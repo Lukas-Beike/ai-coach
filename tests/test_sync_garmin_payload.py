@@ -1,17 +1,19 @@
-import json
 import sqlite3
 import tempfile
 import unittest
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from backend.canonical import garmin_payload
+from backend.db import garmin_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.providers.garmin import _collect_optional_metric, _gear_inventory
 from backend.sync.garmin import GarminPayloadService
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.state import SyncStateRepository
 
 
@@ -185,16 +187,26 @@ class GarminPayloadServiceTests(unittest.TestCase):
 
         self.assertEqual(
             refreshed["training_load_activities"],
+            [{"activityId": 22, "activityTrainingLoad": 48}],
+        )
+        self.assertNotIn("training_load_balance", refreshed)
+        self.assertNotIn("daily_training_status", refreshed)
+        self.store_garmin_snapshot(refreshed)
+        stored = self.stored_view()
+        self.assertEqual(
+            sorted(
+                stored["training_load_activities"], key=lambda row: row["activityId"]
+            ),
             [
-                {"activityId": 22, "activityTrainingLoad": 48},
                 {"activityId": 21, "activityTrainingLoad": 45},
+                {"activityId": 22, "activityTrainingLoad": 48},
             ],
         )
         self.assertEqual(
-            refreshed["training_load_balance"], previous["training_load_balance"]
+            stored["training_load_balance"], previous["training_load_balance"]
         )
         self.assertEqual(
-            refreshed["daily_training_status"], previous["daily_training_status"]
+            stored["daily_training_status"], previous["daily_training_status"]
         )
         self.assertEqual(
             refreshed["source_freshness"]["training_load_activities"]["freshness"],
@@ -238,10 +250,17 @@ class GarminPayloadServiceTests(unittest.TestCase):
             ("training_load_balance", {"load": 210}),
             ("daily_training_status", {"acuteLoad": 68}),
         ):
-            self.assertEqual(refreshed[source], expected)
+            self.assertFalse(refreshed.get(source))
             self.assertEqual(
                 refreshed["source_freshness"][source]["freshness"], "stale"
             )
+        self.store_garmin_snapshot(refreshed)
+        stored = self.stored_view()
+        for source, expected in (
+            ("training_load_balance", {"load": 210}),
+            ("daily_training_status", {"acuteLoad": 68}),
+        ):
+            self.assertEqual(stored[source], expected)
 
     def test_failed_initial_recovery_is_retried_despite_activity_backfill(self):
         seed = self.service.prepare_remote(
@@ -473,7 +492,9 @@ class GarminPayloadServiceTests(unittest.TestCase):
                 "errors": [{"source": "gear", "message": "Synthetic failure"}],
             }
         )
-        self.assertEqual(failed["gear"][0]["activity_ids"], ["11"])
+        self.assertNotIn("gear", failed)
+        self.store_garmin_snapshot(failed)
+        self.assertEqual(self.stored_view()["gear"][0]["activity_ids"], ["11"])
         self.assertEqual(failed["source_freshness"]["gear"]["freshness"], "stale")
 
     def test_failed_gear_activity_read_keeps_the_last_known_list(self):
@@ -607,12 +628,16 @@ class GarminPayloadServiceTests(unittest.TestCase):
                 "errors": [{"source": "gear", "message": "Synthetic failure"}],
             }
         )
-        self.assertEqual(failed["gear"][0]["gearUUID"], "one")
+        self.assertNotIn("gear", failed)
+        self.store_garmin_snapshot(failed)
+        self.assertEqual(self.stored_view()["gear"][0]["gearUUID"], "one")
         self.assertEqual(failed["source_freshness"]["gear"]["freshness"], "stale")
         empty = self.service.prepare_remote(
             {"synced_at": "2026-09-20T11:00:00", "gear": [], "errors": []}
         )
         self.assertEqual(empty["gear"], [])
+        self.store_garmin_snapshot(empty)
+        self.assertEqual(self.stored_view().get("gear", []), [])
         self.assertEqual(empty["source_freshness"]["gear"]["freshness"], "current")
 
     def setUp(self):
@@ -642,23 +667,31 @@ class GarminPayloadServiceTests(unittest.TestCase):
         )
 
     def store_garmin_snapshot(self, payload):
-        serialized = payload if isinstance(payload, str) else json.dumps(payload)
         with self.database.unit_of_work() as db:
-            self.key_values.set(db, "garmin_snapshot", serialized)
+            if isinstance(payload, str):
+                self.key_values.set(db, garmin_payload.STATE_KEY, payload)
+                return
+            GarminSnapshotWriter(self.key_values, lambda: UTC).write(
+                db, {"synced_at": "2026-09-20T12:00:00", **payload}
+            )
+
+    def stored_view(self):
+        with self.database.reader() as db:
+            return garmin_store.read_view(db)
 
     def store_intervals_snapshot(self, activities):
         self.sync_state.save_snapshot(
             {"synced_at": "2026-09-20T11:00:00", "recent_activities": activities}
         )
 
-    def test_snapshot_returns_empty_for_missing_invalid_and_non_object_json(self):
-        self.assertEqual(self.service.snapshot(), {})
+    def test_state_returns_empty_for_missing_invalid_and_non_object_json(self):
+        self.assertEqual(self.service.state(), {})
         self.store_garmin_snapshot("not-json")
-        self.assertEqual(self.service.snapshot(), {})
+        self.assertEqual(self.service.state(), {})
         self.store_garmin_snapshot("[]")
-        self.assertEqual(self.service.snapshot(), {})
+        self.assertEqual(self.service.state(), {})
         self.store_garmin_snapshot("[" * 100_000 + "]" * 100_000)
-        self.assertEqual(self.service.snapshot(), {})
+        self.assertEqual(self.service.state(), {})
 
     def test_fixture_merges_partial_history_and_preserves_raw_records(self):
         intervals = {
@@ -717,7 +750,12 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(payload["source_freshness"]["sleep"]["freshness"], "partial")
         self.assertEqual(
             [record["calendarDate"] for record in payload["sleep"]],
-            ["2026-09-20", "2026-09-18"],
+            ["2026-09-20"],
+        )
+        self.store_garmin_snapshot(payload)
+        self.assertEqual(
+            {record["calendarDate"] for record in self.stored_view()["sleep"]},
+            {"2026-09-20", "2026-09-18"},
         )
         self.assertEqual(payload["activities"], [first_activity, second_activity])
         self.assertEqual(
@@ -737,8 +775,10 @@ class GarminPayloadServiceTests(unittest.TestCase):
             ],
         )
         self.assertEqual(payload["sport_max_hr"], {"cycling": 205, "running": 196})
+        self.assertNotIn("morning_body_battery", payload)
         self.assertEqual(
-            payload["morning_body_battery"], {"status": "ready", "attempts": 2}
+            self.service.state()["morning_body_battery"],
+            {"status": "ready", "attempts": 2},
         )
         self.assertEqual(
             payload["performance_history"],

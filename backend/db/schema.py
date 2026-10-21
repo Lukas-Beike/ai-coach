@@ -332,6 +332,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "state",
         "created_at",
         "updated_at",
+        "observed_on",
     },
     "activity_sessions": {
         "activity_id",
@@ -497,6 +498,7 @@ CURRENT_DATABASE_INDEXES = {
     "idx_planned_units_date",
     "idx_planned_units_external_id",
     "idx_planned_units_local_id",
+    "idx_provider_records_observed",
     "idx_provider_records_reprojection",
     "idx_provider_refresh_area",
     "idx_provider_refresh_created_at",
@@ -507,7 +509,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -544,9 +546,11 @@ PROVIDER_TABLES_DDL = f"""
         state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_PROVIDER_RECORD_STATES})),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        observed_on TEXT,
         UNIQUE (provider, record_kind, source_record_id)
     );
     CREATE INDEX idx_provider_records_reprojection ON provider_records(provider, record_kind, mapped_version);
+    CREATE INDEX idx_provider_records_observed ON provider_records(provider, record_kind, observed_on);
     CREATE TABLE activity_sessions (
         activity_id TEXT PRIMARY KEY CHECK (substr(activity_id, 1, 4) = 'act_' AND length(activity_id) BETWEEN 5 AND 128),
         primary_provider TEXT NOT NULL CHECK (length(primary_provider) BETWEEN 1 AND 64),

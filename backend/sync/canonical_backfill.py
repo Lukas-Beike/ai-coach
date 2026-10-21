@@ -103,8 +103,6 @@ from backend.providers.canonical_plans import (
     ObservationItem,
     RawRecord,
     current_mapper_versions,
-    garmin_ingest_plan,
-    garmin_payload_retrieved_at,
     intervals_snapshot_ingest_plan,
     observation_mapper_versions,
     reprojection_mapper_version,
@@ -114,7 +112,6 @@ from backend.providers.snapshot_projection import (
     CANONICAL_SECTIONS_KEY,
     stored_retrieved_at,
 )
-from backend.sync.garmin_snapshot_writer import GARMIN_SNAPSHOT_KEY
 
 STATE_KEY: Final = "canonical_backfill_state"
 DEFAULT_BATCH_SIZE: Final = 200
@@ -487,7 +484,7 @@ class CanonicalBackfill:
 
     def _source_text(self, db: Any, current: Mapping[str, Any]) -> str | None:
         if current["source"] == _GARMIN:
-            return self._key_values.get(db, GARMIN_SNAPSHOT_KEY)
+            return None
         row = db.execute(
             "SELECT payload FROM snapshots WHERE id = ?", (current["id"],)
         ).fetchone()
@@ -528,7 +525,7 @@ class CanonicalBackfill:
         return {
             "status": BackfillStatus.PENDING.value,
             "phase": _INGEST,
-            "garmin_done": False,
+            "garmin_done": True,
             "snapshot_before": int(row["next_id"]),
             "newest_id": int(newest["newest_id"]),
             "current": None,
@@ -669,8 +666,7 @@ def _retire_unemitted(db: Any, row: Mapping[str, Any], work: _Work, *, now: str)
 
 
 def _next_source(db: Any, state: dict[str, Any]) -> dict[str, Any] | None:
-    if not state["garmin_done"]:
-        return {"source": _GARMIN, "id": None, "fingerprint": "", "offset": 0}
+    # Garmin rows are stored per element since schema 12; its ingest phase is gone.
     row = db.execute(
         "SELECT id FROM snapshots WHERE id < ? ORDER BY id DESC LIMIT 1",
         (state["snapshot_before"],),
@@ -714,26 +710,10 @@ def _ingest_work(
     payload = json.loads(text)
     if not isinstance(payload, dict):
         return _Work(skipped_invalid=1)
-    if source == _GARMIN:
-        return _garmin_work(payload, zone)
     return _work_from_plan(
         intervals_snapshot_ingest_plan(payload, zone=zone),
         stored_retrieved_at(payload, zone=zone),
         may_insert_activities=may_insert_activities,
-    )
-
-
-def _garmin_work(payload: dict[str, Any], zone: tzinfo) -> _Work:
-    """Plan a stored Garmin payload; one without any fetch time is skipped as invalid."""
-    fetched = garmin_payload_retrieved_at(payload, zone=zone)
-    return (
-        _Work(skipped_invalid=1)
-        if fetched is None
-        else _work_from_plan(
-            garmin_ingest_plan(payload, zone=zone),
-            fetched,
-            may_insert_activities=True,
-        )
     )
 
 

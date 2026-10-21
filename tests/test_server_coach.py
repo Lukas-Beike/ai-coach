@@ -10,6 +10,7 @@ from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from garmin_support import read_garmin, save_garmin
 from server_test_support import ServerTestCase, server
 
 from backend.coach import context as coach_context
@@ -291,7 +292,7 @@ class ServerCoachTests(ServerTestCase):
         with self.assertRaises(server.AppError) as missing:
             server.ACTIVITY_READS.activity_read().detail(
                 "activity-3",
-                garmin_snapshot=server.GARMIN_ASSEMBLY.payload_service().snapshot(),
+                garmin_snapshot=read_garmin(),
                 profile=server.ATHLETE_DATA.profile().get(),
                 today=server.ATHLETE_CLOCK.now().date(),
             )
@@ -706,18 +707,13 @@ class ServerCoachTests(ServerTestCase):
         self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
 
     def test_structured_context_keeps_garmin_value_in_performance_only(self):
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
+        save_garmin({
                     "max_metrics": {"running": {"vo2MaxValue": 55}},
                     "race_predictions": {"5k": 1320},
                     "activities": [
                         {"activityId": 1, "activityName": "Duplicate raw activity"}
                     ],
-                }
-            ),
-        )
+                })
         context = server.COACH_CONTEXT.structured_context_service().build(
             {
                 "synced_at": "now",
@@ -1103,12 +1099,11 @@ class ServerCoachTests(ServerTestCase):
             sort_keys=True,
             separators=(",", ":"),
         )
-        garmin_before = json.dumps(
-            garmin_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(intervals_snapshot)
-        server.key_value_service().set(
-            "garmin_snapshot", json.dumps(garmin_snapshot, ensure_ascii=False)
+        save_garmin(garmin_snapshot)
+        garmin_stored = read_garmin()
+        self.assertEqual(
+            garmin_stored["vendor_payload"], "kept in the full snapshot"
         )
 
         context = server.COACH_CONTEXT.training_context_service().build()
@@ -1117,9 +1112,7 @@ class ServerCoachTests(ServerTestCase):
             server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
             intervals_snapshot,
         )
-        self.assertEqual(
-            server.GARMIN_ASSEMBLY.payload_service().snapshot(), garmin_snapshot
-        )
+        self.assertEqual(read_garmin(), garmin_stored)
         self.assertEqual(
             json.dumps(
                 server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
@@ -1128,15 +1121,6 @@ class ServerCoachTests(ServerTestCase):
                 separators=(",", ":"),
             ),
             intervals_before,
-        )
-        self.assertEqual(
-            json.dumps(
-                server.GARMIN_ASSEMBLY.payload_service().snapshot(),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ),
-            garmin_before,
         )
         self.assertNotIn("provider_detail", context)
         self.assertNotIn("vendor_payload", context)

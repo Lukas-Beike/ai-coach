@@ -48,12 +48,11 @@ os.environ.update(
 )
 sys.path.insert(0, "/app")
 import server
+from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
-from backend.sync.canonical_ingest import (
-    ingest_garmin_payload,
-    ingest_intervals_partial_snapshot,
-)
+from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 FIXTURE_SOURCE = "synthetic fixture"
 
@@ -512,9 +511,8 @@ def _save_intervals_snapshot(db, snapshot):
 
 
 def _save_garmin_snapshot(db, payload):
-    """Store a fixture Garmin payload and ingest it like the Garmin writer does."""
-    server.KEY_VALUE_REPOSITORY.set(db, "garmin_snapshot", json.dumps(payload))
-    ingest_garmin_payload(db, payload, zone=UTC)
+    """Store a fixture Garmin payload through the Garmin writer."""
+    GarminSnapshotWriter(server.KEY_VALUE_REPOSITORY, lambda: UTC).write(db, payload)
 
 
 def _merge_snapshot_activities(activities, wellness=None):
@@ -707,13 +705,7 @@ def seed_training_features():
         # Merge into the stored payload so later demo-only keys (endurance
         # score, running tolerance, FTP history, sleep, body battery) and
         # freshness entries survive when features are re-seeded on demand.
-        stored = server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot")
-        try:
-            existing = json.loads(stored) if stored else {}
-        except ValueError:
-            existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
+        existing = garmin_store.read_view(db)
         merged = {**existing, **garmin_full}
         merged["source_freshness"] = {
             **(existing.get("source_freshness") or {}),

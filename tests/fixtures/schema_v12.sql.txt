@@ -1,0 +1,554 @@
+-- Frozen schema version 12 (Garmin payload elements in the raw layer); refreeze only after its digest and an upgrade step are recorded in backend/db/schema_history.py.
+BEGIN TRANSACTION;
+CREATE TABLE activity_detail_analysis (
+        activity_id TEXT PRIMARY KEY REFERENCES activity_sessions(activity_id),
+        analysis_version INTEGER NOT NULL CHECK (analysis_version >= 1),
+        input_sha256 TEXT NOT NULL CHECK (length(input_sha256) = 64),
+        payload TEXT NOT NULL CHECK (json_valid(payload) AND json_type(payload) = 'object'),
+        computed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE activity_detail_sets (
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        provider_activity_id TEXT NOT NULL CHECK (length(provider_activity_id) BETWEEN 1 AND 256),
+        detail_kind TEXT NOT NULL CHECK (detail_kind IN ('streams', 'laps', 'heart_rate_zones', 'power_zones')),
+        mapper_version INTEGER NOT NULL CHECK (mapper_version >= 1),
+        origin TEXT NOT NULL CHECK (origin IN ('fetch', 'legacy_backfill')),
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        source_record_id TEXT CHECK (source_record_id IS NULL OR length(source_record_id) BETWEEN 1 AND 256),
+        resolution TEXT CHECK (resolution IS NULL OR length(resolution) BETWEEN 1 AND 32),
+        lap_source TEXT CHECK (lap_source IS NULL OR length(lap_source) BETWEEN 1 AND 32),
+        zone_boundary_source TEXT CHECK (zone_boundary_source IS NULL OR length(zone_boundary_source) BETWEEN 1 AND 32),
+        summary_sha256 TEXT CHECK (summary_sha256 IS NULL OR length(summary_sha256) = 64),
+        content_sha256 TEXT NOT NULL CHECK (length(content_sha256) = 64),
+        fetched_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, provider_activity_id, detail_kind),
+        FOREIGN KEY (provider, provider_activity_id)
+            REFERENCES activity_records(provider, provider_activity_id),
+        CHECK ((detail_kind = 'streams') = (resolution IS NOT NULL)),
+        CHECK ((detail_kind = 'laps') = (lap_source IS NOT NULL)),
+        CHECK ((detail_kind IN ('heart_rate_zones', 'power_zones')) = (zone_boundary_source IS NOT NULL))
+    );
+CREATE TABLE activity_feedback (
+        activity_id TEXT PRIMARY KEY,
+        activity_name TEXT NOT NULL DEFAULT '',
+        activity_date TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        session_rpe REAL CHECK (session_rpe IS NULL OR (session_rpe >= 0 AND session_rpe <= 10)),
+        deviation_reason TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        provider TEXT
+    );
+CREATE TABLE activity_laps (
+        provider TEXT NOT NULL,
+        provider_activity_id TEXT NOT NULL,
+        detail_kind TEXT NOT NULL DEFAULT 'laps' CHECK (detail_kind = 'laps'),
+        lap_index INTEGER NOT NULL CHECK (lap_index BETWEEN 0 AND 199),
+        kind TEXT NOT NULL CHECK (length(kind) BETWEEN 1 AND 32),
+        start_offset_s REAL NOT NULL CHECK (start_offset_s >= 0),
+        end_offset_s REAL NOT NULL CHECK (end_offset_s >= start_offset_s),
+        name TEXT CHECK (name IS NULL OR length(name) BETWEEN 1 AND 200),
+        moving_duration_s REAL,
+        distance_m REAL,
+        avg_hr REAL,
+        max_hr REAL,
+        avg_power REAL,
+        max_power REAL,
+        normalized_power REAL,
+        avg_cadence REAL,
+        avg_speed_mps REAL,
+        elevation_gain_m REAL,
+        load REAL,
+        intensity_pct REAL,
+        PRIMARY KEY (provider, provider_activity_id, lap_index),
+        FOREIGN KEY (provider, provider_activity_id, detail_kind)
+            REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)
+            ON DELETE CASCADE
+    );
+CREATE TABLE activity_records (
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        provider_activity_id TEXT NOT NULL CHECK (length(provider_activity_id) BETWEEN 1 AND 256),
+        activity_id TEXT REFERENCES activity_sessions(activity_id),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'deleted', 'invalid')),
+        mapper_version INTEGER NOT NULL,
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        source_record_id TEXT CHECK (source_record_id IS NULL OR length(source_record_id) BETWEEN 1 AND 256),
+        sport TEXT NOT NULL,
+        environment TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        local_date TEXT,
+        duration_s REAL,
+        distance_m REAL,
+        load REAL,
+        load_model TEXT NOT NULL,
+        avg_hr REAL,
+        avg_power REAL,
+        moving_duration_s REAL,
+        elevation_gain_m REAL,
+        intensity_pct REAL,
+        max_hr REAL,
+        normalized_power REAL,
+        avg_cadence REAL,
+        energy_kj REAL,
+        name TEXT,
+        details TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        fetched_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, provider_activity_id)
+    );
+CREATE TABLE activity_sessions (
+        activity_id TEXT PRIMARY KEY CHECK (substr(activity_id, 1, 4) = 'act_' AND length(activity_id) BETWEEN 5 AND 128),
+        primary_provider TEXT NOT NULL CHECK (length(primary_provider) BETWEEN 1 AND 64),
+        primary_provider_activity_id TEXT NOT NULL CHECK (length(primary_provider_activity_id) BETWEEN 1 AND 256),
+        link_kind TEXT NOT NULL DEFAULT 'single' CHECK (link_kind IN ('single', 'exact', 'heuristic', 'confirmed')),
+        athlete_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (athlete_confirmed IN (0, 1)),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'hidden', 'duplicate', 'deleted')),
+        merged_into TEXT REFERENCES activity_sessions(activity_id),
+        started_at TEXT NOT NULL,
+        local_date TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK ((state = 'duplicate') = (merged_into IS NOT NULL))
+    );
+CREATE TABLE activity_stream_channels (
+        provider TEXT NOT NULL,
+        provider_activity_id TEXT NOT NULL,
+        detail_kind TEXT NOT NULL DEFAULT 'streams' CHECK (detail_kind = 'streams'),
+        channel TEXT NOT NULL CHECK (length(channel) BETWEEN 1 AND 64),
+        point_count INTEGER NOT NULL CHECK (point_count BETWEEN 1 AND 172800),
+        valid_count INTEGER NOT NULL CHECK (valid_count BETWEEN 0 AND point_count),
+        data BLOB NOT NULL CHECK (typeof(data) = 'blob' AND length(data) BETWEEN 1 AND 4194304),
+        PRIMARY KEY (provider, provider_activity_id, channel),
+        FOREIGN KEY (provider, provider_activity_id, detail_kind)
+            REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)
+            ON DELETE CASCADE
+    );
+CREATE TABLE activity_zone_times (
+        provider TEXT NOT NULL,
+        provider_activity_id TEXT NOT NULL,
+        detail_kind TEXT NOT NULL CHECK (detail_kind IN ('heart_rate_zones', 'power_zones')),
+        zone_index INTEGER NOT NULL CHECK (zone_index BETWEEN 1 AND 20),
+        seconds REAL NOT NULL CHECK (seconds >= 0),
+        lower_bound REAL,
+        upper_bound REAL,
+        label TEXT CHECK (label IS NULL OR length(label) BETWEEN 1 AND 64),
+        PRIMARY KEY (provider, provider_activity_id, detail_kind, zone_index),
+        FOREIGN KEY (provider, provider_activity_id, detail_kind)
+            REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)
+            ON DELETE CASCADE
+    );
+CREATE TABLE athlete_checkins (
+        checkin_date TEXT PRIMARY KEY,
+        soreness INTEGER,
+        stress INTEGER,
+        motivation INTEGER,
+        session_rpe INTEGER,
+        day_form TEXT NOT NULL DEFAULT '',
+        illness TEXT NOT NULL DEFAULT '',
+        pain TEXT NOT NULL DEFAULT '',
+        available_minutes INTEGER,
+        availability_notes TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE change_history (
+        id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        before_hash TEXT NOT NULL,
+        after_hash TEXT NOT NULL,
+        diff TEXT NOT NULL
+    );
+CREATE TABLE coach_action_proposals (
+        id TEXT PRIMARY KEY,
+        session_csrf_hash TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        target_system TEXT NOT NULL,
+        object_ids TEXT NOT NULL,
+        diff TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        action_token_hash TEXT,
+        status TEXT NOT NULL,
+        expires_at REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        used_at TEXT
+    );
+CREATE TABLE coach_commands (
+        id TEXT PRIMARY KEY,
+        client_turn_id TEXT NOT NULL UNIQUE,
+        conversation_id TEXT,
+        intent TEXT NOT NULL,
+        target_system TEXT NOT NULL,
+        artifact_id TEXT,
+        status TEXT NOT NULL,
+        receipt TEXT,
+        error_class TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (artifact_id) REFERENCES coach_plan_artifacts(id)
+    );
+CREATE TABLE coach_plan_artifacts (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT,
+        client_turn_id TEXT,
+        base_revision INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('draft', 'committed', 'superseded')),
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE competition_sync_tombstones (
+        id TEXT PRIMARY KEY,
+        intervals_event_id TEXT,
+        external_id TEXT,
+        created_at TEXT NOT NULL,
+        provider TEXT
+    );
+CREATE TABLE competitions (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        event_date TEXT NOT NULL,
+        sport TEXT NOT NULL,
+        environment TEXT,
+        sport_detail TEXT,
+        priority TEXT NOT NULL,
+        distance TEXT NOT NULL,
+        target TEXT NOT NULL,
+        course_profile TEXT NOT NULL,
+        notes TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'RACE_B',
+        start_date_local TEXT,
+        description TEXT NOT NULL DEFAULT '',
+        moving_time INTEGER,
+        intervals_event_id TEXT,
+        external_id TEXT,
+        sync_dirty INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        sync_conflict TEXT NOT NULL DEFAULT '',
+        last_synced_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE external_calendar_events (
+        id TEXT PRIMARY KEY,
+        uid TEXT NOT NULL,
+        name TEXT NOT NULL,
+        event_date TEXT NOT NULL,
+        start_local TEXT NOT NULL,
+        end_local TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        all_day INTEGER NOT NULL DEFAULT 0,
+        training_relevant INTEGER NOT NULL DEFAULT 1,
+        no_intensity INTEGER NOT NULL DEFAULT 0,
+        short_only INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        no_training INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(uid, start_local)
+    );
+CREATE TABLE food_database_entries (
+        food_id TEXT PRIMARY KEY CHECK (food_id GLOB 'off:*'),
+        barcode TEXT NOT NULL,
+        name TEXT NOT NULL,
+        brand TEXT NOT NULL DEFAULT '',
+        payload TEXT NOT NULL CHECK (json_valid(payload) AND json_type(payload) = 'object'),
+        fetched_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE kv (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE messages (
+        attachments TEXT NOT NULL DEFAULT '[]',
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+        content TEXT NOT NULL,
+        client_turn_id TEXT,
+        created_at TEXT NOT NULL
+    );
+CREATE TABLE nutrition_logs (
+        id TEXT PRIMARY KEY,
+        nutrition_basis TEXT NOT NULL DEFAULT '{}',
+        meal_date TEXT NOT NULL,
+        logged_at TEXT NOT NULL,
+        meal_type TEXT NOT NULL CHECK(meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')),
+        description TEXT NOT NULL,
+        kcal INTEGER NOT NULL CHECK(kcal >= 0),
+        carbs_g REAL,
+        protein_g REAL,
+        fat_g REAL,
+        source TEXT NOT NULL DEFAULT 'manual',
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL , logged_time_known INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE nutrition_products (
+        id TEXT PRIMARY KEY,
+        barcode TEXT UNIQUE,
+        name TEXT NOT NULL,
+        brand TEXT NOT NULL DEFAULT '',
+        basis_amount REAL NOT NULL CHECK (basis_amount > 0),
+        basis_unit TEXT NOT NULL CHECK (basis_unit IN ('g', 'ml', 'portion')),
+        kcal REAL,
+        carbs_g REAL,
+        protein_g REAL,
+        fat_g REAL,
+        sugar_g REAL,
+        fiber_g REAL,
+        salt_g REAL,
+        source TEXT NOT NULL CHECK (source IN ('packaging_label', 'manual', 'open_food_facts', 'bls', 'fddb_export')),
+        source_url TEXT NOT NULL DEFAULT '',
+        external_id TEXT NOT NULL DEFAULT '',
+        provenance TEXT NOT NULL DEFAULT 'manual',
+        extraction_confidence REAL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE nutrition_sync_dates (
+        meal_date TEXT PRIMARY KEY,
+        revision INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending' CHECK(sync_state IN ('pending', 'synced')),
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE nutrition_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        payload TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        natural_key TEXT NOT NULL UNIQUE CHECK (length(natural_key) BETWEEN 1 AND 512),
+        metric TEXT NOT NULL CHECK (length(metric) BETWEEN 1 AND 64),
+        value REAL NOT NULL,
+        unit TEXT NOT NULL CHECK (length(unit) BETWEEN 1 AND 16),
+        method TEXT,
+        aggregation TEXT,
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        provider TEXT CHECK (provider IS NULL OR length(provider) BETWEEN 1 AND 64),
+        source_record_id TEXT CHECK (source_record_id IS NULL OR length(source_record_id) BETWEEN 1 AND 256),
+        sport TEXT,
+        observed_on TEXT NOT NULL,
+        observed_at TEXT,
+        retrieved_at TEXT,
+        label TEXT,
+        details TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        mapper_version INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE plan_adjustments (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        applied_at TEXT
+    );
+CREATE TABLE planned_units (
+         id TEXT PRIMARY KEY,
+         local_id TEXT NOT NULL UNIQUE,
+         external_id TEXT,
+         payload TEXT NOT NULL,
+         sync_dirty INTEGER NOT NULL DEFAULT 1,
+         sync_state TEXT NOT NULL DEFAULT 'local',
+         sync_error TEXT,
+         sync_conflict TEXT NOT NULL DEFAULT '',
+         baseline_hash TEXT,
+         last_synced_at TEXT,
+         plan_id TEXT,
+         revision INTEGER NOT NULL DEFAULT 0,
+         tombstone INTEGER NOT NULL DEFAULT 0,
+         command_id TEXT,
+         created_at TEXT NOT NULL,
+         updated_at TEXT NOT NULL
+     );
+CREATE TABLE planning_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        revision INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE provider_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        record_kind TEXT NOT NULL CHECK (length(record_kind) BETWEEN 1 AND 64),
+        source_record_id TEXT NOT NULL CHECK (length(source_record_id) BETWEEN 1 AND 256),
+        payload TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(payload) AND json_type(payload) = 'object'),
+        payload_hash TEXT NOT NULL CHECK (length(payload_hash) = 64),
+        fetched_at TEXT NOT NULL,
+        mapped_version INTEGER,
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'deleted')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        observed_on TEXT,
+        UNIQUE (provider, record_kind, source_record_id)
+    );
+CREATE TABLE provider_refresh_history (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        area TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        phase TEXT NOT NULL,
+        status TEXT NOT NULL,
+        error_code TEXT,
+        next_retry_at TEXT
+    );
+CREATE TABLE provider_sync_cursors (
+        provider TEXT NOT NULL,
+        stream TEXT NOT NULL,
+        cursor TEXT,
+        high_water_mark TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, stream)
+    );
+CREATE TABLE public_event_candidates (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        uid TEXT NOT NULL,
+        name TEXT NOT NULL,
+        event_date TEXT NOT NULL,
+        sport TEXT NOT NULL,
+        distance TEXT NOT NULL DEFAULT '',
+        location TEXT NOT NULL DEFAULT '',
+        url TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        imported_competition_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(source_id, uid),
+        FOREIGN KEY(source_id) REFERENCES public_event_sources(id) ON DELETE CASCADE
+    );
+CREATE TABLE public_event_sources (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        url TEXT NOT NULL UNIQUE,
+        last_sync_at TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE remote_links (
+        entity_kind TEXT NOT NULL CHECK (length(entity_kind) BETWEEN 1 AND 64),
+        local_id TEXT NOT NULL CHECK (length(local_id) >= 1),
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        remote_id TEXT,
+        remote_external_id TEXT,
+        baseline_hash TEXT,
+        sync_state TEXT NOT NULL CHECK (length(sync_state) BETWEEN 1 AND 64),
+        last_synced_at TEXT,
+        PRIMARY KEY (entity_kind, local_id, provider)
+    );
+CREATE TABLE sessions (
+        token_hash TEXT PRIMARY KEY,
+        csrf_hash TEXT NOT NULL,
+        expires_at REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        last_seen TEXT NOT NULL
+    );
+CREATE TABLE snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        synced_at TEXT NOT NULL DEFAULT '',
+        recent_activity_count INTEGER NOT NULL DEFAULT 0
+    );
+CREATE TABLE sync_job_items (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        item_key TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        remote_id TEXT,
+        status TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        error_class TEXT,
+        error_detail TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(job_id, item_key),
+        FOREIGN KEY (job_id) REFERENCES sync_jobs(id) ON DELETE CASCADE
+    );
+CREATE TABLE sync_jobs (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        type TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'partial', 'failed')),
+        payload TEXT NOT NULL,
+        requested_by TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        progress_total INTEGER NOT NULL DEFAULT 0,
+        progress_completed INTEGER NOT NULL DEFAULT 0,
+        error_class TEXT,
+        available_at TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE training_plans (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        goal TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+CREATE TABLE workout_library (
+         id TEXT PRIMARY KEY,
+         local_id TEXT NOT NULL UNIQUE,
+         external_id TEXT,
+        payload TEXT NOT NULL,
+        sync_dirty INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        sync_error TEXT,
+        last_synced_at TEXT,
+         updated_at TEXT NOT NULL
+     );
+CREATE INDEX idx_coach_plan_artifacts_conversation
+        ON coach_plan_artifacts(conversation_id, created_at DESC);
+CREATE INDEX idx_sync_jobs_status_available
+        ON sync_jobs(status, available_at, created_at);
+CREATE INDEX idx_sync_job_items_status ON sync_job_items(job_id, status);
+CREATE INDEX idx_change_history_created_at ON change_history(created_at DESC);
+CREATE INDEX idx_change_history_entity ON change_history(entity_type, entity_id, created_at DESC);
+CREATE INDEX idx_provider_refresh_created_at ON provider_refresh_history(started_at DESC);
+CREATE INDEX idx_provider_refresh_area ON provider_refresh_history(provider, area, started_at DESC);
+CREATE INDEX idx_nutrition_logs_date ON nutrition_logs(meal_date, logged_at DESC);
+CREATE INDEX idx_nutrition_products_name ON nutrition_products(name COLLATE NOCASE);
+CREATE INDEX idx_nutrition_products_status ON nutrition_products(status, updated_at DESC);
+CREATE UNIQUE INDEX idx_workout_library_external_id ON workout_library(external_id) WHERE external_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_planned_units_local_id ON planned_units(local_id);
+CREATE INDEX idx_planned_units_external_id ON planned_units(external_id);
+CREATE INDEX idx_planned_units_date ON planned_units(json_extract(payload, '$.date'));
+CREATE INDEX idx_provider_records_reprojection ON provider_records(provider, record_kind, mapped_version);
+CREATE INDEX idx_provider_records_observed ON provider_records(provider, record_kind, observed_on);
+CREATE INDEX idx_activity_sessions_local_date ON activity_sessions(local_date);
+CREATE INDEX idx_activity_sessions_merged_into ON activity_sessions(merged_into);
+CREATE INDEX idx_activity_records_local_date ON activity_records(local_date);
+CREATE INDEX idx_activity_records_activity ON activity_records(activity_id);
+CREATE INDEX idx_activity_records_started ON activity_records(started_at);
+CREATE INDEX idx_observations_metric_date ON observations(metric, observed_on);
+CREATE UNIQUE INDEX idx_remote_links_remote_id
+        ON remote_links(provider, entity_kind, remote_id) WHERE remote_id IS NOT NULL;
+CREATE INDEX idx_food_database_entries_name ON food_database_entries(name COLLATE NOCASE);
+DELETE FROM "sqlite_sequence";
+PRAGMA user_version = 12;
+COMMIT;

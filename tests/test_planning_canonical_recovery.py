@@ -10,7 +10,7 @@ providers are mocked and all storage is temporary.
 
 from __future__ import annotations
 
-import json
+import sqlite3
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -21,7 +21,10 @@ from canonical_read_support import CanonicalReadFixture, make_selector, populate
 from canonical_recovery_support import RecordingReader, recovery_observation
 
 from backend.canonical.records import Observation
+from backend.canonical.section_items import split_section
 from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.db.garmin_store import put_section
+from backend.db.schema import initialize_schema
 from backend.performance.planning_recovery import (
     GARMIN_SOURCE,
     INTERVALS_WELLNESS_SOURCE,
@@ -34,7 +37,6 @@ from backend.planning.daily_context_service import (
     DailyPlanningContextService,
 )
 from backend.runtime.ports import ObservationSourceSelector
-from backend.sync.garmin_snapshot_writer import GARMIN_SNAPSHOT_KEY
 
 DAY = "2026-09-20"
 OTHER_DAY = "2026-09-21"
@@ -93,11 +95,14 @@ class _CountingSelector:
 class _FakeDatabaseManager:
     def __init__(self) -> None:
         self.units = 0
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
+        initialize_schema(self.db)
 
     @contextmanager
-    def unit_of_work(self) -> Iterator[str]:
+    def unit_of_work(self) -> Iterator[sqlite3.Connection]:
         self.units += 1
-        yield "db"
+        yield self.db
 
     def reader(self):
         return self.unit_of_work()
@@ -110,13 +115,6 @@ class _FakeKeyValues:
     def get(self, db: Any, key: str) -> Any:
         return self._values.get(key)
 
-    def get_json_fields(self, db, key, fields):
-        try:
-            value = json.loads(self._values.get(key) or "{}")
-        except ValueError:
-            return None
-        value = value if isinstance(value, dict) else {}
-        return json.dumps({field: value.get(field) for field in fields})
 
 
 class _NoBattery:
@@ -326,13 +324,18 @@ class DailyPlanningCanonicalWiringTests(unittest.TestCase):
                 self.assertEqual(by_date[DAY]["recovery"]["sleep_score"], 84)
 
     def test_stored_garmin_recovery_sections_are_not_read(self) -> None:
-        garmin = {"sleep": [{"calendarDate": DAY, "sleepScore": 99}]}
-        reader = _SpyReader({})
-        service = _service(
-            _FakeDatabaseManager(),
-            _FakeKeyValues({GARMIN_SNAPSHOT_KEY: json.dumps(garmin)}),
-            reader,
+        manager = _FakeDatabaseManager()
+        put_section(
+            manager.db,
+            "sleep",
+            split_section([{"calendarDate": DAY, "sleepScore": 99}]),
+            fetched_at="2026-10-10T08:00:00+00:00",
+            now="2026-10-10T08:00:00+00:00",
+            mapper_version=1,
+            replace=True,
         )
+        reader = _SpyReader({})
+        service = _service(manager, _FakeKeyValues({}), reader)
         by_date = {day["date"]: day for day in _build(service, {})}
         self.assertNotIn("sleep_score", by_date.get(DAY, {}).get("recovery", {}))
 

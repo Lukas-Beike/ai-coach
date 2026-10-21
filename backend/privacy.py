@@ -20,7 +20,9 @@ from backend.backup.export import (
 )
 from backend.calendar import public_events as public_event_calendar
 from backend.calendar.external import ExternalCalendarReader
+from backend.canonical import garmin_payload
 from backend.canonical.vocabulary import RemoteEntityKind
+from backend.db import garmin_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, NutritionTemplateRepository
 from backend.errors import AppError
@@ -104,6 +106,7 @@ class PrivacyDataExportService:
                 ).fetchall()
             ]
             public_calendar = public_event_calendar.state(db)
+            garmin_data = garmin_store.read_view(db)
             kv_rows = db.execute("SELECT key, value FROM kv ORDER BY key").fetchall()
             nutrition_templates = NutritionTemplateRepository().list(db)
             nutrition_products = [
@@ -124,6 +127,8 @@ class PrivacyDataExportService:
         excluded_state = {
             "profile",
             "garmin_snapshot",
+            garmin_payload.STATE_KEY,
+            garmin_payload.RETIRED_SNAPSHOT_KEY,
             weather_cache.CACHE_KEY,
             *CREDENTIAL_KV_KEYS,
         }
@@ -137,7 +142,6 @@ class PrivacyDataExportService:
             except TypeError, ValueError:
                 application_state[key] = value
 
-        garmin_data = self._stored_json("garmin_snapshot")
         weather_data = self._stored_json(weather_cache.CACHE_KEY)
         adaptive_preview = dependencies.adaptive_preview_service
         return {

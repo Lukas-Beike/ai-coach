@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
+from garmin_support import read_garmin, save_garmin
 from server_test_support import (
     ServerTestCase,
     _current_performance_context,
@@ -908,7 +909,7 @@ class ServerSyncTests(ServerTestCase):
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
-            _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
+            _garmin_metrics(read_garmin()),
         )
         self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
         self.assertEqual(metrics["cycling_max_hr_bpm"]["source"], "Intervals.icu")
@@ -917,10 +918,7 @@ class ServerSyncTests(ServerTestCase):
 
     def test_garmin_daily_health_is_averaged_over_the_last_seven_days(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
+        save_garmin({
                     "daily_stats": [
                         {
                             "calendarDate": today.isoformat(),
@@ -940,9 +938,7 @@ class ServerSyncTests(ServerTestCase):
                             for offset in range(7)
                         ],
                     ]
-                }
-            ),
-        )
+                })
         performance = _current_performance_context(
             {
                 "synced_at": "now",
@@ -983,15 +979,10 @@ class ServerSyncTests(ServerTestCase):
                 }
             ],
         }
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
+        save_garmin({
                     "cycling_ftp": {"functionalThresholdPower": 300},
                     "performance_history": [],
-                }
-            ),
-        )
+                })
 
         comparison = _current_performance_context(snapshot)["comparisons"][
             "cycling_ftp_watts_30d"
@@ -2226,7 +2217,7 @@ class ServerSyncTests(ServerTestCase):
         )
 
     def test_full_garmin_resync_keeps_last_snapshot_on_provider_failure(self):
-        server.key_value_service().set("garmin_snapshot", json.dumps({"old": True}))
+        save_garmin({"old": True})
         config = replace(server.CONFIG, garmin_fixture_path="fixture.json")
         with (
             patch.object(server, "CONFIG", config),
@@ -2238,9 +2229,7 @@ class ServerSyncTests(ServerTestCase):
             self.assertRaises(RuntimeError),
         ):
             server.PROVIDER_RESYNC.full_resync_service().resync("garmin")
-        self.assertEqual(
-            json.loads(server.key_value_service().get("garmin_snapshot")), {"old": True}
-        )
+        self.assertIs(read_garmin().get("old"), True)
 
     def test_full_resync_blocks_intervals_operations(self):
         self.assertTrue(server.INTERVALS_RESYNC_GATE.begin_reset())
@@ -2271,7 +2260,7 @@ class ServerSyncTests(ServerTestCase):
             server.INTERVALS_RESYNC_GATE.end_reset()
 
     def test_full_garmin_resync_replaces_local_snapshot_without_touching_tokens(self):
-        server.key_value_service().set("garmin_snapshot", json.dumps({"old": True}))
+        save_garmin({"old": True})
         server.key_value_service().set("last_garmin_sync_at", "old")
         with tempfile.TemporaryDirectory() as temp_root:
             fixture = Path(temp_root) / "garmin.json"
@@ -2282,12 +2271,7 @@ class ServerSyncTests(ServerTestCase):
             with patch.object(server, "CONFIG", config):
                 result = server.PROVIDER_RESYNC.full_resync_service().resync("garmin")
         self.assertEqual(result["status"], "ok")
-        self.assertNotEqual(
-            server.key_value_service().get("garmin_snapshot"), json.dumps({"old": True})
-        )
-        self.assertEqual(
-            server.GARMIN_ASSEMBLY.payload_service().snapshot().get("source"), "fixture"
-        )
+        self.assertEqual(read_garmin().get("source"), "fixture")
 
     def test_all_time_snapshot_does_not_truncate_activity_history(self):
         snapshot = planning_context.compact_snapshot(

@@ -67,6 +67,12 @@ class _Rows:
     def fetchall(self):
         return self.rows
 
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+    def __iter__(self):
+        return iter(self.rows)
+
 
 class _Manager:
     def __init__(self, lock, db):
@@ -96,7 +102,7 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
             def get(self, current_db, key):
                 self_outer.assertIs(current_db, db)
                 self_outer.assertTrue(lock.active)
-                return "{malformed" if key == "garmin_snapshot" else "[]"
+                return "[]"
 
         class EmptyService:
             def list(self, *_args, **_kwargs):
@@ -149,8 +155,8 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
         with patch("backend.privacy.public_event_calendar.state", PublicCalendar.state):
             exported = service.export()
 
-        self.assertEqual(manager.entries, 3)
-        self.assertEqual(len(db.queries), 8)
+        self.assertEqual(manager.entries, 2)
+        self.assertEqual(len(db.queries), 12)
         self.assertEqual(exported["food_database_entries"], [])
         self.assertTrue(
             any("FROM food_database_entries" in query for query in db.queries)
@@ -162,7 +168,8 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
         self.assertEqual(exported["nutrition_products"][0]["id"], "product-1")
         self.assertTrue(any("FROM nutrition_products" in query for query in db.queries))
         self.assertEqual(exported["application_state"], {"ordinary": "{broken"})
-        self.assertEqual(exported["garmin_snapshot"], {})
+        # The Garmin rows are read in the same snapshot; an empty store exports no sections.
+        self.assertEqual(exported["garmin_snapshot"], {"activities": []})
         self.assertEqual(exported["weather_cache"], [])
         self.assertNotIn("sync_running", exported["application_state"])
         self.assertNotIn("sync_status", exported["application_state"])

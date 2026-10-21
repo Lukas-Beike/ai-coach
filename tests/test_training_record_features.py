@@ -6,7 +6,11 @@ from unittest.mock import patch
 
 from backend.athlete.checkins import CheckinService
 from backend.athlete.equipment import EquipmentService, _garmin_kind, _garmin_sport
+from backend.canonical.garmin_payload import ITEM_SECTIONS
+from backend.canonical.section_items import split_section
+from backend.db import garmin_store
 from backend.db.repositories import CheckinRepository
+from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.tag_impact import tag_impact
@@ -17,9 +21,20 @@ class MemoryManager:
     def __init__(self):
         self.connection = sqlite3.connect(":memory:")
         self.connection.row_factory = sqlite3.Row
-        self.connection.execute(
-            "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
-        )
+        initialize_schema(self.connection)
+
+    def store_garmin(self, snapshot):
+        """Store a Garmin payload the way the sync does: one row per section element."""
+        for section in ITEM_SECTIONS & set(snapshot):
+            garmin_store.put_section(
+                self.connection,
+                section,
+                split_section(snapshot[section]),
+                fetched_at="2026-10-02T00:00:00+00:00",
+                now="2026-10-02T00:00:00+00:00",
+                mapper_version=1,
+                replace=True,
+            )
 
     def unit_of_work(self):
         manager = self
@@ -87,10 +102,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                 {"gearUUID": "gear-two", "gearName": "Shoes", "stats": {}},
             ]
         }
-        self.manager.connection.execute(
-            "INSERT INTO kv VALUES ('garmin_snapshot', ?, 'now')",
-            (json.dumps(snapshot),),
-        )
+        self.manager.store_garmin(snapshot)
         items = service.read()["garmin_items"]
         self.assertEqual(items[0]["distance_km"], 2.5)
         self.assertEqual(items[0]["usage_percent"], 25)
@@ -99,9 +111,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(items[0]["sessions"], 3)
         self.assertIsNone(items[1]["distance_km"])
         snapshot["gear"][0]["stats"]["totalDistance"] = 3000
-        self.manager.connection.execute(
-            "UPDATE kv SET value=? WHERE key='garmin_snapshot'", (json.dumps(snapshot),)
-        )
+        self.manager.store_garmin(snapshot)
         self.assertEqual(service.read()["garmin_items"][0]["distance_km"], 3)
 
     def test_garmin_initial_sync_imports_once_and_later_sync_updates_only_distance(
@@ -171,10 +181,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             ],
         }
         service.sync_garmin_snapshot(second)
-        self.manager.connection.execute(
-            "INSERT INTO kv VALUES ('garmin_snapshot', ?, 'now')",
-            (json.dumps(second),),
-        )
+        self.manager.store_garmin(second)
         item = service.read()["items"][0]
         self.assertEqual(item["status"], "archived")
         self.assertEqual(item["name"], "Road bike")
@@ -338,10 +345,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.manager.connection.close()
 
     def test_checkin_tag_omission_preserves_and_empty_object_clears(self):
-        connection = self.manager.connection
-        connection.execute(
-            "CREATE TABLE athlete_checkins (checkin_date TEXT PRIMARY KEY, soreness INTEGER, stress INTEGER, motivation INTEGER, session_rpe INTEGER, day_form TEXT, illness TEXT, pain TEXT, available_minutes INTEGER, availability_notes TEXT, notes TEXT, created_at TEXT, updated_at TEXT)"
-        )
         repository = CheckinRepository(lambda: "2026-09-01T00:00:00Z")
         service = CheckinService(self.manager, repository, lambda: date(2026, 9, 1))
         service.save({"checkin_date": "2026-08-31", "tag_answers": {"travel": True}})
@@ -469,10 +472,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         """Import Garmin gear as local items and store the snapshot read() uses."""
         snapshot = self._snapshot(gear, matches)
         service.sync_garmin_snapshot(snapshot)
-        self.manager.connection.execute(
-            "INSERT OR REPLACE INTO kv VALUES ('garmin_snapshot', ?, 'now')",
-            (json.dumps(snapshot),),
-        )
+        self.manager.store_garmin(snapshot)
         return {item["garmin_uuid"]: item for item in service.read()["items"]}
 
     def test_garmin_gear_activities_link_through_matches_and_external_id(self):

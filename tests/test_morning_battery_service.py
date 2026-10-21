@@ -6,10 +6,13 @@ import copy
 import json
 import threading
 import unittest
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from unittest.mock import Mock, patch
 
+from backend.db import garmin_store
 from backend.performance.morning_battery_service import (
     MORNING_BATTERY_HISTORY_KEY,
     MorningBatteryClock,
@@ -108,25 +111,41 @@ class Harness:
     def get(self, _db: object, key: str) -> str | None:
         return self.values.get(key)
 
-    def get_json_fields(self, db, key, fields):
-        try:
-            value = json.loads(self.values.get(key) or "{}")
-        except ValueError:
-            return None
-        value = value if isinstance(value, dict) else {}
-        return json.dumps({field: value.get(field) for field in fields})
 
     def set(self, _db: object, key: str, value: str) -> None:
         self.trace.append(f"write:{key}")
         self.values[key] = value
 
-    def write(self, db: object, payload: object) -> None:
+    def execute(self, _sql: str, _params: object) -> Harness:
+        # Stands in for the connection the Garmin state is read from.
+        return self
+
+    def fetchone(self) -> dict[str, str]:
+        snapshot = json.loads(self.values["garmin_snapshot"])
+        return {"value": json.dumps(garmin_store.split_state(snapshot))}
+
+    def write_refresh(
+        self,
+        db: object,
+        *,
+        fetched_at: str,
+        sections: Mapping[str, Any],
+        view: Mapping[str, Any],
+        windows: Mapping[str, tuple[date, date]],
+        allowed: frozenset[str],
+    ) -> None:
         # Stands in for GarminSnapshotWriter, which the composition root injects.
-        # Only the legacy snapshot value is stored here, matching the old behavior.
+        # The harness keeps sections and state together in one value.
+        snapshot = json.loads(self.values["garmin_snapshot"])
+        for name, records in sections.items():
+            # The writer upserts by identity, so a delta never drops stored records.
+            kept = [item for item in snapshot.get(name, []) if item not in records]
+            snapshot[name] = [*records, *kept]
+        snapshot.update(garmin_store.split_state(view))
         self.set(
             db,
             "garmin_snapshot",
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")),
         )
 
     def unit_of_work(self):

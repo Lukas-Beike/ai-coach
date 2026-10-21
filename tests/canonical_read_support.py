@@ -33,7 +33,7 @@ from backend.sync.canonical_backfill import (
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.garmin_snapshot_writer import GARMIN_SNAPSHOT_KEY
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 NOW = "2026-09-20T08:00:00+00:00"
 CLOCK_AT = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
@@ -135,6 +135,11 @@ def new_backfill(case: CanonicalReadFixture) -> CanonicalBackfill:
     )
 
 
+def store_garmin(case: CanonicalReadFixture, db: Any, payload: dict[str, Any]) -> None:
+    """Write a Garmin collection through the per-element writer."""
+    GarminSnapshotWriter(case.key_values, lambda: case.zone).write(db, payload)
+
+
 def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
     """Store the snapshot and Garmin payload, then backfill until complete."""
     with case.manager.unit_of_work() as db:
@@ -143,7 +148,7 @@ def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
             "VALUES (?, ?, ?, 0)",
             (json.dumps(case.intervals), NOW, str(case.intervals["synced_at"])),
         )
-        case.key_values.set(db, GARMIN_SNAPSHOT_KEY, json.dumps(case.garmin))
+        store_garmin(case, db, case.garmin)
     backfill = new_backfill(case)
     for _ in range(MAX_BATCHES):
         with case.manager.unit_of_work() as db:

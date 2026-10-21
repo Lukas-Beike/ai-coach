@@ -116,13 +116,17 @@ def upsert_provider_record(
     mapper_version: int,
     fetched_at: str,
     now: str,
+    observed_on: str | None = None,
 ) -> WriteOutcome:
-    """Store one sanitized raw record; an unchanged hash and version is not rewritten."""
+    """Store one sanitized raw record; an unchanged hash and version is not rewritten.
+
+    ``observed_on`` is the ISO day the record belongs to, for windowed reads.
+    """
     text = canonical_json(payload)
     digest = payload_hash(text)
     existing = _fetch_row(
         db,
-        "SELECT payload_hash, mapped_version, state FROM provider_records "
+        "SELECT payload_hash, mapped_version, state, observed_on FROM provider_records "
         "WHERE provider = ? AND record_kind = ? AND source_record_id = ?",
         (provider, record_kind, source_record_id),
     )
@@ -137,17 +141,19 @@ def upsert_provider_record(
             mapper_version=mapper_version,
             fetched_at=fetched_at,
             now=now,
+            observed_on=observed_on,
         )
         return WriteOutcome.WRITTEN
     if (
         existing["payload_hash"] == digest
         and existing["mapped_version"] == mapper_version
         and existing["state"] == ProviderRecordState.ACTIVE.value
+        and existing["observed_on"] == observed_on
     ):
         return WriteOutcome.UNCHANGED
     db.execute(
         "UPDATE provider_records SET payload = ?, payload_hash = ?, fetched_at = ?, "
-        "mapped_version = ?, state = ?, updated_at = ? "
+        "mapped_version = ?, state = ?, updated_at = ?, observed_on = ? "
         "WHERE provider = ? AND record_kind = ? AND source_record_id = ?",
         (
             text,
@@ -156,6 +162,7 @@ def upsert_provider_record(
             mapper_version,
             ProviderRecordState.ACTIVE.value,
             now,
+            observed_on,
             provider,
             record_kind,
             source_record_id,
@@ -670,6 +677,32 @@ def observation_metric_windows(
     )
 
 
+def provider_totals(db: Any, provider: str) -> dict[str, Any]:
+    """Return how many active activities and observations one provider holds in the tables.
+
+    The dict holds ``activities``, ``observations`` and the earliest and latest
+    observed day as ISO text (``oldest``, ``newest``; None without observations).
+    """
+    activities = _fetch_row(
+        db,
+        "SELECT COUNT(*) AS count FROM activity_records WHERE provider = ? "
+        "AND state = 'active'",
+        (provider,),
+    )
+    observations = _fetch_row(
+        db,
+        "SELECT COUNT(*) AS count, MIN(observed_on) AS oldest, "
+        "MAX(observed_on) AS newest FROM observations WHERE provider = ?",
+        (provider,),
+    )
+    return {
+        "activities": int(activities["count"]) if activities else 0,
+        "observations": int(observations["count"]) if observations else 0,
+        "oldest": observations["oldest"] if observations else None,
+        "newest": observations["newest"] if observations else None,
+    }
+
+
 def active_record_payloads(
     db: Any, *, provider: str, record_kind: str
 ) -> dict[str, str]:
@@ -913,11 +946,12 @@ def _insert_provider_record(
     mapper_version: int,
     fetched_at: str,
     now: str,
+    observed_on: str | None = None,
 ) -> None:
     db.execute(
         "INSERT INTO provider_records (provider, record_kind, source_record_id, "
         "payload, payload_hash, fetched_at, mapped_version, state, created_at, "
-        "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "updated_at, observed_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             provider,
             record_kind,
@@ -929,6 +963,7 @@ def _insert_provider_record(
             ProviderRecordState.ACTIVE.value,
             now,
             now,
+            observed_on,
         ),
     )
 

@@ -21,16 +21,13 @@ from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from backend.athlete.profile import timezone_name
+from backend.db import garmin_store
 from backend.runtime.ports import ProviderSnapshotReader
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 
 
 class StoredPayloadReader(Protocol):
     def latest_payload(self, db: Any) -> str | None: ...
-
-
-class GarminSnapshotSource(Protocol):
-    def snapshot(self) -> dict[str, Any]: ...
 
 
 class AthleteTimezoneReader(Protocol):
@@ -41,15 +38,15 @@ def build_canonical_snapshot_projection(
     *,
     intervals_snapshots: ProviderSnapshotReader,
     snapshot_payloads: StoredPayloadReader,
-    garmin_payloads: Callable[[], GarminSnapshotSource],
     profile: AthleteTimezoneReader,
     clock: Callable[[], datetime],
+    garmin_payload: Callable[[Any], dict[str, Any]] = garmin_store.read_view,
 ) -> CanonicalSnapshotProjection:
     """Return one canonical projection over the stored snapshots."""
     return CanonicalSnapshotProjection(
         intervals_snapshot=intervals_snapshots.latest_snapshot,
         intervals_version=_intervals_version(snapshot_payloads),
-        garmin_payload=_garmin_payload(garmin_payloads),
+        garmin_payload=garmin_payload,
         zone=_athlete_zone(profile),
         clock=clock,
     )
@@ -61,16 +58,6 @@ def _intervals_version(reader: StoredPayloadReader) -> Callable[[Any], str]:
         return hashlib.sha256(stored.encode("utf-8")).hexdigest()
 
     return version
-
-
-def _garmin_payload(
-    sources: Callable[[], GarminSnapshotSource],
-) -> Callable[[Any], dict[str, Any]]:
-    def payload(_db: Any) -> dict[str, Any]:
-        # The payload service joins the caller's unit of work when one is open.
-        return sources().snapshot()
-
-    return payload
 
 
 def _athlete_zone(profile: AthleteTimezoneReader) -> Callable[[Any], tzinfo]:

@@ -36,7 +36,7 @@ class _PayloadService:
         self.value = snapshot
         self.reads = 0
 
-    def snapshot(self):
+    def recent_view(self, days=None):
         self.reads += 1
         return self.value
 

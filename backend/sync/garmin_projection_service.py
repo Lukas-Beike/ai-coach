@@ -20,9 +20,16 @@ from backend.performance.morning_battery_service import MorningBodyBatteryServic
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
 from backend.runtime.ports import ActivityRowReader, ObservationReader
-from backend.sync.garmin import GarminPayloadService, GarminSyncStateService
+from backend.sync.garmin import (
+    RECENT_VIEW_DAYS,
+    GarminPayloadService,
+    GarminSyncStateService,
+)
 from backend.sync.garmin_service import GarminSyncService
 from backend.sync.state import SyncStateRepository
+
+# The recovery context shows the latest record; two weeks cover a missed sync.
+COACH_RECOVERY_DAYS = 14
 
 
 @dataclass(frozen=True)
@@ -121,7 +128,7 @@ class GarminProjectionService:
     ) -> dict[str, Any]:
         """Project the Garmin status; ``snapshot`` reuses the caller's own read."""
         if snapshot is None:
-            snapshot = self._garmin_payload_service.snapshot()
+            snapshot = self._garmin_payload_service.recent_view()
         state, intervals_rows = self._canonical_read(observations)
         performance_metrics = performance_garmin_metrics.garmin_performance_metrics(
             snapshot,
@@ -217,7 +224,9 @@ class GarminProjectionService:
         }
 
     def coach_context(self, include_performance: bool = False) -> dict[str, Any]:
-        snapshot = self._garmin_payload_service.snapshot()
+        snapshot = self._garmin_payload_service.recent_view(
+            RECENT_VIEW_DAYS if include_performance else COACH_RECOVERY_DAYS
+        )
         context = {
             "synced_at": snapshot.get("synced_at"),
             "start": snapshot.get("start"),

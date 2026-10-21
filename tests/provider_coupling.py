@@ -159,20 +159,12 @@ _LEGACY_LABEL = (
     "legacy-label: view still emits or compares the label itself; move it to "
     "backend/providers/source_labels.py"
 )
-_AWAITING_BODY_BATTERY = "awaiting-kind: morning body battery"
-_AWAITING_EQUIPMENT = (
-    "awaiting-record: equipment reads Garmin gear from the raw snapshot until "
-    "canonical equipment records exist"
-)
-_AWAITING_RESTING_ENERGY = (
-    "awaiting-kind: resting calories; also the daily-stats sync status"
-)
 
 # (rule, repository-relative path) -> reason. Only the files the rules actually
 # fire on are listed; a stale entry fails the guard. Remove an awaiting-kind entry
 # once its consumer reads canonical observations.
 OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
-    (RULE_SNAPSHOT_KEY, "backend/sync/garmin_snapshot_writer.py"): _SYNC_WRITER,
+    (RULE_SNAPSHOT_KEY, "backend/canonical/garmin_payload.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/garmin.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/snapshot_reader.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/snapshot_storage.py"): _SYNC_WRITER,
@@ -183,19 +175,9 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/privacy.py"): _BACKUP,
     (RULE_SNAPSHOT_KEY, "backend/activities/duplicate_inspection.py"): _DUPLICATE,
     (RULE_SNAPSHOT_KEY, "backend/activities/duplicate_service.py"): _DUPLICATE,
-    (
-        RULE_SNAPSHOT_KEY,
-        "backend/performance/morning_battery_service.py",
-    ): "writer: morning body battery rewrites the stored Garmin snapshot",
     (RULE_SNAPSHOT_KEY, "backend/activities/read_service.py"): _SYNC_STATUS,
-    (RULE_SNAPSHOT_KEY, "backend/athlete/equipment.py"): _AWAITING_EQUIPMENT,
     (RULE_SOURCE_LABEL, "backend/athlete/equipment.py"): _LEGACY_LABEL,
     (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,
-    (RULE_SNAPSHOT_KEY, "backend/nutrition/sync_status.py"): _AWAITING_RESTING_ENERGY,
-    (
-        RULE_SNAPSHOT_KEY,
-        "backend/planning/daily_context_service.py",
-    ): _AWAITING_BODY_BATTERY,
     (RULE_SNAPSHOT_KEY, "backend/coach/context.py"): _AWAITING_PERFORMANCE_KINDS,
     (RULE_SNAPSHOT_KEY, "backend/http_api/assembly.py"): _AWAITING_PERFORMANCE_KINDS,
     (

@@ -1,4 +1,3 @@
-import json
 import sqlite3
 import tempfile
 import threading
@@ -11,7 +10,9 @@ from canonical_daily_health_support import MappedDailyReader
 from nutrition_service_support import build_nutrition_services
 
 from backend.db.manager import DatabaseManager
+from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 
 class NutritionGarminExpenditureTests(unittest.TestCase):
@@ -35,16 +36,33 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         self.manager.close()
         self.temp_dir.cleanup()
 
-    def test_day_summary_includes_persisted_garmin_expenditure(self) -> None:
+    def store_garmin(self, payload: dict[str, Any]) -> None:
+        payload = {"synced_at": "2026-09-24T08:00:00Z", **payload}
+        writer = GarminSnapshotWriter(
+            KeyValueRepository(lambda: self.fixed_now), lambda: UTC
+        )
         with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                (
-                    "garmin_snapshot",
-                    '{"synced_at":"2026-09-24T08:00:00Z","daily_stats":[{"date":"2026-09-24","activeKilocalories":600,"bmrKilocalories":1500,"totalKilocalories":2100}],"source_freshness":{"daily_stats":{"freshness":"current","fetched_at":"2026-09-24T08:00:00Z"}}}',
-                    self.fixed_now,
-                ),
-            )
+            writer.write(db, payload)
+
+    def test_day_summary_includes_persisted_garmin_expenditure(self) -> None:
+        self.store_garmin(
+            {
+                "daily_stats": [
+                    {
+                        "date": "2026-09-24",
+                        "activeKilocalories": 600,
+                        "bmrKilocalories": 1500,
+                        "totalKilocalories": 2100,
+                    }
+                ],
+                "source_freshness": {
+                    "daily_stats": {
+                        "freshness": "current",
+                        "fetched_at": "2026-09-24T08:00:00Z",
+                    }
+                },
+            }
+        )
 
         expenditure = self.service.get_day_summary("2026-09-24")["energy_expenditure"]
 
@@ -79,25 +97,13 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
             observation_reader=lambda: reader,
         )
-        with self.manager.unit_of_work() as db:
-            # The snapshot keeps only the resting calories and the sync status.
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                (
-                    "garmin_snapshot",
-                    json.dumps(
-                        {
-                            "daily_stats": [
-                                {"date": "2026-09-24", "bmrKilocalories": 1500}
-                            ],
-                            "source_freshness": {
-                                "daily_stats": {"freshness": "current"}
-                            },
-                        }
-                    ),
-                    self.fixed_now,
-                ),
-            )
+        # The stored rows keep only the resting calories and the sync status.
+        self.store_garmin(
+            {
+                "daily_stats": [{"date": "2026-09-24", "bmrKilocalories": 1500}],
+                "source_freshness": {"daily_stats": {"freshness": "current"}},
+            }
+        )
 
         day = service.get_day_summary("2026-09-24")["energy_expenditure"]
         week = service.get_week_summary()
@@ -118,7 +124,7 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                ("garmin_snapshot", "not-json", self.fixed_now),
+                ("garmin_state", "not-json", self.fixed_now),
             )
 
         summary = self.service.get_day_summary("2026-09-24")
@@ -128,34 +134,28 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         self.assertTrue(summary["energy_expenditure"]["provisional"])
         self.assertIsNone(summary["energy_expenditure"]["total_kcal"])
 
-    def test_targeted_nutrition_refresh_freshness_is_scoped_to_requested_day(self) -> None:
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                (
-                    "garmin_snapshot",
-                    json.dumps(
-                        {
-                            "daily_stats": [
-                                {"calendarDate": "2026-09-23", "totalKilocalories": 2000},
-                                {"calendarDate": "2026-09-24", "totalKilocalories": 2100},
-                            ],
-                            "source_freshness": {
-                                "daily_stats": {"freshness": "current", "fetched_at": "older"}
-                            },
-                            "nutrition_refresh": {
-                                "daily_stats": {
-                                    "2026-09-23": {
-                                        "freshness": "partial",
-                                        "fetched_at": "targeted-read",
-                                    }
-                                }
-                            },
+    def test_targeted_nutrition_refresh_freshness_is_scoped_to_requested_day(
+        self,
+    ) -> None:
+        self.store_garmin(
+            {
+                "daily_stats": [
+                    {"calendarDate": "2026-09-23", "totalKilocalories": 2000},
+                    {"calendarDate": "2026-09-24", "totalKilocalories": 2100},
+                ],
+                "source_freshness": {
+                    "daily_stats": {"freshness": "current", "fetched_at": "older"}
+                },
+                "nutrition_refresh": {
+                    "daily_stats": {
+                        "2026-09-23": {
+                            "freshness": "partial",
+                            "fetched_at": "targeted-read",
                         }
-                    ),
-                    self.fixed_now,
-                ),
-            )
+                    }
+                },
+            }
+        )
 
         requested = self.service.get_day_summary("2026-09-23")["energy_expenditure"]
         untouched = self.service.get_day_summary("2026-09-24")["energy_expenditure"]
@@ -182,29 +182,21 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
                     "fat_g": 50,
                 }
             )
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "INSERT INTO kv(key,value,updated_at) VALUES (?,?,?)",
-                (
-                    "garmin_snapshot",
-                    json.dumps(
-                        {
-                            "daily_stats": [
-                                {"date": "2026-09-17", "totalKilocalories": 2000},
-                                {"date": "2026-09-18", "totalKilocalories": 2100},
-                                {"date": "2026-09-20", "totalKilocalories": 2300},
-                                {
-                                    "date": "2026-09-19",
-                                    "activeKilocalories": 600,
-                                    "bmrKilocalories": 1500,
-                                },
-                                {"date": "2026-09-24", "totalKilocalories": 9999},
-                            ]
-                        }
-                    ),
-                    self.fixed_now,
-                ),
-            )
+        self.store_garmin(
+            {
+                "daily_stats": [
+                    {"date": "2026-09-17", "totalKilocalories": 2000},
+                    {"date": "2026-09-18", "totalKilocalories": 2100},
+                    {"date": "2026-09-20", "totalKilocalories": 2300},
+                    {
+                        "date": "2026-09-19",
+                        "activeKilocalories": 600,
+                        "bmrKilocalories": 1500,
+                    },
+                    {"date": "2026-09-24", "totalKilocalories": 9999},
+                ]
+            }
+        )
         week = self.service.get_week_summary()
         self.assertEqual(
             (week["start_date"], week["end_date"]), ("2026-09-17", "2026-09-23")

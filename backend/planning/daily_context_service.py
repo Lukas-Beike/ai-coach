@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 
+from backend.db import garmin_store
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import read_daily_health_by_date
 from backend.performance.planning_recovery import planning_recovery_view
@@ -14,20 +14,11 @@ from backend.planning.context import build_daily_planning_context
 from backend.runtime.ports import ObservationReader
 from backend.weather.history import decode_history
 
-# The Garmin snapshot is still read for the morning body battery, which has no
+# The Garmin state is still read for the morning body battery, which has no
 # metric kind; every other recovery and daily-health value is canonical.
-_GARMIN_SNAPSHOT_KEY = "garmin_snapshot"
 # Matches the shortest wellness history the compact snapshot keeps.
 RECOVERY_WINDOW_DAYS = 42
 _MORNING_BATTERY_HISTORY_KEY = "morning_body_battery_history"
-
-
-def _decode_garmin_snapshot(value: Any) -> dict[str, Any]:
-    try:
-        decoded = json.loads(value or "{}")
-    except TypeError, ValueError, RecursionError:
-        return {}
-    return decoded if isinstance(decoded, dict) else {}
 
 
 class DailyPlanningContextService:
@@ -111,11 +102,7 @@ class DailyPlanningContextService:
         )
 
         with self._database_manager.reader() as db:
-            garmin = _decode_garmin_snapshot(
-                self._key_value_repository.get_json_fields(
-                    db, _GARMIN_SNAPSHOT_KEY, ("morning_body_battery",)
-                )
-            )
+            garmin = garmin_store.read_state(db)
             morning_battery_history = decode_history(
                 self._key_value_repository.get(db, _MORNING_BATTERY_HISTORY_KEY)
             )

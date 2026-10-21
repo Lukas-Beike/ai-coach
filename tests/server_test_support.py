@@ -97,9 +97,11 @@ def _current_performance_context(snapshot=None):
         if snapshot is not None
         else server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
     )
+    from garmin_support import read_garmin
+
     return performance_context.current_performance_context(
         effective_snapshot,
-        server.GARMIN_ASSEMBLY.payload_service().snapshot(),
+        read_garmin(),
         server.ATHLETE_DATA.profile().get(),
         server.ATHLETE_CLOCK.now().date(),
     )

@@ -154,7 +154,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         )
         garmin_snapshot = {"recent_wellness": []}
         profile_value = {"weight_kg": "70"}
-        garmin = Mock(snapshot=Mock(return_value=garmin_snapshot))
+        garmin = Mock(recent_view=Mock(return_value=garmin_snapshot))
         profile = Mock(get=Mock(return_value=profile_value))
         today = date(2026, 9, 23)
         service = CoachActivityReadToolService(
@@ -176,7 +176,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         self.assertEqual(
             result["activity_validation"]["activity"]["activity_id"], "synthetic-1"
         )
-        garmin.snapshot.assert_called_once_with()
+        garmin.recent_view.assert_called_once_with()
         profile.get.assert_called_once_with()
 
     def test_unknown_tool_is_unclaimed_and_invalid_detail_ids_keep_error(self):
@@ -264,7 +264,7 @@ def _canonical_activity_tool(snapshot: dict):
             observation_reader=lambda: selector,
         ),
     )
-    garmin = Mock(snapshot=Mock(return_value={}))
+    garmin = Mock(recent_view=Mock(return_value={}))
     profile = Mock(get=Mock(return_value={}))
     service = CoachActivityReadToolService(
         activity_read, garmin, profile, lambda: date(2026, 9, 23)
