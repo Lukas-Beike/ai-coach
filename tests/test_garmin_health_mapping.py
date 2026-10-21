@@ -1206,6 +1206,37 @@ class DailyStatsTests(unittest.TestCase):
         )
         self.assertEqual(_issues(result), [])
 
+    def test_daily_stats_map_the_nested_range_endpoint_shape(self) -> None:
+        result = _map(
+            {
+                "daily_stats": [
+                    {
+                        "calendarDate": DAY,
+                        "calories": {
+                            "burnedResting": 1800,
+                            "burnedActive": 610,
+                            "burnedTotal": 2410,
+                        },
+                        "movement": {
+                            "steps": {"goal": 8000, "value": 9123},
+                            "floorsAscended": {"goal": 10, "value": 12},
+                        },
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(
+            _rows(result),
+            [
+                ("daily_energy_active", 610.0, DAY, "-"),
+                ("daily_energy_total", 2410.0, DAY, "-"),
+                ("floors", 12.0, DAY, "-"),
+                ("steps", 9123.0, DAY, "-"),
+            ],
+        )
+        self.assertEqual(_issues(result), [])
+
     def test_daily_stats_counts_are_rounded_like_the_serving_reader(self) -> None:
         result = _map(
             {

@@ -72,6 +72,47 @@ GARMIN_RACE_TIME_ALIASES = (
 GARMIN_RACE_DISTANCE_ALIASES = ("raceDistance", "distanceName", "raceType", "distance")
 
 
+# Garmin's range endpoint nests the daily values the per-day summary keeps flat.
+_NESTED_ENERGY_FIELDS = (
+    ("burnedTotal", "totalKilocalories"),
+    ("burnedActive", "activeKilocalories"),
+    ("burnedResting", "bmrKilocalories"),
+)
+_NESTED_MOVEMENT_FIELDS = (
+    ("steps", "totalSteps"),
+    ("floorsAscended", "floorsAscended"),
+)
+
+
+def flatten_daily_summary(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Add the flat per-day aliases for a nested range-endpoint daily record.
+
+    Existing flat keys win, so a per-day summary is returned unchanged.
+    """
+    calories = record.get("calories")
+    movement = record.get("movement")
+    extra: dict[str, Any] = {}
+    if isinstance(calories, Mapping):
+        for source, alias in _NESTED_ENERGY_FIELDS:
+            if calories.get(source) not in (None, ""):
+                extra[alias] = calories[source]
+    if isinstance(movement, Mapping):
+        for source, alias in _NESTED_MOVEMENT_FIELDS:
+            entry = movement.get(source)
+            value = entry.get("value") if isinstance(entry, Mapping) else None
+            if value not in (None, ""):
+                extra[alias] = value
+    if not extra:
+        return record
+    flat = {
+        key: value
+        for key, value in record.items()
+        if value not in (None, "")
+        and not (key == "calories" and isinstance(value, Mapping))
+    }
+    return {**extra, **flat}
+
+
 def first_present(item: Any, keys: tuple[str, ...]) -> Any:
     """Return the first non-empty field value, preserving zero and False."""
     if not isinstance(item, Mapping):
