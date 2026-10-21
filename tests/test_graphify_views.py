@@ -1,9 +1,10 @@
 import json
-import re
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,15 +38,113 @@ class GraphifyViewsTests(unittest.TestCase):
         }
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        self.runtime = self.root
+        self.graph_path = (
+            self.runtime / "generations" / ("a" * 32) / "graphify-out" / "graph.json"
+        )
+        self.graph_path.parent.mkdir(parents=True)
+        self.graph_path.write_text(json.dumps(self.graph), encoding="utf-8")
+        (self.runtime / "exports").mkdir()
 
     def tearDown(self):
         self.temp.cleanup()
 
     def test_json_export_preserves_graph(self):
-        src, dst = self.root / "graph.json", self.root / "out.json"
-        src.write_text(json.dumps(self.graph), encoding="utf-8")
-        self.assertEqual(0, views.main(["export", str(src), "json", str(dst)]))
+        dst = self.runtime / "exports" / "out.json"
+        with (
+            patch("os.getcwd", return_value=str(self.runtime)),
+            patch("pathlib.Path.cwd", return_value=self.runtime),
+        ):
+            self.assertEqual(
+                0,
+                views.main(["export", str(self.graph_path), "json", str(dst)]),
+            )
         self.assertEqual(self.graph, json.loads(dst.read_text(encoding="utf-8")))
+
+    def test_cli_accepts_runtime_relative_paths_from_wrapper_cwd(self):
+        previous = Path.cwd()
+        try:
+            os.chdir(self.runtime)
+            self.assertEqual(
+                0,
+                views.main(
+                    [
+                        "export",
+                        str(self.graph_path.relative_to(self.runtime)),
+                        "html",
+                        "exports/wrapper.html",
+                    ]
+                ),
+            )
+        finally:
+            os.chdir(previous)
+        self.assertTrue((self.runtime / "exports" / "wrapper.html").is_file())
+
+    def test_cli_rejects_absolute_and_traversal_outputs_for_each_format(self):
+        with tempfile.TemporaryDirectory() as outside_temp:
+            outside = Path(outside_temp)
+            with patch("pathlib.Path.cwd", return_value=self.runtime):
+                for export_format, suffix in (
+                    ("html", "page.html"),
+                    ("wiki", "wiki"),
+                    ("json", "graph.json"),
+                ):
+                    for output in (
+                        outside / suffix,
+                        self.runtime / "exports" / ".." / ".." / "outside" / suffix,
+                    ):
+                        with self.subTest(format=export_format, output=output):
+                            self.assertEqual(
+                                2,
+                                views.main(
+                                    [
+                                        "export",
+                                        str(self.graph_path),
+                                        export_format,
+                                        str(output),
+                                    ]
+                                ),
+                            )
+                            self.assertFalse(output.exists())
+            self.assertEqual([], list(outside.iterdir()))
+
+    def test_cli_rejects_graph_symlink_to_outside(self):
+        with tempfile.TemporaryDirectory() as outside_temp:
+            outside = Path(outside_temp) / "graph.json"
+            outside.write_text(json.dumps(self.graph), encoding="utf-8")
+            link = (
+                self.runtime
+                / "generations"
+                / ("b" * 32)
+                / "graphify-out"
+                / "graph.json"
+            )
+            link.parent.mkdir(parents=True)
+            try:
+                link.symlink_to(outside)
+            except OSError as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+            output = self.runtime / "exports" / "must-not-exist.json"
+            with patch("pathlib.Path.cwd", return_value=self.runtime):
+                self.assertEqual(
+                    2, views.main(["export", str(link), "json", str(output)])
+                )
+            self.assertFalse(output.exists())
+
+    def test_cli_rejects_output_symlink(self):
+        target = self.runtime / "exports" / "target.json"
+        target.write_text("original", encoding="utf-8")
+        link = self.runtime / "exports" / "link.json"
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+        with patch("pathlib.Path.cwd", return_value=self.runtime):
+            self.assertEqual(
+                2,
+                views.main(["export", str(self.graph_path), "json", str(link)]),
+            )
+        self.assertEqual("original", target.read_text(encoding="utf-8"))
 
     def test_html_is_offline_searchable_and_escapes_script_payload(self):
         dst = self.root / "index.html"
@@ -70,10 +169,30 @@ class GraphifyViewsTests(unittest.TestCase):
         dst = self.root / "index.html"
         views.export_html(self.graph, dst)
         content = dst.read_text(encoding="utf-8")
-        script = re.search(r"<script>(.*?)</script>", content, re.DOTALL)
-        self.assertIsNotNone(script)
-        js = self.root / "generated.js"
-        js.write_text(script.group(1), encoding="utf-8")
+
+        class ScriptReader(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.in_script = False
+                self.parts = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag.lower() == "script":
+                    self.in_script = True
+
+            def handle_endtag(self, tag):
+                if tag.lower() == "script":
+                    self.in_script = False
+
+            def handle_data(self, data):
+                if self.in_script:
+                    self.parts.append(data)
+
+        parser = ScriptReader()
+        parser.feed(content)
+        self.assertTrue(parser.parts)
+        js = self.runtime / "exports" / "generated.js"
+        js.write_text("\n".join(parser.parts), encoding="utf-8")
         result = subprocess.run(
             [node, "--check", str(js)], capture_output=True, text=True, check=False
         )

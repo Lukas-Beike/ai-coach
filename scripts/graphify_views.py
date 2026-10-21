@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Offline exports and read-only MCP views over a Graphify JSON snapshot."""
 
 from __future__ import annotations
@@ -12,20 +11,55 @@ from collections import deque
 from pathlib import Path
 from urllib.parse import quote
 
+GENERATION_ID = re.compile(r"[0-9a-f]{32}\Z")
+
+
+def runtime_path(path: Path) -> Path:
+    """Resolve an input path only within a complete runtime generation graph."""
+    runtime = Path.cwd().resolve()
+    candidate = path.resolve()
+    try:
+        relative = candidate.relative_to(runtime)
+    except ValueError as exc:
+        raise ValueError("graph must be inside the current Graphify runtime") from exc
+    if (
+        len(relative.parts) != 4
+        or relative.parts[0] != "generations"
+        or not GENERATION_ID.fullmatch(relative.parts[1])
+        or relative.parts[2:] != ("graphify-out", "graph.json")
+    ):
+        raise ValueError("graph must be a runtime generation graph.json")
+    return candidate
+
+
+def export_path(path: Path) -> Path:
+    """Resolve an output only below exports and reject a symlink destination."""
+    runtime = Path.cwd().resolve()
+    exports = runtime / "exports"
+    candidate = path.resolve()
+    try:
+        candidate.relative_to(exports)
+    except ValueError as exc:
+        raise ValueError("output must be inside the current runtime exports") from exc
+    if path.is_symlink():
+        raise ValueError("output must not be a symlink")
+    return candidate
+
 
 def load_graph(path: Path) -> dict:
     with path.open(encoding="utf-8-sig") as stream:
         graph = json.load(stream)
     if not isinstance(graph, dict) or not isinstance(graph.get("nodes", []), list):
         raise TypeError("graph must be a JSON object with a nodes list")
-    if not isinstance(graph.get("links", graph.get("edges", [])), list):
+    edges = graph.get("links", graph.get("edges", []))
+    if not isinstance(edges, list):
         raise TypeError("graph edges must be a list")
     for node in graph.get("nodes", []):
         if not isinstance(node, dict) or not isinstance(
             node.get("id", node.get("name", "")), (str, int)
         ):
             raise TypeError("graph nodes must be objects with string or integer ids")
-    for edge in graph.get("links", graph.get("edges", [])):
+    for edge in edges:
         if (
             not isinstance(edge, dict)
             or not isinstance(edge.get("source", edge.get("from", "")), (str, int))
@@ -291,10 +325,11 @@ def main(argv: list[str] | None = None) -> int:
     mcp.add_argument("graph", type=Path)
     args = parser.parse_args(argv)
     try:
-        graph = load_graph(args.graph)
+        graph_path = runtime_path(args.graph)
+        graph = load_graph(graph_path)
         if args.command == "mcp":
             return run_mcp(graph)
-        output = args.output
+        output = export_path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
         if args.format == "json":
             output.write_text(

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Explicit, isolated, secret-scanned local Graphify integration."""
 
 from __future__ import annotations
@@ -191,7 +190,7 @@ def safe_path(root: Path, rel: str) -> Path | None:
         for part in p.parts:
             cursor = cursor / part
             try:
-                if os.lstat(cursor).st_file_attributes & getattr(
+                if getattr(os.lstat(cursor), "st_file_attributes", 0) & getattr(
                     stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
                 ):
                     return None
@@ -278,7 +277,7 @@ def process_lock(path: Path, deadline: float | None = None):
                 raise Unavailable("graph update lock timed out")
             try:
                 if os.name == "nt":
-                    import msvcrt
+                    msvcrt = __import__("msvcrt")
 
                     handle.seek(0)
                     if os.fstat(handle.fileno()).st_size == 0:
@@ -297,7 +296,7 @@ def process_lock(path: Path, deadline: float | None = None):
             yield
         finally:
             if os.name == "nt":
-                import msvcrt
+                msvcrt = __import__("msvcrt")
 
                 handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
@@ -515,19 +514,35 @@ def update(root: Path) -> int:
             except Unavailable:
                 active = base / "missing"
             graph = active / "graphify-out" / "graph.json"
+            graph_digest = (
+                hashlib.sha256(graph.read_bytes()).hexdigest()
+                if graph.is_file()
+                else None
+            )
             if (
                 current.get("fingerprint") == fingerprint
                 and current.get("schema") == WRAPPER_SCHEMA
                 and current.get("graphify_version") == VERSION
-                and graph.is_file()
+                and graph_digest is not None
+                and graph_digest == current.get("graph_sha256")
                 and verify_version(root)
             ):
-                if current.get("stale"):
-                    current["stale"] = False
-                    (base / "current.json.tmp").write_text(
-                        json.dumps(current), encoding="utf-8"
-                    )
-                    os.replace(base / "current.json.tmp", base / "current.json")
+                # The fingerprint covers source bytes and Git identity. File
+                # stats can still change while those inputs remain identical,
+                # so publish the metadata from this successful scan as well.
+                if not _metadata_matches(
+                    root, metadata, [(rel, _signature(path)) for rel, path in paths]
+                ):
+                    raise Unavailable("source changed during scan; retry update")
+                current.update(
+                    metadata=metadata,
+                    graph_sha256=graph_digest,
+                    stale=False,
+                    updated=int(time.time()),
+                )
+                pending = base / "current.json.tmp"
+                pending.write_text(json.dumps(current), encoding="utf-8")
+                os.replace(pending, base / "current.json")
                 print("Graphify local: current")
                 return 0
             gen_id = uuid.uuid4().hex
@@ -697,7 +712,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status")
     for name in ("query", "path", "explain"):
         p = sub.add_parser(name)
-        p.add_argument("terms", nargs="+")
+        p.add_argument("terms", nargs=argparse.REMAINDER)
     exp = sub.add_parser("export")
     exp.add_argument("format", choices=("json", "html", "wiki"))
     exp.add_argument("--output", required=True)
@@ -759,15 +774,26 @@ def main(argv: list[str] | None = None) -> int:
             output.parent.mkdir(parents=True, exist_ok=True)
             return helper(root, "export", graph, output, args.format)
         allowed = {
-            "query": {"--graph"},
-            "path": {"--graph", "--directed", "--undirected"},
-            "explain": {"--graph", "--all"},
+            "query": set(),
+            "path": {"--directed", "--undirected"},
+            "explain": {"--all"},
         }[args.command]
+        terms = []
         command = [str(executable(root)), args.command]
         for term in args.terms:
-            if term.startswith("-") and term.split("=", 1)[0] not in allowed:
+            if term.startswith("-") and term not in allowed:
                 raise Unavailable("unsupported Graphify option")
-            command.append(term)
+            terms.append(term)
+        positional = [term for term in terms if term not in allowed]
+        if args.command == "path" and "--directed" in terms and "--undirected" in terms:
+            raise Unavailable("choose either --directed or --undirected")
+        if args.command == "path" and len(positional) != 2:
+            raise Unavailable("path requires a source and target")
+        if args.command == "explain" and len(positional) != 1:
+            raise Unavailable("explain requires one symbol")
+        if not terms:
+            raise Unavailable("Graphify terms are required")
+        command.extend(terms)
         command += ["--graph", str(graph)]
         return subprocess.run(
             command,

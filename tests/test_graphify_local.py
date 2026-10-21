@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -441,6 +442,200 @@ class GraphifyLocalTests(unittest.TestCase):
             patch.object(graph, "verify_version", return_value=True),
         ):
             self.assertEqual(graph.update(self.root), 0)
+
+    def test_fingerprint_match_refreshes_metadata_and_remains_warm(self):
+        rt = graph.runtime(self.root)
+        generation = "d" * 32
+        graph_file = rt / "generations" / generation / "graphify-out" / "graph.json"
+        graph_file.parent.mkdir(parents=True)
+        graph_file.write_text('{"nodes":[{"id":"n"}],"edges":[]}')
+        old_metadata = graph._metadata(self.root)
+        with patch.object(graph, "scan"):
+            fingerprint = graph.state(self.root)[1]
+        pointer = {
+            "generation": generation,
+            "fingerprint": fingerprint,
+            "schema": graph.WRAPPER_SCHEMA,
+            "graphify_version": graph.VERSION,
+            "updated": 1,
+            "stale": False,
+            "metadata": old_metadata,
+            "graph_sha256": hashlib.sha256(graph_file.read_bytes()).hexdigest(),
+        }
+        (rt / "current.json").write_text(json.dumps(pointer))
+        source = self.root / "backend" / "one.py"
+        before = source.stat()
+        os.utime(
+            source,
+            ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000),
+        )
+        self.assertNotEqual(old_metadata, graph._metadata(self.root))
+        tool = rt / "venv" / "Scripts" / "graphify.exe"
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.touch()
+        with (
+            patch.object(graph, "scan") as scanner,
+            patch.object(graph, "executable", return_value=tool),
+            patch.object(graph, "verify_version", return_value=True),
+        ):
+            self.assertEqual(graph.update(self.root), 0)
+            scanner.assert_called_once()
+            current = json.loads((rt / "current.json").read_text())
+            self.assertEqual(current["generation"], generation)
+            self.assertEqual(current["metadata"], graph._metadata(self.root))
+            self.assertEqual(
+                current["graph_sha256"],
+                hashlib.sha256(graph_file.read_bytes()).hexdigest(),
+            )
+            self.assertFalse(current["stale"])
+            self.assertEqual(graph.active_graph(self.root)[1], graph_file)
+            self.assertEqual(graph.update(self.root), 0)
+            scanner.assert_called_once()
+
+    def test_corrupt_graph_is_not_reused_or_blessed_by_metadata_refresh(self):
+        rt = graph.runtime(self.root)
+        generation = "f" * 32
+        graph_file = rt / "generations" / generation / "graphify-out" / "graph.json"
+        graph_file.parent.mkdir(parents=True)
+        graph_file.write_text('{"nodes":[{"id":"original"}],"edges":[]}')
+        with patch.object(graph, "scan"):
+            fingerprint = graph.state(self.root)[1]
+        pointer = {
+            "generation": generation,
+            "fingerprint": fingerprint,
+            "schema": graph.WRAPPER_SCHEMA,
+            "graphify_version": graph.VERSION,
+            "stale": False,
+            "metadata": {},
+            "graph_sha256": hashlib.sha256(graph_file.read_bytes()).hexdigest(),
+        }
+        (rt / "current.json").write_text(json.dumps(pointer))
+        graph_file.write_text('{"nodes":[{"id":"corrupt"}],"edges":[]}')
+        tool = rt / "venv" / "Scripts" / "graphify.exe"
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.touch()
+        out = rt / "cache"
+        out.mkdir()
+        (out / "graph.json").write_text('{"nodes":[{"id":"rebuilt"}],"edges":[]}')
+        real_run = subprocess.run
+
+        def fake_run(command, **kwargs):
+            if command[0] == str(tool):
+                return subprocess.CompletedProcess(command, 0)
+            return real_run(command, **kwargs)
+
+        with (
+            patch.object(graph, "scan"),
+            patch.object(graph, "executable", return_value=tool),
+            patch.object(graph, "verify_version", return_value=True),
+            patch.object(graph.subprocess, "run", side_effect=fake_run) as run,
+        ):
+            self.assertEqual(graph.update(self.root), 0)
+        self.assertTrue(
+            any(call.args[0][0] == str(tool) for call in run.call_args_list)
+        )
+        current = json.loads((rt / "current.json").read_text())
+        self.assertNotEqual(current["generation"], generation)
+        self.assertNotEqual(current["graph_sha256"], pointer["graph_sha256"])
+        active_graph = graph.active_graph(self.root)[1]
+        self.assertEqual(active_graph.read_text(), (out / "graph.json").read_text())
+
+    def test_missing_graph_checksum_is_not_reused(self):
+        rt = graph.runtime(self.root)
+        generation = "d" * 32
+        graph_file = rt / "generations" / generation / "graphify-out" / "graph.json"
+        graph_file.parent.mkdir(parents=True)
+        graph_file.write_text('{"nodes":[],"edges":[]}')
+        with patch.object(graph, "scan"):
+            fingerprint = graph.state(self.root)[1]
+        pointer = {
+            "generation": generation,
+            "fingerprint": fingerprint,
+            "schema": graph.WRAPPER_SCHEMA,
+            "graphify_version": graph.VERSION,
+            "stale": False,
+        }
+        (rt / "current.json").write_text(json.dumps(pointer))
+        tool = rt / "venv" / "Scripts" / "graphify.exe"
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.touch()
+        out = rt / "cache"
+        out.mkdir()
+        (out / "graph.json").write_text('{"nodes":[{"id":"rebuilt"}],"edges":[]}')
+        real_run = subprocess.run
+
+        def fake_run(command, **kwargs):
+            if "update" in command:
+                return subprocess.CompletedProcess(command, 0)
+            return real_run(command, **kwargs)
+
+        with (
+            patch.object(graph, "scan"),
+            patch.object(graph, "executable", return_value=tool),
+            patch.object(graph, "verify_version", return_value=True),
+            patch.object(graph.subprocess, "run", side_effect=fake_run),
+        ):
+            self.assertEqual(graph.update(self.root), 0)
+        current = json.loads((rt / "current.json").read_text())
+        self.assertNotEqual(current["generation"], generation)
+        self.assertEqual(
+            graph.active_graph(self.root)[1].read_text(),
+            (out / "graph.json").read_text(),
+        )
+
+    def test_graphify_cli_rejects_flags_and_graph_override(self):
+        rt = graph.runtime(self.root)
+        generation = "e" * 32
+        graph_file = rt / "generations" / generation / "graphify-out" / "graph.json"
+        graph_file.parent.mkdir(parents=True)
+        graph_file.write_text('{"nodes":[{"id":"n"}],"edges":[]}')
+        pointer = {
+            "generation": generation,
+            "fingerprint": "fixture",
+            "schema": graph.WRAPPER_SCHEMA,
+            "graphify_version": graph.VERSION,
+            "stale": False,
+            "metadata": graph._metadata(self.root),
+            "graph_sha256": hashlib.sha256(graph_file.read_bytes()).hexdigest(),
+        }
+        (rt / "current.json").write_text(json.dumps(pointer))
+        tool = rt / "venv" / "Scripts" / "graphify.exe"
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.touch()
+        launched = []
+        real_run = subprocess.run
+
+        def fake_run(command, **kwargs):
+            if command[0] == str(tool):
+                launched.append(command)
+                return subprocess.CompletedProcess(command, 0)
+            return real_run(command, **kwargs)
+
+        with (
+            patch.object(graph, "repo_root", return_value=self.root),
+            patch.object(graph, "verify_version", return_value=True),
+            patch.object(graph, "executable", return_value=tool),
+            patch.object(graph.subprocess, "run", side_effect=fake_run),
+        ):
+            self.assertEqual(graph.main(["query", "find", "node"]), 0)
+            self.assertEqual(graph.main(["path", "from", "to", "--undirected"]), 0)
+            self.assertEqual(graph.main(["explain", "symbol", "--all"]), 0)
+            for args in (
+                ["query", "find", "--dfs"],
+                ["query", "find", "--graph", "other.json"],
+                ["query", "find", "--graph=other.json"],
+                ["path", "from", "to", "--graph", "other.json"],
+                ["path", "from", "to", "--output", "file"],
+                ["path", "from", "to", "--directed", "--undirected"],
+                ["explain", "symbol", "--graph=other.json"],
+                ["explain", "symbol", "--all=true"],
+            ):
+                with self.subTest(args=args):
+                    self.assertEqual(graph.main(args), 2)
+            self.assertEqual(graph.main(["path", "from", "to", "extra"]), 2)
+            self.assertEqual(graph.main(["explain", "symbol", "extra"]), 2)
+        self.assertEqual(len(launched), 3)
+        self.assertTrue(all(command[-2] == "--graph" for command in launched))
 
     def test_metadata_invalidation_causes_scan_before_source_read(self):
         with patch.object(graph, "scan") as scanner:

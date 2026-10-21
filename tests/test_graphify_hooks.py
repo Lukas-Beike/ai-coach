@@ -151,6 +151,7 @@ class GraphifyHookTests(unittest.TestCase):
             env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
             powershell = shutil.which("powershell")
             self.assertIsNotNone(powershell)
+            assert powershell is not None
 
             missing_worker = subprocess.run(
                 [
