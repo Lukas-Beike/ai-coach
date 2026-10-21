@@ -13,7 +13,7 @@ import math
 import re
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
-from itertools import pairwise
+from itertools import islice, pairwise
 from typing import Any
 from urllib.parse import quote
 
@@ -226,9 +226,10 @@ class ActivityDetailRefreshService:
             row for row in newest if str(row.get("start_date_local") or "") >= floor
         ]
         fetched = failed = 0
-        for activity_id, fingerprint in self._pending_prefetch(candidates):
-            if fetched + failed >= limit:
-                break
+        # Each pending activity is one attempt, so the limit caps the iteration.
+        for activity_id, fingerprint in islice(
+            self._pending_prefetch(candidates), limit
+        ):
             try:
                 with guard():
                     self.refresh(activity_id)
