@@ -120,6 +120,7 @@ def md_code(value: object) -> str:
 
 
 def export_html(graph: dict, output: Path) -> None:
+    output = export_path(output)
     nodes, edges = nodes_edges(graph)
     payload = (
         json.dumps({"nodes": nodes, "edges": edges}, ensure_ascii=True)
@@ -135,30 +136,44 @@ body{{font:15px system-ui,sans-serif;margin:2rem;max-width:1100px;color:#18212b}
 </style><h1>Local code graph</h1><p>Offline snapshot. Search symbols and inspect their relationships and source references.</p>
 <label>Search <input id="q" type="search" autocomplete="off"></label><p id="count"></p><ul id="results"></ul><section id="edges"><h2>Relationships</h2><ul id="relations"></ul></section>
 <script>const graph={payload};const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));const byId=new Map(graph.nodes.map(n=>[String(n.id??n.name??''),n]));const q=document.querySelector('#q');function draw(){{const term=q.value.toLowerCase();const ns=graph.nodes.filter(n=>JSON.stringify(n).toLowerCase().includes(term));document.querySelector('#count').textContent=ns.length+' symbols';document.querySelector('#results').innerHTML=ns.slice(0,300).map(n=>'<li><b>'+esc(n.name??n.label??n.id)+'</b> <span class="tag">'+esc(n.type??n.kind??'symbol')+'</span><br><code>'+esc(n.source_file??n.file_path??n.file??'')+':'+esc(n.source_location??n.location??n.line??'')+'</code></li>').join('');const ids=new Set(ns.map(n=>String(n.id??n.name??'')));const es=graph.edges.filter(e=>ids.has(String(e.source??e.from??''))||ids.has(String(e.target??e.to??'')));document.querySelector('#relations').innerHTML=es.slice(0,500).map(e=>{{const a=byId.get(String(e.source??e.from??'')),b=byId.get(String(e.target??e.to??''));return '<li class="edge">'+esc(a?.name??e.source??e.from)+'  ->  '+esc(b?.name??e.target??e.to)+' <span class="tag">'+esc(e.type??e.label??'relates')+'</span> <span class="tag">confidence '+esc(e.confidence??'unknown')+'</span></li>'}}).join('')}}q.addEventListener('input',draw);draw();</script></html>"""
-    output.write_text(page, encoding="utf-8")
+    with output.open("w", encoding="utf-8") as stream:
+        stream.write(page)
 
 
-def export_wiki(graph: dict, output: Path) -> None:
-    nodes, edges = nodes_edges(graph)
-    by_id = {node_id(n): n for n in nodes}
+def wiki_groups(nodes: list[dict]) -> dict[str, list[dict]]:
     groups: dict[str, list[dict]] = {}
     for node in nodes:
         group = str(node.get("community", node.get("cluster", "")))
         if not group:
             group = source_ref(node).split(":", 1)[0] or "unmapped"
         groups.setdefault(group, []).append(node)
-    if output.exists() and any(output.iterdir()):
-        raise ValueError("wiki output directory must be empty")
-    output.mkdir(parents=True, exist_ok=True)
-    related_by_id: dict[str, list[tuple[str, dict, dict]]] = {}
+    return groups
+
+
+def wiki_related(
+    nodes: list[dict], edges: list[dict]
+) -> dict[str, list[tuple[str, dict, dict]]]:
+    by_id = {node_id(node): node for node in nodes}
+    related: dict[str, list[tuple[str, dict, dict]]] = {}
     for edge in edges:
         src, dst = edge_ends(edge)
         if src in by_id and dst in by_id:
-            related_by_id.setdefault(src, []).append(("depends on", by_id[dst], edge))
+            related.setdefault(src, []).append(("depends on", by_id[dst], edge))
             if dst != src:
-                related_by_id.setdefault(dst, []).append(
+                related.setdefault(dst, []).append(
                     ("called by / referenced by", by_id[src], edge)
                 )
+    return related
+
+
+def export_wiki(graph: dict, output: Path) -> None:
+    output = export_path(output)
+    nodes, edges = nodes_edges(graph)
+    groups = wiki_groups(nodes)
+    if output.exists() and any(output.iterdir()):
+        raise ValueError("wiki output directory must be empty")
+    output.mkdir(parents=True, exist_ok=True)
+    related_by_id = wiki_related(nodes, edges)
     slugs = {
         group: f"{safe_slug(group)[:64]}-{hashlib.sha256(group.encode('utf-8')).hexdigest()[:12]}"
         for group in groups
@@ -175,7 +190,8 @@ def export_wiki(graph: dict, output: Path) -> None:
         f"- [{md_text(group)}](groups/{quote(slugs[group], safe='._-')}.md)"
         for group in sorted(groups)
     ]
-    output.joinpath("index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with (output / "index.md").open("w", encoding="utf-8") as stream:
+        stream.write("\n".join(lines) + "\n")
     directory = output / "groups"
     directory.mkdir(exist_ok=True)
     for group, members in sorted(groups.items()):
@@ -196,7 +212,8 @@ def export_wiki(graph: dict, output: Path) -> None:
             if not related:
                 body.append("- No linked symbols in this snapshot.")
             body.append("")
-        (directory / f"{slugs[group]}.md").write_text("\n".join(body), encoding="utf-8")
+        with (directory / f"{slugs[group]}.md").open("w", encoding="utf-8") as stream:
+            stream.write("\n".join(body))
 
 
 def search(graph: dict, query: str, limit: int = 30) -> list[dict]:
@@ -234,6 +251,38 @@ def by_node(nodes: list[dict], ident: str) -> dict | None:
     return next((n for n in nodes if node_id(n) == ident), None)
 
 
+def path_adjacency(
+    nodes: list[dict], edges: list[dict], directed: bool
+) -> dict[str, set[str]]:
+    known = {node_id(n) for n in nodes}
+    adjacency: dict[str, set[str]] = {ident: set() for ident in known}
+    for edge in edges:
+        source, target = edge_ends(edge)
+        if source in known and target in known:
+            adjacency[source].add(target)
+            if not directed:
+                adjacency[target].add(source)
+    return adjacency
+
+
+def bounded_bfs(
+    adjacency: dict[str, set[str]], start: str, end: str, limit: int
+) -> list[str] | None:
+    queue = deque([(start, [start])])
+    visited = {start}
+    while queue:
+        current, path = queue.popleft()
+        if current == end:
+            return path
+        if len(path) >= limit + 1:
+            continue
+        for neighbor in sorted(adjacency[current]):
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, path + [neighbor]))
+    return None
+
+
 def find_path(
     graph: dict, start: str, end: str, limit: int = 8, directed: bool = True
 ) -> list[str] | None:
@@ -243,26 +292,7 @@ def find_path(
     known = {node_id(n) for n in nodes}
     if start not in known or end not in known:
         raise ValueError("start or end node not found")
-    adjacency: dict[str, set[str]] = {i: set() for i in known}
-    for edge in edges:
-        a, b = edge_ends(edge)
-        if a in known and b in known:
-            adjacency[a].add(b)
-            if not directed:
-                adjacency[b].add(a)
-    queue = deque([(start, [start])])
-    visited = {start}
-    while queue:
-        current, path = queue.popleft()
-        if current == end:
-            return path
-        if len(path) >= limit + 1:
-            continue
-        for nxt in sorted(adjacency[current]):
-            if nxt not in visited:
-                visited.add(nxt)
-                queue.append((nxt, path + [nxt]))
-    return None
+    return bounded_bfs(path_adjacency(nodes, edges, directed), start, end, limit)
 
 
 def run_mcp(graph: dict) -> int:
@@ -332,9 +362,8 @@ def main(argv: list[str] | None = None) -> int:
         output = export_path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
         if args.format == "json":
-            output.write_text(
-                json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
+            with output.open("w", encoding="utf-8") as stream:
+                stream.write(json.dumps(graph, ensure_ascii=False, indent=2) + "\n")
         elif args.format == "html":
             export_html(graph, output)
         else:

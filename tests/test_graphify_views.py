@@ -49,6 +49,14 @@ class GraphifyViewsTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def export_html(self, graph, output):
+        with patch("pathlib.Path.cwd", return_value=self.runtime):
+            views.export_html(graph, output)
+
+    def export_wiki(self, graph, output):
+        with patch("pathlib.Path.cwd", return_value=self.runtime):
+            views.export_wiki(graph, output)
+
     def test_json_export_preserves_graph(self):
         dst = self.runtime / "exports" / "out.json"
         with (
@@ -146,9 +154,23 @@ class GraphifyViewsTests(unittest.TestCase):
             )
         self.assertEqual("original", target.read_text(encoding="utf-8"))
 
+    def test_direct_html_and_wiki_writers_enforce_exports_boundary(self):
+        for export, output in (
+            (self.export_html, self.root / "outside.html"),
+            (self.export_wiki, self.root / "outside-wiki"),
+        ):
+            with (
+                self.subTest(output=output),
+                self.assertRaisesRegex(
+                    ValueError, "inside the current runtime exports"
+                ),
+            ):
+                export(self.graph, output)
+            self.assertFalse(output.exists())
+
     def test_html_is_offline_searchable_and_escapes_script_payload(self):
-        dst = self.root / "index.html"
-        views.export_html(self.graph, dst)
+        dst = self.runtime / "exports" / "index.html"
+        self.export_html(self.graph, dst)
         content = dst.read_text(encoding="utf-8")
         self.assertIn("Relationships", content)
         self.assertIn("confidence", content)
@@ -166,8 +188,8 @@ class GraphifyViewsTests(unittest.TestCase):
         node = shutil.which("node")
         if node is None:
             self.skipTest("Node.js is not installed")
-        dst = self.root / "index.html"
-        views.export_html(self.graph, dst)
+        dst = self.runtime / "exports" / "index.html"
+        self.export_html(self.graph, dst)
         content = dst.read_text(encoding="utf-8")
 
         class ScriptReader(HTMLParser):
@@ -199,8 +221,8 @@ class GraphifyViewsTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
 
     def test_wiki_is_deterministic_and_slug_cannot_traverse(self):
-        out = self.root / "wiki"
-        views.export_wiki(self.graph, out)
+        out = self.runtime / "exports" / "wiki"
+        self.export_wiki(self.graph, out)
         self.assertTrue((out / "index.md").is_file())
         group_files = list((out / "groups").glob("*.md"))
         self.assertEqual(3, len(group_files))
@@ -226,10 +248,10 @@ class GraphifyViewsTests(unittest.TestCase):
             for index in range(node_count)
         )
         graph = {"nodes": nodes, "links": edges}
-        out = self.root / "large-wiki"
+        out = self.runtime / "exports" / "large-wiki"
         original_edge_ends = views.edge_ends
         with patch.object(views, "edge_ends", wraps=original_edge_ends) as endpoints:
-            views.export_wiki(graph, out)
+            self.export_wiki(graph, out)
         self.assertEqual(len(edges), endpoints.call_count)
         page = next((out / "groups").glob("*.md")).read_text(encoding="utf-8")
         self.assertIn("called by / referenced by", page)
@@ -244,15 +266,15 @@ class GraphifyViewsTests(unittest.TestCase):
                 {"id": "4", "name": "Four", "community": "x" * 80 + "second"},
             ]
         }
-        out = self.root / "collision-wiki"
-        views.export_wiki(graph, out)
+        out = self.runtime / "exports" / "collision-wiki"
+        self.export_wiki(graph, out)
         files = list((out / "groups").glob("*.md"))
         self.assertEqual(4, len(files))
         contents = "\n".join(path.read_text(encoding="utf-8") for path in files)
         for name in ("One", "Two", "Three", "Four"):
             self.assertIn(name, contents)
         with self.assertRaisesRegex(ValueError, "must be empty"):
-            views.export_wiki({"nodes": []}, out)
+            self.export_wiki({"nodes": []}, out)
 
     def test_inline_code_uses_safe_delimiter(self):
         raw = "prefix `ticks`\nsecond line"

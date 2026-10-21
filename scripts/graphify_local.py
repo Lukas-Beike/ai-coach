@@ -81,6 +81,9 @@ DENIED = {
     ".codex",
     ".pytest_cache",
 }
+SOURCE_CHANGED = "source changed during scan; retry update"
+GRAPH_FILE = Path("graphify-out") / "graph.json"
+CURRENT_FILE = "current.json"
 
 
 class Unavailable(RuntimeError):
@@ -153,14 +156,13 @@ def local_env(root: Path, graph_out: Path | None = None) -> dict[str, str]:
     return env
 
 
-def safe_path(root: Path, rel: str) -> Path | None:
-    p = Path(rel)
+def _denied_path(p: Path, rel: str) -> bool:
     parts = tuple(part.lower() for part in p.parts)
     # `backend/backup` and `backend/runtime` are first-class source domains.
     # Their names are denied everywhere else; nested sensitive data remains
     # excluded inside those domains too.
     domain = parts[:2] if len(parts) >= 2 and parts[0] == "backend" else ()
-    if p.is_absolute() or any(
+    return p.is_absolute() or any(
         (
             part in DENIED
             and not (
@@ -170,39 +172,52 @@ def safe_path(root: Path, rel: str) -> Path | None:
         or part == ".sonar-secrets-cli-workdir"
         or part.startswith(".env")
         for index, part in enumerate(parts)
-    ):
-        return None
-    if not (p.parts and (p.parts[0] in SOURCE_DIRS or rel in ROOT_FILES)) or (
-        p.suffix.lower() not in EXTENSIONS and rel not in ROOT_FILES
-    ):
+    )
+
+
+def _approved_source_path(p: Path, rel: str) -> bool:
+    if not p.parts or (p.parts[0] not in SOURCE_DIRS and rel not in ROOT_FILES):
+        return False
+    return p.suffix.lower() in EXTENSIONS or rel in ROOT_FILES
+
+
+def _has_reparse_component(root: Path, parts: tuple[str, ...]) -> bool:
+    cursor = root
+    for part in parts:
+        cursor = cursor / part
+        try:
+            attributes = getattr(os.lstat(cursor), "st_file_attributes", 0)
+            if attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+                return True
+        except AttributeError, OSError:
+            if cursor.is_symlink():
+                return True
+    return False
+
+
+def _contained_file(root: Path, path: Path) -> bool:
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root)
+        return resolved.is_file()
+    except OSError, ValueError:
+        return False
+
+
+def safe_path(root: Path, rel: str) -> Path | None:
+    p = Path(rel)
+    if _denied_path(p, rel) or not _approved_source_path(p, rel):
         return None
     full = root / p
     try:
-        # Reject symlinks in every path component, not only the leaf.
         cursor = root
         for part in p.parts:
             cursor = cursor / part
             if cursor.is_symlink():
                 return None
-        # Windows junctions and other reparse points can escape without being
-        # reported as ordinary symlinks. Reject reparse points on every parent.
-        cursor = root
-        for part in p.parts:
-            cursor = cursor / part
-            try:
-                if getattr(os.lstat(cursor), "st_file_attributes", 0) & getattr(
-                    stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
-                ):
-                    return None
-            except AttributeError:
-                if cursor.is_symlink():
-                    return None
-            except OSError:
-                if cursor.is_symlink():
-                    return None
-        resolved = full.resolve(strict=True)
-        resolved.relative_to(root)
-        return full if resolved.is_file() else None
+        if _has_reparse_component(root, p.parts) or not _contained_file(root, full):
+            return None
+        return full
     except OSError:
         return None
     except ValueError:
@@ -320,7 +335,7 @@ def state(
         before_sig = _signature(path)
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         if before_sig != _signature(path) or before_sig != before[rel]:
-            raise Unavailable("source changed during scan; retry update")
+            raise Unavailable(SOURCE_CHANGED)
         rows.append((rel, digest))
         hashes[rel] = digest
     branch = (
@@ -432,7 +447,7 @@ def _metadata_current(root: Path, pointer: dict) -> bool:
         ):
             return False
         generation = generation_dir(root, pointer)
-        graph = generation / "graphify-out" / "graph.json"
+        graph = generation / GRAPH_FILE
         return (
             not pointer.get("stale")
             and graph.is_file()
@@ -486,10 +501,185 @@ def verify_version(root: Path) -> bool:
         return False
 
 
+def _source_metadata(root: Path, paths: list[tuple[str, Path]], metadata: dict) -> None:
+    signatures = [(rel, _signature(path)) for rel, path in paths]
+    if not _metadata_matches(root, metadata, signatures):
+        raise Unavailable(SOURCE_CHANGED)
+
+
+def _refresh_current(base: Path, current: dict, metadata: dict, digest: str) -> None:
+    current.update(
+        metadata=metadata, graph_sha256=digest, stale=False, updated=int(time.time())
+    )
+    pending = base / (CURRENT_FILE + ".tmp")
+    pending.write_text(json.dumps(current), encoding="utf-8")
+    os.replace(pending, base / CURRENT_FILE)
+
+
+def _matching_graph(
+    root: Path,
+    base: Path,
+    current: dict,
+    fingerprint: str,
+    metadata: dict,
+    paths: list[tuple[str, Path]],
+) -> bool:
+    try:
+        graph = generation_dir(root, current) / GRAPH_FILE
+    except Unavailable:
+        return False
+    digest = hashlib.sha256(graph.read_bytes()).hexdigest() if graph.is_file() else None
+    matches = (
+        current.get("fingerprint") == fingerprint
+        and current.get("schema") == WRAPPER_SCHEMA
+        and current.get("graphify_version") == VERSION
+        and digest is not None
+        and digest == current.get("graph_sha256")
+        and verify_version(root)
+    )
+    if not matches:
+        return False
+    assert digest is not None
+    _source_metadata(root, paths, metadata)
+    _refresh_current(base, current, metadata, digest)
+    return True
+
+
+def _copy_inputs(
+    base: Path, paths: list[tuple[str, Path]], hashes: dict[str, str]
+) -> Path:
+    inputs = base / "inputs" / "corpus"
+    inputs.mkdir(parents=True, exist_ok=True)
+    wanted = set()
+    for rel, source in paths:
+        wanted.add(rel)
+        dest = inputs / rel
+        if (
+            dest.is_file()
+            and hashlib.sha256(dest.read_bytes()).hexdigest() == hashes[rel]
+        ):
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        data = source.read_bytes()
+        if hashlib.sha256(data).hexdigest() != hashes[rel]:
+            raise Unavailable("source changed after scan; graph update refused")
+        dest.write_bytes(data)
+    for file in inputs.rglob("*"):
+        if file.is_file() and file.relative_to(inputs).as_posix() not in wanted:
+            file.unlink()
+    return inputs
+
+
+def _run_graphify(root: Path, base: Path, inputs: Path, deadline: float) -> Path:
+    out = base / "cache"
+    command = [str(executable(root)), "update", str(inputs), "--no-cluster"]
+    result = subprocess.run(
+        command,
+        cwd=base,
+        env=local_env(root, out),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=deadline - time.monotonic(),
+        check=False,
+    )
+    graph = out / "graph.json"
+    graph_data = read_json(graph)
+    nodes, edges = (
+        graph_data.get("nodes"),
+        graph_data.get("edges", graph_data.get("links")),
+    )
+    if (
+        result.returncode
+        or not isinstance(nodes, list)
+        or not nodes
+        or not isinstance(edges, list)
+    ):
+        raise Unavailable("Graphify update failed or returned an invalid graph")
+    if any(
+        not isinstance(edge, dict)
+        or not (
+            ("source" in edge and "target" in edge) or ("src" in edge and "dst" in edge)
+        )
+        for edge in edges
+    ):
+        raise Unavailable("Graphify graph edge schema is invalid")
+    return graph
+
+
+def _publish_graph(
+    base: Path,
+    temp: Path,
+    current: dict,
+    fingerprint: str,
+    metadata: dict,
+    source: Path,
+) -> None:
+    (temp / GRAPH_FILE.parent).mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, temp / GRAPH_FILE)
+    gen_id = temp.name.removeprefix(".building-")
+    final = base / "generations" / gen_id
+    temp.rename(final)
+    pointer = {
+        "generation": gen_id,
+        "fingerprint": fingerprint,
+        "schema": WRAPPER_SCHEMA,
+        "graphify_version": VERSION,
+        "updated": int(time.time()),
+        "stale": False,
+        "metadata": metadata,
+        "graph_sha256": hashlib.sha256((final / GRAPH_FILE).read_bytes()).hexdigest(),
+    }
+    pending = base / (CURRENT_FILE + ".tmp")
+    pending.write_text(json.dumps(pointer), encoding="utf-8")
+    os.replace(pending, base / CURRENT_FILE)
+    _prune_generations(base, gen_id, current.get("generation"))
+
+
+def _prune_generations(base: Path, current_id: str, previous_id: str | None) -> None:
+    generations = sorted(
+        (
+            p
+            for p in (base / "generations").iterdir()
+            if p.is_dir() and not p.name.startswith(".building-")
+        ),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    keep = {current_id, previous_id}
+    for old in generations:
+        if old.name not in keep:
+            shutil.rmtree(old, ignore_errors=True)
+
+
+def _update_locked(root: Path, base: Path, deadline: float) -> None:
+    current = read_json(base / CURRENT_FILE)
+    if _metadata_current(root, current) and verify_version(root):
+        print("Graphify local: current")
+        return
+    metadata = _metadata(root)
+    paths, fingerprint, hashes = state(root, deadline)
+    _source_metadata(root, paths, metadata)
+    current = read_json(base / CURRENT_FILE)
+    if _matching_graph(root, base, current, fingerprint, metadata, paths):
+        print("Graphify local: current")
+        return
+    gen_id = uuid.uuid4().hex
+    temp = base / "generations" / (".building-" + gen_id)
+    temp.mkdir(parents=True, exist_ok=True)
+    try:
+        graph = _run_graphify(root, base, _copy_inputs(base, paths, hashes), deadline)
+        _source_metadata(root, paths, metadata)
+        _publish_graph(base, temp, current, fingerprint, metadata, graph)
+    except OSError, subprocess.SubprocessError, Unavailable:
+        if temp.exists():
+            shutil.rmtree(temp, ignore_errors=True)
+        raise
+    print("Graphify local: current (updated)")
+
+
 def update(root: Path) -> int:
     deadline = time.monotonic() + TIMEOUT
     base = runtime(root)
-    temp: Path | None = None
     # Avoid a long source scan when an explicit per-worktree setup is needed.
     if not verify_version(root):
         print(
@@ -498,163 +688,9 @@ def update(root: Path) -> int:
         return 2
     try:
         with process_lock(base / "update.lock", deadline):
-            current = read_json(base / "current.json")
-            if _metadata_current(root, current) and verify_version(root):
-                print("Graphify local: current")
-                return 0
-            metadata = _metadata(root)
-            paths, fingerprint, hashes = state(root, deadline)
-            if not _metadata_matches(
-                root, metadata, [(rel, _signature(path)) for rel, path in paths]
-            ):
-                raise Unavailable("source changed during scan; retry update")
-            current = read_json(base / "current.json")
-            try:
-                active = generation_dir(root, current)
-            except Unavailable:
-                active = base / "missing"
-            graph = active / "graphify-out" / "graph.json"
-            graph_digest = (
-                hashlib.sha256(graph.read_bytes()).hexdigest()
-                if graph.is_file()
-                else None
-            )
-            if (
-                current.get("fingerprint") == fingerprint
-                and current.get("schema") == WRAPPER_SCHEMA
-                and current.get("graphify_version") == VERSION
-                and graph_digest is not None
-                and graph_digest == current.get("graph_sha256")
-                and verify_version(root)
-            ):
-                # The fingerprint covers source bytes and Git identity. File
-                # stats can still change while those inputs remain identical,
-                # so publish the metadata from this successful scan as well.
-                if not _metadata_matches(
-                    root, metadata, [(rel, _signature(path)) for rel, path in paths]
-                ):
-                    raise Unavailable("source changed during scan; retry update")
-                current.update(
-                    metadata=metadata,
-                    graph_sha256=graph_digest,
-                    stale=False,
-                    updated=int(time.time()),
-                )
-                pending = base / "current.json.tmp"
-                pending.write_text(json.dumps(current), encoding="utf-8")
-                os.replace(pending, base / "current.json")
-                print("Graphify local: current")
-                return 0
-            gen_id = uuid.uuid4().hex
-            temp = base / "generations" / (".building-" + gen_id)
-            temp.mkdir(parents=True, exist_ok=True)
-            # Keep one stable corpus and Graphify output so its incremental cache
-            # survives updates; the graph generation itself remains atomic.
-            inputs = base / "inputs" / "corpus"
-            inputs.mkdir(parents=True, exist_ok=True)
-            wanted = set()
-            for rel, source in paths:
-                wanted.add(rel)
-                dest = inputs / rel
-                if (
-                    dest.is_file()
-                    and hashlib.sha256(dest.read_bytes()).hexdigest() == hashes[rel]
-                ):
-                    continue
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                data = source.read_bytes()
-                if hashlib.sha256(data).hexdigest() != hashes[rel]:
-                    raise Unavailable("source changed after scan; graph update refused")
-                dest.write_bytes(data)
-            for file in inputs.rglob("*"):
-                if file.is_file() and file.relative_to(inputs).as_posix() not in wanted:
-                    file.unlink()
-            out = base / "cache"
-            env = local_env(root, out)
-            remaining = deadline - time.monotonic()
-            command = [
-                str(executable(root)),
-                "update",
-                str(inputs),
-                "--no-cluster",
-            ]
-            result = subprocess.run(
-                command,
-                cwd=base,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                timeout=remaining,
-                check=False,
-            )
-            graph_data = read_json(out / "graph.json")
-            nodes, edges = (
-                graph_data.get("nodes"),
-                graph_data.get("edges", graph_data.get("links")),
-            )
-            if (
-                result.returncode
-                or not isinstance(nodes, list)
-                or not nodes
-                or not isinstance(edges, list)
-            ):
-                raise Unavailable("Graphify update failed or returned an invalid graph")
-            for edge in edges:
-                if not isinstance(edge, dict) or not (
-                    ("source" in edge and "target" in edge)
-                    or ("src" in edge and "dst" in edge)
-                ):
-                    raise Unavailable("Graphify graph edge schema is invalid")
-            # Preserve Graphify's raw relationship endpoints; this wrapper
-            # does not assert that the upstream graph is directed.
-            # Verify metadata only after the successful pre-read scan. Hashing
-            # the full source corpus again needlessly doubles the update cost.
-            if not _metadata_matches(
-                root, metadata, [(rel, _signature(path)) for rel, path in paths]
-            ):
-                raise Unavailable(
-                    "source changed during extraction; prior generation retained"
-                )
-            (temp / "graphify-out").mkdir(parents=True, exist_ok=True)
-            shutil.copy2(out / "graph.json", temp / "graphify-out" / "graph.json")
-            final = base / "generations" / gen_id
-            temp.rename(final)
-            temp = None
-            pointer = {
-                "generation": gen_id,
-                "fingerprint": fingerprint,
-                "schema": WRAPPER_SCHEMA,
-                "graphify_version": VERSION,
-                "updated": int(time.time()),
-                "stale": False,
-                "metadata": metadata,
-                "graph_sha256": hashlib.sha256(
-                    (final / "graphify-out" / "graph.json").read_bytes()
-                ).hexdigest(),
-            }
-            pending = base / "current.json.tmp"
-            pending.write_text(json.dumps(pointer), encoding="utf-8")
-            os.replace(pending, base / "current.json")
-            # Retain only current and immediately previous generation.
-            generations = sorted(
-                (
-                    p
-                    for p in (base / "generations").iterdir()
-                    if p.is_dir() and not p.name.startswith(".building-")
-                ),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-            keep = {gen_id, current.get("generation")}
-            for old in generations:
-                if old.name not in keep:
-                    shutil.rmtree(old, ignore_errors=True)
-            # Stable cache is bounded to this single worktree corpus.
-            print("Graphify local: current (updated)")
+            _update_locked(root, base, deadline)
             return 0
     except (OSError, subprocess.SubprocessError, Unavailable) as exc:
-        if temp is not None:
-            shutil.rmtree(temp, ignore_errors=True)
         # Do not mutate current.json outside the updater lock. Freshness is
         # derived from the source fingerprint and graph pointer at read time.
         reason = str(exc) if isinstance(exc, Unavailable) else "Graphify process failed"
@@ -703,6 +739,100 @@ def helper(
     ).returncode
 
 
+def _setup(root: Path) -> int:
+    venv = runtime(root) / "venv"
+    venv.mkdir(parents=True, exist_ok=True)
+    py = python_executable(root)
+    if not py.is_file():
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(venv)],
+            check=True,
+            timeout=120,
+            env=local_env(root),
+        )
+    if not verify_version(root):
+        pip = venv / ("Scripts/pip.exe" if os.name == "nt" else "bin/pip")
+        subprocess.run(
+            [str(pip), "install", f"graphifyy[mcp]=={VERSION}"],
+            check=True,
+            timeout=600,
+            env=local_env(root),
+        )
+    if not verify_version(root):
+        raise Unavailable("installed Graphify version mismatch")
+    print(f"Graphify {VERSION} installed locally; run update")
+    return 0
+
+
+def _status(root: Path) -> int:
+    try:
+        current = read_json(runtime(root) / CURRENT_FILE)
+        generation_dir(root, current)
+        fresh = verify_version(root) and _metadata_current(root, current)
+    except Unavailable, OSError, subprocess.SubprocessError:
+        fresh = False
+    print("Graphify local: " + ("current" if fresh else "stale/unavailable"))
+    return 0 if fresh else 2
+
+
+def _graph_command(
+    root: Path, args: argparse.Namespace, generation: Path, graph: Path
+) -> int:
+    if args.command in {"mcp", "export"}:
+        return _export_or_mcp(root, args, graph)
+    allowed = {
+        "query": set(),
+        "path": {"--directed", "--undirected"},
+        "explain": {"--all"},
+    }[args.command]
+    terms = args.terms
+    if any(term.startswith("-") and term not in allowed for term in terms):
+        raise Unavailable("unsupported Graphify option")
+    positional = [term for term in terms if term not in allowed]
+    if args.command == "path" and "--directed" in terms and "--undirected" in terms:
+        raise Unavailable("choose either --directed or --undirected")
+    if args.command == "path" and len(positional) != 2:
+        raise Unavailable("path requires a source and target")
+    if args.command == "explain" and len(positional) != 1:
+        raise Unavailable("explain requires one symbol")
+    if not terms:
+        raise Unavailable("Graphify terms are required")
+    command = [str(executable(root)), args.command, *terms, "--graph", str(graph)]
+    return subprocess.run(
+        command,
+        cwd=generation,
+        env=local_env(root, graph.parent),
+        stdin=subprocess.DEVNULL,
+        timeout=30,
+        check=False,
+    ).returncode
+
+
+def _export_or_mcp(root: Path, args: argparse.Namespace, graph: Path) -> int:
+    if args.command == "mcp":
+        return helper(root, "mcp", graph)
+    output = Path(args.output).resolve()
+    export_root = (runtime(root) / "exports").resolve()
+    output.relative_to(export_root)
+    if output == export_root:
+        raise Unavailable("export target must be a file below the export directory")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    return helper(root, "export", graph, output, args.format)
+
+
+def _dispatch(root: Path, args: argparse.Namespace) -> int:
+    if args.command == "setup":
+        return _setup(root)
+    if args.command == "update":
+        return update(root)
+    if args.command == "status":
+        return _status(root)
+    if not verify_version(root):
+        raise Unavailable("pinned Graphify unavailable; run setup")
+    generation, graph = active_graph(root)
+    return _graph_command(root, args, generation, graph)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -720,89 +850,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         root = repo_root(Path(__file__).parent)
-        if args.command == "setup":
-            venv = runtime(root) / "venv"
-            venv.mkdir(parents=True, exist_ok=True)
-            py = python_executable(root)
-            if not py.is_file():
-                subprocess.run(
-                    [sys.executable, "-m", "venv", str(venv)],
-                    check=True,
-                    timeout=120,
-                    env=local_env(root),
-                )
-            if not verify_version(root):
-                pip = venv / ("Scripts/pip.exe" if os.name == "nt" else "bin/pip")
-                subprocess.run(
-                    [str(pip), "install", f"graphifyy[mcp]=={VERSION}"],
-                    check=True,
-                    timeout=600,
-                    env=local_env(root),
-                )
-            if not verify_version(root):
-                raise Unavailable("installed Graphify version mismatch")
-            print(f"Graphify {VERSION} installed locally; run update")
-            return 0
-        if args.command == "update":
-            return update(root)
-        if args.command == "status":
-            try:
-                current = read_json(runtime(root) / "current.json")
-                gen = generation_dir(root, current)
-                fresh = verify_version(root) and _metadata_current(root, current)
-            except Unavailable:
-                fresh = False
-            except OSError:
-                fresh = False
-            except subprocess.SubprocessError:
-                fresh = False
-            print("Graphify local: " + ("current" if fresh else "stale/unavailable"))
-            return 0 if fresh else 2
-        if not verify_version(root):
-            raise Unavailable("pinned Graphify unavailable; run setup")
-        gen, graph = active_graph(root)
-        if args.command == "mcp":
-            return helper(root, "mcp", graph)
-        if args.command == "export":
-            output = Path(args.output).resolve()
-            export_root = (runtime(root) / "exports").resolve()
-            output.relative_to(export_root)
-            if output == export_root:
-                raise Unavailable(
-                    "export target must be a file below the export directory"
-                )
-            output.parent.mkdir(parents=True, exist_ok=True)
-            return helper(root, "export", graph, output, args.format)
-        allowed = {
-            "query": set(),
-            "path": {"--directed", "--undirected"},
-            "explain": {"--all"},
-        }[args.command]
-        terms = []
-        command = [str(executable(root)), args.command]
-        for term in args.terms:
-            if term.startswith("-") and term not in allowed:
-                raise Unavailable("unsupported Graphify option")
-            terms.append(term)
-        positional = [term for term in terms if term not in allowed]
-        if args.command == "path" and "--directed" in terms and "--undirected" in terms:
-            raise Unavailable("choose either --directed or --undirected")
-        if args.command == "path" and len(positional) != 2:
-            raise Unavailable("path requires a source and target")
-        if args.command == "explain" and len(positional) != 1:
-            raise Unavailable("explain requires one symbol")
-        if not terms:
-            raise Unavailable("Graphify terms are required")
-        command.extend(terms)
-        command += ["--graph", str(graph)]
-        return subprocess.run(
-            command,
-            cwd=gen,
-            env=local_env(root, graph.parent),
-            stdin=subprocess.DEVNULL,
-            timeout=30,
-            check=False,
-        ).returncode
+        return _dispatch(root, args)
     except (Unavailable, OSError, subprocess.SubprocessError, ValueError) as exc:
         reason = str(exc) if isinstance(exc, Unavailable) else "local operation failed"
         print(f"Graphify local unavailable: {reason}", file=sys.stderr)
