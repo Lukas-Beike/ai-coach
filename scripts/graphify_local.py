@@ -82,7 +82,9 @@ DENIED = {
     ".pytest_cache",
 }
 SOURCE_CHANGED = "source changed during scan; retry update"
-GRAPH_FILE = Path("graphify-out") / "graph.json"
+GRAPH_FILENAME = "graph.json"
+BUILDING_PREFIX = ".building-"
+GRAPH_FILE = Path("graphify-out") / GRAPH_FILENAME
 CURRENT_FILE = "current.json"
 
 
@@ -156,7 +158,7 @@ def local_env(root: Path, graph_out: Path | None = None) -> dict[str, str]:
     return env
 
 
-def _denied_path(p: Path, rel: str) -> bool:
+def _denied_path(p: Path) -> bool:
     parts = tuple(part.lower() for part in p.parts)
     # `backend/backup` and `backend/runtime` are first-class source domains.
     # Their names are denied everywhere else; nested sensitive data remains
@@ -206,7 +208,7 @@ def _contained_file(root: Path, path: Path) -> bool:
 
 def safe_path(root: Path, rel: str) -> Path | None:
     p = Path(rel)
-    if _denied_path(p, rel) or not _approved_source_path(p, rel):
+    if _denied_path(p) or not _approved_source_path(p, rel):
         return None
     full = root / p
     try:
@@ -582,7 +584,7 @@ def _run_graphify(root: Path, base: Path, inputs: Path, deadline: float) -> Path
         timeout=deadline - time.monotonic(),
         check=False,
     )
-    graph = out / "graph.json"
+    graph = out / GRAPH_FILENAME
     graph_data = read_json(graph)
     nodes, edges = (
         graph_data.get("nodes"),
@@ -616,7 +618,7 @@ def _publish_graph(
 ) -> None:
     (temp / GRAPH_FILE.parent).mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, temp / GRAPH_FILE)
-    gen_id = temp.name.removeprefix(".building-")
+    gen_id = temp.name.removeprefix(BUILDING_PREFIX)
     final = base / "generations" / gen_id
     temp.rename(final)
     pointer = {
@@ -640,7 +642,7 @@ def _prune_generations(base: Path, current_id: str, previous_id: str | None) -> 
         (
             p
             for p in (base / "generations").iterdir()
-            if p.is_dir() and not p.name.startswith(".building-")
+            if p.is_dir() and not p.name.startswith(BUILDING_PREFIX)
         ),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
@@ -664,7 +666,7 @@ def _update_locked(root: Path, base: Path, deadline: float) -> None:
         print("Graphify local: current")
         return
     gen_id = uuid.uuid4().hex
-    temp = base / "generations" / (".building-" + gen_id)
+    temp = base / "generations" / (BUILDING_PREFIX + gen_id)
     temp.mkdir(parents=True, exist_ok=True)
     try:
         graph = _run_graphify(root, base, _copy_inputs(base, paths, hashes), deadline)
@@ -706,7 +708,7 @@ def active_graph(root: Path) -> tuple[Path, Path]:
     ):
         raise Unavailable("no compatible local graph; run update")
     gen = generation_dir(root, current)
-    graph = gen / "graphify-out" / "graph.json"
+    graph = gen / "graphify-out" / GRAPH_FILENAME
     if current.get("stale") or not graph.is_file():
         raise Unavailable("no fresh local graph; run update")
     if not _metadata_current(root, current):
@@ -775,29 +777,60 @@ def _status(root: Path) -> int:
     return 0 if fresh else 2
 
 
+def _query_arguments(name: str, supplied: list[str]) -> tuple[list[str], set[str]]:
+    allowed = {
+        "query": (),
+        "path": ("--directed", "--undirected"),
+        "explain": ("--all",),
+    }[name]
+    positional = []
+    flags = set()
+    for term in supplied:
+        if term in allowed:
+            flags.add(term)
+        elif _valid_query_term(term):
+            positional.append(term)
+        else:
+            raise Unavailable("unsupported Graphify option or query term")
+    if name == "path" and "--directed" in flags and "--undirected" in flags:
+        raise Unavailable("choose either --directed or --undirected")
+    expected = {"query": None, "path": 2, "explain": 1}[name]
+    if expected is not None and len(positional) != expected:
+        raise Unavailable(f"{name} requires {expected} positional term(s)")
+    if not positional:
+        raise Unavailable("Graphify terms are required")
+    return positional, flags
+
+
+def _valid_query_term(term: str) -> bool:
+    return (
+        bool(term)
+        and not term.startswith("-")
+        and not any(ord(character) < 32 or ord(character) == 127 for character in term)
+    )
+
+
 def _graph_command(
     root: Path, args: argparse.Namespace, generation: Path, graph: Path
 ) -> int:
     if args.command in {"mcp", "export"}:
         return _export_or_mcp(root, args, graph)
-    allowed = {
-        "query": set(),
-        "path": {"--directed", "--undirected"},
-        "explain": {"--all"},
-    }[args.command]
-    terms = args.terms
-    if any(term.startswith("-") and term not in allowed for term in terms):
-        raise Unavailable("unsupported Graphify option")
-    positional = [term for term in terms if term not in allowed]
-    if args.command == "path" and "--directed" in terms and "--undirected" in terms:
-        raise Unavailable("choose either --directed or --undirected")
-    if args.command == "path" and len(positional) != 2:
-        raise Unavailable("path requires a source and target")
-    if args.command == "explain" and len(positional) != 1:
-        raise Unavailable("explain requires one symbol")
-    if not terms:
-        raise Unavailable("Graphify terms are required")
-    command = [str(executable(root)), args.command, *terms, "--graph", str(graph)]
+    positional, flags = _query_arguments(args.command, args.terms)
+    command = [str(executable(root))]
+    if args.command == "query":
+        command.extend(["query", *positional, "--graph", str(graph)])
+    elif args.command == "path":
+        command.extend(["path", *positional])
+        if "--directed" in flags:
+            command.append("--directed")
+        if "--undirected" in flags:
+            command.append("--undirected")
+        command.extend(["--graph", str(graph)])
+    else:
+        command.extend(["explain", *positional])
+        if "--all" in flags:
+            command.append("--all")
+        command.extend(["--graph", str(graph)])
     return subprocess.run(
         command,
         cwd=generation,

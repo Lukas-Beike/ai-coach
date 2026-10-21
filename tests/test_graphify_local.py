@@ -618,12 +618,15 @@ class GraphifyLocalTests(unittest.TestCase):
             patch.object(graph.subprocess, "run", side_effect=fake_run),
         ):
             self.assertEqual(graph.main(["query", "find", "node"]), 0)
+            self.assertEqual(graph.main(["query", "find:thing (v2)"]), 0)
             self.assertEqual(graph.main(["path", "from", "to", "--undirected"]), 0)
             self.assertEqual(graph.main(["explain", "symbol", "--all"]), 0)
             for args in (
                 ["query", "find", "--dfs"],
                 ["query", "find", "--graph", "other.json"],
                 ["query", "find", "--graph=other.json"],
+                ["query", "--", "--graph", "other.json"],
+                ["query", "find\n--graph=other.json"],
                 ["path", "from", "to", "--graph", "other.json"],
                 ["path", "from", "to", "--output", "file"],
                 ["path", "from", "to", "--directed", "--undirected"],
@@ -634,8 +637,9 @@ class GraphifyLocalTests(unittest.TestCase):
                     self.assertEqual(graph.main(args), 2)
             self.assertEqual(graph.main(["path", "from", "to", "extra"]), 2)
             self.assertEqual(graph.main(["explain", "symbol", "extra"]), 2)
-        self.assertEqual(len(launched), 3)
+        self.assertEqual(len(launched), 4)
         self.assertTrue(all(command[-2] == "--graph" for command in launched))
+        self.assertEqual(launched[1][1:3], ["query", "find:thing (v2)"])
 
     def test_metadata_invalidation_causes_scan_before_source_read(self):
         with patch.object(graph, "scan") as scanner:
