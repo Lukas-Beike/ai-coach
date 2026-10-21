@@ -430,6 +430,21 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_new())
         self.assertEqual(["new"], self.fetched_ids())
 
+    def test_floor_without_local_activities_uses_the_athlete_local_date(self):
+        self.rows = []
+        service = ActivityDetailRefreshService(
+            api_client=self.api,
+            database_manager=self.manager,
+            row_reader=FixedActivityRows(self.rows),
+            store=self.store,
+            # 23:30 UTC on the 18th is already the 19th in the athlete's zone.
+            utc_now=lambda: "2026-10-18T23:30:00Z",
+            configured=True,
+            local_date=lambda: "2026-10-19",
+        )
+        service.prefetch_new()
+        self.assertEqual("2026-10-19", self.store.prefetch_floor())
+
 
 class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
     """A refresh writes the kv record and its canonical rows in one transaction."""

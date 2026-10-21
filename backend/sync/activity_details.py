@@ -11,7 +11,7 @@ import json
 import logging
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 from itertools import pairwise
 from typing import Any
@@ -49,6 +49,8 @@ _LOGGER = logging.getLogger(__name__)
 INITIAL_PREFETCH_ACTIVITIES = 10
 # Provider loads per refresh; the rest stay pending and load on the next refresh.
 MAX_PREFETCH_PER_RUN = 25
+# Stored fingerprints are read in batches of this many candidates.
+PREFETCH_LOOKUP_BATCH = 100
 MAX_DETAIL_BYTES = 24 * 1024 * 1024
 ACTIVITY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
 
@@ -89,6 +91,7 @@ class ActivityDetailRefreshService:
         read_planned_units: Callable[[], list[dict[str, Any]]] = list,
         references: ActivityReferenceResolver | None = None,
         canonical: CanonicalDetailWriter | None = None,
+        local_date: Callable[[], str] | None = None,
     ) -> None:
         self._api_client = api_client
         self._database_manager = database_manager
@@ -99,6 +102,7 @@ class ActivityDetailRefreshService:
         self._read_planned_units = read_planned_units
         self._references = NoActivityReferences() if references is None else references
         self._canonical = canonical
+        self._local_date = local_date
 
     def refresh(self, activity_id: str) -> dict[str, Any]:
         activity_id = normalize_activity_id(
@@ -221,41 +225,62 @@ class ActivityDetailRefreshService:
         candidates = [
             row for row in newest if str(row.get("start_date_local") or "") >= floor
         ]
-        ids = [str(row["id"]) for row in candidates]
-        stored = self._store.fingerprints(ids)
-        known_failures = self._store.failures(ids)
         fetched = failed = 0
-        for row in candidates:
+        for activity_id, fingerprint in self._pending_prefetch(candidates):
             if fetched + failed >= limit:
                 break
-            activity_id = str(row["id"])
-            fingerprint = summary_fingerprint(row)
-            if self._prefetch_settled(activity_id, fingerprint, stored, known_failures):
-                continue
             try:
                 with guard():
                     self.refresh(activity_id)
             except Exception as error:  # noqa: BLE001 - prefetch never fails the refresh
                 failed += 1
-                stops = not _activity_specific_failure(error)
-                _LOGGER.warning(
-                    "activity detail prefetch stopped"
-                    if stops
-                    else "activity detail prefetch skipped an activity",
-                    extra={
-                        "event": "activity_detail_prefetch_failed",
-                        "error_class": type(error).__name__,
-                        "stopped": stops,
-                    },
-                )
-                if stops:
+                if self._record_prefetch_failure(activity_id, fingerprint, error):
                     break
-                self._store.save_failure(
-                    activity_id, fingerprint, _failure_message(error), self._utc_now()
-                )
                 continue
             fetched += 1
         return {"fetched": fetched, "failed": failed}
+
+    def _pending_prefetch(
+        self, candidates: list[dict[str, Any]]
+    ) -> Iterator[tuple[str, str]]:
+        """Yield id and summary fingerprint of candidates still to load, newest first.
+
+        Stored fingerprints are read in batches, so a run only reads the records
+        it reaches before its limit.
+        """
+        for start in range(0, len(candidates), PREFETCH_LOOKUP_BATCH):
+            batch = candidates[start : start + PREFETCH_LOOKUP_BATCH]
+            ids = [str(row["id"]) for row in batch]
+            stored = self._store.fingerprints(ids)
+            known_failures = self._store.failures(ids)
+            for row in batch:
+                activity_id = str(row["id"])
+                fingerprint = summary_fingerprint(row)
+                if not self._prefetch_settled(
+                    activity_id, fingerprint, stored, known_failures
+                ):
+                    yield activity_id, fingerprint
+
+    def _record_prefetch_failure(
+        self, activity_id: str, fingerprint: str, error: Exception
+    ) -> bool:
+        """Record an activity-specific failure; return whether the run must stop."""
+        stops = not _activity_specific_failure(error)
+        _LOGGER.warning(
+            "activity detail prefetch stopped"
+            if stops
+            else "activity detail prefetch skipped an activity",
+            extra={
+                "event": "activity_detail_prefetch_failed",
+                "error_class": type(error).__name__,
+                "stopped": stops,
+            },
+        )
+        if not stops:
+            self._store.save_failure(
+                activity_id, fingerprint, _failure_message(error), self._utc_now()
+            )
+        return stops
 
     def _prefetch_floor(self, newest: list[dict[str, Any]]) -> str:
         """Return the stored floor, setting it on the first prefetch."""
@@ -267,10 +292,16 @@ class ActivityDetailRefreshService:
         floor = (
             str(initial[-1].get("start_date_local") or "")
             if initial
-            else self._utc_now()[:10]
+            else self._local_today()
         )
         self._store.save_prefetch_floor(floor, self._utc_now())
         return self._store.prefetch_floor() or floor
+
+    def _local_today(self) -> str:
+        """Athlete-local calendar date, matching the activities' local dates."""
+        if self._local_date is None:
+            return self._utc_now()[:10]
+        return self._local_date()
 
     def _prefetch_settled(
         self,

@@ -156,6 +156,7 @@ class IntervalsSyncAssembly:
             configured=bool(config.intervals_api_key),
             references=ActivityReferences(self._database_manager()),
             canonical=CanonicalDetailWriter(),
+            local_date=lambda: self._athlete_clock().now().date().isoformat(),
             read_planned_units=lambda: (
                 self._planned_unit_service().list(500)
                 if self._planned_unit_service
