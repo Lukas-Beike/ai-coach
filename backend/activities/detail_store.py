@@ -18,6 +18,7 @@ from backend.providers.intervals_performance_fields import (
 # A separate key keeps failures out of the `activity_detail:%` detail scans.
 _FAILURE = "activity_detail_failure"
 _RECORD_PREFIX = "activity_detail:"
+_PREFETCH_FLOOR = "activity_detail_prefetch_floor"
 
 
 def _json_or_none(raw: str) -> Any:
@@ -128,6 +129,42 @@ class ActivityDetailStore:
             if isinstance(value, dict):
                 result[keys[row["key"]]] = value
         return result
+
+    def fingerprints(self, activity_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+        """Return summary fingerprint and projection version without the streams."""
+        keys = {self._key(item): item for item in set(activity_ids)}
+        if not keys:
+            return {}
+        with self._database_manager.reader() as db:
+            rows = db.execute(
+                "SELECT key, json_extract(value, '$.summary_sha256') AS summary_sha256, "
+                "json_extract(value, '$.projection_version') AS projection_version "
+                f"FROM kv WHERE key IN ({','.join('?' * len(keys))})",
+                tuple(keys),
+            ).fetchall()
+        return {
+            keys[row["key"]]: {
+                "summary_sha256": row["summary_sha256"],
+                "projection_version": row["projection_version"],
+            }
+            for row in rows
+        }
+
+    def prefetch_floor(self) -> str | None:
+        """Start time from which every new activity is loaded automatically."""
+        with self._database_manager.reader() as db:
+            row = db.execute(
+                "SELECT value FROM kv WHERE key=?", (_PREFETCH_FLOOR,)
+            ).fetchone()
+        return None if row is None else str(row["value"])
+
+    def save_prefetch_floor(self, value: str, observed_at: str) -> None:
+        """Set the floor once; an existing floor is never moved."""
+        with self._database_manager.unit_of_work() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
+                (_PREFETCH_FLOOR, value, observed_at),
+            )
 
     @staticmethod
     def records_after(db: Any, after_key: str, limit: int) -> list[tuple[str, Any]]:

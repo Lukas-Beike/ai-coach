@@ -425,51 +425,68 @@ class Redactor:
 
     def redact_text(self, value: str) -> str:
         """Redact configured secrets and credential-bearing URLs case-insensitively."""
-        config = self._config_supplier()
-        redacted = str(value or "")
+        return self._text_redactor()(value)
+
+    def _text_redactor(self, config: Config | None = None) -> Callable[[str], str]:
+        """Prepare one operation's patterns without retaining stale credentials."""
+        if config is None:
+            config = self._config_supplier()
         calendar_url = str(getattr(config, "calendar_ical_url", "") or "")
         calendar_safe_url = self._safe_calendar_url_for_config(config)
-        for pattern in _secret_patterns(calendar_url):
-            redacted = pattern.sub(calendar_safe_url, redacted)
-        redacted = URL_VALUE_RE.sub(_redact_url, redacted)
+        calendar_patterns = _secret_patterns(calendar_url)
         secret_values = config_secret_values(config)
         extra_values = tuple(self._extra_secrets()) if self._extra_secrets else ()
-        for secret_value in (*secret_values, *extra_values):
-            for pattern in _secret_patterns(str(secret_value or "")):
+        patterns = tuple(
+            pattern
+            for secret_value in (*secret_values, *extra_values)
+            for pattern in _secret_patterns(str(secret_value or ""))
+        )
+
+        def redact(value: str) -> str:
+            redacted = str(value or "")
+            for pattern in calendar_patterns:
+                redacted = pattern.sub(calendar_safe_url, redacted)
+            redacted = URL_VALUE_RE.sub(_redact_url, redacted)
+            for pattern in patterns:
                 redacted = pattern.sub(_REDACTED, redacted)
-        redacted = re.sub(
-            r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted
-        )
-        # Legacy Gemini keys can still sit in a preserved .env; keep the
-        # provider-independent signature redacted after the adapter is gone.
-        redacted = re.sub(
-            r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_GEMINI_KEY]", redacted
-        )
-        redacted = re.sub(
-            r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+",
-            r"\1" + _REDACTED,
-            redacted,
-        )
-        return redacted
+            redacted = re.sub(
+                r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED_OPENAI_KEY]", redacted
+            )
+            # Preserved configurations and logs may still contain legacy keys.
+            redacted = re.sub(
+                r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_GEMINI_KEY]", redacted
+            )
+            return re.sub(
+                r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?)(basic|bearer)\s+[^\s,\"'}]+",
+                r"\1" + _REDACTED,
+                redacted,
+            )
+
+        return redact
 
     def sanitize_log_value(self, value: Any) -> Any:
-        if isinstance(value, str):
-            return self.redact_text(value)
-        if isinstance(value, dict):
-            return {
-                str(key): self.sanitize_log_value(item) for key, item in value.items()
-            }
-        if isinstance(value, (list, tuple)):
-            return [self.sanitize_log_value(item) for item in value]
-        if value is None or isinstance(value, (bool, int, float)):
-            return value
-        return self.redact_text(str(value))
+        redact = self._text_redactor()
+
+        def clean(item: Any) -> Any:
+            if isinstance(item, str):
+                return redact(item)
+            if isinstance(item, dict):
+                return {str(key): clean(child) for key, child in item.items()}
+            if isinstance(item, (list, tuple)):
+                return [clean(child) for child in item]
+            if item is None or isinstance(item, (bool, int, float)):
+                return item
+            return redact(str(item))
+
+        return clean(value)
 
     def sanitize_diagnostic_value(self, value: Any) -> Any:
         """Retain diagnostic content while removing credentials before storage."""
         config = self._config_supplier()
         encoded_secrets = _encoded_diagnostic_secrets(config)
-        return _clean_diagnostic_value(value, self, encoded_secrets)
+        return _clean_diagnostic_value(
+            value, self._text_redactor(config), encoded_secrets
+        )
 
 
 def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
@@ -516,9 +533,9 @@ def _redact_labeled_secrets(value: str) -> str:
 
 
 def _clean_diagnostic_text(
-    value: str, redactor: Redactor, encoded_secrets: tuple[str, ...]
+    value: str, redact: Callable[[str], str], encoded_secrets: tuple[str, ...]
 ) -> str:
-    safe = redactor.redact_text(value)
+    safe = redact(value)
     for secret in encoded_secrets:
         safe = safe.replace(secret, _REDACTED)
     safe = _DIAGNOSTIC_AUTH_RE.sub("[REDACTED_AUTHORIZATION]", safe)
@@ -533,28 +550,34 @@ def _clean_diagnostic_text(
 
 
 def _clean_diagnostic_value(
-    value: Any, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int = 0
+    value: Any,
+    redact: Callable[[str], str],
+    encoded_secrets: tuple[str, ...],
+    depth: int = 0,
 ) -> Any:
     if depth >= 40:
         return {"truncated": True, "reason": "depth_limit"}
     if isinstance(value, str):
-        return _clean_diagnostic_string(value, redactor, encoded_secrets, depth)
+        return _clean_diagnostic_string(value, redact, encoded_secrets, depth)
     if isinstance(value, dict):
-        return _clean_diagnostic_mapping(value, redactor, encoded_secrets, depth)
+        return _clean_diagnostic_mapping(value, redact, encoded_secrets, depth)
     if isinstance(value, (list, tuple)):
         return [
-            _clean_diagnostic_value(child, redactor, encoded_secrets, depth + 1)
+            _clean_diagnostic_value(child, redact, encoded_secrets, depth + 1)
             for child in value
         ]
     if isinstance(value, bytes):
         return {"omitted_binary_bytes": len(value)}
     if value is None or isinstance(value, (bool, int, float)):
         return value
-    return _clean_diagnostic_text(str(value), redactor, encoded_secrets)
+    return _clean_diagnostic_text(str(value), redact, encoded_secrets)
 
 
 def _clean_diagnostic_string(
-    value: str, redactor: Redactor, encoded_secrets: tuple[str, ...], depth: int
+    value: str,
+    redact: Callable[[str], str],
+    encoded_secrets: tuple[str, ...],
+    depth: int,
 ) -> str:
     if value.lstrip().startswith(("{", "[")):
         try:
@@ -563,23 +586,23 @@ def _clean_diagnostic_string(
             pass
         else:
             return json.dumps(
-                _clean_diagnostic_value(decoded, redactor, encoded_secrets, depth + 1),
+                _clean_diagnostic_value(decoded, redact, encoded_secrets, depth + 1),
                 ensure_ascii=False,
             )
-    return _clean_diagnostic_text(value, redactor, encoded_secrets)
+    return _clean_diagnostic_text(value, redact, encoded_secrets)
 
 
 def _clean_diagnostic_mapping(
     value: dict[Any, Any],
-    redactor: Redactor,
+    redact: Callable[[str], str],
     encoded_secrets: tuple[str, ...],
     depth: int,
 ) -> dict[str, Any]:
     result = {}
     for key, child in value.items():
         name = re.sub(r"[^a-z0-9]", "", str(key).casefold())
-        result[_clean_diagnostic_text(str(key), redactor, encoded_secrets)] = (
-            _clean_diagnostic_field(name, child, redactor, encoded_secrets, depth + 1)
+        result[_clean_diagnostic_text(str(key), redact, encoded_secrets)] = (
+            _clean_diagnostic_field(name, child, redact, encoded_secrets, depth + 1)
         )
     return result
 
@@ -587,7 +610,7 @@ def _clean_diagnostic_mapping(
 def _clean_diagnostic_field(
     name: str,
     value: Any,
-    redactor: Redactor,
+    redact: Callable[[str], str],
     encoded_secrets: tuple[str, ...],
     depth: int,
 ) -> Any:
@@ -595,7 +618,7 @@ def _clean_diagnostic_field(
         return _REDACTED
     if name in _DIAGNOSTIC_BINARY_FIELDS:
         return "[OMITTED_BINARY]"
-    return _clean_diagnostic_value(value, redactor, encoded_secrets, depth)
+    return _clean_diagnostic_value(value, redact, encoded_secrets, depth)
 
 
 class JsonLogFormatter(logging.Formatter):
@@ -974,9 +997,8 @@ class DiagnosticCapture:
     def entries(self) -> list[dict[str, Any]]:
         self._load_entries()
         with self._lock:
-            return self._redactor.sanitize_diagnostic_value(
-                list(self._entries_cache or [])
-            )
+            entries = list(self._entries_cache or [])
+        return self._redactor.sanitize_diagnostic_value(entries)
 
     def clear(self) -> dict[str, Any]:
         """Clear all captured technical diagnostic metadata."""

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import faulthandler
 import json
 import logging
 import os
 import signal
 import sqlite3
+import sys
 import threading
 import time
 import uuid
@@ -461,7 +463,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.16"
+APP_VERSION = "1.13.17"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -2210,6 +2212,10 @@ def main() -> None:
     daily_thread: threading.Thread | None = None
     # `docker stop` sends SIGTERM; shut down like Ctrl+C so pending work is written.
     signal.signal(signal.SIGTERM, signal.default_int_handler)
+    # `docker kill -s USR1` writes every thread's stack (code locations only, no
+    # values) to stderr, so a stalled server can be diagnosed before a restart.
+    if sys.platform != "win32":
+        faulthandler.register(signal.SIGUSR1, all_threads=True)
     try:
         SYNC_JOB_QUEUE.service().resume_interrupted()
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(

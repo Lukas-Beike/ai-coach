@@ -112,6 +112,13 @@ class PrivacyDataExportService:
                     "SELECT * FROM nutrition_products ORDER BY name COLLATE NOCASE"
                 ).fetchall()
             ]
+            food_database = [
+                {**json.loads(row["payload"]), "fetched_at": row["fetched_at"]}
+                for row in db.execute(
+                    "SELECT payload, fetched_at FROM food_database_entries "
+                    "ORDER BY food_id"
+                ).fetchall()
+            ]
 
         application_state: dict[str, Any] = {}
         excluded_state = {
@@ -139,6 +146,7 @@ class PrivacyDataExportService:
             "application_state": application_state,
             "nutrition_templates": nutrition_templates,
             "nutrition_products": nutrition_products,
+            "food_database_entries": food_database,
             "competitions": competitions,
             "competition_sync_tombstones": tombstones,
             "messages": messages,
@@ -196,6 +204,7 @@ PRIVACY_DELETE_SCOPE = (
             "nutrition_sync_dates",
             "nutrition_templates",
             "nutrition_products",
+            "food_database_entries",
         ),
     ),
     ("adaptive", "Adaptive Plananpassungen", ("plan_adjustments",)),

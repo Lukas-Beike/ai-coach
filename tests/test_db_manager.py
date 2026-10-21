@@ -12,7 +12,11 @@ from backend.db.manager import (
     WriterGate,
     background_writer,
 )
-from backend.db.schema import database_schema_is_current, initialize_schema
+from backend.db.schema import (
+    configure_cipher,
+    database_schema_is_current,
+    initialize_schema,
+)
 from backend.errors import DATABASE_BUSY_MESSAGE, DatabaseBusyError
 
 
@@ -23,7 +27,7 @@ class DatabaseManagerTests(unittest.TestCase):
             self.addCleanup(manager.close)
             with manager.unit_of_work() as writer:
                 self.assertEqual(
-                    writer.execute("PRAGMA cache_size").fetchone()[0], -32768
+                    writer.execute("PRAGMA cache_size").fetchone()[0], -16384
                 )
             with manager.reader() as first:
 
@@ -34,10 +38,10 @@ class DatabaseManagerTests(unittest.TestCase):
 
                 with ThreadPoolExecutor(max_workers=1) as pool:
                     self.assertEqual(
-                        pool.submit(check_other_reader).result(timeout=5), -32768
+                        pool.submit(check_other_reader).result(timeout=5), -16384
                     )
                 self.assertEqual(
-                    first.execute("PRAGMA cache_size").fetchone()[0], -32768
+                    first.execute("PRAGMA cache_size").fetchone()[0], -16384
                 )
             manager.close()
 
@@ -808,6 +812,21 @@ class DatabaseBusyErrorTests(unittest.TestCase):
         self.assertEqual(str(error), DATABASE_BUSY_MESSAGE)
         self.assertEqual(error.reason, "database_busy")
         self.assertEqual(error.resource, "writer")
+
+
+class CipherConfigurationTests(unittest.TestCase):
+    def test_keyed_connections_disable_memory_locking(self):
+        statements: list[str] = []
+
+        class Recorder:
+            def execute(self, statement: str) -> None:
+                statements.append(statement)
+
+        configure_cipher(Recorder(), "synthetic-password")
+
+        self.assertIn("PRAGMA cipher_memory_security = OFF", statements)
+        self.assertNotIn("PRAGMA cipher_memory_security = ON", statements)
+        self.assertIn("PRAGMA cipher_compatibility = 4", statements)
 
 
 if __name__ == "__main__":

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
 import unittest
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -29,7 +30,10 @@ class _Database:
     def execute(self, query, parameters=()):
         self.queries.append((query, parameters))
         table = query.rsplit("FROM ", 1)[1]
-        return SimpleNamespace(fetchone=lambda: {"count": self.values[table]})
+        count = (
+            4096 if table == "kv WHERE key = 'garmin_snapshot'" else self.values[table]
+        )
+        return SimpleNamespace(fetchone=lambda: {"count": count})
 
 
 class _DatabaseManager:
@@ -199,6 +203,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "athlete_checkins": 6,
                 "activity_feedback": 7,
                 "change_history": 8,
+                "garmin_snapshot_bytes": 4096,
                 "workout_library_state": {"local": 2},
                 "external_calendar_events": 1,
             },
@@ -231,7 +236,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         self.service.report()
 
         self.assertEqual(self.manager.transactions, 1)
-        self.assertEqual(len(self.db.queries), 6)
+        self.assertEqual(len(self.db.queries), 7)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query, _parameters in self.db.queries],
             [
@@ -241,11 +246,34 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "athlete_checkins",
                 "activity_feedback",
                 "change_history",
+                "kv WHERE key = 'garmin_snapshot'",
             ],
         )
         # Two extra reads: the Garmin configured signal checks the token blob and
         # the disconnect marker inside the same snapshot (see transactions above).
         self.assertEqual(self.key_values.get.call_count, 10)
+
+    def test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload(self):
+        with closing(sqlite3.connect(":memory:")) as db:
+            db.row_factory = sqlite3.Row
+            for table in self.db.values:
+                db.execute(f"CREATE TABLE {table} (id INTEGER)")
+            db.execute("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT)")
+            self.assertEqual(
+                self.service._database_counts(db)["garmin_snapshot_bytes"], 0
+            )
+
+            payload = '{"value":"\u00e4\U0001f6b2"}'
+            db.executemany(
+                "INSERT INTO kv (key, value) VALUES (?, ?)",
+                [("garmin_snapshot", payload), ("synthetic_other_value", "x" * 10000)],
+            )
+            counts = self.service._database_counts(db)
+            self.assertEqual(
+                counts["garmin_snapshot_bytes"], len(payload.encode("utf-8"))
+            )
+            self.assertGreater(counts["garmin_snapshot_bytes"], len(payload))
+            self.key_values.get.assert_not_called()
 
     def test_clear_delegates_to_diagnostic_capture(self):
         self.capture.clear.return_value = {"ok": True, "entries": 0}

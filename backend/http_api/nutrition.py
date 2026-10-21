@@ -59,7 +59,12 @@ class NutritionGetRoutes:
             meal_library = self._meal_library_service()
             barcode = query.get("barcode", [None])[0]
             term = query.get("q", [None])[0]
-            if barcode:
+            if query.get("source", [None])[0] == "database":
+                handler.send_json(
+                    200,
+                    {"ok": True, "foods": meal_library.list_database_foods(term)},
+                )
+            elif barcode:
                 handler.send_json(
                     200, meal_library.lookup_product({"barcode": barcode})
                 )
@@ -122,6 +127,7 @@ class NutritionPostRoutes:
             f"{NUTRITION_PRODUCTS_PATH}/lookup": self._lookup_product,
             f"{NUTRITION_PRODUCTS_PATH}/extract": self._extract_product,
             f"{NUTRITION_PRODUCTS_PATH}/archive": self._archive_product,
+            f"{NUTRITION_PRODUCTS_PATH}/database/delete": self._forget_database_food,
         }
         route = routes.get(path)
         if route is None:
@@ -249,6 +255,21 @@ class NutritionPostRoutes:
         payload = _read_object(handler)
         handler.send_json(
             200, self._meal_library_service().extract_packaging_photo(payload)
+        )
+
+    def _forget_database_food(self, handler: Any) -> None:
+        payload = _read_object(handler)
+        if payload.get("confirmed") is not True:
+            raise AppError(
+                400,
+                "Das Entfernen muss ausdrücklich bestätigt werden.",
+                reason="confirmation_required",
+            )
+        handler.send_json(
+            200,
+            self._meal_library_service().forget_database_food(
+                str(payload.get("id") or "")
+            ),
         )
 
     def _archive_product(self, handler: Any) -> None:

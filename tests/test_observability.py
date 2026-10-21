@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
 from support import make_config
@@ -68,6 +69,63 @@ class _KeyValueStore:
 
 
 class ObservabilityTests(unittest.TestCase):
+    def test_bulk_redaction_prepares_patterns_once_and_refreshes_credentials(self):
+        from backend import observability
+
+        config = Mock(return_value=_config())
+        tokens = tuple(f"synthetic-runtime-value-{i}" for i in range(40))
+        extra = Mock(return_value=tokens)
+        redactor = Redactor(config, extra)
+        entries = [{"event": "request", "details": list(tokens)} for _ in range(50)]
+        for sanitize in (
+            redactor.sanitize_log_value,
+            redactor.sanitize_diagnostic_value,
+        ):
+            with self.subTest(method=sanitize.__name__):
+                config.reset_mock()
+                extra.reset_mock()
+                with patch.object(
+                    observability,
+                    "_secret_patterns",
+                    wraps=observability._secret_patterns,
+                ) as patterns:
+                    result = sanitize(entries)
+                config.assert_called_once_with()
+                extra.assert_called_once_with()
+                self.assertLess(patterns.call_count, 60)
+                for token in tokens:
+                    self.assertNotIn(token, json.dumps(result))
+                self.assertEqual(len(result), len(entries))
+
+        extra.return_value = ("synthetic-rotated-runtime-value",)
+        self.assertEqual(
+            redactor.sanitize_diagnostic_value({"value": extra.return_value[0]}),
+            {"value": "[REDACTED]"},
+        )
+
+    def test_diagnostic_export_does_not_hold_capture_lock_during_redaction(self):
+        store = _KeyValueStore()
+        redactor = Redactor(_config)
+        capture = DiagnosticCapture(store.get, store.set, redactor)
+        capture.capture("synthetic_event", {"status": 200})
+        original = redactor.sanitize_diagnostic_value
+
+        def sanitize(value):
+            acquired = threading.Event()
+
+            def read_status():
+                capture.status()
+                acquired.set()
+
+            thread = threading.Thread(target=read_status, daemon=True)
+            thread.start()
+            self.assertTrue(acquired.wait(2), "export blocked capture status")
+            thread.join(2)
+            return original(value)
+
+        with patch.object(redactor, "sanitize_diagnostic_value", side_effect=sanitize):
+            self.assertEqual(len(capture.entries()), 1)
+
     # fmt: off
     def test_detail_capture_retains_evidence_and_removes_nested_and_encoded_credentials(self):
         import base64

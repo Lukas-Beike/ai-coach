@@ -578,6 +578,11 @@ When a database restore is initiated:
 - **Diagnostics Management**: In **Betrieb & Diagnose**, authenticated users can download the sanitized technical diagnostic report as JSON, or clear the stored technical diagnostic entries.
 - **Canonical Coverage Summary**: The diagnostic report includes a `canonical_coverage` section with per-provider counts only: activities, observations, issue counts per reason, and whether a sync time is stored. It contains no dates or record content. If the summary cannot be computed, the section reports `unavailable` without details.
 - **Canonical Backfill Status**: The diagnostic report includes a `canonical_backfill` section next to `canonical_coverage`. It copies stored legacy snapshots and the Garmin payload into the canonical tables in newest-first batches. Each run is insert-only: existing rows, live or deleted, are never updated or revived, and the backfill never deletes data. The newest Intervals snapshot is the only one that inserts activities, because it already shows every activity that still exists upstream. Each activity in an older snapshot is skipped and counted as `superseded`, so older data cannot revive activities that were deleted or fall outside the synced range. Older snapshots still insert their wellness and athlete records and observations when absent, and their `snapshots` rows are never modified or deleted. Active provider records whose mapper version is behind the current version are re-projected from their stored raw data. Re-projection never revives a deleted activity, and leaves an activity whose session is deleted untouched. When the new projection no longer emits an activity that an active raw record owns, that activity becomes `invalid` (its session keeps its state) and is counted as `retired`; a later mapper version that emits it again makes it `active` with the same id, counted as `reprojected`. Observations are not retired: an observation that an upgraded mapper no longer emits keeps its old `mapper_version`. While a re-projection is pending, the table reader serves each observation at the newest version stored for it, so nothing disappears; once the backfill completes it serves only observations at the current version. A mapper-version change during a partial re-projection restarts the re-projection scan, including records already passed by the interrupted run. Temporary writer contention waits and retries the same batch. The section reports `status` (`pending`, `running`, `complete`, or `failed`), the number of `batches`, `unresolved_feedback` (feedback entries that match no activity), and per-provider counters: `inserted`, `already_present`, `superseded`, `skipped_invalid`, `sessions_created`, `duplicates`, `reprojected`, and `retired`. It contains counts only, never activity ids, names, or dates. A `failed` run resumes from its saved cursor at the next startup. If the status cannot be read, the section reports `unavailable`.
+- **Garmin Snapshot Size**: The diagnostic report includes `database.garmin_snapshot_bytes`, the UTF-8 byte size of the stored `garmin_snapshot` value (`0` when absent). SQL measures this without loading or parsing the payload in Python; the report adds only the byte count. This is a stored-payload measurement, not the process's RAM usage.
+- **Runtime Memory Diagnostics**: The diagnostic export adds `runtime.process_memory`: available Linux RSS, peak RSS, locked/anonymous/file memory and virtual bytes, thread count, mapping count and kernel mapping limit. Only numeric counters are exported; process memory, mapping addresses and file paths are never captured. Unavailable OS counters are omitted. Sync start, completion and failure log events include the same counters for before/after comparisons; the snapshot byte count is measured only for the diagnostic report.
+- **Stalled Server Stack Dump**: `docker kill -s USR1 AI-Coach` writes the stack of every Python thread to the container log (`docker logs`) without stopping the process. The dump contains file names, line numbers and function names only, no variable values. Capture it before restarting a container whose health check times out.
+- **Database Memory Budget**: Each pooled SQLCipher connection targets a 16 MiB decrypted-page cache. SQLite's cache target is not a hard process RAM limit: Python objects, query results and other native allocations use additional memory. The database file stays encrypted; `cipher_memory_security` is OFF because locking every SQLCipher allocation in memory fragmented the process into tens of thousands of mappings until allocations failed near the kernel's `vm.max_map_count`. A larger host `vm.max_map_count` can provide temporary mapping headroom but does not correct memory growth.
+- **Garmin Metadata Reads**: Automatic sync-window selection, current Morning Body Battery, daily planning and the nutrition day and week energy summaries extract only their required snapshot fields in SQL. Unrelated Garmin collections are not decoded into Python objects for these reads; full sync/merge reads and the stored history remain intact.
 - **Canonical Read Source**: The diagnostic report includes a `canonical_read` section that names the source serving reads (`tables` or `legacy`), the `reason`, and whether the stored check matches the current digest. Reads come from the canonical tables once the backfill has completed at least once; a content-free marker in the backfill state records that, and an existing `complete` state counts as completed. Until then, for example right after an upgrade, the legacy projection serves reads. After the first completion a mapper-version or time-zone change re-projects the stored records in the background while reads stay on the tables, and a sync inside the running process is written to the tables as it happens. Coverage is served from the summaries persisted at ingest; before the first completion a provider without a current summary falls back to the legacy projection. The section reports `serving`, `reason` and `digest_current` (false while a re-projection is pending), and reports `unavailable` if its state cannot be read.
 
 ---
@@ -1009,9 +1014,14 @@ Charts preserve provider provenance and observation dates. Garmin performance me
 ### Aktivitätsdetails
 
 Unter **Geplant → Übersicht** öffnet „Aktivität analysieren“ eine absolvierte
-Einheit mit ihren lokal gespeicherten Messreihen und Intervallen. Die Details
-der zehn neuesten Aktivitäten lädt jede Intervals.icu-Aktualisierung automatisch
-und nur lesend nach; bleiben die Daten einer Einheit dabei aus, steht sie
+Einheit mit ihren lokal gespeicherten Messreihen und Intervallen. Jede
+Intervals.icu-Aktualisierung lädt die Details aller neuen Aktivitäten
+automatisch und nur lesend nach und speichert sie dauerhaft im kanonischen
+Datenmodell. Als neu gilt jede Einheit ab der ältesten der zehn neuesten
+Aktivitäten beim ersten automatischen Laden; ältere Einheiten werden nicht
+automatisch nachgeladen. Pro Aktualisierung lädt die App höchstens 25 Einheiten,
+die neuesten zuerst; übrige folgen bei der nächsten Aktualisierung. Bleiben die
+Daten einer Einheit dabei aus, steht sie
 trotzdem in der Liste und nennt den Grund, ohne bis zur nächsten Änderung
 ihrer Zusammenfassung erneut automatisch geladen zu werden; für ältere Einheiten startet „Detaildaten
 laden“ ausdrücklich einen Hintergrundjob mit ausschließlich lesenden
@@ -1033,6 +1043,21 @@ Calendar cards include a compact interval profile when explicit timed workout st
 Die Ernährungsnavigation enthält Tagebuch, Verlauf, Body und Produkte. Der Verlauf zeigt 14 abgeschlossene Tage oder 12 Wochen bis gestern, mit Tageswerten beziehungsweise Wochendurchschnitten im Diagramm und einer aufklappbaren Tageswerttabelle. Fehlende Werte bleiben unbekannt; Summen und Durchschnitte nennen ihre Datenabdeckung. Body ist aus Analyse in den Ernährungsbereich verschoben. Das Erfassen eines lokalen Produkts erstellt einen bearbeitbaren Coach-Entwurf; es wird nichts automatisch gesendet oder gespeichert. Coach-Anfragen bleiben über die Hauptnavigation verfügbar.
 
 Trainingsverpflegung hat keine eigene Anzeige, API oder Coach-Aktion mehr. Die lokale Änderungshistorie erscheint ebenfalls nicht als eigene Ansicht; Aufzeichnung und Coach-Undo bleiben erhalten. Unter einer Coach-Antwort, die lokale Daten geändert hat, steht „Geändert: …“. Wenn die Antwort nur Profil, Wettkämpfe oder Trainingsvorlagen geändert hat, deren Änderungen vollständig im Verlauf erfasst sind, nimmt „Rückgängig“ nach Bestätigung alle zusammen in einer Transaktion zurück; wurde ein Datensatz danach weiter geändert, bleibt alles unverändert. Intervals.icu und Garmin werden dabei nicht verändert. Der Diagnoseexport enthält weiterhin technische Ereignisse und Coach-Befehlsstatus sowie die Anzahl gespeicherter Änderungen, ohne deren Athleteninhalte offenzulegen.
+
+#### Lokale Produktdatenbank (Spiegel)
+
+Jedes Open-Food-Facts-Produkt, das die App online abruft, wird automatisch und
+dauerhaft in der lokalen Datenbank gespeichert (Tabelle `food_database_entries`,
+Schema v11, getrennt von den eigenen Produkten). Abfragen lesen erst die
+eigenen Produkte, dann diesen Spiegel und fragen Open Food Facts nur ab, wenn
+ein Treffer fehlt oder älter als 90 Tage ist. Ist der Online-Abruf nicht
+möglich, wird der gespeicherte Stand mit Datum („Stand vom …“) verwendet.
+Treffer tragen für den Coach die Herkunft `data_origin` (`live`,
+`local_database`, `local_database_stale`). Im Tab „Produkte“ listet der Abschnitt
+„Datenbank“ die gespeicherten Einträge; „Lokal speichern“ übernimmt einen
+Eintrag nach Prüfung als eigenes Produkt, „Aus Datenbank entfernen“ löscht nur
+den Spiegeleintrag. Der Spiegel gehört zu Backup, Export und Datenlöschung. Das
+Upgrade von Schema v9 oder v10 legt die leere Tabelle an und erhält alle Daten.
 
 #### Lokale Produkte und Verpackungsfotos
 

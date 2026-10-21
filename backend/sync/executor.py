@@ -271,10 +271,8 @@ class IntervalsSyncJobOwner:
             return result
         if self._activity_detail_service is not None:
             try:
-                result["detail_prefetch"] = (
-                    self._activity_detail_service.prefetch_recent(
-                        self._intervals_resync_gate.operation
-                    )
+                result["detail_prefetch"] = self._activity_detail_service.prefetch_new(
+                    self._intervals_resync_gate.operation
                 )
             except Exception:  # noqa: BLE001 - prefetch is best effort; the window is synced
                 result["detail_prefetch"] = {"status": "error"}

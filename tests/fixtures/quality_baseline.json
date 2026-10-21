@@ -254,12 +254,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/sync/observation.py",
-      "code": "arg-type",
-      "message_sha256": "61577da624c3801c0bdeff61bfbc5820f63e2d5796d6b50970f67b8c1b5a0b73"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/http_api/handler.py",
       "code": "arg-type",
       "message_sha256": "6195198e495bd02c70500de218de463b7423c94c7b7371b88aae6a19d1792592"

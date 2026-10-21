@@ -51,6 +51,33 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             {"ok": True, "products": [{"id": "product-1", "name": "Whey"}]},
         )
 
+    def test_get_products_database_source_lists_the_local_mirror(self):
+        self.handler.path = "/api/nutrition/products?source=database&q=Knoppers"
+        self.meal_library.list_database_foods.return_value = [{"id": "off:1"}]
+
+        self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/products"))
+
+        self.meal_library.list_database_foods.assert_called_once_with("Knoppers")
+        self.meal_library.list_products.assert_not_called()
+        self.handler.send_json.assert_called_once_with(
+            200, {"ok": True, "foods": [{"id": "off:1"}]}
+        )
+
+    def test_database_entry_removal_requires_confirmation(self):
+        self.handler.read_json.return_value = {"id": "off:1"}
+
+        with self.assertRaises(AppError) as raised:
+            self.post_routes.handle(
+                self.handler, "/api/nutrition/products/database/delete"
+            )
+        self.assertEqual(raised.exception.reason, "confirmation_required")
+        self.meal_library.forget_database_food.assert_not_called()
+
+        self.handler.read_json.return_value = {"id": "off:1", "confirmed": True}
+        self.meal_library.forget_database_food.return_value = {"ok": True}
+        self.post_routes.handle(self.handler, "/api/nutrition/products/database/delete")
+        self.meal_library.forget_database_food.assert_called_once_with("off:1")
+
     def test_get_products_barcode_uses_local_first_lookup_contract(self):
         self.handler.path = "/api/nutrition/products?barcode=4006381333931"
         self.meal_library.lookup_product.return_value = {

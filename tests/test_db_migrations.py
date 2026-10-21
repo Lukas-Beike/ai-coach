@@ -13,19 +13,26 @@ from backend.db.migrations import migrate_schema
 from backend.db.schema import (
     ACTIVITY_DETAIL_DDL,
     CURRENT_SCHEMA_VERSION,
+    FOOD_DATABASE_DDL,
     configure_cipher,
     database_schema_is_current,
     database_schema_signature,
     execute_ddl,
     initialize_schema,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V9
+from backend.db.schema_history import (
+    SHAPE_CURRENT,
+    SHAPE_SCHEMA_V9,
+    SHAPE_SCHEMA_V10,
+    released_shape,
+)
 
 INTERVALS = ProviderId.INTERVALS.value
 STAMP = "2026-10-16T08:00:00+00:00"
 OLDEST_SUPPORTED_VERSION = 9
 FIXTURES = Path(__file__).with_name("fixtures")
 OLDEST_SUPPORTED_FIXTURE = FIXTURES / "schema_v9.sql.txt"
+V10_FIXTURE = FIXTURES / "schema_v10.sql.txt"
 CURRENT_FIXTURE = FIXTURES / f"schema_v{CURRENT_SCHEMA_VERSION}.sql.txt"
 DETAIL_TABLES = {
     "activity_detail_sets",
@@ -34,6 +41,7 @@ DETAIL_TABLES = {
     "activity_zone_times",
     "activity_detail_analysis",
 }
+MIRROR_TABLES = {"food_database_entries"}
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -188,11 +196,84 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         self.assertTrue(database_schema_is_current(db))
         for table in sorted(set(self.user_tables(db)) - set(v9_tables)):
             with self.subTest(table=table):
-                self.assertIn(table, DETAIL_TABLES)
+                self.assertIn(table, DETAIL_TABLES | MIRROR_TABLES)
                 self.assertEqual(
                     db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
                 )
         self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def populated_v10_database(self, db):
+        db.executescript(V10_FIXTURE.read_text(encoding="utf-8"))
+        db.execute(
+            "INSERT INTO messages(role, content, created_at) "
+            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
+        )
+        db.execute(
+            "INSERT INTO activity_sessions(activity_id, primary_provider, "
+            "primary_provider_activity_id, started_at, created_at, updated_at) "
+            "VALUES ('act_1', ?, 'i1', ?, ?, ?)",
+            (INTERVALS, STAMP, STAMP, STAMP),
+        )
+        db.execute(
+            "INSERT INTO nutrition_products(id, barcode, name, basis_amount, "
+            "basis_unit, kcal, source, created_at, updated_at) "
+            "VALUES ('p1', '4001', 'Skyr', 100, 'g', 63, 'manual', ?, ?)",
+            (STAMP, STAMP),
+        )
+        db.commit()
+        return db
+
+    def test_frozen_v10_fixture_is_the_recorded_released_shape(self):
+        db = self.connect()
+        db.executescript(V10_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V10
+        )
+
+    def test_populated_v10_upgrade_keeps_every_row_and_adds_the_empty_mirror(self):
+        db = self.populated_v10_database(self.connect())
+        v10_tables = self.user_tables(db)
+        before = self.table_rows(db, v10_tables)
+        migrate_schema(db)
+        db.commit()
+        self.assertEqual(self.table_rows(db, v10_tables), before)
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+        self.assertEqual(set(self.user_tables(db)) - set(v10_tables), MIRROR_TABLES)
+        self.assertEqual(
+            db.execute("SELECT COUNT(*) FROM food_database_entries").fetchone()[0], 0
+        )
+        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_failed_v10_upgrade_rolls_back_to_the_unchanged_v10_database(self):
+        db = self.populated_v10_database(self.connect())
+        before = list(db.iterdump())
+
+        def failing_step(connection):
+            execute_ddl(connection, FOOD_DATABASE_DDL)
+            raise RuntimeError("injected migration failure")
+
+        with (
+            mock.patch.dict(
+                migrations.UPGRADE_STEPS,
+                {SHAPE_SCHEMA_V10: (SHAPE_CURRENT, failing_step)},
+            ),
+            self.assertRaisesRegex(RuntimeError, "injected"),
+        ):
+            migrate_schema(db)
+        db.rollback()
+        self.assertEqual(list(db.iterdump()), before)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 10)
+
+    def test_upgraded_v10_database_restarts_with_the_same_build_unchanged(self):
+        db = self.populated_v10_database(self.connect())
+        migrate_schema(db)
+        db.commit()
+        upgraded = list(db.iterdump())
+        migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), upgraded)
 
     def test_failed_upgrade_step_rolls_back_to_the_unchanged_v9_database(self):
         db = self.connect()

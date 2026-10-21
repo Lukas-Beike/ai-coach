@@ -17,7 +17,6 @@ const NAV_ROUTES = Object.freeze({
   more: "settingsPanel",
   "more/connections": "settingsPanel",
   "more/coach": "settingsPanel",
-  "more/privacy": "settingsPanel",
   "more/operations": "settingsPanel",
   "more/appearance": "settingsPanel",
   "more/profile": "profilePanel",
@@ -32,7 +31,7 @@ const NAV_LINK_ROUTES = Object.freeze({
 });
 const DEFAULT_NAV_ROUTE = "coach";
 const PLAN_SEGMENTS = Object.freeze(["overview", "library", "season"]);
-const MORE_SEGMENTS = Object.freeze(["profile", "equipment", "connections", "coach", "privacy", "operations", "appearance"]);
+const MORE_SEGMENTS = Object.freeze(["profile", "equipment", "connections", "coach", "operations", "appearance"]);
 
 globalThis.AppNavigation = Object.freeze({
   routes: NAV_ROUTES,

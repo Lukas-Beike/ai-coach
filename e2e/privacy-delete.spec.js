@@ -21,8 +21,8 @@ test("the deletion stays locked while the backup before deletion is running", as
     await route.continue();
   });
 
-  await page.goto("/#more/privacy");
-  const panel = page.locator('details[data-more-segment-panel="privacy"]');
+  await page.goto("/#more/operations");
+  const panel = page.locator('details[data-more-segment-panel="operations"]').filter({ has: page.locator("#privacyDeleteButton") });
   await expect(panel).toBeVisible();
   if (!(await panel.evaluate((element) => element.open))) {
     await panel.locator("summary").click();
@@ -51,8 +51,8 @@ test("the deletion stays locked while the backup before deletion is running", as
 });
 
 test("local data deletion requires the exact confirmation text", async ({ page }) => {
-  await page.goto("/#more/privacy");
-  const panel = page.locator('details[data-more-segment-panel="privacy"]');
+  await page.goto("/#more/operations");
+  const panel = page.locator('details[data-more-segment-panel="operations"]').filter({ has: page.locator("#privacyDeleteButton") });
   await expect(panel).toBeVisible();
   if (!(await panel.evaluate((element) => element.open))) {
     await panel.locator("summary").click();

@@ -42,6 +42,18 @@ class FakeKeyValueRepository:
         self.calls.append((db, key))
         return self.values.get(key)
 
+    def get_json_fields(self, db, key, fields):
+        self.calls.append((db, key))
+        value = self.values.get(key)
+        if value is None:
+            return None
+        try:
+            decoded = json.loads(value)
+        except TypeError, ValueError:
+            return None
+        decoded = decoded if isinstance(decoded, dict) else {}
+        return json.dumps({field: decoded.get(field) for field in fields})
+
 
 class FakeCheckinService:
     def __init__(self, rows=None):
@@ -173,8 +185,24 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
                 self.key_values.values["garmin_snapshot"] = stored_value
                 self.morning_battery.calls.clear()
                 result = self.service.build()
-                self.assertEqual(self.morning_battery.calls, [{}])
+                self.assertEqual(len(self.morning_battery.calls), 1)
+                self.assertIsNone(
+                    self.morning_battery.calls[0].get("morning_body_battery")
+                )
                 self.assertEqual(result, [])
+
+    def test_only_morning_metadata_is_passed_to_the_battery_projection(self):
+        morning = {"status": "ready", "morning": {"value": 84}}
+        self.key_values.values["garmin_snapshot"] = json.dumps(
+            {
+                "morning_body_battery": morning,
+                "unrelated_history": ["synthetic-unused"] * 1000,
+            }
+        )
+        self.service.build()
+        self.assertEqual(
+            self.morning_battery.calls, [{"morning_body_battery": morning}]
+        )
 
     def test_corrupt_history_is_empty_and_does_not_break_garmin_projection(self):
         self.key_values.values["morning_body_battery_history"] = "not-json"
@@ -249,9 +277,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.assertEqual(today["recovery"]["ctl"], 80)
         self.assertEqual(today["recovery"]["tsb"], 20)
         self.assertEqual(today["recovery"]["body_battery"], 76)
-        self.assertEqual(
-            today["health"], {"steps": 9000, "source": "Garmin Connect"}
-        )
+        self.assertEqual(today["health"], {"steps": 9000, "source": "Garmin Connect"})
         self.assertEqual(today["weather"]["temperature_max"], 17)
         self.assertEqual(today["activity_feedback"][0]["activity_id"], "activity-1")
         self.assertEqual(today["checkin"]["motivation"], 9)
