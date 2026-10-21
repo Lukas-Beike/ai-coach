@@ -122,6 +122,22 @@ class RecentLogEntriesServiceTests(unittest.TestCase):
         self.assertEqual(json.loads(lines[0]), {"message": "rotated [REDACTED]"})
         self.assertEqual(json.loads(lines[1]), {"message": "current"})
 
+    def test_log_preview_redacts_only_requested_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "app.log"
+            log_path.write_text(
+                "".join(json.dumps({"message": str(i)}) + "\n" for i in range(1000)),
+                encoding="utf-8",
+            )
+            redactor = _redactor()
+            service = RecentLogEntriesService(log_path, redactor, lambda: "fixed-time")
+            with patch.object(
+                redactor, "sanitize_log_value", wraps=redactor.sanitize_log_value
+            ) as sanitize:
+                entries = service.list(2)
+            self.assertEqual(entries, [{"message": "998"}, {"message": "999"}])
+            sanitize.assert_called_once_with(entries)
+
     def test_clear_removes_rotated_logs_and_truncates_active_log(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             log_path = Path(directory) / "app.log"

@@ -151,13 +151,21 @@ class GarminPayloadService:
         self._local_today = local_today
         self._activity_rows = activity_rows
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, fields: tuple[str, ...] | None = None) -> dict[str, Any]:
         with self._database_manager.reader() as db:
-            return self.snapshot_in(db)
+            return self.snapshot_in(db, fields)
 
-    def snapshot_in(self, db: Any) -> dict[str, Any]:
-        """Read the stored Garmin snapshot inside the caller's transaction."""
-        serialized = self._key_value_repository.get(db, "garmin_snapshot")
+    def snapshot_in(
+        self, db: Any, fields: tuple[str, ...] | None = None
+    ) -> dict[str, Any]:
+        """Read the snapshot, or selected fields, inside the caller's transaction."""
+        serialized = (
+            self._key_value_repository.get(db, "garmin_snapshot")
+            if fields is None
+            else self._key_value_repository.get_json_fields(
+                db, "garmin_snapshot", fields
+            )
+        )
         try:
             value = json.loads(serialized or "{}")
         except TypeError, ValueError, RecursionError:
@@ -169,7 +177,7 @@ class GarminPayloadService:
 
     def automatic_sync_window(self, minimum_days: int) -> tuple[int, date | None]:
         """Return a bounded, contiguous refresh window for the oldest collection."""
-        snapshot = self.snapshot()
+        snapshot = self.snapshot(("source_freshness",))
         freshness = snapshot.get("source_freshness") or {}
         sources = GARMIN_WINDOW_SOURCES | (
             set(freshness) & {"daily_stats", "resting_hr", "training_status"}

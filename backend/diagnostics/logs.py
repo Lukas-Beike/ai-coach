@@ -25,8 +25,7 @@ class RecentLogEntriesService:
         self._utc_now = utc_now
 
     def list(self, limit: int = 200) -> builtins.list[dict[str, Any]]:
-        entries = self._read_entries((self._log_path,))
-        return entries[-limit:]
+        return self._read_entries((self._log_path,), limit=limit)
 
     def download(self) -> bytes:
         """Return all current and rotated logs as sanitized JSON Lines."""
@@ -54,7 +53,9 @@ class RecentLogEntriesService:
             cleared = True
         return {"ok": True, "cleared": cleared}
 
-    def _read_entries(self, paths: Sequence[Path]) -> builtins.list[dict[str, Any]]:
+    def _read_entries(
+        self, paths: Sequence[Path], *, limit: int | None = None
+    ) -> builtins.list[dict[str, Any]]:
         entries: builtins.list[dict[str, Any]] = []
         for path in paths:
             if not path.is_file():
@@ -67,7 +68,7 @@ class RecentLogEntriesService:
                         "timestamp": self._utc_now(),
                         "level": "ERROR",
                         "event": "log_read_failed",
-                        "message": self._redactor.redact_text(str(exc)),
+                        "message": str(exc),
                     }
                 )
                 continue
@@ -80,5 +81,7 @@ class RecentLogEntriesService:
                         "event": "unparsed_log",
                         "message": line,
                     }
-                entries.append(self._redactor.sanitize_log_value(entry))
-        return entries
+                entries.append(entry)
+        if limit is not None:
+            entries = entries[-limit:]
+        return self._redactor.sanitize_log_value(entries)

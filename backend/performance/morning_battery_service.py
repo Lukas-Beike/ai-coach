@@ -41,7 +41,9 @@ class MorningBatteryStore:
         self._garmin_snapshots = garmin_snapshots
 
     def current(self) -> dict[str, Any] | None:
-        value = self._read_snapshot().get("morning_body_battery")
+        value = self._read_snapshot(fields=("morning_body_battery",)).get(
+            "morning_body_battery"
+        )
         return value if isinstance(value, dict) else None
 
     def persist(
@@ -111,12 +113,19 @@ class MorningBatteryStore:
             )
             self._key_values.set(db, _GARMIN_ERROR_KEY, value)
 
-    def _read_snapshot(self, db: Any | None = None) -> dict[str, Any]:
+    def _read_snapshot(
+        self, db: Any | None = None, *, fields: tuple[str, ...] | None = None
+    ) -> dict[str, Any]:
         if db is None:
             with self._manager.reader() as owned:
-                return self._read_snapshot(owned)
+                return self._read_snapshot(owned, fields=fields)
+        serialized = (
+            self._key_values.get(db, _GARMIN_SNAPSHOT_KEY)
+            if fields is None
+            else self._key_values.get_json_fields(db, _GARMIN_SNAPSHOT_KEY, fields)
+        )
         try:
-            value = json.loads(self._key_values.get(db, _GARMIN_SNAPSHOT_KEY) or "{}")
+            value = json.loads(serialized or "{}")
         except TypeError, ValueError:
             return {}
         return value if isinstance(value, dict) else {}

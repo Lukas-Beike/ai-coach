@@ -110,6 +110,14 @@ class _FakeKeyValues:
     def get(self, db: Any, key: str) -> Any:
         return self._values.get(key)
 
+    def get_json_fields(self, db, key, fields):
+        try:
+            value = json.loads(self._values.get(key) or "{}")
+        except ValueError:
+            return None
+        value = value if isinstance(value, dict) else {}
+        return json.dumps({field: value.get(field) for field in fields})
+
 
 class _NoBattery:
     def current(self, snapshot: Any) -> None:

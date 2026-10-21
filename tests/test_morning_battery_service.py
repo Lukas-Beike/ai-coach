@@ -8,7 +8,7 @@ import threading
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from backend.performance.morning_battery_service import (
     MORNING_BATTERY_HISTORY_KEY,
@@ -107,6 +107,14 @@ class Harness:
 
     def get(self, _db: object, key: str) -> str | None:
         return self.values.get(key)
+
+    def get_json_fields(self, db, key, fields):
+        try:
+            value = json.loads(self.values.get(key) or "{}")
+        except ValueError:
+            return None
+        value = value if isinstance(value, dict) else {}
+        return json.dumps({field: value.get(field) for field in fields})
 
     def set(self, _db: object, key: str, value: str) -> None:
         self.trace.append(f"write:{key}")
@@ -215,6 +223,16 @@ def body_battery_records() -> list[dict[str, object]]:
 
 
 class MorningBodyBatteryServiceTests(unittest.TestCase):
+    def test_current_reads_only_morning_metadata(self):
+        harness = Harness(
+            snapshot={"morning_body_battery": {"status": "ready", "value": 84}}
+        )
+        store = MorningBatteryStore(harness, harness, harness)
+        with patch.object(
+            harness, "get", side_effect=AssertionError("full snapshot read")
+        ):
+            self.assertEqual(store.current(), {"status": "ready", "value": 84})
+
     def test_current_reads_persisted_or_explicit_snapshot(self) -> None:
         persisted = {"sleep_date": "2026-09-04", "status": "ready"}
         harness = Harness(snapshot={"morning_body_battery": persisted})

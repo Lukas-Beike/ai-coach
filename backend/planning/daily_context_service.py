@@ -112,7 +112,9 @@ class DailyPlanningContextService:
 
         with self._database_manager.reader() as db:
             garmin = _decode_garmin_snapshot(
-                self._key_value_repository.get(db, _GARMIN_SNAPSHOT_KEY)
+                self._key_value_repository.get_json_fields(
+                    db, _GARMIN_SNAPSHOT_KEY, ("morning_body_battery",)
+                )
             )
             morning_battery_history = decode_history(
                 self._key_value_repository.get(db, _MORNING_BATTERY_HISTORY_KEY)

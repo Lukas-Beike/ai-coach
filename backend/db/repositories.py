@@ -263,6 +263,19 @@ class KeyValueRepository:
         row = db.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
+    def get_json_fields(self, db: Any, key: str, fields: tuple[str, ...]) -> str | None:
+        """Read selected JSON fields without decoding unrelated data in Python."""
+        if not fields:
+            return "{}"
+        arguments = ", ".join("?, value -> ?" for _ in fields)
+        parameters = tuple(item for field in fields for item in (field, f"$.{field}"))
+        row = db.execute(
+            "SELECT CASE WHEN json_valid(value) THEN "
+            f"json_object({arguments}) END AS value FROM kv WHERE key = ?",
+            (*parameters, key),
+        ).fetchone()
+        return row["value"] if row else None
+
     def set(self, db: Any, key: str, value: str) -> None:
         db.execute(
             "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?) "

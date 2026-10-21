@@ -1,6 +1,6 @@
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
@@ -73,6 +73,28 @@ class SyncOperationObserverTests(unittest.TestCase):
             ["operation_started", "operation_count", "operation_completed"],
         )
         self.assertEqual(logger.records[1][2]["context"]["count"], 4)
+
+    def test_memory_counters_bracket_sync_without_payloads(self):
+        observer, _, logger = self.make_observer()
+        with (
+            patch(
+                "backend.sync.observation.process_memory",
+                side_effect=[
+                    {"rss_bytes": 100, "mapping_count": 10},
+                    {"rss_bytes": 200, "mapping_count": 20},
+                ],
+            ) as measure,
+            observer.observe("garmin", "data"),
+        ):
+            pass
+        self.assertEqual(measure.call_count, 2)
+        self.assertEqual(
+            logger.records[0][2]["context"]["process_memory"]["rss_bytes"], 100
+        )
+        self.assertEqual(
+            logger.records[-1][2]["context"]["process_memory"]["mapping_count"], 20
+        )
+        self.assertNotIn("process_memory", logger.records[1][2]["context"])
 
     def test_nested_observation_reuses_parent_correlation(self):
         observer, tracker, _ = self.make_observer()
