@@ -25,12 +25,7 @@ class DiagnosticsGetRoutes:
         self._diagnostic_report_service = diagnostic_report_service
 
     def handle(self, handler: Any, path: str) -> bool:
-        if path not in {
-            "/api/logs",
-            "/api/logs/download",
-            "/api/diagnostics",
-            "/api/diagnostics/runtime",
-        }:
+        if path not in {"/api/logs", "/api/logs/download", "/api/diagnostics"}:
             return False
 
         self._session_auth_service().require_auth(handler)
@@ -51,8 +46,6 @@ class DiagnosticsGetRoutes:
             except ValueError:
                 limit = 200
             payload = {"entries": self._recent_log_entries_service().list(limit)}
-        elif path == "/api/diagnostics/runtime":
-            payload = self._diagnostic_report_service().runtime_report()
         else:
             payload = self._diagnostic_report_service().report()
 

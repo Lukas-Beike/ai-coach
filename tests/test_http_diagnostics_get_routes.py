@@ -27,11 +27,9 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
     def test_routes_preserve_their_payloads(self) -> None:
         self.logs.list.return_value = ["recent"]
         self.report.report.return_value = {"status": "ok"}
-        self.report.runtime_report.return_value = {"runtime": {"process_memory": {}}}
         cases = (
             ("/api/logs", {"entries": ["recent"]}),
             ("/api/diagnostics", {"status": "ok"}),
-            ("/api/diagnostics/runtime", {"runtime": {"process_memory": {}}}),
         )
         for path, payload in cases:
             with self.subTest(path=path):
@@ -78,7 +76,6 @@ class DiagnosticsGetRoutesTests(unittest.TestCase):
             "/api/logs",
             "/api/logs/download",
             "/api/diagnostics",
-            "/api/diagnostics/runtime",
         ):
             with self.subTest(path=path):
                 with self.assertRaises(PermissionError) as caught:

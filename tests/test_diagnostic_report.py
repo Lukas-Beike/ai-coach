@@ -6,7 +6,7 @@ import sqlite3
 import unittest
 from contextlib import closing, contextmanager
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.diagnostics.report import (
@@ -274,22 +274,6 @@ class DiagnosticReportServiceTests(unittest.TestCase):
             )
             self.assertGreater(counts["garmin_snapshot_bytes"], len(payload))
             self.key_values.get.assert_not_called()
-
-    def test_runtime_report_does_not_load_snapshots_or_diagnostic_capture(self):
-        with patch(
-            "backend.diagnostics.report.process_memory",
-            return_value={"rss_bytes": 4096},
-        ):
-            report = self.service.runtime_report()
-        self.assertEqual(report["runtime"]["process_memory"], {"rss_bytes": 4096})
-        self.assertEqual(report["database"], {"garmin_snapshot_bytes": 4096})
-        self.assertEqual(self.manager.transactions, 1)
-        self.assertEqual(len(self.db.queries), 1)
-        self.key_values.get.assert_not_called()
-        self.sync_state.latest_snapshot.assert_not_called()
-        self.garmin_projection.public_state.assert_not_called()
-        self.capture.entries.assert_not_called()
-        self.capture.status.assert_not_called()
 
     def test_clear_delegates_to_diagnostic_capture(self):
         self.capture.clear.return_value = {"ok": True, "entries": 0}

@@ -182,10 +182,10 @@ class DatabaseManager:
             if self.password and self.configure:
                 self.configure(connection, self.password)
             connection.execute("PRAGMA foreign_keys = ON")
-            # Keep a modest decrypted-page working set per pooled connection.
-            # With cipher_memory_security enabled, larger caches also retain many
-            # locked/unlocked mappings after mixed SQLite/Python allocations.
-            connection.execute("PRAGMA cache_size = -8192")
+            # Keep a 16 MiB decrypted-page working set per pooled connection:
+            # large enough for canonical reads on long athlete histories while
+            # bounding the pool's resident cache.
+            connection.execute("PRAGMA cache_size = -16384")
             if self.row_factory is not None:
                 connection.row_factory = self.row_factory
             return connection

@@ -14,6 +14,7 @@ import traceback
 import unittest
 from collections.abc import Callable
 from datetime import date
+from typing import Any
 
 from server_test_support import ServerTestCase, server
 
@@ -105,6 +106,15 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
                 if key not in {"exported_at", "generated_at"}
             }
 
+        def without_process_measurements(payload: dict[str, Any]) -> dict[str, Any]:
+            # Live process memory counters change between any two reports.
+            runtime = {
+                key: value
+                for key, value in payload["runtime"].items()
+                if key != "process_memory"
+            }
+            return {**without_clock(payload), "runtime": runtime}
+
         return {
             "profile": lambda: server.ATHLETE_DATA.profile().get(),
             "competitions": lambda: server.PLANNING_DATA.competition().list(limit=100),
@@ -168,7 +178,7 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
             "privacy_export": lambda: without_clock(
                 server.PRIVACY_ASSEMBLY.data_export_service().export()
             ),
-            "diagnostic_report": lambda: without_clock(
+            "diagnostic_report": lambda: without_process_measurements(
                 server.DIAGNOSTICS_ASSEMBLY.report_service().report()
             ),
             "coach_history_diagnostics": lambda: (

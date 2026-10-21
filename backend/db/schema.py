@@ -1198,7 +1198,12 @@ def _create_schema_statements(db: Any) -> None:
 def configure_cipher(db: Any, password: str) -> None:
     db.execute(f"PRAGMA key='{password.replace(chr(39), chr(39) * 2)}'")
     db.execute("PRAGMA cipher_compatibility = 4")
-    db.execute("PRAGMA cipher_memory_security = ON")
+    # The database file stays encrypted. Memory security would mlock every
+    # SQLCipher allocation; interleaved locked and unlocked heap ranges split
+    # the process into tens of thousands of mappings until mmap fails near the
+    # kernel's vm.max_map_count. Anyone able to read process memory or swap on
+    # this host can also read APP_PASSWORD, so it adds little protection here.
+    db.execute("PRAGMA cipher_memory_security = OFF")
 
 
 def database_table_names(db: Any) -> set[str]:

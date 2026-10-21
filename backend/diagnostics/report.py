@@ -113,19 +113,6 @@ class DiagnosticReportService:
             "FROM kv WHERE key = 'garmin_snapshot'"
         ).fetchone()["count"]
 
-    def runtime_report(self) -> dict[str, Any]:
-        """Measure memory and stored bytes without provider projections or capture."""
-        deps = self._deps
-        memory = process_memory()
-        with deps.database_manager.read_snapshot() as db:
-            snapshot_bytes = self._garmin_snapshot_bytes(db)
-        return {
-            "generated_at": deps.utc_now(),
-            "app": {"name": deps.app_name, "version": deps.app_version},
-            "runtime": {"process_memory": memory},
-            "database": {"garmin_snapshot_bytes": snapshot_bytes},
-        }
-
     def clear(self) -> dict[str, Any]:
         """Clear the captured technical diagnostic entries."""
         return self._deps.diagnostic_capture.clear()

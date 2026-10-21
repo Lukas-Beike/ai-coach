@@ -15,6 +15,7 @@ from backend.nutrition.contracts import nutrition_approval_item
 from backend.nutrition.models import validate_iso_date
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import (
+    DAILY_ENERGY_SNAPSHOT_FIELDS,
     daily_energy_expenditure,
     read_daily_health_by_date,
 )
@@ -46,7 +47,9 @@ class NutritionSyncStatusService:
             summary = self._nutrition_repository.day_summary(db, validated_date)
             # The snapshot only carries the resting calories (no metric kind) and
             # the daily-stats sync status.
-            serialized_garmin = self._key_value_repository.get(db, "garmin_snapshot")
+            serialized_garmin = self._key_value_repository.get_json_fields(
+                db, "garmin_snapshot", DAILY_ENERGY_SNAPSHOT_FIELDS
+            )
             measured = self._measured_energy(db, validated_date, validated_date)
         try:
             garmin_snapshot = json.loads(serialized_garmin or "{}")
@@ -97,7 +100,9 @@ class NutritionSyncStatusService:
             summaries = [
                 self._nutrition_repository.day_summary(db, day) for day in dates
             ]
-            serialized = self._key_value_repository.get(db, "garmin_snapshot")
+            serialized = self._key_value_repository.get_json_fields(
+                db, "garmin_snapshot", DAILY_ENERGY_SNAPSHOT_FIELDS
+            )
             measured = self._measured_energy(db, dates[0], dates[-1])
         try:
             snapshot = json.loads(serialized or "{}")

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import faulthandler
 import json
 import logging
 import os
 import signal
 import sqlite3
+import sys
 import threading
 import time
 import uuid
@@ -2210,6 +2212,10 @@ def main() -> None:
     daily_thread: threading.Thread | None = None
     # `docker stop` sends SIGTERM; shut down like Ctrl+C so pending work is written.
     signal.signal(signal.SIGTERM, signal.default_int_handler)
+    # `docker kill -s USR1` writes every thread's stack (code locations only, no
+    # values) to stderr, so a stalled server can be diagnosed before a restart.
+    if sys.platform != "win32":
+        faulthandler.register(signal.SIGUSR1, all_threads=True)
     try:
         SYNC_JOB_QUEUE.service().resume_interrupted()
         COACH_BACKGROUND_JOBS.job_store().resume_interrupted(
