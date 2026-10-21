@@ -5,7 +5,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
@@ -37,6 +37,18 @@ class GarminPayloadServiceTests(unittest.TestCase):
             },
             **{source: [] for source in sources},
         }
+
+    def test_automatic_window_fetches_only_coverage_metadata(self):
+        seed = self.service.prepare_remote(
+            self.collection_payload("2026-06-29", "2026-09-20")
+        )
+        seed["large_unrelated_data"] = "synthetic-unused" * 100000
+        self.store_garmin_snapshot(seed)
+        repository = self.service._key_value_repository
+        with patch.object(
+            repository, "get", side_effect=AssertionError("full snapshot read")
+        ):
+            self.assertEqual(self.service.automatic_sync_days(2), 2)
 
     def test_initial_recent_import_then_regular_two_day_refresh(self):
         self.assertEqual(self.service.automatic_sync_days(2), 84)
