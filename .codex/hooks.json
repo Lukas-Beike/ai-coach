@@ -11,6 +11,19 @@
         ],
         "matcher": "*"
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$(git rev-parse --show-toplevel)/scripts/graphify-session-start.sh\"",
+            "commandWindows": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path (git rev-parse --show-toplevel) 'scripts/graphify-session-start.ps1')\"",
+            "timeout": 240
+          }
+        ]
+      }
     ]
   }
 }
