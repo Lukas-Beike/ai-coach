@@ -198,7 +198,7 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.fixture = RecordingFixtureLoader()
         self.nutrition = MockNutritionSync()
         self.details = Mock()
-        self.details.prefetch_recent.return_value = {"fetched": 2, "failed": 0}
+        self.details.prefetch_new.return_value = {"fetched": 2, "failed": 0}
         self.executor = self.make_executor()
 
     def make_executor(self) -> SyncJobExecutor:
@@ -687,16 +687,16 @@ class SyncJobExecutorTests(unittest.TestCase):
                 self.assertEqual(self.gate.active, 1)
             return {"fetched": 2, "failed": 0}
 
-        self.details.prefetch_recent.side_effect = prefetch
+        self.details.prefetch_new.side_effect = prefetch
 
         result = self.executor.execute(self.job("intervals"))
 
-        self.details.prefetch_recent.assert_called_once()
+        self.details.prefetch_new.assert_called_once()
         self.assertEqual(result["detail_prefetch"], {"fetched": 2, "failed": 0})
         self.assertEqual(result["competitions"], {"status": "ok", "count": 2})
 
     def test_prefetch_error_keeps_refresh_and_competitions(self) -> None:
-        self.details.prefetch_recent.side_effect = RuntimeError("fake prefetch failure")
+        self.details.prefetch_new.side_effect = RuntimeError("fake prefetch failure")
 
         result = self.executor.execute(self.job("intervals"))
 
@@ -713,7 +713,7 @@ class SyncJobExecutorTests(unittest.TestCase):
             )
         )
 
-        self.details.prefetch_recent.assert_not_called()
+        self.details.prefetch_new.assert_not_called()
 
     def test_run_survives_failure_while_recording_failure(self) -> None:
         self.intervals.error = RuntimeError("provider failure")

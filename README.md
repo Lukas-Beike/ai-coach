@@ -1009,9 +1009,14 @@ Charts preserve provider provenance and observation dates. Garmin performance me
 ### Aktivitätsdetails
 
 Unter **Geplant → Übersicht** öffnet „Aktivität analysieren“ eine absolvierte
-Einheit mit ihren lokal gespeicherten Messreihen und Intervallen. Die Details
-der zehn neuesten Aktivitäten lädt jede Intervals.icu-Aktualisierung automatisch
-und nur lesend nach; bleiben die Daten einer Einheit dabei aus, steht sie
+Einheit mit ihren lokal gespeicherten Messreihen und Intervallen. Jede
+Intervals.icu-Aktualisierung lädt die Details aller neuen Aktivitäten
+automatisch und nur lesend nach und speichert sie dauerhaft im kanonischen
+Datenmodell. Als neu gilt jede Einheit ab der ältesten der zehn neuesten
+Aktivitäten beim ersten automatischen Laden; ältere Einheiten werden nicht
+automatisch nachgeladen. Pro Aktualisierung lädt die App höchstens 25 Einheiten,
+die neuesten zuerst; übrige folgen bei der nächsten Aktualisierung. Bleiben die
+Daten einer Einheit dabei aus, steht sie
 trotzdem in der Liste und nennt den Grund, ohne bis zur nächsten Änderung
 ihrer Zusammenfassung erneut automatisch geladen zu werden; für ältere Einheiten startet „Detaildaten
 laden“ ausdrücklich einen Hintergrundjob mit ausschließlich lesenden
