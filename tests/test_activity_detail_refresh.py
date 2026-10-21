@@ -218,33 +218,33 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
             if not call.args[0].endswith("/streams.json")
         ]
 
-    def test_loads_only_the_ten_newest_activities_once(self):
-        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_recent())
+    def test_first_run_loads_the_ten_newest_activities_once(self):
+        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_new())
         self.assertEqual(
             [f"a{day:02d}" for day in range(12, 2, -1)], self.fetched_ids()
         )
         self.assertIsNone(self.store.get("a02"))
         self.api.get.reset_mock()
-        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
         self.api.get.assert_not_called()
 
     def test_records_from_an_older_projection_are_loaded_again(self):
-        self.service().prefetch_recent()
+        self.service().prefetch_new()
         with self.manager.unit_of_work() as db:
             for row in self.rows[2:]:
                 record = self.store.get(row["id"])
                 record.pop("projection_version")
                 self.store.save_in(db, row["id"], record)
         self.api.get.reset_mock()
-        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_new())
         self.api.get.reset_mock()
-        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
 
     def test_changed_summary_is_loaded_again(self):
-        self.service().prefetch_recent()
+        self.service().prefetch_new()
         self.rows[-1] = {**self.rows[-1], "name": "Renamed in Intervals.icu"}
         self.api.get.reset_mock()
-        self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_new())
         self.assertEqual(["a12"], self.fetched_ids())
 
     def test_activity_specific_failure_skips_only_that_activity(self):
@@ -255,7 +255,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
 
         self.api.get.side_effect = failing
         with self.assertLogs("backend.sync.activity_details", "WARNING") as logs:
-            result = self.service().prefetch_recent()
+            result = self.service().prefetch_new()
         self.assertEqual({"fetched": 9, "failed": 1}, result)
         self.assertEqual(
             [f"a{day:02d}" for day in range(12, 2, -1)], self.fetched_ids()
@@ -275,7 +275,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.test_activity_specific_failure_skips_only_that_activity()
         self.api.get.side_effect = self.provider
         self.api.get.reset_mock()
-        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
         self.api.get.assert_not_called()
 
         self.service().refresh("a11")
@@ -287,13 +287,13 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.api.get.side_effect = self.provider
         self.api.get.reset_mock()
         self.rows[-2] = {**self.rows[-2], "name": "Renamed in Intervals.icu"}
-        self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_new())
         self.assertEqual(["a11"], self.fetched_ids())
         self.assertEqual({}, self.store.failures(["a11"]))
 
     def test_summary_reverted_to_stored_details_clears_the_failure(self):
         self.api.get.side_effect = self.provider
-        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_new())
         original = self.rows[-2]
         self.rows[-2] = {**original, "name": "Renamed in Intervals.icu"}
 
@@ -304,11 +304,11 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
 
         self.api.get.side_effect = failing
         with self.assertLogs("backend.sync.activity_details", "WARNING"):
-            self.service().prefetch_recent()
+            self.service().prefetch_new()
         self.assertIn("a11", self.store.failures(["a11"]))
         self.rows[-2] = original
         self.api.get.reset_mock()
-        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_recent())
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
         self.api.get.assert_not_called()
         self.assertEqual({}, self.store.failures(["a11"]))
 
@@ -324,7 +324,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
 
         self.api.get.side_effect = failing
         with self.assertLogs("backend.sync.activity_details", "WARNING"):
-            return self.service().prefetch_recent()
+            return self.service().prefetch_new()
 
     def test_missing_remote_activity_is_skipped(self):
         error = ProviderErrorClassifier.classify_upstream(
@@ -364,7 +364,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
 
         self.api.get.side_effect = failing
         with self.assertLogs("backend.sync.activity_details", "WARNING") as logs:
-            result = self.service().prefetch_recent()
+            result = self.service().prefetch_new()
         self.assertEqual({"fetched": 1, "failed": 1}, result)
         self.assertEqual(["a12", "a11"], self.fetched_ids())
         self.assertNotIn("Synthetic rate limit", "\n".join(logs.output))
@@ -379,15 +379,56 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
             events.append("exit")
 
         self.rows = self.rows[:2]
-        self.service().prefetch_recent(guard)
+        self.service().prefetch_new(guard)
         self.assertEqual(["enter", "exit", "enter", "exit"], events)
 
     def test_unconfigured_provider_is_not_called(self):
         self.assertEqual(
             {"fetched": 0, "failed": 0},
-            self.service(configured=False).prefetch_recent(),
+            self.service(configured=False).prefetch_new(),
         )
         self.api.get.assert_not_called()
+
+    def test_every_new_activity_loads_while_older_ones_stay_unloaded(self):
+        self.service().prefetch_new()
+        self.assertEqual("2026-10-03T08:00:00", self.store.prefetch_floor())
+        self.rows += [
+            {"id": f"n{index:02d}", "start_date_local": f"2026-11-{index:02d}T08:00:00"}
+            for index in range(1, 31)
+        ]
+        self.api.get.reset_mock()
+        # More new activities than one run loads: the rest follow on the next refresh.
+        self.assertEqual({"fetched": 25, "failed": 0}, self.service().prefetch_new())
+        self.assertEqual(
+            [f"n{index:02d}" for index in range(30, 5, -1)], self.fetched_ids()
+        )
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 5, "failed": 0}, self.service().prefetch_new())
+        self.assertEqual(
+            [f"n{index:02d}" for index in range(5, 0, -1)], self.fetched_ids()
+        )
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
+        self.api.get.assert_not_called()
+        self.assertIsNone(self.store.get("a01"))
+        self.assertIsNone(self.store.get("a02"))
+
+    def test_floor_is_kept_once_set(self):
+        self.service().prefetch_new()
+        self.rows = self.rows[-1:]
+        self.service().prefetch_new()
+        self.assertEqual("2026-10-03T08:00:00", self.store.prefetch_floor())
+
+    def test_floor_without_local_activities_starts_today(self):
+        self.rows = []
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
+        self.assertEqual("2026-10-18", self.store.prefetch_floor())
+        self.rows = [
+            {"id": "old", "start_date_local": "2026-10-17T08:00:00"},
+            {"id": "new", "start_date_local": "2026-10-18T07:00:00"},
+        ]
+        self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_new())
+        self.assertEqual(["new"], self.fetched_ids())
 
 
 class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
@@ -433,6 +474,13 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
         result = self.service(CanonicalDetailWriter()).refresh("9001")
         self.assertEqual("completed", result["status"])
         self.assertIsNotNone(self.store.get("9001"))
+        self.assertGreater(self.canonical_rows(), 0)
+
+    def test_prefetch_stores_new_activity_in_the_canonical_tables(self):
+        self.assertEqual(
+            {"fetched": 1, "failed": 0},
+            self.service(CanonicalDetailWriter()).prefetch_new(),
+        )
         self.assertGreater(self.canonical_rows(), 0)
 
     def test_failed_canonical_write_leaves_neither_record_nor_rows(self):

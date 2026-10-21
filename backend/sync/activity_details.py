@@ -1,7 +1,7 @@
 """Read-only loading of full-resolution Intervals activity data.
 
-The newest activities are prefetched after each Intervals refresh; older ones
-load on the athlete's explicit request.
+Every activity from the prefetch floor onward loads after an Intervals refresh;
+activities before the floor load on the athlete's explicit request.
 """
 
 from __future__ import annotations
@@ -44,8 +44,11 @@ from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 
 _LOGGER = logging.getLogger(__name__)
 
-# The analysis tab opens these without a click; older activities load on request.
-PREFETCH_RECENT_ACTIVITIES = 10
+# The first prefetch sets its floor at the oldest of this many newest activities;
+# every later activity loads automatically, older ones only on request.
+INITIAL_PREFETCH_ACTIVITIES = 10
+# Provider loads per refresh; the rest stay pending and load on the next refresh.
+MAX_PREFETCH_PER_RUN = 25
 MAX_DETAIL_BYTES = 24 * 1024 * 1024
 ACTIVITY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
 
@@ -188,35 +191,46 @@ class ActivityDetailRefreshService:
                 )
         return {"status": "completed", "activity_id": activity_id}
 
-    def prefetch_recent(
+    def prefetch_new(
         self,
         guard: Callable[[], AbstractContextManager[Any]] = nullcontext,
-        limit: int = PREFETCH_RECENT_ACTIVITIES,
+        limit: int = MAX_PREFETCH_PER_RUN,
     ) -> dict[str, int]:
-        """Load missing or outdated details of the newest local activities.
+        """Load missing or outdated details of every activity since the floor.
 
-        ``guard`` wraps each provider refresh, so a full resync waits for one
-        activity rather than the whole run. Invalid or missing data of one
-        activity is recorded and not retried until its summary changes or the
-        athlete reloads it; a rate limit, outage or authentication failure ends
-        the run, so it is not retried per activity and the next refresh tries
-        again.
+        The floor is stored once, so new activities always load in full while
+        older ones are never loaded automatically. Newest first, at most
+        ``limit`` provider loads per run; pending activities stay above the
+        floor and load on the next refresh. ``guard`` wraps each provider
+        refresh, so a full resync waits for one activity rather than the whole
+        run. Invalid or missing data of one activity is recorded and not
+        retried until its summary changes or the athlete reloads it; a rate
+        limit, outage or authentication failure ends the run, so it is not
+        retried per activity and the next refresh tries again.
         """
         if not self._configured:
             return {"fetched": 0, "failed": 0}
         with self._database_manager.unit_of_work() as db:
             rows = self._row_reader.activity_rows(db)
-        recent = sorted(
+        newest = sorted(
             (row for row in rows if row.get("id")),
             key=lambda row: str(row.get("start_date_local") or ""),
             reverse=True,
-        )[:limit]
+        )
+        floor = self._prefetch_floor(newest)
+        candidates = [
+            row for row in newest if str(row.get("start_date_local") or "") >= floor
+        ]
+        ids = [str(row["id"]) for row in candidates]
+        stored = self._store.fingerprints(ids)
+        known_failures = self._store.failures(ids)
         fetched = failed = 0
-        known_failures = self._store.failures(str(row["id"]) for row in recent)
-        for row in recent:
+        for row in candidates:
+            if fetched + failed >= limit:
+                break
             activity_id = str(row["id"])
             fingerprint = summary_fingerprint(row)
-            if self._prefetch_settled(activity_id, fingerprint, known_failures):
+            if self._prefetch_settled(activity_id, fingerprint, stored, known_failures):
                 continue
             try:
                 with guard():
@@ -243,14 +257,30 @@ class ActivityDetailRefreshService:
             fetched += 1
         return {"fetched": fetched, "failed": failed}
 
+    def _prefetch_floor(self, newest: list[dict[str, Any]]) -> str:
+        """Return the stored floor, setting it on the first prefetch."""
+        floor = self._store.prefetch_floor()
+        if floor is not None:
+            return floor
+        initial = newest[:INITIAL_PREFETCH_ACTIVITIES]
+        # Without local activities everything synced from today on is new.
+        floor = (
+            str(initial[-1].get("start_date_local") or "")
+            if initial
+            else self._utc_now()[:10]
+        )
+        self._store.save_prefetch_floor(floor, self._utc_now())
+        return self._store.prefetch_floor() or floor
+
     def _prefetch_settled(
         self,
         activity_id: str,
         fingerprint: str,
+        stored_fingerprints: dict[str, dict[str, Any]],
         known_failures: dict[str, dict[str, Any]],
     ) -> bool:
         """Whether details match the summary or already failed for it."""
-        stored = self._store.get(activity_id)
+        stored = stored_fingerprints.get(activity_id)
         failure = known_failures.get(activity_id)
         if (
             stored
