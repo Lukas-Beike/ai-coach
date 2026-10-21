@@ -23,7 +23,7 @@ class DatabaseManagerTests(unittest.TestCase):
             self.addCleanup(manager.close)
             with manager.unit_of_work() as writer:
                 self.assertEqual(
-                    writer.execute("PRAGMA cache_size").fetchone()[0], -32768
+                    writer.execute("PRAGMA cache_size").fetchone()[0], -8192
                 )
             with manager.reader() as first:
 
@@ -34,10 +34,10 @@ class DatabaseManagerTests(unittest.TestCase):
 
                 with ThreadPoolExecutor(max_workers=1) as pool:
                     self.assertEqual(
-                        pool.submit(check_other_reader).result(timeout=5), -32768
+                        pool.submit(check_other_reader).result(timeout=5), -8192
                     )
                 self.assertEqual(
-                    first.execute("PRAGMA cache_size").fetchone()[0], -32768
+                    first.execute("PRAGMA cache_size").fetchone()[0], -8192
                 )
             manager.close()
 

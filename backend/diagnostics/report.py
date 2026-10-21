@@ -31,6 +31,7 @@ from backend.observability import DiagnosticCapture, Redactor
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
 from backend.providers.state import ProviderStateService
+from backend.runtime.memory import process_memory
 from backend.runtime.ports import (
     ActivityRowReader,
     ObservationReader,
@@ -97,9 +98,32 @@ class DiagnosticReportService:
             "activity_feedback": "SELECT COUNT(*) AS count FROM activity_feedback",
             "change_history": "SELECT COUNT(*) AS count FROM change_history",
         }
-        return {
+        counts = {
             name: db.execute(query).fetchone()["count"]
             for name, query in queries.items()
+        }
+        counts["garmin_snapshot_bytes"] = self._garmin_snapshot_bytes(db)
+        return counts
+
+    @staticmethod
+    def _garmin_snapshot_bytes(db: Any) -> int:
+        # octet_length uses stored byte lengths without fetching the JSON payload.
+        return db.execute(
+            "SELECT COALESCE(SUM(octet_length(value)), 0) AS count "
+            "FROM kv WHERE key = 'garmin_snapshot'"
+        ).fetchone()["count"]
+
+    def runtime_report(self) -> dict[str, Any]:
+        """Measure memory and stored bytes without provider projections or capture."""
+        deps = self._deps
+        memory = process_memory()
+        with deps.database_manager.read_snapshot() as db:
+            snapshot_bytes = self._garmin_snapshot_bytes(db)
+        return {
+            "generated_at": deps.utc_now(),
+            "app": {"name": deps.app_name, "version": deps.app_version},
+            "runtime": {"process_memory": memory},
+            "database": {"garmin_snapshot_bytes": snapshot_bytes},
         }
 
     def clear(self) -> dict[str, Any]:
@@ -121,6 +145,7 @@ class DiagnosticReportService:
                 "runtime": {
                     "python": platform.python_version(),
                     "platform": platform.platform(),
+                    "process_memory": process_memory(),
                 },
                 "configuration": {
                     "openai_configured": bool(deps.config.openai_api_key),

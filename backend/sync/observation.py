@@ -15,6 +15,7 @@ from typing import Any
 
 from backend.errors import AppError
 from backend.runtime.maintenance import MaintenanceGate
+from backend.runtime.memory import process_memory
 from backend.sync.refresh import ProviderRefreshTracker
 
 OPERATION_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar(
@@ -76,7 +77,7 @@ def operation_result_count(result: Any) -> int | None:
 
 
 def refresh_status(result: Any) -> str:
-    status = result.get("status") if isinstance(result, dict) else None
+    status: Any = result.get("status") if isinstance(result, dict) else None
     return {
         "not_configured": "skipped",
         "stale": "error",
@@ -106,6 +107,8 @@ def log_operation_event(
         "phase": phase,
         "duration_ms": round((monotonic() - started) * 1000, 1),
     }
+    if event in {"operation_started", "operation_completed", "operation_failed"}:
+        context["process_memory"] = process_memory()
     if count is not None:
         context["count"] = count
     if error_code:
