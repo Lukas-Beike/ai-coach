@@ -41,6 +41,124 @@ class NutritionCompositionTests(unittest.TestCase):
         self.manager.close()
         self.temp_dir.cleanup()
 
+    def test_sugar_and_salt_follow_consumption_snapshots_and_unknowns(self):
+        product = self.library.save_product(
+            {
+                "name": "Synthetic food",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 200,
+                "carbs_g": 30,
+                "protein_g": 10,
+                "fat_g": 5,
+                "sugar_g": 12,
+                "salt_g": 1.2,
+            }
+        )
+        entry = self.service.log_product(product["id"], 50, "g")
+        day = entry["meal_date"]
+        summary = self.service.get_day_summary(day)
+        self.assertEqual(summary["total_sugar_g"], 6)
+        self.assertEqual(summary["total_salt_g"], 0.6)
+        self.library.update_product(product["id"], {"sugar_g": 20, "salt_g": 2})
+        self._make_service()
+        self.assertEqual(self.service.get_day_summary(day)["total_sugar_g"], 6)
+        self.service.log_meal({"description": "Unknown nutrients", "kcal": 100})
+        summary = self.service.get_day_summary(day)
+        self.assertIsNone(summary["total_sugar_g"])
+        self.assertIsNone(summary["total_salt_g"])
+        self.assertEqual(summary["known_intake_totals"], {"sugar_g": 6, "salt_g": 0.6})
+        empty = self.service.get_day_summary("2026-09-23")
+        self.assertIsNone(empty["total_sugar_g"])
+
+    def test_database_intake_uses_frozen_ingredients_and_partial_components(self):
+        self.library.food_database.resolve = Mock(
+            return_value={
+                "id": "synthetic:food",
+                "name": "Synthetic food",
+                "basis_unit": "g",
+                "per_100": {
+                    "kcal": 200,
+                    "carbs_g": 30,
+                    "protein_g": 10,
+                    "fat_g": 5,
+                    "sugar_g": 8,
+                    "salt_g": 1,
+                },
+            }
+        )
+        self.service.log_meal(
+            {
+                "description": "Database meal",
+                "food_ingredients": [
+                    {"food_id": "synthetic:food", "amount": 50, "unit": "g"},
+                ],
+            }
+        )
+        self.service.log_meal(
+            {
+                "description": "Mixed meal",
+                "components": [
+                    {
+                        "kind": "database",
+                        "food_id": "synthetic:food",
+                        "amount": 25,
+                        "unit": "g",
+                    },
+                    {
+                        "kind": "manual",
+                        "name": "Unknown",
+                        "amount": 10,
+                        "unit": "g",
+                        "kcal": 20,
+                        "carbs_g": 1,
+                        "protein_g": 1,
+                        "fat_g": 1,
+                    },
+                ],
+            }
+        )
+        summary = self.service.get_day_summary("2026-09-24")
+        self.assertIsNone(summary["total_sugar_g"])
+        self.assertIsNone(summary["total_salt_g"])
+        self.assertEqual(summary["known_intake_totals"], {"sugar_g": 6, "salt_g": 0.8})
+
+    def test_composite_salt_sugar_scale_with_template_portions_and_week_coverage(self):
+        product = self.library.save_product(
+            {
+                "name": "Synthetic food",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 200,
+                "carbs_g": 30,
+                "protein_g": 10,
+                "fat_g": 5,
+                "sugar_g": 0,
+                "salt_g": 2,
+            }
+        )
+        template = self.library.save_template(
+            {
+                "name": "Synthetic meal",
+                "description": "Food",
+                "components": [
+                    {
+                        "kind": "local_product",
+                        "product_id": product["id"],
+                        "amount": 50,
+                        "unit": "g",
+                    }
+                ],
+            }
+        )
+        self.service.log_template(template["id"], 0.5, meal_date="2026-09-23")
+        summary = self.service.get_day_summary("2026-09-23")
+        self.assertEqual(summary["total_sugar_g"], 0)
+        self.assertEqual(summary["total_salt_g"], 0.5)
+        week = self.service.get_week_summary(14)
+        self.assertEqual(week["averages"]["sugar_g"], {"value": 0, "days": 1})
+        self.assertEqual(week["averages"]["salt_g"], {"value": 0.5, "days": 1})
+
     def test_composite_components_resolve_and_freeze_mixed_sources(self):
         product = self.library.save_product(
             {
