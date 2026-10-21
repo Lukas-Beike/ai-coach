@@ -150,7 +150,11 @@ class PrivacyDataExportServiceTests(unittest.TestCase):
             exported = service.export()
 
         self.assertEqual(manager.entries, 3)
-        self.assertEqual(len(db.queries), 7)
+        self.assertEqual(len(db.queries), 8)
+        self.assertEqual(exported["food_database_entries"], [])
+        self.assertTrue(
+            any("FROM food_database_entries" in query for query in db.queries)
+        )
         self.assertEqual(exported["nutrition_templates"][0]["id"], "template-1")
         self.assertTrue(
             any("FROM nutrition_templates" in query for query in db.queries)

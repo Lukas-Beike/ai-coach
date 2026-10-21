@@ -14,6 +14,7 @@ from backend.db.repositories import (
 )
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.food_database import FoodDatabaseService
+from backend.nutrition.food_mirror import FoodDatabaseMirror
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.photo import NutritionPhotoExtractionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
@@ -57,13 +58,19 @@ class NutritionAssembly:
         self._utc_now = dependencies.runtime.utc_now
         self._local_now = dependencies.runtime.local_now
         self._intervals_request = dependencies.runtime.intervals_request
-        self._food_database = FoodDatabaseService()
+        self._food_mirror = FoodDatabaseMirror(
+            self._database_manager, self._database_lock, self._utc_now
+        )
+        self._food_database = FoodDatabaseService(mirror=self._food_mirror)
         self._product_repository = NutritionProductRepository()
         self._template_repository = NutritionTemplateRepository()
         self._runtime_photo_extractor = dependencies.runtime.photo_extractor
 
     def food_database(self) -> FoodDatabaseService:
         return self._food_database
+
+    def food_mirror(self) -> FoodDatabaseMirror:
+        return self._food_mirror
 
     def meal_library_service(self) -> NutritionMealLibraryService:
         return NutritionMealLibraryService(

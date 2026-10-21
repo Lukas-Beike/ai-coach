@@ -469,6 +469,15 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "created_at",
         "updated_at",
     },
+    "food_database_entries": {
+        "food_id",
+        "barcode",
+        "name",
+        "brand",
+        "payload",
+        "fetched_at",
+        "updated_at",
+    },
 }
 
 CURRENT_DATABASE_INDEXES = {
@@ -480,6 +489,7 @@ CURRENT_DATABASE_INDEXES = {
     "idx_change_history_created_at",
     "idx_change_history_entity",
     "idx_coach_plan_artifacts_conversation",
+    "idx_food_database_entries_name",
     "idx_nutrition_logs_date",
     "idx_nutrition_products_name",
     "idx_nutrition_products_status",
@@ -497,7 +507,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -826,6 +836,22 @@ ACTIVITY_DETAIL_DDL = f"""
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );
+"""
+
+
+# Local mirror of external food database hits (schema version 11). The payload
+# is the projected, validated food record; name and brand are searchable copies.
+FOOD_DATABASE_DDL = """
+    CREATE TABLE food_database_entries (
+        food_id TEXT PRIMARY KEY CHECK (food_id GLOB 'off:*'),
+        barcode TEXT NOT NULL,
+        name TEXT NOT NULL,
+        brand TEXT NOT NULL DEFAULT '',
+        payload TEXT NOT NULL CHECK (json_valid(payload) AND json_type(payload) = 'object'),
+        fetched_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_food_database_entries_name ON food_database_entries(name COLLATE NOCASE);
 """
 
 
@@ -1165,6 +1191,7 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, PROVIDER_TABLES_DDL)
     execute_ddl(db, REMOTE_LINKS_DDL)
     execute_ddl(db, ACTIVITY_DETAIL_DDL)
+    execute_ddl(db, FOOD_DATABASE_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

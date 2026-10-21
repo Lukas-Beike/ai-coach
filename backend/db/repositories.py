@@ -178,6 +178,81 @@ class NutritionProductRepository:
         )
 
 
+class FoodDatabaseEntryRepository:
+    """Persist projected external food records as a searchable local mirror."""
+
+    _SELECT = "SELECT payload, fetched_at FROM food_database_entries"
+
+    @staticmethod
+    def _entry(row: Any) -> dict[str, Any]:
+        return {**json.loads(row["payload"]), "fetched_at": row["fetched_at"]}
+
+    def get(self, db: Any, food_id: str) -> dict[str, Any] | None:
+        row = db.execute(self._SELECT + " WHERE food_id=?", (food_id,)).fetchone()
+        return self._entry(row) if row else None
+
+    def search(
+        self, db: Any, query: str, *, limit: int = 8, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """Return entries whose name or brand contains every word of the query.
+
+        An empty query lists everything, newest first. A query without any
+        usable word matches nothing rather than a broader set.
+        """
+        terms = [
+            term
+            for word in query.split()
+            if len(term := word.strip(",.()/-!?:;+&")) >= 2
+        ][:20]
+        if query.strip() and not terms:
+            return []
+        clauses = []
+        params: list[Any] = []
+        for term in terms:
+            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            clauses.append(
+                "(name LIKE ? ESCAPE '\\' COLLATE NOCASE "
+                "OR brand LIKE ? ESCAPE '\\' COLLATE NOCASE)"
+            )
+            params.extend((f"%{escaped}%", f"%{escaped}%"))
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = db.execute(
+            self._SELECT
+            + where
+            + " ORDER BY fetched_at DESC, food_id LIMIT ? OFFSET ?",
+            (*params, max(1, min(int(limit), 100)), max(0, int(offset))),
+        ).fetchall()
+        return [self._entry(row) for row in rows]
+
+    def upsert(self, db: Any, food: dict[str, Any], now: str) -> None:
+        payload = {key: value for key, value in food.items() if key != "fetched_at"}
+        db.execute(
+            "INSERT INTO food_database_entries("
+            "food_id, barcode, name, brand, payload, fetched_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(food_id) DO UPDATE SET "
+            "barcode=excluded.barcode, name=excluded.name, brand=excluded.brand, "
+            "payload=excluded.payload, fetched_at=excluded.fetched_at, "
+            "updated_at=excluded.updated_at",
+            (
+                payload["id"],
+                str(payload["id"]).removeprefix("off:"),
+                payload["name"],
+                payload.get("brands") or "",
+                json.dumps(payload, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+
+    def delete(self, db: Any, food_id: str) -> bool:
+        return (
+            db.execute(
+                "DELETE FROM food_database_entries WHERE food_id=?", (food_id,)
+            ).rowcount
+            > 0
+        )
+
+
 class KeyValueRepository:
     """Read and write the application's durable key/value settings."""
 

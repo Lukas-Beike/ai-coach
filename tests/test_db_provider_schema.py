@@ -135,7 +135,7 @@ class ProviderSchemaTests(unittest.TestCase):
         self.assertEqual(
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
-        self.assertEqual(CURRENT_SCHEMA_VERSION, 10)
+        self.assertEqual(CURRENT_SCHEMA_VERSION, 11)
         self.assertTrue(database_schema_is_current(db))
         for table in PROVIDER_TABLES:
             with self.subTest(table=table):
@@ -189,7 +189,10 @@ class ProviderSchemaTests(unittest.TestCase):
         self.assertEqual(
             lists,
             {
-                ("detail_kind", frozenset(member.value for member in ActivityDetailKind)),
+                (
+                    "detail_kind",
+                    frozenset(member.value for member in ActivityDetailKind),
+                ),
                 ("origin", frozenset(member.value for member in ActivityDetailOrigin)),
                 ("detail_kind", frozenset(member.value for member in zone_kinds)),
             },

@@ -20,20 +20,28 @@ function harness(apiImpl) {
     "#nutritionBarcodeDialog": { close() {} },
   };
   const rendered = [];
+  const databaseLoads = [];
   const context = vm.createContext({
     state: { sessionGeneration: 1 },
     document: { querySelector: (selector) => elements[selector] || null },
     api: apiImpl,
     renderNutritionProducts: (products) => rendered.push(products),
     saveNutritionProduct: async () => {},
+    loadNutritionDatabase: async (query) => { databaseLoads.push(query); },
     normalizeNutritionProduct: (product) => product,
   });
   vm.runInContext(
     `let nutritionProductLoadSequence = 0;\nlet nutritionLookupResultShown = false;\n${slice("function isCurrentNutritionProductLoad", "async function saveNutritionProduct")}\n${slice("async function lookupNutritionProduct", "function stopNutritionBarcode")}`,
     context,
   );
-  return { context, elements, rendered };
+  return { context, elements, rendered, databaseLoads };
 }
+
+test("a product search also lists the stored database entries for the same query", async () => {
+  const { context, databaseLoads } = harness(async () => ({ products: [] }));
+  await context.loadNutritionProducts("hafer");
+  assert.deepEqual(databaseLoads, ["hafer"]);
+});
 
 const LOCAL_LOOKUP = { ok: true, source: "manual", local: true, product: { id: "p1", name: "Haferdrink" } };
 

@@ -82,6 +82,13 @@ class NutritionMealLibraryService:
             query=query, barcode=barcode, include_archived=include_archived
         )
 
+    def list_database_foods(self, query: str | None = None) -> list[dict[str, Any]]:
+        return self.food_database.stored_foods(query)
+
+    def forget_database_food(self, food_id: str) -> dict[str, Any]:
+        self.food_database.forget(food_id)
+        return {"ok": True, "id": food_id, "status": "removed"}
+
     def get_product(self, product_id: str) -> dict[str, Any]:
         return self._product_catalog.get_product(product_id)
 

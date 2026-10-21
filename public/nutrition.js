@@ -725,6 +725,31 @@ function renderNutritionProducts(products, { local = true, targetId = "#nutritio
   }
 }
 
+async function loadNutritionDatabase(query = "") {
+  const generation = state.sessionGeneration;
+  const target = document.querySelector("#nutritionDatabase");
+  if (!target) return;
+  try {
+    const params = query ? `&q=${encodeURIComponent(query)}` : "";
+    const result = await api(`/api/nutrition/products?source=database${params}`);
+    if (generation !== state.sessionGeneration) return;
+    const foods = result.foods || [];
+    if (!foods.length) { target.textContent = "Noch keine Produkte aus der Datenbank gespeichert."; return; }
+    renderNutritionProducts(foods, { local: false, targetId: "#nutritionDatabase" });
+    target.querySelectorAll(".nutrition-product-card").forEach((card, index) => {
+      const food = foods[index];
+      if (food.stored_at) card.querySelector("small").append(` · Stand vom ${new Date(food.stored_at).toLocaleDateString("de-DE")}`);
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "secondary-button"; remove.textContent = "Aus Datenbank entfernen";
+      remove.addEventListener("click", async () => {
+        if (!await requestConfirmation(`Eintrag „${food.name}“ aus der Datenbank entfernen? Eigene Produkte bleiben erhalten.`)) return;
+        try { await api("/api/nutrition/products/database/delete", { method: "POST", body: JSON.stringify({ id: food.id, confirmed: true }) }); await loadNutritionDatabase(query); }
+        catch (error) { document.querySelector("#nutritionProductStatus").textContent = `Eintrag konnte nicht entfernt werden: ${error.message}`; }
+      });
+      card.append(remove);
+    });
+  } catch (error) { if (generation === state.sessionGeneration) target.textContent = `Datenbank konnte nicht geladen werden: ${error.message}`; }
+}
+
 function useNutritionProduct(product) {
   const unit = nutritionProductUnit(product);
   nutritionProductForUse = product;
@@ -788,6 +813,7 @@ async function loadNutritionProducts(query = "", { background = false, throwOnEr
     const params = query ? `?q=${encodeURIComponent(query)}` : "";
     const result = await api(`/api/nutrition/products${params}`);
     if (!isCurrentNutritionProductLoad(sequence, generation, expectedQuery)) return;
+    void loadNutritionDatabase(query);
     renderNutritionProducts(result.products || []);
     if (!preserveLookup) status.textContent = result.products?.length ? "" : "Keine lokalen Produkte gefunden.";
   } catch (error) {
