@@ -73,6 +73,7 @@ $("#garmin-login-form").addEventListener("submit", submitGarminLogin);
 $("#garmin-mfa-form").addEventListener("submit", submitGarminMfa);
 $("#garmin-mfa-cancel").addEventListener("click", cancelGarminMfa);
 $("#garmin-disconnect").addEventListener("click", disconnectGarmin);
+$("#garmin-metric-export-toggle").addEventListener("click", (event) => toggleMetricExport(event.currentTarget));
 $("#garminFullResyncButton").addEventListener("click", () => fullResync(providerIds().garmin));
 $("#profileForm").addEventListener("submit", saveProfile);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });

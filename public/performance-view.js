@@ -303,36 +303,8 @@ function renderCurrentPerformance(metrics, history) {
     grid.append(table);
   }
   if (!grid.childElementCount) grid.append(reportNode("p", "Noch keine aktuellen Leistungswerte.", "empty"));
-  root.append(grid, metricExportActions());
+  root.append(grid);
   makeAnalysisSectionCollapsible(root, "current-performance");
-}
-
-function metricExportActions() {
-  const root = reportNode("div");
-  const enabled = Boolean(state.data?.garmin?.metric_export_enabled);
-  root.append(reportNode("p", enabled
-    ? "Neue Garmin-Messwerte werden automatisch an Intervals.icu gesendet. Herzfrequenzzonen bleiben unverändert. Bestehende abweichende Werte ohne bestätigten Vergleichsstand und spätere Änderungen bei Intervals.icu werden geschützt."
-    : "Einmal aktivieren: Neue Garmin-Messwerte nach erfolgreichem Sync automatisch an Intervals.icu senden. Herzfrequenzzonen und bestehende abweichende Zielwerte bleiben geschützt.", "muted"));
-  const button = reportNode("button", enabled ? "Automatischen Abgleich deaktivieren" : "Garmin → Intervals.icu automatisch abgleichen", "secondary-button");
-  button.type = "button";
-  button.addEventListener("click", () => { void configureAutomaticMetricExport(!enabled, button); });
-  root.append(button);
-  const status = state.data?.garmin?.metric_export_status;
-  if (status) root.append(reportNode("p", status, "muted"));
-  return root;
-}
-
-async function configureAutomaticMetricExport(enabled, button) {
-  const message = enabled
-    ? "Garmin-Messwerte künftig nach erfolgreichen Garmin-Syncs automatisch an Intervals.icu senden? Herzfrequenzzonen bleiben unverändert; abweichende Zielwerte ohne Vergleichsstand werden nicht überschrieben."
-    : "Den automatischen Garmin-Abgleich mit Intervals.icu deaktivieren?";
-  if (!await requestConfirmation(message, { title: enabled ? "Automatischen Abgleich aktivieren?" : "Automatischen Abgleich deaktivieren?" })) return;
-  button.disabled = true;
-  try {
-    await api("/api/metric-export/automatic", { method: "POST", body: JSON.stringify({ enabled, confirmed: true, source: providerIds().garmin, provider: providerIds().intervals }) });
-    await load();
-  } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; }
 }
 
 function renderPerformance(performance, { refreshCharts = true } = {}) {
