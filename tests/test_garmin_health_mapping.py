@@ -1430,7 +1430,7 @@ class EnduranceScoreTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 8)
+        self.assertEqual(MAPPER_VERSION, 9)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):

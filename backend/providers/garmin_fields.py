@@ -73,15 +73,22 @@ GARMIN_RACE_DISTANCE_ALIASES = ("raceDistance", "distanceName", "raceType", "dis
 
 
 # Garmin's range endpoint nests the daily values the per-day summary keeps flat.
-_NESTED_ENERGY_FIELDS = (
-    ("burnedTotal", "totalKilocalories"),
-    ("burnedActive", "activeKilocalories"),
-    ("burnedResting", "bmrKilocalories"),
+_NESTED_DAILY_FIELDS = (
+    (("calories", "burnedTotal"), "totalKilocalories"),
+    (("calories", "burnedActive"), "activeKilocalories"),
+    (("calories", "burnedResting"), "bmrKilocalories"),
+    (("movement", "steps", "value"), "totalSteps"),
+    (("movement", "floorsAscended", "value"), "floorsAscended"),
 )
-_NESTED_MOVEMENT_FIELDS = (
-    ("steps", "totalSteps"),
-    ("floorsAscended", "floorsAscended"),
-)
+
+
+def _nested_value(record: Mapping[str, Any], path: tuple[str, ...]) -> Any:
+    value: Any = record
+    for key in path:
+        if not isinstance(value, Mapping):
+            return None
+        value = value.get(key)
+    return value
 
 
 def flatten_daily_summary(record: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -89,19 +96,11 @@ def flatten_daily_summary(record: Mapping[str, Any]) -> Mapping[str, Any]:
 
     Existing flat keys win, so a per-day summary is returned unchanged.
     """
-    calories = record.get("calories")
-    movement = record.get("movement")
-    extra: dict[str, Any] = {}
-    if isinstance(calories, Mapping):
-        for source, alias in _NESTED_ENERGY_FIELDS:
-            if calories.get(source) not in (None, ""):
-                extra[alias] = calories[source]
-    if isinstance(movement, Mapping):
-        for source, alias in _NESTED_MOVEMENT_FIELDS:
-            entry = movement.get(source)
-            value = entry.get("value") if isinstance(entry, Mapping) else None
-            if value not in (None, ""):
-                extra[alias] = value
+    extra = {
+        alias: value
+        for path, alias in _NESTED_DAILY_FIELDS
+        if (value := _nested_value(record, path)) not in (None, "")
+    }
     if not extra:
         return record
     flat = {
