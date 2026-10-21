@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import Mock
 
 from backend.config import Config
@@ -24,6 +24,7 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.sync_service = Mock()
         self.sync_job_queue = Mock()
         self.sync_job_queue.enqueue.return_value = {"id": "nutrition-job-1"}
+        self.nutrition_refresh_service = Mock()
         self.local_now = lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 
         self.get_routes = NutritionGetRoutes(
@@ -36,6 +37,8 @@ class NutritionHttpApiTests(unittest.TestCase):
             diary_service=lambda: self.diary_service,
             meal_library_service=lambda: self.meal_library_service,
             sync_job_queue=lambda: self.sync_job_queue,
+            nutrition_refresh_service=lambda: self.nutrition_refresh_service,
+            local_now=self.local_now,
         )
         self.put_routes = NutritionPutRoutes(
             diary_service=lambda: self.diary_service,
@@ -187,6 +190,99 @@ class NutritionHttpApiTests(unittest.TestCase):
         self.sync_job_queue.enqueue.assert_called_once_with(
             "intervals", "nutrition_sync", {"pending_limit": 3}, requested_by="http_api"
         )
+
+    def test_nutrition_refresh_diary_reads_local_meals_and_only_daily_energy(self) -> None:
+        self.handler.read_json.return_value = {"area": "diary", "date": "2026-09-23"}
+        self.diary_service.get_day_summary.return_value = {"date": "2026-09-23", "entries": []}
+        self.nutrition_refresh_service.refresh.return_value = {
+            "status": "ok", "source": "Garmin Connect", "records": 1
+        }
+
+        handled = self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+
+        self.assertTrue(handled)
+        self.diary_service.get_day_summary.assert_called_once_with("2026-09-23")
+        self.nutrition_refresh_service.refresh.assert_called_once_with(
+            "daily_stats", date(2026, 9, 23), date(2026, 9, 23)
+        )
+        self.sync_job_queue.enqueue.assert_not_called()
+        self.handler.send_json.assert_called_once_with(
+            200,
+            {
+                "ok": True,
+                "area": "diary",
+                "status": "ok",
+                "meal_status": "local",
+                "summary": {"date": "2026-09-23", "entries": []},
+                "expenditure_refresh": {
+                    "status": "ok", "source": "Garmin Connect", "records": 1
+                },
+            },
+        )
+
+    def test_nutrition_refresh_diary_exposes_partial_provider_status(self) -> None:
+        self.handler.read_json.return_value = {"area": "diary", "date": "2026-09-23"}
+        self.diary_service.get_day_summary.return_value = {
+            "date": "2026-09-23",
+            "entries": [],
+            "energy_expenditure": {"freshness": "stale"},
+        }
+        self.nutrition_refresh_service.refresh.return_value = {
+            "status": "partial", "reason": "provider_unavailable"
+        }
+
+        self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+
+        response = self.handler.send_json.call_args.args[1]
+        self.assertEqual(response["status"], "partial")
+        self.assertEqual(response["meal_status"], "local")
+        self.assertEqual(
+            response["summary"]["energy_expenditure"]["freshness"], "partial"
+        )
+
+    def test_nutrition_refresh_week_uses_requested_range(self) -> None:
+        self.handler.read_json.return_value = {
+            "area": "week", "days": 84, "date": "2026-09-23"
+        }
+        self.nutrition_refresh_service.refresh.return_value = {"status": "partial"}
+
+        self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+
+        self.nutrition_refresh_service.refresh.assert_called_once_with(
+            "daily_stats", date(2026, 7, 2), date(2026, 9, 23)
+        )
+        self.handler.send_json.assert_called_once_with(
+            200, {"ok": True, "area": "week", "status": "partial"}
+        )
+
+    def test_nutrition_refresh_body_uses_bounded_weight_range(self) -> None:
+        self.handler.read_json.return_value = {"area": "body"}
+        self.nutrition_refresh_service.refresh.return_value = {"status": "ok"}
+
+        self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+
+        self.nutrition_refresh_service.refresh.assert_called_once_with(
+            "weight", date(2026, 7, 3), date(2026, 9, 24)
+        )
+
+    def test_nutrition_refresh_local_products_never_calls_provider(self) -> None:
+        self.handler.read_json.return_value = {"area": "products"}
+        self.meal_library_service.list_products.return_value = [{"id": "food-1"}]
+
+        self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+
+        self.nutrition_refresh_service.refresh.assert_not_called()
+        self.handler.send_json.assert_called_once_with(
+            200,
+            {"ok": True, "area": "products", "status": "local", "products": [{"id": "food-1"}]},
+        )
+
+    def test_nutrition_refresh_rejects_invalid_range(self) -> None:
+        self.handler.read_json.return_value = {"area": "week", "days": 15}
+
+        with self.assertRaises(AppError):
+            self.post_routes.handle(self.handler, "/api/nutrition/refresh")
+        self.nutrition_refresh_service.refresh.assert_not_called()
 
     def test_put_entry_route(self) -> None:
         self.handler.read_json.return_value = {

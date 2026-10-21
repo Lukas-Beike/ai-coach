@@ -218,6 +218,23 @@ class ActivityReadServiceTests(unittest.TestCase):
         )
         self.assertEqual(service._snapshot(), snapshot)
 
+    def test_activity_refresh_timestamp_is_independent_of_performance_refresh(self):
+        snapshot = {
+            "synced_at": "2026-10-20T12:00:00+00:00",
+            "activities_synced_at": "2026-10-19T12:00:00+00:00",
+            "recent_activities": [],
+        }
+        service = ActivityAnalysisReadService(
+            _Manager(),
+            SnapshotRepositoryReader(_Snapshots(snapshot)),
+            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
+            _Feedback(),
+        )
+
+        synced_at, _activities = service._read()
+
+        self.assertEqual("2026-10-19T12:00:00+00:00", synced_at)
+
 
 if __name__ == "__main__":
     unittest.main()

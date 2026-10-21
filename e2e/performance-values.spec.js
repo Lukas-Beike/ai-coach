@@ -26,14 +26,15 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
     ];
     state.data.performance = { ...state.data.performance, history, metrics: {
       ...state.data.performance.metrics,
-      running_max_hr_bpm: { value: 190, unit: "bpm" }, cycling_max_hr_bpm: { value: 185, unit: "bpm" },
+      running_max_hr_bpm: { value: 187, unit: "bpm", source_provider: "garmin" }, cycling_max_hr_bpm: { value: 200, unit: "bpm", source_provider: "intervals" },
+      max_hr_bpm: { value: 187, unit: "bpm", source_provider: "garmin" },
       run_threshold_hr_bpm: { value: 170, unit: "bpm" },
     } };
     renderPerformance(state.data.performance);
   });
   const current = page.locator("#currentPerformance");
   await expect(current.getByRole("rowheader", { name: "Maximale Herzfrequenz" })).toHaveCount(1);
-  await expect(current.locator('[data-metric="max_hr_bpm"]')).toContainText("190 bpm");
+  await expect(current.locator('[data-metric="max_hr_bpm"]')).toContainText("187 bpm");
   await expect(current.locator('[data-metric="cycling_w_per_kg"]')).toContainText("3,8 W/kg");
   await expect(current.locator('[data-metric="run_threshold_watts"]')).toHaveCount(0);
   const order = await current.evaluate((root) => {

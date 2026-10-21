@@ -43,6 +43,21 @@ class SnapshotPersistenceTests(unittest.TestCase):
         self.assertEqual(values["last_sync_at"], snapshot["synced_at"])
         self.assertEqual(values["last_sync_activity_days"], "14")
 
+    def test_activity_view_save_does_not_change_full_or_performance_sync_markers(self):
+        repository = _Repository()
+        values = {}
+
+        save_snapshot(
+            object(),
+            {"synced_at": "2026-01-02T00:00:00+00:00"},
+            repository,
+            update_full_sync=None,
+            activity_days=None,
+            set_value=lambda key, value, db: values.__setitem__(key, value),
+        )
+
+        self.assertEqual(values, {})
+
 
 class SnapshotMergeTests(unittest.TestCase):
     def test_performance_merge_preserves_fields_and_deduplicates_incoming_first(self):
@@ -142,11 +157,22 @@ class SnapshotMergeTests(unittest.TestCase):
         self.assertEqual(result["recent_wellness"], [])
         self.assertEqual(result["raw_provider_data"], {"wellness": []})
         self.assertEqual(result["provider_sync"], {"pagination": {}})
-
+        self.assertIsNone(result["activities_synced_at"])
         pair_sequence = [("extra", "kept")]
         self.assertEqual(
             merge_performance_snapshot(pair_sequence, performance)["extra"], "kept"
         )
+
+    def test_performance_merge_preserves_the_activity_list_freshness_marker(self):
+        current = {
+            "synced_at": "activity-list-time",
+            "activities_synced_at": "activity-list-time",
+        }
+
+        result = merge_performance_snapshot(current, {"synced_at": "performance-time"})
+
+        self.assertEqual(result["synced_at"], "performance-time")
+        self.assertEqual(result["activities_synced_at"], "activity-list-time")
 
     def test_historical_merge_returns_input_when_current_is_not_a_dict(self):
         historical = {"synced_at": "historical"}

@@ -81,6 +81,8 @@ def _provider_summary(
     return {
         "provider": str(item.provider),
         "sync_time_stored": item.retrieved_at is not None,
+        "activity_sync_time_stored": item.activities_retrieved_at is not None,
+        "observation_sync_time_stored": item.observations_retrieved_at is not None,
         "activities": item.activity_count,
         "observations": item.observation_count,
         # Every reason is reported, so an absent reason is an explicit zero.

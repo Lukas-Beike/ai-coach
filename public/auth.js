@@ -66,7 +66,6 @@ function showLogin() {
   clearAnalysisReportCache();
   AppState.setPlanSegment("overview");
   state.profileDirty = false;
-  state.checkinDirty = false;
   state.chatAttachments = [];
   renderChatAttachments();
   state.chatDraftDirty = false;

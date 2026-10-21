@@ -71,16 +71,16 @@ class PerformanceRefreshService:
     def running(self) -> bool:
         return self._lock.locked()
 
-    def refresh(self) -> dict[str, Any]:
+    def refresh(self, *, include_power_profile: bool = True) -> dict[str, Any]:
         with (
             self._observer.observe(INTERVALS_ID, "performance") as scope,
             self._provider_resync_gate.operation(),
         ):
-            result = self._refresh_inner()
+            result = self._refresh_inner(include_power_profile=include_power_profile)
             scope.result = result
             return result
 
-    def _refresh_inner(self) -> dict[str, Any]:
+    def _refresh_inner(self, *, include_power_profile: bool = True) -> dict[str, Any]:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         if not self._lock.acquire(blocking=False):
@@ -88,8 +88,13 @@ class PerformanceRefreshService:
 
         try:
             self._set_value("performance_refresh_running", "1")
-            provider_snapshot = self._provider_client.fetch_performance_snapshot(
-                self._snapshot_storage.merge_base()
+            existing = self._snapshot_storage.merge_base()
+            provider_snapshot = (
+                self._provider_client.fetch_performance_snapshot(existing)
+                if include_power_profile
+                else self._provider_client.fetch_performance_snapshot(
+                    existing, include_power_profile=False
+                )
             )
             with self._database_manager.unit_of_work() as db:
                 merged = merge_performance_snapshot(

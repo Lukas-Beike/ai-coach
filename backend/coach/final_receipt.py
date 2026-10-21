@@ -68,6 +68,9 @@ class CoachFinalReceiptService:
             ],
             "change_summary": change_summary(command_receipts),
         }
+        # Keeps the attachment window anchor after the resume id is dropped.
+        if receipt.get("openai_response_id"):
+            final_receipt["openai_reached"] = True
         for key in (
             "openai_response_id",
             "pending_tool_outputs",

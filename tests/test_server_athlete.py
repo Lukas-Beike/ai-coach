@@ -67,7 +67,7 @@ class ServerAthleteTests(ServerTestCase):
         ).read_text(encoding="utf-8")
         save_profile = app[
             app.index("async function saveProfile") : app.index(
-                "async function saveCheckin"
+                "async function downloadDatabaseBackup"
             )
         ]
         self.assertIn(

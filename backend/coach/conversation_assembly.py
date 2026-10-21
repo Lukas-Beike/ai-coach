@@ -90,6 +90,7 @@ class CoachConversationAssembly:
             self._openai_client(),
             self._database_lock,
             self._uuid_factory,
+            logger=self._logger,
         )
 
     def reset_service(self) -> CoachConversationResetService:

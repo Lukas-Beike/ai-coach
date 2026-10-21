@@ -525,7 +525,10 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             patch.object(
                 server.COACH_CONVERSATION,
                 "provision_service",
-                return_value=Mock(ensure=Mock(return_value="synthetic-conversation")),
+                return_value=Mock(
+                    ensure=Mock(return_value="synthetic-conversation"),
+                    rotate=Mock(return_value="synthetic-conversation"),
+                ),
             ),
         ):
             transport_factory.return_value.background_request.side_effect = respond
@@ -572,7 +575,10 @@ class AttachmentTests(DialogueHarness, unittest.TestCase):
             patch.object(
                 server.COACH_CONVERSATION,
                 "provision_service",
-                return_value=Mock(ensure=Mock(return_value="synthetic-conversation")),
+                return_value=Mock(
+                    ensure=Mock(return_value="synthetic-conversation"),
+                    rotate=Mock(return_value="synthetic-conversation"),
+                ),
             ),
         ):
             transport_factory.return_value.background_request.side_effect = respond

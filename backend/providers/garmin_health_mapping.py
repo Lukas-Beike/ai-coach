@@ -14,8 +14,8 @@ Mapped sections and their canonical kinds:
 * ``resting_hr``: RESTING_HR.
 * ``readiness``: READINESS.
 * ``max_metrics``: VO2MAX from the generic, cycling and running objects.
-* ``running_threshold``: THRESHOLD_PACE in m/s (the raw Garmin speed, not the
-  seconds-per-kilometre value that ``garmin_metrics._garmin_pace_seconds`` shows),
+* ``running_threshold``: THRESHOLD_PACE in m/s (Garmin's scaled speed below 1
+  is multiplied by ten before storage; pace rounding belongs to the display),
   THRESHOLD_HR for running and THRESHOLD_HR for cycling. Its ``power`` object's
   ``functionalThresholdPower`` is RUN_THRESHOLD_POWER for running: the collector
   requests the running lactate threshold and ``garmin_metrics`` shows it as running
@@ -48,7 +48,9 @@ guarantees on dated records. ``daily_stats`` uses the collector's chain
 calendarDate, summaryDate, date. ``running_threshold`` has no date; the collector
 requests it as the latest value on the sync day, so its observation day is the
 athlete-zone date of ``retrieved_at``. Undated ``heart_rate_zones`` and
-``race_predictions`` records use the same sync day.
+``race_predictions`` records use the same sync day. The latest ``cycling_ftp``
+value also uses the sync day when it has no date; dated FTP history still
+requires a provider date and is never backdated from an undated current value.
 
 Weight and body fat follow the legacy reader ``backend/performance/garmin_weight``
 for record shapes. A record's day is the first present of calendarDate,
@@ -155,7 +157,7 @@ from backend.providers.garmin_weight_walk import (
     weight_payload,
 )
 
-MAPPER_VERSION: Final = 5
+MAPPER_VERSION: Final = 8
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -974,7 +976,13 @@ class _HealthMapping:
     ) -> None:
         date_keys = _SECTION_DATE_KEYS.get(name, (_DATE_FIELD,))
         for ref, record, index in self._records(name, payload):
-            day = self._record_day(record, ref, fallback=None, date_keys=date_keys)
+            day = self._record_day(
+                record,
+                ref,
+                fallback=self._sync_day if name == "cycling_ftp" else None,
+                date_keys=date_keys,
+                datetime_dates=name in ("cycling_ftp", "cycling_ftp_history"),
+            )
             if day is not None:
                 for group in groups:
                     self._map_group(name, record, group, ref, day, index=index)
@@ -1090,6 +1098,12 @@ class _HealthMapping:
         entry = _entry(name, ref, day, group.key, index=index)
         for field in group.fields:
             number = self._group_number(name, group, record, source, field, ref)
+            if (
+                number is not None
+                and field.kind is MetricKind.THRESHOLD_PACE
+                and 0 < number < 1
+            ):
+                number *= 10
             if number is not None and field.whole:
                 number = float(round(number))
             if number is not None:
@@ -1151,6 +1165,7 @@ class _HealthMapping:
         *,
         fallback: date | None,
         date_keys: tuple[str, ...] = (_DATE_FIELD,),
+        datetime_dates: bool = False,
     ) -> date | None:
         named = _named_value(record, date_keys)
         nested_sleep = record.get("dailySleepDTO")
@@ -1160,7 +1175,12 @@ class _HealthMapping:
             if fallback is None:
                 self.issue(ref, date_keys[0], IssueReason.MISSING)
             return fallback
-        day = _parse_day(named[1])
+        raw = named[1]
+        day = (
+            _iso_day(raw)
+            if datetime_dates and isinstance(raw, str)
+            else _parse_day(raw)
+        )
         if day is None:
             self.issue(ref, named[0], IssueReason.INVALID_TYPE)
         return day

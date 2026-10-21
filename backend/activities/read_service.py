@@ -116,7 +116,11 @@ class ActivityReadService:
         with self._database_manager.read_snapshot() as db:
             snapshot = self._snapshot_reader.latest_snapshot(db)
             rows = self._row_reader.activity_rows(db)
-        synced_at = snapshot.get("synced_at") if isinstance(snapshot, dict) else None
+        synced_at = (
+            snapshot.get("activities_synced_at", snapshot.get("synced_at"))
+            if isinstance(snapshot, dict)
+            else None
+        )
         return synced_at, list(rows)
 
     def _with_local_ids(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:

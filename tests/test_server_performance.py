@@ -404,7 +404,7 @@ class ServerPerformanceTests(ServerTestCase):
         for key, value, expected in (
             ("speedInMetersPerSecond", 3.8, 263),
             ("thresholdPace", "4:27", 267),
-            ("speed", 0.35833233, 280),
+            ("speed", 0.35833233, 279),
         ):
             metrics = _garmin_metrics({"running_threshold": {key: value}})
             self.assertEqual(

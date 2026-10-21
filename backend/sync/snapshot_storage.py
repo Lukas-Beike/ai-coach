@@ -61,23 +61,32 @@ class SnapshotStorage:
         self._serving = serving
         self._rows = rows
 
-    def merge_base(self) -> dict[str, Any] | None:
+    def merge_base(self, db: Any | None = None) -> dict[str, Any] | None:
         """Return the latest snapshot with its activity sections, rebuilt if stripped."""
+        if db is not None:
+            return self._merge_base(db)
         if self._database_manager is None or self._rows is None:
             return self._state.latest_snapshot()
-        with self._database_manager.unit_of_work() as db:
-            snapshot = self._state.latest_snapshot(db)
-            if snapshot is None or not intervals_snapshot_is_stripped(snapshot):
-                return snapshot
-            if self._serving is None or not self._serving.serves_tables(db):
-                # The activities live only in the tables; merging against an empty
-                # history would store a snapshot that forgets them.
-                raise AppError(
-                    409,
-                    "Die gespeicherten Aktivitäten sind noch nicht lesbar.",
-                    reason="canonical_tables_unavailable",
-                )
-            rows = self._rows.activity_rows(db)
+        with self._database_manager.unit_of_work() as unit_db:
+            return self._merge_base(unit_db)
+
+    def _merge_base(self, db: Any) -> dict[str, Any] | None:
+        snapshot = self._state.latest_snapshot(db)
+        if snapshot is None or not intervals_snapshot_is_stripped(snapshot):
+            return snapshot
+        if (
+            self._serving is None
+            or self._rows is None
+            or not self._serving.serves_tables(db)
+        ):
+            # The activities live only in the tables; merging against an empty
+            # history would store a snapshot that forgets them.
+            raise AppError(
+                409,
+                "Die gespeicherten Aktivitäten sind noch nicht lesbar.",
+                reason="canonical_tables_unavailable",
+            )
+        rows = self._rows.activity_rows(db)
         return restore_intervals_activity_sections(
             snapshot, raw_rows=rows, compact_rows=compact_activity_rows(rows)
         )
@@ -88,7 +97,7 @@ class SnapshotStorage:
         snapshot: dict[str, Any],
         *,
         zone: tzinfo,
-        update_full_sync: bool = True,
+        update_full_sync: bool | None = True,
         activity_days: int | None = None,
     ) -> None:
         """Store the snapshot in the caller's unit of work, stripped when tables serve.

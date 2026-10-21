@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
@@ -12,6 +13,7 @@ from backend.activities.duplicates import (
     deduplicate_api_records,
     intervals_cycling_activities_match,
 )
+from backend.activities.identity import activity_datetime
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import RecordingOrigin
@@ -39,12 +41,46 @@ def deduplicated_rows(rows: Sequence[Any]) -> tuple[list[dict[str, Any]], int]:
         row for row in deduplicate_api_records(list(rows)) if isinstance(row, dict)
     ]
     wahoo = [row for row in unique if intervals_activity_recorded_by_wahoo(row)]
+    indexed = sorted(
+        (started, index)
+        for index, row in enumerate(wahoo)
+        if (
+            started := activity_datetime(
+                row.get("start_date_local") or row.get("start_date")
+            )
+        )
+        is not None
+    )
+    starts = [started for started, _ in indexed]
+    window = timedelta(minutes=30)
+
+    def matches_wahoo(row: dict[str, Any]) -> bool:
+        started = activity_datetime(
+            row.get("start_date_local") or row.get("start_date")
+        )
+        if started is None:
+            return False
+        minimum = datetime.min.replace(tzinfo=started.tzinfo)
+        maximum = datetime.max.replace(tzinfo=started.tzinfo)
+        low = bisect_left(
+            starts,
+            started - window if started >= minimum + window else minimum,
+        )
+        high = bisect_right(
+            starts,
+            started + window if started <= maximum - window else maximum,
+        )
+        return any(
+            intervals_cycling_activities_match(wahoo[index], row)
+            for _, index in indexed[low:high]
+        )
+
     kept = [
         row
         for row in unique
         if not (
             intervals_activity_device_source(row) == RecordingOrigin.GARMIN
-            and any(intervals_cycling_activities_match(other, row) for other in wahoo)
+            and matches_wahoo(row)
         )
     ]
     return kept, len(unique) - len(kept)

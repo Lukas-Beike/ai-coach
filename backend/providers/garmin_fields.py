@@ -3,7 +3,16 @@
 from collections.abc import Mapping
 from typing import Any
 
-GARMIN_DATE_ALIASES = ("calendarDate", "summaryDate", "date")
+GARMIN_CALENDAR_DATE_KEY = "calendarDate"
+GARMIN_DATE_ALIASES = (GARMIN_CALENDAR_DATE_KEY, "summaryDate", "date")
+GARMIN_MEASUREMENT_DATE_ALIASES = (
+    "date",
+    *GARMIN_DATE_ALIASES[:2],
+    "measurementTime",
+    "timestamp",
+)
+GARMIN_EXTENDED_DATE_ALIASES = (*GARMIN_DATE_ALIASES, "measurementTime", "timestamp")
+GARMIN_HRV_SUMMARIES_KEY = "hrvSummaries"
 GARMIN_SLEEP_DATE_KEYS = ("calendarDate", "summaryDate")
 GARMIN_SLEEP_DURATION_ALIASES = ("sleepTimeSeconds", "sleepDuration")
 GARMIN_SLEEP_SCORE_ALIASES = ("sleepScore", "overallSleepScore")

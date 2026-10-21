@@ -146,7 +146,10 @@ class DialogueHarness:
             patch.object(
                 server.COACH_CONVERSATION,
                 "provision_service",
-                return_value=Mock(ensure=Mock(return_value="synthetic-conversation")),
+                return_value=Mock(
+                    ensure=Mock(return_value="synthetic-conversation"),
+                    rotate=Mock(return_value="synthetic-conversation"),
+                ),
             ),
             patch(
                 "backend.coach.context.CoachTrainingContextService.build",

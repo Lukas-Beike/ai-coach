@@ -167,6 +167,7 @@ class IntervalsSnapshotReader:
             all_sync_days=self._all_sync_days,
             synced_at=self._utc_now(),
         )
+        incoming["activities_synced_at"] = incoming["synced_at"]
         # Keep every provider row in durable storage; only the compact fields
         # above are the read model passed on to consumers.
         incoming["raw_provider_data"] = {
@@ -258,7 +259,10 @@ class IntervalsSnapshotReader:
             return {**(existing.get("cycling_power_profile") or {}), "status": "failed"}
 
     def fetch_performance_snapshot(
-        self, existing_snapshot: dict[str, Any] | None
+        self,
+        existing_snapshot: dict[str, Any] | None,
+        *,
+        include_power_profile: bool = True,
     ) -> dict[str, Any]:
         """Refresh athlete settings and 90-day wellness without other collections."""
         athlete = quote(self._config.intervals_athlete_id, safe="")
@@ -281,9 +285,10 @@ class IntervalsSnapshotReader:
             synced_at=self._utc_now(),
         )
         snapshot["provider_sync"] = {"pagination": self._pagination()}
-        snapshot["cycling_power_profile"] = self._cycling_power_profile(
-            athlete, today, existing
-        )
+        if include_power_profile:
+            snapshot["cycling_power_profile"] = self._cycling_power_profile(
+                athlete, today, existing
+            )
         snapshot["raw_provider_data"] = {
             "athlete": athlete_data,
             "wellness": wellness,

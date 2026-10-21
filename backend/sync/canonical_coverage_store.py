@@ -62,10 +62,27 @@ def intervals_snapshot_coverage(
     stored_at = stored_retrieved_at(snapshot, zone=zone)
     if stored_at is None:
         return None
-    activities, observations = project_intervals_snapshot(
+    activity_time = (
+        stored_retrieved_at(
+            {"synced_at": snapshot.get("activities_synced_at")}, zone=zone
+        )
+        if isinstance(snapshot, Mapping) and "activities_synced_at" in snapshot
+        else stored_at
+    )
+    activities, _activity_observations = project_intervals_snapshot(
+        snapshot, zone=zone, retrieved_at=activity_time or stored_at
+    )
+    _observation_activities, observations = project_intervals_snapshot(
         snapshot, zone=zone, retrieved_at=stored_at
     )
-    return summarize_provider(ProviderId.INTERVALS, stored_at, activities, observations)
+    return summarize_provider(
+        ProviderId.INTERVALS,
+        stored_at,
+        activities,
+        observations,
+        activities_retrieved_at=activity_time,
+        observations_retrieved_at=stored_at,
+    )
 
 
 def garmin_payload_coverage(
@@ -149,6 +166,8 @@ def _encode(coverage: ProviderCoverage, zone: tzinfo) -> dict[str, Any]:
         "mapper_versions": current_mapper_versions(),
         "zone": str(zone),
         "retrieved_at": _iso(coverage.retrieved_at),
+        "activities_retrieved_at": _iso(coverage.activities_retrieved_at),
+        "observations_retrieved_at": _iso(coverage.observations_retrieved_at),
         "activity_count": coverage.activity_count,
         "observation_count": coverage.observation_count,
         "issue_counts": {
@@ -170,6 +189,8 @@ def _decode(
     ):
         return None
     retrieved_at = data["retrieved_at"]
+    activities_retrieved_at = data.get("activities_retrieved_at", retrieved_at)
+    observations_retrieved_at = data.get("observations_retrieved_at", retrieved_at)
     first = data["first_observed_on"]
     last = data["last_observed_on"]
     return ProviderCoverage(
@@ -177,6 +198,16 @@ def _decode(
         retrieved_at=None
         if retrieved_at is None
         else datetime.fromisoformat(retrieved_at),
+        activities_retrieved_at=(
+            None
+            if activities_retrieved_at is None
+            else datetime.fromisoformat(activities_retrieved_at)
+        ),
+        observations_retrieved_at=(
+            None
+            if observations_retrieved_at is None
+            else datetime.fromisoformat(observations_retrieved_at)
+        ),
         activity_count=data["activity_count"],
         observation_count=data["observation_count"],
         issue_counts={

@@ -20,7 +20,9 @@ class StructuredTurnTests(unittest.TestCase):
         self.opening = Mock()
         self.opening.open.return_value = {"mode": "background", "tool_rounds": 0}
         self.attachments = Mock()
-        self.attachments.load_for_receipt.return_value = ([], False)
+        self.attachments.load_for_receipt.return_value = ([], False, False)
+        self.conversations = Mock()
+        self.conversations.rotate.return_value = "synthetic-rotated-conversation"
         self.dialogue = Mock()
         self.dialogue.context.return_value = {"synthetic": True}
         self.payload = Mock()
@@ -49,6 +51,7 @@ class StructuredTurnTests(unittest.TestCase):
             CoachStructuredTurnDependencies(
                 opening=self.opening,
                 attachments=self.attachments,
+                conversations=self.conversations,
                 dialogue=self.dialogue,
                 payload=self.payload,
                 response=self.response,
@@ -148,6 +151,56 @@ class StructuredTurnTests(unittest.TestCase):
         self.assertEqual(expected, "weekly_planning")
         state = self.rounds.run.call_args.kwargs["state"]
         self.assertEqual(state.context_profile, expected)
+
+    def test_attachment_turn_rotates_once_and_uses_rotated_conversation(self) -> None:
+        attachment = {"type": "image", "name": "synthetic.png"}
+        self.attachments.load_for_receipt.return_value = ([attachment], False, False)
+
+        self.run_turn()
+
+        self.conversations.rotate.assert_called_once_with(
+            "synthetic-turn", "synthetic-conversation"
+        )
+        self.assertEqual(
+            self.payload.build.call_args.kwargs["conversation_id"],
+            "synthetic-rotated-conversation",
+        )
+        self.assertTrue(
+            self.payload.build.call_args.kwargs["retain_openai_attachment_context"]
+        )
+        state = self.rounds.run.call_args.kwargs["state"]
+        self.assertEqual(state.conversation_id, "synthetic-rotated-conversation")
+        self.assertEqual(state.attachments, [attachment])
+
+    def test_resume_with_stored_rotation_flag_does_not_rotate_again(self) -> None:
+        self.opening.open.return_value["openai_conversation_rotated"] = True
+        self.attachments.load_for_receipt.return_value = (
+            [{"type": "image", "name": "synthetic.png"}],
+            True,
+            True,
+        )
+
+        self.run_turn()
+
+        self.conversations.rotate.assert_not_called()
+        self.assertEqual(
+            self.payload.build.call_args.kwargs["conversation_id"],
+            "synthetic-conversation",
+        )
+
+    def test_in_window_follow_up_retains_without_rotating(self) -> None:
+        self.attachments.load_for_receipt.return_value = ([], True, True)
+
+        self.run_turn()
+
+        self.conversations.rotate.assert_not_called()
+        self.assertTrue(
+            self.payload.build.call_args.kwargs["retain_openai_attachment_context"]
+        )
+        self.assertEqual(
+            self.payload.build.call_args.kwargs["conversation_id"],
+            "synthetic-conversation",
+        )
 
     def test_failure_persists_safe_receipt_without_session_key(self) -> None:
         self.response.respond.side_effect = AppError(

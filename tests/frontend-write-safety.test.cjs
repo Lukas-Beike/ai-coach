@@ -67,7 +67,7 @@ function profileContext({ server, baseline, stateProfile }) {
     load: async () => {},
   });
   vm.runInContext(
-    slice(settingsSource, "// Profile values as the form presents", "\nasync function saveCheckin")
+    slice(settingsSource, "// Profile values as the form presents", "\n// Rejects when the backup fails")
       + slice(performanceSource, "async function saveInlineMetric", "\nfunction performanceSection"),
     context,
   );

@@ -261,7 +261,7 @@ def performance_options(
     return {} if canonical is None else {"canonical": canonical}
 
 
-class _ReadOnceReader:
+class ReadOnceObservationReader:
     """Serve the reads of one snapshot unit from one unbounded read per kind.
 
     The wellness rows, the current metrics, the recovery inputs and the recovery
@@ -350,7 +350,9 @@ def read_performance_inputs(
     selecting reader chooses its source once for all reads. ``as_of`` is the
     athlete-local day the Wahoo fallbacks must be current on.
     """
-    reader = _ReadOnceReader(resolve_reader(reader, db))
+    reader = resolve_reader(reader, db)
+    if not isinstance(reader, ReadOnceObservationReader):
+        reader = ReadOnceObservationReader(reader)
     observed = canonical_sections.read_wellness_observations(reader, db)
     compact = _snapshot_rows(snapshot, "recent_wellness")
     rows = canonical_sections.wellness_rows(compact, observed)

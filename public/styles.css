@@ -132,7 +132,6 @@
   --planned-session-strength-surface: #a5682120;
   --sharing-warning-border: rgba(255, 193, 7, .3);
   --sharing-warning-surface: rgba(255, 193, 7, .06);
-  --checkin-critical-ink: #ffb1aa;
   --selected-surface: rgba(105, 225, 183, .08);
   --sync-progress-border: rgba(52, 207, 161, .38);
   --sync-progress-surface: rgba(52, 207, 161, .07);
@@ -814,6 +813,14 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .tab-sync-detail { display: block; margin-top: 5px; color: var(--subtle); font-size: .68rem; font-weight: 400; }
 .data-sync-only { margin: 18px 2px 0; }
 .section-heading > .secondary-button { padding: 8px 11px; font-size: .7rem; }
+.view-refresh { position: relative; display: grid; justify-items: end; align-content: start; gap: 4px; }
+.view-refresh .icon-button { cursor: pointer; }
+.view-refresh .icon-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.view-refresh .icon-button.busy { animation: none; }
+.view-refresh .icon-button.busy svg { animation: spin 1s linear infinite; }
+.view-refresh output { max-width: min(58vw, 250px); color: var(--subtle); font-size: .64rem; text-align: right; }
+.view-refresh output:empty { display: none; }
+.view-refresh output:not(:empty) { position: absolute; top: 47px; right: 0; z-index: 2; padding: 4px 7px; border-radius: 7px; background: var(--surface-raised); }
 .panel-intro { margin: -6px 2px 18px; color: var(--muted); font-size: .78rem; line-height: 1.45; }
 .performance-card { margin-bottom: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-soft); }
 .garmin-panel { margin: 0 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--translucent-surface); }
@@ -1058,19 +1065,6 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .context-preview-values .context-preview-values { padding-left: 10px; border-left: 1px solid var(--line); }
 .context-preview-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .context-preview-text { margin: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; overflow-wrap: anywhere; }
-.checkin-form { display: grid; gap: 12px; margin-top: 14px; }
-.checkin-critical-field { color: var(--checkin-critical-ink); }
-.checkin-form > button { justify-self: start; min-height: 44px; }
-.checkin-history { display: grid; gap: 8px; margin-top: 22px; }
-.checkin-history > strong { color: var(--ink); font-size: .82rem; }
-.checkin-history-item { display: grid; gap: 3px; width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--translucent-surface); color: var(--muted); text-align: left; cursor: pointer; }
-.checkin-history-item:hover, .checkin-history-item.selected { border-color: var(--accent-bright); background: var(--selected-surface); }
-.checkin-history-item strong { color: var(--ink); font-size: .78rem; }
-.checkin-history-item span { font-size: .7rem; }
-.checkin-dialog { width: min(94vw, 620px); max-height: min(90dvh, 760px); overflow: auto; }
-.checkin-dialog-content { display: grid; gap: 15px; }
-.checkin-dialog .settings-section-heading { margin-bottom: 0; }
-.checkin-dialog .checkin-form { margin-top: 0; }
 .settings-section { display: grid; gap: 12px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 18px; padding: 17px; background: var(--surface); }
 .collapsible-section > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -17px -17px 0; padding: 17px; color: var(--ink); list-style-position: inside; }
 #settingsPanel .collapsible-section:not([open]) { gap: 0; margin-bottom: 10px; padding: 0; }
@@ -1445,7 +1439,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   .more-segment-nav, .segmented-control, .plan-segment-nav,
   .planned-comparison, .replan-preview, .context-preview-content details,
   .library-sport, .training-plan, .garmin-panel, .coach-provider-item,
-  .skeleton-row, .checkin-history-item,
+  .skeleton-row,
   .collapsible-section > summary, .secondary-button
 ) { background-color: var(--surface-raised); }
 :root[data-theme="light"] .provider-attention-banner strong,
@@ -1488,7 +1482,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 
 #nutritionPanel button { min-width: 44px; min-height: 44px; }
 #nutritionPanel .push-button { padding: 12px 16px; }
-#nutritionPanel .panel-heading { margin-bottom: 18px; }
 .nutrition-total span, .nutrition-card small { color: var(--muted); }
 .nutrition-components { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
 .nutrition-components summary { min-height: 44px; display: flex; align-items: center; width: fit-content; cursor: pointer; font-weight: 600; }

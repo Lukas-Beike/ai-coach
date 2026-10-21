@@ -95,7 +95,7 @@ class SyncStateRepository:
     def save_snapshot(
         self,
         snapshot: dict[str, Any],
-        update_full_sync: bool = True,
+        update_full_sync: bool | None = True,
         activity_days: int | None = None,
         activity_count: int | None = None,
     ) -> None:

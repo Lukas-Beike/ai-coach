@@ -39,6 +39,44 @@ def empty_garmin(**overrides):
 
 
 class CurrentPerformanceMetricsTests(unittest.TestCase):
+    def test_general_maximum_hr_prefers_garmin_before_comparing_sports(self):
+        snapshot = {
+            "athlete": {
+                "sport_settings": [
+                    {"types": ["Run"], "max_hr": 200},
+                    {"types": ["Ride"], "max_hr": 190},
+                ]
+            }
+        }
+        for running, cycling, expected in (
+            (187, None, 187),
+            (None, 185, 185),
+            (187, 185, 187),
+            (None, None, 200),
+        ):
+            with self.subTest(running=running, cycling=cycling):
+                garmin = empty_garmin(
+                    **{
+                        key: {
+                            "value": value,
+                            "unit": "bpm",
+                            "source_provider": "garmin",
+                        }
+                        for key, value in (
+                            ("running_max_hr_bpm", running),
+                            ("cycling_max_hr_bpm", cycling),
+                        )
+                    }
+                )
+                selected = current_performance_metrics(snapshot, {}, garmin)[
+                    "max_hr_bpm"
+                ]
+                self.assertEqual(selected["value"], expected)
+                self.assertEqual(
+                    selected["source_provider"],
+                    "garmin" if running or cycling else "intervals",
+                )
+
     def test_garmin_priority_and_metric_shape(self):
         garmin = empty_garmin(
             weight_kg={

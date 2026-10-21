@@ -760,6 +760,7 @@ class CurrentResultShapeTests(unittest.TestCase):
                 "cycling_eftp_watts": "W",
                 "cycling_max_hr_bpm": "bpm",
                 "running_max_hr_bpm": "bpm",
+                "max_hr_bpm": "bpm",
                 "cycling_vo2max_ml_kg_min": "ml/kg/min",
                 "running_vo2max_ml_kg_min": "ml/kg/min",
                 "run_5k_seconds": "s",
