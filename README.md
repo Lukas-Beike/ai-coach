@@ -608,6 +608,64 @@ the final diff, and run affected validation. Include final-state evidence and
 unverified checks in the handoff. Source code and current workflow behavior take
 precedence over remembered paths or stale operating assumptions.
 
+#### Optional local code graph
+
+The repository can use graphifyy 0.9.93 as a local structural navigation aid.
+Its separate per-worktree environment and generated graph live under
+`.graphify-local/`; setup is explicit and missing tools are never installed by
+session hooks. Codex and Claude Code are configured to run the same local `update
+--session-start` command synchronously at session start and resume. This keeps
+the graph fresh before use; after edits during a session, run
+`python scripts/graphify_local.py update` before querying it. Check `status`
+first if an update could not complete.
+
+Run `python scripts/graphify_local.py setup` once to prepare the isolated
+environment, then run `python scripts/graphify_local.py update` to generate the
+structural graph. Setup downloads the pinned packages when needed; subsequent
+graph operations run locally and do not call external models or services. Use
+`status`, `query <terms>`, `path <source> <target>`, and `explain <symbol>` to
+inspect availability and navigate; queries select the active graph
+automatically. Run `python scripts/graphify_local.py export html --output .graphify-local/exports/graph.html` or
+`python scripts/graphify_local.py export wiki --output .graphify-local/exports/wiki`
+for local views; exports are restricted to `.graphify-local/exports/`. `mcp`
+starts the optional local stdio MCP server. Its read-only snapshot exposes
+`graph_query`, `graph_node`, `graph_path`, and `graph_stats`, with no upstream
+PR tools; restart the server after graph edits to refresh the snapshot. The hook
+does not read session payloads or transcripts. Native host activation has not
+been verified; the hook tests do not prove Codex or Claude dispatch. Codex may
+require repository trust approval in `/hooks` before activation.
+
+The graph represents structural relationships only. Semantic documentation
+enrichment is disabled; it requires a separately installed, explicitly local
+model and is outside this integration. Always check current source, callers,
+tests, and applicable instructions before acting on graph findings. Broad or
+stale matches can be incomplete; use ordinary source search when needed.
+
+The Codex hook is configured in `.codex/hooks.json` and preserves the existing
+Sonar prompt scanner. Codex requires accepting the repository hook in its
+`/hooks` trust UI. Claude Code uses `.claude/settings.json` and requires its
+normal repository trust. Do not bypass either trust prompt. The checked-in
+Claude hook uses the documented PowerShell shell on Windows. For POSIX Claude
+installations, use the included `scripts/graphify-session-start.sh` and this
+SessionStart command configuration:
+
+```json
+{
+  "type": "command",
+  "command": "sh \"$(git rev-parse --show-toplevel)/scripts/graphify-session-start.sh\"",
+  "shell": "bash",
+  "timeout": 240
+}
+```
+
+Both launchers resolve the repository root, including when the session starts
+in a nested directory. If the worker or Python is unavailable, they print a
+short status message, do not install anything, and let the session continue.
+
+T3 Code's managed runtime may not dispatch either host's native repository
+hooks. Hook activation inside T3 Code itself is not verified; run the update
+manually there when needed.
+
 AI documentation is checked by the existing
 `Validate repository AI documentation` workflow. Locally, after secrets scans,
 run `python -m unittest discover -s tests -p test_ai_docs_contract.py -v`.

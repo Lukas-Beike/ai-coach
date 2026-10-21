@@ -12,6 +12,9 @@ AGENTS.md
 docs/
 
 .worktrees/
+.graphify-local/
+graphify-out/
+.claude/
 node_modules/
 playwright/
 playwright-report/
