@@ -6,7 +6,7 @@ test("@responsive nutrition week shows coverage, signed balance and missing days
   page.on("request", (request) => { if (request.url().includes("/nutrition/fueling")) fuelingRequests += 1; });
   await page.route("**/api/nutrition/week?days=*", (route) => fail ? route.abort() : route.fulfill({ json: {
     start_date: "2026-09-22", end_date: "2026-10-05", balance_kcal: 500, balance_days: 5,
-    averages: { intake_kcal: { value: 2200, days: 6 }, expenditure_kcal: { value: 2100, days: 5 }, carbs_g: { value: 250, days: 4 }, protein_g: { value: 100, days: 6 }, fat_g: { value: null, days: 0 } },
+    averages: { intake_kcal: { value: 2200, days: 6 }, expenditure_kcal: { value: 2100, days: 5 }, carbs_g: { value: 250, days: 4 }, protein_g: { value: 100, days: 6 }, fat_g: { value: null, days: 0 }, sugar_g: { value: 25, days: 3 }, salt_g: { value: null, days: 0 } },
     days: Array.from({ length: 14 }, (_, index) => ({ date: new Date(Date.UTC(2026, 8, 22 + index)).toISOString().slice(0, 10), intake_kcal: index < 6 ? 2200 : null, expenditure_kcal: index < 5 ? 2100 : null, balance_kcal: index < 5 ? 100 : null })),
   } }));
   await page.goto("/#nutrition/week");
@@ -21,6 +21,10 @@ test("@responsive nutrition week shows coverage, signed balance and missing days
   await expect(intake).toContainText("2.200 kcal");
   await expect(intake).toContainText("6 von 14 Tagen");
   await expect(week.locator(".nutrition-total").filter({ hasText: "Ø Fett" })).toContainText("Nicht verfügbar");
+  const sugar = week.locator(".nutrition-total").filter({ hasText: "Ø Zucker" });
+  await expect(sugar).toContainText("25 g");
+  await expect(sugar).toContainText("3 von 14 Tagen");
+  await expect(week.locator(".nutrition-total").filter({ hasText: "Ø Salz" })).toContainText("Nicht verfügbar");
   await expect(week.locator(".nutrition-week-chart-day")).toHaveCount(14);
   await expect(week.locator(".nutrition-week-chart-day").first()).toContainText("2.200 kcal");
   await expect(week.locator(".nutrition-week-chart-track.is-missing")).toHaveCount(17);
@@ -76,7 +80,7 @@ test("@responsive nutrition gaps keep expenditure visible without inventing inta
     const count = Number(new URL(route.request().url()).searchParams.get("days"));
     const days = Array.from({ length: count }, (_, index) => ({ date: new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10), intake_kcal: index === 0 ? 2100 : null, expenditure_kcal: 2400, balance_kcal: index === 0 ? -300 : null }));
     return route.fulfill({ json: { start_date: days[0].date, end_date: days.at(-1).date, days, balance_kcal: -300, balance_days: 1,
-      averages: { intake_kcal: { value: 2100, days: 1 }, expenditure_kcal: { value: 2400, days: count }, carbs_g: { value: null, days: 0 }, protein_g: { value: null, days: 0 }, fat_g: { value: null, days: 0 } } } });
+      averages: { intake_kcal: { value: 2100, days: 1 }, expenditure_kcal: { value: 2400, days: count }, carbs_g: { value: null, days: 0 }, protein_g: { value: null, days: 0 }, fat_g: { value: null, days: 0 }, sugar_g: { value: 25, days: 3 }, salt_g: { value: null, days: 0 } } } });
   });
   await page.goto("/#nutrition/week");
   const root = page.locator("#nutritionWeek");

@@ -12,6 +12,7 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, NutritionRepository
 from backend.errors import AppError
 from backend.nutrition.contracts import nutrition_approval_item
+from backend.nutrition.intake_totals import INTAKE_FIELDS, add_intake_totals
 from backend.nutrition.models import validate_iso_date
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import (
@@ -61,6 +62,7 @@ class NutritionSyncStatusService:
             measured = _filter_targeted_missing_energy(
                 measured, garmin_snapshot, [validated_date]
             )
+        add_intake_totals(summary)
         summary["energy_expenditure"] = daily_energy_expenditure(
             garmin_snapshot,
             validated_date,
@@ -114,6 +116,7 @@ class NutritionSyncStatusService:
             measured = _filter_targeted_missing_energy(measured, snapshot, dates)
         days = []
         for summary in summaries:
+            add_intake_totals(summary)
             expenditure = daily_energy_expenditure(
                 snapshot,
                 summary["date"],
@@ -124,7 +127,14 @@ class NutritionSyncStatusService:
             )
             days.append(_week_day(summary, expenditure))
         averages = {}
-        for key in ("intake_kcal", "expenditure_kcal", "carbs_g", "protein_g", "fat_g"):
+        for key in (
+            "intake_kcal",
+            "expenditure_kcal",
+            "carbs_g",
+            "protein_g",
+            "fat_g",
+            *INTAKE_FIELDS,
+        ):
             values = [day[key] for day in days if day[key] is not None]
             averages[key] = {
                 "value": round(sum(values) / len(values), 1) if values else None,
@@ -215,7 +225,7 @@ def _week_day(summary: dict[str, Any], expenditure: dict[str, Any]) -> dict[str,
         "energy_expenditure": expenditure,
         **{
             key: summary[f"total_{key}"] if logged else None
-            for key in ("carbs_g", "protein_g", "fat_g")
+            for key in ("carbs_g", "protein_g", "fat_g", *INTAKE_FIELDS)
         },
     }
 
