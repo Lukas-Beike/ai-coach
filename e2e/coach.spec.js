@@ -239,12 +239,14 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
     await expect(page).toHaveURL(/#more$/);
     await settingsNav.getByRole("link", { name: "Coach & Modell", exact: true }).click();
     await expect(page).toHaveURL(/#more\/coach$/);
-    await expect(page.locator('[data-more-segment-panel="coach"]')).toHaveCount(2);
+    await expect(page.locator('[data-more-segment-panel="coach"]')).toHaveCount(3);
     await expect(page.locator('[data-more-segment-panel="coach"]').first()).toBeVisible();
+    await expect(page.locator("#usageSummary")).toContainText("Anfragen");
+    await page.locator("#usageSummary").click();
+    await expect(page.locator("#usageRequests")).toBeVisible();
+    await expect(page.locator("#usageTotalTokens")).toBeVisible();
     await expect(page.locator('[data-more-segment-panel="connections"]').first()).toBeHidden();
-    await settingsNav.getByRole("link", { name: "Daten & Datenschutz", exact: true }).click();
-    await expect(page).toHaveURL(/#more\/privacy$/);
-    await expect(page.locator('[data-more-segment-panel="privacy"]')).toBeVisible();
+    await expect(settingsNav.getByRole("link", { name: "Daten & Datenschutz" })).toHaveCount(0);
     await settingsNav.getByRole("link", { name: "Betrieb & Diagnose", exact: true }).click();
     await expect(page).toHaveURL(/#more\/operations$/);
     await expect(page.locator('[data-more-segment-panel="operations"]').first()).toBeVisible();

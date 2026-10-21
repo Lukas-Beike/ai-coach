@@ -1149,6 +1149,15 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .settings-inline-action > div { display: grid; gap: 4px; }
 .settings-inline-action strong { color: var(--ink); font-size: .76rem; }
 .settings-inline-action span { color: var(--subtle); font-size: .68rem; }
+.usage-stats, .usage-details { display: grid; gap: 8px; margin: 0; }
+.usage-stats { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.usage-stats > div, .usage-details > div { display: grid; gap: 2px; min-width: 0; }
+.usage-stats > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.usage-details > div { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.usage-stats dt, .usage-details dt { color: var(--subtle); font-size: .68rem; }
+.usage-stats dd, .usage-details dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.usage-stats dd { font-size: 1.05rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-details dd { font-size: .76rem; text-align: right; }
 .backup-actions label { flex: 1; }
 .backup-actions input[type="file"] { padding: 8px; font-size: .7rem; }
 .replan-preview { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: var(--translucent-surface); font-size: .72rem; line-height: 1.45; }

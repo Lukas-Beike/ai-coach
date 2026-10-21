@@ -638,18 +638,27 @@ function renderSettingsSyncControls(data, configured) {
 
 function renderSettingsUsage(data) {
   const usage = data.usage || {};
-  const providerLabel = "OpenAI";
-  const usageNode = $("#usageSummary");
-  if (usageNode) {
-    const rateLimits = usage.rate_limits || {};
-    const remaining = rateLimits.remaining_requests != null || rateLimits.remaining_tokens != null
-      ? ` · Restkontingent im aktuellen Anbieterfenster: ${rateLimits.remaining_requests ?? "?"} Anfragen / ${rateLimits.remaining_tokens ?? "?"} Tokens`
-      : " · Restkontingent wird nach einem API-Aufruf angezeigt";
-    const error = usage.status?.state === "error" ? ` · Status: ${usage.status.message || "Fehler bei letzter Anfrage"}` : "";
-    usageNode.textContent = `${providerLabel} heute: ${usage.requests || 0} Anfragen · ${usage.total_tokens || 0} Tokens${remaining}${error}`;
+  const rateLimits = usage.rate_limits || {};
+  const number = (value) => Number(value || 0).toLocaleString("de-DE");
+  const optionalNumber = (value) => (value == null ? "Noch nicht bekannt" : number(value));
+  const lastRequest = usage.last_request_at ? new Date(usage.last_request_at) : null;
+  const values = {
+    usageSummary: `${number(usage.requests)} Anfragen · ${number(usage.total_tokens)} Tokens heute`,
+    usageRequests: number(usage.requests),
+    usageInputTokens: number(usage.input_tokens),
+    usageOutputTokens: number(usage.output_tokens),
+    usageTotalTokens: number(usage.total_tokens),
+    usageRemainingRequests: optionalNumber(rateLimits.remaining_requests),
+    usageRemainingTokens: optionalNumber(rateLimits.remaining_tokens),
+    usageLastRequest: lastRequest && !Number.isNaN(lastRequest.getTime())
+      ? lastRequest.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })
+      : "Heute noch keine",
+    usageStatus: usage.status?.state === "error" ? usage.status.message || "Fehler bei letzter Anfrage" : "In Ordnung",
+  };
+  for (const [id, text] of Object.entries(values)) {
+    const node = document.getElementById(id);
+    if (node) node.textContent = text;
   }
-  const privacy = $("#privacySummary");
-  if (privacy) privacy.textContent = `${usage.requests || 0} ${providerLabel}-Anfragen heute`;
 }
 
 function garminConnectionLabel(garmin, running) {
