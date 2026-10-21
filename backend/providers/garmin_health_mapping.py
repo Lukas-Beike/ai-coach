@@ -147,6 +147,7 @@ from backend.providers.garmin_fields import (
     GARMIN_TOTAL_KCAL_ALIASES,
     GARMIN_VO2MAX_ALIASES,
     GARMIN_WEIGHT_UNIT_ALIASES,
+    flatten_daily_summary,
 )
 from backend.providers.garmin_weight_walk import (
     BODY_FAT_SKIP_KEYS,
@@ -157,7 +158,7 @@ from backend.providers.garmin_weight_walk import (
     weight_payload,
 )
 
-MAPPER_VERSION: Final = 8
+MAPPER_VERSION: Final = 9
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -976,6 +977,8 @@ class _HealthMapping:
     ) -> None:
         date_keys = _SECTION_DATE_KEYS.get(name, (_DATE_FIELD,))
         for ref, record, index in self._records(name, payload):
+            if name == _DAILY_STATS:
+                record = flatten_daily_summary(record)
             day = self._record_day(
                 record,
                 ref,

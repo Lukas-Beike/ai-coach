@@ -47,6 +47,31 @@ class GarminDailyHealthTests(unittest.TestCase):
         self.assertEqual(result["status"], "measured")
         self.assertIsNone(result["synced_at"])
 
+    def test_daily_expenditure_reads_the_nested_range_endpoint_shape(self):
+        snapshot = {
+            "daily_stats": [
+                {
+                    "calendarDate": "2026-08-31",
+                    "calories": {
+                        "burnedResting": 1420,
+                        "burnedActive": 300,
+                        "burnedTotal": 1720,
+                    },
+                    "movement": {"steps": {"goal": 8000, "value": 5000}},
+                }
+            ]
+        }
+
+        result = daily_energy_expenditure(snapshot, "2026-08-31", date(2026, 9, 1))
+
+        self.assertEqual(result["active_kcal"], 300)
+        self.assertEqual(result["resting_kcal"], 1420)
+        self.assertEqual(result["total_kcal"], 1720)
+        self.assertEqual(result["status"], "measured")
+        self.assertEqual(
+            garmin_daily_health_by_date(snapshot)["2026-08-31"]["steps"], 5000
+        )
+
     def test_daily_expenditure_does_not_invent_a_total_or_reuse_another_date(self):
         snapshot = {
             "daily_stats": [
