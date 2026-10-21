@@ -144,10 +144,48 @@ function renderGarminCard(data) {
   setCredentialHidden("garmin-login-form", view.mode !== "login");
   setCredentialHidden("garmin-mfa-form", view.mode !== "mfa");
   setCredentialHidden("garmin-connected", view.mode !== "connected");
+  setCredentialHidden("garmin-metric-export", view.mode !== "connected");
   for (const id of ["garmin-login-submit", "garmin-mfa-submit", "garmin-mfa-cancel", "garmin-disconnect"]) {
     const node = $("#" + id);
     if (node) node.disabled = busy;
   }
+}
+
+// Pure: consent text, toggle label and last sync receipt of the Garmin → Intervals.icu export.
+function metricExportView(enabled, status) {
+  return {
+    text: enabled
+      ? "Neue Garmin-Messwerte werden automatisch an Intervals.icu gesendet. Herzfrequenzzonen bleiben unverändert. Bestehende abweichende Werte ohne bestätigten Vergleichsstand und spätere Änderungen bei Intervals.icu werden geschützt."
+      : "Einmal aktivieren: Neue Garmin-Messwerte nach erfolgreichem Sync automatisch an Intervals.icu senden. Herzfrequenzzonen und bestehende abweichende Zielwerte bleiben geschützt.",
+    button: enabled ? "Automatischen Abgleich deaktivieren" : "Garmin → Intervals.icu automatisch abgleichen",
+    status: status || "",
+  };
+}
+
+function renderMetricExport(garmin) {
+  const view = metricExportView(Boolean(garmin?.metric_export_enabled), garmin?.metric_export_status);
+  setCredentialText("garmin-metric-export-text", view.text);
+  setCredentialText("garmin-metric-export-toggle", view.button);
+  setCredentialText("garmin-metric-export-status", view.status);
+  setCredentialHidden("garmin-metric-export-status", !view.status);
+}
+
+// The toggle reads the last loaded state; the confirmation and the POST live in configureAutomaticMetricExport.
+function toggleMetricExport(button) {
+  void configureAutomaticMetricExport(!state.data?.garmin?.metric_export_enabled, button);
+}
+
+async function configureAutomaticMetricExport(enabled, button) {
+  const message = enabled
+    ? "Garmin-Messwerte künftig nach erfolgreichen Garmin-Syncs automatisch an Intervals.icu senden? Herzfrequenzzonen bleiben unverändert; abweichende Zielwerte ohne Vergleichsstand werden nicht überschrieben."
+    : "Den automatischen Garmin-Abgleich mit Intervals.icu deaktivieren?";
+  if (!await requestConfirmation(message, { title: enabled ? "Automatischen Abgleich aktivieren?" : "Automatischen Abgleich deaktivieren?" })) return;
+  button.disabled = true;
+  try {
+    await api("/api/metric-export/automatic", { method: "POST", body: JSON.stringify({ enabled, confirmed: true, source: providerIds().garmin, provider: providerIds().intervals }) });
+    await load();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
 }
 
 // Updates badges, current values and busy states from the bootstrap or public state.
@@ -166,6 +204,7 @@ function renderProviderCredentials(data = {}) {
     for (const field of CREDENTIAL_FORMS[provider]) renderCredentialField(field, fields, busy);
   }
   renderGarminCard(data);
+  renderMetricExport(data.garmin);
 }
 
 // Keeps the provider's controls disabled for the whole request, including the reload.

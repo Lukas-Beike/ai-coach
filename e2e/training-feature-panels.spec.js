@@ -1,27 +1,23 @@
 const { test, expect } = require("@playwright/test");
 
-test("@responsive current metrics describe automatic Garmin transfer and show its receipt", async ({ page }) => {
-  await page.goto("/#analysis/performance");
+test("@responsive Garmin metric export sits in Anbindungen and shows its receipt", async ({ page }) => {
+  await page.goto("/#more/connections");
   await expect(page.locator("#appShell")).toBeVisible();
-  const panel = page.locator("#currentPerformance");
-  const toggle = panel.locator("summary");
-  if (await toggle.count() && !await panel.locator("details").evaluate((node) => node.open)) await toggle.click();
+  const panel = page.locator("details[data-more-segment-panel='connections']");
+  if (!await panel.evaluate((node) => node.open)) await panel.locator("summary").click();
+  // The fixture runtime has no Garmin credentials, so the export block stays hidden until Garmin is connected.
+  await expect(page.locator("#garmin-metric-export")).toBeHidden();
+  await page.evaluate(() => {
+    state.data.credentials = { ...(state.data.credentials || {}), garmin_connection: { connected: true, source: "db" } };
+    state.data.garmin.metric_export_enabled = false;
+    state.data.garmin.metric_export_status = "Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.";
+    renderProviderCredentials(state.data);
+  });
   await expect(panel.getByText(/automatisch an Intervals\.icu senden/)).toBeVisible();
-  await panel.getByRole("button", { name: "Garmin → Intervals.icu automatisch abgleichen" }).click();
-  await page.getByRole("dialog").filter({ hasText: "Automatischen Abgleich aktivieren?" }).getByRole("button", { name: "Bestätigen", exact: true }).click();
-  await expect(panel.getByRole("button", { name: "Automatischen Abgleich deaktivieren" })).toBeVisible();
-  await page.reload();
-  await expect(panel.getByRole("button", { name: "Automatischen Abgleich deaktivieren" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Garmin → Intervals.icu automatisch abgleichen" })).toBeVisible();
+  await expect(panel.getByText("Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.")).toBeVisible();
   await expect(panel.getByRole("button", { name: "Werte an Anbieter senden" })).toHaveCount(0);
   await expect(panel.getByRole("checkbox")).toHaveCount(0);
-  await page.evaluate(() => {
-    state.data.garmin.metric_export_status = "Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.";
-    renderCurrentPerformance(state.data.performance.metrics, state.data.performance.history);
-  });
-  await expect(panel.getByText("Intervals.icu: 2 Messwerte gesendet, 1 Konflikte, 0 fehlgeschlagen.")).toBeVisible();
-  await panel.getByRole("button", { name: "Automatischen Abgleich deaktivieren" }).click();
-  await page.getByRole("dialog").filter({ hasText: "Automatischen Abgleich deaktivieren?" }).getByRole("button", { name: "Bestätigen", exact: true }).click();
-  await expect(panel.getByRole("button", { name: "Garmin → Intervals.icu automatisch abgleichen" })).toBeVisible();
 });
 
 test("@responsive chart readings keep their coordinates and legible labels", async ({ page }) => {
