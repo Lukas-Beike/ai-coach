@@ -141,7 +141,8 @@ class OpenFoodFactsClient:
             "product": deque(),
             "search": deque(),
         }
-        self._blocked_until = 0.0
+        # OFF counts search and product lookups separately, so block them separately.
+        self._blocked_until = {"product": 0.0, "search": 0.0}
 
     def search(self, query: str) -> list[dict[str, Any]]:
         # Legacy CGI is OFF's documented text-search endpoint; v2 has no text search.
@@ -198,7 +199,7 @@ class OpenFoodFactsClient:
             while recent and now - recent[0] >= 60:
                 recent.popleft()
             limit = 14 if category == "product" else 9
-            if now < self._blocked_until or len(recent) >= limit:
+            if now < self._blocked_until[category] or len(recent) >= limit:
                 raise AppError(
                     429,
                     "Lebensmittelsuche ist kurzzeitig begrenzt. Bitte später erneut versuchen.",
@@ -212,7 +213,7 @@ class OpenFoodFactsClient:
                     "Accept": "application/json",
                 },
             )
-            response = self._request_response(request)
+            response = self._request_response(request, category)
             if not isinstance(response.payload, dict):
                 raise AppError(
                     502, UNAVAILABLE, reason="food_database_invalid_response"
@@ -223,13 +224,13 @@ class OpenFoodFactsClient:
                 self._cache.popitem(last=False)
             return copy.deepcopy(response.payload)
 
-    def _request_response(self, request: Request) -> Any:
+    def _request_response(self, request: Request, category: str) -> Any:
         try:
             return request_json(
                 request, timeout=10, max_bytes=500_000, opener=self._opener
             )
         except HTTPError as exc:
-            self._raise_http_error(exc)
+            self._raise_http_error(exc, category)
         except (
             URLError,
             OSError,
@@ -241,20 +242,21 @@ class OpenFoodFactsClient:
                 502, UNAVAILABLE, reason="food_database_unavailable"
             ) from None
 
-    def _raise_http_error(self, exc: HTTPError) -> None:
+    def _raise_http_error(self, exc: HTTPError, category: str) -> None:
         if exc.code == 404:
             raise AppError(
                 404, "Produkt nicht gefunden.", reason="food_not_found"
             ) from None
-        if exc.code in (429, 503):
+        # Only 429 is a rate limit; 503 is an overload and must not start a backoff.
+        if exc.code == 429:
             retry_after = _number(
                 exc.headers.get("Retry-After") if exc.headers is not None else None,
                 86400,
             )
-            self._blocked_until = self._clock() + max(60, retry_after or 60)
+            self._blocked_until[category] = self._clock() + max(60, retry_after or 60)
             raise AppError(
                 429,
-                "Open Food Facts begrenzt die Anfragen. Bitte sp￼ter erneut versuchen.",
+                "Open Food Facts begrenzt die Anfragen. Bitte später erneut versuchen.",
                 reason="food_database_rate_limited",
             ) from None
         raise AppError(502, UNAVAILABLE, reason="food_database_unavailable") from None
