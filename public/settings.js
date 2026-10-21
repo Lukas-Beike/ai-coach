@@ -59,41 +59,6 @@ async function saveProfile(event) {
   }
 }
 
-async function saveCheckin(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const values = Object.fromEntries(new FormData(form));
-  values.tag_answers = {};
-  for (const tag of ["travel", "late_meal", "high_stress"]) {
-    if (values[`tag_${tag}`] !== "") values.tag_answers[tag] = values[`tag_${tag}`] === "true";
-    delete values[`tag_${tag}`];
-  }
-  for (const field of ["soreness", "stress", "motivation", "session_rpe", "available_minutes"]) {
-    values[field] = values[field] === "" ? null : Number(values[field]);
-  }
-  const button = form.querySelector("button[type=submit]");
-  const errorNode = $("#checkinError");
-  if (errorNode) errorNode.textContent = "";
-  if (button) { button.disabled = true; button.textContent = "Check-in wird gespeichert…"; }
-  // The form stays editable while the request is pending; edits made after this snapshot remain a draft.
-  const submittedForm = JSON.stringify([...new FormData(form)]);
-  try {
-    const result = await api("/api/feedback", { method: "POST", body: JSON.stringify(values) });
-    if (result.checkin?.checkin_date !== values.checkin_date) throw new Error("Die Check-in-Bestätigung fehlt. Der Entwurf bleibt erhalten.");
-    state.checkinDirty = JSON.stringify([...new FormData(form)]) !== submittedForm;
-    setDirtyIndicator("checkinDirtyIndicator", state.checkinDirty);
-    state.checkinSelectedDate = result.checkin?.checkin_date || values.checkin_date;
-    toast("Tages-Check-in gespeichert");
-    if (!state.checkinDirty) $("#checkinDialog")?.close();
-    await load();
-  } catch (error) {
-    if (errorNode) errorNode.textContent = error.message;
-  }
-  finally {
-    if (button) { button.disabled = false; button.textContent = "Tages-Check-in speichern"; }
-  }
-}
-
 // Rejects when the backup fails so callers can report the error and keep their own state consistent.
 async function downloadDatabaseBackup() {
   const button = $("#backupDownloadButton");

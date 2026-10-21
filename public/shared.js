@@ -252,7 +252,6 @@ function formatTime(value) {
 
 function hasUnsavedChanges({ includeChatDraft = true } = {}) {
   return state.profileDirty
-    || state.checkinDirty
     || (includeChatDraft && (state.chatQueue.length > 0 || state.rejectedMessages.length > 0 || state.chatDraftDirty || Boolean($("#messageInput")?.value.trim())));
 }
 
@@ -275,7 +274,6 @@ async function confirmDiscardChanges() {
 
 function discardUnsavedChanges() {
   state.profileDirty = false;
-  state.checkinDirty = false;
   if (state.data) render(state.data);
 }
 

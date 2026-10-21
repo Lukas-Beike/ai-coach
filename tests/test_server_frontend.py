@@ -97,7 +97,6 @@ class ServerFrontendTests(ServerTestCase):
             ),
             "settings.js": (
                 "saveProfile",
-                "saveCheckin",
                 "saveCalendarDisplaySettings",
             ),
         }
@@ -633,8 +632,6 @@ class ServerFrontendTests(ServerTestCase):
         self.assertLess(
             index.index(asset_ref("/coach.js")), index.index(asset_ref("/app.js"))
         )
-        self.assertIn('aria-describedby="checkinDescription"', index)
-        self.assertIn('id="checkinError" class="error" role="alert"', index)
         self.assertIn(
             'path != "/api/state/events"',
             Path(state_events_get.__file__).read_text(encoding="utf-8"),
@@ -920,13 +917,8 @@ class ServerFrontendTests(ServerTestCase):
             'if (typeof value === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return value;',
             views,
         )
-        self.assertIn("function renderCheckins(checkins, timeZone)", views)
-        self.assertIn('id="checkinForm"', index)
-        self.assertIn('id="checkinHistory"', index)
-        self.assertIn('id="checkinDialog"', index)
+        self.assertNotIn('id="checkinDialog"', index)
         self.assertNotIn('id="todayPanel"', index)
-        self.assertIn('name="day_form"', index)
-        self.assertIn('name="illness"', index)
         self.assertNotIn('id="syncIllnessToIntervals"', app)
         self.assertIn('id="coachAdaptivePlanningButton"', index)
         self.assertEqual(ILLNESS_CALENDAR_CATEGORY, "SICK")
