@@ -28,6 +28,8 @@ test.describe("login dialog", () => {
 
     await page.getByRole("link", { name: "Mehr", exact: true }).click();
     await expect(page.locator("#settingsPanel")).toHaveClass(/active/);
+    // Logout lives in the Betrieb & Diagnose segment, not in the default settings view.
+    await page.locator('a[data-more-segment="operations"]:visible').first().click();
     await page.getByRole("button", { name: "Abmelden", exact: true }).click();
     await page.locator("#confirmationDialogAccept").click();
 
