@@ -1039,6 +1039,21 @@ Die Ernährungsnavigation enthält Tagebuch, Verlauf, Body und Produkte. Der Ver
 
 Trainingsverpflegung hat keine eigene Anzeige, API oder Coach-Aktion mehr. Die lokale Änderungshistorie erscheint ebenfalls nicht als eigene Ansicht; Aufzeichnung und Coach-Undo bleiben erhalten. Unter einer Coach-Antwort, die lokale Daten geändert hat, steht „Geändert: …“. Wenn die Antwort nur Profil, Wettkämpfe oder Trainingsvorlagen geändert hat, deren Änderungen vollständig im Verlauf erfasst sind, nimmt „Rückgängig“ nach Bestätigung alle zusammen in einer Transaktion zurück; wurde ein Datensatz danach weiter geändert, bleibt alles unverändert. Intervals.icu und Garmin werden dabei nicht verändert. Der Diagnoseexport enthält weiterhin technische Ereignisse und Coach-Befehlsstatus sowie die Anzahl gespeicherter Änderungen, ohne deren Athleteninhalte offenzulegen.
 
+#### Lokale Produktdatenbank (Spiegel)
+
+Jedes Open-Food-Facts-Produkt, das die App online abruft, wird automatisch und
+dauerhaft in der lokalen Datenbank gespeichert (Tabelle `food_database_entries`,
+Schema v11, getrennt von den eigenen Produkten). Abfragen lesen erst die
+eigenen Produkte, dann diesen Spiegel und fragen Open Food Facts nur ab, wenn
+ein Treffer fehlt oder älter als 90 Tage ist. Ist der Online-Abruf nicht
+möglich, wird der gespeicherte Stand mit Datum („Stand vom …“) verwendet.
+Treffer tragen für den Coach die Herkunft `data_origin` (`live`,
+`local_database`, `local_database_stale`). Im Tab „Produkte“ listet der Abschnitt
+„Datenbank“ die gespeicherten Einträge; „Lokal speichern“ übernimmt einen
+Eintrag nach Prüfung als eigenes Produkt, „Aus Datenbank entfernen“ löscht nur
+den Spiegeleintrag. Der Spiegel gehört zu Backup, Export und Datenlöschung. Das
+Upgrade von Schema v9 oder v10 legt die leere Tabelle an und erhält alle Daten.
+
 #### Lokale Produkte und Verpackungsfotos
 
 Die Ernährungsbibliothek speichert bestätigte Einzelprodukte getrennt von

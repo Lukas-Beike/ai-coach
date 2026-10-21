@@ -16,6 +16,7 @@ from typing import Any, Final
 from backend.db.schema import (
     ACTIVITY_DETAIL_DDL,
     CURRENT_SCHEMA_VERSION,
+    FOOD_DATABASE_DDL,
     database_schema_is_current,
     database_schema_signature,
     execute_ddl,
@@ -24,6 +25,7 @@ from backend.db.schema_history import (
     ACCEPTED_SHAPES_BY_VERSION,
     SHAPE_CURRENT,
     SHAPE_SCHEMA_V9,
+    SHAPE_SCHEMA_V10,
     released_shape,
 )
 
@@ -90,6 +92,12 @@ def _upgrade_v9_to_v10(db: Any) -> None:
     execute_ddl(db, ACTIVITY_DETAIL_DDL)
 
 
+def _upgrade_v10_to_v11(db: Any) -> None:
+    # Adds the empty local food database mirror; no existing row changes.
+    execute_ddl(db, FOOD_DATABASE_DDL)
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
-    SHAPE_SCHEMA_V9: (SHAPE_CURRENT, _upgrade_v9_to_v10),
+    SHAPE_SCHEMA_V9: (SHAPE_SCHEMA_V10, _upgrade_v9_to_v10),
+    SHAPE_SCHEMA_V10: (SHAPE_CURRENT, _upgrade_v10_to_v11),
 }
