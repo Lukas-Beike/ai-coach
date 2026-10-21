@@ -7,6 +7,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.garmin_fields import flatten_daily_summary
 
 UTC_OFFSET_SUFFIX = "+00:00"
 AVERAGE_DAYS = 7
@@ -66,7 +67,7 @@ def dated_garmin_recovery_records(value: Any) -> list[tuple[str, dict[str, Any]]
                 _first_present(current, garmin_perf_fields.RECORD_IDENTITY_KEYS)
             )
             if record_date:
-                records.append((record_date, current))
+                records.append((record_date, dict(flatten_daily_summary(current))))
             pending.extend(
                 item for item in current.values() if isinstance(item, (dict, list))
             )

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& (Join-Path (git rev-parse --show-toplevel) 'scripts/graphify-session-start.ps1')",
+            "shell": "powershell",
+            "timeout": 240
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -12,3 +12,4 @@ Use for unfamiliar ai-coach tasks that span Coach, providers, sync, planning, HT
 - Verify the actual code and tests before trusting documentation, remembered paths, defaults, or tool capabilities. If the first path is stale, search the symbol rather than widening to a whole-repository read.
 - Return a compact map of `path:line`, request flow, relevant tests, and one next action.
 - Trace provider shapes through sanitized fixtures and tests; never read live athlete data, credentials, token stores or backups.
+- For a repository-wide symbol or dependency map, optionally use the local structural graph described in [ai-coach-graphify](../ai-coach-graphify/SKILL.md). Treat it as navigation only and verify candidates in current source.
