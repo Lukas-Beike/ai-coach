@@ -94,9 +94,11 @@ class ServerRuntimeTests(ServerTestCase):
         index = (
             Path(__file__).resolve().parents[1] / "public" / "index.html"
         ).read_text(encoding="utf-8")
-        for segment in ("profile", "connections", "coach", "privacy", "operations"):
+        for segment in ("profile", "connections", "coach", "operations"):
             self.assertIn(f'"more/{segment}"', navigation)
             self.assertIn(f'href="#more/{segment}"', index)
+        self.assertNotIn("more/privacy", navigation)
+        self.assertNotIn("more/privacy", index)
         self.assertIn(
             "function moreSegmentFromRoute(route = AppState.state.route)", navigation
         )
@@ -117,7 +119,7 @@ class ServerRuntimeTests(ServerTestCase):
             'competitionFact("Distanz", distanceLabel(competition.distance))',
             plan_views,
         )
-        self.assertIn('data-more-segment-panel="privacy"', index)
+        self.assertNotIn('data-more-segment-panel="privacy"', index)
         self.assertIn('data-more-segment-panel="operations"', index)
 
     def test_unlimited_retention_does_not_delete_history(self):

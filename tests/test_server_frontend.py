@@ -575,7 +575,7 @@ class ServerFrontendTests(ServerTestCase):
             navigation,
         )
         self.assertIn(
-            'const MORE_SEGMENTS = Object.freeze(["profile", "equipment", "connections", "coach", "privacy", "operations", "appearance"]);',
+            'const MORE_SEGMENTS = Object.freeze(["profile", "equipment", "connections", "coach", "operations", "appearance"]);',
             navigation,
         )
         self.assertLess(

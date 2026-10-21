@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=332">
+  <link rel="stylesheet" href="/styles.css?v=333">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -203,7 +203,6 @@
           <a href="#more/equipment" data-more-segment="equipment">Ausrüstung und Wartung</a>
           <a href="#more/connections" data-more-segment="connections">Anbindungen</a>
           <a href="#more/coach" data-more-segment="coach">Coach &amp; Modell</a>
-          <a href="#more/privacy" data-more-segment="privacy">Daten &amp; Datenschutz</a>
           <a href="#more/operations" data-more-segment="operations">Betrieb &amp; Diagnose</a>
         </nav>
         <form id="profileForm" class="profile-form" aria-describedby="profileContextNotice">
@@ -266,7 +265,6 @@
           <a href="#more/equipment" data-more-segment="equipment">Ausrüstung und Wartung</a>
           <a href="#more/connections" data-more-segment="connections" aria-current="page">Anbindungen</a>
           <a href="#more/coach" data-more-segment="coach">Coach &amp; Modell</a>
-          <a href="#more/privacy" data-more-segment="privacy">Daten &amp; Datenschutz</a>
           <a href="#more/operations" data-more-segment="operations">Betrieb &amp; Diagnose</a>
         </nav>
         <section class="settings-section" data-more-segment-panel="equipment" hidden>
@@ -412,6 +410,23 @@
             </div>
           </div>
         </details>
+        <details class="settings-section collapsible-section" data-more-segment-panel="coach">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Verbrauch</span><span id="usageSummary" class="collapsible-summary-meta">Verbrauch wird geladen…</span></summary>
+          <p class="fine-print">Anfragen und Tokens des Coach-Anbieters für den heutigen Tag.</p>
+          <dl class="usage-stats">
+            <div><dt>Anfragen</dt><dd id="usageRequests">–</dd></div>
+            <div><dt>Eingabe-Tokens</dt><dd id="usageInputTokens">–</dd></div>
+            <div><dt>Ausgabe-Tokens</dt><dd id="usageOutputTokens">–</dd></div>
+            <div><dt>Gesamt-Tokens</dt><dd id="usageTotalTokens">–</dd></div>
+          </dl>
+          <dl class="usage-details">
+            <div><dt>Restkontingent Anfragen</dt><dd id="usageRemainingRequests">–</dd></div>
+            <div><dt>Restkontingent Tokens</dt><dd id="usageRemainingTokens">–</dd></div>
+            <div><dt>Letzte Anfrage</dt><dd id="usageLastRequest">–</dd></div>
+            <div><dt>Status</dt><dd id="usageStatus">–</dd></div>
+          </dl>
+          <p class="fine-print">Das Restkontingent stammt aus dem aktuellen Anbieterfenster und erscheint nach dem ersten API-Aufruf.</p>
+        </details>
         <details class="settings-section context-preview collapsible-section" data-more-segment-panel="coach" aria-label="Chat-Kontext und Prompt">
           <summary class="collapsible-summary"><span class="collapsible-summary-title">Chat-Kontext und Prompt</span><span class="collapsible-summary-meta">Transparenz</span></summary>
           <div class="context-preview-heading">
@@ -427,9 +442,8 @@
           <div class="settings-section-heading"><div><h3>Server-Logs</h3><p>Die bereinigten Einträge aus Fehler- und Laufzeitprotokoll.</p></div><div class="settings-inline-action"><button id="logsDownloadButton" type="button" class="secondary-button">Logs herunterladen</button><button id="logsRefreshButton" type="button" class="secondary-button">Logs aktualisieren</button><button id="logsDeleteButton" type="button" class="secondary-button danger-button">Logs löschen</button></div></div>
           <pre id="logsOutput" class="logs-output">Logs werden beim Öffnen geladen…</pre>
         </details>
-        <details class="settings-section collapsible-section" data-more-segment-panel="privacy">
-          <summary class="collapsible-summary"><span class="collapsible-summary-title">Datenschutz &amp; Verbrauch</span><span id="privacySummary" class="collapsible-summary-meta">Verbrauch wird geladen…</span></summary>
-          <p id="usageSummary" class="fine-print">Verbrauch wird geladen…</p>
+        <details class="settings-section collapsible-section" data-more-segment-panel="operations">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Datenschutz &amp; Backup</span><span class="collapsible-summary-meta">Export, Löschung, Wiederherstellung</span></summary>
           <div class="settings-inline-action notification-actions">
             <div><strong>PWA-Benachrichtigungen</strong><span id="notificationStatus">Noch nicht aktiviert</span></div>
             <button id="notificationEnableButton" type="button" class="secondary-button">Benachrichtigungen aktivieren</button>
@@ -460,8 +474,11 @@
             <p class="fine-print">Die Diagnose enthält technische Anfrageformen, Provider-Metadaten und Fehlerdetails. Athleteninhalte, Zugangsdaten, Schlüssel, Tokens und Sitzungsdaten werden nicht gespeichert; Binärdaten werden ausgelassen.</p>
           </div>
         </details>
-        <section class="settings-section session-settings" aria-label="Sitzung">
-          <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
+        <section class="settings-section session-settings" data-more-segment-panel="operations" aria-label="Sitzung">
+          <div class="settings-inline-action">
+            <div><strong>Sitzung</strong><span>Meldet dich auf diesem Gerät ab und entfernt die lokal zwischengespeicherten Ansichten.</span></div>
+            <button id="logoutButton" type="button" class="secondary-button">Abmelden</button>
+          </div>
         </section>
       </section>
     </main>
@@ -525,9 +542,9 @@
   </dialog>
   <script src="/format.js?v=1" defer></script>
   <script src="/api.js?v=224" defer></script>
-  <script src="/navigation.js?v=235" defer></script>
+  <script src="/navigation.js?v=236" defer></script>
   <script src="/state.js?v=226" defer></script>
-  <script src="/views.js?v=231" defer></script>
+  <script src="/views.js?v=232" defer></script>
   <script src="/plan-views.js?v=16" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
