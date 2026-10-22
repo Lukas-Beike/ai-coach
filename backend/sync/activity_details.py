@@ -29,6 +29,7 @@ from backend.activities.detail_projection import (
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.workout_profile import recorded_profile
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
+from backend.db.activity_detail_fingerprints import intervals_detail_fingerprints
 from backend.errors import AppError, public_error_contract
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
@@ -252,13 +253,17 @@ class ActivityDetailRefreshService:
         for start in range(0, len(candidates), PREFETCH_LOOKUP_BATCH):
             batch = candidates[start : start + PREFETCH_LOOKUP_BATCH]
             ids = [str(row["id"]) for row in batch]
+            with self._database_manager.reader() as db:
+                canonical = intervals_detail_fingerprints(
+                    db, ids, batch_size=PREFETCH_LOOKUP_BATCH
+                )
             stored = self._store.fingerprints(ids)
             known_failures = self._store.failures(ids)
             for row in batch:
                 activity_id = str(row["id"])
                 fingerprint = summary_fingerprint(row)
                 if not self._prefetch_settled(
-                    activity_id, fingerprint, stored, known_failures
+                    activity_id, fingerprint, canonical, stored, known_failures
                 ):
                     yield activity_id, fingerprint
 
@@ -308,17 +313,23 @@ class ActivityDetailRefreshService:
         self,
         activity_id: str,
         fingerprint: str,
+        canonical_fingerprints: dict[str, set[str]],
         stored_fingerprints: dict[str, dict[str, Any]],
         known_failures: dict[str, dict[str, Any]],
     ) -> bool:
         """Whether details match the summary or already failed for it."""
         stored = stored_fingerprints.get(activity_id)
         failure = known_failures.get(activity_id)
-        if (
-            stored
-            and stored.get("summary_sha256") == fingerprint
-            and stored.get("projection_version") == DETAIL_PROJECTION_VERSION
-        ):
+        # While a legacy kv record exists it is what the detail view reads, so its
+        # projection must stay current; otherwise the canonical rows decide.
+        if stored:
+            settled = (
+                stored.get("summary_sha256") == fingerprint
+                and stored.get("projection_version") == DETAIL_PROJECTION_VERSION
+            )
+        else:
+            settled = fingerprint in canonical_fingerprints.get(activity_id, ())
+        if settled:
             # A summary that reverted to the stored version leaves a stale note.
             if failure:
                 self._store.clear_failure(activity_id)
