@@ -33,29 +33,36 @@ _LOOKUP_MATCHES_PER_QUERY = 3
 _LOOKUP_MATCHES_PER_STEP = 24
 
 
+def _group_matches(group: Any) -> list[dict[str, Any]]:
+    """Return the best matches of one successful lookup_food query."""
+    if not isinstance(group, dict) or not group.get("ok"):
+        return []
+    local = group.get("local") is True
+    candidates = [
+        *((item, True) for item in group.get("local_products") or []),
+        *((item, local) for item in group.get("foods") or []),
+    ]
+    query = group.get("query")
+    return [
+        {
+            "id": item["id"][:80],
+            "name": str(item.get("name") or "")[:120],
+            "kind": "local_product" if is_local else "database",
+            **({"query": query[:120]} if isinstance(query, str) else {}),
+        }
+        for item, is_local in candidates[:_LOOKUP_MATCHES_PER_QUERY]
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    ]
+
+
 def _lookup_matches(result: dict[str, Any]) -> list[dict[str, Any]]:
     """Return the ids, names and component kinds a lookup_food step found."""
     groups = result.get("results")
-    matches: list[dict[str, Any]] = []
-    for group in groups if isinstance(groups, list) else [result]:
-        if not isinstance(group, dict) or not group.get("ok"):
-            continue
-        local = group.get("local") is True
-        candidates = [
-            *((item, True) for item in group.get("local_products") or []),
-            *((item, local) for item in group.get("foods") or []),
-        ]
-        for item, is_local in candidates[:_LOOKUP_MATCHES_PER_QUERY]:
-            if isinstance(item, dict) and isinstance(item.get("id"), str):
-                match = {
-                    "id": item["id"][:80],
-                    "name": str(item.get("name") or "")[:120],
-                    "kind": "local_product" if is_local else "database",
-                }
-                if isinstance(group.get("query"), str):
-                    match["query"] = group["query"][:120]
-                matches.append(match)
-    return matches[:_LOOKUP_MATCHES_PER_STEP]
+    return [
+        match
+        for group in (groups if isinstance(groups, list) else [result])
+        for match in _group_matches(group)
+    ][:_LOOKUP_MATCHES_PER_STEP]
 
 
 INSTRUCTIONS = """

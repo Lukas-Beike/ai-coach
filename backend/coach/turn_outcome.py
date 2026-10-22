@@ -190,6 +190,35 @@ def _athlete_request(
     return ids, (summary or message)[:2000]
 
 
+def _retried_request(
+    command_receipts: list[dict[str, Any]],
+    pending_request: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the request a failed turn keeps for a later retry."""
+    last_request = next(
+        (
+            entry.get("request")
+            for entry in reversed(command_receipts)
+            if entry.get("request")
+        ),
+        None,
+    )
+    if last_request:
+        return last_request
+    if pending_request.get("status") != "needs_clarification":
+        return pending_request
+    # The athlete's answer belongs to the request it clarifies, so a retry
+    # re-runs both, e.g. "trocken, plus 130g Champignons".
+    return {
+        **pending_request,
+        "source_message_ids": [
+            *_message_ids(pending_request),
+            context["current_user_message_id"],
+        ],
+    }
+
+
 def _pending_value(
     command_receipts: list[dict[str, Any]],
     effects: list[dict[str, Any]],
@@ -204,14 +233,6 @@ def _pending_value(
 ) -> str | None:
     can_update = allow_mutations and not cancelled and not question
     if can_update and (failures or incomplete_answer):
-        last_request = next(
-            (
-                entry.get("request")
-                for entry in reversed(command_receipts)
-                if entry.get("request")
-            ),
-            None,
-        )
         selection = select_coach_context(message, context)
         pending_request = (
             context.get("pending_request") or {}
@@ -223,20 +244,7 @@ def _pending_value(
             for entry in (failures + effects)
             if isinstance(entry, dict) and "tool" in entry
         ]
-        request = last_request or pending_request
-        if (
-            request is pending_request
-            and request.get("status") == "needs_clarification"
-        ):
-            # The athlete's answer belongs to the request it clarifies, so a
-            # retry re-runs both, e.g. "trocken, plus 130g Champignons".
-            request = {
-                **request,
-                "source_message_ids": [
-                    *_message_ids(request),
-                    context["current_user_message_id"],
-                ],
-            }
+        request = _retried_request(command_receipts, pending_request, context)
         source_ids, summary = _athlete_request(
             request,
             context,
