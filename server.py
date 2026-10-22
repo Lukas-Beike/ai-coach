@@ -1440,6 +1440,7 @@ COACH_CONTEXT = CoachContextAssembly(
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
             workout_library_service=PLANNING_DATA.workout_library,
+            nutrition_meal_library=NUTRITION_ASSEMBLY.meal_library_service,
         ),
         dialogue=CoachContextDialogueSources(
             profile_service=ATHLETE_DATA.profile,

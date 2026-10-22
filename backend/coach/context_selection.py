@@ -27,6 +27,7 @@ CONTEXT_SECTIONS = frozenset(
         "recovery",
         "weather",
         "daily_planning_context",
+        "nutrition_products",
         "source_policy",
     }
 )
@@ -106,6 +107,10 @@ PROFILE_KEYWORDS = (
         r"aktivität|aktivitaet|activity|analyse|analy[sz]|einheit|session|workout",
     ),
     ("today_training", r"heute|morgen|today|tomorrow|" + WEATHER_PATTERN),
+)
+FOOD_INTAKE_PATTERN = (
+    r"gegessen|getrunken|mittag|frühstück|fruehstueck|abendessen|kcal|snack"
+    r"|\bate\b|\bdrank\b|calorie|kalorie|mahlzeit|\bmeal\b|ernährung|ernaehrung|nutrition"
 )
 CONTINUATION_PATTERN = (
     r"^\s*(?:bitte\s+|please\s+)?"
@@ -296,6 +301,8 @@ def select_coach_context(
     )
     if planning:
         sections.update({"planning", "training_plans"})
+    if re.search(FOOD_INTAKE_PATTERN, normalized):
+        sections.add("nutrition_products")
     if "provider_refresh_or_sync" in matched:
         return CoachContextSelection(name, retain_pending_request=is_pending_active)
     if _requires_full_time_context(planning, normalized):

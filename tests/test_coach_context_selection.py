@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 from server_test_support import server
 
+from backend.coach.context import CoachStructuredContextService
 from backend.coach.context_selection import (
     BASE_SECTIONS,
     CONTEXT_SECTIONS,
@@ -135,6 +136,58 @@ class CoachContextSelectionTests(unittest.TestCase):
         ):
             with self.subTest(message=message):
                 self.assertEqual(select_coach_context(message, {}).name, expected)
+
+    def test_food_intake_adds_saved_products_section_only_for_food(self):
+        for message in (
+            "Frühstück: 77g Banane, 60g Whey, 100g Mandeldrink",
+            "I ate lunch",
+            "Ich habe einen Shake getrunken",
+        ):
+            with self.subTest(message=message):
+                sections = select_coach_context(message, {}).sections
+                self.assertEqual(sections, BASE_SECTIONS | {"nutrition_products"})
+        for message in ("Speichere meinen Check-in", "Wie ist mein Befinden?"):
+            with self.subTest(message=message):
+                sections = select_coach_context(message, {}).sections
+                self.assertNotIn("nutrition_products", sections)
+
+    def test_structured_context_lists_compact_saved_products(self):
+        library = Mock()
+        library.list_products.return_value = [
+            {
+                "id": "p1",
+                "name": "Bio Whey Protein",
+                "brand": "Rheinnatur",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 400,
+                "provenance": {"kind": "manual"},
+            }
+        ]
+        service = CoachStructuredContextService(
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            lambda: library.list_products(),
+        )
+        section = service._selected_sections(
+            frozenset({"nutrition_products"}), {}, {}, [], {}, []
+        )["nutrition_products"]
+        self.assertEqual(
+            section,
+            [
+                {
+                    "id": "p1",
+                    "name": "Bio Whey Protein",
+                    "brand": "Rheinnatur",
+                    "basis_amount": 100,
+                    "basis_unit": "g",
+                }
+            ],
+        )
 
     def test_long_range_planning_uses_complete_context(self):
         for message in (
