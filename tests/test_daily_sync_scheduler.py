@@ -166,7 +166,7 @@ class DailySyncSchedulerTests(unittest.TestCase):
                 (
                     "intervals",
                     "refresh",
-                    {"days": 14, "reason": "automatic refresh"},
+                    {"days": 14, "reason": "automatic refresh", "automatic": True},
                     "scheduler",
                 ),
             ],

@@ -918,27 +918,29 @@ class ServerSyncTests(ServerTestCase):
 
     def test_garmin_daily_health_is_averaged_over_the_last_seven_days(self):
         today = server.ATHLETE_CLOCK.now().date()
-        save_garmin({
-                    "daily_stats": [
+        save_garmin(
+            {
+                "daily_stats": [
+                    {
+                        "calendarDate": today.isoformat(),
+                        "totalSteps": 1,
+                        "floorsAscended": 0,
+                        "totalKilocalories": 10,
+                    },
+                    *[
                         {
-                            "calendarDate": today.isoformat(),
-                            "totalSteps": 1,
-                            "floorsAscended": 0,
-                            "totalKilocalories": 10,
-                        },
-                        *[
-                            {
-                                "calendarDate": (
-                                    today - timedelta(days=offset + 1)
-                                ).isoformat(),
-                                "totalSteps": 1000 + offset * 100,
-                                "floorsAscended": 5 + offset,
-                                "totalKilocalories": 2000 + offset * 10,
-                            }
-                            for offset in range(7)
-                        ],
-                    ]
-                })
+                            "calendarDate": (
+                                today - timedelta(days=offset + 1)
+                            ).isoformat(),
+                            "totalSteps": 1000 + offset * 100,
+                            "floorsAscended": 5 + offset,
+                            "totalKilocalories": 2000 + offset * 10,
+                        }
+                        for offset in range(7)
+                    ],
+                ]
+            }
+        )
         performance = _current_performance_context(
             {
                 "synced_at": "now",
@@ -979,10 +981,12 @@ class ServerSyncTests(ServerTestCase):
                 }
             ],
         }
-        save_garmin({
-                    "cycling_ftp": {"functionalThresholdPower": 300},
-                    "performance_history": [],
-                })
+        save_garmin(
+            {
+                "cycling_ftp": {"functionalThresholdPower": 300},
+                "performance_history": [],
+            }
+        )
 
         comparison = _current_performance_context(snapshot)["comparisons"][
             "cycling_ftp_watts_30d"
@@ -1592,7 +1596,7 @@ class ServerSyncTests(ServerTestCase):
                 "cancellable", activity_days=42, cancel_event=cancel_event
             )
         fetch_snapshot.assert_called_once_with(
-            activity_days=42, cancel_event=cancel_event
+            activity_days=42, retain_days=84, cancel_event=cancel_event
         )
         refresh_library.assert_called_once_with(
             reason="Initialer Intervals.icu-Sync (cancellable)",
