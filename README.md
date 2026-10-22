@@ -606,6 +606,10 @@ root, `.agents/skills/`; full review and `pr` were moved from the legacy `.codex
 root without duplicate copies. No duplicate `CLAUDE.md` or app-specific rules
 layer is needed.
 
+The local [code-review skill](.agents/skills/code-review/SKILL.md) adapts
+Claude's review workflow for PRs and pre-push branch diffs. Agents read it
+directly; the `pr` workflow requires no host-specific slash command.
+
 Coding tasks default to the repository's [Ponytail workflow](.agents/skills/ai-coach-ponytail/SKILL.md)
 in `full` mode: the smallest complete change, reusing existing code before adding
 dependencies or abstractions. Any agent can scan and read its Markdown directly;

@@ -45,12 +45,19 @@ class NutritionSyncStatusService:
 
     def get_day_summary(self, meal_date: str) -> dict[str, Any]:
         validated_date = validate_iso_date(meal_date)
+        today = self._local_now().date()
+        # Today's projection needs the latest complete resting-energy reference.
+        snapshot_start = (
+            (today - timedelta(days=7)).isoformat()
+            if validated_date == today.isoformat()
+            else validated_date
+        )
         with self._database_manager.read_snapshot() as db:
             summary = self._nutrition_repository.day_summary(db, validated_date)
             # The snapshot only carries the resting calories (no metric kind) and
             # the daily-stats sync status.
             garmin_snapshot = garmin_store.read_view(
-                db, _ENERGY_SECTIONS, start=validated_date, end=validated_date
+                db, _ENERGY_SECTIONS, start=snapshot_start, end=validated_date
             )
             measured = self._measured_energy(db, validated_date, validated_date)
         if measured is not None:
@@ -61,7 +68,7 @@ class NutritionSyncStatusService:
         summary["energy_expenditure"] = daily_energy_expenditure(
             garmin_snapshot,
             validated_date,
-            self._local_now().date(),
+            today,
             measured=None if measured is None else measured.get(validated_date, {}),
         )
         return summary
