@@ -21,6 +21,19 @@ Select implementation, review, or evaluation from the requested work.
 Orchestration owns model selection, isolation, scheduling, and result handling.
 Load only the applicable owner for task-specific rules:
 
+- [code-review](../code-review/SKILL.md): PR/branch-diff review criteria;
+  [codebase review](../ai-coach-codebase-review/SKILL.md): full audits.
+- [skill evaluation](../ai-coach-skill-evaluation/SKILL.md): repository-skill
+  evaluation design, comparisons, and evidence.
+- [validation](../ai-coach-validation/SKILL.md): affected application checks.
+- [pr](../pr/SKILL.md), when invoked/authorized: mandatory PR review gate,
+  round limits, waivers, and publication/merge lifecycle.
+
+Review-only work returns findings without source edits. Evaluation-only work
+permits its owner's scoped temporary artifacts, without adopting source changes
+unless requested. Patch-adoption steps apply only to authorized source changes.
+Every mode requires parent verification of results and inspected source identity.
+
 ## Choose execution mode before model questions
 
 First decide whether workers are needed and whether this host can dispatch them
@@ -41,19 +54,6 @@ unless separately authorized. Never use sequential mode to bypass parent review
 and adoption of an active worker candidate, a PR review gate, or authorization
 for a remote action. Closing retrospectives may use the same sequential mode and
 must not recursively spawn workers.
-
-- [code-review](../code-review/SKILL.md): PR/branch-diff review criteria;
-  [codebase review](../ai-coach-codebase-review/SKILL.md): full audits.
-- [skill evaluation](../ai-coach-skill-evaluation/SKILL.md): repository-skill
-  evaluation design, comparisons, and evidence.
-- [validation](../ai-coach-validation/SKILL.md): affected application checks.
-- [pr](../pr/SKILL.md), when invoked/authorized: mandatory PR review gate,
-  round limits, waivers, and publication/merge lifecycle.
-
-Review-only work returns findings without source edits. Evaluation-only work
-permits its owner's scoped temporary artifacts, without adopting source changes
-unless requested. Patch-adoption steps apply only to authorized source changes.
-Every mode requires parent verification of results and inspected source identity.
 
 ## Select worker model tiers when dispatching workers
 
