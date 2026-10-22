@@ -697,14 +697,19 @@ class CoachStructuredContextService:
             limit=COACH_NUTRITION_PRODUCT_LIMIT + 1
         )
         keys = ("id", "name", "brand", "basis_amount", "basis_unit", "source")
-        # The flag comes first so section clipping keeps it with the items.
-        return {
-            "truncated": len(products) > COACH_NUTRITION_PRODUCT_LIMIT,
-            "items": [
-                {key: product.get(key) for key in keys}
-                for product in products[:COACH_NUTRITION_PRODUCT_LIMIT]
-            ],
-        }
+        truncated = len(products) > COACH_NUTRITION_PRODUCT_LIMIT
+        # Stop before the section budget so clipping never hides dropped items.
+        budget = COACH_CONTEXT_SECTION_LIMITS["nutrition_products"]
+        size = coach_context_json_size({"truncated": False, "items": []})
+        items: list[dict[str, Any]] = []
+        for product in products[:COACH_NUTRITION_PRODUCT_LIMIT]:
+            item = {key: product.get(key) for key in keys}
+            size += coach_context_json_size(item) + (1 if items else 0)
+            if size > budget:
+                truncated = True
+                break
+            items.append(item)
+        return {"truncated": truncated, "items": items}
 
 
 def compact_coach_local_planned_workout(

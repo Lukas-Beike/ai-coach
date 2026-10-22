@@ -4,7 +4,11 @@ from unittest.mock import Mock
 
 from server_test_support import server
 
-from backend.coach.context import CoachStructuredContextService
+from backend.coach.context import (
+    COACH_CONTEXT_SECTION_LIMITS,
+    CoachStructuredContextService,
+    bounded_coach_context_sections,
+)
 from backend.coach.context_selection import (
     BASE_SECTIONS,
     CONTEXT_SECTIONS,
@@ -225,6 +229,36 @@ class CoachContextSelectionTests(unittest.TestCase):
         )["nutrition_products"]
         self.assertTrue(section["truncated"])
         self.assertEqual(len(section["items"]), 80)
+
+    def test_saved_products_fit_section_budget_and_flag_dropped_items(self):
+        library = Mock()
+        library.list_products.return_value = [
+            {
+                "id": f"{index:032x}",
+                "name": "N" * 200,
+                "brand": "B" * 120,
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "source": "open_food_facts",
+            }
+            for index in range(80)
+        ]
+        service = CoachStructuredContextService(
+            Mock(), Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
+        )
+        section = service._selected_sections(
+            frozenset({"nutrition_products"}), {}, {}, [], {}, []
+        )["nutrition_products"]
+        self.assertTrue(section["truncated"])
+        self.assertLess(len(section["items"]), 80)
+        bounded, truncations = bounded_coach_context_sections(
+            {"nutrition_products": section},
+            section_limits={
+                "nutrition_products": COACH_CONTEXT_SECTION_LIMITS["nutrition_products"]
+            },
+        )
+        self.assertEqual(bounded["nutrition_products"], section)
+        self.assertEqual(truncations, [])
 
     def test_long_range_planning_uses_complete_context(self):
         for message in (
