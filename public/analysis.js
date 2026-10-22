@@ -759,6 +759,9 @@ function renderAnalysisHistory(history) { // NOSONAR
   const enduranceScore = otherMetrics.endurance_score;
   delete otherMetrics.running_tolerance;
   delete otherMetrics.endurance_score;
+  delete otherMetrics.training_readiness_history;
+  // Weekly training status only repeats the acute load already charted in the load tab.
+  delete otherMetrics.weekly_training_status;
   const enduranceMissing = [];
   renderProviderMetrics({ endurance_score: enduranceScore }, extra, performanceStart, end, enduranceMissing);
   while (extra.firstElementChild) enduranceRoot.append(makeAnalysisSectionCollapsible(extra.firstElementChild, "endurance-score"));
@@ -1211,6 +1214,12 @@ function renderRecoveryCharts(report, root) {
     const title = average == null ? item.legendLabel : `${item.legendLabel} · Ø ${analysisValue(average, item.unit)}`;
     return collectAnalysisChart(missing, title, [item], item.unit, start, end, "", { compactInfo: true, includeCoverage: false, showLegend: false });
   }).filter(Boolean);
+  const readiness = state.data?.performance?.history?.provider_metrics?.training_readiness_history;
+  if (readiness) {
+    const readinessCharts = document.createDocumentFragment();
+    renderProviderMetrics({ training_readiness_history: readiness }, readinessCharts, start, end, missing);
+    charts.unshift(...readinessCharts.children);
+  }
   root.append(analysisPeriodControls("Zeitraum für Erholung", recoveryHistoryPeriod, (period) => { recoveryHistoryPeriod = period; renderPersonalRecovery(report); }));
   const group = analysisChartGroup(`Erholung · ${recoveryHistoryPeriod === "twelveWeeks" ? "Letzte 12 Wochen" : "Letzte 14 Tage"}`, charts, series, note);
   const missingNote = analysisMissingDataNote(missing);
