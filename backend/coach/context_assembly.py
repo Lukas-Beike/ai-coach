@@ -120,14 +120,8 @@ class CoachContextAssembly:
                 self._canonical,
                 self._activity_rows,
             ),
-            nutrition_products=self._nutrition_products_reader(),
+            nutrition_meal_library=self._nutrition_meal_library,
         )
-
-    def _nutrition_products_reader(self) -> Callable[[], list[dict[str, Any]]] | None:
-        meal_library = self._nutrition_meal_library
-        if meal_library is None:
-            return None
-        return lambda: meal_library().list_products()
 
     def training_context_service(self) -> CoachTrainingContextService:
         limits = self._limits()
