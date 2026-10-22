@@ -39,6 +39,10 @@ class WeatherSyncService:
             scope.result = result
             return result
 
+    def refresh_due(self) -> bool:
+        """Return whether an unforced refresh would read the forecast now."""
+        return bool(self._weather_service.refresh_due())
+
     def _sync_inner(self, reason: str, force: bool) -> dict[str, Any]:
         if not self._profile_service.get().get("weather_location", "").strip():
             return {"status": "not_configured"}

@@ -2,7 +2,7 @@ import json
 import sqlite3
 import unittest
 from contextlib import contextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import Mock
 
 from backend.athlete.profile import ProfileService
@@ -283,6 +283,30 @@ class WeatherServiceTests(unittest.TestCase):
             self.tracker.events[-1][2:], ("error", "failed", "provider_error")
         )
         self.assertEqual(len(self.logger.calls), 1)
+
+    def test_refresh_due_follows_cache_age_and_retry_backoff(self):
+        refreshed = {
+            "query": "Berlin",
+            "forecast": {"daily": {"time": ["2026-09-20"]}},
+            "fetched_at": self.now.isoformat(),
+        }
+        client = Client(refreshed)
+        service = self.service(client)
+        self.assertTrue(service.refresh_due())
+
+        service.state()
+        self.assertFalse(service.refresh_due())
+        self.now += timedelta(hours=3)
+        self.assertTrue(service.refresh_due())
+
+        client.error = AppError(503, "upstream")
+        service.state()
+        self.assertFalse(service.refresh_due())
+        self.now += timedelta(hours=6)
+        self.assertTrue(service.refresh_due())
+
+        self.profile.save({"weather_location": ""})
+        self.assertFalse(service.refresh_due())
 
     def test_local_read_does_not_fetch_and_uses_cached_projection(self):
         client = Client(error=AssertionError("must not fetch"))

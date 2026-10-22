@@ -256,7 +256,12 @@ def weather_binding(deps: ProviderRuntimeDependencies) -> ProviderRuntimeBinding
     """Bind the weather forecast job and its location-driven schedule."""
 
     def schedule() -> WeatherSchedulePolicy:
-        return WeatherSchedulePolicy(deps.profile())
+        return WeatherSchedulePolicy(
+            deps.profile(),
+            refresh_due=lambda: (
+                deps.calendar_weather.weather_sync_service().refresh_due()
+            ),
+        )
 
     def job_owner() -> ProviderJobOwner:
         return CalendarWeatherJobAdapter(
