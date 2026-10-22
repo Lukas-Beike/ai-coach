@@ -1030,7 +1030,9 @@ Intervals.icu-Aktualisierung lädt die Details aller neuen Aktivitäten
 automatisch und nur lesend nach und speichert sie dauerhaft im kanonischen
 Datenmodell. Als neu gilt jede Einheit ab der ältesten der zehn neuesten
 Aktivitäten beim ersten automatischen Laden; ältere Einheiten werden nicht
-automatisch nachgeladen. Pro Aktualisierung lädt die App höchstens 25 Einheiten,
+automatisch nachgeladen. Das Startdatum lässt sich unter Mehr › Anbindungen bei
+Intervals.icu-Aktivitätsdetails („Laden ab“) auf einen Tag setzen; bereits
+gespeicherte Details bleiben unverändert. Pro Aktualisierung lädt die App höchstens 25 Einheiten,
 die neuesten zuerst; übrige folgen bei der nächsten Aktualisierung. Bleiben die
 Daten einer Einheit dabei aus, steht sie
 trotzdem in der Liste und nennt den Grund, ohne bis zur nächsten Änderung

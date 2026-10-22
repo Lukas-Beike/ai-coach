@@ -26,6 +26,10 @@ class SettingsPutRoutes:
             )
         elif path == "/api/settings/calendar-display":
             result = self._settings.save_calendar_display_settings(handler.read_json())
+        elif path == "/api/settings/activity-detail-floor":
+            result = self._settings.save_activity_detail_prefetch_floor(
+                handler.read_json()
+            )
         else:
             return False
 

@@ -49,6 +49,21 @@ class SettingsPutRoutesTests(unittest.TestCase):
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_called_once_with(200, result)
 
+    def test_activity_detail_floor_route_passes_whole_payload(self) -> None:
+        payload = {"date": "2026-10-22"}
+        self.handler.read_json.return_value = payload
+        result = {"status": "ok", **payload}
+        self.settings.save_activity_detail_prefetch_floor.return_value = result
+
+        self.assertTrue(
+            self.routes.handle(self.handler, "/api/settings/activity-detail-floor")
+        )
+
+        self.settings.save_activity_detail_prefetch_floor.assert_called_once_with(
+            payload
+        )
+        self.handler.send_json.assert_called_once_with(200, result)
+
     def test_unknown_path_has_no_side_effects(self) -> None:
         self.assertFalse(self.routes.handle(self.handler, "/api/settings/unknown"))
 
@@ -58,6 +73,7 @@ class SettingsPutRoutesTests(unittest.TestCase):
             self.settings.save_model,
             self.settings.save_thinking_level,
             self.settings.save_calendar_display_settings,
+            self.settings.save_activity_detail_prefetch_floor,
         ):
             save.assert_not_called()
 

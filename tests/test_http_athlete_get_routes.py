@@ -39,6 +39,7 @@ class AthleteGetRoutesTests(unittest.TestCase):
         self.profile.get.return_value = {"name": "Test Athlete"}
         self.competitions.list.return_value = [{"name": "Test Race"}]
         self.feedback.feedback_state.return_value = {"feedback": []}
+        self.settings.activity_detail_prefetch_floor.return_value = "2026-10-22"
         cases = (
             ("/api/performance", {"metrics": {"ftp": 250}}),
             (
@@ -49,6 +50,7 @@ class AthleteGetRoutesTests(unittest.TestCase):
                 },
             ),
             ("/api/feedback", {"feedback": []}),
+            ("/api/settings/activity-detail-floor", {"date": "2026-10-22"}),
         )
         for path, expected_payload in cases:
             with self.subTest(path=path):

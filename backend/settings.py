@@ -6,9 +6,12 @@ storage are supplied by the application composition root.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
+from backend.activities.detail_store import PREFETCH_FLOOR_KEY
 from backend.config import DEFAULT_OPENAI_BASE_URL, Config
 from backend.errors import AppError
 
@@ -222,3 +225,25 @@ class SettingsService:
         for key, value in updates.items():
             self._set_value(f"calendar_display_{key}", str(value))
         return {"status": "ok", **self._calendar_display_settings()}
+
+    def activity_detail_prefetch_floor(self) -> str | None:
+        """Return the day from which activity details load automatically, if set."""
+        self._config_supplier()
+        stored = self._get_value(PREFETCH_FLOOR_KEY)
+        return stored[:10] if stored else None
+
+    def save_activity_detail_prefetch_floor(self, values: Any) -> dict[str, Any]:
+        """Move the automatic detail loading start to a calendar day."""
+        self._config_supplier()
+        raw = values.get("date") if isinstance(values, dict) else None
+        text = raw.strip() if isinstance(raw, str) else ""
+        try:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+                raise ValueError(text)
+            floor = date.fromisoformat(text)
+        except ValueError as exc:
+            raise AppError(
+                400, "Das Datum muss im Format JJJJ-MM-TT angegeben werden."
+            ) from exc
+        self._set_value(PREFETCH_FLOOR_KEY, floor.isoformat())
+        return {"status": "ok", "date": floor.isoformat()}
