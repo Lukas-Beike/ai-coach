@@ -396,6 +396,18 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
         self.assert_invalid(
             "weather", "refresh", {"force": "true"}, "force muss ein Boolean"
         )
+        self.assertIs(
+            self.normalize("intervals", "refresh", {"automatic": True})["payload"][
+                "automatic"
+            ],
+            True,
+        )
+        self.assert_invalid(
+            "intervals", "refresh", {"automatic": 1}, "automatic muss ein Boolean"
+        )
+        self.assert_invalid(
+            "garmin", "refresh", {"automatic": True}, UNSUPPORTED_JOB_FIELDS_ERROR
+        )
 
     def test_historical_backfill_is_limited_to_activity_providers(self):
         for provider in ("intervals", "garmin"):

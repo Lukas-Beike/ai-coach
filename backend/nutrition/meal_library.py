@@ -77,9 +77,10 @@ class NutritionMealLibraryService:
         query: str | None = None,
         barcode: str | None = None,
         include_archived: bool = False,
+        limit: int = 50,
     ) -> list[dict[str, Any]]:
         return self._product_catalog.list_products(
-            query=query, barcode=barcode, include_archived=include_archived
+            query=query, barcode=barcode, include_archived=include_archived, limit=limit
         )
 
     def list_database_foods(self, query: str | None = None) -> list[dict[str, Any]]:

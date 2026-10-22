@@ -107,8 +107,17 @@ class WeatherSchedulePolicyTests(unittest.TestCase):
         self.assertFalse(self.make_policy("   ").configured())
         self.assertFalse(self.make_policy("").configured())
 
-    def test_never_blocked(self) -> None:
+    def test_never_blocked_without_freshness_check(self) -> None:
         self.assertFalse(self.make_policy().blocked())
+
+    def test_blocked_while_no_unforced_refresh_is_due(self) -> None:
+        due = [False]
+        policy = WeatherSchedulePolicy(
+            cast(Any, _Profile("Synthetic city")), refresh_due=lambda: due[0]
+        )
+        self.assertTrue(policy.blocked())
+        due[0] = True
+        self.assertFalse(policy.blocked())
 
     def test_payload_forces_only_on_startup(self) -> None:
         policy = self.make_policy()
@@ -187,11 +196,12 @@ class IntervalsSchedulePolicyTests(unittest.TestCase):
     def test_payload_uses_sync_period_for_both_triggers(self) -> None:
         policy, sync_state = self.make_policy()
         self.assertEqual(
-            policy.refresh_payload("daily", "auto"), {"days": 21, "reason": "auto"}
+            policy.refresh_payload("daily", "auto"),
+            {"days": 21, "reason": "auto", "automatic": True},
         )
         self.assertEqual(
             policy.refresh_payload("startup", "startup"),
-            {"days": 21, "reason": "startup"},
+            {"days": 21, "reason": "startup", "automatic": True},
         )
         self.assertEqual(
             sync_state.period_reads,

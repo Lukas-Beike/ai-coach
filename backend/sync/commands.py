@@ -57,7 +57,7 @@ class IntervalsSynchronousRefresh:
             activity_days=activity_days,
             wait_for_existing=True,
             wait_for_performance=True,
-            **({"cancel_event": cancel_event} if cancel_event is not None else {}),
+            **_cancel_kwargs(cancel_event),
         )
         _raise_if_busy(result, "Intervals.icu")
         try:
@@ -98,7 +98,7 @@ class IntervalsSynchronousRefresh:
             "Chat-Anfrage",
             activity_days=activity_days,
             wait_for_existing=False,
-            **({"cancel_event": cancel_event} if cancel_event is not None else {}),
+            **_cancel_kwargs(cancel_event),
         )
         _raise_if_busy(result, "Intervals.icu")
         return result
@@ -136,6 +136,10 @@ def _requested_days(
             reason="invalid_refresh_request",
         )
     return days
+
+
+def _cancel_kwargs(cancel_event: threading.Event | None) -> dict[str, Any]:
+    return {"cancel_event": cancel_event} if cancel_event is not None else {}
 
 
 def _raise_if_busy(result: Mapping[str, Any], provider_label: str) -> None:

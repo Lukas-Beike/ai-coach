@@ -514,7 +514,10 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.assertEqual(self.intervals.calls[-1][1]["end_date"], date(2000, 1, 10))
 
     def test_backfill_below_the_floor_ends_without_a_fetch(self) -> None:
-        for provider, service in (("intervals", self.intervals), ("garmin", self.garmin)):
+        for provider, service in (
+            ("intervals", self.intervals),
+            ("garmin", self.garmin),
+        ):
             with self.subTest(provider=provider):
                 service.calls.clear()
                 self.queue.calls.clear()
@@ -679,6 +682,22 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.executor.run(self.job("intervals"))
 
         self.assertEqual(len(self.competitions.calls), 1)
+
+    def test_only_scheduled_intervals_refreshes_are_automatic(self) -> None:
+        self.executor.run(
+            self.job("intervals", payload={"days": 42, "automatic": True})
+        )
+        self.executor.run(self.job("intervals", payload={"days": 42}))
+        self.executor.run(
+            self.job(
+                "intervals",
+                "historical_backfill",
+                {"days": 5, "end_date": "2026-06-03", "automatic": True},
+            )
+        )
+
+        flags = [kwargs.get("automatic") for _args, kwargs in self.intervals.calls]
+        self.assertEqual(flags, [True, None, None])
 
     def test_refresh_prefetches_recent_details_with_provider_gate(self) -> None:
         def prefetch(guard):

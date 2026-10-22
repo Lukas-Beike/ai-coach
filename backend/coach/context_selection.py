@@ -86,6 +86,12 @@ FULL_CALENDAR_PATTERN = (
     r"\btermine?\b|\bappointments?\b|\bmein(?:e[mnrs]?)?\s+kalender\b"
     r"|\bkalender\s+komplett\b|\bmy\s+calendar\b"
 )
+FOOD_INTAKE_PATTERN = (
+    r"gegessen|getrunken|\bmittag(?:essen)?\b|frühstück|fruehstueck|abendessen|kcal|snack"
+    r"|\bate\b|\bdrank\b|calorie|kalorie|mahlzeit|\bmeal\b|ernährung|ernaehrung|nutrition"
+)
+# Quantities such as "60g Whey" or "200 ml" also report intake without a keyword.
+FOOD_AMOUNT_PATTERN = r"\b\d+(?:[.,]\d+)?\s?(?:g|gramm|kg|ml|l)\b"
 PROFILE_KEYWORDS = (
     (
         "provider_refresh_or_sync",
@@ -102,17 +108,13 @@ PROFILE_KEYWORDS = (
     ("competition_preparation", r"wettkampf|rennen|race|competition|marathon"),
     (
         "profile_or_checkin",
-        r"check.?in|ruhepuls|gewicht|profil|gegessen|mittag|frühstück|fruehstueck|abendessen|kcal|snack|\bate\b|calorie|kalorie|nutrition|ernährung|ernaehrung|mahlzeit|befinden",
+        r"check.?in|ruhepuls|gewicht|profil|befinden|" + FOOD_INTAKE_PATTERN,
     ),
     (
         "activity_analysis",
         r"aktivität|aktivitaet|activity|analyse|analy[sz]|einheit|session|workout",
     ),
     ("today_training", r"heute|morgen|today|tomorrow|" + WEATHER_PATTERN),
-)
-FOOD_INTAKE_PATTERN = (
-    r"gegessen|getrunken|\bmittag(?:essen)?\b|frühstück|fruehstueck|abendessen|kcal|snack"
-    r"|\bate\b|\bdrank\b|calorie|kalorie|mahlzeit|\bmeal\b|ernährung|ernaehrung|nutrition"
 )
 CONTINUATION_PATTERN = (
     r"^\s*(?:bitte\s+|please\s+)?"
@@ -264,13 +266,13 @@ def is_bare_follow_up(message: str) -> bool:
     )
 
 
-def _food_sections(normalized: str) -> frozenset[str]:
-    """Return the saved-product section when the message reports food or drink."""
-    return (
-        frozenset({"nutrition_products"})
-        if re.search(FOOD_INTAKE_PATTERN, normalized)
-        else frozenset()
+def _food_sections(normalized: str, attachments: bool) -> set[str]:
+    """Return the saved-product section when the turn may report intake."""
+    food = attachments or any(
+        re.search(pattern, normalized)
+        for pattern in (FOOD_INTAKE_PATTERN, FOOD_AMOUNT_PATTERN)
     )
+    return {"nutrition_products"} if food else set()
 
 
 def select_coach_context(
@@ -299,21 +301,22 @@ def select_coach_context(
         continuation,
     )
 
+    food = _food_sections(normalized, attachments)
     if _needs_fallback_context(
         is_pending_active, continuation, pronoun, matched, normalized
     ):
         return CoachContextSelection(
-            "fallback", FALLBACK_SECTIONS, retain_pending_request=is_pending_active
+            "fallback",
+            FALLBACK_SECTIONS | food,
+            retain_pending_request=is_pending_active,
         )
     name = matched[0] if matched else "general_coaching"
-    sections = set(BASE_SECTIONS)
+    sections = set(BASE_SECTIONS) | food
     planning = bool(
         set(matched) & {"weekly_planning", "plan_editing", "competition_preparation"}
     )
     if planning:
         sections.update({"planning", "training_plans"})
-    food = _food_sections(normalized)
-    sections |= food
     if "provider_refresh_or_sync" in matched or _requires_full_time_context(
         planning, normalized
     ):

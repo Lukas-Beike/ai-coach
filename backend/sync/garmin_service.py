@@ -28,6 +28,7 @@ from backend.providers.garmin import (
     collect_garmin_data,
 )
 from backend.providers.garmin_fields import GARMIN_EXTENDED_DATE_ALIASES
+from backend.sync.garmin import GARMIN_RECONCILIATION_DAYS
 from backend.sync.garmin_snapshot_writer import (
     ANALYSIS_SOURCES,
     NUTRITION_SOURCES,
@@ -165,6 +166,8 @@ class GarminRemoteReader:
         status: Callable[[str], None],
         cancel_event: threading.Event | None = None,
         include_recovery: bool | None = None,
+        include_daily_metrics: bool = True,
+        known_activity_ids: frozenset[str] | None = None,
     ) -> tuple[dict[str, Any], list[tuple[date, date]]]:
         today = end_date or self._local_today()
         windows = split_date_windows(
@@ -200,6 +203,8 @@ class GarminRemoteReader:
                     include_current_metrics=(
                         end_date is None and days != self._all_sync_days
                     ),
+                    include_daily_metrics=include_daily_metrics,
+                    known_activity_ids=known_activity_ids,
                 ),
             )
         finally:
@@ -845,6 +850,8 @@ class GarminSyncSource:
         status: Callable[[str], None],
         cancel_event: threading.Event | None,
         include_recovery: bool | None = None,
+        include_daily_metrics: bool = True,
+        known_activity_ids: frozenset[str] | None = None,
     ) -> tuple[dict[str, Any], list[tuple[date, date]] | None, str | None, str]:
         if self.fixture_enabled():
             payload = self._fixture_loader.load(days)
@@ -855,6 +862,8 @@ class GarminSyncSource:
             status=status,
             cancel_event=cancel_event,
             include_recovery=include_recovery,
+            include_daily_metrics=include_daily_metrics,
+            known_activity_ids=known_activity_ids,
         )
         return payload, windows, None, windows[0][0].isoformat()
 
@@ -1112,12 +1121,29 @@ class GarminSyncService:
     ) -> dict[str, Any]:
         self._lifecycle_state.record_sync_started()
         self._set_status(operation_id, "fetching", 10, "Garmin-Daten werden gelesen…")
+        # The first current refresh of a local day, whoever starts it, reconciles
+        # the recent window and reads the slowly changing metrics. Later runs read
+        # them after a new activity or a failed source; historical windows never.
+        reconcile = end_date is None and self._payload_service.daily_metrics_due()
+        if reconcile:
+            days = max(days, GARMIN_RECONCILIATION_DAYS)
+        daily_metrics = (
+            end_date is not None
+            or reconcile
+            or self._payload_service.daily_metrics_retry_due()
+        )
         payload, windows, source, historical_cursor = self._source.read(
             days,
             end_date,
             status=self._lifecycle_state.set_sync_status,
             cancel_event=cancel_event,
             include_recovery=include_recovery,
+            include_daily_metrics=daily_metrics,
+            known_activity_ids=(
+                None
+                if daily_metrics
+                else self._payload_service.known_activity_ids(days)
+            ),
         )
         self._raise_if_cancelled(cancel_event)
         payload = (

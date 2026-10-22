@@ -16,7 +16,7 @@ import unittest
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest import mock
 
 from provider_runtime_fakes import (
@@ -267,6 +267,19 @@ class BuiltinBindingTests(unittest.TestCase):
                 if pid in BUILTIN_IDS
             ],
         )
+
+    def test_weather_schedule_waits_while_the_forecast_cache_is_fresh(self) -> None:
+        deps = _builtin_deps()
+        weather = cast(Any, deps.calendar_weather).weather_sync_service.return_value
+        runtime = build_provider_runtime(
+            DEFAULT_PROVIDER_REGISTRY, builtin_bindings(deps)
+        )
+        policy = runtime.schedule_policies()["daily"][WEATHER_ID]
+
+        weather.refresh_due.return_value = False
+        self.assertTrue(policy.blocked())
+        weather.refresh_due.return_value = True
+        self.assertFalse(policy.blocked())
 
 
 class RegistryValidationTests(unittest.TestCase):

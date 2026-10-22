@@ -525,7 +525,11 @@ def _normalize_refresh_job(
             values["days"], all_sync_days, max_days
         )
     if "force" in values:
-        normalized_payload["force"] = _normalize_refresh_force(values["force"])
+        normalized_payload["force"] = _normalize_refresh_flag(values["force"], "force")
+    if "automatic" in values:
+        normalized_payload["automatic"] = _normalize_refresh_flag(
+            values["automatic"], "automatic"
+        )
     if "end_date" in values:
         normalized_payload["end_date"] = _normalize_refresh_end_date(values["end_date"])
     if values.get("reason") is not None:
@@ -553,9 +557,9 @@ def _normalize_empty_chunks(value: Any) -> int:
     return count
 
 
-def _normalize_refresh_force(value: Any) -> bool:
+def _normalize_refresh_flag(value: Any, field: str) -> bool:
     if type(value) is not bool:
-        raise JobValidationError("force muss ein Boolean sein.")
+        raise JobValidationError(f"{field} muss ein Boolean sein.")
     return value
 
 
