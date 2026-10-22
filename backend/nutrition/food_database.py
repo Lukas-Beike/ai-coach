@@ -60,6 +60,21 @@ def _stems(word: str) -> set[str]:
     }
 
 
+def _occurrence_score(
+    variant: str, position: int, starts: set[int], ends: set[int]
+) -> int:
+    """Score one place where a variant occurs in the joined name; see _word_score."""
+    end = position + len(variant)
+    at_start, at_end = position in starts, end in ends
+    if at_start and at_end:
+        return 4
+    # Across words only whole words count, not "frei S" for "reis".
+    spans = any(position < start < end for start in starts)
+    if (at_start or at_end) and not spans:
+        return 3 if at_end else 2
+    return int(len(variant) >= 3)
+
+
 def _word_score(variants: set[str], words: list[str], joined: str) -> int:
     """Score how a name contains a query word; 0 means not at all.
 
@@ -77,16 +92,7 @@ def _word_score(variants: set[str], words: list[str], joined: str) -> int:
     for variant in variants:
         position = joined.find(variant)
         while position != -1:
-            end = position + len(variant)
-            at_start, at_end = position in starts, end in ends
-            # Across words only whole words count, not "frei S" for "reis".
-            spans = any(position < start < end for start in starts)
-            if at_start and at_end:
-                score = 4
-            elif (at_start or at_end) and not spans:
-                score = 3 if at_end else 2
-            else:
-                score = int(len(variant) >= 3)
+            score = _occurrence_score(variant, position, starts, ends)
             if score:
                 best = max(best, score + (score > 1 and position < first_end))
             position = joined.find(variant, position + 1)
@@ -325,16 +331,19 @@ class FoodDatabaseService:
         else:
             if not isinstance(query, str) or not 2 <= len(query.strip()) <= 120:
                 raise AppError(400, "Suchbegriff muss 2 bis 120 Zeichen enthalten.")
-            if source == "bls":
-                foods, partial = _bls_search(query)
-                if partial:
-                    notice += PARTIAL_NOTICE
-            elif source == "open_food_facts":
-                found, origin = self._off_search(query.strip())
-                foods = self._labelled(found, origin)
-            else:
-                raise AppError(400, "Ungültige Lebensmitteldatenbank.")
+            foods, search_notice = self._search(query, source)
+            notice += search_notice
         return {"ok": True, "foods": foods, "notice": notice}
+
+    def _search(self, query: str, source: Any) -> tuple[list[dict[str, Any]], str]:
+        """Return the foods for a text query and the notice it adds, if any."""
+        if source == "bls":
+            foods, partial = _bls_search(query)
+            return foods, PARTIAL_NOTICE if partial else ""
+        if source == "open_food_facts":
+            found, origin = self._off_search(query.strip())
+            return self._labelled(found, origin), ""
+        raise AppError(400, "Ungültige Lebensmitteldatenbank.")
 
     def resolve(self, food_id: Any) -> dict[str, Any]:
         if not isinstance(food_id, str):
