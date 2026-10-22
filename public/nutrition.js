@@ -160,7 +160,7 @@ function nutritionCard(item, template) {
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
   const basisLabel = nutritionBasisLabel(item.nutrition_basis, { template, syncLabel }, sourceLabel);
-  source.textContent = basisLabel ? basisLabel + (template ? "" : syncLabel) : "";
+  if (basisLabel) source.textContent = basisLabel + (template ? "" : syncLabel);
   card.append(title, description, values);
   if (source.textContent) card.append(source);
   if (!template) {
@@ -267,7 +267,9 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
 
   const syncedAt = nutritionExpenditureTimestamp(expenditure?.synced_at);
   const fetchedAt = nutritionExpenditureTimestamp(expenditure?.fetched_at);
-  date.textContent = syncedAt ? `Sync: ${syncedAt}` : fetchedAt ? `Abgerufen: ${fetchedAt}` : "";
+  date.textContent = "";
+  if (syncedAt) date.textContent = `Sync: ${syncedAt}`;
+  else if (fetchedAt) date.textContent = `Abgerufen: ${fetchedAt}`;
   if (projectionTile) {
     projectionTile.title = `Grundumsatz vom ${nutritionExpenditureDate(expenditure.projection_reference_date)} (${formatKcal(expenditure.projection_resting_kcal)}) + bisherige Aktivkalorien (${formatKcal(expenditure.active_kcal)}), eigene Schätzung`;
   }
