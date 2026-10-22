@@ -210,6 +210,31 @@ def iter_items(
     yield from _items(db, sections, None, None)
 
 
+def _section_clause(names: list[str]) -> tuple[str, list[object]]:
+    matches = " OR ".join(
+        "(source_record_id = ? OR substr(source_record_id, 1, ?) = ?)" for _ in names
+    )
+    params: list[object] = []
+    for name in names:
+        params.extend((name, len(name) + 1, f"{name}/"))
+    return f"({matches})", params
+
+
+def _decoded_item(row: Any) -> tuple[str, SectionItem] | None:
+    identifier = str(row["source_record_id"])
+    section = section_of(identifier)
+    if section not in ITEM_SECTIONS:
+        return None
+    try:
+        payload = json.loads(row["payload"])
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    item = unwrapped(section, key_of(identifier), payload)
+    return None if item is None else (section, item)
+
+
 def _items(
     db: Any,
     sections: Iterable[str] | None,
@@ -222,13 +247,9 @@ def _items(
         names = sorted(set(sections) & ITEM_SECTIONS)
         if not names:
             return
-        matches = " OR ".join(
-            "(source_record_id = ? OR substr(source_record_id, 1, ?) = ?)"
-            for _ in names
-        )
-        clauses.append(f"({matches})")
-        for name in names:
-            params.extend((name, len(name) + 1, f"{name}/"))
+        clause, values = _section_clause(names)
+        clauses.append(clause)
+        params.extend(values)
     if start is not None:
         clauses.append("(observed_on IS NULL OR observed_on >= ?)")
         params.append(start)
@@ -242,19 +263,9 @@ def _items(
         tuple(params),
     )
     for row in cursor:
-        identifier = str(row["source_record_id"])
-        section = section_of(identifier)
-        if section not in ITEM_SECTIONS:
-            continue
-        try:
-            payload = json.loads(row["payload"])
-        except ValueError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        item = unwrapped(section, key_of(identifier), payload)
-        if item is not None:
-            yield section, item
+        decoded = _decoded_item(row)
+        if decoded is not None:
+            yield decoded
 
 
 def section_names(db: Any) -> frozenset[str]:

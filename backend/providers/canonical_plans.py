@@ -291,18 +291,12 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         section_at = garmin_section_retrieved_at(payload, name, zone=zone)
         if section_at is None:
             continue
-        # Each element is mapped as stored, so re-projection rebuilds the same rows.
         for section in WEIGHT_SECTIONS if name == GARMIN_WEIGHT_SECTION else (name,):
-            for item in split_section(payload.get(section)):
-                if item.value is None:
-                    continue
-                health = map_garmin_health(
-                    wrapped(section, item), zone=zone, retrieved_at=section_at
+            observations.extend(
+                _garmin_section_observations(
+                    section, payload.get(section), zone=zone, retrieved_at=section_at
                 )
-                observations.extend(
-                    ObservationItem(observation, GARMIN_HEALTH_VERSION)
-                    for observation in health.records
-                )
+            )
     return IngestPlan(
         provider=ProviderId.GARMIN,
         raw_records=tuple(raw_records),
@@ -311,6 +305,20 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         present_activity_ids=frozenset(present),
         skipped_invalid=skipped,
     )
+
+
+def _garmin_section_observations(
+    section: str, value: object, *, zone: tzinfo, retrieved_at: Any
+) -> Iterator[ObservationItem]:
+    """Map each stored element as stored, so re-projection rebuilds the same rows."""
+    for item in split_section(value):
+        if item.value is None:
+            continue
+        health = map_garmin_health(
+            wrapped(section, item), zone=zone, retrieved_at=retrieved_at
+        )
+        for observation in health.records:
+            yield ObservationItem(observation, GARMIN_HEALTH_VERSION)
 
 
 def _garmin_section_records(

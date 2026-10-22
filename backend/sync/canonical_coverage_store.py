@@ -114,13 +114,14 @@ def garmin_ingest_coverage(
         return None
     totals = canonical_store.provider_totals(db, ProviderId.GARMIN.value)
     oldest, newest = totals["oldest"], totals["newest"]
-    return replace(
+    coverage: ProviderCoverage = replace(
         fetched,
         activity_count=totals["activities"],
         observation_count=totals["observations"],
         first_observed_on=None if oldest is None else date.fromisoformat(oldest),
         last_observed_on=None if newest is None else date.fromisoformat(newest),
     )
+    return coverage
 
 
 def wahoo_payload_coverage(payload: object, *, zone: tzinfo) -> ProviderCoverage | None:
