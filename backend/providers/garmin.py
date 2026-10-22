@@ -1464,19 +1464,37 @@ def collect_garmin_data(
             capability_success,
         )
     provider_sync: dict[str, Any] = {"pagination": pagination}
-    if collection_options.include_current_metrics:
-        if read_daily:
-            provider_sync["daily_metrics_on"] = today.isoformat()
-        else:
-            # Skipped, not failed: the stored values and their freshness stay.
-            provider_sync["skipped_sources"] = [
-                source
-                for source in GARMIN_DAILY_METRIC_SOURCES
-                if source not in pagination
-            ]
     payload["provider_sync"] = provider_sync
     _validate_current_metrics(payload, redact, warn)
+    if collection_options.include_current_metrics:
+        _record_daily_metrics(payload, provider_sync, today, read_daily)
     return payload
+
+
+def _record_daily_metrics(
+    payload: dict[str, Any],
+    provider_sync: dict[str, Any],
+    today: date,
+    read_daily: bool,
+) -> None:
+    """Record the daily metric read; failed sources are read again next run."""
+    if not read_daily:
+        # Skipped, not failed: the stored values and their freshness stay.
+        provider_sync["skipped_sources"] = [
+            source
+            for source in GARMIN_DAILY_METRIC_SOURCES
+            if source not in provider_sync["pagination"]
+        ]
+        return
+    provider_sync["daily_metrics_on"] = today.isoformat()
+    failed = {
+        error.get("source")
+        for error in payload.get("errors") or []
+        if isinstance(error, dict)
+    }
+    retry = [source for source in GARMIN_DAILY_METRIC_SOURCES if source in failed]
+    if retry:
+        provider_sync["daily_metrics_retry"] = retry
 
 
 def _reads_new_activity(

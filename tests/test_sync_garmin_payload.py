@@ -130,6 +130,24 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertFalse(self.service.daily_metrics_due())
         self.assertEqual(self.service.known_activity_ids(2), frozenset({"101"}))
 
+    def test_failed_daily_metric_retry_survives_skipping_runs(self):
+        seed_payload = self.collection_payload("2026-06-29", "2026-09-20")
+        seed_payload["provider_sync"]["daily_metrics_retry"] = ["race_predictions"]
+        self.store_garmin_snapshot(self.service.prepare_remote(seed_payload))
+        self.assertFalse(self.service.daily_metrics_due())
+        self.assertTrue(self.service.daily_metrics_retry_due())
+
+        historical = self.collection_payload("2026-06-01", "2026-06-28")
+        del historical["provider_sync"]["daily_metrics_on"]
+        merged = self.service.prepare_remote(historical)
+        self.assertEqual(
+            merged["provider_sync"]["daily_metrics_retry"], ["race_predictions"]
+        )
+
+        retried = self.collection_payload("2026-09-19", "2026-09-20")
+        self.store_garmin_snapshot(self.service.prepare_remote(retried))
+        self.assertFalse(self.service.daily_metrics_retry_due())
+
     def test_missing_or_invalid_day_marker_makes_daily_metrics_due(self):
         self.assertTrue(self.service.daily_metrics_due())
         self.store_garmin_snapshot({"provider_sync": {"daily_metrics_on": "invalid"}})

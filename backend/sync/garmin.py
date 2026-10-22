@@ -169,6 +169,13 @@ def _daily_metrics_due(state: dict[str, Any], today: date) -> bool:
         return True
 
 
+def _daily_metrics_retry_due(state: dict[str, Any]) -> bool:
+    provider_sync = state.get("provider_sync")
+    return isinstance(provider_sync, dict) and bool(
+        provider_sync.get("daily_metrics_retry")
+    )
+
+
 class GarminPayloadService:
     """Read local Garmin state and prepare collected payloads for persistence."""
 
@@ -227,6 +234,10 @@ class GarminPayloadService:
     def daily_metrics_due(self) -> bool:
         """Return whether no refresh has read the daily metrics on this local day."""
         return _daily_metrics_due(self.state(), self._local_today())
+
+    def daily_metrics_retry_due(self) -> bool:
+        """Return whether a daily metric source failed on its last read."""
+        return _daily_metrics_retry_due(self.state())
 
     def known_activity_ids(self, days: int) -> frozenset[str]:
         """Return the stored Garmin activity IDs of the last ``days`` local days."""
@@ -337,14 +348,13 @@ class GarminPayloadService:
         with self._database_manager.reader() as db:
             previous = garmin_store.read_view(db, None, start=start)
             stored = garmin_store.stored_sources(db)
-        # Runs that skip the daily metrics keep the day they were last read.
+        # Runs that skip the daily metrics keep the day they were last read
+        # and the sources still waiting for a retry.
         previous_sync = previous.get("provider_sync")
-        if (
-            "daily_metrics_on" not in provider_sync
-            and isinstance(previous_sync, dict)
-            and previous_sync.get("daily_metrics_on")
-        ):
-            provider_sync["daily_metrics_on"] = previous_sync["daily_metrics_on"]
+        if "daily_metrics_on" not in provider_sync and isinstance(previous_sync, dict):
+            for key in ("daily_metrics_on", "daily_metrics_retry"):
+                if previous_sync.get(key):
+                    provider_sync[key] = previous_sync[key]
         merge_sources(payload, previous, stored)
         if not fixture:
             payload["activities"] = deduplicate_api_records(

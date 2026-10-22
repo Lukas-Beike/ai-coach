@@ -190,7 +190,7 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
         )
         self.assertEqual(result["errors"][0]["source"], "weekly_training_status")
 
-    def daily_metric_collection(self, activity_id, *, due, known):
+    def daily_metric_collection(self, activity_id, *, due, known, fail=False):
         calls = []
 
         class Client:
@@ -203,6 +203,8 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
 
             def get_race_predictions(self):
                 calls.append("race_predictions")
+                if fail:
+                    raise TimeoutError("timed out")
                 return {"time5K": 1200}
 
             def get_max_metrics_range(self, *_args):
@@ -250,6 +252,14 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
         calls, provider_sync = self.daily_metric_collection(1, due=True, known=None)
         self.assertIn("race_predictions", calls)
         self.assertEqual(provider_sync["daily_metrics_on"], TODAY.isoformat())
+        self.assertNotIn("daily_metrics_retry", provider_sync)
+
+    def test_failed_daily_metric_is_marked_for_retry(self):
+        _calls, provider_sync = self.daily_metric_collection(
+            1, due=True, known=None, fail=True
+        )
+        self.assertEqual(provider_sync["daily_metrics_on"], TODAY.isoformat())
+        self.assertEqual(provider_sync["daily_metrics_retry"], ["race_predictions"])
 
     def test_endurance_score_dto_range_is_unwrapped(self):
         points = metric_points(

@@ -84,10 +84,12 @@ class _PayloadService:
         payload: dict | None = None,
         *,
         daily_metrics_due: bool = True,
+        daily_metrics_retry_due: bool = False,
         known_activity_ids: frozenset[str] = frozenset(),
     ) -> None:
         self.payload = payload or {}
         self._daily_metrics_due = daily_metrics_due
+        self._daily_metrics_retry_due = daily_metrics_retry_due
         self._known_activity_ids = known_activity_ids
 
     def snapshot(self) -> dict:
@@ -95,6 +97,9 @@ class _PayloadService:
 
     def daily_metrics_due(self) -> bool:
         return self._daily_metrics_due
+
+    def daily_metrics_retry_due(self) -> bool:
+        return self._daily_metrics_retry_due
 
     def known_activity_ids(self, days: int) -> frozenset[str]:
         return self._known_activity_ids
@@ -316,6 +321,16 @@ class GarminSyncServiceTests(unittest.TestCase):
 
         self.make_service(payload=_PayloadService(daily_metrics_due=True)).sync(days=2)
         self.assertEqual(self.remote.daily_metrics, (True, None))
+        # Any caller's first refresh of the day reads the reconciliation window.
+        self.assertEqual(self.remote.arguments[:2], (7, None))
+
+        self.make_service(
+            payload=_PayloadService(
+                daily_metrics_due=False, daily_metrics_retry_due=True
+            )
+        ).sync(days=2)
+        self.assertEqual(self.remote.daily_metrics, (True, None))
+        self.assertEqual(self.remote.arguments[:2], (2, None))
 
         self.make_service(payload=_PayloadService(daily_metrics_due=False)).sync(
             days=20, end_date=date(2026, 9, 1)
