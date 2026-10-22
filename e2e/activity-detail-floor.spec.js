@@ -1,11 +1,5 @@
 const { test, expect } = require("@playwright/test");
-
-async function expandConnections(page) {
-  const section = page.locator('details[data-more-segment-panel="connections"]');
-  await expect(section).toBeVisible();
-  if (!(await section.evaluate((element) => element.open))) await section.locator("summary").first().click();
-  await expect(section).toHaveAttribute("open", "");
-}
+const { expandConnections } = require("./helpers/connections");
 
 test("@responsive the automatic detail loading day is saved and survives a reload", async ({ page }) => {
   await page.goto("/#more/connections");

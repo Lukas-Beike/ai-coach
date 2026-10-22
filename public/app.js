@@ -81,7 +81,7 @@ $("#modelSelect").addEventListener("change", saveModel);
 $("#serviceTierSelect").addEventListener("change", saveServiceTier);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
-$('details[data-more-segment-panel="connections"]').addEventListener("toggle", (event) => { if (event.currentTarget.open) loadActivityDetailFloor(); });
+$('details[data-more-segment-panel="connections"]').addEventListener("toggle", (event) => { if (event.currentTarget.open) void loadActivityDetailFloor(); });
 $("#activityDetailFloorSaveButton").addEventListener("click", saveActivityDetailFloor);
 $("#diagnosticsButton").addEventListener("click", downloadDiagnostics);
 $("#diagnosticsDeleteButton")?.addEventListener("click", deleteDiagnostics);
