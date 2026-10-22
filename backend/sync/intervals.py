@@ -50,6 +50,20 @@ INTERVALS_SHORT_WINDOW_DAYS = 2
 FULL_WINDOW_READ_KEY = "intervals_full_window_read_on"
 
 
+def _wellness_day(row: Any) -> str:
+    return str(row.get("id") or "") if isinstance(row, dict) else ""
+
+
+def _merged_wellness(rows: list[Any], keep_days: int | None) -> list[Any]:
+    """Return deduplicated wellness rows in day order, keeping the newest days.
+
+    Wellness IDs are ISO days, so the cap drops the oldest days, never the ones
+    a read just fetched. ``None`` keeps every row.
+    """
+    ordered = sorted(deduplicate_api_records(rows), key=_wellness_day)
+    return ordered if keep_days is None else ordered[-(keep_days + 1) :]
+
+
 class IntervalsSnapshotReader:
     """Read Intervals provider data and prepare complete durable snapshots."""
 
@@ -207,18 +221,11 @@ class IntervalsSnapshotReader:
         merged["recent_activities"] = deduplicate_api_records(
             incoming["recent_activities"] + existing.get("recent_activities", [])
         )[:500]
-        # Wellness IDs are ISO days: keep the rows in day order so the cap drops
-        # the oldest days, never the ones this read just fetched.
-        wellness_rows = sorted(
-            deduplicate_api_records(
-                incoming["recent_wellness"] + existing.get("recent_wellness", [])
-            ),
-            key=lambda row: str(row.get("id") or "") if isinstance(row, dict) else "",
-        )
-        merged["recent_wellness"] = (
-            wellness_rows
+        merged["recent_wellness"] = _merged_wellness(
+            incoming["recent_wellness"] + existing.get("recent_wellness", []),
+            None
             if retain_days == self._all_sync_days
-            else wellness_rows[-(max(42, activity_days, retain_days or 0) + 1) :]
+            else max(42, activity_days, retain_days or 0),
         )
         previous_raw = (
             existing.get("raw_provider_data")
