@@ -35,7 +35,8 @@ class GarminPayloadServiceTests(unittest.TestCase):
             "provider_sync": {
                 "pagination": {
                     source: {"complete": source != failed} for source in sources
-                }
+                },
+                "daily_metrics_on": end,
             },
             **{source: [] for source in sources},
         }
@@ -84,12 +85,73 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.store_garmin_snapshot(completed)
         self.assertEqual(self.service.automatic_sync_days(2), 2)
 
-    def test_next_calendar_day_still_needs_only_two_days(self):
+    def test_next_calendar_day_reconciles_once_then_needs_only_two_days(self):
         seed = self.service.prepare_remote(
             self.collection_payload("2026-06-28", "2026-09-19")
         )
         self.store_garmin_snapshot(seed)
+        self.assertTrue(self.service.daily_metrics_due())
+        self.assertEqual(self.service.automatic_sync_days(2), 7)
+
+        reconciled = self.service.prepare_remote(
+            self.collection_payload("2026-09-14", "2026-09-20")
+        )
+        self.store_garmin_snapshot(reconciled)
+        self.assertFalse(self.service.daily_metrics_due())
         self.assertEqual(self.service.automatic_sync_days(2), 2)
+
+    def test_skipped_daily_metrics_keep_values_freshness_and_day_marker(self):
+        seed_payload = self.collection_payload("2026-06-29", "2026-09-20")
+        seed_payload["activities"] = [
+            {"activityId": 101, "startTimeLocal": "2026-09-20 07:00:00"}
+        ]
+        seed_payload["race_predictions"] = {"time5K": 1200}
+        seed = self.service.prepare_remote(seed_payload)
+        self.store_garmin_snapshot(seed)
+        later = self.collection_payload("2026-09-19", "2026-09-20")
+        later["synced_at"] = "2026-09-20T13:00:00"
+        del later["provider_sync"]["daily_metrics_on"]
+        later["provider_sync"]["skipped_sources"] = ["race_predictions"]
+
+        merged = self.service.prepare_remote(later)
+
+        self.assertNotIn("race_predictions", merged)
+        self.assertEqual(
+            merged["source_freshness"]["race_predictions"],
+            seed["source_freshness"]["race_predictions"],
+        )
+        self.assertEqual(merged["provider_sync"]["daily_metrics_on"], "2026-09-20")
+        self.store_garmin_snapshot(merged)
+        stored = self.service.view(("race_predictions",))
+        self.assertEqual(stored["race_predictions"], {"time5K": 1200})
+        self.assertEqual(
+            stored["source_freshness"]["race_predictions"]["freshness"], "current"
+        )
+        self.assertFalse(self.service.daily_metrics_due())
+        self.assertEqual(self.service.known_activity_ids(2), frozenset({"101"}))
+
+    def test_failed_daily_metric_retry_survives_skipping_runs(self):
+        seed_payload = self.collection_payload("2026-06-29", "2026-09-20")
+        seed_payload["provider_sync"]["daily_metrics_retry"] = ["race_predictions"]
+        self.store_garmin_snapshot(self.service.prepare_remote(seed_payload))
+        self.assertFalse(self.service.daily_metrics_due())
+        self.assertTrue(self.service.daily_metrics_retry_due())
+
+        historical = self.collection_payload("2026-06-01", "2026-06-28")
+        del historical["provider_sync"]["daily_metrics_on"]
+        merged = self.service.prepare_remote(historical)
+        self.assertEqual(
+            merged["provider_sync"]["daily_metrics_retry"], ["race_predictions"]
+        )
+
+        retried = self.collection_payload("2026-09-19", "2026-09-20")
+        self.store_garmin_snapshot(self.service.prepare_remote(retried))
+        self.assertFalse(self.service.daily_metrics_retry_due())
+
+    def test_missing_or_invalid_day_marker_makes_daily_metrics_due(self):
+        self.assertTrue(self.service.daily_metrics_due())
+        self.store_garmin_snapshot({"provider_sync": {"daily_metrics_on": "invalid"}})
+        self.assertTrue(self.service.daily_metrics_due())
 
     def test_unavailable_optional_collection_does_not_force_repeated_initial_import(
         self,
@@ -105,6 +167,8 @@ class GarminPayloadServiceTests(unittest.TestCase):
         required = self.collection_payload("2026-06-27", "2026-09-18")
         del required["training_load_activities"]
         del required["provider_sync"]["pagination"]["training_load_activities"]
+        # Daily metrics were read today, so only coverage widens the window.
+        required["provider_sync"]["daily_metrics_on"] = "2026-09-20"
         self.store_garmin_snapshot(self.service.prepare_remote(required))
 
         load_refresh = {
@@ -163,6 +227,8 @@ class GarminPayloadServiceTests(unittest.TestCase):
                 "observed_at": "2026-09-18",
             },
         }
+        # Daily metrics were read today, so only coverage widens the window.
+        previous["provider_sync"]["daily_metrics_on"] = "2026-09-20"
         self.store_garmin_snapshot(self.service.prepare_remote(previous))
 
         failed = {
