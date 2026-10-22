@@ -1,14 +1,8 @@
 const { test, expect } = require("@playwright/test");
+const { expandConnections } = require("./helpers/connections");
 
 // The fixture runtime has no Intervals.icu or Garmin credentials, so provider
 // actions must be disabled and the setup banner must be shown.
-
-async function expandConnections(page) {
-  const section = page.locator('details[data-more-segment-panel="connections"]');
-  await expect(section).toBeVisible();
-  if (!(await section.evaluate((element) => element.open))) await section.locator("summary").first().click();
-  await expect(section).toHaveAttribute("open", "");
-}
 
 test("@responsive provider sync actions are disabled with a setup hint without configuration", async ({ page }) => {
   await page.goto("/#more/connections");

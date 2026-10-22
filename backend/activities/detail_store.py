@@ -18,7 +18,7 @@ from backend.providers.intervals_performance_fields import (
 # A separate key keeps failures out of the `activity_detail:%` detail scans.
 _FAILURE = "activity_detail_failure"
 _RECORD_PREFIX = "activity_detail:"
-_PREFETCH_FLOOR = "activity_detail_prefetch_floor"
+PREFETCH_FLOOR_KEY = "activity_detail_prefetch_floor"
 
 
 def _json_or_none(raw: str) -> Any:
@@ -154,7 +154,7 @@ class ActivityDetailStore:
         """Start time from which every new activity is loaded automatically."""
         with self._database_manager.reader() as db:
             row = db.execute(
-                "SELECT value FROM kv WHERE key=?", (_PREFETCH_FLOOR,)
+                "SELECT value FROM kv WHERE key=?", (PREFETCH_FLOOR_KEY,)
             ).fetchone()
         return None if row is None else str(row["value"])
 
@@ -163,7 +163,7 @@ class ActivityDetailStore:
         with self._database_manager.unit_of_work() as db:
             db.execute(
                 "INSERT OR IGNORE INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                (_PREFETCH_FLOOR, value, observed_at),
+                (PREFETCH_FLOOR_KEY, value, observed_at),
             )
 
     @staticmethod

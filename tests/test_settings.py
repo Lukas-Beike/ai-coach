@@ -1,6 +1,7 @@
 import unittest
 from dataclasses import replace
 
+from backend.activities.detail_store import PREFETCH_FLOOR_KEY
 from backend.config import Config
 from backend.errors import AppError
 from backend.settings import (
@@ -176,6 +177,33 @@ class SettingsServiceTests(unittest.TestCase):
             self.assertEqual(error.exception.status, 400)
             self.assertEqual(str(error.exception), message)
             self.assertEqual(self.writes, [])
+
+    def test_prefetch_floor_reads_the_day_and_moves_to_a_valid_date(self):
+        self.assertIsNone(self.service.activity_detail_prefetch_floor())
+        self.values[PREFETCH_FLOOR_KEY] = "2026-10-03T08:00:00"
+        self.assertEqual(self.service.activity_detail_prefetch_floor(), "2026-10-03")
+
+        result = self.service.save_activity_detail_prefetch_floor(
+            {"date": " 2026-10-22 "}
+        )
+
+        self.assertEqual(result, {"status": "ok", "date": "2026-10-22"})
+        self.assertEqual(self.writes, [(PREFETCH_FLOOR_KEY, "2026-10-22")])
+        self.assertEqual(self.service.activity_detail_prefetch_floor(), "2026-10-22")
+
+    def test_prefetch_floor_rejects_invalid_dates_without_writing(self):
+        for payload in (
+            None,
+            {},
+            {"date": 20261022},
+            {"date": "22.10.2026"},
+            {"date": "2026-02-30"},
+            {"date": "20261022"},
+        ):
+            with self.subTest(payload=payload), self.assertRaises(AppError) as error:
+                self.service.save_activity_detail_prefetch_floor(payload)
+            self.assertEqual(error.exception.status, 400)
+        self.assertEqual(self.writes, [])
 
 
 if __name__ == "__main__":
