@@ -225,6 +225,7 @@ class GarminActivityDetailService:
                 ACTIVITY_RECORD_KIND,
                 since=since,
                 limit=len(universe),
+                mapper_version=MAPPER_VERSION,
                 retry_ids=[
                     provider_activity_id
                     for provider_activity_id, (_summary, attempts) in retry.items()

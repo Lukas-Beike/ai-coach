@@ -86,6 +86,7 @@ _FIT_FIELD_SCALES: Final[Mapping[tuple[int, int], tuple[str, int, int]]] = {
     (19, 8): ("total_timer_time_s", 1000, 0),
     (19, 9): ("total_distance_m", 100, 0),
     (19, 13): ("avg_speed_m_s", 1000, 0),
+    (19, 14): ("max_speed_m_s", 1000, 0),
     (19, 15): ("avg_heart_rate_bpm", 1, 0),
     (19, 16): ("max_heart_rate_bpm", 1, 0),
     (19, 17): ("avg_cadence_rpm", 1, 0),
@@ -94,6 +95,7 @@ _FIT_FIELD_SCALES: Final[Mapping[tuple[int, int], tuple[str, int, int]]] = {
     (19, 21): ("total_ascent_m", 1, 0),
     (19, 33): ("normalized_power_w", 1, 0),
     (19, 110): ("enhanced_avg_speed_m_s", 1000, 0),
+    (19, 111): ("enhanced_max_speed_m_s", 1000, 0),
     # session message
     (18, 2): ("timestamp", 1, 0),
     (18, 7): ("elapsed_time_s", 1000, 0),
@@ -123,6 +125,7 @@ _FIT_FIELD_PREFERENCES: Final[Mapping[tuple[int, int], tuple[int, ...]]] = {
     (18, 14): (124, 14),
     (18, 15): (125, 15),
     (19, 13): (110, 13),
+    (19, 14): (111, 14),
 }
 _FIT_BASE_TYPE_FORMATS: Final[Mapping[int, str]] = {
     0: "B",

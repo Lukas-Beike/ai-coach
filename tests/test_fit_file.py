@@ -266,6 +266,11 @@ class FitFileValueTests(unittest.TestCase):
         self.assertEqual(fit_field({73: None, 6: 2000}, 20, 6), 2.0)
         self.assertEqual(fit_field({6: 2000}, 20, 6), 2.0)
 
+    def test_lap_max_speed_prefers_the_enhanced_field(self):
+        self.assertEqual(fit_field({111: 4500, 14: 9000}, 19, 14), 4.5)
+        self.assertEqual(fit_field({111: None, 14: 4000}, 19, 14), 4.0)
+        self.assertEqual(fit_field({14: 4000}, 19, 14), 4.0)
+
     def test_enhanced_field_sentinel_falls_back_to_base_end_to_end(self):
         builder = FitBuilder().define(0, 20, [(73, UINT32), (6, UINT16)])
         builder.data(0, {73: 1500, 6: 9000})

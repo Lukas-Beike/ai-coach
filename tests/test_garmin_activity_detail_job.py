@@ -25,6 +25,7 @@ from backend.db.activity_detail_store import detail_sets_for
 from backend.errors import AppError
 from backend.providers import canonical_plans as plans
 from backend.providers.descriptors import GARMIN_ID
+from backend.providers.garmin_activity_detail_mapping import MAPPER_VERSION
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.executor import GarminSyncJobOwner
@@ -157,7 +158,7 @@ class GarminActivityDetailJobTests(unittest.TestCase):
         for item in items:
             with self.subTest(kind=item.detail.kind.value):
                 self.assertEqual(item.provider, GARMIN_ID)
-                self.assertEqual(item.mapper_version, 1)
+                self.assertEqual(item.mapper_version, MAPPER_VERSION)
                 self.assertEqual(item.detail.provenance.provider, ProviderId.GARMIN)
                 self.assertEqual(item.detail.origin, ActivityDetailOrigin.FETCH)
                 self.assertEqual(datetime.fromisoformat(item.fetched_at), NOW_AT)

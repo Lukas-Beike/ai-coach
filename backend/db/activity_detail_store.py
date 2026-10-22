@@ -270,6 +270,7 @@ def activity_detail_backfill_candidates(
     *,
     since: datetime,
     limit: int,
+    mapper_version: int,
     retry_ids: Collection[str] = (),
 ) -> list[dict[str, str]]:
     """Return recent records whose details are missing or outdated, newest first.
@@ -279,9 +280,11 @@ def activity_detail_backfill_candidates(
     from the current active raw record. Once one kind was fetched for the current
     summary, kinds Garmin no longer returns do not make the record a candidate
     again, so the backfill does not refetch it on every sync. A set without a
-    known hash counts as current. ``started_at`` and ``since`` are compared
-    as instants (julianday), so stored UTC offsets order correctly. Each row
-    carries the current summary hash, which is stored with any fetched details.
+    known hash counts as current. A set stored by an older ``mapper_version`` than
+    the one given is outdated, so a mapper change refetches the window.
+    ``started_at`` and ``since`` are compared as instants (julianday), so stored
+    UTC offsets order correctly. Each row carries the current summary hash,
+    which is stored with any fetched details.
     ``retry_ids`` qualify despite current sets, because their last fetch was
     incomplete; the caller bounds how often they are retried.
     """
@@ -301,7 +304,8 @@ def activity_detail_backfill_candidates(
         "AND julianday(r.started_at) >= julianday(?) "
         "AND (NOT EXISTS (SELECT 1 FROM activity_detail_sets AS d "
         "WHERE d.provider = r.provider AND d.provider_activity_id = r.provider_activity_id "
-        "AND (d.summary_sha256 IS NULL OR d.summary_sha256 = p.payload_hash))"
+        "AND (d.summary_sha256 IS NULL OR d.summary_sha256 = p.payload_hash) "
+        "AND d.mapper_version >= ?)"
         + retry_clause
         + ") ORDER BY julianday(r.started_at) DESC, r.provider_activity_id LIMIT ?",
         (
@@ -312,6 +316,7 @@ def activity_detail_backfill_candidates(
             ActivityRecordState.ACTIVE.value,
             RecordingOrigin.MANUAL.value,
             since.isoformat(),
+            mapper_version,
             *retry,
             limit,
         ),
