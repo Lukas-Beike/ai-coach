@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 from backend.config import Config
@@ -120,6 +120,31 @@ class IntervalsSnapshotReaderTests(unittest.TestCase):
         self.assertNotIn("incremental", full)
         self.assertEqual(len(full["recent_activities"]), 505)
         self.assertEqual(len(full["raw_provider_data"]["activities"]), 505)
+
+    def test_short_window_keeps_sync_period_wellness_in_day_order(self):
+        start = date(2025, 9, 1)
+        stored = [
+            {"id": (start + timedelta(days=index)).isoformat(), "ctl": index}
+            for index in range(100)
+        ]
+        latest = (start + timedelta(days=99)).isoformat()
+        today = (start + timedelta(days=100)).isoformat()
+        api = FakeIntervalsApi(
+            rows={"wellness": [{"id": latest, "ctl": 99}, {"id": today, "ctl": 100}]}
+        )
+        reader = make_reader(api, {"recent_wellness": stored})
+
+        narrow = reader.fetch_snapshot(activity_days=2)
+        kept = reader.fetch_snapshot(activity_days=2, retain_days=84)
+        everything = reader.fetch_snapshot(activity_days=2, retain_days=-1)
+
+        self.assertEqual(len(narrow["recent_wellness"]), 43)
+        self.assertEqual(len(kept["recent_wellness"]), 85)
+        self.assertEqual(len(everything["recent_wellness"]), 101)
+        for snapshot in (narrow, kept, everything):
+            days = [row["id"] for row in snapshot["recent_wellness"]]
+            self.assertEqual(days, sorted(days))
+            self.assertEqual(days[-1], today)
 
     def test_historical_date_windows_and_calendar_window(self):
         api = FakeIntervalsApi()

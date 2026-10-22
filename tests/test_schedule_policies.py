@@ -196,11 +196,12 @@ class IntervalsSchedulePolicyTests(unittest.TestCase):
     def test_payload_uses_sync_period_for_both_triggers(self) -> None:
         policy, sync_state = self.make_policy()
         self.assertEqual(
-            policy.refresh_payload("daily", "auto"), {"days": 21, "reason": "auto"}
+            policy.refresh_payload("daily", "auto"),
+            {"days": 21, "reason": "auto", "automatic": True},
         )
         self.assertEqual(
             policy.refresh_payload("startup", "startup"),
-            {"days": 21, "reason": "startup"},
+            {"days": 21, "reason": "startup", "automatic": True},
         )
         self.assertEqual(
             sync_state.period_reads,

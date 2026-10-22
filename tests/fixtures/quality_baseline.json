@@ -8,12 +8,6 @@
   "diagnostics": [
     {
       "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "code": "arg-type",
-      "message_sha256": "01a4b33e9317a99c5507566b8e6bfae3dc12d7213e6274566ec7a68a005c15c8"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_selected.py",
       "code": "arg-type",
       "message_sha256": "04ac4f7dcf901a9a86add9229c1d9cee38e39b3f1f1115cf2c2f4fb8aaa60417"
@@ -242,12 +236,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "code": "arg-type",
-      "message_sha256": "5c99e03c0b7482fef0eb1fd152f5eeacad63c96c9362eabe614b1e39e0f6b0c0"
-    },
-    {
-      "tool": "mypy",
       "path": "tools/extract_bls.py",
       "code": "arg-type",
       "message_sha256": "5f98b44ccead6c444920709d58717d3d30817c9730bd4172d31a000187375f7f"
@@ -338,12 +326,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "code": "arg-type",
-      "message_sha256": "84c087c3edc1fdc2670002e0a2d344c006de6737fa58730960658598df1aa4c3"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_coach_job_status.py",
       "code": "arg-type",
       "message_sha256": "84d21304c9cdbc535678b32cefd1ab96320705c1126d837c4341d75570cb8110"
@@ -410,12 +392,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "code": "arg-type",
-      "message_sha256": "afed839adb87afaffef924126bec2f2edff23d1990be88ea86df4f8d09249830"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/architecture_analysis.py",
       "code": "arg-type",
       "message_sha256": "b3400639f6486b6f2bfd9393c50fbfbe8e417675811b9e5e55763387699387a4"
@@ -437,12 +413,6 @@
       "path": "backend/planning/library.py",
       "code": "arg-type",
       "message_sha256": "b99b36ea488d466a65f1ebd5b90d5a128b23cbc7f5f56e2da5766f6080c1dbb5"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/commands.py",
-      "code": "arg-type",
-      "message_sha256": "c1a535fc787bf4ddd136d75c148e48f96a4ba980cbd2cd66b7844c24bb4d5af4"
     },
     {
       "tool": "mypy",

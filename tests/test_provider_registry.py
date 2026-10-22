@@ -420,7 +420,7 @@ PREVIOUS_JOB_SUPPORT: dict[str, frozenset[str]] = {
     "wahoo": frozenset({"refresh", "plan_push"}),
 }
 PREVIOUS_REFRESH_FIELDS: dict[str, frozenset[str]] = {
-    "intervals": frozenset({"days", "reason", "end_date"}),
+    "intervals": frozenset({"days", "reason", "end_date", "automatic"}),
     "garmin": frozenset({"days", "reason", "end_date"}),
     "calendar": frozenset({"reason"}),
     "weather": frozenset({"force", "reason"}),

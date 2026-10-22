@@ -161,7 +161,11 @@ class IntervalsSyncServiceTests(unittest.TestCase):
         self.assertEqual(self.events[-2], "gate.exit")
         self.assertEqual(self.events[-1][0], "observer.exit")
         self.assertEqual(self.events[-1][1], result)
-        self.reader.fetch_snapshot.assert_called_once_with(activity_days=7)
+        # A narrower manual read keeps the stored sync period's wellness.
+        self.reader.fetch_snapshot.assert_called_once_with(
+            activity_days=7, retain_days=42
+        )
+        self.snapshot_service.mark_full_window_read.assert_not_called()
         self.snapshot_service.store_snapshot.assert_called_once_with(
             self.snapshot, 7, None
         )
@@ -180,6 +184,48 @@ class IntervalsSyncServiceTests(unittest.TestCase):
         self.assertEqual(self.get_value("sync_running"), "0")
         self.assertEqual(self.get_value("sync_status"), "")
         self.assertFalse(self.lock.locked())
+
+    def test_automatic_refresh_reads_full_period_once_per_day(self):
+        self.snapshot_service.full_window_read_today.return_value = False
+
+        first = self.service.sync("auto", activity_days=42, automatic=True)
+
+        self.reader.fetch_snapshot.assert_called_once_with(activity_days=42)
+        self.snapshot_service.mark_full_window_read.assert_called_once_with()
+        self.assertEqual(first["performance_refresh_job_id"], "performance-job")
+
+        self.reader.fetch_snapshot.reset_mock()
+        self.snapshot_service.mark_full_window_read.reset_mock()
+        self.followup.enqueue_after_sync.reset_mock()
+        self.snapshot_service.full_window_read_today.return_value = True
+
+        later = self.service.sync("auto", activity_days=42, automatic=True)
+
+        self.reader.fetch_snapshot.assert_called_once_with(
+            activity_days=2, retain_days=42
+        )
+        self.snapshot_service.store_snapshot.assert_called_with(self.snapshot, 2, None)
+        self.snapshot_service.mark_full_window_read.assert_not_called()
+        self.followup.enqueue_after_sync.assert_not_called()
+        self.assertNotIn("performance_refresh_job_id", later)
+
+    def test_manual_full_period_refresh_counts_as_the_daily_full_read(self):
+        result = self.service.sync("manual", activity_days=42)
+
+        self.reader.fetch_snapshot.assert_called_once_with(activity_days=42)
+        self.snapshot_service.full_window_read_today.assert_not_called()
+        self.snapshot_service.mark_full_window_read.assert_called_once_with()
+        self.assertEqual(result["performance_refresh_job_id"], "performance-job")
+
+    def test_automatic_all_history_period_narrows_after_daily_read(self):
+        self.sync_state.set_sync_period("intervals", -1, -1)
+        self.snapshot_service.full_window_read_today.return_value = True
+
+        self.service.sync("auto", activity_days=-1, automatic=True)
+
+        self.reader.fetch_snapshot.assert_called_once_with(
+            activity_days=2, retain_days=-1
+        )
 
     def test_historical_sync_forwards_end_and_cancel_without_followup(self):
         cancel_event = threading.Event()

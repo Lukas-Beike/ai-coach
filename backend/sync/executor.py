@@ -260,6 +260,8 @@ class IntervalsSyncJobOwner:
         }
         if historical_end is not None:
             sync_kwargs["end_date"] = historical_end
+        elif payload.get("automatic") is True:
+            sync_kwargs["automatic"] = True
         result = self._intervals_sync_service.sync(**sync_kwargs)
         if str(job.get("type") or "") == "historical_backfill":
             self._historical_sync.add_next_end(

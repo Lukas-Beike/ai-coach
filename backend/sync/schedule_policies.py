@@ -131,7 +131,8 @@ class IntervalsSchedulePolicy:
         days = self._sync_state.sync_period(
             INTERVALS_ID, self._sync_period_defaults, self._all_sync_days
         )
-        return {"days": days, "reason": reason}
+        # The sync owner narrows automatic refreshes after the day's full read.
+        return {"days": days, "reason": reason, "automatic": True}
 
 
 class WahooSchedulePolicy:
