@@ -79,11 +79,25 @@ class _FixtureLoader:
 
 
 class _PayloadService:
-    def __init__(self, payload: dict | None = None) -> None:
+    def __init__(
+        self,
+        payload: dict | None = None,
+        *,
+        daily_metrics_due: bool = True,
+        known_activity_ids: frozenset[str] = frozenset(),
+    ) -> None:
         self.payload = payload or {}
+        self._daily_metrics_due = daily_metrics_due
+        self._known_activity_ids = known_activity_ids
 
     def snapshot(self) -> dict:
         return self.payload
+
+    def daily_metrics_due(self) -> bool:
+        return self._daily_metrics_due
+
+    def known_activity_ids(self, days: int) -> frozenset[str]:
+        return self._known_activity_ids
 
     def prepare_fixture(self, payload: dict) -> dict:
         self.prepared = ("fixture", payload)
@@ -126,9 +140,18 @@ class _RemoteReader:
         return self._configured
 
     def fetch(
-        self, days, end_date, *, status, cancel_event=None, include_recovery=None
+        self,
+        days,
+        end_date,
+        *,
+        status,
+        cancel_event=None,
+        include_recovery=None,
+        include_daily_metrics=True,
+        known_activity_ids=None,
     ):
         self.arguments = (days, end_date, cancel_event, include_recovery)
+        self.daily_metrics = (include_daily_metrics, known_activity_ids)
         status("Garmin: Zeitraum 1/1 wird synchronisiert…")
         return (
             {"synced_at": "2026-09-20T10:00:00+00:00", "activities": []},
@@ -284,6 +307,21 @@ class GarminSyncServiceTests(unittest.TestCase):
         )
         self.assertEqual(self.key_values.values["garmin_sync_status"], "")
 
+    def test_current_refresh_reads_daily_metrics_only_when_due(self):
+        known = frozenset({"101"})
+        self.make_service(
+            payload=_PayloadService(daily_metrics_due=False, known_activity_ids=known)
+        ).sync(days=2)
+        self.assertEqual(self.remote.daily_metrics, (False, known))
+
+        self.make_service(payload=_PayloadService(daily_metrics_due=True)).sync(days=2)
+        self.assertEqual(self.remote.daily_metrics, (True, None))
+
+        self.make_service(payload=_PayloadService(daily_metrics_due=False)).sync(
+            days=20, end_date=date(2026, 9, 1)
+        )
+        self.assertEqual(self.remote.daily_metrics, (True, None))
+
     def test_backfill_runs_after_a_successful_remote_sync_and_reports_counts(self):
         counts = {"status": "completed", "fetched": 2, "empty": 0, "remaining": 0}
         backfill = Mock(return_value=counts)
@@ -325,6 +363,7 @@ class GarminSyncServiceTests(unittest.TestCase):
                 status,
                 cancel_event=None,
                 include_recovery=None,
+                **daily_metrics,
             ):
                 event.set()
                 return super().fetch(
@@ -333,6 +372,7 @@ class GarminSyncServiceTests(unittest.TestCase):
                     status=status,
                     cancel_event=cancel_event,
                     include_recovery=include_recovery,
+                    **daily_metrics,
                 )
 
         with self.assertRaises(AppError) as ctx:

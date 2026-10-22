@@ -43,6 +43,9 @@ GARMIN_INITIAL_SYNC_DAYS = 84
 GARMIN_CATCHUP_MAX_DAYS = 90
 # The days of Garmin read-window sections that the performance views load.
 RECENT_VIEW_DAYS = 90
+# The first refresh of a local day re-reads this many days, so values a watch
+# uploads late replace the partial ones already stored for those days.
+GARMIN_RECONCILIATION_DAYS = 7
 # Collections every refresh window must cover before it counts as current.
 GARMIN_WINDOW_SOURCES = frozenset({"activities", "sleep", "hrv"})
 
@@ -138,14 +141,32 @@ def merge_sources(
         for error in payload.get("errors") or []
         if isinstance(error, dict)
     }
-    pagination = (payload.get("provider_sync") or {}).get("pagination") or {}
+    provider_sync = payload.get("provider_sync") or {}
+    pagination = provider_sync.get("pagination") or {}
+    skipped = set(provider_sync.get("skipped_sources") or ())
     for source in (*GARMIN_COLLECTION_SOURCES, *GARMIN_METRIC_SOURCES):
+        if source in skipped:
+            # Not due in this run: the stored rows and their freshness stay.
+            continue
         _merge_garmin_source(
             payload, previous, stored, freshness, failed, pagination, source
         )
     payload["source_freshness"] = freshness
     if previous.get("start") and payload.get("start"):
         payload["start"] = min(str(previous["start"]), str(payload["start"]))
+
+
+def _daily_metrics_due(state: dict[str, Any], today: date) -> bool:
+    provider_sync = state.get("provider_sync")
+    marker = (
+        provider_sync.get("daily_metrics_on")
+        if isinstance(provider_sync, dict)
+        else None
+    )
+    try:
+        return date.fromisoformat(str(marker)) < today
+    except TypeError, ValueError:
+        return True
 
 
 class GarminPayloadService:
@@ -203,9 +224,30 @@ class GarminPayloadService:
     def automatic_sync_days(self, minimum_days: int) -> int:
         return self.automatic_sync_window(minimum_days)[0]
 
+    def daily_metrics_due(self) -> bool:
+        """Return whether no refresh has read the daily metrics on this local day."""
+        return _daily_metrics_due(self.state(), self._local_today())
+
+    def known_activity_ids(self, days: int) -> frozenset[str]:
+        """Return the stored Garmin activity IDs of the last ``days`` local days."""
+        start = (self._local_today() - timedelta(days=max(1, days))).isoformat()
+        with self._database_manager.reader() as db:
+            rows = garmin_store.read_activities(db, start=start)
+        return frozenset(
+            str(row["activityId"])
+            for row in rows
+            if isinstance(row, dict) and row.get("activityId") is not None
+        )
+
     def automatic_sync_window(self, minimum_days: int) -> tuple[int, date | None]:
-        """Return a bounded, contiguous refresh window for the oldest collection."""
+        """Return a bounded, contiguous refresh window for the oldest collection.
+
+        The first refresh of a local day widens the window to the reconciliation
+        span; later refreshes read from the last covered day.
+        """
         snapshot = self.state()
+        if _daily_metrics_due(snapshot, self._local_today()):
+            minimum_days = max(minimum_days, GARMIN_RECONCILIATION_DAYS)
         freshness = snapshot.get("source_freshness") or {}
         sources = GARMIN_WINDOW_SOURCES | (
             set(freshness) & {"daily_stats", "resting_hr", "training_status"}
@@ -285,7 +327,8 @@ class GarminPayloadService:
         with the fetch, so no read touches the whole stored stock.
         """
         # Merging widens ``start`` to older runs; keep this run's own window.
-        payload.setdefault("provider_sync", {})["read_window"] = {
+        provider_sync = payload.setdefault("provider_sync", {})
+        provider_sync["read_window"] = {
             "start": payload.get("start"),
             "end": payload.get("end"),
         }
@@ -294,6 +337,14 @@ class GarminPayloadService:
         with self._database_manager.reader() as db:
             previous = garmin_store.read_view(db, None, start=start)
             stored = garmin_store.stored_sources(db)
+        # Runs that skip the daily metrics keep the day they were last read.
+        previous_sync = previous.get("provider_sync")
+        if (
+            "daily_metrics_on" not in provider_sync
+            and isinstance(previous_sync, dict)
+            and previous_sync.get("daily_metrics_on")
+        ):
+            provider_sync["daily_metrics_on"] = previous_sync["daily_metrics_on"]
         merge_sources(payload, previous, stored)
         if not fixture:
             payload["activities"] = deduplicate_api_records(

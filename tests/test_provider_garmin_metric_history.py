@@ -190,6 +190,67 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
         )
         self.assertEqual(result["errors"][0]["source"], "weekly_training_status")
 
+    def daily_metric_collection(self, activity_id, *, due, known):
+        calls = []
+
+        class Client:
+            def get_activities_by_date(self, *_args):
+                return [{"activityId": activity_id}]
+
+            def get_training_readiness(self, day):
+                calls.append("readiness")
+                return {"calendarDate": day, "score": 70}
+
+            def get_race_predictions(self):
+                calls.append("race_predictions")
+                return {"time5K": 1200}
+
+            def get_max_metrics_range(self, *_args):
+                calls.append("max_metrics")
+                return []
+
+            def get_endurance_score(self, *_args):
+                calls.append("endurance_score")
+                return []
+
+        result = collect_garmin_data(
+            Client(),
+            [(TODAY, TODAY)],
+            start=TODAY,
+            today=TODAY,
+            synced_at="sync",
+            external_call=lambda _service, _op, fn, _details: fn(),
+            redact=lambda _value: "redacted",
+            options=GarminCollectionOptions(
+                include_recovery=False,
+                include_daily_metrics=due,
+                known_activity_ids=known,
+            ),
+        )
+        return calls, result["provider_sync"]
+
+    def test_daily_metrics_are_skipped_until_due_or_a_new_activity(self):
+        calls, provider_sync = self.daily_metric_collection(
+            1, due=False, known=frozenset({"1"})
+        )
+        self.assertEqual(calls, ["readiness"])
+        self.assertNotIn("daily_metrics_on", provider_sync)
+        self.assertIn("race_predictions", provider_sync["skipped_sources"])
+        self.assertIn("endurance_score", provider_sync["skipped_sources"])
+
+        calls, provider_sync = self.daily_metric_collection(
+            2, due=False, known=frozenset({"1"})
+        )
+        self.assertEqual(
+            calls, ["readiness", "race_predictions", "max_metrics", "endurance_score"]
+        )
+        self.assertEqual(provider_sync["daily_metrics_on"], TODAY.isoformat())
+        self.assertNotIn("skipped_sources", provider_sync)
+
+        calls, provider_sync = self.daily_metric_collection(1, due=True, known=None)
+        self.assertIn("race_predictions", calls)
+        self.assertEqual(provider_sync["daily_metrics_on"], TODAY.isoformat())
+
     def test_endurance_score_dto_range_is_unwrapped(self):
         points = metric_points(
             {

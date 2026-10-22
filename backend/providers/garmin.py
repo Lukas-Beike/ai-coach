@@ -48,6 +48,27 @@ class GarminCollectionOptions:
     # historical-minimal collections remain activities-only.  Callers can set
     # an explicit boolean to override that profile.
     include_historic_metrics: bool | None = None
+    # ``False`` skips the slowly changing metrics (``GARMIN_DAILY_METRIC_SOURCES``)
+    # unless the run reads an activity outside ``known_activity_ids``.
+    include_daily_metrics: bool = True
+    known_activity_ids: frozenset[str] | None = None
+
+
+# Metrics that change at most daily or after an activity: they are read once per
+# local day and after a new activity instead of on every refresh.
+GARMIN_DAILY_METRIC_SOURCES = (
+    "heart_rate_zones",
+    "gear",
+    "race_predictions",
+    "max_metrics",
+    "cycling_ftp",
+    "running_threshold",
+    "cycling_ftp_history",
+    "endurance_score",
+    "running_tolerance",
+    "training_readiness_history",
+    "weekly_training_status",
+)
 
 
 class GarminClientFactory:
@@ -864,14 +885,18 @@ def _collect_current_metrics(
     external_call: ExternalCall,
     redact: Redact,
     warn: WarningLogger | None,
+    include_daily: bool = True,
 ) -> None:
+    """Read the current metrics; ``include_daily`` adds the slowly changing ones."""
     fetch = getattr(client, "get_heart_rate_zones", None)
-    if callable(fetch):
+    if include_daily and callable(fetch):
         _collect_optional_metric(
             payload, "heart_rate_zones", fetch, None, external_call, redact, warn
         )
-    if callable(getattr(client, "get_user_profile", None)) and callable(
-        getattr(client, "get_gear", None)
+    if (
+        include_daily
+        and callable(getattr(client, "get_user_profile", None))
+        and callable(getattr(client, "get_gear", None))
     ):
         _collect_optional_metric(
             payload,
@@ -914,6 +939,8 @@ def _collect_current_metrics(
         ),
     )
     for key, metric_fetch, details in metrics:
+        if not include_daily and key in GARMIN_DAILY_METRIC_SOURCES:
+            continue
         if key == "daily_training_status" and not callable(
             getattr(client, "get_daily_training_status", None)
         ):
@@ -926,12 +953,12 @@ def _collect_current_metrics(
             payload, key, metric_fetch, details, external_call, redact, warn
         )
     fetch = getattr(client, "get_cycling_ftp", None)
-    if callable(fetch):
+    if include_daily and callable(fetch):
         _collect_optional_metric(
             payload, "cycling_ftp", fetch, None, external_call, redact, warn
         )
     fetch = getattr(client, "get_lactate_threshold", None)
-    if callable(fetch):
+    if include_daily and callable(fetch):
         _collect_optional_metric(
             payload,
             "running_threshold",
@@ -1381,11 +1408,22 @@ def collect_garmin_data(
             source="training_status",
             method="get_training_status",
         )
+    read_daily = collection_options.include_daily_metrics or _reads_new_activity(
+        payload, collection_options.known_activity_ids
+    )
     if collection_options.include_current_metrics:
-        _collect_current_metrics(client, today, payload, external_call, redact, warn)
+        _collect_current_metrics(
+            client,
+            today,
+            payload,
+            external_call,
+            redact,
+            warn,
+            include_daily=read_daily,
+        )
     include_historic_metrics = collection_options.include_historic_metrics
     if include_historic_metrics is None:
-        include_historic_metrics = (
+        include_historic_metrics = read_daily and (
             options is None
             or collection_options.include_recovery
             or collection_options.include_current_metrics
@@ -1403,9 +1441,34 @@ def collect_garmin_data(
             capability_failure,
             capability_success,
         )
-    payload["provider_sync"] = {"pagination": pagination}
+    provider_sync: dict[str, Any] = {"pagination": pagination}
+    if collection_options.include_current_metrics:
+        if read_daily:
+            provider_sync["daily_metrics_on"] = today.isoformat()
+        else:
+            # Skipped, not failed: the stored values and their freshness stay.
+            provider_sync["skipped_sources"] = [
+                source
+                for source in GARMIN_DAILY_METRIC_SOURCES
+                if source not in pagination
+            ]
+    payload["provider_sync"] = provider_sync
     _validate_current_metrics(payload, redact, warn)
     return payload
+
+
+def _reads_new_activity(
+    payload: dict[str, Any], known_activity_ids: frozenset[str] | None
+) -> bool:
+    """Return whether the run read an activity missing from the stored snapshot."""
+    if known_activity_ids is None:
+        return False
+    return any(
+        isinstance(row, dict)
+        and row.get("activityId") is not None
+        and str(row["activityId"]) not in known_activity_ids
+        for row in payload.get("activities") or []
+    )
 
 
 def _validate_historic_metric(value: Any, key: str) -> None:
