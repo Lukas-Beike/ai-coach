@@ -27,6 +27,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V9,
     SHAPE_SCHEMA_V10,
     SHAPE_SCHEMA_V11,
+    SHAPE_SCHEMA_V12,
     released_shape,
 )
 
@@ -37,6 +38,7 @@ FIXTURES = Path(__file__).with_name("fixtures")
 OLDEST_SUPPORTED_FIXTURE = FIXTURES / "schema_v9.sql.txt"
 V10_FIXTURE = FIXTURES / "schema_v10.sql.txt"
 V11_FIXTURE = FIXTURES / "schema_v11.sql.txt"
+V12_FIXTURE = FIXTURES / "schema_v12.sql.txt"
 CURRENT_FIXTURE = FIXTURES / f"schema_v{CURRENT_SCHEMA_VERSION}.sql.txt"
 DETAIL_TABLES = {
     "activity_detail_sets",
@@ -449,6 +451,107 @@ class DatabaseSchemaGateTests(unittest.TestCase):
 
     def test_upgraded_v11_database_restarts_with_the_same_build_unchanged(self):
         db = self.populated_v11_database(self.connect())
+        migrate_schema(db)
+        db.commit()
+        upgraded = list(db.iterdump())
+        migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), upgraded)
+
+    def populated_v12_database(self, db):
+        db.executescript(V12_FIXTURE.read_text(encoding="utf-8"))
+        db.execute(
+            "INSERT INTO messages(role, content, created_at) "
+            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
+        )
+        db.execute(
+            "INSERT INTO activity_sessions(activity_id, primary_provider, "
+            "primary_provider_activity_id, started_at, created_at, updated_at) "
+            "VALUES ('act_1', ?, 'i1', ?, ?, ?)",
+            (INTERVALS, STAMP, STAMP, STAMP),
+        )
+        db.execute(
+            "INSERT INTO activity_records(provider, provider_activity_id, "
+            "activity_id, mapper_version, source_kind, recorded_by, sport, "
+            "environment, started_at, load_model, fetched_at, created_at, "
+            "updated_at) VALUES (?, 'i1', 'act_1', 1, 'device_measured', "
+            "'intervals', 'ride', 'outdoor', ?, 'none', ?, ?, ?)",
+            (INTERVALS, STAMP, STAMP, STAMP, STAMP),
+        )
+        db.execute(
+            "INSERT INTO activity_detail_sets(provider, provider_activity_id, "
+            "detail_kind, mapper_version, origin, source_kind, recorded_by, "
+            "lap_source, content_sha256, fetched_at, created_at, updated_at) "
+            "VALUES (?, 'i1', 'laps', 1, 'fetch', 'device_measured', 'intervals', "
+            "'device_laps', ?, ?, ?, ?)",
+            (INTERVALS, "0" * 64, STAMP, STAMP, STAMP),
+        )
+        db.execute(
+            "INSERT INTO activity_laps(provider, provider_activity_id, lap_index, "
+            "kind, start_offset_s, end_offset_s, avg_speed_mps, intensity_pct) "
+            "VALUES (?, 'i1', 0, 'work', 0, 600, 8.5, 80)",
+            (INTERVALS,),
+        )
+        db.commit()
+        return db
+
+    def test_frozen_v12_fixture_is_the_recorded_released_shape(self):
+        db = self.connect()
+        db.executescript(V12_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V12
+        )
+
+    def test_populated_v12_upgrade_keeps_every_row_and_adds_an_empty_lap_max_speed(
+        self,
+    ):
+        db = self.populated_v12_database(self.connect())
+        tables = self.user_tables(db)
+        lap_columns = "provider, provider_activity_id, lap_index, kind, avg_speed_mps"
+        before = self.table_rows(db, [t for t in tables if t != "activity_laps"])
+        laps_before = db.execute(f"SELECT {lap_columns} FROM activity_laps").fetchall()
+        migrate_schema(db)
+        db.commit()
+        self.assertEqual(
+            self.table_rows(db, [t for t in tables if t != "activity_laps"]), before
+        )
+        self.assertEqual(
+            db.execute(f"SELECT {lap_columns} FROM activity_laps").fetchall(),
+            laps_before,
+        )
+        lap = db.execute("SELECT * FROM activity_laps").fetchone()
+        self.assertIsNone(lap["max_speed_mps"])
+        self.assertEqual(lap["intensity_pct"], 80)
+        self.assertEqual(self.user_tables(db), tables)
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
+        )
+        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_failed_v12_upgrade_rolls_back_to_the_unchanged_v12_database(self):
+        db = self.populated_v12_database(self.connect())
+        before = list(db.iterdump())
+
+        def failing_step(connection):
+            connection.execute(
+                "ALTER TABLE activity_laps ADD COLUMN max_speed_mps REAL"
+            )
+            raise RuntimeError("injected migration failure")
+
+        with (
+            mock.patch.dict(
+                migrations.UPGRADE_STEPS,
+                {SHAPE_SCHEMA_V12: (SHAPE_CURRENT, failing_step)},
+            ),
+            self.assertRaisesRegex(RuntimeError, "injected"),
+        ):
+            migrate_schema(db)
+        db.rollback()
+        self.assertEqual(list(db.iterdump()), before)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 12)
+
+    def test_upgraded_v12_database_restarts_with_the_same_build_unchanged(self):
+        db = self.populated_v12_database(self.connect())
         migrate_schema(db)
         db.commit()
         upgraded = list(db.iterdump())

@@ -76,8 +76,8 @@ def _set_rows(details, index, values):
 
 
 class GarminActivityDetailMappingTests(unittest.TestCase):
-    def test_mapper_version_is_one(self):
-        self.assertEqual(MAPPER_VERSION, 1)
+    def test_mapper_version_includes_the_lap_max_speed(self):
+        self.assertGreaterEqual(MAPPER_VERSION, 2)
 
     def test_full_fixture_maps_every_set_without_issues(self):
         result = _map(_collected())
@@ -274,6 +274,19 @@ class GarminActivityDetailMappingTests(unittest.TestCase):
         self.assertEqual(laps.laps[0].end_offset_s, 240.0)
         self.assertEqual(laps.laps[0].avg_hr, 150.0)
         self.assertEqual(laps.laps[1].start_offset_s, 240.0)
+
+    def test_lap_max_speed_is_mapped_and_out_of_range_values_are_dropped(self):
+        splits = _fixture("splits")
+        # lapDTOs[1] has the lower lapIndex, so it becomes the first lap.
+        splits["lapDTOs"][1]["maxSpeed"] = 6.5
+        splits["lapDTOs"][0]["maxSpeed"] = 500.0
+
+        result = _map(_collected(splits=splits))
+        first, second = _only(result, ActivityLapSet).laps
+
+        self.assertEqual(first.max_speed_mps, 6.5)
+        self.assertIsNone(second.max_speed_mps)
+        self.assertIn(_issue("maxSpeed", IssueReason.OUT_OF_RANGE), result.issues)
 
     def test_invalid_lap_metric_is_dropped_and_lap_is_kept(self):
         splits = _fixture("splits")

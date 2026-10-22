@@ -65,7 +65,9 @@ LAP_FIELDS = [
     (8, UINT32),
     (9, UINT32),
     (13, UINT16),
+    (14, UINT16),
     (110, UINT32),
+    (111, UINT32),
     (15, UINT8),
     (16, UINT8),
     (17, UINT8),
@@ -94,6 +96,8 @@ _LAP_NAMES = {
     "distance": 9,
     "speed": 13,
     "enhanced_speed": 110,
+    "max_speed": 14,
+    "enhanced_max_speed": 111,
     "avg_hr": 15,
     "max_hr": 16,
     "avg_cadence": 17,
@@ -151,8 +155,8 @@ def _issue(field, reason):
 
 
 class FitActivityDetailMappingTests(unittest.TestCase):
-    def test_mapper_version_is_one(self):
-        self.assertEqual(MAPPER_VERSION, 1)
+    def test_mapper_version_includes_the_lap_max_speed(self):
+        self.assertGreaterEqual(MAPPER_VERSION, 2)
 
     def test_full_record_set_maps_every_channel_in_canonical_units(self):
         result = _map(
@@ -364,6 +368,8 @@ class FitActivityDetailMappingTests(unittest.TestCase):
                         distance=1000,
                         speed=3000,
                         enhanced_speed=3200,
+                        max_speed=4000,
+                        enhanced_max_speed=4500,
                         avg_hr=150,
                         max_hr=170,
                         avg_cadence=90,
@@ -379,6 +385,7 @@ class FitActivityDetailMappingTests(unittest.TestCase):
         self.assertEqual(lap.moving_duration_s, 58.0)
         self.assertEqual(lap.distance_m, 10.0)
         self.assertEqual(lap.avg_speed_mps, 3.2)
+        self.assertEqual(lap.max_speed_mps, 4.5)
         self.assertEqual(lap.avg_hr, 150.0)
         self.assertEqual(lap.max_hr, 170.0)
         self.assertEqual(lap.avg_cadence, 90.0)
@@ -386,6 +393,17 @@ class FitActivityDetailMappingTests(unittest.TestCase):
         self.assertEqual(lap.max_power, 500.0)
         self.assertEqual(lap.elevation_gain_m, 12.0)
         self.assertEqual(lap.normalized_power, 210.0)
+
+    def test_lap_max_speed_falls_back_to_the_base_field_and_drops_bad_values(self):
+        laps = [
+            _lap(start=1000, elapsed=60000, max_speed=4000),
+            _lap(start=1060, elapsed=60000, enhanced_max_speed=150000),
+        ]
+        result = _map(_fit(laps=laps))
+        first, second = _only(result, ActivityLapSet).laps
+        self.assertEqual(first.max_speed_mps, 4.0)
+        self.assertIsNone(second.max_speed_mps)
+        self.assertIn(_issue("max_speed_mps", IssueReason.OUT_OF_RANGE), result.issues)
 
     def test_lap_intensity_maps_to_kinds_and_unknown_values_as_lap(self):
         laps = [

@@ -90,7 +90,16 @@ def lap_set(activity_id="i1", provider=INTERVALS):
         lap_source=LapSource.DEVICE_LAPS,
         laps=(
             ActivityLap(0, LapKind.WARMUP, 0.0, 600.0, name="Warm up", avg_hr=120.0),
-            ActivityLap(1, LapKind.WORK, 600.0, 900.0, avg_power=280.0, load=12.5),
+            ActivityLap(
+                1,
+                LapKind.WORK,
+                600.0,
+                900.0,
+                avg_power=280.0,
+                load=12.5,
+                avg_speed_mps=8.0,
+                max_speed_mps=11.5,
+            ),
         ),
     )
 
