@@ -106,7 +106,7 @@ function nutritionComponentSource(basis) {
 }
 
 function nutritionBasisLabel(basis, item, sourceLabel) {
-  if (basis?.kind === "composite") return "Zusammengesetztes Essen · Herkunft je Zutat";
+  if (basis?.kind === "composite") return "";
   if (basis?.kind === "database") {
     return "Datenbankberechnung · " + basis.ingredients.map((food) => `${food.source}: ${food.name}, ${food.amount} ${food.unit} (Basis 100 ${food.basis_unit})`).join("; ");
   }
@@ -160,8 +160,9 @@ function nutritionCard(item, template) {
   const sourceLabel = sourceLabels[item.source] || "Erfasst";
   const syncLabel = item.sync_state === "synced" ? " · Synchronisiert" : " · Lokal";
   const basisLabel = nutritionBasisLabel(item.nutrition_basis, { template, syncLabel }, sourceLabel);
-  source.textContent = basisLabel + (template ? "" : syncLabel);
-  card.append(title, description, values, source);
+  if (basisLabel) source.textContent = basisLabel + (template ? "" : syncLabel);
+  card.append(title, description, values);
+  if (source.textContent) card.append(source);
   if (!template) {
     const details = nutritionComponentDetails(item);
     if (details) card.append(details);
@@ -264,21 +265,14 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
     componentTile(expenditure?.resting_kcal, expenditure?.provisional ? "Grundumsatz (vorläufig)" : "Grundumsatz"),
   );
 
-  const measuredDate = expenditure?.measured_date || expenditure?.date || selectedDate || "";
-  const fetchedAt = nutritionExpenditureTimestamp(expenditure?.fetched_at);
-  const syncedAt = nutritionExpenditureTimestamp(expenditure?.synced_at);
-  const timestamps = [
-    fetchedAt ? `Abgerufen: ${fetchedAt}` : "",
-    syncedAt ? `Garmin-Sync: ${syncedAt}` : "",
-  ].filter(Boolean).join(" · ");
-  const dateParts = ["Messdatum: " + nutritionExpenditureDate(measuredDate)];
-  if (measured && expenditure.provisional) dateParts.push("Vorläufiger Tageswert");
-  if (hasProjection) {
-    dateParts.push(`Prognose: Grundumsatz vom ${nutritionExpenditureDate(expenditure.projection_reference_date)} (${formatKcal(expenditure.projection_resting_kcal)}) + bisherige Aktivkalorien (${formatKcal(expenditure.active_kcal)}), eigene Schätzung`);
+  const syncedAt = nutritionExpenditureTimestamp(expenditure?.synced_at);
+  const fetchedAt = nutritionExpenditureTimestamp(expenditure?.fetched_at);
+  date.textContent = "";
+  if (syncedAt) date.textContent = `Sync: ${syncedAt}`;
+  else if (fetchedAt) date.textContent = `Abgerufen: ${fetchedAt}`;
+  if (projectionTile) {
+    projectionTile.title = `Grundumsatz vom ${nutritionExpenditureDate(expenditure.projection_reference_date)} (${formatKcal(expenditure.projection_resting_kcal)}) + bisherige Aktivkalorien (${formatKcal(expenditure.active_kcal)}), eigene Schätzung`;
   }
-  if (!measured) dateParts.push("Status: nicht verfügbar");
-  if (timestamps) dateParts.push(timestamps);
-  date.textContent = dateParts.join(" · ");
 }
 
 function appendNutritionTotals(totals, day) {

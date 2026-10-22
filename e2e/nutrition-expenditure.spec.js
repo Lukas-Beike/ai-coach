@@ -24,7 +24,7 @@ test("@responsive nutrition projects today's expenditure from persisted Garmin d
   await expect(expenditure).toContainText("Prognose Tagesverbrauch (abgeleitet)");
   await expect(expenditure).toContainText("1.968 kcal");
   await expect(expenditure).toContainText("1.960 kcal");
-  await expect(expenditure.locator("#nutritionExpenditureDate")).toContainText("eigene Schätzung");
+  await expect(expenditure.locator(".nutrition-total").filter({ hasText: "Prognose Tagesverbrauch (abgeleitet)" })).toHaveAttribute("title", /eigene Schätzung/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -81,6 +81,8 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
   });
 
   await page.goto("/#nutrition/diary");
+  await expect(page.locator("#nutritionPanel .section-heading h2")).toHaveText("Ernährung");
+  await expect(page.locator("#nutritionPanel .section-heading .eyebrow, #nutritionPanel .section-heading .tab-sync-detail")).toHaveCount(0);
   const expenditure = page.locator("#nutritionExpenditure");
   await expect.poll(() => requestedDates.length).toBeGreaterThan(0);
   expect(requestedDates[0]).toBe("2026-10-06");
@@ -91,8 +93,10 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
   await expect(expenditure).toContainText("Vorläufig");
   await expect(expenditure).toContainText("06.10.2026");
   await expect(expenditure).toContainText("2.100 kcal");
-  await expect(expenditure).toContainText("Abgerufen: 06.10.2026");
-  await expect(expenditure).toContainText("Garmin-Sync: 06.10.2026");
+  await expect(expenditure.locator("#nutritionExpenditureDate")).toHaveText(/^Sync: 06[.]10[.]2026, [0-9]{2}:[0-9]{2}$/);
+  await expect(expenditure).not.toContainText("Messdatum:");
+  await expect(expenditure).not.toContainText("Abgerufen:");
+  await expect(expenditure).not.toContainText("Garmin-Sync:");
   const totals = expenditure.locator("#nutritionExpenditureTotals");
   await expect(totals).toContainText("Tagesverbrauch (vorläufig)");
   await expect(totals).toContainText("Aktivkalorien");
@@ -101,7 +105,6 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
   await expect(totals).toContainText("1.500 kcal");
   await expect(totals).toContainText("Prognose Tagesverbrauch (abgeleitet)");
   await expect(totals).toContainText("2.350 kcal");
-  await expect(expenditure.locator("#nutritionExpenditureDate")).toContainText("Prognose: Grundumsatz vom 05.10.2026 (1.750 kcal) + bisherige Aktivkalorien (600 kcal), eigene Schätzung");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   responseMode = "unavailable";
@@ -120,15 +123,13 @@ test("@responsive nutrition diary presents Garmin energy expenditure and unavail
   holdResponse = false;
   releaseResponse();
   await expect(expenditure).toContainText("keine Garmin-Verbrauchsdaten");
-  await expect(expenditure).toContainText("Status: nicht verfügbar");
-  await expect(expenditure).toContainText("05.10.2026");
+  await expect(expenditure.locator("#nutritionExpenditureDate")).toBeEmpty();
   await expect(expenditure).toContainText("Nicht verfügbar");
 
   responseMode = "error";
   await page.evaluate(() => loadNutrition());
   // A failed refresh keeps the stored day on this device and says so.
   await expect(page.locator("#nutritionExpenditureStatus")).toContainText("Gespeicherter Stand. Tagesverbrauch konnte nicht aktualisiert werden");
-  await expect(expenditure).toContainText("05.10.2026");
   await page.evaluate(() => { localStorage.removeItem("coach-view-cache"); return loadNutrition(); });
   await expect(page.locator("#nutritionExpenditureStatus")).toContainText("Tagesverbrauch konnte nicht geladen werden");
   await expect(expenditure.locator("#nutritionExpenditureTotals")).not.toContainText("2.100 kcal");

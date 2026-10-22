@@ -231,6 +231,9 @@ test("@responsive composite meal shows immutable ingredient snapshots and proven
   const card = page.locator("#nutritionEntries .nutrition-card").filter({ hasText: "Mixed meal" });
   await expect(card).toHaveCount(1);
   await expect(card).toContainText("kcal");
+  await expect(card).not.toContainText("Zusammengesetztes Essen");
+  await expect(card).not.toContainText("Herkunft je Zutat");
+  await expect(card).not.toContainText("\u00b7 Lokal");
   await card.locator("summary").click();
   await expect(card).toContainText("Synthetic whey");
   await expect(card).toContainText("Max Rubner-Institut");

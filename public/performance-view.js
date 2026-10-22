@@ -269,7 +269,6 @@ function renderCurrentPerformance(metrics, history) {
   rememberAnalysisSectionState(root);
   root.replaceChildren(reportNode("h3", "Aktuelle Leistungswerte"));
   const groups = [
-    ["Allgemein", [["max_hr_bpm", "Maximale Herzfrequenz"]]],
     ["Laufen", [
       ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
       ["run_threshold_watts", "Schwellenleistung"],
@@ -299,7 +298,6 @@ function renderCurrentPerformance(metrics, history) {
     }
     if (!body.childElementCount) continue;
     table.append(body);
-    if (sport === "Allgemein") table.classList.add("current-performance-general");
     grid.append(table);
   }
   if (!grid.childElementCount) grid.append(reportNode("p", "Noch keine aktuellen Leistungswerte.", "empty"));
