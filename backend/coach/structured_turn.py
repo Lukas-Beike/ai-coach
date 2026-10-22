@@ -241,9 +241,7 @@ class CoachStructuredTurnService:
             cancelled=False,
             state=round_state,
         )
-        budget_exhausted = self._deps.rounds.budget_exhausted(
-            rounds, question=question, cancelled=cancelled
-        )
+        budget_exhausted = round_state.budget_exhausted
         status, text, failures = self._deps.outcome.finalize(
             response,
             command_receipts,

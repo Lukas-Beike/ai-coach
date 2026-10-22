@@ -222,7 +222,9 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.jobs.merge_receipt.assert_not_called()
         self.failure.project.assert_called_once()
 
-    def test_round_records_output_then_forces_no_more_tools_at_limit(self) -> None:
+    def test_round_records_output_and_answer_after_last_round_is_complete(
+        self,
+    ) -> None:
         state = self.state()
         first_response = {"id": "response-one", "output": [self.call()]}
 
@@ -241,8 +243,11 @@ class StructuredToolRoundTests(unittest.TestCase):
             )
 
         self.assertEqual(result[:4], ({"output": []}, 1, "", False))
+        # The model may still answer without tools; that is not exhaustion.
+        self.response.respond.assert_called_once()
+        self.assertFalse(state.budget_exhausted)
         followup = self.response.respond.call_args.args[0]
-        self.assertEqual(followup["tool_choice"], "none")
+        self.assertEqual(followup["tool_choice"], "auto")
         self.assertEqual(followup["previous_response_id"], "response-one")
         self.assertEqual(followup["input"][0]["call_id"], "call-one")
         self.assertEqual(followup["input"][0]["output"], '{"ok": true}')
@@ -253,9 +258,15 @@ class StructuredToolRoundTests(unittest.TestCase):
 
     def test_exhausted_budget_tells_model_and_logs_only_counts(self) -> None:
         state = self.state()
+        state.tools.append({"name": "lookup_food"})
         state.command_receipts.extend(
             [{"tool": "lookup_food", "result": {"ok": True, "foods": []}}] * 2
+            + [{"tool": "synthetic-secret-name", "result": {"ok": False}}]
         )
+        self.response.respond.side_effect = [
+            {"id": "response-two", "output": [self.call()]},
+            {"output": []},
+        ]
 
         with (
             patch.object(
@@ -273,22 +284,25 @@ class StructuredToolRoundTests(unittest.TestCase):
                 state=state,
             )
 
-        followup = self.response.respond.call_args.args[0]
-        self.assertEqual(followup["tool_choice"], "none")
-        self.assertTrue(followup["instructions"].startswith("synthetic-instructions"))
-        self.assertIn("Tool step limit reached", followup["instructions"])
+        last, final = (call.args[0] for call in self.response.respond.call_args_list)
+        self.assertEqual(last["tool_choice"], "auto")
+        self.assertNotIn("Tool step limit reached", last["instructions"])
+        self.assertEqual(final["tool_choice"], "none")
+        self.assertTrue(final["instructions"].startswith("synthetic-instructions"))
+        self.assertIn("Tool step limit reached", final["instructions"])
+        self.assertEqual(final["previous_response_id"], "response-two")
+        # The call the model still wanted is answered as not executed.
+        self.assertEqual(final["input"][0]["call_id"], "call-one")
+        self.assertFalse(json.loads(final["input"][0]["output"])["executed"])
+        self.assertTrue(state.budget_exhausted)
         self.assertEqual(state.model_instructions, "synthetic-instructions")
         [record] = logs.records
         self.assertEqual(getattr(record, "event", None), "coach_tool_budget_exhausted")
+        # Rejected names come from the provider and are never logged verbatim.
         self.assertEqual(
             getattr(record, "context", None),
-            {"rounds": 1, "tool_calls": {"lookup_food": 2}},
+            {"rounds": 1, "tool_calls": {"lookup_food": 2, "unknown": 1}},
         )
-        self.assertTrue(self.service.budget_exhausted(1, question="", cancelled=False))
-        self.assertFalse(
-            self.service.budget_exhausted(1, question="Welcher Reis?", cancelled=False)
-        )
-        self.assertFalse(self.service.budget_exhausted(0, question="", cancelled=False))
 
     def test_cancelled_round_does_not_execute_tool_or_followup(self) -> None:
         event = threading.Event()

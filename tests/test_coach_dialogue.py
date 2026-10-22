@@ -123,6 +123,11 @@ class DialogueHarness:
             ]
         }
 
+    @staticmethod
+    def meal_count():
+        diary = server.NUTRITION_ASSEMBLY.diary_service()
+        return diary.get_today_summary()["entry_count"]
+
     def confirm_impact(self, domain, *, delete=False, bulk=False, accepts=False):
         """Let the gate's classifier confirm an explicitly requested delete/bulk."""
         self.gate_verdict = {
@@ -2274,7 +2279,9 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                 ],
             )
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(model.call_args_list[1].args[0]["tool_choice"], "none")
+        # The follow-up may still answer with tools; only an unfinished request
+        # is forced to a final answer without them.
+        self.assertEqual(model.call_args_list[1].args[0]["tool_choice"], "auto")
         self.assertEqual(
             model.call_args_list[1].args[0]["input"][0]["type"], "function_call_output"
         )
@@ -2291,12 +2298,23 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                     lambda _: self.call(
                         "lookup_food", {"queries": ["Reis", "Zucchini"]}
                     ),
+                    # Still asking for a tool after the last round.
+                    lambda _: self.call(
+                        "save_nutrition_entry",
+                        {"payload": {"description": "Abendessen"}},
+                        ["local_nutrition"],
+                        call_id="call-after-limit",
+                    ),
                     {"output_text": "Ich habe die Zutaten nachgeschlagen."},
                 ],
             )
-        followup = model.call_args_list[1].args[0]
+        self.assertEqual(model.call_args_list[1].args[0]["tool_choice"], "auto")
+        followup = model.call_args_list[2].args[0]
         self.assertEqual(followup["tool_choice"], "none")
         self.assertIn("Tool step limit reached", followup["instructions"])
+        self.assertEqual(followup["input"][0]["call_id"], "call-after-limit")
+        self.assertIn("tool_step_limit_reached", followup["input"][0]["output"])
+        self.assertEqual(self.meal_count(), 0)
         self.assertTrue(result["tool_budget_exhausted"])
         self.assertIn("Schrittlimit", result["message"]["content"])
         pending = json.loads(server.key_value_service().get("coach_pending_request"))
@@ -2317,6 +2335,27 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             all(match["id"].startswith("bls:") for match in lookup["found"])
         )
         self.assertFalse(result["tool_budget_exhausted"])
+
+    def test_save_in_last_tool_round_is_not_unfinished(self):
+        with patch.object(structured_tool_round, "COACH_TOOL_MAX_ROUNDS", 1):
+            result, model = self.turn(
+                "Abendessen: 450 kcal Haferbrei",
+                [
+                    lambda _: self.call(
+                        "save_nutrition_entry",
+                        {"payload": {"description": "Haferbrei", "kcal": 450}},
+                        ["local_nutrition"],
+                    ),
+                    {"output_text": "Gespeichert."},
+                ],
+            )
+        self.assertEqual(model.call_args_list[1].args[0]["tool_choice"], "auto")
+        self.assertEqual(len(model.call_args_list), 2)
+        self.assertFalse(result["tool_budget_exhausted"])
+        self.assertNotIn("Schrittlimit", result["message"]["content"])
+        self.assertEqual(self.meal_count(), 1)
+        pending = server.key_value_service().get("coach_pending_request")
+        self.assertIn(pending, (None, "null"))
 
     def test_unknown_tool_and_malformed_arguments_have_no_effect(self):
         before = self.state()
