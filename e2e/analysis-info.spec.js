@@ -390,14 +390,16 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
     },
   });
   const performance = page.locator("#analysisHistoryCharts");
-  await expect(performance.getByRole("heading", { name: "Trainingsbereitschaft" })).toBeVisible();
-  await expect(performance.getByRole("heading", { name: "Trainingsstatus · akute Belastung" })).toBeVisible();
+  await expect(performance.getByRole("heading", { name: "Trainingsbereitschaft" })).toHaveCount(0);
+  await expect(page.locator("#analysisLoadCharts").getByRole("heading", { name: "Trainingsbereitschaft" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Trainingsstatus · akute Belastung" })).toHaveCount(0);
   await expect(page.locator("#performanceEnduranceCharts").getByRole("heading", { name: "Ausdauer-Score" })).toBeVisible();
   await expect(performance.getByRole("heading", { name: "Lauf-Belastbarkeit" })).toHaveCount(0);
   await expect(performance).not.toContainText("Garmin-Provider-Metriken");
   await expect(performance).not.toContainText("Rohfeld");
   await page.evaluate(async () => { await AppRouter.navigate("analysis/recovery", { historyMode: "replace" }); });
   const recovery = page.locator("#personalRecovery");
+  await expect(recovery.getByRole("heading", { name: "Trainingsbereitschaft" })).toBeVisible();
   await expect(recovery).not.toContainText("Schlafdefizit");
   await expect(recovery).not.toContainText("Schlafregelm");
   await expect(page.locator("#analysisTagImpact, #analysisComparisons")).toHaveCount(0);

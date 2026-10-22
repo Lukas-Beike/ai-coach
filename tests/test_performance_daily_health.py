@@ -283,6 +283,21 @@ class GarminDailyHealthTests(unittest.TestCase):
         )
         self.assertEqual(covered["projected_total_kcal"], 2023)
 
+        # The day's wide first run stays trusted after a later one-day run.
+        kept = daily_energy_expenditure(
+            {
+                "daily_stats": daily_stats,
+                "source_freshness": {"daily_stats": {"freshness": "current"}},
+                "provider_sync": {
+                    "read_window": {"start": "2026-10-15", "end": "2026-10-15"},
+                    "daily_read_window": {"start": "2026-10-09", "end": "2026-10-15"},
+                },
+            },
+            "2026-10-15",
+            date(2026, 10, 15),
+        )
+        self.assertEqual(kept["projected_total_kcal"], 2023)
+
     def test_running_day_projection_ignores_records_retained_by_a_partial_read(self):
         daily_stats = [
             {

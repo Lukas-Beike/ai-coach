@@ -90,6 +90,11 @@ class ReleaseShellGuardTests(unittest.TestCase):
             "EVENT_NAME": "workflow_run",
             "WORKFLOW_RUN_BRANCH": "chore/release-version-1.7.3",
             "MERGED_VERSION_PR": "",
+            "PR_STATE": "OPEN",
+            "DISPATCH_FAIL": "false",
+            "MERGE_DURING_DISPATCH": "false",
+            "TEST_CHECK_COUNT": "0",
+            "TEST_RUN_COUNT": "0",
         }
         environment.update(overrides)
         mocks = r"""
@@ -111,6 +116,20 @@ class ReleaseShellGuardTests(unittest.TestCase):
                 'release view 1.7.3 --repo example/release-test') return 0 ;;
                 'pr list --repo example/release-test --base develop '* )
                   printf '%s' "$MERGED_VERSION_PR" ;;
+                'pr view 123 --repo example/release-test --json state '* )
+                  printf '%s' "$PR_STATE" ;;
+                'pr view 123 --repo example/release-test --json state,autoMergeRequest '* )
+                  if [[ "$PR_STATE" == "MERGED" ]]; then printf true; else printf false; fi ;;
+                'pr merge 123 --repo example/release-test --auto --squash')
+                  [[ "$PR_STATE" == "OPEN" ]] ;;
+                'pr view 123 --repo example/release-test --json statusCheckRollup '* )
+                  printf '%s' "$TEST_CHECK_COUNT" ;;
+                'pr view 123 --repo example/release-test --json headRefOid '* )
+                  printf '%s' "$TESTED_SHA" ;;
+                'run list '* ) printf '%s' "$TEST_RUN_COUNT" ;;
+                'workflow run '* )
+                  if [[ "$MERGE_DURING_DISPATCH" == "true" ]]; then PR_STATE=MERGED; fi
+                  [[ "$DISPATCH_FAIL" == "false" ]] ;;
                 *) return 97 ;;
               esac
             }
@@ -130,6 +149,57 @@ class ReleaseShellGuardTests(unittest.TestCase):
         )
         operations = (self.root / "operations").read_text(encoding="utf-8")
         return result, operations
+
+    def release_test_script(self):
+        functions = WORKFLOW.split("          enable_auto_merge() {", 1)[1].split(
+            "          version_merge=false", 1
+        )[0]
+        return (
+            "set -euo pipefail\nenable_auto_merge() {"
+            + textwrap.dedent(functions)
+            + "\nensure_release_test 123 chore/release-version-1.7.3 1.7.3\n"
+            + "enable_auto_merge 123\n"
+        )
+
+    def test_open_pr_dispatches_release_test(self):
+        result, operations = self.run_script(self.release_test_script())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("gh workflow run publish-container.yml", operations)
+        self.assertGreater(
+            operations.index("gh pr merge"), operations.index("gh workflow run")
+        )
+
+    def test_merged_pr_does_not_dispatch_on_deleted_branch(self):
+        result, operations = self.run_script(
+            self.release_test_script(), PR_STATE="MERGED"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("gh workflow run", operations)
+        self.assertNotIn("gh pr merge", operations)
+
+    def test_merge_during_failed_dispatch_is_successful(self):
+        result, operations = self.run_script(
+            self.release_test_script(),
+            DISPATCH_FAIL="true",
+            MERGE_DURING_DISPATCH="true",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("merged during test dispatch", result.stdout)
+        self.assertIn("gh workflow run", operations)
+        self.assertNotIn("gh pr merge", operations)
+
+    def test_unrelated_dispatch_failure_remains_a_failure(self):
+        result, _ = self.run_script(self.release_test_script(), DISPATCH_FAIL="true")
+        self.assertEqual(result.returncode, 1, result.stderr)
+
+    def test_existing_tests_do_not_dispatch_again(self):
+        for overrides in ({"TEST_CHECK_COUNT": "1"}, {"TEST_RUN_COUNT": "1"}):
+            with self.subTest(overrides=overrides):
+                result, operations = self.run_script(
+                    self.release_test_script(), **overrides
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("gh workflow run", operations)
 
     def test_matching_tested_main_can_continue_without_querying_a_promotion_pr(self):
         script = textwrap.dedent(CREATE_RELEASE.split("        run: |\n", 1)[1])
