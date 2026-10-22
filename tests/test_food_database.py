@@ -82,6 +82,41 @@ class FoodDatabaseTests(unittest.TestCase):
         off.product.assert_not_called()
         off.search.assert_not_called()
 
+    def test_bls_search_tolerates_plurals_typos_and_compounds(self):
+        service = FoodDatabaseService(Mock())
+
+        def names(query):
+            return [food["name"] for food in service.lookup({"query": query})["foods"]]
+
+        self.assertEqual(names("Champignons roh")[0], "Champignon roh")
+        self.assertEqual(names("zuccini roh"), ["Zucchini roh"])
+        self.assertEqual(
+            names("Pfeffersoße"), ["Pfeffersauce von dunkler/brauner Grundsauce"]
+        )
+        self.assertEqual(names("Haferflocken")[0], "Hafer Flocken")
+        # Whole words and compound ends rank first: rice, not strawberry ice.
+        rice = names("Reis")
+        self.assertIn("Reis poliert, roh", rice)
+        self.assertNotIn("Erdbeereis", rice)
+        eggs = names("Ei")
+        self.assertIn("Hühnerei roh", eggs)
+        self.assertFalse(any("Reis" in name for name in eggs))
+        complete = service.lookup({"query": "Rumpsteak"})
+        self.assertEqual(complete["foods"][0]["name"], "Rinderrumpsteak gebraten")
+        self.assertNotIn("Teiltreffer", complete["notice"])
+
+        # Without a food containing every word, compound parts are matched
+        # and the result says it holds only partial matches.
+        partial = service.lookup({"query": "Risottoreis roh"})
+        self.assertIn("Teiltreffer", partial["notice"])
+        self.assertEqual(partial["foods"][0]["name"], "Reis poliert, roh")
+        self.assertNotIn("Preiselbeere roh", names("Risottoreis roh"))
+        steaks = names("Rinderhüftsteak gebraten")
+        self.assertIn("Rind Hüfte, gebraten ohne Fett (Ofen)", steaks)
+        self.assertTrue(any("Steak" in name for name in steaks))
+        self.assertTrue(all("gebraten" in name for name in steaks))
+        self.assertEqual(names("Xqzvw"), [])
+
     def test_unknown_macros_are_not_zero_and_units_are_not_guessed(self):
         off = Mock()
         off.product.return_value = project_product(product())

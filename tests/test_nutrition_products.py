@@ -156,6 +156,31 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(self.library.list_products(query="Ei Brokkoli"), [])
         self.assertEqual(len(self.library.list_products(query="nudeln brokkoli")), 1)
 
+    def test_search_tolerates_plurals_umlauts_and_typos_but_needs_every_word(self):
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Champignon braun", brand=None)
+        )
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Hüttenkäse", brand="Milsani")
+        )
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Zucchini", brand=None)
+        )
+
+        for query, name in (
+            ("Champignons braun", "Champignon braun"),
+            ("HÜTTENKÄSE", "Hüttenkäse"),
+            ("Huettenkase milsani", "Hüttenkäse"),
+            ("zuccini", "Zucchini"),
+        ):
+            with self.subTest(query=query):
+                result = self.library.lookup_product({"query": query})
+                self.assertEqual(result["source"], "local")
+                self.assertEqual([p["name"] for p in result["foods"]], [name])
+        self.food_database.lookup.assert_not_called()
+        # A word the product lacks leaves the search to the food database.
+        self.assertEqual(self.library.list_products(query="Champignons roh"), [])
+
     def test_search_ignores_separators_around_words(self):
         self.library.save_product(
             self.product_payload(barcode=None, name="Haferflocken Banane", brand=None)
