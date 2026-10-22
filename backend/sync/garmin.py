@@ -184,6 +184,8 @@ def _keep_daily_read_window(
     recorded gets the reconciliation span of the day's first run.
     """
     run = provider_sync["read_window"]
+    run_start: date | None = None
+    run_end: date | None = None
     try:
         run_start = date.fromisoformat(str(run["start"]))
         run_end = date.fromisoformat(str(run["end"]))
