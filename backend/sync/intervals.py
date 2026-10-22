@@ -44,6 +44,25 @@ from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncOperationStateWriter
 from backend.sync.windows import split_date_windows
 
+# Automatic refreshes after the day's full-window read cover yesterday and today.
+INTERVALS_SHORT_WINDOW_DAYS = 2
+# The local day of the last refresh that read the whole sync period.
+FULL_WINDOW_READ_KEY = "intervals_full_window_read_on"
+
+
+def _wellness_day(row: Any) -> str:
+    return str(row.get("id") or "") if isinstance(row, dict) else ""
+
+
+def _merged_wellness(rows: list[Any], keep_days: int | None) -> list[Any]:
+    """Return deduplicated wellness rows in day order, keeping the newest days.
+
+    Wellness IDs are ISO days, so the cap drops the oldest days, never the ones
+    a read just fetched. ``None`` keeps every row.
+    """
+    ordered = sorted(deduplicate_api_records(rows), key=_wellness_day)
+    return ordered if keep_days is None else ordered[-(keep_days + 1) :]
+
 
 class IntervalsSnapshotReader:
     """Read Intervals provider data and prepare complete durable snapshots."""
@@ -95,7 +114,12 @@ class IntervalsSnapshotReader:
         activity_days: int = 42,
         end_date: date | None = None,
         cancel_event: threading.Event | None = None,
+        retain_days: int | None = None,
     ) -> dict[str, Any]:
+        """Read one activity window; an incremental read merges into the stored one.
+
+        ``retain_days`` is the sync period whose wellness a narrower read keeps.
+        """
         athlete = quote(self._config.intervals_athlete_id, safe="")
         today = end_date or self._local_now().date()
         calendar_start = today - timedelta(days=self._calendar_history_days)
@@ -192,14 +216,26 @@ class IntervalsSnapshotReader:
         )
         if not incremental:
             return incoming
+        return self._merge_incremental(incoming, existing, activity_days, retain_days)
 
+    def _merge_incremental(
+        self,
+        incoming: dict[str, Any],
+        existing: dict[str, Any],
+        activity_days: int,
+        retain_days: int | None,
+    ) -> dict[str, Any]:
+        """Merge a narrower read into the stored snapshot it extends."""
         merged = dict(incoming)
         merged["recent_activities"] = deduplicate_api_records(
             incoming["recent_activities"] + existing.get("recent_activities", [])
         )[:500]
-        merged["recent_wellness"] = deduplicate_api_records(
-            incoming["recent_wellness"] + existing.get("recent_wellness", [])
-        )[-(max(42, activity_days) + 1) :]
+        merged["recent_wellness"] = _merged_wellness(
+            incoming["recent_wellness"] + existing.get("recent_wellness", []),
+            None
+            if retain_days == self._all_sync_days
+            else max(42, activity_days, retain_days or 0),
+        )
         previous_raw = (
             existing.get("raw_provider_data")
             if isinstance(existing.get("raw_provider_data"), dict)
@@ -219,7 +255,7 @@ class IntervalsSnapshotReader:
             "upcoming_calendar": incoming["raw_provider_data"]["upcoming_calendar"],
         }
         merged["incremental"] = True
-        merged["incremental_window_days"] = request_days
+        merged["incremental_window_days"] = activity_days
         return merged
 
     def _cycling_power_profile(
@@ -432,6 +468,15 @@ class IntervalsSnapshotService:
         with self._database_manager.unit_of_work() as db:
             self._key_value_repository.set(db, key, value)
 
+    def full_window_read_today(self) -> bool:
+        """Return whether a refresh read the whole sync period on this local day."""
+        with self._database_manager.reader() as db:
+            stored = self._key_value_repository.get(db, FULL_WINDOW_READ_KEY)
+        return stored == self._local_now().date().isoformat()
+
+    def mark_full_window_read(self) -> None:
+        self._set_key_value(FULL_WINDOW_READ_KEY, self._local_now().date().isoformat())
+
     def record_window(
         self, activity_days: int, end_date: date | None, snapshot: dict[str, Any]
     ) -> tuple[list[tuple[date, date]], dict[str, Any]]:
@@ -498,6 +543,26 @@ class IntervalsSyncWorkflow:
             INTERVALS_ID, self._sync_period_defaults, self._all_sync_days
         )
 
+    def full_window(self, activity_days: int) -> bool:
+        """Return whether a refresh of ``activity_days`` reads the whole sync period."""
+        if activity_days == self._all_sync_days:
+            return True
+        period = self.sync_period()
+        return period != self._all_sync_days and activity_days >= period
+
+    def automatic_days(self, activity_days: int) -> int:
+        """Return the window of an automatic refresh.
+
+        The first automatic refresh of a local day reads the whole sync period, so
+        edits and deletions inside it arrive daily; later ones read the short
+        window. A missing or failed full read keeps the next refresh full.
+        """
+        if not self._snapshots.full_window_read_today():
+            return activity_days
+        if activity_days == self._all_sync_days:
+            return INTERVALS_SHORT_WINDOW_DAYS
+        return min(activity_days, INTERVALS_SHORT_WINDOW_DAYS)
+
     def synchronize(
         self,
         reason: str,
@@ -510,6 +575,8 @@ class IntervalsSyncWorkflow:
         fetch_kwargs: dict[str, Any] = {"activity_days": activity_days}
         if end_date is not None:
             fetch_kwargs["end_date"] = end_date
+        elif not self.full_window(activity_days):
+            fetch_kwargs["retain_days"] = self.sync_period()
         if cancel_event is not None:
             fetch_kwargs["cancel_event"] = cancel_event
         snapshot = self._reader.fetch_snapshot(**fetch_kwargs)
@@ -529,6 +596,8 @@ class IntervalsSyncWorkflow:
         sync_window, pagination = self._snapshots.record_window(
             activity_days, end_date, snapshot
         )
+        if end_date is None and self.full_window(activity_days):
+            self._snapshots.mark_full_window_read()
         return {
             "status": "partial" if library_error else "ok",
             "synced_at": snapshot["synced_at"],
@@ -798,7 +867,9 @@ class IntervalsSyncService:
         wait_for_existing: bool = False,
         wait_for_performance: bool = False,
         cancel_event: threading.Event | None = None,
+        automatic: bool = False,
     ) -> dict[str, Any]:
+        """Synchronize one window; ``automatic`` lets the daily cadence narrow it."""
         with self._runtime.operation(reason, operation_id) as scope:
             result = self._sync_inner(
                 reason,
@@ -808,6 +879,7 @@ class IntervalsSyncService:
                 wait_for_existing,
                 wait_for_performance,
                 cancel_event,
+                automatic,
             )
             scope.result = result
             return result
@@ -821,11 +893,17 @@ class IntervalsSyncService:
         wait_for_existing: bool,
         wait_for_performance: bool,
         cancel_event: threading.Event | None,
+        automatic: bool = False,
     ) -> dict[str, Any]:
         if not self._config.intervals_api_key:
             raise AppError(503, INTERVALS_API_KEY_ERROR, reason="not_configured")
         if activity_days is None:
             activity_days = self._workflow.sync_period()
+        # An automatic refresh narrowed to the short window skips the follow-up.
+        follow_up = True
+        if automatic and end_date is None:
+            activity_days = self._workflow.automatic_days(activity_days)
+            follow_up = self._workflow.full_window(activity_days)
         self._raise_if_cancelled(cancel_event)
         if not self._runtime.acquire():
             if not wait_for_existing:
@@ -854,6 +932,7 @@ class IntervalsSyncService:
                 end_date,
                 wait_for_performance,
                 cancel_event,
+                follow_up,
             )
         except Exception as exc:
             self._journal.failure(resolved_operation_id, reason, exc)
@@ -869,6 +948,7 @@ class IntervalsSyncService:
         end_date: date | None,
         wait_for_performance: bool,
         cancel_event: threading.Event | None,
+        follow_up: bool = True,
     ) -> dict[str, Any]:
         self._journal.start(operation_id)
         self._status.set("sync_running", "1")
@@ -882,9 +962,11 @@ class IntervalsSyncService:
             self._journal,
         )
         self._journal.complete(operation_id)
+        # A short automatic window already refreshed the athlete, power curve and
+        # recent wellness; the 90-day refresh follows the day's full read.
         performance_job = (
             self._performance_followup_service.enqueue_after_sync(reason)
-            if end_date is None
+            if end_date is None and follow_up
             else None
         )
         if performance_job:

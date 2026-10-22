@@ -130,7 +130,12 @@ class StartupSyncSchedulerTests(unittest.TestCase):
             self.queue.jobs,
             [
                 ("calendar", "refresh", {"reason": "startup"}, "startup"),
-                ("intervals", "refresh", {"days": 17, "reason": "startup"}, "startup"),
+                (
+                    "intervals",
+                    "refresh",
+                    {"days": 17, "reason": "startup", "automatic": True},
+                    "startup",
+                ),
                 (
                     "intervals",
                     "historical_backfill",
