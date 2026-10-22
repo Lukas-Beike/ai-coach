@@ -216,7 +216,16 @@ class IntervalsSnapshotReader:
         )
         if not incremental:
             return incoming
+        return self._merge_incremental(incoming, existing, activity_days, retain_days)
 
+    def _merge_incremental(
+        self,
+        incoming: dict[str, Any],
+        existing: dict[str, Any],
+        activity_days: int,
+        retain_days: int | None,
+    ) -> dict[str, Any]:
+        """Merge a narrower read into the stored snapshot it extends."""
         merged = dict(incoming)
         merged["recent_activities"] = deduplicate_api_records(
             incoming["recent_activities"] + existing.get("recent_activities", [])
@@ -246,7 +255,7 @@ class IntervalsSnapshotReader:
             "upcoming_calendar": incoming["raw_provider_data"]["upcoming_calendar"],
         }
         merged["incremental"] = True
-        merged["incremental_window_days"] = request_days
+        merged["incremental_window_days"] = activity_days
         return merged
 
     def _cycling_power_profile(
