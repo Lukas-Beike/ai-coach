@@ -169,6 +169,23 @@ def _daily_metrics_due(state: dict[str, Any], today: date) -> bool:
         return True
 
 
+def _wide_run_today(run: Any, today: date) -> bool:
+    """Return whether a run read at least the reconciliation span ending today."""
+    try:
+        start = date.fromisoformat(str(run["start"]))
+        end = date.fromisoformat(str(run["end"]))
+    except KeyError, TypeError, ValueError:
+        return False
+    return end == today and (today - start).days + 1 >= GARMIN_RECONCILIATION_DAYS
+
+
+def _source_failed(errors: Any, source: str) -> bool:
+    return any(
+        isinstance(error, dict) and error.get("source") == source
+        for error in errors or []
+    )
+
+
 def _keep_daily_read_window(
     provider_sync: dict[str, Any],
     previous_sync: dict[str, Any],
@@ -184,38 +201,21 @@ def _keep_daily_read_window(
     recorded gets the reconciliation span of the day's first run.
     """
     run = provider_sync["read_window"]
-    run_start: date | None = None
-    run_end: date | None = None
-    try:
-        run_start = date.fromisoformat(str(run["start"]))
-        run_end = date.fromisoformat(str(run["end"]))
-    except KeyError, TypeError, ValueError:
-        run_start = run_end = None
+    today_text = today.isoformat()
     kept = previous_sync.get("daily_read_window")
-    kept_today = isinstance(kept, dict) and str(kept.get("end")) == today.isoformat()
-    if (
-        "daily_metrics_on" in provider_sync
-        and run_end == today
-        and run_start is not None
-        and (today - run_start).days + 1 >= GARMIN_RECONCILIATION_DAYS
-    ):
-        failed = any(
-            isinstance(error, dict) and error.get("source") == "daily_stats"
-            for error in errors or []
-        )
-        if not failed:
-            provider_sync["daily_read_window"] = dict(run)
-        else:
+    kept_today = isinstance(kept, dict) and str(kept.get("end")) == today_text
+    if "daily_metrics_on" in provider_sync and _wide_run_today(run, today):
+        if _source_failed(errors, "daily_stats"):
             provider_sync["daily_read_window"] = kept if kept_today else None
+        else:
+            provider_sync["daily_read_window"] = dict(run)
+    elif previous_sync.get("daily_metrics_on") != today_text:
         return
-    if previous_sync.get("daily_metrics_on") != today.isoformat():
-        return
-    if "daily_read_window" not in previous_sync:
+    elif "daily_read_window" not in previous_sync:
+        span_start = today - timedelta(days=GARMIN_RECONCILIATION_DAYS - 1)
         provider_sync["daily_read_window"] = {
-            "start": (
-                today - timedelta(days=GARMIN_RECONCILIATION_DAYS - 1)
-            ).isoformat(),
-            "end": today.isoformat(),
+            "start": span_start.isoformat(),
+            "end": today_text,
         }
     elif kept is None or kept_today:
         provider_sync["daily_read_window"] = kept
