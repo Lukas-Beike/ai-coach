@@ -169,6 +169,48 @@ def _daily_metrics_due(state: dict[str, Any], today: date) -> bool:
         return True
 
 
+def _keep_daily_read_window(
+    provider_sync: dict[str, Any],
+    previous_sync: dict[str, Any],
+    errors: Any,
+    today: date,
+) -> None:
+    """Remember the wide window the day's first run read, past later one-day runs.
+
+    The window vouches for the previous days' stored daily stats (the resting
+    calories behind the running-day projection). It is kept for the local day
+    only; a state stored before the window was recorded gets the reconciliation
+    span of the day's first run.
+    """
+    run = provider_sync["read_window"]
+    try:
+        run_start = date.fromisoformat(str(run["start"]))
+        run_end = date.fromisoformat(str(run["end"]))
+    except KeyError, TypeError, ValueError:
+        run_start = run_end = None
+    if (
+        "daily_metrics_on" in provider_sync
+        and run_end == today
+        and (today - run_start).days + 1 >= GARMIN_RECONCILIATION_DAYS
+        and not any(
+            isinstance(error, dict) and error.get("source") == "daily_stats"
+            for error in errors or []
+        )
+    ):
+        provider_sync["daily_read_window"] = dict(run)
+        return
+    kept = previous_sync.get("daily_read_window")
+    if isinstance(kept, dict) and str(kept.get("end")) == today.isoformat():
+        provider_sync["daily_read_window"] = kept
+    elif not kept and previous_sync.get("daily_metrics_on") == today.isoformat():
+        provider_sync["daily_read_window"] = {
+            "start": (
+                today - timedelta(days=GARMIN_RECONCILIATION_DAYS - 1)
+            ).isoformat(),
+            "end": today.isoformat(),
+        }
+
+
 def _daily_metrics_retry_due(state: dict[str, Any]) -> bool:
     provider_sync = state.get("provider_sync")
     return isinstance(provider_sync, dict) and bool(
@@ -355,6 +397,12 @@ class GarminPayloadService:
             for key in ("daily_metrics_on", "daily_metrics_retry"):
                 if previous_sync.get(key):
                     provider_sync[key] = previous_sync[key]
+        _keep_daily_read_window(
+            provider_sync,
+            previous_sync if isinstance(previous_sync, dict) else {},
+            payload.get("errors"),
+            today,
+        )
         merge_sources(payload, previous, stored)
         if not fixture:
             payload["activities"] = deduplicate_api_records(

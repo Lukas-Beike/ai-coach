@@ -382,6 +382,62 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(windows[-1][1], date(2026, 9, 20))
         self.assertEqual(self.service.automatic_sync_window(2), (2, None))
 
+    def test_one_day_runs_keep_the_wide_window_of_the_days_first_run(self):
+        first = self.service.prepare_remote(
+            self.collection_payload("2026-09-14", "2026-09-20")
+        )
+        self.assertEqual(
+            first["provider_sync"]["daily_read_window"],
+            {"start": "2026-09-14", "end": "2026-09-20"},
+        )
+        self.store_garmin_snapshot(first)
+        later = self.collection_payload("2026-09-20", "2026-09-20")
+        del later["provider_sync"]["daily_metrics_on"]
+
+        merged = self.service.prepare_remote(later)
+
+        self.assertEqual(
+            merged["provider_sync"]["read_window"],
+            {"start": "2026-09-20", "end": "2026-09-20"},
+        )
+        self.assertEqual(
+            merged["provider_sync"]["daily_read_window"],
+            {"start": "2026-09-14", "end": "2026-09-20"},
+        )
+        # A short retry run must not replace the wide window.
+        retry = self.collection_payload("2026-09-20", "2026-09-20")
+        self.assertEqual(
+            self.service.prepare_remote(retry)["provider_sync"]["daily_read_window"],
+            {"start": "2026-09-14", "end": "2026-09-20"},
+        )
+
+    def test_stored_state_without_a_wide_window_gets_the_reconciliation_span(self):
+        self.store_garmin_snapshot(
+            {"provider_sync": {"daily_metrics_on": "2026-09-20"}}
+        )
+        later = self.collection_payload("2026-09-20", "2026-09-20")
+        del later["provider_sync"]["daily_metrics_on"]
+
+        merged = self.service.prepare_remote(later)
+
+        self.assertEqual(
+            merged["provider_sync"]["daily_read_window"],
+            {"start": "2026-09-14", "end": "2026-09-20"},
+        )
+
+    def test_a_wide_window_of_an_earlier_day_is_not_kept(self):
+        self.store_garmin_snapshot(
+            self.service.prepare_remote(
+                self.collection_payload("2026-09-13", "2026-09-19")
+            )
+        )
+        later = self.collection_payload("2026-09-20", "2026-09-20")
+        del later["provider_sync"]["daily_metrics_on"]
+
+        merged = self.service.prepare_remote(later)
+
+        self.assertNotIn("daily_read_window", merged["provider_sync"])
+
     def test_awaited_run_status_requires_the_latest_complete_read_of_the_window(
         self,
     ):
