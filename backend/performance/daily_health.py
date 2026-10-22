@@ -20,6 +20,7 @@ from backend.performance import recovery as performance_recovery
 from backend.providers.garmin_fields import (
     GARMIN_ACTIVE_KCAL_ALIASES,
     GARMIN_FLOORS_ALIASES,
+    GARMIN_RESTING_KCAL_ALIASES,
     GARMIN_STEPS_ALIASES,
     GARMIN_TOTAL_KCAL_ALIASES,
 )
@@ -37,17 +38,7 @@ GARMIN_DAILY_HEALTH_FIELDS = {
 
 GARMIN_DAILY_EXPENDITURE_FIELDS = {
     "active_kcal": GARMIN_ACTIVE_KCAL_ALIASES,
-    "resting_kcal": (
-        "bmrKilocalories",
-        "bmr_kilocalories",
-        "bmrCalories",
-        "bmr_calories",
-        "restingKilocalories",
-        "resting_kilocalories",
-        "restingCalories",
-        "resting_calories",
-        "basalMetabolicRateKilocalories",
-    ),
+    "resting_kcal": GARMIN_RESTING_KCAL_ALIASES,
     "total_kcal": GARMIN_DAILY_HEALTH_FIELDS["calories"],
 }
 

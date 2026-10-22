@@ -61,6 +61,39 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         self.assertEqual(client.get_heart_rates.call_count, 3)
         reader._state_service.record_capability_failure.assert_called_once()
 
+    def test_recovery_completes_missing_resting_energy_per_day(self) -> None:
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
+        client = Mock(spec=["get_daily_summaries", "get_user_summary"])
+        client.get_daily_summaries.return_value = {
+            "data": [
+                {"calendarDate": "2026-09-23", "bmrKilocalories": 1700},
+                {"calendarDate": "2026-09-24"},
+            ]
+        }
+        client.get_user_summary.return_value = {"bmrKilocalories": 1750}
+        reader.configured = Mock(return_value=True)
+        reader._external_call = lambda _cancel: (
+            lambda _service, _operation, call, _details: call()
+        )
+        reader._authenticated_client = lambda _external: (client, "")
+        reader._garmin_tokens = None
+        reader._state_service = Mock()
+        reader._warn = Mock()
+
+        payload, complete = reader.fetch_analysis_data(
+            "recovery", date(2026, 9, 23), date(2026, 9, 24)
+        )
+
+        self.assertTrue(complete["daily_stats"])
+        self.assertEqual(
+            payload["daily_stats"],
+            [
+                {"calendarDate": "2026-09-23", "bmrKilocalories": 1700},
+                {"calendarDate": "2026-09-24", "bmrKilocalories": 1750},
+            ],
+        )
+        client.get_user_summary.assert_called_once_with("2026-09-24")
+
     def test_sessions_reader_requests_only_bounded_activities(self) -> None:
         reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock(spec=["get_activities_by_date"])

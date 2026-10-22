@@ -28,7 +28,7 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
 
             def get_daily_summaries(self, start, end):
                 calls.append(("batch", start, end))
-                return [{"calendarDate": start, "steps": 10}]
+                return [{"calendarDate": start, "steps": 10, "bmrKilocalories": 1}]
 
             def get_user_summary(self, day):
                 calls.append(("day", day))
@@ -54,6 +54,75 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
         )
         self.assertEqual(len(result["daily_stats"]), 2)
         self.assertTrue(pagination["daily_stats"]["complete"])
+
+    def test_daily_summary_batch_completes_missing_resting_energy_per_day(self):
+        calls = []
+
+        class Client:
+            def get_daily_summaries(self, start, end):
+                calls.append(("batch", start, end))
+                return [
+                    {"calendarDate": start, "calories": {"burnedResting": 1800}},
+                    {"calendarDate": end, "calories": {"burnedTotal": 700}},
+                ]
+
+            def get_user_summary(self, day):
+                calls.append(("day", day))
+                return {"calendarDate": day, "bmrKilocalories": 1900}
+
+        result = {"errors": []}
+        pagination = {}
+        _collect_daily_stats(
+            Client(),
+            [(date(2026, 10, 5), TODAY)],
+            result,
+            pagination,
+            lambda _service, _op, fn, _details: fn(),
+            str,
+            None,
+        )
+
+        self.assertEqual(
+            calls,
+            [("batch", "2026-10-05", "2026-10-06"), ("day", "2026-10-06")],
+        )
+        self.assertEqual(
+            result["daily_stats"][1],
+            {
+                "calendarDate": "2026-10-06",
+                "calories": {"burnedTotal": 700},
+                "bmrKilocalories": 1900,
+            },
+        )
+        self.assertEqual(result["daily_stats"][0]["calories"]["burnedResting"], 1800)
+        self.assertTrue(pagination["daily_stats"]["complete"])
+
+    def test_failed_resting_energy_completion_keeps_the_range_row(self):
+        class Client:
+            def get_daily_summaries(self, start, _end):
+                return [{"calendarDate": start, "calories": {"burnedTotal": 700}}]
+
+            def get_user_summary(self, _day):
+                raise RuntimeError("synthetic day failure")
+
+        result = {"errors": []}
+        pagination = {}
+        _collect_daily_stats(
+            Client(),
+            [(TODAY, TODAY)],
+            result,
+            pagination,
+            lambda _service, _op, fn, _details: fn(),
+            str,
+            None,
+        )
+
+        self.assertEqual(
+            result["daily_stats"],
+            [{"calendarDate": "2026-10-06", "calories": {"burnedTotal": 700}}],
+        )
+        self.assertTrue(pagination["daily_stats"]["complete"])
+        self.assertEqual(result["errors"], [])
 
     def test_daily_summary_batch_failure_keeps_partial_day_semantics(self):
         class Client:
