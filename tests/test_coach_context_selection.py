@@ -8,6 +8,7 @@ from backend.coach.context import CoachStructuredContextService
 from backend.coach.context_selection import (
     BASE_SECTIONS,
     CONTEXT_SECTIONS,
+    FULL_SECTIONS,
     CoachContextSelection,
     compact_coach_dialogue,
     infer_coach_domain,
@@ -146,7 +147,11 @@ class CoachContextSelectionTests(unittest.TestCase):
             with self.subTest(message=message):
                 sections = select_coach_context(message, {}).sections
                 self.assertEqual(sections, BASE_SECTIONS | {"nutrition_products"})
-        for message in ("Speichere meinen Check-in", "Wie ist mein Befinden?"):
+        for message in (
+            "Speichere meinen Check-in",
+            "Wie ist mein Befinden?",
+            "Was soll ich heute Nachmittag trainieren?",
+        ):
             with self.subTest(message=message):
                 sections = select_coach_context(message, {}).sections
                 self.assertNotIn("nutrition_products", sections)
@@ -663,7 +668,7 @@ class CoachContextRuleTests(unittest.TestCase):
             {},
         )
         self.assertIsNone(selection.horizon_days)
-        self.assertEqual(CONTEXT_SECTIONS, selection.sections)
+        self.assertEqual(FULL_SECTIONS, selection.sections)
         projected = selection.project(
             {"current_performance": {"ctl": 40, "comparisons": [{"week": "last"}]}},
             "2026-10-18",
@@ -787,7 +792,7 @@ class CoachContextRuleTests(unittest.TestCase):
             (
                 "Synchronisiere den Plan",
                 "provider_refresh_or_sync",
-                CONTEXT_SECTIONS,
+                FULL_SECTIONS,
                 None,
                 5,
                 True,
@@ -832,7 +837,7 @@ class CoachContextRuleTests(unittest.TestCase):
             (
                 "Plane 8 Wochen",
                 "weekly_planning",
-                CONTEXT_SECTIONS,
+                FULL_SECTIONS,
                 None,
                 5,
                 True,

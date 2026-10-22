@@ -13,7 +13,11 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import local as calendar_local
 from backend.canonical.vocabulary import ProviderId
-from backend.coach.context_selection import CONTEXT_SECTIONS, CoachContextSelection
+from backend.coach.context_selection import (
+    CONTEXT_SECTIONS,
+    FULL_SECTIONS,
+    CoachContextSelection,
+)
 from backend.coach.conversation import CoachMessageService
 from backend.coach.prompt import COACH_PROMPT
 from backend.db import DatabaseManager
@@ -570,7 +574,7 @@ class CoachStructuredContextService:
                     self._sync_state_repository.latest_snapshot
                 )
             )
-        included = selection.sections if selection else CONTEXT_SECTIONS
+        included = selection.sections if selection else FULL_SECTIONS
         checkins = (
             self._checkin_service.context()
             if included & {"local_feedback", "daily_planning_context"}
