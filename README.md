@@ -610,6 +610,29 @@ The local [code-review skill](.agents/skills/code-review/SKILL.md) adapts
 Claude's review workflow for PRs and pre-push branch diffs. Agents read it
 directly; the `pr` workflow requires no host-specific slash command.
 
+The [orchestration skill](.agents/skills/orchestrated-plan-implementation/SKILL.md)
+is the mandatory default for repository work, including documentation/skill
+changes, implementation, reviews, evaluations, and retrospectives. It starts by
+proposing live models for simple, standard, and complex/critical tasks and asks
+for missing selections. Explicit session choices are reused across phases;
+status answers do not launch new workers. Workers use isolated source trees;
+the current parent reviews and
+verifies results and alone adopts authorized source patches. Review/evaluation
+criteria and PR gates remain with their owning workflows; review-only work does
+not implement fixes. T3 and native-host adapters use the capabilities actually
+available, without requiring a particular provider CLI or global installation.
+
+The [retro skill](.agents/skills/ai-coach-retro/SKILL.md) must run before every
+final session completion or blocked handoff, without a separate request,
+including documentation-only sessions. It examines process friction,
+skill/instruction gaps, and related application defects, using concrete evidence
+and scoped synthetic checks. It proposes prioritized improvements, distinguishes
+open defects from repaired issues and hypotheses, and preserves existing action
+authorization; a retro alone does not apply fixes or update global memories.
+Intermediate questions/status and waits are not session endings. These are
+agent instructions; an abrupt host shutdown cannot execute a retro, so a missed
+one is completed on resumption before final handoff.
+
 Coding tasks default to the repository's [Ponytail workflow](.agents/skills/ai-coach-ponytail/SKILL.md)
 in `full` mode: the smallest complete change, reusing existing code before adding
 dependencies or abstractions. Any agent can scan and read its Markdown directly;

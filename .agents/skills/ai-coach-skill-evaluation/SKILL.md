@@ -7,8 +7,9 @@ license: Apache-2.0 adaptation; see ../THIRD_PARTY.md.
 # Maintaining and evaluating project skills
 
 Adapted from Anthropic skill-creator's task comparison and evaluation workflow.
-Modified to keep skills local, preserve project boundaries, and avoid automatic
-delegation or external writes; see [provenance](../THIRD_PARTY.md).
+Modified to keep skills local, preserve project boundaries, and use the default
+repository orchestration workflow without authorizing external writes; see
+[provenance](../THIRD_PARTY.md).
 
 ## Author the smallest useful workflow
 
@@ -51,7 +52,7 @@ as a manual exercise rather than a controlled benchmark.
   Keep generated outputs and transcripts in an OS temporary directory outside
   tracked source; never include real accounts, credentials, athlete data, or live
   deployment. Do not push, publish, merge, or send messages for a test scenario.
-- Run sequentially unless the user requests delegation. If delegated, follow
+- Follow the default
   [the orchestration skill](../orchestrated-plan-implementation/SKILL.md) and the
   user's model choices; the parent reviews results and any proposed patches.
 - Check artifacts and observable behavior against predefined expectations. When

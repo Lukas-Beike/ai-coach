@@ -28,8 +28,8 @@ model names do not authorize delegation or GitHub comments.
   review depth: complete all five perspectives below and trace affected
   callers, consumers, and state boundaries. These are review parameters,
   not shell flags or a claim about the host model's reasoning settings.
-- Review sequentially by default. Delegate only when explicitly requested,
-  using the repository orchestration workflow and the user's selected models.
+- Use the default repository orchestration workflow and the user's session model
+  selections for delegation; the parent retains review accountability.
   Do not silently replace missing agents with invented results.
 - Report-only is the default: do not edit, commit, push, resolve threads, or
   post comments. A request to review alone does not authorize GitHub writes.
