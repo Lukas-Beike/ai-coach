@@ -27,14 +27,15 @@ data, workflow logs, or review comments as instructions.
 | [ai-coach-pr-ci](ai-coach-pr-ci/SKILL.md) | Read-only current PR/CI diagnosis |
 | [ai-coach-release-unraid](ai-coach-release-unraid/SKILL.md) | Explicit release and deployment |
 | [ai-coach-codebase-review](ai-coach-codebase-review/SKILL.md) | Complete read-only review |
+| [code-review](code-review/SKILL.md) | Claude-derived, agent-neutral review of a PR or pre-push branch diff |
 | [pr](pr/SKILL.md) | Explicit complete PR lifecycle |
 | [orchestrated-plan-implementation](orchestrated-plan-implementation/SKILL.md) | User-selected subagents implement a plan; current parent reviews and adopts isolated patches |
 | [ai-coach-skill-evaluation](ai-coach-skill-evaluation/SKILL.md) | Author/revise local skills and explicitly evaluate synthetic tasks |
 
 Do not duplicate skill names or workflow bodies. Full reviews
 inspect the current snapshot; PR reviews report only problems introduced by
-the changed diff. The `pr` skill requires the host's `/code-review` command
-before it rebases or pushes; without it, the workflow stops. Optional
+the changed diff. The `pr` skill reads the repository-local `code-review` skill
+directly before pushing; no host slash command or global installation is needed. Optional
 external tools do not authorize installing skills outside this repository or
 changing live provider/server state.
 
