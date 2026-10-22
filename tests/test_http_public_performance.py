@@ -20,7 +20,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
         sync_state_repository = Mock()
         sync_state_repository.latest_snapshot.return_value = snapshot
         garmin_payload_service = Mock()
-        garmin_payload_service.snapshot.return_value = garmin
+        garmin_payload_service.recent_view.return_value = garmin
         profile_service = Mock()
         profile_service.get.return_value = profile
         garmin_projection_service = Mock()
@@ -60,7 +60,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
         )
         project_performance.assert_called_once_with(snapshot, garmin, profile, today)
         sync_state_repository.latest_snapshot.assert_called_once_with()
-        garmin_payload_service.snapshot.assert_called_once_with()
+        garmin_payload_service.recent_view.assert_called_once_with()
         profile_service.get.assert_called_once_with()
         garmin_projection_service.public_state.assert_called_once_with(garmin)
 
@@ -106,7 +106,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
     def test_performance_state_reuses_snapshot_from_composite_state(self):
         sync_state_repository = Mock()
         garmin_payload_service = Mock()
-        garmin_payload_service.snapshot.return_value = {}
+        garmin_payload_service.recent_view.return_value = {}
         profile_service = Mock()
         profile_service.get.return_value = {}
         service = PublicPerformanceStateService(

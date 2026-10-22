@@ -2,7 +2,7 @@ import json
 import pathlib
 import unittest
 
-from backend.coach.context_selection import CONTEXT_SECTIONS, select_coach_context
+from backend.coach.context_selection import FULL_SECTIONS, select_coach_context
 
 FIXTURE = (
     pathlib.Path(__file__).resolve().parent
@@ -92,7 +92,7 @@ class CoachContextScenarioTests(unittest.TestCase):
     def test_full_context_scenarios_use_all_sections(self):
         selection = select_coach_context("Synchronisiere den Plan", {})
         self.assertIsNone(selection.horizon_days)
-        self.assertEqual(CONTEXT_SECTIONS, selection.sections)
+        self.assertEqual(FULL_SECTIONS, selection.sections)
 
 
 if __name__ == "__main__":

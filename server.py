@@ -463,7 +463,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.17"
+APP_VERSION = "1.13.18"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -1440,6 +1440,7 @@ COACH_CONTEXT = CoachContextAssembly(
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
             workout_library_service=PLANNING_DATA.workout_library,
+            nutrition_meal_library=NUTRITION_ASSEMBLY.meal_library_service,
         ),
         dialogue=CoachContextDialogueSources(
             profile_service=ATHLETE_DATA.profile,
@@ -1954,7 +1955,6 @@ PUBLIC_STATE = PublicStateAssembly(
 CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
     intervals_snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
     snapshot_payloads=SNAPSHOT_REPOSITORY,
-    garmin_payloads=lambda: GARMIN_ASSEMBLY.payload_service(),
     profile=ATHLETE_PROFILE_SERVICE,
     clock=ATHLETE_CLOCK.now,
 )

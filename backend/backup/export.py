@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend import change_history
+from backend.canonical import garmin_payload
+from backend.db import garmin_store
 from backend.db.activity_detail_store import analysis_export_rows, stream_export_rows
 from backend.errors import AppError
 from backend.observability import sanitized_provider_payload
@@ -117,6 +119,8 @@ class PrivacyArchiveExportService:
             excluded_keys={
                 "profile",
                 "garmin_snapshot",
+                garmin_payload.STATE_KEY,
+                garmin_payload.RETIRED_SNAPSHOT_KEY,
                 weather_cache.CACHE_KEY,
                 *CREDENTIAL_KV_KEYS,
             },
@@ -471,7 +475,7 @@ class PrivacyArchiveExportService:
                 archive.writestr(
                     "garmin_snapshot.json",
                     json.dumps(
-                        decode_payload(self._key_values.get(db, "garmin_snapshot")),
+                        garmin_store.read_view(db),
                         ensure_ascii=False,
                         separators=(",", ":"),
                     ),

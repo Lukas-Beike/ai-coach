@@ -27,9 +27,12 @@ CONTEXT_SECTIONS = frozenset(
         "recovery",
         "weather",
         "daily_planning_context",
+        "nutrition_products",
         "source_policy",
     }
 )
+# Saved products ride along only when the message reports food or drink.
+FULL_SECTIONS = CONTEXT_SECTIONS - {"nutrition_products"}
 BASE_SECTIONS = frozenset(
     {
         "durable_profile",
@@ -107,6 +110,10 @@ PROFILE_KEYWORDS = (
     ),
     ("today_training", r"heute|morgen|today|tomorrow|" + WEATHER_PATTERN),
 )
+FOOD_INTAKE_PATTERN = (
+    r"gegessen|getrunken|\bmittag(?:essen)?\b|frühstück|fruehstueck|abendessen|kcal|snack"
+    r"|\bate\b|\bdrank\b|calorie|kalorie|mahlzeit|\bmeal\b|ernährung|ernaehrung|nutrition"
+)
 CONTINUATION_PATTERN = (
     r"^\s*(?:bitte\s+|please\s+)?"
     r"(?:ja|yes|ok|okay|mach(?:\s+(?:das|es|den\s+plan))?|plan\s+fortsetzen"
@@ -175,7 +182,7 @@ def infer_coach_domain(
 @dataclass(frozen=True)
 class CoachContextSelection:
     name: str
-    sections: frozenset[str] = CONTEXT_SECTIONS
+    sections: frozenset[str] = FULL_SECTIONS
     horizon_days: int | None = None
     activity_limit: int = 5
     include_library: bool = True
@@ -257,6 +264,15 @@ def is_bare_follow_up(message: str) -> bool:
     )
 
 
+def _food_sections(normalized: str) -> frozenset[str]:
+    """Return the saved-product section when the message reports food or drink."""
+    return (
+        frozenset({"nutrition_products"})
+        if re.search(FOOD_INTAKE_PATTERN, normalized)
+        else frozenset()
+    )
+
+
 def select_coach_context(
     message: str,
     dialogue: dict[str, Any],
@@ -296,10 +312,14 @@ def select_coach_context(
     )
     if planning:
         sections.update({"planning", "training_plans"})
-    if "provider_refresh_or_sync" in matched:
-        return CoachContextSelection(name, retain_pending_request=is_pending_active)
-    if _requires_full_time_context(planning, normalized):
-        return CoachContextSelection(name, retain_pending_request=is_pending_active)
+    food = _food_sections(normalized)
+    sections |= food
+    if "provider_refresh_or_sync" in matched or _requires_full_time_context(
+        planning, normalized
+    ):
+        return CoachContextSelection(
+            name, FULL_SECTIONS | food, retain_pending_request=is_pending_active
+        )
     if attachments:
         name = "attachment_analysis"
     weather = bool(re.search(WEATHER_PATTERN, normalized))

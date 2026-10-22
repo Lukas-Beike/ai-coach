@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -13,7 +13,14 @@ from backend.activities.duplicates import (
     garmin_activity_duplicates_intervals,
 )
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.garmin_payload import (
+    MERGE_SECTIONS,
+    REPLACE_SECTIONS,
+    SECTIONS,
+)
+from backend.canonical.section_items import merge_records
 from backend.config import Config
+from backend.db import garmin_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -24,7 +31,6 @@ from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
 from backend.providers.garmin_gear_fields import garmin_gear_id
-from backend.providers.garmin_morning import merge_garmin_records
 from backend.runtime.ports import ActivityRowReader
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
@@ -35,6 +41,8 @@ GARMIN_CAPABILITY_FAILURE_LIMIT = 3
 GARMIN_CAPABILITY_PAUSE_SECONDS = 24 * 60 * 60
 GARMIN_INITIAL_SYNC_DAYS = 84
 GARMIN_CATCHUP_MAX_DAYS = 90
+# The days of Garmin read-window sections that the performance views load.
+RECENT_VIEW_DAYS = 90
 # Collections every refresh window must cover before it counts as current.
 GARMIN_WINDOW_SOURCES = frozenset({"activities", "sleep", "hrv"})
 
@@ -112,8 +120,15 @@ def _shift_fixture_sleep_dates(value: Any, shift: timedelta) -> Any:
     return normalized
 
 
-def merge_sources(payload: dict[str, Any], previous: dict[str, Any]) -> None:
-    """Retain source-owned freshness and records across partial reads/backfills."""
+def merge_sources(
+    payload: dict[str, Any], previous: dict[str, Any], stored: frozenset[str]
+) -> None:
+    """Retain source-owned freshness across partial reads/backfills.
+
+    ``previous`` is the stored Garmin state (plus the stored gear section) and
+    ``stored`` names the sections that hold rows. The payload keeps only what this
+    read fetched: records of earlier reads stay in their rows.
+    """
     freshness = {
         source: dict(details)
         for source, details in (previous.get("source_freshness") or {}).items()
@@ -125,10 +140,10 @@ def merge_sources(payload: dict[str, Any], previous: dict[str, Any]) -> None:
     }
     pagination = (payload.get("provider_sync") or {}).get("pagination") or {}
     for source in (*GARMIN_COLLECTION_SOURCES, *GARMIN_METRIC_SOURCES):
-        _merge_garmin_source(payload, previous, freshness, failed, pagination, source)
+        _merge_garmin_source(
+            payload, previous, stored, freshness, failed, pagination, source
+        )
     payload["source_freshness"] = freshness
-    if isinstance(previous.get("morning_body_battery"), dict):
-        payload["morning_body_battery"] = previous["morning_body_battery"]
     if previous.get("start") and payload.get("start"):
         payload["start"] = min(str(previous["start"]), str(payload["start"]))
 
@@ -151,33 +166,46 @@ class GarminPayloadService:
         self._local_today = local_today
         self._activity_rows = activity_rows
 
-    def snapshot(self, fields: tuple[str, ...] | None = None) -> dict[str, Any]:
+    def state(self) -> dict[str, Any]:
+        """Return the small stored Garmin state: freshness, sync metadata, errors."""
         with self._database_manager.reader() as db:
-            return self.snapshot_in(db, fields)
+            return garmin_store.read_state(db)
 
-    def snapshot_in(
-        self, db: Any, fields: tuple[str, ...] | None = None
+    def view(
+        self,
+        sources: Iterable[str],
+        *,
+        start: str | None = None,
+        end: str | None = None,
     ) -> dict[str, Any]:
-        """Read the snapshot, or selected fields, inside the caller's transaction."""
-        serialized = (
-            self._key_value_repository.get(db, "garmin_snapshot")
-            if fields is None
-            else self._key_value_repository.get_json_fields(
-                db, "garmin_snapshot", fields
-            )
-        )
-        try:
-            value = json.loads(serialized or "{}")
-        except TypeError, ValueError, RecursionError:
-            return {}
-        return value if isinstance(value, dict) else {}
+        """Return the Garmin state plus only the named stored sections.
+
+        The bounded read-window sections honour the inclusive ISO day range.
+        """
+        with self._database_manager.reader() as db:
+            return garmin_store.read_view(db, sources, start=start, end=end)
+
+    def recent_view(self, days: int = RECENT_VIEW_DAYS) -> dict[str, Any]:
+        """Return the Garmin state plus every section of the last ``days`` local days.
+
+        The sections holding the provider's current answer are always complete; the
+        read-window sections and the activities are cut to the window, so a read
+        costs the window and never the stored stock.
+        """
+        with self._database_manager.reader() as db:
+            return self.recent_view_in(db, days)
+
+    def recent_view_in(self, db: Any, days: int = RECENT_VIEW_DAYS) -> dict[str, Any]:
+        """Read ``recent_view`` inside the caller's transaction."""
+        start = (self._local_today() - timedelta(days=max(1, days) - 1)).isoformat()
+        return garmin_store.read_view(db, None, start=start)
 
     def automatic_sync_days(self, minimum_days: int) -> int:
         return self.automatic_sync_window(minimum_days)[0]
 
     def automatic_sync_window(self, minimum_days: int) -> tuple[int, date | None]:
         """Return a bounded, contiguous refresh window for the oldest collection."""
-        snapshot = self.snapshot(("source_freshness",))
+        snapshot = self.state()
         freshness = snapshot.get("source_freshness") or {}
         sources = GARMIN_WINDOW_SOURCES | (
             set(freshness) & {"daily_stats", "resting_hr", "training_status"}
@@ -215,7 +243,7 @@ class GarminPayloadService:
         reads still count. A failed collection outside the window's core makes
         the run ``partial``.
         """
-        snapshot = self.snapshot()
+        snapshot = self.state()
         if not synced_at or snapshot.get("synced_at") != synced_at:
             return None
         end = end_date or self._local_today()
@@ -244,24 +272,29 @@ class GarminPayloadService:
         return "ok" if collection_complete(snapshot) else "partial"
 
     def prepare_fixture(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._prepare(payload, self.snapshot(), fixture=True)
+        return self._prepare(payload, fixture=True)
 
     def prepare_remote(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._prepare(payload, self.snapshot(), fixture=False)
+        return self._prepare(payload, fixture=False)
 
-    def _prepare(
-        self,
-        payload: dict[str, Any],
-        previous: dict[str, Any],
-        *,
-        fixture: bool,
-    ) -> dict[str, Any]:
+    def _prepare(self, payload: dict[str, Any], *, fixture: bool) -> dict[str, Any]:
+        """Turn one collected payload into the delta to store.
+
+        The payload keeps only what this read fetched plus the complete state keys;
+        the performance history is derived from the stored 90-day window overlaid
+        with the fetch, so no read touches the whole stored stock.
+        """
         # Merging widens ``start`` to older runs; keep this run's own window.
         payload.setdefault("provider_sync", {})["read_window"] = {
             "start": payload.get("start"),
             "end": payload.get("end"),
         }
-        merge_sources(payload, previous)
+        today = self._local_today()
+        start = (today - timedelta(days=RECENT_VIEW_DAYS - 1)).isoformat()
+        with self._database_manager.reader() as db:
+            previous = garmin_store.read_view(db, None, start=start)
+            stored = garmin_store.stored_sources(db)
+        merge_sources(payload, previous, stored)
         if not fixture:
             payload["activities"] = deduplicate_api_records(
                 payload.get("activities", [])
@@ -282,7 +315,10 @@ class GarminPayloadService:
                     }
                 },
             )
-        append_garmin_performance_history(payload, previous, self._local_today())
+        window = _overlaid(previous, payload)
+        append_garmin_performance_history(window, previous, today)
+        payload["performance_history"] = window["performance_history"]
+        payload["provider_metrics"] = window["provider_metrics"]
         return payload
 
     def intervals_activities(self) -> list[dict[str, Any]]:
@@ -313,9 +349,21 @@ class GarminPayloadService:
         ]
 
 
+def _overlaid(window: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the stored window with this read's fetch applied, as the merged payload."""
+    merged = dict(window)
+    for key, value in payload.items():
+        if key in MERGE_SECTIONS:
+            merged[key] = merge_records(value, window.get(key))
+        elif key not in SECTIONS or value:
+            merged[key] = value
+    return merged
+
+
 def _merge_garmin_source(
     payload: dict[str, Any],
     previous: dict[str, Any],
+    stored: frozenset[str],
     freshness: dict[str, Any],
     failed: set[Any],
     pagination: dict[str, Any],
@@ -328,12 +376,12 @@ def _merge_garmin_source(
         _keep_gear_activity_ids(incoming, previous.get("gear"))
         return
     _merge_source_freshness(
-        source, incoming, previous, previous_freshness, complete, payload, freshness
+        source, incoming, stored, previous_freshness, complete, payload, freshness
     )
     _merge_source_coverage(
         source, previous_freshness, pagination, complete, payload, freshness
     )
-    _merge_source_records(source, incoming, previous, payload)
+    _merge_source_records(source, incoming, payload)
 
 
 def _merge_gear_freshness(
@@ -379,7 +427,7 @@ def _keep_gear_activity_ids(incoming: Any, previous: Any) -> None:
 def _merge_source_freshness(
     source: str,
     incoming: Any,
-    previous: dict[str, Any],
+    stored: frozenset[str],
     previous_freshness: dict[str, Any],
     complete: bool,
     payload: dict[str, Any],
@@ -391,7 +439,7 @@ def _merge_source_freshness(
             "fetched_at": payload["synced_at"],
             "observed_at": garmin_observations.garmin_source_observed_at(incoming),
         }
-    elif source in previous:
+    elif source in stored:
         freshness[source] = {**previous_freshness, "freshness": "stale"}
 
 
@@ -415,25 +463,17 @@ def _merge_source_coverage(
             freshness[source] = {**freshness.get(source, {}), **coverage}
 
 
-def _merge_source_records(
-    source: str,
-    incoming: Any,
-    previous: dict[str, Any],
-    payload: dict[str, Any],
-) -> None:
-    if source == "cycling_ftp_history" and (source in previous or source in payload):
-        incoming_rows = [incoming] if isinstance(incoming, dict) else incoming
-        previous_rows = previous.get(source)
-        previous_rows = (
-            [previous_rows] if isinstance(previous_rows, dict) else previous_rows
+def _merge_source_records(source: str, incoming: Any, payload: dict[str, Any]) -> None:
+    """Normalize what this read fetched; earlier records stay in their rows."""
+    if source == "cycling_ftp_history" and source in payload:
+        payload[source] = merge_records(
+            [incoming] if isinstance(incoming, dict) else incoming, None
         )
-        payload[source] = merge_garmin_records(incoming_rows, previous_rows)
-    elif source in GARMIN_COLLECTION_SOURCES and (
-        source in previous or source in payload
-    ):
-        payload[source] = merge_garmin_records(incoming, previous.get(source))
-    elif not incoming and source in previous:
-        payload[source] = previous[source]
+    elif source in GARMIN_COLLECTION_SOURCES and source in payload:
+        payload[source] = merge_records(incoming, None)
+    elif isinstance(incoming, dict) and not incoming and source in REPLACE_SECTIONS:
+        # An empty answer must not overwrite the stored record.
+        del payload[source]
 
 
 def _merge_collection_coverage(
@@ -586,11 +626,14 @@ class GarminSyncStateService:
     ) -> dict[str, Any]:
         synced_at = payload["synced_at"]
         complete = collection_complete(payload)
-        if self._sync_equipment is not None and source != "fixture":
-            self._sync_equipment(payload)
-        # Canonical rows and the legacy snapshot commit together; cursors come later.
+        # Canonical rows and the Garmin state commit together; cursors come later.
         with self._database_manager.unit_of_work() as db:
             self._snapshot_writer.write(db, payload)
+        if self._sync_equipment is not None and source != "fixture":
+            # The fetch carries only new matches; the links need all stored ones.
+            with self._database_manager.reader() as db:
+                stored = garmin_store.read_sections(db, ("activity_matches",))
+            self._sync_equipment({**payload, **stored})
         self._set("last_garmin_sync_at", synced_at)
         if end_date is None:
             self._daily_sync_marker_service.mark(GARMIN_ID)

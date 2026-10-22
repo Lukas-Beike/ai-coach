@@ -1,13 +1,15 @@
 """Schema gate: supported released schemas upgrade, anything else stays unchanged."""
 
+import json
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, ClassVar
 from unittest import mock
 
 from backend.canonical.vocabulary import ProviderId
-from backend.db import migrations
+from backend.db import garmin_items_migration, garmin_store, migrations
 from backend.db.manager import DatabaseManager
 from backend.db.migrations import migrate_schema
 from backend.db.schema import (
@@ -24,6 +26,7 @@ from backend.db.schema_history import (
     SHAPE_CURRENT,
     SHAPE_SCHEMA_V9,
     SHAPE_SCHEMA_V10,
+    SHAPE_SCHEMA_V11,
     released_shape,
 )
 
@@ -33,6 +36,7 @@ OLDEST_SUPPORTED_VERSION = 9
 FIXTURES = Path(__file__).with_name("fixtures")
 OLDEST_SUPPORTED_FIXTURE = FIXTURES / "schema_v9.sql.txt"
 V10_FIXTURE = FIXTURES / "schema_v10.sql.txt"
+V11_FIXTURE = FIXTURES / "schema_v11.sql.txt"
 CURRENT_FIXTURE = FIXTURES / f"schema_v{CURRENT_SCHEMA_VERSION}.sql.txt"
 DETAIL_TABLES = {
     "activity_detail_sets",
@@ -269,6 +273,182 @@ class DatabaseSchemaGateTests(unittest.TestCase):
 
     def test_upgraded_v10_database_restarts_with_the_same_build_unchanged(self):
         db = self.populated_v10_database(self.connect())
+        migrate_schema(db)
+        db.commit()
+        upgraded = list(db.iterdump())
+        migrate_schema(db)
+        self.assertEqual(list(db.iterdump()), upgraded)
+
+    GARMIN_BLOB: ClassVar[dict[str, Any]] = {
+        "synced_at": "2026-10-20T06:00:00+00:00",
+        "start": "2026-10-01",
+        "end": "2026-10-20",
+        "source_freshness": {
+            "sleep": {"fetched_at": "2026-10-20T06:00:00+00:00", "freshness": "current"}
+        },
+        "provider_sync": {"read_window": {"start": "2026-10-01", "end": "2026-10-20"}},
+        "sport_max_hr": {"run": 190},
+        "sleep": [
+            {"calendarDate": "2026-10-19", "sleepScore": 80},
+            {"calendarDate": "2026-10-20", "sleepScore": 84},
+            {"sleepScore": 70},
+        ],
+        "max_metrics": {"vo2MaxRunning": 52.0},
+        "performance_history": [{"date": "2026-10-20", "metrics": {"x": 1}}],
+        "activities": [
+            {
+                "activityId": 4001,
+                "startTimeLocal": "2026-10-20 07:00:00",
+                "activityName": "Morning run",
+                "authToken": "never-stored",
+            },
+            {"activityId": "bad id!", "startTimeLocal": "2026-10-20 08:00:00"},
+        ],
+        "empty_section": [],
+    }
+
+    def populated_v11_database(self, db, blob=None):
+        db.executescript(V11_FIXTURE.read_text(encoding="utf-8"))
+        db.execute(
+            "INSERT INTO messages(role, content, created_at) "
+            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
+        )
+        db.execute(
+            "INSERT INTO kv(key, value, updated_at) VALUES ('garmin_snapshot', ?, ?)",
+            (json.dumps(self.GARMIN_BLOB if blob is None else blob), STAMP),
+        )
+        db.execute(
+            "INSERT INTO provider_records(provider, record_kind, source_record_id, "
+            "payload, payload_hash, fetched_at, mapped_version, state, created_at, "
+            "updated_at) VALUES ('garmin', 'health', 'sleep', ?, ?, ?, 9, "
+            "'active', ?, ?)",
+            (
+                json.dumps({"sleep": self.GARMIN_BLOB["sleep"]}),
+                "0" * 64,
+                STAMP,
+                STAMP,
+                STAMP,
+            ),
+        )
+        db.commit()
+        return db
+
+    def garmin_rows(self, db, kind):
+        return {
+            row["source_record_id"]: row
+            for row in db.execute(
+                "SELECT * FROM provider_records WHERE provider = 'garmin' "
+                "AND record_kind = ?",
+                (kind,),
+            )
+        }
+
+    def test_frozen_v11_fixture_is_the_recorded_released_shape(self):
+        db = self.connect()
+        db.executescript(V11_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V11
+        )
+
+    def test_populated_v11_upgrade_splits_the_garmin_snapshot_into_rows(self):
+        db = self.populated_v11_database(self.connect())
+        messages = self.table_rows(db, ["messages"])
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(self.table_rows(db, ["messages"]), messages)
+        health = self.garmin_rows(db, "health")
+        self.assertNotIn("sleep", health)
+        self.assertEqual(
+            {name.split("/")[0] for name in health},
+            {"sleep", "max_metrics", "performance_history"},
+        )
+        sleep = {n: r for n, r in health.items() if n.startswith("sleep/")}
+        self.assertEqual(len(sleep), 3)
+        self.assertEqual(sleep["sleep/2026-10-19"]["observed_on"], "2026-10-19")
+        self.assertEqual(sleep["sleep/2026-10-19"]["mapped_version"], 0)
+        self.assertEqual(sleep["sleep/2026-10-19"]["fetched_at"], STAMP)
+        self.assertEqual(health["max_metrics"]["observed_on"], None)
+        self.assertEqual(
+            garmin_store.read_sections(db, ["sleep", "max_metrics"]),
+            {
+                "sleep": [
+                    {"calendarDate": "2026-10-19", "sleepScore": 80},
+                    {"calendarDate": "2026-10-20", "sleepScore": 84},
+                    {"sleepScore": 70},
+                ],
+                "max_metrics": {"vo2MaxRunning": 52.0},
+            },
+        )
+        self.assertEqual(
+            garmin_store.read_sections(db, ["sleep"], start="2026-10-20"),
+            {
+                "sleep": [
+                    {"calendarDate": "2026-10-20", "sleepScore": 84},
+                    {"sleepScore": 70},
+                ]
+            },
+        )
+        state = garmin_store.read_state(db)
+        self.assertEqual(state["sport_max_hr"], {"run": 190})
+        self.assertEqual(state["synced_at"], self.GARMIN_BLOB["synced_at"])
+        self.assertNotIn("sleep", state)
+        self.assertNotIn("activities", state)
+        activities = self.garmin_rows(db, "activity")
+        self.assertEqual(set(activities), {"4001"})
+        self.assertEqual(activities["4001"]["observed_on"], "2026-10-20")
+        self.assertNotIn("authToken", activities["4001"]["payload"])
+        kv = {
+            row["key"]: row["value"]
+            for row in db.execute("SELECT key, value FROM kv WHERE key LIKE 'garmin%'")
+        }
+        self.assertNotIn("garmin_snapshot", kv)
+        self.assertEqual(json.loads(kv["garmin_snapshot_legacy"]), self.GARMIN_BLOB)
+        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_v11_upgrade_without_a_garmin_snapshot_only_adds_the_day_column(self):
+        db = self.populated_v11_database(self.connect(), blob={})
+        db.execute("DELETE FROM kv WHERE key = 'garmin_snapshot'")
+        db.execute("DELETE FROM provider_records")
+        db.commit()
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+        self.assertEqual(
+            db.execute("SELECT COUNT(*) FROM provider_records").fetchone()[0], 0
+        )
+
+    def test_failed_v11_upgrade_rolls_back_to_the_unchanged_v11_database(self):
+        db = self.populated_v11_database(self.connect())
+        before = list(db.iterdump())
+        with (
+            mock.patch.object(
+                migrations,
+                "split_garmin_snapshot",
+                side_effect=RuntimeError("injected"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "injected"),
+        ):
+            migrate_schema(db)
+        db.rollback()
+        self.assertEqual(list(db.iterdump()), before)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 11)
+
+    def test_v11_upgrade_that_cannot_read_every_element_back_is_rolled_back(self):
+        db = self.populated_v11_database(self.connect())
+        before = list(db.iterdump())
+        with (
+            mock.patch.object(
+                garmin_items_migration.garmin_store, "iter_items", return_value=iter(())
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            migrate_schema(db)
+        db.rollback()
+        self.assertEqual(list(db.iterdump()), before)
+
+    def test_upgraded_v11_database_restarts_with_the_same_build_unchanged(self):
+        db = self.populated_v11_database(self.connect())
         migrate_schema(db)
         db.commit()
         upgraded = list(db.iterdump())

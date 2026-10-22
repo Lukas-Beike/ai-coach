@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.config import Config
+from backend.db import garmin_store
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
@@ -287,22 +288,22 @@ class GarminMergeTests(unittest.TestCase):
             "start": "2026-09-01",
         }
 
-        merge_sources(payload, previous)
+        merge_sources(payload, previous, frozenset(previous))
 
-        self.assertEqual([item["id"] for item in payload["sleep"]], [2, 1])
+        self.assertEqual([item["id"] for item in payload["sleep"]], [2])
         self.assertEqual(payload["source_freshness"]["sleep"]["freshness"], "partial")
         self.assertEqual(payload["source_freshness"]["sleep"]["fetched_at"], UTC_NOW)
         self.assertEqual(
             payload["source_freshness"]["sleep"]["observed_at"], "2026-09-20"
         )
-        self.assertEqual(payload["hrv"], previous["hrv"])
+        self.assertNotIn("hrv", payload)
         self.assertEqual(payload["source_freshness"]["hrv"]["freshness"], "stale")
         self.assertEqual(payload["source_freshness"]["hrv"]["extra"], "retained")
-        self.assertEqual(payload["body_battery"], previous["body_battery"])
+        self.assertEqual(payload["body_battery"], [])
         self.assertEqual(
             payload["source_freshness"]["body_battery"]["freshness"], "stale"
         )
-        self.assertEqual(len(payload["activities"]), 2)
+        self.assertEqual(len(payload["activities"]), 1)
         self.assertEqual(
             payload["source_freshness"]["activities"]["freshness"], "current"
         )
@@ -320,15 +321,13 @@ class GarminMergeTests(unittest.TestCase):
         self.assertEqual(
             payload["source_freshness"]["cycling_ftp"]["freshness"], "partial"
         )
-        self.assertEqual(payload["weight"], previous["weight"])
+        self.assertNotIn("weight", payload)
         self.assertEqual(payload["source_freshness"]["weight"]["freshness"], "stale")
-        self.assertEqual(payload["max_metrics"], previous["max_metrics"])
+        self.assertNotIn("max_metrics", payload)
         self.assertEqual(
             payload["source_freshness"]["max_metrics"]["freshness"], "stale"
         )
-        self.assertEqual(
-            payload["morning_body_battery"], previous["morning_body_battery"]
-        )
+        self.assertNotIn("morning_body_battery", payload)
         self.assertEqual(payload["start"], "2026-08-01")
 
     def test_collection_completion_truth_table(self):
@@ -397,6 +396,10 @@ class GarminSyncStateServiceTests(unittest.TestCase):
     def _get(self, key):
         with self.manager.unit_of_work() as db:
             return self.key_values.get(db, key)
+
+    def _state(self):
+        with self.manager.unit_of_work() as db:
+            return garmin_store.read_state(db)
 
     def _set(self, key, value):
         with self.manager.unit_of_work() as db:
@@ -539,10 +542,8 @@ class GarminSyncStateServiceTests(unittest.TestCase):
                 "source": "fixture",
             },
         )
-        self.assertEqual(
-            self._get("garmin_snapshot"),
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        )
+        self.assertEqual(self._state()["synced_at"], UTC_NOW)
+        self.assertIsNone(self._get("garmin_snapshot"))
         self.assertEqual(self._get("last_garmin_sync_at"), UTC_NOW)
         self.assertEqual(self._get("last_garmin_error"), "")
         self.assertIsNone(self._get("sync_garmin_last_success_at"))
@@ -645,12 +646,11 @@ class GarminSyncStateServiceTests(unittest.TestCase):
             events,
             [
                 "canonical_coverage:garmin",
-                "garmin_snapshot",
                 "last_garmin_sync_at",
                 "last_garmin_error",
             ],
         )
-        self.assertEqual(json.loads(self._get("garmin_snapshot")), payload)
+        self.assertEqual(self._state()["synced_at"], UTC_NOW)
         self.assertEqual(self._get("last_garmin_sync_at"), UTC_NOW)
         self.assertIsNone(self._get("sync_garmin_last_success_at"))
         self.assertIsNone(self.sync_state.cursor("garmin", "data")["cursor"])

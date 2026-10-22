@@ -17,6 +17,12 @@ from functools import partial
 from typing import Any
 
 from backend.providers.descriptors import GARMIN_ID
+from backend.providers.garmin_fields import (
+    GARMIN_DATE_ALIASES,
+    GARMIN_RESTING_KCAL_ALIASES,
+    first_present,
+    flatten_daily_summary,
+)
 
 try:
     from garminconnect import Garmin as GarminClient
@@ -399,7 +405,11 @@ def fetch_targeted_analysis(
             warn=warn,
         )
         if complete[source]:
-            payload[source] = value
+            payload[source] = (
+                _with_resting_energy(client, value, external_call)
+                if source == "daily_stats"
+                else value
+            )
     return payload, complete
 
 
@@ -511,7 +521,7 @@ def fetch_targeted_nutrition(
             continue
         if start <= observed <= end:
             bounded.append(row)
-    return bounded, complete
+    return _with_resting_energy(client, bounded, external_call), complete
 
 
 def _normalize_targeted_analysis_response(source: str, value: Any) -> Any:
@@ -669,6 +679,42 @@ def _daily_stats_records(value: Any, current: date) -> list[dict[str, Any]]:
     ]
 
 
+def _with_resting_energy(
+    client: Any, rows: list[dict[str, Any]], external_call: ExternalCall
+) -> list[dict[str, Any]]:
+    """Complete range rows that lack resting energy from the per-day summary.
+
+    Garmin's daily-summaries range can omit the running day's resting calories,
+    which the per-day summary reports. A failed or equally empty per-day read
+    keeps the range row, whose other values remain valid.
+    """
+    fetch = getattr(client, "get_user_summary", None)
+    if not callable(fetch):
+        return rows
+    completed: list[dict[str, Any]] = []
+    for row in rows:
+        day = first_present(row, GARMIN_DATE_ALIASES)
+        if not isinstance(day, str) or (
+            first_present(flatten_daily_summary(row), GARMIN_RESTING_KCAL_ALIASES)
+            is not None
+        ):
+            completed.append(row)
+            continue
+        try:
+            summary = external_call(
+                GARMIN_ID, "daily_stats", partial(fetch, day[:10]), {"date": day[:10]}
+            )
+        except Exception:  # noqa: BLE001 - the range row stays the result.
+            summary = None
+        if (
+            isinstance(summary, dict)
+            and first_present(summary, GARMIN_RESTING_KCAL_ALIASES) is not None
+        ):
+            row = {**row, **summary}
+        completed.append(row)
+    return completed
+
+
 def _collect_daily_stats_day(
     fetch: Any,
     current: date,
@@ -765,6 +811,7 @@ def _collect_daily_summaries_window(
         if observed is not None and start <= observed <= end:
             accepted.append(row)
             covered.add(observed.isoformat())
+    accepted = _with_resting_energy(client, accepted, external_call)
     payload.setdefault("daily_stats", []).extend(accepted)
     stats["records"] = int(stats["records"]) + len(accepted)
     return covered

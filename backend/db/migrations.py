@@ -13,6 +13,7 @@ import contextlib
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
+from backend.db.garmin_items_migration import split_garmin_snapshot
 from backend.db.schema import (
     ACTIVITY_DETAIL_DDL,
     CURRENT_SCHEMA_VERSION,
@@ -26,6 +27,7 @@ from backend.db.schema_history import (
     SHAPE_CURRENT,
     SHAPE_SCHEMA_V9,
     SHAPE_SCHEMA_V10,
+    SHAPE_SCHEMA_V11,
     released_shape,
 )
 
@@ -97,7 +99,19 @@ def _upgrade_v10_to_v11(db: Any) -> None:
     execute_ddl(db, FOOD_DATABASE_DDL)
 
 
+def _upgrade_v11_to_v12(db: Any) -> None:
+    # Adds the day column of raw provider records, then moves the Garmin snapshot
+    # blob into one raw record per payload element (see garmin_items_migration).
+    db.execute("ALTER TABLE provider_records ADD COLUMN observed_on TEXT")
+    db.execute(
+        "CREATE INDEX idx_provider_records_observed "
+        "ON provider_records(provider, record_kind, observed_on)"
+    )
+    split_garmin_snapshot(db)
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V9: (SHAPE_SCHEMA_V10, _upgrade_v9_to_v10),
-    SHAPE_SCHEMA_V10: (SHAPE_CURRENT, _upgrade_v10_to_v11),
+    SHAPE_SCHEMA_V10: (SHAPE_SCHEMA_V11, _upgrade_v10_to_v11),
+    SHAPE_SCHEMA_V11: (SHAPE_CURRENT, _upgrade_v11_to_v12),
 }

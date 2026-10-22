@@ -238,8 +238,8 @@ def _service(
     sync_state.latest_snapshot.return_value = snapshot
     garmin_snapshot = garmin if garmin is not None else {}
     garmin_payload = Mock()
-    garmin_payload.snapshot.return_value = garmin_snapshot
-    garmin_payload.snapshot_in.side_effect = lambda _db: garmin_snapshot
+    garmin_payload.recent_view.return_value = garmin_snapshot
+    garmin_payload.recent_view_in.side_effect = lambda _db: garmin_snapshot
     profile = Mock()
     profile.get.return_value = PARITY_PROFILE
     projection = Mock()
@@ -840,7 +840,7 @@ def _profile_stub() -> Mock:
 
 def _garmin_stub() -> Mock:
     garmin = Mock()
-    garmin.snapshot.return_value = {}
+    garmin.recent_view.return_value = {}
     return garmin
 
 

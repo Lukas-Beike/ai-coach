@@ -457,7 +457,8 @@ class SelectorTests(CanonicalReadFixture):
         populate(self)
         selector = make_selector(self)
 
-        self.assertEqual(self.read(selector.coverage), ())
+        # Garmin coverage is persisted by its writer; only Intervals.icu could fall back.
+        self.assertEqual(self._intervals_coverage(selector), ())
 
     def test_persisted_coverage_is_kept_after_a_mapper_bump(self) -> None:
         populate(self)
@@ -469,10 +470,17 @@ class SelectorTests(CanonicalReadFixture):
                 db, summary, zone=self.zone
             )
         )
-        self.assertEqual(self.read(selector.coverage), (summary,))
+        self.assertEqual(self._intervals_coverage(selector), (summary,))
 
         with bumped_intervals_mappers():
-            self.assertEqual(self.read(selector.coverage), (summary,))
+            self.assertEqual(self._intervals_coverage(selector), (summary,))
+
+    def _intervals_coverage(self, selector: Any) -> tuple[Any, ...]:
+        return tuple(
+            item
+            for item in self.read(selector.coverage)
+            if item.provider is ProviderId.INTERVALS
+        )
 
     def test_reader_for_returns_the_source_that_serves_reads(self) -> None:
         selector = make_selector(self)

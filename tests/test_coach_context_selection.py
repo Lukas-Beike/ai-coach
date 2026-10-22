@@ -4,9 +4,11 @@ from unittest.mock import Mock
 
 from server_test_support import server
 
+from backend.coach.context import CoachStructuredContextService
 from backend.coach.context_selection import (
     BASE_SECTIONS,
     CONTEXT_SECTIONS,
+    FULL_SECTIONS,
     CoachContextSelection,
     compact_coach_dialogue,
     infer_coach_domain,
@@ -135,6 +137,62 @@ class CoachContextSelectionTests(unittest.TestCase):
         ):
             with self.subTest(message=message):
                 self.assertEqual(select_coach_context(message, {}).name, expected)
+
+    def test_food_intake_adds_saved_products_section_only_for_food(self):
+        for message in (
+            "Frühstück: 77g Banane, 60g Whey, 100g Mandeldrink",
+            "I ate lunch",
+            "Ich habe einen Shake getrunken",
+        ):
+            with self.subTest(message=message):
+                sections = select_coach_context(message, {}).sections
+                self.assertEqual(sections, BASE_SECTIONS | {"nutrition_products"})
+        for message in (
+            "Speichere meinen Check-in",
+            "Wie ist mein Befinden?",
+            "Was soll ich heute Nachmittag trainieren?",
+        ):
+            with self.subTest(message=message):
+                sections = select_coach_context(message, {}).sections
+                self.assertNotIn("nutrition_products", sections)
+
+    def test_structured_context_lists_compact_saved_products(self):
+        library = Mock()
+        library.list_products.return_value = [
+            {
+                "id": "p1",
+                "name": "Bio Whey Protein",
+                "brand": "Rheinnatur",
+                "basis_amount": 100,
+                "basis_unit": "g",
+                "kcal": 400,
+                "provenance": {"kind": "manual"},
+            }
+        ]
+        service = CoachStructuredContextService(
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            lambda: library.list_products(),
+        )
+        section = service._selected_sections(
+            frozenset({"nutrition_products"}), {}, {}, [], {}, []
+        )["nutrition_products"]
+        self.assertEqual(
+            section,
+            [
+                {
+                    "id": "p1",
+                    "name": "Bio Whey Protein",
+                    "brand": "Rheinnatur",
+                    "basis_amount": 100,
+                    "basis_unit": "g",
+                }
+            ],
+        )
 
     def test_long_range_planning_uses_complete_context(self):
         for message in (
@@ -610,7 +668,7 @@ class CoachContextRuleTests(unittest.TestCase):
             {},
         )
         self.assertIsNone(selection.horizon_days)
-        self.assertEqual(CONTEXT_SECTIONS, selection.sections)
+        self.assertEqual(FULL_SECTIONS, selection.sections)
         projected = selection.project(
             {"current_performance": {"ctl": 40, "comparisons": [{"week": "last"}]}},
             "2026-10-18",
@@ -734,7 +792,7 @@ class CoachContextRuleTests(unittest.TestCase):
             (
                 "Synchronisiere den Plan",
                 "provider_refresh_or_sync",
-                CONTEXT_SECTIONS,
+                FULL_SECTIONS,
                 None,
                 5,
                 True,
@@ -779,7 +837,7 @@ class CoachContextRuleTests(unittest.TestCase):
             (
                 "Plane 8 Wochen",
                 "weekly_planning",
-                CONTEXT_SECTIONS,
+                FULL_SECTIONS,
                 None,
                 5,
                 True,

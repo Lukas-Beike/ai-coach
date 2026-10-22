@@ -54,7 +54,7 @@ class PublicPerformanceStateService:
         # load reads.
         with source.database_manager().read_snapshot() as db:
             snapshot = self._sync_state_repository.latest_snapshot()
-            garmin = self._garmin_payload_service.snapshot_in(db)
+            garmin = self._garmin_payload_service.recent_view_in(db)
             reader = ReadOnceObservationReader(
                 resolve_reader(source.observation_reader(), db)
             )
@@ -84,7 +84,7 @@ class PublicPerformanceStateService:
         """Project a snapshot and the inputs a larger state request read with it."""
         return self._project(
             snapshot,
-            self._garmin_payload_service.snapshot(),
+            self._garmin_payload_service.recent_view(),
             canonical,
             None,
             self._today(),

@@ -61,6 +61,39 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         self.assertEqual(client.get_heart_rates.call_count, 3)
         reader._state_service.record_capability_failure.assert_called_once()
 
+    def test_recovery_completes_missing_resting_energy_per_day(self) -> None:
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
+        client = Mock(spec=["get_daily_summaries", "get_user_summary"])
+        client.get_daily_summaries.return_value = {
+            "data": [
+                {"calendarDate": "2026-09-23", "bmrKilocalories": 1700},
+                {"calendarDate": "2026-09-24"},
+            ]
+        }
+        client.get_user_summary.return_value = {"bmrKilocalories": 1750}
+        reader.configured = Mock(return_value=True)
+        reader._external_call = lambda _cancel: (
+            lambda _service, _operation, call, _details: call()
+        )
+        reader._authenticated_client = lambda _external: (client, "")
+        reader._garmin_tokens = None
+        reader._state_service = Mock()
+        reader._warn = Mock()
+
+        payload, complete = reader.fetch_analysis_data(
+            "recovery", date(2026, 9, 23), date(2026, 9, 24)
+        )
+
+        self.assertTrue(complete["daily_stats"])
+        self.assertEqual(
+            payload["daily_stats"],
+            [
+                {"calendarDate": "2026-09-23", "bmrKilocalories": 1700},
+                {"calendarDate": "2026-09-24", "bmrKilocalories": 1750},
+            ],
+        )
+        client.get_user_summary.assert_called_once_with("2026-09-24")
+
     def test_sessions_reader_requests_only_bounded_activities(self) -> None:
         reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock(spec=["get_activities_by_date"])
@@ -131,7 +164,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         manager.unit_of_work.return_value = nullcontext(object())
         writer = Mock()
         payloads = Mock()
-        payloads.snapshot.return_value = {
+        payloads.view.return_value = {
             "synced_at": "2026-09-23T12:00:00Z",
             "sleep": [{"calendarDate": "2026-09-23"}],
             "daily_training_status": {"old": "kept"},
@@ -172,7 +205,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         reader.fetch_analysis_data.assert_called_once_with(
             "load", date(2026, 9, 1), date(2026, 9, 24)
         )
-        snapshot = writer.write_analysis_refresh.call_args.args[1]
+        snapshot = writer.write_refresh.call_args.kwargs["view"]
         self.assertEqual(snapshot["sleep"], [{"calendarDate": "2026-09-23"}])
         self.assertEqual(snapshot["daily_training_status"], {"old": "kept"})
         self.assertEqual(snapshot["synced_at"], "2026-09-23T12:00:00Z")
@@ -212,9 +245,9 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         reader.fetch_analysis_data.assert_called_once_with(
             "sessions", date(2026, 8, 14), date(2026, 9, 24)
         )
-        writer.write_analysis_refresh.assert_called_once()
+        writer.write_refresh.assert_called_once()
         self.assertEqual(
-            writer.write_analysis_refresh.call_args.args[3], {"activities": [activity]}
+            writer.write_refresh.call_args.kwargs["sections"], {"activities": [activity]}
         )
 
     def test_refresh_rejects_ranges_over_ninety_days(self) -> None:
@@ -222,7 +255,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         with self.assertRaises(AppError):
             service.refresh("recovery", date(2026, 1, 1), date(2026, 4, 1))
         reader.fetch_analysis_data.assert_not_called()
-        writer.write_analysis_refresh.assert_not_called()
+        writer.write_refresh.assert_not_called()
 
     def test_assembly_factory_wires_targeted_service_and_disables_fixtures(
         self,

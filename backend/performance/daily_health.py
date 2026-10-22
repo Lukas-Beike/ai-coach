@@ -20,6 +20,7 @@ from backend.performance import recovery as performance_recovery
 from backend.providers.garmin_fields import (
     GARMIN_ACTIVE_KCAL_ALIASES,
     GARMIN_FLOORS_ALIASES,
+    GARMIN_RESTING_KCAL_ALIASES,
     GARMIN_STEPS_ALIASES,
     GARMIN_TOTAL_KCAL_ALIASES,
 )
@@ -37,29 +38,9 @@ GARMIN_DAILY_HEALTH_FIELDS = {
 
 GARMIN_DAILY_EXPENDITURE_FIELDS = {
     "active_kcal": GARMIN_ACTIVE_KCAL_ALIASES,
-    "resting_kcal": (
-        "bmrKilocalories",
-        "bmr_kilocalories",
-        "bmrCalories",
-        "bmr_calories",
-        "restingKilocalories",
-        "resting_kilocalories",
-        "restingCalories",
-        "resting_calories",
-        "basalMetabolicRateKilocalories",
-    ),
+    "resting_kcal": GARMIN_RESTING_KCAL_ALIASES,
     "total_kcal": GARMIN_DAILY_HEALTH_FIELDS["calories"],
 }
-
-# Top-level Garmin snapshot fields read by daily_energy_expenditure, so callers
-# can project only these instead of decoding every stored collection.
-DAILY_ENERGY_SNAPSHOT_FIELDS = (
-    "daily_stats",
-    "nutrition_refresh",
-    "provider_sync",
-    "source_freshness",
-    "synced_at",
-)
 
 # Daily totals by canonical kind and the field of the date-indexed view.
 DAILY_HEALTH_KINDS: Mapping[MetricKind, str] = {

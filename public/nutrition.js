@@ -284,7 +284,7 @@ function renderNutritionExpenditure(expenditure, selectedDate) {
 function appendNutritionTotals(totals, day) {
   // Empty days report zero totals, which are unknown, so the tiles stay at "–".
   const hasEntries = Number(day.entry_count) > 0;
-  for (const [label, key, unit] of [["Kalorien", "kcal", "kcal"], ["Kohlenhydrate", "carbs_g", "g"], ["Protein", "protein_g", "g"], ["Fett", "fat_g", "g"]]) {
+  for (const [label, key, unit] of [["Kalorien", "kcal", "kcal"], ["Kohlenhydrate", "carbs_g", "g"], ["Protein", "protein_g", "g"], ["Fett", "fat_g", "g"], ["Zucker", "sugar_g", "g"], ["Salz", "salt_g", "g"]]) {
     totals.append(nutritionTotalTile(label, key, unit, day, hasEntries));
   }
 }
@@ -295,7 +295,7 @@ function nutritionTotalTile(label, key, unit, day, hasEntries) {
   const value = document.createElement("strong");
   const complete = hasEntries ? day[`total_${key}`] : null;
   // A partial sum of known values is shown only with an explicit incompleteness label.
-  const total = hasEntries ? (complete ?? day.known_macro_totals?.[key]) : null;
+  const total = hasEntries ? (complete ?? day.known_macro_totals?.[key] ?? day.known_intake_totals?.[key]) : null;
   const totalText = total != null ? nutritionNumber(total) : "–";
   value.textContent = `${totalText} ${unit}`;
   const caption = document.createElement("span");
@@ -352,7 +352,7 @@ function renderNutritionWeek(week) {
   const balance = week.balance_kcal;
   let balanceLabel = "Bilanz";  if (balance != null) {    balanceLabel = "Ausgeglichene Bilanz";    if (balance > 0) balanceLabel = "Kalorienüberschuss";    if (balance < 0) balanceLabel = "Kaloriendefizit";  }  if (balance != null && week.balance_days < dayCount) balanceLabel = "Erfasste Teilbilanz";
   const items = [[balanceLabel, balance, "kcal", week.balance_days, true],
-    ...[["Ø Aufnahme", "intake_kcal", "kcal"], ["Ø Verbrauch", "expenditure_kcal", "kcal"], ["Ø Kohlenhydrate", "carbs_g", "g"], ["Ø Protein", "protein_g", "g"], ["Ø Fett", "fat_g", "g"]].map(([label, key, unit]) => [label, week.averages[key].value, unit, week.averages[key].days, false])];
+    ...[["Ø Aufnahme", "intake_kcal", "kcal"], ["Ø Verbrauch", "expenditure_kcal", "kcal"], ["Ø Kohlenhydrate", "carbs_g", "g"], ["Ø Protein", "protein_g", "g"], ["Ø Fett", "fat_g", "g"], ["Ø Zucker", "sugar_g", "g"], ["Ø Salz", "salt_g", "g"]].map(([label, key, unit]) => [label, week.averages[key].value, unit, week.averages[key].days, false])];
   totals.replaceChildren(...items.map(([label, value, unit, days, isBalance]) => {
     const tile = document.createElement("div"); tile.className = "nutrition-total";
     if (isBalance) tile.style.gridColumn = "1 / -1";

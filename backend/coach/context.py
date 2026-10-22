@@ -13,7 +13,11 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import local as calendar_local
 from backend.canonical.vocabulary import ProviderId
-from backend.coach.context_selection import CONTEXT_SECTIONS, CoachContextSelection
+from backend.coach.context_selection import (
+    CONTEXT_SECTIONS,
+    FULL_SECTIONS,
+    CoachContextSelection,
+)
 from backend.coach.conversation import CoachMessageService
 from backend.coach.prompt import COACH_PROMPT
 from backend.db import DatabaseManager
@@ -49,6 +53,7 @@ COACH_RECENT_ACTIVITIES_PER_SPORT = 5
 COACH_PLANNED_EVENT_LIMIT = 50
 COACH_LOCAL_PLANNED_LIMIT = 50
 COACH_LIBRARY_LIMIT = 12
+COACH_NUTRITION_PRODUCT_LIMIT = 80
 COACH_LIBRARY_DESCRIPTION_LIMIT = 1500
 COACH_CONTEXT_TOTAL_CHAR_LIMIT = 120_000
 COACH_CONTEXT_SECTION_LIMITS = {
@@ -61,6 +66,7 @@ COACH_CONTEXT_SECTION_LIMITS = {
     "weather": 16_000,
     "daily_planning_context": 24_000,
     "external_calendar": 20_000,
+    "nutrition_products": 8_000,
 }
 LOGGER = logging.getLogger("intervals_coach")
 
@@ -511,7 +517,7 @@ class CoachPerformanceContextReader:
         return coach_performance_projection(
             performance_context.current_performance_context(
                 snapshot,
-                self._garmin_payload_service.snapshot(),
+                self._garmin_payload_service.recent_view(),
                 self._profile_service.get(),
                 self._today(),
                 **performance_options(canonical),
@@ -539,7 +545,9 @@ class CoachStructuredContextService:
         activity_feedback_service: Any,
         planning_reader: CoachPlanningContextReader,
         performance_reader: CoachPerformanceContextReader,
+        nutrition_products: Callable[[], list[dict[str, Any]]] | None = None,
     ) -> None:
+        self._nutrition_products = nutrition_products
         self._sync_state_repository = sync_state_repository
         self._checkin_service = checkin_service
         self._weather_service = weather_service
@@ -566,7 +574,7 @@ class CoachStructuredContextService:
                     self._sync_state_repository.latest_snapshot
                 )
             )
-        included = selection.sections if selection else CONTEXT_SECTIONS
+        included = selection.sections if selection else FULL_SECTIONS
         checkins = (
             self._checkin_service.context()
             if included & {"local_feedback", "daily_planning_context"}
@@ -660,6 +668,9 @@ class CoachStructuredContextService:
             else None,
             "weather": weather,
             "daily_planning_context": daily_context,
+            "nutrition_products": self._compact_nutrition_products()
+            if "nutrition_products" in included
+            else None,
             "source_policy": {
                 "weather": "Open-Meteo forecast for the profile location; daily values up to 14 days, time-window recommendations only for the next 5 days and outdoor run/ride sessions; air_quality is the Open-Meteo/CAMS European AQI forecast for about 5 days; pollen uses the official DWD pollen-flight hazard index (0-3) for German regions for up to 3 days, otherwise Open-Meteo/CAMS concentrations",
                 "local_feedback": "Athlete-entered subjective signals and availability; not copied from Garmin or Intervals.icu",
@@ -672,10 +683,20 @@ class CoachStructuredContextService:
                 "durable_profile": "Vom Athleten bestätigte Werte, lokal in SQLite gespeichert",
                 "target_competitions": "Vom Athleten bestätigte Wettkämpfe, lokal in SQLite gespeichert",
                 "current_performance": f"Aus dem letzten gespeicherten {intervals_label}-Snapshot und verbundenen Provider-Daten abgeleitet",
+                "nutrition_products": "Vom Athleten gespeicherte lokale Produkte (id, Name, Marke, Bezugsmenge); zuerst damit abgleichen, Nährwerte über calculate_food_nutrition mit product_id berechnen",
                 "conversation": "Nur Dialogkontinuität; keine autoritative Quelle für dauerhafte Athletenfakten",
             },
         }
         return {key: value for key, value in context.items() if key in included}
+
+    def _compact_nutrition_products(self) -> list[dict[str, Any]]:
+        if self._nutrition_products is None:
+            return []
+        keys = ("id", "name", "brand", "basis_amount", "basis_unit")
+        return [
+            {key: product.get(key) for key in keys}
+            for product in self._nutrition_products()[:COACH_NUTRITION_PRODUCT_LIMIT]
+        ]
 
 
 def compact_coach_local_planned_workout(

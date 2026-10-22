@@ -10,7 +10,6 @@ were removed from the stored Garmin snapshot. All storage is temporary.
 from __future__ import annotations
 
 import copy
-import json
 import logging
 import unittest
 from datetime import UTC, date, datetime
@@ -20,6 +19,7 @@ from canonical_read_support import (
     CanonicalReadFixture,
     make_selector,
     populate,
+    store_garmin,
 )
 from support import make_config
 
@@ -32,6 +32,7 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.coach.morning import GarminSleepObservations, ManualMorningCheckinService
+from backend.db.garmin_store import prune_section
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance import garmin_metrics, garmin_observations
@@ -47,7 +48,6 @@ from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
 )
-from backend.sync.garmin_snapshot_writer import GARMIN_SNAPSHOT_KEY
 
 TODAY = date(2026, 10, 11)
 LOCAL_NOW = datetime(2026, 10, 11, 8, tzinfo=UTC)
@@ -158,11 +158,7 @@ class GarminReadFixture(CanonicalReadFixture):
 
     def _store_snapshot(self) -> None:
         """Store the Garmin payload without a backfill, so the selector serves legacy."""
-        self.write(
-            lambda db: self.key_values.set(
-                db, GARMIN_SNAPSHOT_KEY, json.dumps(self.garmin)
-            )
-        )
+        self.write(lambda db: store_garmin(self, db, self.garmin))
 
     def _strip_canonical_sections(self) -> None:
         """Remove the canonical Garmin sections from the stored and in-memory snapshot."""
@@ -172,11 +168,8 @@ class GarminReadFixture(CanonicalReadFixture):
             if key not in CANONICAL_SECTIONS
         }
         self.garmin = stripped
-        self.write(
-            lambda db: self.key_values.set(
-                db, GARMIN_SNAPSHOT_KEY, json.dumps(stripped)
-            )
-        )
+        for section in CANONICAL_SECTIONS:
+            self.write(lambda db, name=section: prune_section(db, name, set()))
 
 
 class GarminStateEqualityTests(GarminReadFixture):

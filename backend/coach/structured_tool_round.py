@@ -79,9 +79,14 @@ class CoachStructuredToolRoundLimits:
 
 
 def _log_context_reload(
-    state: StructuredCoachRoundState, result: dict[str, Any], round_number: int
+    state: StructuredCoachRoundState,
+    result: dict[str, Any],
+    round_number: int,
+    name: str,
 ) -> None:
     """Log a successful context reload: counts and validated section names only."""
+    if name != "read_coach_context" or not result.get("ok"):
+        return
     projection = result.get("projection") or {}
     logging.getLogger("intervals_coach").info(
         "Coach context reload",
@@ -195,8 +200,7 @@ class CoachStructuredToolRoundService:
                 result = self._execute_and_record(metadata, action, state)
                 if result is None:
                     return name, call_id, dict(_TURN_RELEASED), {"operation": name}
-                if name == "read_coach_context" and result.get("ok"):
-                    _log_context_reload(state, result, round_number)
+                _log_context_reload(state, result, round_number, name)
             if result.get("synchronous_refresh") or (
                 name == "get_sync_job" and result.get("ok")
             ):

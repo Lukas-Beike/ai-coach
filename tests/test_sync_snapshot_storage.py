@@ -21,6 +21,7 @@ from support import garmin_payload_fixture, load_provider_fixture
 
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.duplicates import remove_activity_from_snapshot
+from backend.canonical.garmin_payload import STATE_KEY as GARMIN_STATE_KEY
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
@@ -35,7 +36,6 @@ from backend.sync.canonical_backfill import STATE_KEY
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.garmin_snapshot_writer import (
-    GARMIN_SNAPSHOT_KEY,
     GarminSnapshotWriter,
 )
 from backend.sync.intervals import IntervalsSnapshotReader, IntervalsSnapshotService
@@ -589,7 +589,7 @@ class GarminRawRecordTests(StorageCase):
         writer = GarminSnapshotWriter(env.key_values, lambda: ZoneInfo("Europe/Berlin"))
         return writer, env
 
-    def test_garmin_write_persists_raw_records_with_the_snapshot_value(self) -> None:
+    def test_garmin_write_persists_raw_records_with_the_state_value(self) -> None:
         writer, env = self._writer_and_manager()
         with env.manager.unit_of_work() as db:
             writer.write(db, garmin_payload_fixture())
@@ -602,9 +602,9 @@ class GarminRawRecordTests(StorageCase):
         }
         self.assertEqual(kinds, {ACTIVITY_RECORD_KIND, HEALTH_RECORD_KIND})
         with env.manager.reader() as db:
-            self.assertIsNotNone(env.key_values.get(db, GARMIN_SNAPSHOT_KEY))
+            self.assertIsNotNone(env.key_values.get(db, GARMIN_STATE_KEY))
 
-    def test_garmin_rollback_leaves_neither_records_nor_snapshot_value(self) -> None:
+    def test_garmin_rollback_leaves_neither_records_nor_state_value(self) -> None:
         writer, env = self._writer_and_manager()
 
         with self.assertRaises(RuntimeError), env.manager.unit_of_work() as db:
@@ -613,7 +613,7 @@ class GarminRawRecordTests(StorageCase):
 
         self.assertEqual(env.count("provider_records"), 0)
         with env.manager.reader() as db:
-            self.assertIsNone(env.key_values.get(db, GARMIN_SNAPSHOT_KEY))
+            self.assertIsNone(env.key_values.get(db, GARMIN_STATE_KEY))
 
 
 if __name__ == "__main__":
