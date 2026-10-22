@@ -1,5 +1,33 @@
 const { test, expect } = require("@playwright/test");
 
+test("@responsive nutrition projects today's expenditure from persisted Garmin days", async ({ page, request }) => {
+  const seeded = await request.get("/api/fixture/demo");
+  expect(seeded.ok()).toBe(true);
+  const response = await request.get("/api/nutrition/day");
+  expect(response.ok()).toBe(true);
+  const day = await response.json();
+  const yesterday = new Date(`${day.date}T12:00:00Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const referenceDate = yesterday.toISOString().slice(0, 10);
+  const previousResponse = await request.get(`/api/nutrition/day?date=${referenceDate}`);
+  expect(previousResponse.ok()).toBe(true);
+  const previousDay = await previousResponse.json();
+  const energy = day.energy_expenditure;
+  expect(energy.projection_reference_date).toBe(referenceDate);
+  expect(energy.projection_resting_kcal).toBe(previousDay.energy_expenditure.resting_kcal);
+  expect(energy.projected_total_kcal).toBe(1968);
+  expect(energy.projected_total_kcal).toBe(energy.projection_resting_kcal + energy.active_kcal);
+  expect(previousDay.energy_expenditure.projected_total_kcal).toBeNull();
+
+  await page.goto("/#nutrition/diary");
+  const expenditure = page.locator("#nutritionExpenditure");
+  await expect(expenditure).toContainText("Prognose Tagesverbrauch (abgeleitet)");
+  await expect(expenditure).toContainText("1.968 kcal");
+  await expect(expenditure).toContainText("1.960 kcal");
+  await expect(expenditure.locator("#nutritionExpenditureDate")).toContainText("eigene Schätzung");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test("@responsive nutrition diary presents Garmin energy expenditure and unavailable states", async ({ page }) => {
   let responseMode = "measured";
   let holdResponse = false;

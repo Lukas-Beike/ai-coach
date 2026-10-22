@@ -120,6 +120,53 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
             [2000, 2100, None],
         )
 
+    def test_today_projects_persisted_resting_reference_with_current_active_energy(
+        self,
+    ) -> None:
+        today = {
+            "date": "2026-09-24",
+            "activeKilocalories": 436,
+            "bmrKilocalories": 1659,
+            "totalKilocalories": 2095,
+        }
+        for canonical in (False, True):
+            with self.subTest(canonical=canonical):
+                self.store_garmin(
+                    {
+                        "daily_stats": [
+                            today,
+                            {"date": "2026-09-23", "bmrKilocalories": 2200},
+                        ],
+                        "source_freshness": {"daily_stats": {"freshness": "current"}},
+                        "provider_sync": {
+                            "read_window": {
+                                "start": "2026-09-17",
+                                "end": "2026-09-24",
+                            }
+                        },
+                    }
+                )
+                reader = MappedDailyReader({"daily_stats": [today]})
+                service, _ = build_nutrition_services(
+                    self.manager,
+                    threading.Lock(),
+                    lambda: self.fixed_now,
+                    lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
+                    observation_reader=(lambda reader=reader: reader)
+                    if canonical
+                    else None,
+                )
+
+                energy = service.get_day_summary("2026-09-24")["energy_expenditure"]
+
+                self.assertEqual(energy["projected_total_kcal"], 2636)
+                self.assertEqual(energy["projection_resting_kcal"], 2200)
+                self.assertEqual(energy["projection_reference_date"], "2026-09-23")
+                self.assertEqual(energy["total_kcal"], 2095)
+                self.assertEqual(energy["resting_kcal"], 1659)
+                closed = service.get_day_summary("2026-09-23")["energy_expenditure"]
+                self.assertIsNone(closed["projected_total_kcal"])
+
     def test_malformed_garmin_snapshot_leaves_local_day_summary_available(self) -> None:
         with self.manager.unit_of_work() as db:
             db.execute(
