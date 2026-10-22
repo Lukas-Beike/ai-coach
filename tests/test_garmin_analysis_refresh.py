@@ -131,7 +131,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         manager.unit_of_work.return_value = nullcontext(object())
         writer = Mock()
         payloads = Mock()
-        payloads.snapshot.return_value = {
+        payloads.view.return_value = {
             "synced_at": "2026-09-23T12:00:00Z",
             "sleep": [{"calendarDate": "2026-09-23"}],
             "daily_training_status": {"old": "kept"},
@@ -172,7 +172,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         reader.fetch_analysis_data.assert_called_once_with(
             "load", date(2026, 9, 1), date(2026, 9, 24)
         )
-        snapshot = writer.write_analysis_refresh.call_args.args[1]
+        snapshot = writer.write_refresh.call_args.kwargs["view"]
         self.assertEqual(snapshot["sleep"], [{"calendarDate": "2026-09-23"}])
         self.assertEqual(snapshot["daily_training_status"], {"old": "kept"})
         self.assertEqual(snapshot["synced_at"], "2026-09-23T12:00:00Z")
@@ -212,9 +212,9 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         reader.fetch_analysis_data.assert_called_once_with(
             "sessions", date(2026, 8, 14), date(2026, 9, 24)
         )
-        writer.write_analysis_refresh.assert_called_once()
+        writer.write_refresh.assert_called_once()
         self.assertEqual(
-            writer.write_analysis_refresh.call_args.args[3], {"activities": [activity]}
+            writer.write_refresh.call_args.kwargs["sections"], {"activities": [activity]}
         )
 
     def test_refresh_rejects_ranges_over_ninety_days(self) -> None:
@@ -222,7 +222,7 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         with self.assertRaises(AppError):
             service.refresh("recovery", date(2026, 1, 1), date(2026, 4, 1))
         reader.fetch_analysis_data.assert_not_called()
-        writer.write_analysis_refresh.assert_not_called()
+        writer.write_refresh.assert_not_called()
 
     def test_assembly_factory_wires_targeted_service_and_disables_fixtures(
         self,

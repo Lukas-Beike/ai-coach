@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from datetime import UTC, date, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from backend.canonical.section_items import merge_records
 
 ExternalCall = Callable[[str, str, Callable[[], Any], dict[str, Any] | None], Any]
 
@@ -66,42 +67,4 @@ def fetch_morning_body_battery(
 
 def merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
     """Merge bounded-window results without discarding older snapshot records."""
-    values = []
-    if isinstance(incoming, list):
-        values.extend(incoming)
-    if isinstance(previous, list):
-        values.extend(previous)
-    merged: list[Any] = []
-    seen: set[tuple[str, str]] = set()
-    for value in values:
-        if not isinstance(value, dict):
-            merged.append(value)
-            continue
-        identity = next(
-            (
-                value[key]
-                for key in (
-                    "id",
-                    "activityId",
-                    "calendarDate",
-                    "summaryDate",
-                    "date",
-                    "startTime",
-                )
-                if value.get(key) not in (None, "")
-            ),
-            None,
-        )
-        key = (
-            ("identity", str(identity))
-            if identity not in (None, "")
-            else (
-                "payload",
-                json.dumps(value, sort_keys=True, ensure_ascii=False, default=str),
-            )
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(value)
-    return merged
+    return merge_records(incoming, previous)

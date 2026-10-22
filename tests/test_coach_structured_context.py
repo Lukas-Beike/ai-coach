@@ -78,7 +78,7 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         }
         self.adaptive_replan_preview_service.status.return_value = {"available": False}
         self.garmin_payload_service = Mock()
-        self.garmin_payload_service.snapshot.return_value = {
+        self.garmin_payload_service.recent_view.return_value = {
             "source": "garmin",
             "sleep": [],
             "hrv": [],

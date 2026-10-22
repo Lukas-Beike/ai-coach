@@ -14,14 +14,21 @@ with the payload's latest sync time.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
 
+from backend.canonical.garmin_payload import ITEM_SECTIONS as GARMIN_ITEM_SECTIONS
 from backend.canonical.local_time import local_date, parse_provider_datetime
 from backend.canonical.mapping import MappingResult
 from backend.canonical.records import ActivityRecord, Observation
+from backend.canonical.section_items import (
+    record_id,
+    section_of,
+    split_section,
+    wrapped,
+)
 from backend.canonical.vocabulary import ProviderId
 from backend.providers.garmin_activity_mapping import (
     MAPPER_VERSION as GARMIN_ACTIVITY_VERSION,
@@ -109,6 +116,8 @@ class RawRecord:
     mapper_version: int
     # When the row was fetched; None means the ingest's own retrieval time.
     retrieved_at: datetime | None = None
+    # ISO day the row belongs to, for windowed reads; None when it has no day.
+    observed_on: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,28 +285,18 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
             zone=zone,
             retrieved_at=activities_at,
         )
+    raw_records.extend(_garmin_section_records(payload, zone=zone))
     observations: list[ObservationItem] = []
     for name in GARMIN_HEALTH_SECTION_NAMES:
         section_at = garmin_section_retrieved_at(payload, name, zone=zone)
         if section_at is None:
             continue
-        sections = _health_sections(payload, name)
-        if any(value is not None for value in sections.values()):
-            # The stored record is the exact mapper input, so re-projection can rebuild the rows.
-            raw_records.append(
-                RawRecord(
-                    HEALTH_RECORD_KIND,
-                    name,
-                    sections,
-                    GARMIN_HEALTH_VERSION,
-                    retrieved_at=section_at,
+        for section in WEIGHT_SECTIONS if name == GARMIN_WEIGHT_SECTION else (name,):
+            observations.extend(
+                _garmin_section_observations(
+                    section, payload.get(section), zone=zone, retrieved_at=section_at
                 )
             )
-        health = map_garmin_health(sections, zone=zone, retrieved_at=section_at)
-        observations.extend(
-            ObservationItem(observation, GARMIN_HEALTH_VERSION)
-            for observation in health.records
-        )
     return IngestPlan(
         provider=ProviderId.GARMIN,
         raw_records=tuple(raw_records),
@@ -306,6 +305,48 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         present_activity_ids=frozenset(present),
         skipped_invalid=skipped,
     )
+
+
+def _garmin_section_observations(
+    section: str, value: object, *, zone: tzinfo, retrieved_at: Any
+) -> Iterator[ObservationItem]:
+    """Map each stored element as stored, so re-projection rebuilds the same rows."""
+    for item in split_section(value):
+        if item.value is None:
+            continue
+        health = map_garmin_health(
+            wrapped(section, item), zone=zone, retrieved_at=retrieved_at
+        )
+        for observation in health.records:
+            yield ObservationItem(observation, GARMIN_HEALTH_VERSION)
+
+
+def _garmin_section_records(
+    payload: Mapping[str, Any], *, zone: tzinfo
+) -> Iterator[RawRecord]:
+    """Yield one raw record per element of each Garmin section the payload carries.
+
+    The stored object is the exact mapper input of that element, so re-projection
+    rebuilds its rows. A section without a fetch time is left out.
+    """
+    for section in sorted(GARMIN_ITEM_SECTIONS):
+        value = payload.get(section)
+        if value is None:
+            continue
+        # The weight aliases are one fetch and share the weight section's time.
+        stamp_section = GARMIN_WEIGHT_SECTION if section in WEIGHT_SECTIONS else section
+        section_at = garmin_section_retrieved_at(payload, stamp_section, zone=zone)
+        if section_at is None:
+            continue
+        for item in split_section(value):
+            yield RawRecord(
+                HEALTH_RECORD_KIND,
+                record_id(section, item.key),
+                wrapped(section, item),
+                GARMIN_HEALTH_VERSION,
+                retrieved_at=section_at,
+                observed_on=item.observed_on,
+            )
 
 
 def wahoo_payload_retrieved_at(payload: object, *, zone: tzinfo) -> datetime | None:
@@ -593,8 +634,15 @@ def _reprojected_health(
     zone: tzinfo,
     fetched: datetime,
 ) -> IngestPlan:
-    """Re-map one stored health record. Legacy shapes without the section read as invalid."""
-    sections = _health_sections(payload, section_name)
+    """Re-map one stored health element, which holds the exact mapper input.
+
+    A section no health mapper reads (such as ``activity_matches``) projects to nothing.
+    """
+    section = section_of(section_name)
+    mapped = GARMIN_HEALTH_SECTION_NAMES + WEIGHT_SECTIONS
+    sections = {key: value for key, value in payload.items() if key in mapped}
+    if section not in mapped:
+        return IngestPlan(provider=provider)
     if not sections:
         return IngestPlan(provider=provider, skipped_invalid=1)
     health = map_garmin_health(sections, zone=zone, retrieved_at=fetched)
@@ -616,12 +664,6 @@ def _stored_payload(text: object) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return value if isinstance(value, dict) else None
-
-
-def _health_sections(payload: Mapping[str, Any], name: str) -> dict[str, Any]:
-    """Return the payload sections the health mapper reads for one section name."""
-    names = WEIGHT_SECTIONS if name == GARMIN_WEIGHT_SECTION else (name,)
-    return {key: payload[key] for key in names if key in payload}
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
@@ -669,6 +711,7 @@ def _activity_batch(
                 row if stored is None else stored(row),
                 mapper_version,
                 retrieved_at=retrieved_at,
+                observed_on=local_date(record.started_at, zone).isoformat(),
             )
         )
         items.append(

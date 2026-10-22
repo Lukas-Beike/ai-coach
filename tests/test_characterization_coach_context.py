@@ -114,7 +114,7 @@ def _performance_reader(
     profile_service = Mock()
     profile_service.get.return_value = {"name": "Athlete", "timezone": "UTC"}
     payload_service = Mock()
-    payload_service.snapshot.return_value = garmin_payload
+    payload_service.recent_view.return_value = garmin_payload
     garmin_projection = Mock()
     garmin_projection.coach_context.return_value = {"recovery": {}}
     reader = CoachPerformanceContextReader(
@@ -170,7 +170,7 @@ def _structured_service(
 
 def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionService:
     payload_service = Mock()
-    payload_service.snapshot.return_value = snapshot
+    payload_service.recent_view.return_value = snapshot
     battery_service = Mock()
     battery_service.current.return_value = None
     redactor = Mock()

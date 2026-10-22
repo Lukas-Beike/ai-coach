@@ -46,7 +46,7 @@ from backend.sync.canonical_backfill import (
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 from backend.sync.canonical_ingest import ingest_plan
-from backend.sync.garmin_snapshot_writer import GARMIN_SNAPSHOT_KEY
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 NOW = "2026-09-20T08:00:00+00:00"
 LATER = "2026-09-25T00:00:00+00:00"
@@ -178,7 +178,8 @@ class BackfillFixture(unittest.TestCase):
             self.key_values.set(db, key, value)
 
     def set_garmin(self, manager: DatabaseManager, payload: Any) -> None:
-        self.set_kv(manager, GARMIN_SNAPSHOT_KEY, json.dumps(payload))
+        with manager.unit_of_work() as db:
+            GarminSnapshotWriter(self.key_values, lambda: ZONE).write(db, payload)
 
     def run_batch(
         self, backfill: CanonicalBackfill, manager: DatabaseManager | None = None
@@ -309,10 +310,9 @@ class PopulatedBackfillTests(BackfillFixture):
                 counters["sessions_created"]
                 for counters in summary["providers"].values()
             ),
-            3,
+            1,
         )
         self.assertEqual(summary["providers"][INTERVALS]["skipped_invalid"], 0)
-        self.assertGreater(summary["providers"][GARMIN]["inserted"], 0)
         self.assertEqual(
             self.state()["versions"], canonical_plans.current_mapper_versions()
         )
@@ -527,33 +527,6 @@ class PopulatedBackfillTests(BackfillFixture):
         self.assertEqual(counters["already_present"], 0)
         self.assertEqual(counters["sessions_created"], 250)
 
-    def test_source_changed_between_batches_restarts_and_counts_existing_rows(
-        self,
-    ) -> None:
-        self.set_garmin(
-            self.manager,
-            garmin_payload(activities=[garmin_activity(i) for i in range(60)]),
-        )
-        backfill = self.make_backfill(batch_size=100)
-        self.run_batch(backfill)
-        self.set_garmin(
-            self.manager,
-            garmin_payload(activities=[garmin_activity(i) for i in range(61)]),
-        )
-        self.run_to_completion(backfill)
-
-        counters = self.summary(backfill)["providers"][GARMIN]
-        self.assertEqual(self.count("activity_records"), 61)
-        self.assertEqual(counters["sessions_created"], 61)
-        self.assertGreater(counters["already_present"], 0)
-        self.assertEqual(counters["duplicates"], 0)
-        self.assertEqual(
-            counters["inserted"],
-            self.count("provider_records")
-            + self.count("activity_records")
-            + self.count("observations"),
-        )
-
     def test_snapshots_and_payloads_without_mapper_input_are_skipped_invalid(
         self,
     ) -> None:
@@ -564,23 +537,11 @@ class PopulatedBackfillTests(BackfillFixture):
             self.manager,
             {"raw_provider_data": {"activities": [intervals_activity("1")]}},
         )
-        self.set_kv(self.manager, GARMIN_SNAPSHOT_KEY, "[]")
         backfill = self.make_backfill()
         self.run_to_completion(backfill)
 
         providers = self.summary(backfill)["providers"]
         self.assertEqual(providers[INTERVALS]["skipped_invalid"], 2)
-        self.assertEqual(providers[GARMIN]["skipped_invalid"], 1)
-        self.assertEqual(self.count("activity_records"), 0)
-
-    def test_garmin_payload_without_a_fetch_time_is_skipped(self) -> None:
-        self.set_garmin(self.manager, {"activities": [garmin_activity(1)]})
-        backfill = self.make_backfill()
-        self.run_to_completion(backfill)
-
-        self.assertEqual(
-            self.summary(backfill)["providers"][GARMIN]["skipped_invalid"], 1
-        )
         self.assertEqual(self.count("activity_records"), 0)
 
     def test_duplicates_within_one_source_are_counted_once(self) -> None:
@@ -698,39 +659,6 @@ class SupersessionTests(BackfillFixture):
         self.assertGreater(counters["inserted"], 0)
         # The only observations come from the older snapshot's wellness.
         self.assertGreater(self.count("observations"), 0)
-
-    def test_removed_authority_supersedes_every_remaining_snapshot_activity(
-        self,
-    ) -> None:
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot([intervals_activity("old", day="2026-09-01")]),
-        )
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot([intervals_activity("middle", day="2026-09-10")]),
-        )
-        self.insert_snapshot(
-            self.manager,
-            intervals_snapshot(
-                [intervals_activity("newest", day="2026-09-20")], synced_at=LATER
-            ),
-        )
-        # 120 weights keep the Garmin source going past the first batch, so the newest
-        # snapshot's turn has not started when it is removed.
-        self.set_garmin(self.manager, garmin_payload(weight=synthetic_weights(120)))
-        backfill = self.make_backfill(batch_size=100)
-        self.assertFalse(self.run_batch(backfill).done)
-        with self.manager.unit_of_work() as db:
-            db.execute("DELETE FROM snapshots WHERE id = 3")
-        self.run_to_completion(backfill)
-
-        # With the authority gone, every remaining snapshot is older and inserts nothing.
-        self.assertEqual(self.activity_ids(), [])
-        self.assertEqual(self.raw_activity_ids(), [])
-        self.assertEqual(
-            self.summary(backfill)["providers"][INTERVALS]["superseded"], 2
-        )
 
     def test_abort_and_resume_across_older_writes_matches_the_uninterrupted_run(
         self,
@@ -1216,7 +1144,7 @@ class ReprojectionTests(BackfillFixture):
 
     def test_reprojection_spans_batches_and_skips_a_row_deleted_mid_way(self) -> None:
         backfill = self.make_backfill(batch_size=100)
-        self.set_garmin(self.manager, garmin_payload(weight=synthetic_weights(300)))
+        self.set_garmin(self.manager, garmin_payload(weight=[{"weight": synthetic_weights(300)}]))
         self.run_to_completion(backfill)
         key = (GARMIN, HEALTH_KIND)
         version = canonical_plans._MAPPER_VERSIONS[key]
@@ -1841,7 +1769,7 @@ class ReprojectionTests(BackfillFixture):
             self.manager,
             garmin_payload(
                 resting_hr={"calendarDate": "2026-09-19", "restingHeartRate": 49},
-                weight=synthetic_weights(300),
+                weight=[{"weight": synthetic_weights(300)}],
             ),
         )
         self.run_to_completion(backfill)

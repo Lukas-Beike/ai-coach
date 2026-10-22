@@ -1,6 +1,5 @@
 """Current provider contracts and deterministic destructive-maintenance races."""
 
-import json
 import tempfile
 import threading
 import unittest
@@ -11,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
+from garmin_support import read_garmin, save_garmin
 
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.http_api.auth import RATE_LIMITER
@@ -323,7 +323,20 @@ class ProviderReviewTests(unittest.TestCase):
             source: (
                 {"calendarDate": "2026-09-01", "synthetic_metric": 51}
                 if source in ("training_load_balance", "daily_training_status")
-                else [{"calendarDate": "2026-09-01", "synthetic_metric": 51}]
+                else [
+                    {
+                        "calendarDate": "2026-09-01",
+                        "synthetic_metric": 51,
+                        **(
+                            {
+                                "activityId": 1,
+                                "startTimeLocal": "2026-09-01 10:00:00",
+                            }
+                            if source == "activities"
+                            else {}
+                        ),
+                    }
+                ]
             )
             for source in sources
         }
@@ -340,9 +353,7 @@ class ProviderReviewTests(unittest.TestCase):
         for source in sources:
             for historical in (False, True):
                 with self.subTest(source=source, historical=historical):
-                    server.key_value_service().set(
-                        "garmin_snapshot", json.dumps(previous)
-                    )
+                    save_garmin(previous)
                     server.SYNC_PERSISTENCE.state_repository().update_cursor(
                         "garmin", "data", "2026-09-01", "synthetic"
                     )
@@ -379,7 +390,7 @@ class ProviderReviewTests(unittest.TestCase):
                             days=2,
                             end_date=date(2026, 8, 30) if historical else None,
                         )
-                    saved = server.GARMIN_ASSEMBLY.payload_service().snapshot()
+                    saved = read_garmin()
                     self.assertEqual(saved[source], previous[source])
                     self.assertEqual(
                         saved["source_freshness"][source]["fetched_at"],
@@ -460,7 +471,7 @@ class ProviderReviewTests(unittest.TestCase):
                     result = server.GARMIN_ASSEMBLY.sync_service().sync(days=2)
                 self.assertEqual(result["status"], "ok")
                 self.assertEqual(
-                    server.GARMIN_ASSEMBLY.payload_service().snapshot()["activities"],
+                    read_garmin()["activities"],
                     [original],
                 )
                 self.assertEqual(
@@ -470,9 +481,7 @@ class ProviderReviewTests(unittest.TestCase):
                     0,
                 )
                 self.assertEqual(
-                    server.GARMIN_ASSEMBLY.payload_service().snapshot()[
-                        "activity_matches"
-                    ],
+                    read_garmin()["activity_matches"],
                     [{"garmin_activity_id": 123, "intervals_activity_id": "canonical"}],
                 )
                 self.assertEqual(
@@ -498,14 +507,13 @@ class ProviderReviewTests(unittest.TestCase):
             "readiness": {"calendarDate": "2026-09-01", "score": 73},
             "weight": {"calendarDate": "2026-08-31", "weight": 72},
         }
-        garmin_sync.merge_sources(first, {})
-        performance_history.append_garmin_performance_history(
-            first, {}, server.ATHLETE_CLOCK.now().date()
-        )
+        payloads = server.GARMIN_ASSEMBLY.payload_service()
+        payloads.prepare_remote(first)
         history = first["performance_history"]
         self.assertEqual(
             [row["date"] for row in history], ["2026-08-30", "2026-08-31", "2026-09-01"]
         )
+        save_garmin(first)
         for failed in (True, False):
             second = {
                 "synced_at": "2026-09-05T09:00:00+00:00",
@@ -519,11 +527,8 @@ class ProviderReviewTests(unittest.TestCase):
                     {"activityId": 8, "startTimeLocal": "2025-02-01T12:00:00"}
                 ],
             }
-            garmin_sync.merge_sources(second, first)
-            performance_history.append_garmin_performance_history(
-                second, first, server.ATHLETE_CLOCK.now().date()
-            )
-            server.key_value_service().set("garmin_snapshot", json.dumps(second))
+            payloads.prepare_remote(second)
+            save_garmin(second, replace=False)
             server.SYNC_PERSISTENCE.state_repository().save_snapshot(
                 {
                     "synced_at": second["synced_at"],
@@ -534,7 +539,7 @@ class ProviderReviewTests(unittest.TestCase):
             )
             public = performance_context.current_performance_context(
                 server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
-                server.GARMIN_ASSEMBLY.payload_service().snapshot(),
+                read_garmin(),
                 server.ATHLETE_DATA.profile().get(),
                 server.ATHLETE_CLOCK.now().date(),
             )
@@ -573,7 +578,7 @@ class ProviderReviewTests(unittest.TestCase):
             "errors": [],
             "cycling_ftp": {"functionalThresholdPower": 300},
         }
-        garmin_sync.merge_sources(payload, {})
+        garmin_sync.merge_sources(payload, {}, frozenset())
         performance_history.append_garmin_performance_history(
             payload, {}, server.ATHLETE_CLOCK.now().date()
         )
@@ -598,10 +603,9 @@ class ProviderReviewTests(unittest.TestCase):
                 }
             ],
         }
-        garmin_sync.merge_sources(first, {})
-        performance_history.append_garmin_performance_history(
-            first, {}, server.ATHLETE_CLOCK.now().date()
-        )
+        payloads = server.GARMIN_ASSEMBLY.payload_service()
+        payloads.prepare_remote(first)
+        save_garmin(first)
         second = {
             "synced_at": "2026-09-05T09:00:00+00:00",
             "errors": [],
@@ -614,12 +618,10 @@ class ProviderReviewTests(unittest.TestCase):
                 }
             ],
         }
-        garmin_sync.merge_sources(second, first)
-        performance_history.append_garmin_performance_history(
-            second, first, server.ATHLETE_CLOCK.now().date()
-        )
+        payloads.prepare_remote(second)
+        save_garmin(second, replace=False)
         metric = performance_garmin_metrics.garmin_performance_metrics(
-            second, server.ATHLETE_CLOCK.now().date()
+            read_garmin(), server.ATHLETE_CLOCK.now().date()
         )["cycling_max_hr_bpm"]
         self.assertEqual(metric["value"], 180)
         self.assertEqual(metric["observed_at"], "2026-08-31")

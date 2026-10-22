@@ -1,6 +1,5 @@
 """Server integration tests for performance."""
 
-import json
 import unittest
 from dataclasses import replace
 from datetime import date, timedelta
@@ -9,6 +8,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
+from garmin_support import read_garmin, save_garmin
 from server_test_support import (
     ServerTestCase,
     _current_performance_context,
@@ -100,48 +100,45 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertNotIn("instruction", result)
 
     def test_garmin_coach_context_keeps_only_latest_recovery_records(self):
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
+        latest = server.ATHLETE_CLOCK.now().date() - timedelta(days=1)
+        earlier = latest - timedelta(days=1)
+        save_garmin({
                     "synced_at": "now",
                     "sleep": [
                         {
-                            "calendarDate": "2026-08-28",
+                            "calendarDate": earlier.isoformat(),
                             "sleepTimeSeconds": 25200,
                             "sleepScore": 70,
                         },
                         {
-                            "calendarDate": "2026-08-29",
+                            "calendarDate": latest.isoformat(),
                             "sleepTimeSeconds": 27000,
                             "sleepScore": 82,
                         },
                     ],
                     "hrv": [
-                        {"calendarDate": "2026-08-28", "weeklyAvg": 51},
+                        {"calendarDate": earlier.isoformat(), "weeklyAvg": 51},
                         {
-                            "calendarDate": "2026-08-29",
+                            "calendarDate": latest.isoformat(),
                             "weeklyAvg": 54,
                             "lastNightAvg": 57,
                         },
                     ],
                     "readiness": {
-                        "calendarDate": "2026-08-29",
+                        "calendarDate": latest.isoformat(),
                         "score": 78,
                         "level": "GREEN",
                     },
                     "body_battery": [
-                        {"calendarDate": "2026-08-29", "charged": 76, "drained": 31}
+                        {"calendarDate": latest.isoformat(), "charged": 76, "drained": 31}
                     ],
                     "activities": [
                         {"activityId": 1, "activityName": "Should not be sent"}
                     ],
                     "race_predictions": {"5k": 1310},
-                }
-            ),
-        )
+                })
         result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
-        self.assertEqual(result["recovery"]["sleep"]["calendarDate"], "2026-08-29")
+        self.assertEqual(result["recovery"]["sleep"]["calendarDate"], latest.isoformat())
         self.assertEqual(result["recovery"]["hrv"]["lastNightAvg"], 57)
         self.assertEqual(result["recovery"]["readiness"]["score"], 78)
         self.assertNotIn("activities", result)
@@ -149,10 +146,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertNotIn("race_predictions", result)
 
     def test_garmin_coach_context_extracts_nested_latest_recovery_record(self):
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
+        save_garmin({
                     "sleep": [
                         {
                             "id": "wrapper-z",
@@ -169,9 +163,7 @@ class ServerPerformanceTests(ServerTestCase):
                             "trainingReadinessScore": 78,
                         }
                     },
-                }
-            ),
-        )
+                })
 
         result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
 
@@ -228,15 +220,10 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertIsNone(performance_garmin_metrics.garmin_duration_seconds("00:00"))
 
     def test_garmin_values_have_priority_in_performance_metrics(self):
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
+        save_garmin({
                     "max_metrics": {"running": {"vo2Max": 55}},
                     "race_predictions": {"5k": 1320},
-                }
-            ),
-        )
+                })
         snapshot = {
             "athlete": {"sport_settings": [{"types": ["Run"], "vo2max": 48}]},
             "recent_activities": [],
@@ -245,7 +232,7 @@ class ServerPerformanceTests(ServerTestCase):
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
-            _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
+            _garmin_metrics(read_garmin()),
         )
         self.assertEqual(metrics["running_vo2max_ml_kg_min"]["value"], 55)
         self.assertEqual(
@@ -359,10 +346,7 @@ class ServerPerformanceTests(ServerTestCase):
         )
 
     def test_garmin_threshold_metrics_are_used_without_confusing_ftp_and_eftp(self):
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
+        save_garmin({
                     "cycling_ftp": {"functionalThresholdPower": 302},
                     "running_threshold": {
                         "speed_and_heart_rate": {
@@ -372,9 +356,7 @@ class ServerPerformanceTests(ServerTestCase):
                         },
                         "power": {"functionalThresholdPower": 328},
                     },
-                }
-            ),
-        )
+                })
         snapshot = {
             "athlete": {
                 "icu_ftp": 250,
@@ -389,7 +371,7 @@ class ServerPerformanceTests(ServerTestCase):
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
-            _garmin_metrics(server.GARMIN_ASSEMBLY.payload_service().snapshot()),
+            _garmin_metrics(read_garmin()),
         )
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
         self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")
@@ -416,10 +398,7 @@ class ServerPerformanceTests(ServerTestCase):
 
     def test_garmin_recovery_values_take_precedence_and_keep_provenance(self):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
+        save_garmin({
                     "sleep": [
                         {
                             "id": "sleep-wrapper",
@@ -432,9 +411,7 @@ class ServerPerformanceTests(ServerTestCase):
                     ],
                     "resting_hr": [{"calendarDate": today, "restingHeartRate": 49}],
                     "hrv": [{"calendarDate": today, "lastNightAvg": 63}],
-                }
-            ),
-        )
+                })
         performance = _current_performance_context(
             {
                 "synced_at": "now",
@@ -480,10 +457,7 @@ class ServerPerformanceTests(ServerTestCase):
                 },
             ],
         }
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
+        save_garmin({
                     "race_predictions": {"5k": 1500},
                     "performance_history": [
                         {
@@ -491,9 +465,7 @@ class ServerPerformanceTests(ServerTestCase):
                             "metrics": {"run_5k_seconds": 1600},
                         }
                     ],
-                }
-            ),
-        )
+                })
         performance = _current_performance_context(snapshot)
         comparisons = performance["comparisons"]
         self.assertEqual(comparisons["cycling_ftp_watts_30d"]["days"], 30)
@@ -607,7 +579,7 @@ class ServerPerformanceTests(ServerTestCase):
             )["2026-09-04"],
             78,
         )
-        server.key_value_service().set("garmin_snapshot", "{}")
+        save_garmin({})
         recovery = performance_planning_recovery.planning_recovery_by_date(
             [],
             {},

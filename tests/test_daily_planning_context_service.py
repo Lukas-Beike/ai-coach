@@ -12,8 +12,25 @@ from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.planning.daily_context_service import DailyPlanningContextService
 
 
+class FakeConnection:
+    """Serves the stored key-value rows the Garmin state is read from."""
+
+    def __init__(self, values):
+        self.values = values
+        self.row = None
+
+    def execute(self, _sql, params):
+        value = self.values.get(params[0])
+        self.row = None if value is None else {"value": value}
+        return self
+
+    def fetchone(self):
+        return self.row
+
+
 class FakeDatabaseManager:
-    def __init__(self):
+    def __init__(self, values):
+        self.values = values
         self.unit_of_work_calls = 0
         self.active_connection = None
 
@@ -23,7 +40,7 @@ class FakeDatabaseManager:
         if self.active_connection is not None:
             yield self.active_connection
             return
-        self.active_connection = object()
+        self.active_connection = FakeConnection(self.values)
         try:
             yield self.active_connection
         finally:
@@ -99,8 +116,9 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
     def setUp(self):
         self.today = date(2026, 9, 20)
         self.today_calls = 0
-        self.database_manager = FakeDatabaseManager()
-        self.key_values = FakeKeyValueRepository({})
+        self.stored = {}
+        self.database_manager = FakeDatabaseManager(self.stored)
+        self.key_values = FakeKeyValueRepository(self.stored)
         self.checkins = FakeCheckinService()
         self.calendar = FakeCalendarReader()
         self.morning_battery = FakeMorningBodyBatteryService()
@@ -169,9 +187,8 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.assertEqual(self.database_manager.unit_of_work_calls, 2)
         self.assertEqual(
             [key for _db, key in self.key_values.calls],
-            ["garmin_snapshot", "morning_body_battery_history"],
+            ["morning_body_battery_history"],
         )
-        self.assertIs(self.key_values.calls[0][0], self.key_values.calls[1][0])
         self.assertIs(self.key_values.calls[0][0], outer_db)
         self.assertEqual(self.checkins.calls, [30])
         self.assertEqual(self.calendar.calls, [((), {"training_relevant_only": True})])
@@ -182,7 +199,10 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
     def test_corrupt_and_non_object_garmin_values_fail_soft(self):
         for stored_value in ("{broken", "[]", None):
             with self.subTest(stored_value=stored_value):
-                self.key_values.values["garmin_snapshot"] = stored_value
+                if stored_value is None:
+                    self.key_values.values.pop("garmin_state", None)
+                else:
+                    self.key_values.values["garmin_state"] = stored_value
                 self.morning_battery.calls.clear()
                 result = self.service.build()
                 self.assertEqual(len(self.morning_battery.calls), 1)
@@ -191,13 +211,14 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
                 )
                 self.assertEqual(result, [])
 
-    def test_only_morning_metadata_is_passed_to_the_battery_projection(self):
+    def test_only_the_small_state_is_passed_to_the_battery_projection(self):
         morning = {"status": "ready", "morning": {"value": 84}}
-        self.key_values.values["garmin_snapshot"] = json.dumps(
-            {
-                "morning_body_battery": morning,
-                "unrelated_history": ["synthetic-unused"] * 1000,
-            }
+        self.key_values.values["garmin_state"] = json.dumps(
+            {"morning_body_battery": morning}
+        )
+        # Section rows are never read for the battery; the legacy value is unread.
+        self.key_values.values["garmin_snapshot_legacy"] = json.dumps(
+            {"unrelated_history": ["synthetic-unused"] * 1000}
         )
         self.service.build()
         self.assertEqual(
@@ -223,7 +244,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.key_values.values.update(
             {
                 # Stored daily totals are no longer read; the observation wins.
-                "garmin_snapshot": json.dumps(
+                "garmin_state": json.dumps(
                     {"daily_stats": [{"date": "2026-09-20", "totalSteps": 1}]}
                 ),
                 "morning_body_battery_history": json.dumps({"2026-09-19": 64}),

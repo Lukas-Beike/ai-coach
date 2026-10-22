@@ -1,11 +1,10 @@
-"""GarminSnapshotWriter: one write path for the legacy snapshot and canonical rows.
+"""GarminSnapshotWriter: one write path for the Garmin element rows and canonical rows.
 
 Temporary SQLite and mocked providers only. No Garmin account or token is used.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import tempfile
 import unittest
@@ -15,14 +14,12 @@ from typing import Any
 from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
+from backend.db import garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.performance.morning_battery_service import MorningBatteryStore
 from backend.sync.canonical_ingest import CanonicalIngestCounters
-from backend.sync.garmin_snapshot_writer import (
-    GARMIN_SNAPSHOT_KEY,
-    GarminSnapshotWriter,
-)
+from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 ZONE = ZoneInfo("Europe/Berlin")
 NOW = "2026-10-10T08:00:00+00:00"
@@ -45,13 +42,6 @@ def payload(**extra: Any) -> dict[str, Any]:
     }
 
 
-def stored_snapshot(key_values: KeyValueRepository, db: sqlite3.Connection) -> str:
-    stored = key_values.get(db, GARMIN_SNAPSHOT_KEY)
-    if stored is None:
-        raise AssertionError("garmin_snapshot was not stored")
-    return stored
-
-
 class WriterFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -67,7 +57,7 @@ class WriterFixture(unittest.TestCase):
 
 
 class WriteTests(WriterFixture):
-    def test_write_returns_canonical_counters_and_stores_the_snapshot(self) -> None:
+    def test_write_returns_canonical_counters_and_stores_the_activity(self) -> None:
         counters = self.writer.write(self.db, payload())
         self.assertIsInstance(counters, CanonicalIngestCounters)
         self.assertEqual(counters.written, 1)
@@ -75,14 +65,45 @@ class WriteTests(WriterFixture):
             self.db.execute("SELECT COUNT(*) FROM provider_records").fetchone()[0], 1
         )
 
-    def test_legacy_snapshot_is_compact_json_with_unicode_kept(self) -> None:
-        value = payload()
-        self.writer.write(self.db, value)
-        stored = stored_snapshot(self.key_values, self.db)
-        self.assertEqual(
-            stored, json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    def test_sections_are_stored_per_element_and_state_stays_small(self) -> None:
+        value = payload(
+            sleep=[{"calendarDate": "2026-10-08", "note": "Rübe"}],
+            hrv=[{"calendarDate": "2026-10-08"}, {"calendarDate": "2026-10-09"}],
+            custom_marker="kept",
         )
-        self.assertIn("Rübe", stored)
+        self.writer.write(self.db, value)
+        ids = sorted(
+            row[0]
+            for row in self.db.execute(
+                "SELECT source_record_id FROM provider_records "
+                "WHERE record_kind = 'health'"
+            )
+        )
+        self.assertEqual(ids, ["hrv/2026-10-08", "hrv/2026-10-09", "sleep/2026-10-08"])
+        state = garmin_store.read_state(self.db)
+        self.assertEqual(state["custom_marker"], "kept")
+        self.assertNotIn("sleep", state)
+        view = garmin_store.read_view(self.db, {"sleep"})
+        self.assertEqual(view["sleep"][0]["note"], "Rübe")
+
+    def test_a_repeated_write_changes_no_row(self) -> None:
+        value = payload(sleep=[{"calendarDate": "2026-10-08"}])
+        self.writer.write(self.db, value)
+        before = self.db.total_changes
+        self.writer.write(self.db, value)
+        # Only the state value and coverage bookkeeping may be touched.
+        rows = self.db.execute(
+            "SELECT COUNT(*) FROM provider_records WHERE record_kind = 'health'"
+        ).fetchone()[0]
+        self.assertEqual(rows, 1)
+        self.assertLessEqual(self.db.total_changes - before, 4)
+
+    def test_a_delta_leaves_sections_it_does_not_mention(self) -> None:
+        self.writer.write(self.db, payload(sleep=[{"calendarDate": "2026-10-08"}]))
+        self.writer.write(self.db, payload(hrv=[{"calendarDate": "2026-10-09"}]))
+        self.assertEqual(
+            garmin_store.section_names(self.db), frozenset({"sleep", "hrv"})
+        )
 
     def test_sync_time_is_read_in_the_zone_from_the_provider(self) -> None:
         self.writer.write(self.db, payload())
@@ -92,12 +113,12 @@ class WriteTests(WriterFixture):
         ).fetchone()[0]
         self.assertEqual(fetched_at, "2026-10-10T08:00:00+02:00")
 
-    def test_payload_without_a_sync_time_still_stores_the_legacy_snapshot(self) -> None:
+    def test_payload_without_a_sync_time_still_stores_state(self) -> None:
         value = payload()
         del value["synced_at"]
         counters = self.writer.write(self.db, value)
         self.assertEqual(counters, CanonicalIngestCounters())
-        self.assertIsNotNone(self.key_values.get(self.db, GARMIN_SNAPSHOT_KEY))
+        self.assertNotIn("activities", garmin_store.read_state(self.db))
 
     def test_repeated_writes_never_delete_canonical_activities(self) -> None:
         self.writer.write(self.db, payload())
@@ -118,8 +139,8 @@ class BodyBatteryPathTests(WriterFixture):
             {"status": "ready", "sleep_date": "2026-10-09", "morning": {"value": 80}},
             None,
         )
-        spy.write.assert_called_once()
-        stored = json.loads(stored_snapshot(self.key_values, self.db))
+        spy.write_refresh.assert_called_once()
+        stored = garmin_store.read_state(self.db)
         self.assertEqual(stored["morning_body_battery"]["sleep_date"], "2026-10-09")
 
     def _uow(self):

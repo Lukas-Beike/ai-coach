@@ -2,26 +2,28 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.db import garmin_store
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import KeyValueRepository, NutritionRepository
+from backend.db.repositories import NutritionRepository
 from backend.errors import AppError
 from backend.nutrition.contracts import nutrition_approval_item
 from backend.nutrition.intake_totals import INTAKE_FIELDS, add_intake_totals
 from backend.nutrition.models import validate_iso_date
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import (
-    DAILY_ENERGY_SNAPSHOT_FIELDS,
     daily_energy_expenditure,
     read_daily_health_by_date,
 )
 from backend.providers.garmin_fields import GARMIN_DATE_ALIASES
 from backend.runtime.ports import ObservationReader
+
+# The energy views need the daily stats of the shown days and the sync state.
+_ENERGY_SECTIONS = ("daily_stats",)
 
 
 class NutritionSyncStatusService:
@@ -38,7 +40,6 @@ class NutritionSyncStatusService:
         self._database_manager = database_manager
         self._db_lock = db_lock
         self._nutrition_repository = nutrition_repository
-        self._key_value_repository = KeyValueRepository(utc_now)
         self._utc_now = utc_now
         self._local_now = local_now
 
@@ -48,16 +49,10 @@ class NutritionSyncStatusService:
             summary = self._nutrition_repository.day_summary(db, validated_date)
             # The snapshot only carries the resting calories (no metric kind) and
             # the daily-stats sync status.
-            serialized_garmin = self._key_value_repository.get_json_fields(
-                db, "garmin_snapshot", DAILY_ENERGY_SNAPSHOT_FIELDS
+            garmin_snapshot = garmin_store.read_view(
+                db, _ENERGY_SECTIONS, start=validated_date, end=validated_date
             )
             measured = self._measured_energy(db, validated_date, validated_date)
-        try:
-            garmin_snapshot = json.loads(serialized_garmin or "{}")
-        except TypeError, ValueError:
-            garmin_snapshot = {}
-        if not isinstance(garmin_snapshot, dict):
-            garmin_snapshot = {}
         if measured is not None:
             measured = _filter_targeted_missing_energy(
                 measured, garmin_snapshot, [validated_date]
@@ -102,16 +97,10 @@ class NutritionSyncStatusService:
             summaries = [
                 self._nutrition_repository.day_summary(db, day) for day in dates
             ]
-            serialized = self._key_value_repository.get_json_fields(
-                db, "garmin_snapshot", DAILY_ENERGY_SNAPSHOT_FIELDS
+            snapshot = garmin_store.read_view(
+                db, _ENERGY_SECTIONS, start=dates[0], end=dates[-1]
             )
             measured = self._measured_energy(db, dates[0], dates[-1])
-        try:
-            snapshot = json.loads(serialized or "{}")
-        except TypeError, ValueError:
-            snapshot = {}
-        if not isinstance(snapshot, dict):
-            snapshot = {}
         if measured is not None:
             measured = _filter_targeted_missing_energy(measured, snapshot, dates)
         days = []

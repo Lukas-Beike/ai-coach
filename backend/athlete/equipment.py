@@ -16,6 +16,7 @@ from backend.canonical.stored_sports import (
     resolve_equipment_sport,
 )
 from backend.canonical.vocabulary import ProviderId, Sport
+from backend.db import garmin_store
 from backend.errors import AppError
 from backend.providers.garmin_gear_fields import (
     garmin_gear_descriptor_texts,
@@ -73,14 +74,7 @@ class EquipmentService:
         """Read items with usage; ``activity_id`` lists only its full assignments."""
         rows, duplicates = self._deduplicate(self._read_activity_rows())
         with self._manager.unit_of_work() as db:
-            garmin_row = db.execute(
-                "SELECT value FROM kv WHERE key='garmin_snapshot'"
-            ).fetchone()
-            try:
-                garmin = json.loads(garmin_row["value"]) if garmin_row else {}
-            except TypeError, json.JSONDecodeError:
-                garmin = {}
-            garmin = garmin if isinstance(garmin, dict) else {}
+            garmin = garmin_store.read_view(db, ("gear", "activity_matches"))
             if garmin.get("source") == "fixture":
                 garmin = {key: value for key, value in garmin.items() if key != "gear"}
             gear_initialized = (

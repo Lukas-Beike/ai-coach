@@ -45,14 +45,14 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
 
         self.local_today.assert_not_called()
         self.garmin_sync.sync.assert_not_called()
-        self.garmin_payload.snapshot.assert_not_called()
+        self.garmin_payload.recent_view.assert_not_called()
         self.morning_battery.refresh.assert_not_called()
 
     def test_fresh_sleep_syncs_then_refreshes_battery(self) -> None:
         events: list[str] = []
         self.garmin_sync.configured.return_value = True
         self.garmin_sync.sync.side_effect = lambda **_: events.append("sync")
-        self.garmin_payload.snapshot.side_effect = lambda: (
+        self.garmin_payload.recent_view.side_effect = lambda _days=None: (
             events.append("snapshot")
             or {"sleep": [{"calendarDate": TODAY.isoformat()}]}
         )
@@ -76,7 +76,7 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
             {"sleep": [{"calendarDate": (TODAY - timedelta(days=1)).isoformat()}]},
         ):
             with self.subTest(snapshot=snapshot):
-                self.garmin_payload.snapshot.return_value = snapshot
+                self.garmin_payload.recent_view.return_value = snapshot
                 self.morning_battery.refresh.reset_mock()
 
                 with self.assertRaises(AppError) as raised:
@@ -88,7 +88,7 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
 
     def test_sync_failure_logs_and_stale_snapshot_still_blocks(self) -> None:
         self.garmin_sync.sync.side_effect = RuntimeError("provider unavailable")
-        self.garmin_payload.snapshot.return_value = {}
+        self.garmin_payload.recent_view.return_value = {}
 
         with self.assertRaises(AppError) as raised:
             self.service.prepare()
@@ -103,7 +103,7 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
 
     def test_sync_failure_with_fresh_snapshot_logs_then_refreshes(self) -> None:
         self.garmin_sync.sync.side_effect = RuntimeError("provider unavailable")
-        self.garmin_payload.snapshot.return_value = {
+        self.garmin_payload.recent_view.return_value = {
             "sleep": [{"calendarDate": TODAY.isoformat()}]
         }
 

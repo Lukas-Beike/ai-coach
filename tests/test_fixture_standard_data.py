@@ -18,7 +18,9 @@ from zoneinfo import ZoneInfo
 from server_test_support import server
 
 from backend.calendar.ical_mapping import calendar_event_constraints
+from backend.canonical.section_items import split_section
 from backend.coach.response_transport import raise_if_chat_cancelled
+from backend.db import garmin_store
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.http_api import auth as http_auth
@@ -124,28 +126,29 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             fixture_runtime.initialise_fixture()
             fixture_runtime.seed_preview_demo()
             with server.database_manager().unit_of_work() as db:
-                before = json.loads(
-                    server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot")
-                )
-                before.pop("race_predictions")
+                before = garmin_store.read_view(db)
                 for row in before["performance_history"]:
                     for key in list(row["metrics"]):
                         if key.startswith("run_") and key.endswith("seconds"):
                             row["metrics"].pop(key)
-                server.KEY_VALUE_REPOSITORY.set(
-                    db, "garmin_snapshot", json.dumps(before)
+                garmin_store.prune_section(db, "race_predictions", set())
+                garmin_store.prune_section(db, "performance_history", set())
+                garmin_store.put_section(
+                    db,
+                    "performance_history",
+                    split_section(before["performance_history"]),
+                    fetched_at="2026-01-01T00:00:00+00:00",
+                    now="2026-01-01T00:00:00+00:00",
+                    mapper_version=1,
+                    replace=True,
                 )
                 server.KEY_VALUE_REPOSITORY.set(db, "preview_demo_seed_version", "6")
             upgraded = fixture_runtime.seed_preview_demo()
             with server.database_manager().unit_of_work() as db:
-                garmin = json.loads(
-                    server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot")
-                )
+                garmin = garmin_store.read_view(db)
             repeated = fixture_runtime.seed_preview_demo()
             with server.database_manager().unit_of_work() as db:
-                restarted = json.loads(
-                    server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot")
-                )
+                restarted = garmin_store.read_view(db)
             today = server.ATHLETE_CLOCK.now().date()
             products = server.NUTRITION_ASSEMBLY.meal_library_service().list_products(
                 include_archived=True
@@ -375,6 +378,13 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                 "_fixture_seed_calendar",
                 return_value=8,
             ) as seed_calendar_mock,
+            patch.object(
+                fixture_runtime,
+                "_save_garmin_snapshot",
+                side_effect=lambda _db, payload: set_value(
+                    _db, "garmin_snapshot", json.dumps(payload)
+                ),
+            ),
             patch.object(repository, "get", side_effect=get_value),
             patch.object(repository, "set", side_effect=set_value),
         ):
@@ -450,9 +460,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
 
                 upgraded = fixture_runtime.seed_preview_demo()
                 with server.database_manager().unit_of_work() as db:
-                    stored_garmin = json.loads(
-                        server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot")
-                    )
+                    stored_garmin = garmin_store.read_view(db)
                     seed_version = server.KEY_VALUE_REPOSITORY.get(
                         db, "preview_demo_seed_version"
                     )
@@ -708,7 +716,7 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
     @staticmethod
     def _garmin_snapshot(server):
         with server.database_manager().unit_of_work() as db:
-            return json.loads(server.KEY_VALUE_REPOSITORY.get(db, "garmin_snapshot"))
+            return garmin_store.read_view(db)
 
     def test_reseeding_on_a_later_date_moves_the_single_cycling_target(self):
         seed_day = self.today

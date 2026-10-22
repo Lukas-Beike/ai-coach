@@ -191,11 +191,11 @@ def _service(
         return garmin
 
     garmin_payload = Mock()
-    garmin_payload.snapshot_in.side_effect = capture_garmin
-    garmin_payload.snapshot.return_value = garmin
+    garmin_payload.recent_view_in.side_effect = capture_garmin
+    garmin_payload.recent_view.return_value = garmin
     if events is not None:
         # With an event log, any read outside the captured transaction fails.
-        garmin_payload.snapshot.side_effect = AssertionError(
+        garmin_payload.recent_view.side_effect = AssertionError(
             "Garmin re-read outside the transaction"
         )
     profile = Mock()

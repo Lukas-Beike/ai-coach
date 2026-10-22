@@ -1954,7 +1954,6 @@ PUBLIC_STATE = PublicStateAssembly(
 CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
     intervals_snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
     snapshot_payloads=SNAPSHOT_REPOSITORY,
-    garmin_payloads=lambda: GARMIN_ASSEMBLY.payload_service(),
     profile=ATHLETE_PROFILE_SERVICE,
     clock=ATHLETE_CLOCK.now,
 )

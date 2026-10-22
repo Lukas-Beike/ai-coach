@@ -11,8 +11,8 @@ from datetime import UTC, date, datetime
 from typing import Any, Protocol
 
 from backend.canonical.vocabulary import ProviderId
+from backend.db import garmin_store
 from backend.performance import garmin_projection, morning_battery
-from backend.providers.garmin_morning import merge_garmin_records
 from backend.weather import history as weather_history
 
 MORNING_RETRY_SECONDS = 15 * 60
@@ -20,18 +20,27 @@ MORNING_MAX_ATTEMPTS = 3
 MORNING_LOCK_POLL_SECONDS = 1
 
 MORNING_BATTERY_HISTORY_KEY = "morning_body_battery_history"
-_GARMIN_SNAPSHOT_KEY = "garmin_snapshot"
+MORNING_SOURCES = frozenset({"body_battery"})
 _GARMIN_ERROR_KEY = "last_garmin_error"
 
 
 class GarminSnapshotSink(Protocol):
-    """Stores a Garmin snapshot and its canonical rows on the given connection."""
+    """Stores refreshed Garmin sections and state on the given connection."""
 
-    def write(self, db: Any, payload: Mapping[str, Any]) -> object: ...
+    def write_refresh(
+        self,
+        db: Any,
+        *,
+        fetched_at: str,
+        sections: Mapping[str, Any],
+        view: Mapping[str, Any],
+        windows: Mapping[str, tuple[date, date]],
+        allowed: frozenset[str],
+    ) -> object: ...
 
 
 class MorningBatteryStore:
-    """Own Garmin snapshot, morning history, and Body Battery error state."""
+    """Own the morning Garmin reading, morning history, and Body Battery error state."""
 
     def __init__(
         self, manager: Any, key_values: Any, garmin_snapshots: GarminSnapshotSink
@@ -41,9 +50,8 @@ class MorningBatteryStore:
         self._garmin_snapshots = garmin_snapshots
 
     def current(self) -> dict[str, Any] | None:
-        value = self._read_snapshot(fields=("morning_body_battery",)).get(
-            "morning_body_battery"
-        )
+        with self._manager.reader() as db:
+            value = garmin_store.read_state(db).get("morning_body_battery")
         return value if isinstance(value, dict) else None
 
     def persist(
@@ -62,13 +70,14 @@ class MorningBatteryStore:
             else 0
         )
         with self._manager.unit_of_work() as db:
-            current = self._read_snapshot(db)
-            if isinstance(records, list):
-                current["body_battery"] = merge_garmin_records(
-                    records, current.get("body_battery")
-                )
-            current["morning_body_battery"] = record
-            self._garmin_snapshots.write(db, current)
+            self._garmin_snapshots.write_refresh(
+                db,
+                fetched_at=datetime.now(UTC).isoformat(),
+                sections={"body_battery": records} if isinstance(records, list) else {},
+                view={"morning_body_battery": record},
+                windows={},
+                allowed=MORNING_SOURCES,
+            )
             history = weather_history.decode_history(
                 self._key_values.get(db, MORNING_BATTERY_HISTORY_KEY)
             )
@@ -112,23 +121,6 @@ class MorningBatteryStore:
                 else ""
             )
             self._key_values.set(db, _GARMIN_ERROR_KEY, value)
-
-    def _read_snapshot(
-        self, db: Any | None = None, *, fields: tuple[str, ...] | None = None
-    ) -> dict[str, Any]:
-        if db is None:
-            with self._manager.reader() as owned:
-                return self._read_snapshot(owned, fields=fields)
-        serialized = (
-            self._key_values.get(db, _GARMIN_SNAPSHOT_KEY)
-            if fields is None
-            else self._key_values.get_json_fields(db, _GARMIN_SNAPSHOT_KEY, fields)
-        )
-        try:
-            value = json.loads(serialized or "{}")
-        except TypeError, ValueError:
-            return {}
-        return value if isinstance(value, dict) else {}
 
 
 class MorningBatteryRemoteSource(Protocol):

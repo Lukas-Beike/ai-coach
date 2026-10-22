@@ -8,6 +8,7 @@ from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from garmin_support import save_garmin
 from server_test_support import ServerTestCase, server
 from support import (
     IntervalsRequestRecorder,
@@ -410,31 +411,27 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 "notes": "Nur locker möglich",
             }
         )
-        server.key_value_service().set(
-            "garmin_snapshot",
-            json.dumps(
-                {
-                    "sleep": [
-                        {
-                            "calendarDate": today,
-                            "sleepTimeSeconds": 28800,
-                            "sleepScore": 82,
-                        }
-                    ],
-                    "hrv": [{"calendarDate": today, "lastNightAvg": 48}],
-                    "readiness": [
-                        {"calendarDate": today, "trainingReadinessScore": 55}
-                    ],
-                    "daily_stats": [
-                        {
-                            "calendarDate": today,
-                            "totalSteps": 9876,
-                            "floorsAscended": 12,
-                            "totalKilocalories": 2345,
-                        }
-                    ],
-                }
-            ),
+        save_garmin(
+            {
+                "synced_at": f"{today}T08:00:00+00:00",
+                "sleep": [
+                    {
+                        "calendarDate": today,
+                        "sleepTimeSeconds": 28800,
+                        "sleepScore": 82,
+                    }
+                ],
+                "hrv": [{"calendarDate": today, "lastNightAvg": 48}],
+                "readiness": [{"calendarDate": today, "trainingReadinessScore": 55}],
+                "daily_stats": [
+                    {
+                        "calendarDate": today,
+                        "totalSteps": 9876,
+                        "floorsAscended": 12,
+                        "totalKilocalories": 2345,
+                    }
+                ],
+            }
         )
         with server.DB_LOCK, server.database_manager().unit_of_work() as db:
             db.execute(

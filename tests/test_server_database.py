@@ -17,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from garmin_support import save_garmin
 from server_test_support import ServerTestCase, create_test_session, server
 
 from backend import privacy as privacy_module
@@ -586,9 +587,7 @@ class ServerDatabaseTests(ServerTestCase):
         server.PLANNING_DATA.workout_library().update(
             archived["id"], {"action": "archive"}
         )
-        server.key_value_service().set(
-            "garmin_snapshot", json.dumps({"source": "Garmin", "days": []})
-        )
+        save_garmin({"source": "Garmin", "days": []})
         server.key_value_service().set(
             weather_cache.CACHE_KEY, json.dumps({"query": "Berlin", "forecast": {}})
         )
@@ -653,7 +652,7 @@ class ServerDatabaseTests(ServerTestCase):
         self.assertNotIn("job_running", exported["application_state"])
         self.assertNotIn("job_status", exported["application_state"])
         self.assertEqual(exported["application_state"]["ordinary_state"], "{")
-        self.assertEqual(exported["garmin_snapshot"], {})
+        self.assertEqual(exported["garmin_snapshot"], {"activities": []})
         self.assertEqual(exported["weather_cache"], {})
 
     def test_privacy_json_projection_uses_composed_local_clock(self):

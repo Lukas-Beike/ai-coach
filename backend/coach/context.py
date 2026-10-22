@@ -511,7 +511,7 @@ class CoachPerformanceContextReader:
         return coach_performance_projection(
             performance_context.current_performance_context(
                 snapshot,
-                self._garmin_payload_service.snapshot(),
+                self._garmin_payload_service.recent_view(),
                 self._profile_service.get(),
                 self._today(),
                 **performance_options(canonical),

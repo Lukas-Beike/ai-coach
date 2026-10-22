@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from backend.canonical.mapping import MappingResult
 from backend.canonical.records import ActivityRecord
+from backend.canonical.section_items import section_of, split_section, wrapped
 from backend.canonical.vocabulary import ProviderId
 from backend.providers import canonical_plans as plans
 from backend.providers.garmin_health_mapping import map_garmin_health
@@ -237,11 +238,13 @@ class GarminPlanTests(unittest.TestCase):
             for item in plan.raw_records
             if item.record_kind == plans.HEALTH_RECORD_KIND
         ]
-        # The raw record holds the sections the health mapper reads, so re-projection can rebuild it.
+        # Each raw record holds one element as the health mapper reads it, so re-projection can rebuild it.
         self.assertEqual(
-            health,
-            [("sleep", {"sleep": {"hours": 7}}), ("resting_hr", {"resting_hr": [49]})],
+            [(section_of(record_id), body) for record_id, body in health],
+            [("resting_hr", {"resting_hr": [49]}), ("sleep", {"sleep": {"hours": 7}})],
         )
+        self.assertTrue(health[0][0].startswith("resting_hr/"))
+        self.assertEqual(health[1][0], "sleep")
 
 
 if __name__ == "__main__":
@@ -264,12 +267,21 @@ def garmin_health_payload() -> dict[str, Any]:
 class GarminSectionTimeTests(unittest.TestCase):
     def test_sections_mapped_one_by_one_match_one_whole_payload_mapping(self) -> None:
         payload = garmin_health_payload()
-        whole = map_garmin_health(payload, zone=ZONE, retrieved_at=RETRIEVED_AT)
         plan = plans.garmin_ingest_plan(payload, zone=ZONE)
-        self.assertGreater(len(whole.records), 0)
-        self.assertEqual(
-            [item.observation for item in plan.observations], list(whole.records)
-        )
+        expected = [
+            observation
+            for name in plans.GARMIN_HEALTH_SECTION_NAMES
+            for section in (
+                plans.WEIGHT_SECTIONS if name == plans.GARMIN_WEIGHT_SECTION else (name,)
+            )
+            for item in split_section(payload.get(section))
+            if item.value is not None
+            for observation in map_garmin_health(
+                wrapped(section, item), zone=ZONE, retrieved_at=RETRIEVED_AT
+            ).records
+        ]
+        self.assertGreater(len(expected), 0)
+        self.assertEqual([item.observation for item in plan.observations], expected)
 
     def test_a_retained_section_keeps_the_time_of_the_read_that_fetched_it(
         self,
@@ -284,8 +296,13 @@ class GarminSectionTimeTests(unittest.TestCase):
         raw_times = {
             item.source_record_id: item.retrieved_at for item in plan.raw_records
         }
-        self.assertEqual(raw_times["hrv"], EARLIER)
-        self.assertEqual(raw_times["sleep"], RETRIEVED_AT)
+        by_section = {
+            section_of(key): at
+            for key, at in raw_times.items()
+            if key != "910010"
+        }
+        self.assertEqual(by_section["hrv"], EARLIER)
+        self.assertEqual(by_section["sleep"], RETRIEVED_AT)
         self.assertEqual(raw_times["910010"], RETRIEVED_AT)
         self.assertEqual(plan.activities[0].retrieved_at, RETRIEVED_AT)
         hrv = [
@@ -353,9 +370,10 @@ class GarminSectionTimeTests(unittest.TestCase):
         plan = plans.garmin_ingest_plan(payload, zone=ZONE)
         self.assertEqual(plan.activities, ())
         self.assertEqual(
-            [item.source_record_id for item in plan.raw_records], ["body_battery"]
+            {section_of(item.source_record_id) for item in plan.raw_records},
+            {"body_battery"},
         )
-        self.assertEqual(plan.raw_records[0].retrieved_at, MORNING)
+        self.assertTrue(all(item.retrieved_at == MORNING for item in plan.raw_records))
         # Body Battery maps to no observation, and the undated sleep section is left out.
         self.assertEqual(plan.observations, ())
         self.assertEqual(plans.garmin_payload_retrieved_at(payload, zone=ZONE), MORNING)

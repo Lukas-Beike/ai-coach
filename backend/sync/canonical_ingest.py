@@ -202,6 +202,7 @@ def ingest_plan(
             mapper_version=raw.mapper_version,
             fetched_at=_fetched_at(raw.retrieved_at, stamp),
             now=stamp,
+            observed_on=raw.observed_on,
         )
     for activity in plan.activities:
         counters.count(

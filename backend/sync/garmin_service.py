@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, date, timedelta
 from pathlib import Path
@@ -28,7 +28,11 @@ from backend.providers.garmin import (
     collect_garmin_data,
 )
 from backend.providers.garmin_fields import GARMIN_EXTENDED_DATE_ALIASES
-from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.garmin_snapshot_writer import (
+    ANALYSIS_SOURCES,
+    NUTRITION_SOURCES,
+    GarminSnapshotWriter,
+)
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver, operation_context
 from backend.sync.refresh import sync_job_error_class
@@ -442,7 +446,9 @@ class GarminNutritionRefreshService:
                 fetched_at = self._utc_now()
                 if source == "weight" and not records:
                     complete = False
-                snapshot = self._payload_service.snapshot()
+                snapshot = self._payload_service.view(
+                    [source], start=start.isoformat(), end=end.isoformat()
+                )
                 self._apply_nutrition_refresh(
                     snapshot, source, start, end, records, complete, fetched_at
                 )
@@ -488,8 +494,15 @@ class GarminNutritionRefreshService:
             "complete": complete,
         }
         with self._database_manager.unit_of_work() as db:
-            self._snapshot_writer.write_nutrition_refresh(
-                db, snapshot, source, fetched_at, records
+            self._snapshot_writer.write_refresh(
+                db,
+                fetched_at=fetched_at,
+                sections={source: snapshot[source]},
+                view=snapshot,
+                windows={source: (start, end)}
+                if complete and source == "daily_stats"
+                else {},
+                allowed=NUTRITION_SOURCES,
             )
 
     @staticmethod
@@ -568,7 +581,11 @@ class GarminAnalysisRefreshService:
                         "area": area,
                     }
                 fetched_at = self._utc_now()
-                snapshot = self._payload_service.snapshot()
+                snapshot = self._payload_service.view(
+                    [source for source in fetched if source != "activities"],
+                    start=start.isoformat(),
+                    end=end.isoformat(),
+                )
                 self._apply_analysis_refresh(
                     snapshot, area, start, end, fetched, sources_complete, fetched_at
                 )
@@ -625,9 +642,24 @@ class GarminAnalysisRefreshService:
             "sources": dict(sources_complete),
             "fetched_at": fetched_at,
         }
+        sections = {
+            source: snapshot[source] if source != "activities" else incoming
+            for source, incoming in fetched.items()
+            if incoming is not None
+        }
+        windows = {
+            source: (start, end)
+            for source, complete in sources_complete.items()
+            if complete and isinstance(fetched.get(source), list)
+        }
         with self._database_manager.unit_of_work() as db:
-            self._snapshot_writer.write_analysis_refresh(
-                db, snapshot, fetched_at, fetched
+            self._snapshot_writer.write_refresh(
+                db,
+                fetched_at=fetched_at,
+                sections=sections,
+                view=snapshot,
+                windows=windows,
+                allowed=ANALYSIS_SOURCES,
             )
 
     @staticmethod
@@ -976,8 +1008,17 @@ class GarminSyncService:
     def configured(self) -> bool:
         return self._source.configured()
 
-    def snapshot(self) -> dict[str, Any]:
-        return self._payload_service.snapshot()
+    def state(self) -> dict[str, Any]:
+        return self._payload_service.state()
+
+    def view(
+        self,
+        sources: Iterable[str],
+        *,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> dict[str, Any]:
+        return self._payload_service.view(sources, start=start, end=end)
 
     def automatic_sync_days(self, minimum_days: int) -> int:
         return self._payload_service.automatic_sync_days(minimum_days)

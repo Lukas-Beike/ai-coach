@@ -86,9 +86,9 @@ class Stores:
         return build_canonical_snapshot_projection(
             intervals_snapshots=self.snapshots,
             snapshot_payloads=self.version_source,
-            garmin_payloads=lambda: self.garmin,
             profile=self.profile,
             clock=lambda: CLOCK_AT,
+            garmin_payload=lambda _db: self.garmin.snapshot(),
         )
 
 

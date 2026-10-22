@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from copy import replace
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
 
 from backend.canonical.coverage import ProviderCoverage, summarize_provider
 from backend.canonical.mapping import IssueReason
 from backend.canonical.vocabulary import ProviderId
+from backend.db import canonical_store
 from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import (
     WAHOO_POWER_ZONES_KEY,
@@ -96,6 +98,29 @@ def garmin_payload_coverage(
         payload, zone=zone, retrieved_at=stored_at
     )
     return summarize_provider(ProviderId.GARMIN, stored_at, activities, observations)
+
+
+def garmin_ingest_coverage(
+    db: Any, payload: object, *, zone: tzinfo
+) -> ProviderCoverage | None:
+    """Summarize Garmin after one ingest: the tables' totals plus this fetch's issues.
+
+    A Garmin write carries only the sections it fetched, so the record counts and
+    the observed range come from the tables, which hold everything ingested so far.
+    The fetch time and the mapping issue counts are those of the written payload.
+    """
+    fetched = garmin_payload_coverage(payload, zone=zone)
+    if fetched is None:
+        return None
+    totals = canonical_store.provider_totals(db, ProviderId.GARMIN.value)
+    oldest, newest = totals["oldest"], totals["newest"]
+    return replace(
+        fetched,
+        activity_count=totals["activities"],
+        observation_count=totals["observations"],
+        first_observed_on=None if oldest is None else date.fromisoformat(oldest),
+        last_observed_on=None if newest is None else date.fromisoformat(newest),
+    )
 
 
 def wahoo_payload_coverage(payload: object, *, zone: tzinfo) -> ProviderCoverage | None:
