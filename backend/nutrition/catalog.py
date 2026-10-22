@@ -40,10 +40,15 @@ class ProductCatalogService:
         query: str | None = None,
         barcode: str | None = None,
         include_archived: bool = False,
+        limit: int = 50,
     ) -> list[dict[str, Any]]:
         with self._database_manager.reader() as db:
             return self._products.list(
-                db, query=query, barcode=barcode, include_archived=include_archived
+                db,
+                query=query,
+                barcode=barcode,
+                include_archived=include_archived,
+                limit=limit,
             )
 
     def get_product(self, product_id: str) -> dict[str, Any]:
