@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+from backend.activities.detail_analysis_reads import calendar_profiles
+from backend.activities.detail_store import summary_fingerprint
 from backend.calendar import canonical as calendar_canonical
 from backend.canonical.public_metrics import neutral_calendar_entries
 from backend.db.manager import DatabaseManager
@@ -101,7 +102,7 @@ class PublicPlanStateService:
         manager = self._database_manager_factory()
         with manager.reader() as db:
             history = self._key_values.get(db, weather_cache.HISTORY_KEY)
-        return history, ActivityDetailStore(manager).calendar_profiles()
+        return history, calendar_profiles(manager)
 
     def _read(self, weather: dict[str, Any] | None) -> dict[str, Any]:
         snapshot = self._sync_state.latest_snapshot() or {}

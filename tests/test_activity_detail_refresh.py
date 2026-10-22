@@ -316,6 +316,11 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.prefetched_service()
         self.drop_kv_details()
         self.canonical_update("DELETE FROM activity_detail_sets")
+        # Payloads written before analysis version 2 carry no summary hash.
+        self.canonical_update(
+            "UPDATE activity_detail_analysis "
+            "SET payload = json_remove(payload, '$.summary_sha256')"
+        )
         self.canonical_update(
             "UPDATE activity_detail_analysis SET payload = json_set(payload, "
             "'$.summary_sha256', ?) WHERE activity_id = ("
