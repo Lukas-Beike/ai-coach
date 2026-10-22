@@ -179,8 +179,9 @@ def _keep_daily_read_window(
 
     The window vouches for the previous days' stored daily stats (the resting
     calories behind the running-day projection). It is kept for the local day
-    only; a state stored before the window was recorded gets the reconciliation
-    span of the day's first run.
+    only. A wide run whose daily-stats read failed records ``None``, so later
+    runs of the day gain no coverage; only a state stored before the window was
+    recorded gets the reconciliation span of the day's first run.
     """
     run = provider_sync["read_window"]
     try:
@@ -188,27 +189,34 @@ def _keep_daily_read_window(
         run_end = date.fromisoformat(str(run["end"]))
     except KeyError, TypeError, ValueError:
         run_start = run_end = None
+    kept = previous_sync.get("daily_read_window")
+    kept_today = isinstance(kept, dict) and str(kept.get("end")) == today.isoformat()
     if (
         "daily_metrics_on" in provider_sync
         and run_end == today
+        and run_start is not None
         and (today - run_start).days + 1 >= GARMIN_RECONCILIATION_DAYS
-        and not any(
+    ):
+        failed = any(
             isinstance(error, dict) and error.get("source") == "daily_stats"
             for error in errors or []
         )
-    ):
-        provider_sync["daily_read_window"] = dict(run)
+        if not failed:
+            provider_sync["daily_read_window"] = dict(run)
+        else:
+            provider_sync["daily_read_window"] = kept if kept_today else None
         return
-    kept = previous_sync.get("daily_read_window")
-    if isinstance(kept, dict) and str(kept.get("end")) == today.isoformat():
-        provider_sync["daily_read_window"] = kept
-    elif not kept and previous_sync.get("daily_metrics_on") == today.isoformat():
+    if previous_sync.get("daily_metrics_on") != today.isoformat():
+        return
+    if "daily_read_window" not in previous_sync:
         provider_sync["daily_read_window"] = {
             "start": (
                 today - timedelta(days=GARMIN_RECONCILIATION_DAYS - 1)
             ).isoformat(),
             "end": today.isoformat(),
         }
+    elif kept is None or kept_today:
+        provider_sync["daily_read_window"] = kept
 
 
 def _daily_metrics_retry_due(state: dict[str, Any]) -> bool:

@@ -425,6 +425,19 @@ class GarminPayloadServiceTests(unittest.TestCase):
             {"start": "2026-09-14", "end": "2026-09-20"},
         )
 
+    def test_failed_wide_read_gives_later_runs_no_window(self):
+        failed = self.service.prepare_remote(
+            self.collection_payload("2026-09-14", "2026-09-20", failed="daily_stats")
+        )
+        self.assertIsNone(failed["provider_sync"]["daily_read_window"])
+        self.store_garmin_snapshot(failed)
+        later = self.collection_payload("2026-09-20", "2026-09-20")
+        del later["provider_sync"]["daily_metrics_on"]
+
+        merged = self.service.prepare_remote(later)
+
+        self.assertIsNone(merged["provider_sync"]["daily_read_window"])
+
     def test_a_wide_window_of_an_earlier_day_is_not_kept(self):
         self.store_garmin_snapshot(
             self.service.prepare_remote(
