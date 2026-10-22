@@ -804,7 +804,7 @@ function providerMetricUnit(key) {
 function providerMetricValue(metric, values) {
   const fields = {
     endurance_score: ["overallScore", "enduranceScore", "score", "groupAverage"],
-    running_tolerance: ["runningTolerance", "tolerance"],
+    running_tolerance: ["toleranceScore", "runningTolerance", "tolerance"],
   }[metric] || [];
   for (const field of fields) {
     const value = values?.[field];
