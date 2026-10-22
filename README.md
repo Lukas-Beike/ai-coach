@@ -613,9 +613,12 @@ directly; the `pr` workflow requires no host-specific slash command.
 The [orchestration skill](.agents/skills/orchestrated-plan-implementation/SKILL.md)
 is the mandatory default for repository work, including documentation/skill
 changes, implementation, reviews, evaluations, and retrospectives. It starts by
-proposing live models for simple, standard, and complex/critical tasks and asks
-for missing selections. Explicit session choices are reused across phases;
-status answers do not launch new workers. Workers use isolated source trees;
+choosing delegated or sequential parent-only mode. Only work that will dispatch
+workers proposes live model tiers and asks for missing selections; hosted or
+noninteractive read-only reviews can complete sequentially without prompts or
+child tasks. Explicit worker requirements remain binding. Explicit session
+choices are reused across phases; status answers do not launch new workers.
+Workers use isolated source trees;
 the current parent reviews and
 verifies results and alone adopts authorized source patches. Review/evaluation
 criteria and PR gates remain with their owning workflows; review-only work does

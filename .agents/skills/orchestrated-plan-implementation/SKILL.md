@@ -21,6 +21,27 @@ Select implementation, review, or evaluation from the requested work.
 Orchestration owns model selection, isolation, scheduling, and result handling.
 Load only the applicable owner for task-specific rules:
 
+## Choose execution mode before model questions
+
+First decide whether workers are needed and whether this host can dispatch them
+and collect required choices. Use **sequential parent-only mode** for read-only
+reviews, genuinely trivial low-impact work, or when delegation/user interaction
+is unavailable and the task can safely be completed without workers. This mode
+still follows the applicable workflow, source identity, validation, and reporting
+rules. Hosted and noninteractive reviewers must be able to complete read-only
+reviews this way without prompts or child tasks. Do not ask for or claim worker
+model tiers when no worker will be dispatched; report that the parent performed
+the work sequentially and any resulting limitation. A missing tool or unanswered
+choice is not itself permission to use this mode when workers are needed.
+
+If the user explicitly requires delegated workers or an exact worker contract,
+preserve that requirement and report the blocker when unsupported or unanswered;
+do not substitute parent execution. Account/login/tool setup remains unauthorized
+unless separately authorized. Never use sequential mode to bypass parent review
+and adoption of an active worker candidate, a PR review gate, or authorization
+for a remote action. Closing retrospectives may use the same sequential mode and
+must not recursively spawn workers.
+
 - [code-review](../code-review/SKILL.md): PR/branch-diff review criteria;
   [codebase review](../ai-coach-codebase-review/SKILL.md): full audits.
 - [skill evaluation](../ai-coach-skill-evaluation/SKILL.md): repository-skill
@@ -34,7 +55,7 @@ permits its owner's scoped temporary artifacts, without adopting source changes
 unless requested. Patch-adoption steps apply only to authorized source changes.
 Every mode requires parent verification of results and inspected source identity.
 
-## Select three model tiers at the start
+## Select worker model tiers when dispatching workers
 
 Inspect repository instructions, branch, worktree, and existing diff. Record the
 objective, endpoint, acceptance criteria, exclusions, and starting tree identity.
@@ -53,7 +74,7 @@ health, actual upstream identity, price, or quality. Date recommendations; if
 release verification is unavailable, label recency unverified. Do not infer
 newest/best/cheapest from names, list order, or custom aliases.
 
-Ask the user once, in their language, for these complexity/risk tiers, giving
+Only in delegated mode, ask the user once, in their language, for these complexity/risk tiers, giving
 one recommended provider/model/effective-options tuple and useful alternatives
 per tier, with a brief rationale:
 
@@ -79,9 +100,13 @@ output as the requested model's work. Report unsupported settings without
 silently reducing them. Escalation within the approved tier mapping needs an
 update/ledger entry; changing outside it needs a new selection.
 
-Missing capability/auth/quota is not permission to substitute models, run the
-work in the parent, install tools, change accounts/routing, or read credentials.
-Preserve independent progress and explain the concrete limitation.
+When workers are required or explicitly requested, missing capability/auth/quota
+is not permission to substitute models or silently move that work to the parent;
+preserve the worker contract and report the concrete blocker. A declared
+sequential parent-only mode is permitted only under the conditions above, not as
+a silent model or account substitution. Installing tools, changing
+accounts/routing, or reading credentials remains unauthorized. Preserve
+independent progress and explain the concrete limitation.
 
 ## Plan, brief, and isolate
 

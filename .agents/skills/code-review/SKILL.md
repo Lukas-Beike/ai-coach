@@ -15,6 +15,13 @@ model names do not authorize delegation or GitHub comments.
 
 ## Scope and execution
 
+- Review sequentially by default when no workers are dispatched. Follow the
+  orchestration skill's sequential parent-only mode for hosted/noninteractive
+  read-only reviews; do not require prompts or child tasks to complete them.
+  If delegation is explicitly required, preserve that requirement and report
+  unavailable choices/capability as a blocker. Sequential review does not waive
+  this workflow's evidence bar or any invoking PR workflow's review gate.
+
 - Accept a PR URL/number or an explicit Git range such as
   `origin/develop...HEAD`. Resolve and record the base and head SHAs. Before a
   PR exists, review the complete committed branch diff against its named base.

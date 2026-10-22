@@ -63,6 +63,11 @@ as a manual exercise rather than a controlled benchmark.
 - Explain failures, revise the specific instruction causing them, then rerun the
   affected cases and at least one retained case. Favor the shorter workflow when
   outcomes are equivalent; do not broaden triggers to win a narrow test set.
+- Manual walkthroughs of synthetic cases and static checks are not independent
+  model benchmarks. For orchestration revisions, include sequential hosted and
+  noninteractive reviews, interactive supplied mappings, unanswered choices
+  with explicitly requested workers, an unsupported exact-worker requirement,
+  active worker-candidate adoption, and sequential closing retro as boundaries.
 - Validate frontmatter, unique names, local links, and `git diff --check`; run
   `python -m unittest discover -s tests -p test_ai_docs_contract.py -v` after scanning
   the Markdown it reads. Static validation is not behavioral evaluation. Report

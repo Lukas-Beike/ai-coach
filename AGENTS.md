@@ -145,10 +145,12 @@ requested as deliverables. Always use the repository's
 [orchestration workflow](.agents/skills/orchestrated-plan-implementation/SKILL.md)
 for repository work, including implementation, documentation/skill changes,
 reviews, evaluations, and retrospectives. This is standing authorization for
-bounded delegation under that workflow; reuse the session's explicit model
-choices and ask only for missing selections before dispatching workers. The
-current parent remains the sole review/integration owner. Status answers and
-coordination do not need new workers. External actions retain their authorization.
+bounded delegation under that workflow. Choose its sequential parent-only mode
+before model questions when no worker is needed or delegation/prompting is
+unavailable; select/reuse model choices only for workers that will be dispatched.
+An explicit worker requirement remains binding. The current parent remains the
+sole review/integration owner. Status answers and coordination do not need new
+workers. External actions retain their authorization.
 
 Always run the [retro skill](.agents/skills/ai-coach-retro/SKILL.md) at the end of
 every repository work session, before the final completion or blocked handoff,

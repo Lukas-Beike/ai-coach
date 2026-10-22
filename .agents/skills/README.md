@@ -59,9 +59,10 @@ are involved. Read only the references needed for the current step.
   `python -m unittest discover -s tests -p test_ai_docs_contract.py -v`; they do
   not demonstrate model quality or replace a behavioral comparison.
 - Always use orchestration for repository work, including documentation and
-  skills. It starts by selecting models for simple,
-  standard, and complex/critical tasks from live capabilities. Reuse explicit
-  run selections; retain the current parent as review and integration owner.
+  skills. It first selects delegated or sequential parent-only mode; only work
+  that dispatches workers selects model tiers from live capabilities. Reuse
+  explicit run selections; retain the current parent as review and integration
+  owner.
   Review and evaluation criteria stay with their specialist workflows; patch
   acceptance does not replace the PR workflow's review gate or round limits.
 - Always run `ai-coach-retro` before the final session completion or blocked
