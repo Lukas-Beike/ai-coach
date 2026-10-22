@@ -878,25 +878,21 @@ def _collect_resting_hr(
             current += timedelta(days=1)
 
 
-def _collect_current_metrics(
+def _collect_profile_metrics(
     client: Any,
-    today: date,
     payload: dict[str, Any],
     external_call: ExternalCall,
     redact: Redact,
     warn: WarningLogger | None,
-    include_daily: bool = True,
 ) -> None:
-    """Read the current metrics; ``include_daily`` adds the slowly changing ones."""
+    """Read the heart-rate zones and gear, which change at most daily."""
     fetch = getattr(client, "get_heart_rate_zones", None)
-    if include_daily and callable(fetch):
+    if callable(fetch):
         _collect_optional_metric(
             payload, "heart_rate_zones", fetch, None, external_call, redact, warn
         )
-    if (
-        include_daily
-        and callable(getattr(client, "get_user_profile", None))
-        and callable(getattr(client, "get_gear", None))
+    if callable(getattr(client, "get_user_profile", None)) and callable(
+        getattr(client, "get_gear", None)
     ):
         _collect_optional_metric(
             payload,
@@ -907,6 +903,46 @@ def _collect_current_metrics(
             redact,
             warn,
         )
+
+
+def _collect_threshold_metrics(
+    client: Any,
+    payload: dict[str, Any],
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None,
+) -> None:
+    """Read the cycling FTP and running threshold, which change at most daily."""
+    fetch = getattr(client, "get_cycling_ftp", None)
+    if callable(fetch):
+        _collect_optional_metric(
+            payload, "cycling_ftp", fetch, None, external_call, redact, warn
+        )
+    fetch = getattr(client, "get_lactate_threshold", None)
+    if callable(fetch):
+        _collect_optional_metric(
+            payload,
+            "running_threshold",
+            lambda: fetch(latest=True),
+            {"latest": True},
+            external_call,
+            redact,
+            warn,
+        )
+
+
+def _collect_current_metrics(
+    client: Any,
+    today: date,
+    payload: dict[str, Any],
+    external_call: ExternalCall,
+    redact: Redact,
+    warn: WarningLogger | None,
+    include_daily: bool = True,
+) -> None:
+    """Read the current metrics; ``include_daily`` adds the slowly changing ones."""
+    if include_daily:
+        _collect_profile_metrics(client, payload, external_call, redact, warn)
     max_metrics_start = today - timedelta(days=89)
     max_metrics_range = getattr(client, "get_max_metrics_range", None)
     metrics = (
@@ -952,22 +988,8 @@ def _collect_current_metrics(
         _collect_optional_metric(
             payload, key, metric_fetch, details, external_call, redact, warn
         )
-    fetch = getattr(client, "get_cycling_ftp", None)
-    if include_daily and callable(fetch):
-        _collect_optional_metric(
-            payload, "cycling_ftp", fetch, None, external_call, redact, warn
-        )
-    fetch = getattr(client, "get_lactate_threshold", None)
-    if include_daily and callable(fetch):
-        _collect_optional_metric(
-            payload,
-            "running_threshold",
-            lambda: fetch(latest=True),
-            {"latest": True},
-            external_call,
-            redact,
-            warn,
-        )
+    if include_daily:
+        _collect_threshold_metrics(client, payload, external_call, redact, warn)
     fetch = getattr(client, "get_weigh_ins", None)
     if callable(fetch):
         weight_start = today - timedelta(days=89)
