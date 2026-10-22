@@ -193,6 +193,7 @@ def build_structured_tool_schemas(
                             "recovery",
                             "weather",
                             "daily_planning_context",
+                            "nutrition_products",
                             "source_policy",
                         ],
                     },

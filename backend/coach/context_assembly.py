@@ -47,6 +47,7 @@ class CoachContextPlanningSources:
     training_plan_service: Callable[[], Any]
     adaptive_preview_service: Callable[[], Any]
     workout_library_service: Callable[[], Any]
+    nutrition_meal_library: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,7 @@ class CoachContextAssembly:
         self._training_plan_service = planning.training_plan_service
         self._adaptive_preview_service = planning.adaptive_preview_service
         self._workout_library_service = planning.workout_library_service
+        self._nutrition_meal_library = planning.nutrition_meal_library
         self._profile_service = dialogue.profile_service
         self._message_service = dialogue.message_service
         self._settings = dialogue.settings
@@ -118,7 +120,14 @@ class CoachContextAssembly:
                 self._canonical,
                 self._activity_rows,
             ),
+            nutrition_products=self._nutrition_products_reader(),
         )
+
+    def _nutrition_products_reader(self) -> Callable[[], list[dict[str, Any]]] | None:
+        meal_library = self._nutrition_meal_library
+        if meal_library is None:
+            return None
+        return lambda: meal_library().list_products()
 
     def training_context_service(self) -> CoachTrainingContextService:
         limits = self._limits()
