@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.activities.detail_contract import (
     ACTIVITY_DETAIL_CONTRACT,
+    ProviderStatus,
     activity_detail_contract,
     measured_order,
 )
@@ -14,6 +15,7 @@ from backend.activities.detail_merge import (
     DetailCandidate,
     merge_details,
 )
+from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.canonical.activity_detail import (
     LAP_METRIC_FIELDS,
     ActivityDetailSet,
@@ -199,6 +201,7 @@ def build(
     *,
     analysis: dict[str, Any] | None = None,
     refreshable: frozenset[ProviderId] = REFRESHABLE,
+    **extras: Any,
 ) -> dict[str, Any]:
     return activity_detail_contract(
         "act_1",
@@ -207,6 +210,7 @@ def build(
         [item.stored for item in candidates],
         analysis=analysis,
         refreshable=refreshable,
+        **extras,
     )
 
 
@@ -659,6 +663,131 @@ class ProviderTests(unittest.TestCase):
             for item in doc["detail_data"]["providers"]
         }
         self.assertEqual({"intervals": False, "wahoo": True}, flags)
+
+
+class StatusTests(unittest.TestCase):
+    def test_status_adds_stale_load_error_and_coverage_per_provider(self) -> None:
+        values: list[float | None] = list(heart_rate_values())
+        values[3] = None
+        error = {"message": "boom", "observed_at": FETCHED}
+        doc = build(
+            [record(INTERVALS, "i-ride-99"), record(WAHOO, "w-ride-99")],
+            [
+                candidate(
+                    stream_set(
+                        INTERVALS, "i-ride-99", {HR: tuple(values)}, label="Intervals"
+                    )
+                )
+            ],
+            status={INTERVALS: ProviderStatus(stale=True, load_error=error)},
+        )
+
+        intervals, wahoo = doc["detail_data"]["providers"]
+        self.assertTrue(intervals["stale"])
+        self.assertEqual(error, intervals["load_error"])
+        self.assertEqual(
+            {HR.value: {"points": 2701, "valid_points": 2700}}, intervals["coverage"]
+        )
+        self.assertEqual(
+            (False, None, {}),
+            (wahoo["stale"], wahoo["load_error"], wahoo["coverage"]),
+        )
+
+    def test_provider_entries_are_unchanged_without_status(self) -> None:
+        doc = build([record(INTERVALS, "i-ride-99")])
+
+        self.assertNotIn("stale", doc["detail_data"]["providers"][0])
+
+    def test_display_sampled_follows_the_downsampling_cap(self) -> None:
+        records = [record(INTERVALS, "i-ride-99")]
+        long_set = candidate(
+            stream_set(INTERVALS, "i-ride-99", {HR: heart_rate_values()})
+        )
+        short = tuple(float(i) for i in range(2000))
+        short_set = candidate(
+            ActivityStreamSet(
+                provider_activity_id="i-ride-99",
+                provenance=provenance(INTERVALS, RecordingOrigin.WAHOO, None),
+                origin=ActivityDetailOrigin.FETCH,
+                resolution=StreamResolution.FULL,
+                channels={StreamChannel.TIME_S: short, HR: (100.0,) * len(short)},
+            )
+        )
+
+        self.assertTrue(build(records, [long_set])["detail_data"]["display_sampled"])
+        self.assertFalse(build(records, [short_set])["detail_data"]["display_sampled"])
+        self.assertFalse(build(records)["detail_data"]["display_sampled"])
+
+
+class EnvelopeTests(unittest.TestCase):
+    def test_envelope_blocks_become_top_level_keys(self) -> None:
+        envelope = {
+            "activity_feedback": {"rpe": 6},
+            "equipment": [{"id": "bike"}],
+            "activity_validation": {"status": "ok"},
+            "ignored": 1,
+        }
+
+        doc = build([record(INTERVALS, "i-ride-99")], envelope=envelope)
+
+        self.assertEqual(envelope["activity_feedback"], doc["activity_feedback"])
+        self.assertEqual(envelope["equipment"], doc["equipment"])
+        self.assertEqual(envelope["activity_validation"], doc["activity_validation"])
+        self.assertNotIn("ignored", doc)
+
+    def test_missing_envelope_blocks_are_none_and_absent_envelope_adds_nothing(
+        self,
+    ) -> None:
+        doc = build([record(INTERVALS, "i-ride-99")], envelope={})
+
+        self.assertEqual(
+            (None, None, None),
+            (doc["activity_feedback"], doc["equipment"], doc["activity_validation"]),
+        )
+        self.assertNotIn("activity_feedback", build([record(INTERVALS, "i-ride-99")]))
+
+
+class SummaryMetricTests(unittest.TestCase):
+    def test_summary_scalars_map_to_labelled_metrics(self) -> None:
+        metrics = intervals_summary_metrics(
+            {
+                "average_speed": 8.5,
+                "calories": 700,
+                "decoupling": float("nan"),
+                "feel": True,
+                "icu_intensity": 0.8,
+                "average_temp": "warm",
+            }
+        )
+
+        self.assertEqual({"avg_speed_mps", "calories_kcal", "intensity"}, set(metrics))
+        self.assertEqual(
+            {
+                "value": 8.5,
+                "unit": "m/s",
+                "source": {
+                    "provider": "intervals",
+                    "label": "Intervals.icu",
+                    "kind": "measured",
+                },
+                "alternatives": [],
+            },
+            metrics["avg_speed_mps"],
+        )
+        self.assertEqual("derived", metrics["intensity"]["source"]["kind"])
+
+    def test_summary_metrics_never_override_measured_values(self) -> None:
+        extra = intervals_summary_metrics({"average_speed": 8.5})
+        extra["avg_hr"] = {"value": 1, "unit": "bpm", "source": {}, "alternatives": []}
+
+        doc = build(
+            [record(INTERVALS, "i-ride-99", label="Intervals.icu", avg_hr=120.0)],
+            summary_metrics=extra,
+        )
+
+        self.assertEqual(120.0, doc["metrics"]["avg_hr"]["value"])
+        self.assertEqual(8.5, doc["metrics"]["avg_speed_mps"]["value"])
+        json.dumps(doc, allow_nan=False)
 
 
 if __name__ == "__main__":

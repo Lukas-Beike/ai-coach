@@ -9,25 +9,87 @@ transaction: ``db`` is an open connection and this module only reads from it.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
-from backend.activities.detail_contract import activity_detail_contract, measured_order
+from backend.activities.detail_contract import (
+    ProviderStatus,
+    activity_detail_contract,
+    measured_order,
+)
 from backend.activities.detail_merge import DetailCandidate, merge_details
+from backend.activities.detail_store import summary_fingerprint
+from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.canonical.records import ActivityRecord
-from backend.canonical.vocabulary import ProviderId
-from backend.db import activity_detail_store
+from backend.canonical.vocabulary import ActivitySessionState, ProviderId
+from backend.db import activity_detail_store, canonical_store
 from backend.db.activity_detail_store import StoredDetailSet
 from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
+from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
+
+_MAX_MERGE_DEPTH: Final = 64
 
 
 class SessionRecordReader(Protocol):
     """Return the active activity records of one canonical session."""
 
     def __call__(self, db: Any, activity_id: str) -> Sequence[ActivityRecord]: ...
+
+
+class SummaryRowReader(Protocol):
+    """Return the current Intervals.icu summary row of a provider activity id."""
+
+    def __call__(
+        self, db: Any, provider_activity_id: str
+    ) -> Mapping[str, Any] | None: ...
+
+
+class EnvelopeReader(Protocol):
+    """Return the feedback, equipment and activity validation of one session.
+
+    ``summary`` is the current Intervals.icu summary row, when there is one.
+    """
+
+    def __call__(
+        self,
+        db: Any,
+        activity_id: str,
+        provider_activity_id: str | None,
+        summary: Mapping[str, Any] | None,
+    ) -> Mapping[str, Any]: ...
+
+
+FailureReader = Callable[[Iterable[str]], Mapping[str, Mapping[str, Any]]]
+
+
+def read_reference(db: Any, any_id: str) -> str | None:
+    """Return the canonical session id of a local or Intervals.icu activity id.
+
+    A local ``act_`` id is used directly, any other id is looked up as an
+    Intervals.icu provider activity id. A duplicate session resolves to the
+    session it was merged into. An unknown id returns None.
+    """
+    text = any_id.strip()
+    if text.startswith(canonical_store.ACTIVITY_ID_PREFIX):
+        current: str | None = text
+    else:
+        current = canonical_store.activity_local_ids(
+            db, ProviderId.INTERVALS.value, [text]
+        ).get(text)
+    seen: set[str] = set()
+    while current is not None and current not in seen and len(seen) < _MAX_MERGE_DEPTH:
+        seen.add(current)
+        session = canonical_store.activity_sessions_by_ids(db, [current]).get(current)
+        if session is None:
+            return None
+        merged_into = session["merged_into"]
+        if session["state"] != ActivitySessionState.DUPLICATE.value or not merged_into:
+            return current
+        current = str(merged_into)
+    return None
 
 
 class CanonicalDetailReader:
@@ -38,12 +100,24 @@ class CanonicalDetailReader:
         session_records: SessionRecordReader,
         *,
         refreshable: frozenset[ProviderId],
+        summary_row: SummaryRowReader | None = None,
+        failures: FailureReader | None = None,
+        envelope: EnvelopeReader | None = None,
     ) -> None:
         self._session_records = session_records
         self._refreshable = refreshable
+        self._summary_row = summary_row
+        self._failures = failures
+        self._envelope = envelope
 
-    def read(self, db: Any, activity_id: str) -> dict[str, Any] | None:
-        """Return the document, or None when the session has no readable records."""
+    def read(self, db: Any, any_id: str) -> dict[str, Any] | None:
+        """Return the document, or None when the session has no readable records.
+
+        ``any_id`` is a local session id or an Intervals.icu activity id.
+        """
+        activity_id = read_reference(db, any_id)
+        if activity_id is None:
+            return None
         records = tuple(self._session_records(db, activity_id))
         if not records:
             return None
@@ -99,14 +173,78 @@ class CanonicalDetailReader:
                 source_label=adapted.label_for("velocity_smooth", "distance", "moving"),
             ),
         }
+        sets = [candidate.stored for candidate in candidates]
+        intervals_id = (
+            analysis_record.activity_id
+            if analysis_record.provenance.provider is ProviderId.INTERVALS
+            else None
+        )
+        summary = (
+            self._summary_row(db, intervals_id)
+            if self._summary_row is not None and intervals_id is not None
+            else None
+        )
+        envelope = (
+            None
+            if self._envelope is None
+            else self._envelope(db, activity_id, intervals_id, summary)
+        )
         return activity_detail_contract(
             activity_id,
             records,
             merged,
-            [candidate.stored for candidate in candidates],
+            sets,
             analysis=analysis,
             refreshable=self._refreshable,
+            status=self._status(db, sets, intervals_id, summary),
+            envelope=envelope,
+            summary_metrics=None
+            if summary is None
+            else intervals_summary_metrics(summary),
         )
+
+    def _status(
+        self,
+        db: Any,
+        sets: Sequence[StoredDetailSet],
+        intervals_id: str | None,
+        summary: Mapping[str, Any] | None,
+    ) -> dict[ProviderId, ProviderStatus]:
+        """Compare each provider's stored sets with its current summary version."""
+        fingerprint = None if summary is None else summary_fingerprint(dict(summary))
+        status: dict[ProviderId, ProviderStatus] = {}
+        for item in sets:
+            provider = ProviderId(item.provider)
+            if provider is ProviderId.INTERVALS:
+                # The summary row belongs to one Intervals.icu record only.
+                current = (
+                    fingerprint if item.provider_activity_id == intervals_id else None
+                )
+            else:
+                current = canonical_store.active_provider_record_hash(
+                    db, item.provider, ACTIVITY_RECORD_KIND, item.provider_activity_id
+                )
+            if item.summary_sha256 and current and item.summary_sha256 != current:
+                status[provider] = ProviderStatus(stale=True)
+        load_error = self._load_error(intervals_id, fingerprint)
+        if load_error is not None:
+            status[ProviderId.INTERVALS] = ProviderStatus(
+                stale=status.get(ProviderId.INTERVALS, ProviderStatus()).stale,
+                load_error=load_error,
+            )
+        return status
+
+    def _load_error(
+        self, intervals_id: str | None, fingerprint: str | None
+    ) -> dict[str, Any] | None:
+        """Return the failure note of the current Intervals.icu summary, if any."""
+        if intervals_id is None or fingerprint is None or not self._failures:
+            return None
+        note = self._failures([intervals_id]).get(intervals_id)
+        # A note left by another summary version no longer describes this one.
+        if not note or note.get("summary_sha256") != fingerprint:
+            return None
+        return {"message": note.get("message"), "observed_at": note.get("observed_at")}
 
 
 def _provider_text(record: ActivityRecord) -> str | None:
