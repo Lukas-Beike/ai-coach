@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import Counter
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -44,6 +45,15 @@ _TURN_RELEASED = {
         "Do not repeat this call and do not claim it happened."
     ),
 }
+
+# Sent with the last follow-up, when tools are switched off, so the answer
+# states what is unfinished instead of implying the meal or change was saved.
+_TOOL_BUDGET_NOTICE = (
+    "\nTool step limit reached for this turn: no further tools can run. Nothing "
+    "beyond the confirmed tool results was saved or sent. Tell the athlete plainly "
+    "which parts are done and which are not, never claim an unfinished change, and "
+    'say that replying "weiter" continues the request.'
+)
 
 
 @dataclass
@@ -98,6 +108,22 @@ def _log_context_reload(
                 "characters": projection.get("characters"),
                 "complete": projection.get("complete"),
                 "round": round_number,
+            },
+        },
+    )
+
+
+def _log_budget_exhausted(state: StructuredCoachRoundState, rounds: int) -> None:
+    """Log that a turn ran out of tool rounds: counts and tool names only."""
+    logging.getLogger("intervals_coach").warning(
+        "Coach tool budget exhausted",
+        extra={
+            "event": "coach_tool_budget_exhausted",
+            "context": {
+                "rounds": rounds,
+                "tool_calls": dict(
+                    Counter(str(entry.get("tool")) for entry in state.command_receipts)
+                ),
             },
         },
     )
@@ -315,6 +341,10 @@ class CoachStructuredToolRoundService:
         )
         self._jobs.merge_receipt(state.client_turn_id, {"plan_scope": scope})
 
+    def budget_exhausted(self, rounds: int, *, question: str, cancelled: bool) -> bool:
+        """Return whether the turn ran out of tool rounds before it could finish."""
+        return rounds >= self._limits.max_rounds and not (question or cancelled)
+
     def _followup_response(
         self,
         response: dict[str, Any],
@@ -325,13 +355,17 @@ class CoachStructuredToolRoundService:
         cancelled: bool,
         rounds: int,
     ) -> dict[str, Any]:
+        exhausted = self.budget_exhausted(
+            rounds, question=question, cancelled=cancelled
+        )
+        if exhausted:
+            _log_budget_exhausted(state, rounds)
         followup = {
             **state.request_payload,
-            "instructions": state.model_instructions,
+            "instructions": state.model_instructions
+            + (_TOOL_BUDGET_NOTICE if exhausted else ""),
             "input": outputs,
-            "tool_choice": "none"
-            if question or cancelled or rounds >= self._limits.max_rounds
-            else "auto",
+            "tool_choice": "none" if question or cancelled or exhausted else "auto",
         }
         if any(
             step.get("tool") == "read_coach_context"

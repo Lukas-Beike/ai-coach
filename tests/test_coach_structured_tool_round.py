@@ -251,6 +251,45 @@ class StructuredToolRoundTests(unittest.TestCase):
         self.assertEqual(phases[1]["phase"], "waiting_final_response")
         self.assertEqual(phases[-1], {"pending_tool_outputs": []})
 
+    def test_exhausted_budget_tells_model_and_logs_only_counts(self) -> None:
+        state = self.state()
+        state.command_receipts.extend(
+            [{"tool": "lookup_food", "result": {"ok": True, "foods": []}}] * 2
+        )
+
+        with (
+            patch.object(
+                self.service,
+                "_execute_tool_call",
+                return_value=("lookup_food", "call-one", {"ok": True}, {}),
+            ),
+            self.assertLogs("intervals_coach", level="WARNING") as logs,
+        ):
+            self.service.run(
+                {"output": [self.call()]},
+                rounds=0,
+                question="",
+                cancelled=False,
+                state=state,
+            )
+
+        followup = self.response.respond.call_args.args[0]
+        self.assertEqual(followup["tool_choice"], "none")
+        self.assertTrue(followup["instructions"].startswith("synthetic-instructions"))
+        self.assertIn("Tool step limit reached", followup["instructions"])
+        self.assertEqual(state.model_instructions, "synthetic-instructions")
+        [record] = logs.records
+        self.assertEqual(getattr(record, "event", None), "coach_tool_budget_exhausted")
+        self.assertEqual(
+            getattr(record, "context", None),
+            {"rounds": 1, "tool_calls": {"lookup_food": 2}},
+        )
+        self.assertTrue(self.service.budget_exhausted(1, question="", cancelled=False))
+        self.assertFalse(
+            self.service.budget_exhausted(1, question="Welcher Reis?", cancelled=False)
+        )
+        self.assertFalse(self.service.budget_exhausted(0, question="", cancelled=False))
+
     def test_cancelled_round_does_not_execute_tool_or_followup(self) -> None:
         event = threading.Event()
         event.set()

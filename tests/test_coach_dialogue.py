@@ -2283,6 +2283,41 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             model.call_args_list[1].args[0]["model"],
         )
 
+    def test_exhausted_tool_budget_keeps_meal_request_resumable(self):
+        with patch.object(structured_tool_round, "COACH_TOOL_MAX_ROUNDS", 1):
+            result, model = self.turn(
+                "Abendessen: 100g Reis und 125g Zucchini",
+                [
+                    lambda _: self.call(
+                        "lookup_food", {"queries": ["Reis", "Zucchini"]}
+                    ),
+                    {"output_text": "Ich habe die Zutaten nachgeschlagen."},
+                ],
+            )
+        followup = model.call_args_list[1].args[0]
+        self.assertEqual(followup["tool_choice"], "none")
+        self.assertIn("Tool step limit reached", followup["instructions"])
+        self.assertTrue(result["tool_budget_exhausted"])
+        self.assertIn("Schrittlimit", result["message"]["content"])
+        pending = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(pending["status"], "failed")
+        self.assertEqual(pending["domain"], "nutrition_or_profile")
+        self.assertEqual(pending["summary"], "Abendessen: 100g Reis und 125g Zucchini")
+
+        result, model = self.turn("weiter", [{"output_text": "Ich mache weiter."}])
+
+        dialogue = json.loads(model.call_args.args[0]["input"])["dialogue"]
+        self.assertIn("100g Reis", dialogue["pending_request"]["summary"])
+        [lookup] = dialogue["confirmed_results"][0]["steps"]
+        self.assertEqual(lookup["tool"], "lookup_food")
+        self.assertEqual(
+            {match["query"] for match in lookup["found"]}, {"Reis", "Zucchini"}
+        )
+        self.assertTrue(
+            all(match["id"].startswith("bls:") for match in lookup["found"])
+        )
+        self.assertFalse(result["tool_budget_exhausted"])
+
     def test_unknown_tool_and_malformed_arguments_have_no_effect(self):
         before = self.state()
         result, _ = self.turn(

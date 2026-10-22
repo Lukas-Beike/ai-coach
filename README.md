@@ -1112,7 +1112,13 @@ Name oder Marke vorkommt (`%` und `_` zählen wörtlich; Wörter mit weniger als
 drei Zeichen müssen ein Wort beginnen, damit „Ei“ nicht „Reisnudeln“ findet; Satzzeichen wie Kommas oder Klammern um ein Wort werden ignoriert). Erst für Zutaten ohne passendes Produkt fragt er BLS
 oder Open Food Facts ab; auch dann liefert die Suche passende
 gespeicherte Produkte mit, auch wenn die externe Datenbank nicht erreichbar ist
-oder die Anfrage ablehnt. Ein
+oder die Anfrage ablehnt. Alle Zutaten einer Mahlzeit werden in einer Suche
+abgefragt (höchstens 20 Begriffe); ein fehlgeschlagener Begriff lässt die
+Treffer der übrigen nutzbar. Der Coach speichert die Mahlzeit danach direkt mit
+allen Komponenten, ohne vorherige Nährwertvorschau; das Speichern berechnet und
+nennt die Summen. Erreicht eine Antwort das Schrittlimit, sagt der Coach, was
+erledigt ist und was nicht; „weiter“ setzt den Auftrag mit den bereits
+gefundenen Lebensmittel-IDs fort. Ein
 Treffer aus einer Onlinequelle wird erst nach Prüfung und ausdrücklicher
 Bestätigung lokal gespeichert; BLS, Open Food Facts, Verpackungsangabe und
 Das Modell kennt die Quellenkennzeichnung `fddb_export`, aber es gibt keinen

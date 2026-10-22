@@ -44,6 +44,7 @@ class CoachDiagnosticHistoryService:
         receipt = self._receipt_parser(row["receipt"])
         status = receipt.get("status")
         response_status = receipt.get("response_status")
+        rounds = receipt.get("tool_rounds")
         return self._redact(
             {
                 "id": hashlib.sha256(str(row["client_turn_id"]).encode()).hexdigest()[
@@ -61,6 +62,10 @@ class CoachDiagnosticHistoryService:
                     else None
                 ),
                 "awaiting_clarification": receipt.get("awaiting_clarification") is True,
+                "tool_rounds": rounds
+                if type(rounds) is int and 0 <= rounds <= 1000
+                else None,
+                "tool_budget_exhausted": receipt.get("tool_budget_exhausted") is True,
                 "error": self._error_metadata(receipt.get("diagnostic_error")),
                 "steps": self._command_steps(receipt),
             }

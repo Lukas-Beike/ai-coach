@@ -224,6 +224,19 @@ def _pending_value(
             if isinstance(entry, dict) and "tool" in entry
         ]
         request = last_request or pending_request
+        if (
+            request is pending_request
+            and request.get("status") == "needs_clarification"
+        ):
+            # The athlete's answer belongs to the request it clarifies, so a
+            # retry re-runs both, e.g. "trocken, plus 130g Champignons".
+            request = {
+                **request,
+                "source_message_ids": [
+                    *_message_ids(request),
+                    context["current_user_message_id"],
+                ],
+            }
         source_ids, summary = _athlete_request(
             request,
             context,
@@ -397,6 +410,12 @@ def _unbacked_save_notice(text: str, effects: list[dict[str, Any]]) -> str:
     )
 
 
+_BUDGET_EXHAUSTED_NOTE = (
+    "Hinweis: Das Schrittlimit dieser Antwort wurde erreicht; möglicherweise ist "
+    "nicht alles erledigt. Antworte mit „weiter“, um den Auftrag fortzusetzen."
+)
+
+
 def _fallback_message(text: str, effects: list[dict[str, Any]]) -> str:
     if text:
         return text
@@ -433,6 +452,7 @@ class CoachStructuredOutcomeService:
         allow_mutations: bool,
         context: dict[str, Any],
         message: str,
+        budget_exhausted: bool = False,
     ) -> tuple[str, str, list[dict[str, Any]]]:
         failures = unresolved_coach_steps(command_receipts)
         mark_resolved_receipts(command_receipts, failures)
@@ -440,11 +460,14 @@ class CoachStructuredOutcomeService:
         text, incomplete_answer, missing_answer = self._text(
             response, question, failures, effects, command_receipts
         )
+        if budget_exhausted:
+            text += "\n" + _BUDGET_EXHAUSTED_NOTE
         self._persist_pending(
             command_receipts,
             effects,
             failures=failures,
-            incomplete_answer=incomplete_answer,
+            # An unfinished request stays resumable with "weiter" or "nochmal".
+            incomplete_answer=incomplete_answer or budget_exhausted,
             missing_answer=missing_answer,
             question=question,
             cancelled=cancelled,

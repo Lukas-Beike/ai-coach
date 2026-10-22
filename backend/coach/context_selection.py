@@ -108,7 +108,11 @@ PROFILE_KEYWORDS = (
     ("competition_preparation", r"wettkampf|rennen|race|competition|marathon"),
     (
         "profile_or_checkin",
-        r"check.?in|ruhepuls|gewicht|profil|befinden|" + FOOD_INTAKE_PATTERN,
+        # An amount alone ("130g Champignons") still answers a meal question.
+        r"check.?in|ruhepuls|gewicht|profil|befinden|"
+        + FOOD_INTAKE_PATTERN
+        + "|"
+        + FOOD_AMOUNT_PATTERN,
     ),
     (
         "activity_analysis",
@@ -170,7 +174,7 @@ def infer_coach_domain(
 ) -> str | None:
     if tools:
         for t in tools:
-            if any(sub in t for sub in ("nutrition", "checkin", "profile")):
+            if any(sub in t for sub in ("nutrition", "food", "checkin", "profile")):
                 return "nutrition_or_profile"
         for t in tools:
             if any(sub in t for sub in ("sync", "refresh")):

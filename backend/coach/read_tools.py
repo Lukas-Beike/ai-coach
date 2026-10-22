@@ -25,6 +25,9 @@ from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.state_service import StructuredTrainingStateService
 from backend.planning.training_plans import TrainingPlanService
 
+# All ingredients of one meal fit one lookup, matching nutrition_components.
+MAX_FOOD_LOOKUP_QUERIES = 20
+
 
 class CoachReadToolService:
     """Own read-tool selection, bounds, and response projection."""
@@ -169,8 +172,45 @@ class CoachReadToolService:
             return self._lookup_food(nutrition, arguments)
         return self._calculate_food(nutrition, arguments)
 
-    @staticmethod
+    @classmethod
     def _lookup_food(
+        cls, nutrition: NutritionMealLibraryService, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        queries = arguments.get("queries")
+        if queries is None:
+            return cls._lookup_one_food(nutrition, arguments)
+        if arguments.get("barcode") or not isinstance(queries, list):
+            raise AppError(
+                400, "queries ist eine Liste von Suchbegriffen ohne barcode."
+            )
+        unique: dict[str, str] = {}
+        for term in [arguments.get("query"), *queries]:
+            if isinstance(term, str) and term.strip():
+                unique.setdefault(term.strip().casefold(), term.strip())
+        if not 1 <= len(unique) <= MAX_FOOD_LOOKUP_QUERIES:
+            raise AppError(
+                400,
+                f"queries muss 1 bis {MAX_FOOD_LOOKUP_QUERIES} Suchbegriffe enthalten.",
+            )
+        source = arguments.get("source")
+        results: list[dict[str, Any]] = []
+        errors: list[AppError] = []
+        # One call covers a whole meal; a failed term keeps the others usable.
+        for term in unique.values():
+            try:
+                result = cls._lookup_one_food(
+                    nutrition, {"query": term, **({"source": source} if source else {})}
+                )
+            except AppError as exc:
+                errors.append(exc)
+                result = {"ok": False, "error": exc.message, "reason": exc.reason}
+            results.append({"query": term, **result})
+        if len(errors) == len(results):
+            raise errors[0]
+        return {"ok": True, "results": results}
+
+    @staticmethod
+    def _lookup_one_food(
         nutrition: NutritionMealLibraryService, arguments: dict[str, Any]
     ) -> dict[str, Any]:
         source = str(arguments.get("source") or "").strip().lower()

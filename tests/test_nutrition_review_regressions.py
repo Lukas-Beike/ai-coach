@@ -126,6 +126,69 @@ class NutritionReviewRegressionTests(unittest.TestCase):
         with self.assertRaises(AppError):
             service.execute("lookup_food", {"query": "Haferflocken", "source": "bls"})
 
+    def test_batched_queries_return_each_term_and_isolate_failures(self) -> None:
+        meal_library = Mock()
+
+        def lookup(arguments):
+            if arguments["query"] == "Pfeffersoße":
+                raise AppError(
+                    429,
+                    "Lebensmitteldatenbank ist vorübergehend ausgelastet.",
+                    reason="food_database_rate_limited",
+                )
+            return {"ok": True, "foods": [{"id": f"local-{arguments['query']}"}]}
+
+        meal_library.lookup_product.side_effect = lookup
+        service = CoachReadToolService(
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            Mock(),
+            training_change_limit=366,
+            nutrition_meal_library=Mock(return_value=meal_library),
+        )
+
+        result = service.execute(
+            "lookup_food",
+            {"query": "Reis", "queries": [" Zucchini ", "reis", "Pfeffersoße"]},
+        )
+
+        assert isinstance(result, dict)
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            [item["query"] for item in result["results"]],
+            ["Reis", "Zucchini", "Pfeffersoße"],
+        )
+        self.assertEqual(result["results"][1]["foods"], [{"id": "local-Zucchini"}])
+        self.assertEqual(
+            result["results"][2],
+            {
+                "query": "Pfeffersoße",
+                "ok": False,
+                "error": "Lebensmitteldatenbank ist vorübergehend ausgelastet.",
+                "reason": "food_database_rate_limited",
+            },
+        )
+        # Without a source each term keeps the local-first product lookup.
+        meal_library.lookup_product.assert_any_call({"query": "Zucchini"})
+        meal_library.food_database.lookup.assert_not_called()
+
+        meal_library.lookup_product.side_effect = AppError(429, "Ausgelastet.")
+        with self.assertRaises(AppError):
+            service.execute("lookup_food", {"queries": ["Reis", "Zucchini"]})
+        for arguments in (
+            {"queries": "Reis"},
+            {"queries": ["Reis"], "barcode": "4001234567890"},
+            {"queries": [" "]},
+            {"queries": [f"Zutat {index}" for index in range(21)]},
+        ):
+            with self.subTest(arguments=arguments), self.assertRaises(AppError):
+                service.execute("lookup_food", arguments)
+
     def test_barcode_source_keeps_local_first_lookup(self) -> None:
         meal_library = Mock()
         meal_library.lookup_product.return_value = {
