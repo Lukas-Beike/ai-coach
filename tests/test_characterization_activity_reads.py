@@ -1,7 +1,7 @@
 """Characterize activity pagination, recent reads and analysis fingerprints.
 
 These tests pin current behaviour, quirks included, as the parity reference for
-the provider-neutral refactor. Storage is a temporary SQLite key/value table and
+the provider-neutral refactor. Storage is a temporary SQLite database and
 providers are in-memory fakes; no server, network or real athlete data is used.
 """
 
@@ -19,10 +19,12 @@ from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from activity_row_support import SnapshotActivityRows
+from canonical_detail_support import seed_intervals_activity
 
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.read_service import PAGE_DEFAULT, PAGE_MAX, ActivityReadService
 from backend.db.manager import DatabaseManager
+from backend.db.schema import initialize_schema
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.performance.activity_read_service import (
@@ -45,9 +47,7 @@ class _Database:
     def __init__(self, path: Path) -> None:
         self.path = path
         with self.unit_of_work() as db:
-            db.execute(
-                "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
-            )
+            initialize_schema(db)
 
     @contextmanager
     def unit_of_work(self) -> Iterator[sqlite3.Connection]:
@@ -682,6 +682,8 @@ class TrainingRecordObservationCharacterizationTests(_StorageCase):
     def _save_analysis(
         self, activity_id: str, fingerprint: str | None, aerobic: Any = None
     ) -> None:
+        # Analyses are read for linked activities only.
+        seed_intervals_activity(cast(DatabaseManager, self.database), activity_id)
         ActivityDetailStore(self.database).save(
             activity_id,
             {
@@ -753,6 +755,7 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
     COMPACT_LEAN = _activity("ride-1", DAY, name="Threshold")
 
     def _save_profile(self) -> None:
+        seed_intervals_activity(cast(DatabaseManager, self.database), "ride-1")
         ActivityDetailStore(self.database).save(
             "ride-1",
             {
