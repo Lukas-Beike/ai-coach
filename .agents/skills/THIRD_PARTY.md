@@ -13,6 +13,8 @@ Anthropic skill-creator attribution: Copyright 2026 Anthropic, PBC.
 | `ai-coach-ui-design` | [Anthropic frontend-design](https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/frontend-design) | `dbd4588f9e1033efb41dad4bef2f7947c8993d44` | [Apache 2.0](licenses/Apache-2.0.txt) |
 | `ai-coach-skill-evaluation` | [Anthropic skill-creator](https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/skill-creator) | `dbd4588f9e1033efb41dad4bef2f7947c8993d44` | [Apache 2.0](licenses/Apache-2.0.txt) |
 | `code-review` | [Anthropic Claude Code code-review command](https://github.com/anthropics/claude-plugins-official/blob/af59ee3a1051a29dda4a2e7a2af221aa457ae08b/plugins/code-review/commands/code-review.md), author Boris Cherny | Local marketplace snapshot `.gcs-sha`: `af59ee3a1051a29dda4a2e7a2af221aa457ae08b`; original command SHA-256: `7d5a0bc9a41babad32a387152f9680316997bc4ad376928827d670b1760cc890` | [Apache 2.0](licenses/Apache-2.0.txt) |
+| `orchestrated-plan-implementation` | [Oliviero Pinotti orchestrator](https://github.com/olivieropinotti/orchestrator-skill/blob/a897bbfc06be4f73cfdc1ae8198bdb9b28623da0/skills/orchestrator/SKILL.md) | `a897bbfc06be4f73cfdc1ae8198bdb9b28623da0` | [MIT, copyright 2026 Oliviero Pinotti](#orchestration-mit-notices) |
+| `orchestrated-plan-implementation` | [Alireza Rezvani Orchestration Protocol](https://github.com/alirezarezvani/claude-skills/blob/27cfcd0fb0a41f60adffcbd5271fdf8839f86ed2/orchestration/ORCHESTRATION.md) | `27cfcd0fb0a41f60adffcbd5271fdf8839f86ed2` | [MIT, copyright 2025 Alireza Rezvani](#orchestration-mit-notices) |
 
 Project changes replace broad upstream defaults with this repository's privacy,
 SQLCipher, ownership, validation, and authorization requirements. UI guidance
@@ -24,8 +26,68 @@ Code review preserves the original command as a provenance reference and adapts
 its five perspectives and confidence scoring for explicit branch ranges,
 report-only execution, sequential review, and `REVIEW.md` evidence/severity rules.
 It removes automatic model-specific delegation, trivial/bot skips, and PR writes.
+Orchestration adapts asynchronous lifecycle/briefs and objective/phase handoffs
+to live provider discovery, three user-selected complexity tiers, isolated
+worktrees, and the existing parent-only adoption gate. Fixed vendor roles,
+nested delegation, automatic setup, and blanket human approval are excluded.
+[The source assessment](orchestrated-plan-implementation/SKILL.md#source-assessment)
+also evaluates eddiearc/dev-orchestrator-skill at revision
+`300e9ade5161e27916159f178112c4cfc9300c33`; no license was found there, so its
+text/templates are not copied or redistributed.
 
 Review later upstream changes deliberately against code and project contracts;
 do not synchronize bundles or install global copies. App-supplied materials have
 separate licensing and runtime constraints; see
 [app skill ownership](references/app-skill-ownership.md).
+
+## Orchestration MIT notices
+
+Retained upstream notices for the two rewritten orchestration workflows.
+
+```text
+MIT License
+
+Copyright (c) 2026 Oliviero Pinotti
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+```text
+MIT License
+
+Copyright (c) 2025 Alireza Rezvani
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
