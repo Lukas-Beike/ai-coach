@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import replace
+from copy import replace
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
 
@@ -114,14 +114,13 @@ def garmin_ingest_coverage(
         return None
     totals = canonical_store.provider_totals(db, ProviderId.GARMIN.value)
     oldest, newest = totals["oldest"], totals["newest"]
-    coverage: ProviderCoverage = replace(
+    return replace(
         fetched,
         activity_count=totals["activities"],
         observation_count=totals["observations"],
         first_observed_on=None if oldest is None else date.fromisoformat(oldest),
         last_observed_on=None if newest is None else date.fromisoformat(newest),
     )
-    return coverage
 
 
 def wahoo_payload_coverage(payload: object, *, zone: tzinfo) -> ProviderCoverage | None:
