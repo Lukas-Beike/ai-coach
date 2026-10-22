@@ -117,7 +117,7 @@ jobs:
           enable_auto_merge() {
             local pull_request_number="$1"
             local auto_merge_enabled
-            auto_merge_enabled="$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json autoMergeRequest --jq 'if .autoMergeRequest == null then "false" else "true" end')"
+            auto_merge_enabled="$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json state,autoMergeRequest --jq 'if .state == "MERGED" or .autoMergeRequest != null then "true" else "false" end')"
             if [[ "$auto_merge_enabled" != "true" ]]; then
               gh pr merge "$pull_request_number" --repo "$REPOSITORY" --auto --squash
             fi
@@ -140,6 +140,10 @@ jobs:
             local test_check_count
             local test_run_count
             local source_sha
+            if [[ "$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json state --jq '.state')" == "MERGED" ]]; then
+              echo "PR #$pull_request_number is already merged; its merged event will continue the release."
+              return 0
+            fi
             test_check_count="$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name == "test")] | length')"
             source_sha="$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json headRefOid --jq '.headRefOid')"
             test_run_count="$(gh run list \
@@ -152,7 +156,13 @@ jobs:
               --jq "[.[] | select(.headSha == \"$source_sha\") | select(.status != \"completed\" or .conclusion == \"success\")] | length")"
             if [[ "$test_check_count" -eq 0 && "$test_run_count" -eq 0 ]]; then
               echo "Starting an explicit test run for PR #$pull_request_number."
-              trigger_release_test "$source_ref" "$release_tag"
+              if ! trigger_release_test "$source_ref" "$release_tag"; then
+                if [[ "$(gh pr view "$pull_request_number" --repo "$REPOSITORY" --json state --jq '.state')" == "MERGED" ]]; then
+                  echo "PR #$pull_request_number merged during test dispatch; its merged event will continue the release."
+                  return 0
+                fi
+                return 1
+              fi
             elif [[ "$test_check_count" -eq 0 ]]; then
               echo "An explicit test run for PR #$pull_request_number is already queued or completed."
             fi
@@ -242,8 +252,8 @@ jobs:
             existing_pr="$(gh pr list --repo "$REPOSITORY" --base main --head "$promotion_branch" --state open --json number --jq '.[0].number // empty')"
             if [[ -n "$existing_pr" ]]; then
               echo "Release promotion PR #$existing_pr is already open."
-              enable_auto_merge "$existing_pr"
               ensure_release_test "$existing_pr" "$promotion_branch" "$app_version"
+              enable_auto_merge "$existing_pr"
               exit 0
             fi
             if git ls-remote --exit-code --heads origin "$promotion_branch" >/dev/null 2>&1; then
@@ -267,8 +277,8 @@ jobs:
               --title "chore(release): promote $app_version to main" \
               --body "Promote APP_VERSION $app_version from develop to protected main. Merge this PR to create the GitHub release and publish the container.")"
             promotion_pr_number="$(gh pr view "$promotion_pr_url" --repo "$REPOSITORY" --json number --jq '.number')"
-            enable_auto_merge "$promotion_pr_url"
             ensure_release_test "$promotion_pr_number" "$promotion_branch" "$app_version"
+            enable_auto_merge "$promotion_pr_url"
             exit 0
           fi
 
@@ -295,8 +305,8 @@ jobs:
           existing_pr="$(gh pr list --repo "$REPOSITORY" --base develop --head "$version_branch" --state open --json number --jq '.[0].number // empty')"
           if [[ -n "$existing_pr" ]]; then
             echo "Version bump PR #$existing_pr is already open."
-            enable_auto_merge "$existing_pr"
             ensure_release_test "$existing_pr" "$version_branch" "$next_tag"
+            enable_auto_merge "$existing_pr"
             exit 0
           fi
           if git ls-remote --exit-code --heads origin "$version_branch" >/dev/null 2>&1; then
@@ -323,9 +333,9 @@ jobs:
             --head "$version_branch" \
             --title "chore(release): set application version to $next_tag" \
             --body "Synchronize APP_VERSION with the upcoming GitHub release $next_tag. Merge this PR to promote the release to main.")"
-          enable_auto_merge "$version_pr_url"
           version_pr_number="$(gh pr view "$version_pr_url" --repo "$REPOSITORY" --json number --jq '.number')"
           ensure_release_test "$version_pr_number" "$version_branch" "$next_tag"
+          enable_auto_merge "$version_pr_url"
 
   create-release:
     # Release only after the merged main commit passes its own tests. Review
