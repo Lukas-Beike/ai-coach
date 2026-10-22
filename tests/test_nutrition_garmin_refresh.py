@@ -340,8 +340,16 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock()
         client.get_daily_summaries.return_value = [
-            {"calendarDate": "2026-09-23", "totalKilocalories": 2000},
-            {"calendarDate": "2026-09-24", "totalKilocalories": 2100},
+            {
+                "calendarDate": "2026-09-23",
+                "totalKilocalories": 2000,
+                "bmrKilocalories": 1700,
+            },
+            {
+                "calendarDate": "2026-09-24",
+                "totalKilocalories": 2100,
+                "calories": {"burnedResting": 1700},
+            },
         ]
         reader.configured = Mock(return_value=True)
         reader._external_call = lambda _cancel: (
@@ -358,6 +366,32 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         self.assertEqual(len(records), 2)
         client.get_daily_summaries.assert_called_once_with("2026-09-23", "2026-09-24")
         client.get_user_summary.assert_not_called()
+
+    def test_remote_energy_refresh_reads_missing_resting_energy_per_day(self) -> None:
+        reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
+        client = Mock()
+        client.get_daily_summaries.return_value = [
+            {"calendarDate": "2026-09-24", "calories": {"burnedTotal": 733}}
+        ]
+        client.get_user_summary.return_value = {
+            "calendarDate": "2026-09-24",
+            "bmrKilocalories": 2313,
+        }
+        reader.configured = Mock(return_value=True)
+        reader._external_call = lambda _cancel: (
+            lambda _service, _operation, call, _details: call()
+        )
+        reader._authenticated_client = lambda _external: (client, "")
+        reader._garmin_tokens = None
+
+        records, complete = reader.fetch_nutrition_data(
+            "daily_stats", date(2026, 9, 24), date(2026, 9, 24)
+        )
+
+        self.assertTrue(complete)
+        self.assertEqual(records[0]["bmrKilocalories"], 2313)
+        self.assertEqual(records[0]["calories"], {"burnedTotal": 733})
+        client.get_user_summary.assert_called_once_with("2026-09-24")
 
     def test_remote_body_refresh_uses_only_the_weight_range(self) -> None:
         reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))

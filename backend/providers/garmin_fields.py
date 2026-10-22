@@ -59,6 +59,17 @@ GARMIN_ACTIVE_KCAL_ALIASES = (
     "activeCaloriesBurned",
     "active_calories_burned",
 )
+GARMIN_RESTING_KCAL_ALIASES = (
+    "bmrKilocalories",
+    "bmr_kilocalories",
+    "bmrCalories",
+    "bmr_calories",
+    "restingKilocalories",
+    "resting_kilocalories",
+    "restingCalories",
+    "resting_calories",
+    "basalMetabolicRateKilocalories",
+)
 GARMIN_ENDURANCE_SCORE_ALIASES = ("overallScore",)
 GARMIN_ENDURANCE_WRAPPER_KEYS = ("enduranceScoreDTO", "enduranceScoreDTOList")
 GARMIN_RACE_TIME_ALIASES = (
