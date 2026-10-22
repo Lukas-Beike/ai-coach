@@ -201,11 +201,7 @@ class WeatherService:
         force: bool,
         track_refresh: bool,
     ) -> bool:
-        if not (
-            force
-            or not state.cache_matches
-            or state.cache_age >= self._retry_policy.cache_seconds
-        ):
+        if not (force or self._expired(state)):
             return False
         if cache.retry_wait(state.failure, now=self._now()) > 0 and not force:
             state.error = "Wetterdaten konnten nach einem Fehler noch nicht erneut geladen werden."
@@ -229,6 +225,27 @@ class WeatherService:
         except Exception as exc:  # noqa: BLE001 - provider boundary normalizes failures
             return self._record_failure(state, exc, refresh_id)
         return False
+
+    def refresh_due(self) -> bool:
+        """Return whether an unforced refresh would read the forecast now."""
+        query, cached_value, failure_value = self._cache_store.read()
+        if not query:
+            return False
+        now = self._now()
+        state = cache.cache_state(
+            query,
+            cached_value,
+            failure_value,
+            now=now,
+            cache_seconds=self._retry_policy.cache_seconds,
+        )
+        return self._expired(state) and cache.retry_wait(state.failure, now=now) <= 0
+
+    def _expired(self, state: cache.WeatherCacheState) -> bool:
+        return (
+            not state.cache_matches
+            or state.cache_age >= self._retry_policy.cache_seconds
+        )
 
     def _record_failure(
         self,

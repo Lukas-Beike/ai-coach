@@ -39,16 +39,25 @@ ScheduleTrigger = Literal["daily", "startup"]
 
 
 class WeatherSchedulePolicy:
-    """Scheduled when a weather location is saved; startup forces the refresh."""
+    """Scheduled when a weather location is saved; startup forces the refresh.
 
-    def __init__(self, profile: ProfileService) -> None:
+    ``refresh_due`` reports whether an unforced refresh would read the forecast,
+    so a daily pass skips the job while the cache is fresh or a retry waits.
+    """
+
+    def __init__(
+        self,
+        profile: ProfileService,
+        refresh_due: Callable[[], bool] | None = None,
+    ) -> None:
         self._profile = profile
+        self._refresh_due = refresh_due
 
     def configured(self) -> bool:
         return bool(self._profile.get().get("weather_location", "").strip())
 
     def blocked(self) -> bool:
-        return False
+        return self._refresh_due is not None and not self._refresh_due()
 
     def refresh_payload(self, trigger: ScheduleTrigger, reason: str) -> dict[str, Any]:
         return {"force": trigger == "startup", "reason": reason}
