@@ -1392,7 +1392,8 @@ function seasonStatusLabel(status) {
 }
 
 function seasonDistance(value) {
-  return value == null ? "unbekannt" : (AppFormat.distance(value) ?? "0 km");
+  if (value === 0) return "0 km";
+  return AppFormat.distance(value) ?? "unbekannt";
 }
 
 function seasonDuration(value) {
