@@ -557,13 +557,10 @@ class StructuredTrainingPlanResolver:
 
     def _apply_authorized_plan(
         self,
-        derived_plan: dict[str, str],
-        authorized_plan_id: str | None,
+        referenced_memberships: set[str],
+        authorized_plan_id: str,
         db: Any,
     ) -> dict[str, str]:
-        authorized_plan_id = str(authorized_plan_id or "").strip()
-        if not authorized_plan_id:
-            return derived_plan
         authorized_plan = self.repository.get(db, authorized_plan_id)
         if not authorized_plan or authorized_plan.get("status") == "archived":
             raise AppError(
@@ -571,7 +568,9 @@ class StructuredTrainingPlanResolver:
                 "Der benannte Trainingsplan ist nicht aktiv.",
                 reason="plan_not_available",
             )
-        if derived_plan and derived_plan["plan_id"] != authorized_plan_id:
+        # A named plan covers only units that already belong to it: a foreign,
+        # empty or mixed membership is rejected before any write.
+        if referenced_memberships - {authorized_plan_id}:
             raise AppError(
                 403,
                 "Die Planreferenzen der Änderung sind nicht eindeutig.",
@@ -588,8 +587,12 @@ class StructuredTrainingPlanResolver:
         authorized_plan_id: str | None,
         db: Any,
     ) -> dict[str, str]:
-        derived_plan = self._derived_plan(referenced_memberships, db)
-        return self._apply_authorized_plan(derived_plan, authorized_plan_id, db)
+        authorized_plan_id = str(authorized_plan_id or "").strip()
+        if not authorized_plan_id:
+            return self._derived_plan(referenced_memberships, db)
+        return self._apply_authorized_plan(
+            referenced_memberships, authorized_plan_id, db
+        )
 
     @staticmethod
     def _validate_create_plan_ids(

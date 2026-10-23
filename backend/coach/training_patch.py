@@ -8,7 +8,11 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.coach.authorization import require_coach_scope
+from backend.coach.authorization import (
+    TRAINING_PLAN_SCOPE_PREFIX,
+    require_coach_scope,
+    scope_values,
+)
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
@@ -75,6 +79,18 @@ class CoachTrainingPatchService:
         ]
         if normalized:
             require_coach_scope(action, "local_plan")
+        plan_ids = sorted(
+            token.split(":", 1)[1]
+            for token in scope_values(action)
+            if token.startswith(TRAINING_PLAN_SCOPE_PREFIX) and token.split(":", 1)[1]
+        )
+        if len(plan_ids) > 1:
+            raise AppError(
+                400,
+                "Die Änderungen dürfen nur einen konkret benannten Trainingsplan auswählen.",
+                reason="intent_scope_denied",
+            )
+        authorized_plan_id = plan_ids[0] if plan_ids else None
         ids = [str(item.get("local_id") or "") for item in changes]
         if len(set(ids)) != len(ids):
             raise AppError(
@@ -96,7 +112,12 @@ class CoachTrainingPatchService:
                 )
             self._validate_schedule(changes, normalized, ids, db)
             changed = (
-                self._change_service.apply_in_db(db, arguments, require_revision=True)
+                self._change_service.apply_in_db(
+                    db,
+                    arguments,
+                    require_revision=True,
+                    authorized_plan_id=authorized_plan_id,
+                )
                 if changes
                 else {"changes": []}
             )
@@ -111,7 +132,9 @@ class CoachTrainingPatchService:
                 if normalized
                 else []
             )
-            self._store_constraints(created, ids, action["request"]["constraints"], db)
+            self._store_constraints(
+                created, ids, action["request"]["constraints"], authorized_plan_id, db
+            )
             revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
         self._events.publish("planning", {"status": "changed"})
         return {
@@ -144,12 +167,16 @@ class CoachTrainingPatchService:
         created: list[dict[str, Any]],
         ids: list[str],
         constraints: list[str],
+        authorized_plan_id: str | None,
         db: Any,
     ) -> None:
         plan_ids = {str(item.get("plan_id") or "") for item in created}
         for local_id in ids:
             row = db.execute(SELECT_PLANNED_PAYLOAD_SQL, (local_id,)).fetchone()
-            plan_ids.add(str(json.loads(row["payload"]).get("plan_id") or ""))
+            unit_plan_id = str(json.loads(row["payload"]).get("plan_id") or "")
+            # A named plan never receives constraints under another unit's plan.
+            if not authorized_plan_id or unit_plan_id == authorized_plan_id:
+                plan_ids.add(unit_plan_id)
         if constraints:
             for plan_id in plan_ids - {""}:
                 self._key_values.set(

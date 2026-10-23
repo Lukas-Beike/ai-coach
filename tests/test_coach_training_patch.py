@@ -15,6 +15,133 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
     def action(self, *scopes: str) -> dict:
         return {"authorization_scope": list(scopes), "request": {"constraints": []}}
 
+    def add_plan(self, plan_id: str) -> None:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db,
+                plan_id,
+                plan_id,
+                "Build",
+                "2026-09-01",
+                "2026-09-30",
+                "planned",
+                "2026-09-01T00:00:00Z",
+            )
+
+    def add_unit(self, plan_id: str, day: str) -> str:
+        workout = {**self.workout(day=day), "plan_id": plan_id, "plan_name": plan_id}
+        return server.PLANNING_DATA.planned_unit().create(workout)["id"]
+
+    def rename(self, local_id: str) -> dict:
+        state = self.state()
+        expected_hash = next(
+            item["expected_payload_hash"]
+            for item in state["planned_units"]
+            if item["local_id"] == local_id
+        )
+        change = {
+            "local_id": local_id,
+            "action": "update",
+            "name": "Renamed",
+            "expected_payload_hash": expected_hash,
+        }
+        return {
+            "expected_revision": state["planning_revision"],
+            "changes": [change],
+            "workouts": [],
+        }
+
+    def constraints(self, plan_id: str) -> str | None:
+        return server.key_value_service().get(COACH_PLAN_CONSTRAINTS_PREFIX + plan_id)
+
+    def test_named_plan_rejects_foreign_unit_before_write(self):
+        self.add_plan("plan-a")
+        self.add_plan("plan-b")
+        unit_b = self.add_unit("plan-b", "2026-09-10")
+        action = self.action("training_plan:plan-a", f"planned_unit:{unit_b}")
+        action["request"]["constraints"] = ["Synthetic no intensity"]
+        before = self.state()
+        with self.assertRaises(server.AppError) as error:
+            server.COACH_PLANNING_TOOLS.training_patch_service().apply(
+                self.rename(unit_b), action
+            )
+        self.assertEqual(error.exception.status, 403)
+        self.assertEqual(error.exception.reason, "intent_scope_denied")
+        self.assertEqual(self.state(), before)
+        self.assertIsNone(self.constraints("plan-a"))
+        self.assertIsNone(self.constraints("plan-b"))
+
+    def test_named_plan_stores_constraints_only_under_that_plan(self):
+        self.add_plan("plan-a")
+        self.add_plan("plan-b")
+        unit_a = self.add_unit("plan-a", "2026-09-10")
+        self.add_unit("plan-b", "2026-09-11")
+        action = self.action("training_plan:plan-a", f"planned_unit:{unit_a}")
+        action["request"]["constraints"] = ["Synthetic no intensity"]
+        result = server.COACH_PLANNING_TOOLS.training_patch_service().apply(
+            self.rename(unit_a), action
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            json.loads(self.constraints("plan-a") or "null"),
+            action["request"]["constraints"],
+        )
+        self.assertIsNone(self.constraints("plan-b"))
+
+    def test_two_named_plans_are_rejected_before_write(self):
+        self.add_plan("plan-a")
+        self.add_plan("plan-b")
+        unit_a = self.add_unit("plan-a", "2026-09-10")
+        before = self.state()
+        action = self.action(
+            "local_plan",
+            "training_plan:plan-a",
+            "training_plan:plan-b",
+            f"planned_unit:{unit_a}",
+        )
+        for arguments in (
+            self.rename(unit_a),
+            {
+                "expected_revision": before["planning_revision"],
+                "changes": [],
+                "workouts": [self.workout(day="2026-09-12")],
+            },
+        ):
+            with self.subTest(changes=bool(arguments["changes"])):
+                with self.assertRaises(server.AppError) as error:
+                    server.COACH_PLANNING_TOOLS.training_patch_service().apply(
+                        arguments, action
+                    )
+                self.assertEqual(error.exception.reason, "intent_scope_denied")
+        self.assertEqual(self.state(), before)
+
+    def test_patch_without_named_plan_keeps_unit_changes_and_creations(self):
+        self.add_plan("plan-b")
+        unit_b = self.add_unit("plan-b", "2026-09-10")
+        action = self.action("local_plan", f"planned_unit:{unit_b}")
+        action["request"]["constraints"] = ["Synthetic no intensity"]
+        result = server.COACH_PLANNING_TOOLS.training_patch_service().apply(
+            self.rename(unit_b), action
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            json.loads(self.constraints("plan-b") or "null"),
+            action["request"]["constraints"],
+        )
+        names = {
+            item["local_id"]: item["name"] for item in self.state()["planned_units"]
+        }
+        self.assertEqual(names[unit_b], "Renamed")
+        created = server.COACH_PLANNING_TOOLS.training_patch_service().apply(
+            {
+                "expected_revision": self.state()["planning_revision"],
+                "changes": [],
+                "workouts": [self.workout(day="2026-09-12")],
+            },
+            self.action("local_plan", "training_plan:plan-b"),
+        )
+        self.assertEqual(len(created["library_entry_ids"]), 1)
+
     def test_one_batch_creates_workout_and_advances_revision_once(self):
         before = self.state()["planning_revision"]
         result = server.COACH_PLANNING_TOOLS.training_patch_service().apply(
