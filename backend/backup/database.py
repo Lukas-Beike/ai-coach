@@ -128,6 +128,11 @@ class DatabaseBackupService:
             raise AppError(413, "Das Datenbank-Backup überschreitet das Größenlimit.")
         self._check_free_space(expected_size + self._config.minimum_free_bytes)
 
+    def has_free_space_for(self, copy_bytes: int) -> bool:
+        """Whether a copy of this size still leaves the configured reserve free."""
+        free_bytes = self._config.disk_usage(self._config.data_dir).free
+        return free_bytes >= copy_bytes + self._config.minimum_free_bytes
+
     def _check_free_space(self, required_bytes: int) -> None:
         free_bytes = self._config.disk_usage(self._config.data_dir).free
         if free_bytes < required_bytes:

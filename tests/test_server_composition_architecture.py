@@ -576,6 +576,36 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             ast.unparse(read_selector.value.func),
         )
 
+    def test_startup_sweeps_orphaned_staging_files_once_before_workers(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        sweeps = [
+            ast.unparse(node)
+            for node in ast.walk(server_tree)
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func).endswith("remove_orphaned_staging_files")
+        ]
+        self.assertEqual(["remove_orphaned_staging_files(DATA_DIR, LOGGER)"], sweeps)
+
+        main = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "main"
+        )
+        statements = [ast.unparse(statement) for statement in main.body]
+        sweep = statements.index(sweeps[0])
+        self.assertEqual("initialise_database()", statements[sweep - 1])
+        first_start = min(
+            index
+            for index, statement in enumerate(main.body)
+            if any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "start"
+                for node in ast.walk(statement)
+            )
+        )
+        self.assertLess(sweep, first_start)
+
     def test_weather_service_cache_is_owned_by_weather_service_module(self) -> None:
         weather_tree = _parse(BACKEND_ROOT / "weather" / "service.py")
         self.assertTrue(

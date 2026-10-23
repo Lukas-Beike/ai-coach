@@ -33,6 +33,7 @@ from backend.db.schema import (
 )
 from backend.http_api import server as http_server_module
 from backend.http_api.chat_page import ChatHistoryPageService
+from backend.http_api.export_streams import ExportStreamTransport
 from backend.http_api.public_state import PublicStateService
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.response_transport import STREAM_CHUNK_BYTES
@@ -911,6 +912,50 @@ class ServerDatabaseTests(ServerTestCase):
             self.assertTrue(lock_acquired.wait(1))
             lock_probe.join(1)
             self.assertFalse(lock_probe.is_alive())
+
+    def privacy_export_in(self, data_dir):
+        service = server.PRIVACY_ASSEMBLY.archive_export_service()
+        config = replace(
+            service._config,
+            data_dir=data_dir,
+            minimum_free_bytes=1,
+            disk_usage=lambda _path: Mock(free=10**12),
+        )
+        return service, patch.object(service, "_config", config)
+
+    def test_interrupted_privacy_export_leaves_no_plaintext_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            service, configured = self.privacy_export_in(data_dir)
+            with (
+                configured,
+                patch.object(
+                    service, "_application_state", side_effect=KeyboardInterrupt
+                ),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                service.create_file()
+            self.assertEqual(list(data_dir.iterdir()), [])
+
+    def test_streamed_privacy_export_leaves_no_archive_after_the_response(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            service, configured = self.privacy_export_in(data_dir)
+            handler = object.__new__(server.HTTP_API.request_handler_class())
+            handler.send_response = Mock()
+            handler.send_header = Mock()
+            handler.end_headers = Mock()
+            handler.wfile = BytesIO()
+            transport = ExportStreamTransport(
+                Mock(side_effect=RuntimeError("unused database backup")),
+                lambda: service,
+                monotonic=time.monotonic,
+                time_limit_seconds=30,
+            )
+            with configured:
+                transport.stream_privacy_export(handler)
+            self.assertTrue(zipfile.is_zipfile(BytesIO(handler.wfile.getvalue())))
+            self.assertEqual(list(data_dir.iterdir()), [])
 
     def test_file_stream_uses_bounded_chunks_and_cleans_up_after_disconnect(self):
         class RecordingWriter:
