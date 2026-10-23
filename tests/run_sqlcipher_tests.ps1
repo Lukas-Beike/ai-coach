@@ -54,6 +54,7 @@ Write-Host "Running the container unit-test suite with a read-only source mount.
     --volume "${repositoryRoot}/requirements-dev.in:/review/requirements-dev.in:ro" `
     --volume "${repositoryRoot}/requirements-dev.txt:/review/requirements-dev.txt:ro" `
     --volume "${pyprojectFile}:/review/pyproject.toml:ro" `
+    --volume "${repositoryRoot}/README.md:/review/README.md:ro" `
     --volume "${docsDirectory}:/review/docs:ro" `
     --volume "${publicDirectory}:/review/public:ro" `
     --volume "${serverFile}:/review/server.py:ro" `

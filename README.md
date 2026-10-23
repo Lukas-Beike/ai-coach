@@ -293,9 +293,12 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 
 ### Docker Run
 
-Run the published container image with a persistent data volume and read-only container root:
+Run the published container image with a persistent data volume and read-only container root. The app runs as UID 100 / GID 101, so on a Linux host the data directory must belong to that user before the first start:
 
 ```sh
+mkdir -p /mnt/user/appdata/ai-coach/data
+chown -R 100:101 /mnt/user/appdata/ai-coach/data
+
 docker pull ghcr.io/lukas-beike/ai-coach:latest
 
 docker run -d \
@@ -340,18 +343,21 @@ services:
       - TZ=Europe/Berlin
 ```
 
-Start the service:
+Start the service. The app runs as UID 100 / GID 101, so on a Linux host give it the data directory first:
 
 ```sh
+mkdir -p data
+chown -R 100:101 data
 docker compose up -d
 ```
 
 ### Unraid Deployment Guide
 
 1. **Prepare Appdata Directory**:
-   Create the storage folder on your cache pool and ensure it is writable by the container user (UID 100 / GID 101 or standard app permissions):
+   Create the storage folder on your cache pool and give it to the container user, which runs as UID 100 / GID 101:
    ```sh
    mkdir -p /mnt/user/appdata/ai-coach/data
+   chown -R 100:101 /mnt/user/appdata/ai-coach/data
    chmod -R 770 /mnt/user/appdata/ai-coach/data
    ```
 2. **Container Template Setup**:
@@ -427,7 +433,7 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). The primary way to co
 
 An existing token file at `/data/garmin_tokens` is imported once when the database has no Garmin tokens yet. The file is left in place and is not deleted by the import. Because it is plaintext JSON protected only by owner-only file permissions, keep `/data` and every backup of it on encrypted host storage, and treat the file like a password.
 
-The bundled `garmin-login.py` helper is still available as an alternative for headless setups. It runs inside a temporary container attached to your data directory:
+The bundled `garmin-login.py` helper is still available as an alternative for headless setups. It runs inside a temporary container attached to your data directory, which on a Linux host must already belong to UID 100 / GID 101 (`chown -R 100:101`, see [Docker Run](#docker-run)):
 
 ```sh
 docker run --rm -it \
@@ -563,7 +569,7 @@ Cooldown
 ### SQLCipher Encryption
 All persistent application state is stored in `/data/intervals-coach.db` encrypted with AES-256 via SQLCipher. The database key is derived from `APP_PASSWORD`. The application will refuse to start without SQLCipher libraries present.
 
-Each pooled database connection uses a 32 MiB page-cache budget to reduce repeated encrypted reads of large histories. The default pool has four readers and one writer (up to 160 MiB of page caches, allocated as needed).
+Each pooled database connection uses a 16 MiB page-cache budget to reduce repeated encrypted reads of large histories. The default pool has four readers and one writer (up to 80 MiB of page caches, allocated as needed).
 
 ### Maintenance Mode & Database Restoration
 When a database restore is initiated:

@@ -13,8 +13,8 @@ COPY public /app/public
 COPY requirements.txt /app/requirements.txt
 
 RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r /app/requirements.txt \
-    && addgroup --system app \
-    && adduser --system --ingroup app app \
+    && addgroup --system --gid 101 app \
+    && adduser --system --uid 100 --ingroup app app \
     && mkdir -p /data \
     && chown -R app:app /data \
     && chmod -R a-w /app
