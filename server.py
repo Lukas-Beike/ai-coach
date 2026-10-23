@@ -36,6 +36,7 @@ from backend.backup.assembly import (
     RestoreLifecycleDependencies,
     RestoreValidationDependencies,
 )
+from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.calendar import local as calendar_local
 from backend.coach import attachments as coach_attachments
 from backend.coach import context as coach_context_module
@@ -2203,6 +2204,7 @@ def main() -> None:
         },
     )
     initialise_database()
+    remove_orphaned_staging_files(DATA_DIR, LOGGER)
     server = http_server.CoachHTTPServer(
         ("0.0.0.0", CONFIG.port), HTTP_API.request_handler_class()
     )
