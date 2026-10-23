@@ -15,6 +15,7 @@ from backend.performance.current_metrics import as_number as _as_number
 from backend.performance.current_metrics import metric as _metric
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.garmin_fields import colon_time_parts
 from backend.providers.garmin_fields import first_present as _first_present
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -54,12 +55,13 @@ def _garmin_vo2_value(value: Any) -> float | int | None:
 
 
 def _garmin_colon_duration_seconds(value: str) -> int | None:
-    parts = value.strip().split(":")
-    if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
+    numbers = colon_time_parts(value)
+    if numbers is None:
         return None
-    numbers = [int(part) for part in parts]
     seconds = (
-        numbers[-1] + numbers[-2] * 60 + (numbers[-3] * 3600 if len(parts) == 3 else 0)
+        numbers[-1]
+        + numbers[-2] * 60
+        + (numbers[-3] * 3600 if len(numbers) == 3 else 0)
     )
     return seconds if 60 <= seconds <= 100_000 else None
 
@@ -157,13 +159,12 @@ def garmin_bounded_metric(
 
 def _garmin_pace_seconds(value: Any) -> float | int | None:
     if isinstance(value, str) and ":" in value:
-        parts = value.strip().split(":")
-        if len(parts) in (2, 3) and all(part.isdigit() for part in parts):
-            numbers = [int(part) for part in parts]
+        numbers = colon_time_parts(value)
+        if numbers is not None:
             value = (
                 numbers[-1]
                 + numbers[-2] * 60
-                + (numbers[-3] * 3600 if len(parts) == 3 else 0)
+                + (numbers[-3] * 3600 if len(numbers) == 3 else 0)
             )
     number = _garmin_numeric(value)
     if number is None or number <= 0:

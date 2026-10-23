@@ -9,6 +9,7 @@ a log or a return value. Nothing is written to Wahoo.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from http.client import HTTPException
 from typing import Any, Final
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -94,14 +95,14 @@ def download_wahoo_fit(
     except HTTPError as error:
         error.close()
         reason = _http_reason(error.code)
-    except OSError:
+    except OSError, HTTPException:
         reason = "unavailable"
     else:
         try:
             return read_bounded_response(response, MAX_WAHOO_FIT_BYTES)
         except ProviderResponseTooLarge:
             reason = "too_large"
-        except OSError:
+        except OSError, HTTPException:
             reason = "unavailable"
         finally:
             response.close()

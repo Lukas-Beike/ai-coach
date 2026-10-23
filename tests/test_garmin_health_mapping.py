@@ -1390,6 +1390,18 @@ class RacePredictionTests(unittest.TestCase):
             ],
         )
 
+    def test_non_ascii_or_overlong_colon_times_are_reported(self) -> None:
+        for text in ("²:30", "1" * 4301 + ":30"):
+            with self.subTest(length=len(text)):
+                result = _map({"race_predictions": {"5k": text}})
+
+                self.assertEqual(result.records, ())
+                self.assertEqual(
+                    _issues(result),
+                    [("race_predictions[0]", "5k", IssueReason.INVALID_NUMBER)],
+                )
+        self.assertEqual(self._seconds({"5k": "25:30"}), {"race_prediction_5k": 1530.0})
+
 
 class EnduranceScoreTests(unittest.TestCase):
     def test_wrapped_endurance_score_is_mapped(self) -> None:

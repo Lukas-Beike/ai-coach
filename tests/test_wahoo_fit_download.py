@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import unittest
 from email.message import Message
+from http.client import BadStatusLine, IncompleteRead
 from unittest import mock
 from urllib.error import HTTPError, URLError
 
@@ -138,7 +139,7 @@ class WahooFitDownloadTests(unittest.TestCase):
                 self.assert_no_url_text(caught.exception)
 
     def test_transport_failures_map_to_unavailable(self) -> None:
-        failures = [URLError(URL), TimeoutError(URL), OSError(URL)]
+        failures = [URLError(URL), TimeoutError(URL), OSError(URL), BadStatusLine(URL)]
         for failure in failures:
             with self.subTest(failure=type(failure).__name__):
                 with self.assertRaises(WahooFitUnavailable) as caught:
@@ -148,6 +149,14 @@ class WahooFitDownloadTests(unittest.TestCase):
 
     def test_read_failure_maps_to_unavailable_and_closes_the_response(self) -> None:
         response = FakeResponse(read_error=TimeoutError(URL))
+        with self.assertRaises(WahooFitUnavailable) as caught:
+            download_wahoo_fit(URL, opener=mock.Mock(return_value=response))
+        self.assertEqual("unavailable", caught.exception.reason)
+        self.assertEqual(1, response.closed)
+        self.assert_no_url_text(caught.exception)
+
+    def test_incomplete_read_maps_to_unavailable_and_closes_the_response(self) -> None:
+        response = FakeResponse(read_error=IncompleteRead(b"partial"))
         with self.assertRaises(WahooFitUnavailable) as caught:
             download_wahoo_fit(URL, opener=mock.Mock(return_value=response))
         self.assertEqual("unavailable", caught.exception.reason)

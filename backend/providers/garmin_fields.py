@@ -1,5 +1,6 @@
 """Shared Garmin field aliases and value lookup, without runtime dependencies."""
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -81,6 +82,7 @@ GARMIN_RACE_TIME_ALIASES = (
     "value",
 )
 GARMIN_RACE_DISTANCE_ALIASES = ("raceDistance", "distanceName", "raceType", "distance")
+_COLON_TIME_PART = re.compile(r"[0-9]{1,6}")
 
 
 # Garmin's range endpoint nests the daily values the per-day summary keeps flat.
@@ -121,6 +123,21 @@ def flatten_daily_summary(record: Mapping[str, Any]) -> Mapping[str, Any]:
         and not (key == "calories" and isinstance(value, Mapping))
     }
     return {**extra, **flat}
+
+
+def colon_time_parts(text: str) -> list[int] | None:
+    """Return the numbers of ``mm:ss`` or ``h:mm:ss`` text, or None for other text.
+
+    Each part is one to six ASCII digits once its surrounding whitespace is
+    stripped, so ``int`` neither fails on other digit characters nor converts
+    unbounded text.
+    """
+    parts = [part.strip() for part in text.split(":")]
+    if len(parts) not in (2, 3) or not all(
+        _COLON_TIME_PART.fullmatch(part) for part in parts
+    ):
+        return None
+    return [int(part) for part in parts]
 
 
 def first_present(item: Any, keys: tuple[str, ...]) -> Any:
