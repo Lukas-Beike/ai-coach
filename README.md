@@ -1109,8 +1109,16 @@ Beschreibt der Athlet eine Mahlzeit mit Zutaten und Mengen, gleicht der Coach
 jede Zutat zuerst mit den gespeicherten Produkten ab und nutzt passende
 Produkte mit ihrer ID; die Textsuche findet ein Produkt, wenn jedes Suchwort in
 Name oder Marke vorkommt (`%` und `_` zählen wörtlich; Wörter mit weniger als
-drei Zeichen müssen ein Wort beginnen, damit „Ei“ nicht „Reisnudeln“ findet; Satzzeichen wie Kommas oder Klammern um ein Wort werden ignoriert). Erst für Zutaten ohne passendes Produkt fragt er BLS
-oder Open Food Facts ab; auch dann liefert die Suche passende
+drei Zeichen müssen ein Wort beginnen, damit „Ei“ nicht „Reisnudeln“ findet; Satzzeichen wie Kommas oder Klammern um ein Wort werden ignoriert). Findet
+diese Suche nichts, prüft sie die 100 zuletzt geänderten Produkte erneut ohne
+Groß-/Kleinschreibung und Umlaute, mit Pluralformen und einem Tippfehler
+(„Champignons“ findet „Champignon“, „zuccini“ findet „Zucchini“); auch dann muss
+jedes Suchwort passen. Erst für Zutaten ohne passendes Produkt fragt er BLS
+oder Open Food Facts ab. Die BLS-Suche toleriert ebenfalls Pluralformen,
+Tippfehler und „Soße“/„Sauce“; ganze Wörter und Wortenden ranken vor
+Wortanfängen, damit „Reis“ Reis statt „Erdbeereis“ liefert. Enthält kein Eintrag
+alle Suchwörter, liefert sie Teiltreffer aus den bekannten Wortteilen
+(„Risottoreis“ findet Reis und Risotto) und kennzeichnet sie als solche; auch dann liefert die Suche passende
 gespeicherte Produkte mit, auch wenn die externe Datenbank nicht erreichbar ist
 oder die Anfrage ablehnt. Alle Zutaten einer Mahlzeit werden in einer Suche
 abgefragt (höchstens 20 Begriffe); ein fehlgeschlagener Begriff lässt die
