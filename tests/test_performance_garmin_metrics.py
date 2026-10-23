@@ -32,6 +32,20 @@ class GarminMetricHelperTests(unittest.TestCase):
         self.assertIsNone(garmin_bounded_metric(49, 50, 700))
         self.assertIsNone(garmin_bounded_metric(float("inf"), 50, 700))
 
+    def test_non_ascii_or_overlong_colon_text_is_absent(self):
+        self.assertEqual(garmin_duration_seconds("25:30"), 1530)
+        self.assertEqual(garmin_duration_seconds(" 42:30 "), 2550)
+        for text in ("²:30", "1" * 4301 + ":30"):
+            with self.subTest(length=len(text)):
+                self.assertIsNone(garmin_duration_seconds(text))
+                for key in ("speed", "thresholdPace"):
+                    result = garmin_performance_metrics(
+                        {"running_threshold": {key: text}}, CURRENT_DATE
+                    )
+                    self.assertIsNone(
+                        result["run_threshold_pace_seconds_per_km"]["value"]
+                    )
+
     def test_profile_max_hr_uses_nested_sport_categories(self):
         zones = [
             {"sport": "cycling", "maxHeartRateUsed": 181},

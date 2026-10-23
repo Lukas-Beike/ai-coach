@@ -147,6 +147,7 @@ from backend.providers.garmin_fields import (
     GARMIN_TOTAL_KCAL_ALIASES,
     GARMIN_VO2MAX_ALIASES,
     GARMIN_WEIGHT_UNIT_ALIASES,
+    colon_time_parts,
     flatten_daily_summary,
 )
 from backend.providers.garmin_weight_walk import (
@@ -684,12 +685,12 @@ def _race_children(value: object) -> list[Mapping[str, object]]:
 
 def _colon_seconds(text: str) -> float | None:
     """Seconds of ``mm:ss`` or ``h:mm:ss`` text, or None for any other text."""
-    parts = text.strip().split(":")
-    if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
+    parts = colon_time_parts(text)
+    if parts is None:
         return None
     seconds = 0.0
     for part in parts:
-        seconds = seconds * 60 + int(part)
+        seconds = seconds * 60 + part
     return seconds
 
 
