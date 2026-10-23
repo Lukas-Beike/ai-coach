@@ -778,6 +778,18 @@ class SyncJobStore:
                 "WHERE key='performance_refresh_running' AND value='1'",
                 (now,),
             )
+            # Callers run before the workers start or under the drained restore
+            # gate, so no competition sync can be in flight either.
+            db.execute(
+                "UPDATE kv SET value='0', updated_at=? "
+                "WHERE key='competition_sync_running' AND value!='0'",
+                (now,),
+            )
+            db.execute(
+                "UPDATE kv SET value='', updated_at=? "
+                "WHERE key='competition_sync_status' AND value!=''",
+                (now,),
+            )
             return len(jobs)
 
     def claim(self) -> dict[str, Any] | None:

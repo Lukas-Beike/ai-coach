@@ -1052,6 +1052,30 @@ class SyncJobStoreTests(unittest.TestCase):
             }
         self.assertEqual(values, {"performance_refresh_running": "0", "other": "1"})
 
+    def test_resume_interrupted_resets_stale_competition_sync_markers(self):
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO kv(key, value, updated_at) VALUES "
+                "('competition_sync_running', '1', ?), "
+                "('competition_sync_status', 'Zielwettkämpfe werden synchronisiert…', ?), "
+                "('performance_refresh_running', '1', ?)",
+                (self.now, self.now, self.now),
+            )
+        self.store.resume_interrupted()
+        with self.manager.unit_of_work() as db:
+            values = {
+                row["key"]: row["value"]
+                for row in db.execute("SELECT key, value FROM kv").fetchall()
+            }
+        self.assertEqual(
+            values,
+            {
+                "competition_sync_running": "0",
+                "competition_sync_status": "",
+                "performance_refresh_running": "0",
+            },
+        )
+
     def test_automatic_refresh_and_backfill_requests_coalesce_atomically(self):
         for job_type, payload in (
             ("refresh", {"reason": "daily"}),

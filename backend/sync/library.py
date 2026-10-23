@@ -28,6 +28,7 @@ from backend.observability import Redactor
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
 from backend.planning.library_service import WorkoutLibraryService
+from backend.providers.http import ProviderHTTPError
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import maintenance_operation
 from backend.sync.gates import intervals_operation
@@ -383,6 +384,23 @@ class WorkoutLibrarySyncStateService:
                 ),
             )
         return True
+
+    def mark_remote_missing(self, local_id: str) -> None:
+        """Record a remote deletion found mid-sync; the local edit stays dirty."""
+        with self._database_manager.unit_of_work() as db:
+            row = db.execute(
+                "SELECT payload FROM workout_library WHERE local_id=?", (local_id,)
+            ).fetchone()
+            if row is None:
+                return
+            payload = self._object_payload(row["payload"])
+            payload["sync_status"] = "remote_missing"
+            db.execute(
+                "UPDATE workout_library SET payload=?, sync_dirty=1, "
+                "sync_state='remote_missing', sync_error=NULL, updated_at=? "
+                "WHERE local_id=?",
+                (json.dumps(payload, ensure_ascii=False), self._now(), local_id),
+            )
 
     def summary(self) -> dict[str, int]:
         with self._database_manager.unit_of_work() as db:
@@ -780,8 +798,18 @@ class WorkoutLibrarySyncService:
         external_id = str(row.get("external_id") or "")
         payload = self._export.serialize_library(local_workout)
         if external_id and row.get("sync_state") != "remote_missing":
-            updated = self._export.library_update(external_id, payload)
-            return {**updated, "id": external_id}
+            try:
+                updated = self._export.library_update(external_id, payload)
+            except (AppError, ProviderHTTPError) as exc:
+                status = (
+                    exc.upstream_status if isinstance(exc, AppError) else exc.status
+                )
+                if status != 404:
+                    raise
+                # Deleted in Intervals.icu: this athlete-named sync re-creates it.
+                self._state_service.mark_remote_missing(str(row["local_id"]))
+            else:
+                return {**updated, "id": external_id}
         remote_workouts = self._export.library_list()
         recovered = next(
             (
