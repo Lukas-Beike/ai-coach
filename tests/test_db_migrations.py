@@ -9,7 +9,7 @@ from typing import Any, ClassVar
 from unittest import mock
 
 from backend.canonical.vocabulary import ProviderId
-from backend.db import garmin_items_migration, garmin_store, migrations
+from backend.db import garmin_items_migration, garmin_store, migrations, row_factory
 from backend.db.manager import DatabaseManager
 from backend.db.migrations import migrate_schema
 from backend.db.schema import (
@@ -527,6 +527,19 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
         self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_v12_upgrade_works_with_the_application_row_factory(self):
+        # The application reads rows as plain mappings without positional access.
+        db = self.populated_v12_database(self.connect())
+        db.row_factory = row_factory
+        migrate_schema(db)
+        db.commit()
+        self.assertTrue(database_schema_is_current(db))
+        self.assertIsNone(
+            db.execute("SELECT max_speed_mps FROM activity_laps").fetchone()[
+                "max_speed_mps"
+            ]
+        )
 
     def test_failed_v12_upgrade_rolls_back_to_the_unchanged_v12_database(self):
         db = self.populated_v12_database(self.connect())
