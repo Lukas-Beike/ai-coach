@@ -115,7 +115,7 @@ def _upgrade_v12_to_v13(db: Any) -> None:
     # Adds the maximum speed of a lap; existing laps keep NULL until refetched.
     # The v9 step creates the detail tables from the current DDL, which already
     # has the column, so it is only added to tables written by v10 or later.
-    columns = {row[1] for row in db.execute("PRAGMA table_info(activity_laps)")}
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(activity_laps)")}
     if "max_speed_mps" not in columns:
         db.execute("ALTER TABLE activity_laps ADD COLUMN max_speed_mps REAL")
 
