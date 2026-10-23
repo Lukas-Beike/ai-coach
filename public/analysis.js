@@ -1,7 +1,7 @@
 const ANALYSIS_SVG_NS = "http://www.w3.org/2000/svg";
 
 const KIND_LABELS = { bike: "Fahrrad", component: "Komponente", shoes: "Schuhe", other: "Sonstiges" };
-const SPORT_LABELS = { Ride: "Rad", VirtualRide: "Indoor-Rad", Run: "Laufen", Swim: "Schwimmen", Walk: "Gehen", ride: "Rad", run: "Laufen", swim: "Schwimmen", walk: "Gehen", strength: "Kraft", other: "Andere" };
+const SPORT_LABELS = { Ride: "Rad", VirtualRide: "Indoor-Rad", WeightTraining: "Kraft", Run: "Laufen", Swim: "Schwimmen", Walk: "Gehen", ride: "Rad", run: "Laufen", swim: "Schwimmen", walk: "Gehen", strength: "Kraft", other: "Andere" };
 const equipmentSportLabel = (item) => (item.sport === "ride" && item.environment === "virtual" ? "Indoor-Rad" : SPORT_LABELS[item.sport] || item.sport);
 const isRideEquipment = (item) => ["Ride", "VirtualRide", "ride"].includes(item.sport);
 const isRunEquipment = (item) => ["Run", "run"].includes(item.sport);
@@ -1357,36 +1357,56 @@ function seasonEventCard(event, generation, { open = false } = {}) {
   summary.append(reportNode("h4", `${event.name} · ${dateLabel(event.event_date)} · Priorität ${event.priority}`), reportNode("span", when, "season-event-when"));
   section.append(summary);
   const phase = {base:"Basis",build:"Aufbau",peak:"Spezifische Vorbereitung",taper:"Taper",completed:"Vergangen"}[event.phase];
-  section.append(reportNode("p", `${when} · kalendarische Phase: ${phase} · ${analysisCountLabel(event.preparation.sessions_84_days, "passende Einheit", "passende Einheiten")} in 84 Tagen`));
+  section.append(seasonFacts([["Phase", phase], ["Passende Einheiten (84 Tage)", String(event.preparation.sessions_84_days ?? 0)]]));
   const weekly = reportNode("details"); weekly.append(reportNode("summary", `Daten für ${event.preparation.weeks_with_recorded_training} von 12 Wochen mit erfasstem sportartspezifischem Training vorhanden.`));
   for (const week of event.preparation.weeks || []) weekly.append(reportNode("p", seasonWeekSummary(week)));
-  weekly.append(reportNode("p", "Wochen ohne Aufzeichnung beweisen keine Trainingspause; Umfang enthält nur lokal bekannte Einheiten.", "muted")); section.append(weekly);
+  section.append(weekly);
   appendSeasonEvidence(event.preparation, section);
   for (const item of event.preparation.long_sessions) {
-    const button = reportNode("button", `${dateLabel(item.date)} · ${item.name} · ${item.duration_seconds == null ? "Dauer unbekannt" : formatDuration(item.duration_seconds)}`, "secondary-button");
+    const button = reportNode("button", `${dateLabel(item.date)} · ${item.name} · ${item.duration_seconds == null ? "Dauer unbekannt" : seasonDuration(item.duration_seconds)}`, "secondary-button");
     button.type = "button";
     button.addEventListener("click", () => globalThis.ActivityDetails.open({ id:item.activity_id, name:item.name }, { api, showDialog:showAccessibleDialog }));
     section.append(button);
     if (item.aerobic?.status === "ok") section.append(reportNode("p", `Gleichmäßige Belastung: lokale Herzfrequenzdrift ${item.aerobic.drift_percent}% · Effizienz ${analysisValue(item.aerobic.efficiency, item.aerobic.unit)}`, "muted"));
   }
-  section.append(reportNode("p", "Absolviertes Training ist ein Beleg, keine Wettkampffreigabe oder Zeitprognose. Gelände, spezifische Intensität und erprobte Verpflegung bleiben ohne passende Nachweise offen.", "muted"));
   if (event.days_until > 0 && event.days_until <= 180) {
     appendSeasonScenario(event, section, generation);
   }
   return section;
 }
 
+const SEASON_SOURCE_LABELS = {
+  "confirmed local competition": "Bestätigter Wettkampf",
+  "Intervals.icu recorded activities": "Intervals.icu Aktivitäten",
+  "confirmed competition and recorded activities": "Wettkampf und Intervals.icu Aktivitäten",
+  "cached activity analyses": "Abgeleitet aus Analysen",
+};
+
+function seasonSourceLabel(source) {
+  return SEASON_SOURCE_LABELS[source] || source || "unbekannt";
+}
+
+// Observed data needs no status tile; only missing evidence is called out.
 function seasonStatusLabel(status) {
-  return { observations: "Beobachtungen", observed: "beobachtet", insufficient_data: "nicht genügend Daten", unknown: "unbekannt" }[status] || status || "unbekannt";
+  return { insufficient_data: "nicht genügend Daten", unknown: "unbekannt" }[status] || null;
 }
 
 function seasonDistance(value) {
-  const km = value == null ? null : AppFormat.number(Number(value) / 1000);
-  return km == null ? "unbekannt" : `${km} km`;
+  return value == null ? "unbekannt" : (AppFormat.distance(value) ?? "0 km");
 }
 
 function seasonDuration(value) {
-  return value == null ? "unbekannt" : formatDuration(Number(value));
+  return AppFormat.duration(value) ?? "unbekannt";
+}
+
+function seasonFacts(items) {
+  const list = reportNode("dl", null, "activity-analysis-stats");
+  for (const [label, value] of items.filter(([, value]) => value != null)) {
+    const item = reportNode("div");
+    item.append(reportNode("dt", label), reportNode("dd", value));
+    list.append(item);
+  }
+  return list;
 }
 
 function appendSeasonEvidence(preparation, section) {
@@ -1395,16 +1415,39 @@ function appendSeasonEvidence(preparation, section) {
   const long = preparation?.long_session_evidence || {};
   const specificity = preparation?.specificity_evidence || {};
   const comparison = preparation?.target_distance_comparison || {};
+  const dimensions = specificity.known_dimensions || {};
   const details = reportNode("details", null, "season-evidence");
   details.open = true;
   details.append(reportNode("summary", "Beobachtete Nachweise und Lücken"));
-  details.append(reportNode("p", `Zielkontext · Sport: ${target.sport || "unbekannt"} · Distanz: ${target.distance_confirmed ? seasonDistance(target.distance_meters) : "unbekannt"} · Ziel: ${target.target_confirmed ? target.target : "unbekannt"} · Quelle: ${target.source || "unbekannt"}`));
-  details.append(reportNode("p", `Wöchentlicher beobachteter Umfang · Status: ${seasonStatusLabel(weekly.status)} · ${weekly.weeks_with_sessions ?? 0}/${weekly.weeks_total ?? 12} Wochen mit Einheiten · ${weekly.sessions ?? 0} Einheiten · Dauer: ${seasonDuration(weekly.duration_seconds)} (${weekly.duration_known_sessions ?? 0} bekannte Einheiten) · Distanz: ${seasonDistance(weekly.distance_meters)} (${weekly.distance_known_sessions ?? 0} bekannte Einheiten) · Quelle: ${weekly.source || "unbekannt"}`));
-  appendSeasonWeeklyHistory(preparation.weeks || [], weekly.source || "unbekannt", details);
-  details.append(reportNode("p", `Lange Einheit · Status: ${seasonStatusLabel(long.status)} · ${analysisCountLabel(long.sessions, "Nachweis", "Nachweise")} · längste Dauer: ${seasonDuration(long.duration_seconds)} · längste Distanz: ${seasonDistance(long.distance_meters)} · Quelle: ${long.source || "unbekannt"}`));
-  const dimensions = specificity.known_dimensions || {};
-  details.append(reportNode("p", `Spezifitätsnachweise · Status: ${seasonStatusLabel(specificity.status)} · Ausdauer: ${dimensions.aerobic ?? 0} · Power-Profil: ${dimensions.power_profile ?? 0} · Intervallqualität: ${dimensions.interval_quality ?? 0} · Quelle: ${specificity.source || "unbekannt"}`));
-  details.append(reportNode("p", `Zieldistanzvergleich · Status: ${seasonStatusLabel(comparison.status)} · Ziel: ${seasonDistance(comparison.target_distance_meters)} · beobachtete lange Einheit: ${seasonDistance(comparison.observed_long_session_distance_meters)} · Quelle: ${comparison.source || "unbekannt"}`));
+  const group = (title, item, facts) => {
+    details.append(reportNode("h5", title), seasonFacts([...facts, ["Datenlage", seasonStatusLabel(item.status)], ["Quelle", seasonSourceLabel(item.source)]]));
+  };
+  group("Zielkontext", target, [
+    ["Sport", SPORT_LABELS[target.sport] || target.sport || "unbekannt"],
+    ["Distanz", target.distance_confirmed ? seasonDistance(target.distance_meters) : "unbekannt"],
+    ["Ziel", target.target_confirmed ? target.target : "unbekannt"],
+  ]);
+  group("Wöchentlicher beobachteter Umfang", weekly, [
+    ["Wochen mit Einheiten", `${weekly.weeks_with_sessions ?? 0}/${weekly.weeks_total ?? 12}`],
+    ["Einheiten", String(weekly.sessions ?? 0)],
+    ["Dauer", `${seasonDuration(weekly.duration_seconds)} (${weekly.duration_known_sessions ?? 0} bekannt)`],
+    ["Distanz", `${seasonDistance(weekly.distance_meters)} (${weekly.distance_known_sessions ?? 0} bekannt)`],
+  ]);
+  appendSeasonWeeklyHistory(preparation.weeks || [], seasonSourceLabel(weekly.source), details);
+  group("Lange Einheit", long, [
+    ["Nachweise", String(long.sessions ?? 0)],
+    ["Längste Dauer", seasonDuration(long.duration_seconds)],
+    ["Längste Distanz", seasonDistance(long.distance_meters)],
+  ]);
+  group("Spezifitätsnachweise", specificity, [
+    ["Ausdauer", String(dimensions.aerobic ?? 0)],
+    ["Power-Profil", String(dimensions.power_profile ?? 0)],
+    ["Intervallqualität", String(dimensions.interval_quality ?? 0)],
+  ]);
+  group("Zieldistanzvergleich", comparison, [
+    ["Ziel", seasonDistance(comparison.target_distance_meters)],
+    ["Beobachtete lange Einheit", seasonDistance(comparison.observed_long_session_distance_meters)],
+  ]);
   section.append(details);
 }
 
