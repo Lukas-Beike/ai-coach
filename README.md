@@ -650,6 +650,85 @@ the final diff, and run affected validation. Include final-state evidence and
 unverified checks in the handoff. Source code and current workflow behavior take
 precedence over remembered paths or stale operating assumptions.
 
+#### Optional local OpenSpec
+
+[OpenSpec](https://github.com/Fission-AI/OpenSpec) 1.14.3 is pinned as a local
+development dependency. It manages behavior specifications and change plans;
+the application does not load it. Node.js >=20.19.0 is required. Install and
+check it from the task worktree:
+
+```powershell
+npm.cmd ci --ignore-scripts
+npm.cmd run openspec -- --version
+npm.cmd run openspec -- list --specs
+npm.cmd run openspec -- validate --all --strict --no-interactive
+```
+
+Use `npm` instead of `npm.cmd` outside Windows. The repository script disables
+OpenSpec telemetry on every invocation; no global CLI, skills, profile changes,
+store, hosted service, or model credentials are required. Its config/data homes
+are isolated under ignored `.openspec-local/` in the working directory, including
+profile migrations triggered by `init` or `update`. The universal
+`agents` adapter installs six skills directly into `.agents/skills/`, shared
+by agents that support that directory. Other agents scan and read the linked
+skills in the index. Restart a session if its skill catalog was already loaded.
+Host-specific slash commands are not installed; plain-language requests such
+as "use openspec-propose to plan a backfill of Coach write authorization" work
+through the repository skill index.
+
+To regenerate those skills from the installed, pinned CLI:
+
+```powershell
+npm.cmd run openspec -- init --tools agents --profile core --no-animation
+```
+
+Review the generated diff and retain the project context/rules in
+`openspec/config.yaml`. Do not pass `--language` when regenerating an existing
+project; the language instruction is already in its context. Deliberate upgrades
+update the exact dependency pin, lockfile, generated skills, and their provenance
+together. Do not run the bare `openspec config profile`: that changes user-global
+configuration. Existing
+AGENTS boundaries and authorization take precedence over generated workflows;
+OpenSpec does not replace repository review, orchestration, or validation.
+
+**Incremental backfill.** This setup contains no application specs yet; an empty
+inventory or validator with nothing to validate is not evidence of coverage.
+Build one cohesive capability at a time, in this suggested order:
+
+1. SQLCipher migrations, restart, backup/restore, and preservation of athlete data.
+2. Coach write authorization, durable effects, receipts, undo, and provenance.
+3. Provider startup/daily/manual sync, freshness, conflicts, and explicit remote writes.
+4. Login/session/CSRF, PWA/offline behavior, and failure/recovery states.
+5. Planning, activities, nutrition, performance, and the remaining athlete flows.
+
+For each slice, record the inspected Git revision and scope, then inspect its
+current owner, callers, tests, and existing contracts. Write observable
+requirements with concrete `WHEN`/`THEN` scenarios, citing source and test paths.
+Distinguish observed behavior, intended requirements, known defects, and missing
+evidence; do not turn a discovered bug into an accepted requirement or quietly
+fix application behavior during a documentation backfill. Include negative,
+authorization, persistence, provenance, and recovery cases where applicable.
+Use synthetic fixtures only.
+
+Reviewed current-behavior baselines live in
+`openspec/specs/<capability>/spec.md` with `## Purpose` and `## Requirements`.
+Create change plans with the CLI rather than hand-making change metadata:
+
+```powershell
+npm.cmd run openspec -- new change backfill-coach-write-authorization
+npm.cmd run openspec -- status --change backfill-coach-write-authorization --json
+npm.cmd run openspec -- instructions proposal --change backfill-coach-write-authorization --json
+```
+
+Read the schema instructions for subsequent artifacts. For backfills, `ADDED`
+means newly documented requirements, not newly implemented app behavior. Review
+the evidence, run strict validation, complete the documented scope, then sync
+and archive the change. Track uncovered scenarios and domains explicitly in
+each slice; task completion and format validation alone do not prove that the
+application satisfies the spec. Later behavior changes update the affected
+spec and tests in the same change. Keep small fixes proportional; a repository-wide
+backfill is not a prerequisite for normal maintenance.
+
 #### Optional local code graph
 
 The repository can use graphifyy 0.9.93 as a local structural navigation aid.

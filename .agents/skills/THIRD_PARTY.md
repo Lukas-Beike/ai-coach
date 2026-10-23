@@ -40,6 +40,18 @@ do not synchronize bundles or install global copies. App-supplied materials have
 separate licensing and runtime constraints; see
 [app skill ownership](references/app-skill-ownership.md).
 
+## OpenSpec generated skills
+
+The six `openspec-*` skills are unmodified output of
+[`@fission-ai/openspec` 1.14.3](https://www.npmjs.com/package/@fission-ai/openspec/v/1.14.3),
+generated with `init --tools agents --profile core --language en --no-animation`.
+The exact version and package integrity are pinned in `package-lock.json`.
+Upstream: [Fission-AI/OpenSpec](https://github.com/Fission-AI/OpenSpec),
+MIT, copyright (c) 2024 OpenSpec Contributors. The complete
+[MIT notice](licenses/OpenSpec-MIT.txt) is retained with these generated files.
+Repository integration adds index routing, local CLI invocation, project context,
+and the incremental backfill runbook; it does not modify the generated bodies.
+
 ## Orchestration MIT notices
 
 Retained upstream notices for the two rewritten orchestration workflows.
