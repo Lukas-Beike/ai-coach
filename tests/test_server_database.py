@@ -19,6 +19,7 @@ from unittest.mock import Mock, patch
 
 from garmin_support import save_garmin
 from server_test_support import ServerTestCase, create_test_session, server
+from support import canonical_backfill_stopped
 
 from backend import privacy as privacy_module
 from backend.coach import limits as coach_limits
@@ -1427,6 +1428,7 @@ class ServerDatabaseTests(ServerTestCase):
                 patch.object(server, "DATA_DIR", data_dir),
                 patch.object(server, "DB_PATH", db_path),
                 patch.object(server, "CONFIG", config),
+                canonical_backfill_stopped(server),
             ):
                 server.initialise_database()
                 server.key_value_service().set("restore-marker", "preserved")
