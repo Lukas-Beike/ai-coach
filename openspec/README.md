@@ -2,7 +2,7 @@
 
 This baseline backfills the existing application at
 `b8c911c9dda83a7920171916ace32681c0c38ba0` (version 1.13.22, schema v13).
-The 30 capabilities contain 267 observable requirements and 733 scenarios.
+The 30 capabilities contain 272 observable requirements and 757 scenarios.
 Each requirement cites current code and existing tests; citations alone do not
 mean every scenario was executed. Read the [coverage and evidence ledger](COVERAGE.md)
 for executed checks, boundaries, discrepancies and source identity.
@@ -22,7 +22,7 @@ remain in the repository README.
 | [coach-tool-authority](specs/coach-tool-authority/spec.md) | Tool catalog, athlete-message authority, impact checks, approvals and receipts |
 | [athlete-profile-and-checkins](specs/athlete-profile-and-checkins/spec.md) | Profile, athlete-local days, check-ins, feedback and equipment |
 | [competitions-and-seasons](specs/competitions-and-seasons/spec.md) | Target events, competition sync, phases and observed preparation |
-| [training-library](specs/training-library/spec.md) | Reusable workouts, scheduled copies, validation and explicit exports |
+| [training-library](specs/training-library/spec.md) | Reusable workouts, scheduled copies, guarded explicit calendar exports and repair |
 | [training-plans-and-adaptation](specs/training-plans-and-adaptation/spec.md) | Drafts, local plan transactions, patches and approved adaptation |
 | [change-history-and-undo](specs/change-history-and-undo/spec.md) | Bounded local history, optimistic restore and complete-turn undo |
 | [model-selection-and-usage](specs/model-selection-and-usage/spec.md) | Selected model/thinking/speed, Responses lifecycle and daily token counts |

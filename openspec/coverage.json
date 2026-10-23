@@ -3151,7 +3151,8 @@
       "path": "backend/providers/intervals_workouts.py",
       "capabilities": [
         "provider-connections",
-        "provider-normalization-and-provenance"
+        "provider-normalization-and-provenance",
+        "training-library"
       ],
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
@@ -3627,7 +3628,8 @@
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",
-        "activity-ingestion-and-storage"
+        "activity-ingestion-and-storage",
+        "training-library"
       ],
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
@@ -3798,7 +3800,8 @@
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",
-        "activity-ingestion-and-storage"
+        "activity-ingestion-and-storage",
+        "training-library"
       ],
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
@@ -3924,7 +3927,8 @@
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",
-        "activity-ingestion-and-storage"
+        "activity-ingestion-and-storage",
+        "training-library"
       ],
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
@@ -4014,7 +4018,8 @@
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",
-        "activity-ingestion-and-storage"
+        "activity-ingestion-and-storage",
+        "training-library"
       ],
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
@@ -4059,7 +4064,8 @@
       "capabilities": [
         "sync-jobs-and-scheduling",
         "provider-connections",
-        "activity-ingestion-and-storage"
+        "activity-ingestion-and-storage",
+        "training-library"
       ],
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
@@ -6541,6 +6547,26 @@
           "requirement": "TL10 Exact explicit sync selection and complete repair manifests"
         },
         {
+          "capability": "training-library",
+          "requirement": "TL11 Planned-calendar upsert identity and in-flight local changes"
+        },
+        {
+          "capability": "training-library",
+          "requirement": "TL12 Guarded explicit removal of a linked planned event"
+        },
+        {
+          "capability": "training-library",
+          "requirement": "TL13 Exact repair ownership and bounded duplicate cleanup"
+        },
+        {
+          "capability": "training-library",
+          "requirement": "TL14 Repair identity retention and final collection verification"
+        },
+        {
+          "capability": "training-library",
+          "requirement": "TL15 Selected execution reports mixed outcomes and failed-object retry scope"
+        },
+        {
           "capability": "coach-tool-authority",
           "requirement": "CA5 Named remote synchronization and explicit proposals"
         },
@@ -6798,8 +6824,8 @@
       "scenarios": 19
     },
     "training-library": {
-      "requirements": 10,
-      "scenarios": 31
+      "requirements": 15,
+      "scenarios": 55
     },
     "training-plans-and-adaptation": {
       "requirements": 11,

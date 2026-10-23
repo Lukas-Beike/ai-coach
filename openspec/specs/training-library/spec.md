@@ -24,21 +24,25 @@ The system SHALL create reusable local templates independently from dated plans,
 Evidence: `backend/planning/library_service.py:WorkoutLibraryService.create_template`, `backend/planning/library_service.py:WorkoutLibraryService.create_local_entry`; `backend/coach/training_template_tools.py:TrainingTemplateToolService.execute`; `tests/test_coach_tool_coverage.py:test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy`; `tests/test_coach_training_template_tools.py:test_requires_operation_and_template_scope_before_manager_resolution`.
 
 ### Requirement: TL2 Atomic template lifecycle
-The system SHALL support authorized template update, archive, restore and delete as local operations, preserve identity and derived metadata according to changed content, and execute a bounded template batch atomically.
+The system SHALL support authorized template update, archive, restore and deletion of unlinked templates as local operations, preserve identity and derived metadata according to changed content, and execute a bounded template batch atomically.
 
 #### Scenario: Edit or archive template
 - **WHEN** a resolved template is updated, archived or restored
 - **THEN** its local ID is preserved, content is validated, applicable derived data is retained or reconciled and sync state becomes local.
 
-#### Scenario: Delete template
-- **WHEN** an authorized delete targets an existing reusable template
-- **THEN** only that local template and its local remote-link record are removed and its history is recorded; independently scheduled copies remain.
+#### Scenario: Delete unlinked template
+- **WHEN** an authorized delete targets an existing reusable template whose stored external_id is empty
+- **THEN** only that local template and any local remote-link record are removed and its history is recorded; independently scheduled copies and remote provider state remain unchanged.
+
+#### Scenario: Linked template deletion is refused
+- **WHEN** an authorized delete targets a reusable template with a stored external_id
+- **THEN** deletion fails with HTTP 409 and directs the athlete to archive it instead; supported archival retains its identity/link, marks it archived and locally pending, and performs no immediate provider write or scheduled-copy mutation.
 
 #### Scenario: Batch failure
 - **WHEN** one of up to twenty-eight requested template changes fails after an earlier write
 - **THEN** the entire batch rolls back on the currently active database manager rather than committing earlier changes.
 
-Evidence: `backend/coach/training_template_tools.py:TrainingTemplateToolService.execute`; `backend/planning/library_service.py:WorkoutLibraryService.update`; `backend/planning/library.py:updated_workout_library_entry`; `tests/test_coach_training_template_tools.py:test_restore_batch_uses_current_manager_and_rolls_back_prior_write`; `tests/test_planning_library_mutations.py:test_derived_fields_are_retained_when_only_name_changes`; `tests/test_coach_tool_coverage.py:test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy`.
+Evidence: `backend/coach/training_template_tools.py:TrainingTemplateToolService.execute`; `backend/planning/library_service.py:WorkoutLibraryService.update`, `backend/planning/library_service.py:WorkoutLibraryService._delete_local_workout_library_entry`; `tests/test_library_service.py:test_delete_is_physical_and_records_before_history_after_commit`, `tests/test_library_service.py:test_synchronized_entry_cannot_be_deleted_but_can_be_archived`; `backend/planning/library.py:updated_workout_library_entry`; `tests/test_coach_training_template_tools.py:test_restore_batch_uses_current_manager_and_rolls_back_prior_write`; `tests/test_planning_library_mutations.py:test_derived_fields_are_retained_when_only_name_changes`; `tests/test_coach_tool_coverage.py:test_template_lifecycle_and_scheduling_preserve_the_scheduled_copy`.
 
 ### Requirement: TL3 Independent local scheduling from the library
 The system SHALL apply selected saved library entries to local dates as an atomic batch of at most fourteen entries, creating independent planned-unit identities without remote writes.
@@ -178,4 +182,122 @@ The system SHALL bind explicit plan pushes to concrete local IDs/current hashes,
 - **WHEN** an explicit conflict choice reaches the authorized conflict service or a failed/partial sync job is retried
 - **THEN** the recorded strategy is applied locally or the original job is retried with its original provider and required read/push authority; a mismatched provider or remote-write declaration is rejected.
 
-Evidence: `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._prepare_plan_sync`; `backend/coach/proposal_creation.py:_approved_plan_sync_arguments`; `backend/sync/plan_selection.py:StructuredPlanSyncService`; `backend/sync/plan_repair.py:PlanRepairManifestService`; `backend/sync/plan_commands.py:PlanPushCommandService.enqueue`; `backend/coach/sync_tools.py:CoachSyncToolService._resolve_conflict`; `tests/test_coach_tool_preparation.py:test_created_plan_sync_projects_exact_ids_and_scopes`, `tests/test_coach_tool_preparation.py:test_all_pending_captures_a_concrete_manifest_for_approval`, `tests/test_coach_tool_preparation.py:test_selected_sync_requires_entries_unless_repairing`; `tests/test_coach_sync_tools.py:test_plan_repair_checks_object_scopes_before_mutation`, `tests/test_coach_sync_tools.py:test_retry_requires_matching_provider_and_remote_write_intent`; `tests/test_coach_tool_coverage.py:test_all_pending_approval_does_not_expand_to_units_added_after_preview`. Complete remote repair execution belongs to provider capabilities; no real remote sync was exercised here. The local-choice tool's catalog/write-gate mismatch is recorded separately rather than promised as universally available through chat.
+Evidence: `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._prepare_plan_sync`; `backend/coach/proposal_creation.py:_approved_plan_sync_arguments`; `backend/sync/plan_selection.py:StructuredPlanSyncService`; `backend/sync/plan_repair.py:PlanRepairManifestService`; `backend/sync/plan_commands.py:PlanPushCommandService.enqueue`; `backend/coach/sync_tools.py:CoachSyncToolService._resolve_conflict`; `tests/test_coach_tool_preparation.py:test_created_plan_sync_projects_exact_ids_and_scopes`, `tests/test_coach_tool_preparation.py:test_all_pending_captures_a_concrete_manifest_for_approval`, `tests/test_coach_tool_preparation.py:test_selected_sync_requires_entries_unless_repairing`; `tests/test_coach_sync_tools.py:test_plan_repair_checks_object_scopes_before_mutation`, `tests/test_coach_sync_tools.py:test_retry_requires_matching_provider_and_remote_write_intent`; `tests/test_coach_tool_coverage.py:test_all_pending_approval_does_not_expand_to_units_added_after_preview`. Intervals planned-calendar execution and recovery are specified in TL11-TL15; no real remote sync was exercised here. The local-choice tool's catalog/write-gate mismatch is recorded separately rather than promised as universally available through chat.
+
+
+### Requirement: TL11 Planned-calendar upsert identity and in-flight local changes
+The system SHALL use stable Intervals planned-event identity for explicit dated-unit pushes, validate the returned event before marking the unchanged local unit synced, and preserve newer local content and recoverable remote identity when the upload races with local changes or result validation fails.
+
+#### Scenario: Create and later update
+- **WHEN** an explicit normal push exports an active planned unit and a later push retries or updates it
+- **THEN** the initial external_id is derived from its local UUID as `intervals-coach-<local_id>`; a stored remote external_id is reused and a known remote_event_id is included on subsequent upserts.
+
+#### Scenario: Returned event fails validation
+- **WHEN** an upsert returns a concrete event identity but its sport or applicable parsed endurance content fails readback validation
+- **THEN** the service raises the validation error and persists sync_error with the returned remote identity and external identity for recovery; it does not mark that payload synced.
+
+#### Scenario: No usable returned identity
+- **WHEN** the normal upsert response has no first event object with a nonempty event ID
+- **THEN** the push fails rather than inventing an ID or reporting synchronization; a remote write may already have occurred and the stable external identity remains the retry basis.
+
+#### Scenario: Local edit, move, archive or deletion during upload
+- **WHEN** the local payload changes or the row disappears while an earlier payload is uploaded
+- **THEN** persistence retains the newer content and returned remote identity, leaves the changed unit locally dirty and pending instead of syncing the newer payload, or recreates a hidden deletion tombstone for later explicit remote cleanup; a later push uses the retained identity.
+
+#### Scenario: Same-unit pushes overlap
+- **WHEN** normal sync or repair is already running for the same local ID
+- **THEN** another push for that ID is rejected with a running-sync conflict and the guard is released when the active operation exits.
+
+Evidence: `backend/sync/planned_calendar.py:PlannedCalendarSyncService._event_payload`, `backend/sync/planned_calendar.py:PlannedCalendarSyncService._remote_event`, `backend/sync/planned_calendar.py:planned_unit_sync_guard`; `backend/sync/reconcile.py:PlannedUnitSyncStateWriter._state_values`; `backend/providers/intervals_workouts.py:intervals_external_id`; `tests/test_sync_planned_calendar.py:test_create_and_retry_use_stable_external_identity`, `tests/test_sync_planned_calendar.py:test_readback_validation_failure_persists_identity_and_sync_error`, `tests/test_sync_planned_calendar.py:test_malformed_provider_result_is_rejected`, `tests/test_sync_planned_calendar.py:test_edit_during_upload_keeps_new_payload_pending_and_retries_it`, `tests/test_sync_planned_calendar.py:test_reschedule_during_upload_stays_pending_and_retries_new_date`, `tests/test_sync_planned_calendar.py:test_archive_during_upload_keeps_identity_until_remote_cleanup`, `tests/test_sync_planned_calendar.py:test_delete_during_upload_becomes_remote_cleanup_tombstone`, `tests/test_sync_planned_calendar.py:test_concurrent_edit_survives_upload_validation_error`, `tests/test_sync_planned_calendar.py:test_repair_and_normal_sync_share_per_id_guard`. Normal push validates the returned event through the export port; TL14 separately requires repair collection readback.
+
+### Requirement: TL12 Guarded explicit removal of a linked planned event
+The system SHALL reconcile an archived or locally deleted planned unit through the explicit sync path, checking the stored remote event ID and its current eligibility before deletion and rechecking local content before recording removal.
+
+#### Scenario: Remove a known eligible event
+- **WHEN** normal explicit sync removes an inactive unit with a remote_event_id and reading that ID returns the same ID as an unpaired WORKOUT dated today or later
+- **THEN** the service rechecks the local payload, deletes that concrete remote event and marks local removal synced only after another local-payload check.
+
+#### Scenario: No remote ID or already absent
+- **WHEN** an inactive unit has no remote event ID, or reading its linked event reports HTTP 404 directly or through the wrapped HTTP error cause
+- **THEN** removal is treated as already satisfied without a remote delete and local removal is recorded subject to the final local-payload check.
+
+#### Scenario: Linked event is no longer eligible
+- **WHEN** the remote read is not an event object with the expected ID, is not a planned WORKOUT, is past, or is paired with an activity or event
+- **THEN** normal removal fails with an identity conflict and issues no delete.
+
+#### Scenario: Local payload changes after the remote read
+- **WHEN** the unit changes before the pre-delete payload recheck
+- **THEN** deletion is blocked with a planning revision conflict; a change detected after a remote delete also blocks the final local success record without undoing that remote delete.
+
+Evidence: `backend/sync/planned_calendar.py:PlannedCalendarSyncService._delete_remote_event`, `backend/sync/planned_calendar.py:PlannedCalendarSyncService._mark_removed`, `backend/sync/planned_calendar.py:PlannedCalendarSyncService._remove_event`; `backend/sync/intervals_workout_export.py:IntervalsWorkoutExport.is_unpaired_future_planned`; `tests/test_sync_planned_calendar.py:test_delete_success_rechecks_and_persists_removed_state`, `tests/test_sync_planned_calendar.py:test_archived_or_deleted_without_remote_id_only_marks_local_sync`, `tests/test_sync_planned_calendar.py:test_delete_404_is_already_removed`, `tests/test_sync_planned_calendar.py:test_delete_treats_http_error_404_cause_as_already_removed`, `tests/test_sync_planned_calendar.py:test_delete_identity_conflicts`, `tests/test_sync_planned_calendar.py:test_payload_change_after_remote_read_blocks_delete`. The post-delete concurrent-edit branch is implementation-inspected; these cited tests do not inject an edit after deletion. Normal removal has no final collection readback; repair verification is covered by TL14.
+
+### Requirement: TL13 Exact repair ownership and bounded duplicate cleanup
+The system SHALL repair selected planned units dated today or later using current local hashes and concrete remote identities, refuse identified unsafe or ambiguous candidates, and limit cleanup to identity-checked related events in the repair window.
+
+#### Scenario: Invalid local repair target
+- **WHEN** the unit is missing, its expected payload hash is stale, its payload/date is invalid, or its date is before today
+- **THEN** repair fails before performing a remote write.
+
+#### Scenario: Identify related events and refuse foreign ownership
+- **WHEN** the repair window contains an event with a concrete ID matching the unit's stored remote ID or a generated/stored external identity
+- **THEN** it is related only if it is an unpaired planned WORKOUT dated today or later and neither its ID nor external identity belongs to another local planned unit; an identified event failing those checks causes an identity conflict.
+
+#### Scenario: Known ID is absent from the window
+- **WHEN** the stored remote ID is not among the related events read from the repair window
+- **THEN** repair reads that ID directly: a 404 permits reconciliation as absent, another read failure propagates, and an event still present outside the window causes an identity conflict rather than being moved or deleted automatically.
+
+#### Scenario: Ambiguous namesake during active repair
+- **WHEN** an active unit has an otherwise unassigned planned event on the same day with the same name after case/edge-space normalization but without a matching identity
+- **THEN** repair refuses automatic adoption, copy creation and deletion with an ambiguity conflict; unrelated events belonging to other local units remain outside cleanup, and removal does not adopt or delete an unlinked namesake.
+
+#### Scenario: Create or keep one identity and remove only concrete related duplicates
+- **WHEN** an active repair has passed the identity and ambiguity checks
+- **THEN** it creates with the stable generated external identity if no related event remains, or prefers the stored remote ID as keeper when present and otherwise adopts a related event; an existing keeper ID/external identity is reused for upsert, and only other concrete related IDs are deleted after local-hash rechecks. An inactive repair performs no upsert and removes its concrete related IDs; an empty ID is never a delete target.
+
+Evidence: `backend/sync/planned_calendar.py:PlannedCalendarRepairService._context`, `backend/sync/planned_calendar.py:PlannedCalendarRepairService._related_event`, `backend/sync/planned_calendar.py:PlannedCalendarRepairService._check_remote_identity`, `backend/sync/planned_calendar.py:PlannedCalendarRepairService.repair_entry`, `backend/sync/planned_calendar.py:PlannedCalendarRepairService._delete_duplicates`; `tests/test_sync_planned_calendar.py:test_repair_create_update_and_remove`, `tests/test_sync_planned_calendar.py:test_repair_rejects_corrupt_stored_payload_as_conflict`, `tests/test_sync_planned_calendar.py:test_repair_rejects_invalid_paired_foreign_and_ambiguous_events`, `tests/test_sync_planned_calendar.py:test_repair_deletes_only_identity_checked_duplicates`, `tests/test_sync_planned_calendar.py:test_delete_duplicates_never_deletes_an_empty_identity`. The known-ID-outside-window and local-past-date branches are implementation-inspected rather than demonstrated by those cited tests.
+
+### Requirement: TL14 Repair identity retention and final collection verification
+The system SHALL retain a usable repair response identity before subsequent verification, recheck local payload hashes around repair writes and completion, and mark a repair synced only after final collection readback confirms the required remote result and unchanged local content.
+
+#### Scenario: Repair response or readback fails
+- **WHEN** repair upsert returns exactly one event with a concrete ID but later schedule or workout-content validation fails
+- **THEN** the returned remote ID and requested external identity have already been persisted for recovery with non-synced state; an unusable or ambiguous upsert response instead raises verification failure without inventing a remote ID.
+
+#### Scenario: Local revision changes during repair
+- **WHEN** the local payload hash changes before upsert, before a duplicate delete, after upsert or before final persistence
+- **THEN** the applicable recheck refuses further success/progress with a planning revision conflict; while the local row remains, a usable identity from an already completed upsert is retained and newer local content is preserved rather than overwritten.
+
+#### Scenario: Active repair final state
+- **WHEN** final collection readback verifies an active repair
+- **THEN** exactly one related eligible event must remain, its ID must equal the keeper, its day and exact name must match the local workout and its sport/applicable parsed content must pass export readback validation before the local unit becomes synced.
+
+#### Scenario: Removal final state
+- **WHEN** final collection readback verifies an inactive-unit repair
+- **THEN** no related events may remain in the repair window and the current local hash must still match before local removal is marked synced.
+
+#### Scenario: Verification is unavailable or mismatched
+- **WHEN** final collection read fails, related events are missing/duplicated or still present after removal, schedule/content validation fails, or the completion hash changed
+- **THEN** repair does not record verified local success; selected-batch execution records the affected error as described in TL15 and retains any already persisted remote identity.
+
+Evidence: `backend/sync/planned_calendar.py:PlannedCalendarRepairService._upsert`, `backend/sync/planned_calendar.py:PlannedCalendarRepairService._recheck`, `backend/sync/planned_calendar.py:PlannedCalendarRepairService._completion`, `backend/sync/planned_calendar.py:PlannedCalendarRepairBatch.verify`; `tests/test_sync_planned_calendar.py:test_repair_hash_conflict_before_write`, `tests/test_sync_planned_calendar.py:test_repair_hash_conflict_before_final_persist_preserves_written_remote_id`, `tests/test_sync_planned_calendar.py:test_repair_readback_failure_keeps_remote_identity`, `tests/test_sync_planned_calendar.py:test_repair_preserves_requested_external_id_from_provider_response`, `tests/test_sync_planned_calendar.py:test_repair_batch_verify_failure_and_collection_error_are_propagated`, `tests/test_sync_planned_calendar.py:test_repair_batch_shares_two_reads_and_deferred_verification`. These local checks and collection snapshots are not remote compare-and-swap: an external edit can race with a write, and local failure cannot roll back an already completed remote upsert/delete. The cited tests exercise representative failures; not every final-read mismatch branch is separately executed.
+
+### Requirement: TL15 Selected execution reports mixed outcomes and failed-object retry scope
+The system SHALL execute the exact selected sync entries with per-entry outcomes, defer repair success until shared collection verification, and report failures without implying an atomic transaction across remote operations.
+
+#### Scenario: Route the frozen selection
+- **WHEN** an Intervals plan_push job executes
+- **THEN** its concrete entries and repair flag are passed to selected synchronization; each entry is checked for existence and current payload hash, and planned units route to normal push or repair without widening the selection.
+
+#### Scenario: Shared repair snapshots and lock
+- **WHEN** a selected repair batch executes
+- **THEN** it waits for the Intervals sync lock or fails temporarily, shares its initial remote window snapshot and final collection read across deferred completions, and releases the lock on exit; final-read failures apply to each deferred completion instead of accepting its provisional result.
+
+#### Scenario: Verification overrides a provisional result
+- **WHEN** an entry's repair operation or deferred verification fails
+- **THEN** selected execution records its sync_error, returns a redacted bounded per-entry error, and changes a provisional calendar_synced result to error with calendar_synced false when final verification fails.
+
+#### Scenario: Mixed success and failure
+- **WHEN** the selected entries finish with successes and errors/conflicts
+- **THEN** the aggregate status is partial, or error if every entry failed, with failed_object_ids and retry_scope directing selection of only failed objects; an all-success result is ok with no retry scope. Completed remote effects for other entries remain in place even if a later entry fails.
+
+Evidence: `backend/sync/executor.py:IntervalsSyncJobOwner.execute_specific`; `backend/sync/selected.py:SelectedWorkoutSyncService.sync`, `backend/sync/selected.py:SelectedWorkoutSyncService._sync_unlocked`, `backend/sync/selected.py:SelectedWorkoutSyncService._sync_entry`, `backend/sync/selected.py:SelectedWorkoutSyncService._verify_repair`; `backend/sync/planned_calendar.py:PlannedCalendarRepairBatch.snapshot`, `backend/sync/planned_calendar.py:PlannedCalendarRepairBatch.verify`; `tests/test_sync_executor.py:test_dispatches_specific_intervals_jobs_and_preserves_plan_repair`; `tests/test_sync_selected.py:test_planned_normal_and_repair_paths`, `tests/test_sync_selected.py:test_hash_and_not_found_conflicts_are_aggregated`, `tests/test_sync_selected.py:test_partial_and_all_failure_aggregation`, `tests/test_sync_selected.py:test_repair_errors_are_recorded_and_verification_failure_overrides_result`, `tests/test_sync_selected.py:test_repair_lock_timeout_release_and_exception_cleanup`; `tests/test_sync_planned_calendar.py:test_repair_batch_shares_two_reads_and_deferred_verification`. Retry scope here is the selected operation's failed-object guidance; the separately authorized durable job retry in TL10 retains the original job selection. Evidence uses inspected implementation and synthetic/mocked tests, not a live provider or a distributed rollback guarantee.

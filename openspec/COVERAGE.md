@@ -24,7 +24,7 @@ is not an OpenAPI document. Historical review documents, skills, test-fixture
 corpora and generated/local state are evidence or development material rather
 than additional athlete-facing capabilities.
 
-The initial baseline contains 30 capabilities, 267 requirements and 733 scenarios.
+The reviewed baseline contains 30 capabilities, 272 requirements and 757 scenarios.
 The executable Coach catalog has 49 canonical schemas, 52 dialogue schemas,
 53 union tool names and 17 read-only tools. The [complete tool map](COACH_TOOLS.md)
 links each to specific requirement names and existing test evidence. The parent
@@ -60,7 +60,13 @@ configuration or contacting providers.
 - Parent plus three isolated implementation workers use user-selected
   `codex / gpt-6.1-sol / reasoningEffort=xhigh / serviceTier=default`.
   The parent alone accepts and integrates worker patches. An independent L3
-  critique checks the frozen combined candidate before closure.
+  critique of the frozen combined candidate `ef4c29edc` found two documentation
+  errors: TL2 omitted the linked-template deletion refusal, and TL10 delegated
+  remote calendar repair to capabilities that did not specify those effects.
+  Parent source review confirmed both. The adopted two-file revision qualifies
+  TL2 and adds TL11-TL15 for identity-bound calendar sync/removal, repair,
+  verification, local-edit recovery and partial batch outcomes. A focused
+  independent re-review checks their resolution before closure.
 - 128 existing platform regressions passed in the SQLCipher runtime image with
   `--network none`, a read-only tests mount and temporary `/tmp`/`/data`.
   Selected modules: `test_db_migrations`, `test_database_restore_validation`,
@@ -101,13 +107,20 @@ configuration or contacting providers.
   notification and credential-form groups after adoption. These are subset
   repetitions, not additional unique test coverage. Counts above are execution
   evidence per batch; overlapping modules are not summed as unique tests.
+- The isolated training-library revision worker passed 49 existing mocked
+  tests: the planned-calendar and selected-sync modules, three library lifecycle
+  cases and the executor repair-routing case. The parent independently reran
+  the 34 planned-calendar and 11 selected-sync cases; all 45 passed. These are
+  repeated executions, not additional unique coverage. Source-only branches and
+  the lack of live remote compare-and-swap remain explicit in TL11-TL15.
 - Strict OpenSpec validation checks syntax/structure. Source/test-reference
   checks verify cited paths and named symbols exist. These checks do not prove
   every assertion or substitute for product conformance tests.
 - The frozen combined candidate passes strict validation for all 30 main specs
   and the active change. Main/delta content is identical after the documented
-  heading transformation. The parent checked 1,770 evidence references, local
-  links and requirement/scenario structure; no unresolved reference errors remain.
+  heading transformation. Before the revision, the parent checked 1,770 evidence
+  references, local links and requirement/scenario structure; no unresolved
+  reference errors remained. The revision adds 59 checked named references.
   All seven existing AI documentation contract tests passed. Compile checks,
   the local CLI wrapper syntax check and whitespace checks also passed.
 
