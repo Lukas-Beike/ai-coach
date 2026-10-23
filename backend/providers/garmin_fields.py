@@ -82,7 +82,7 @@ GARMIN_RACE_TIME_ALIASES = (
     "value",
 )
 GARMIN_RACE_DISTANCE_ALIASES = ("raceDistance", "distanceName", "raceType", "distance")
-_COLON_TIME_PART = re.compile(r"[0-9]{1,6}")
+_COLON_TIME_PART = re.compile(r"\d{1,6}", re.ASCII)
 
 
 # Garmin's range endpoint nests the daily values the per-day summary keeps flat.
