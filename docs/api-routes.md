@@ -14,6 +14,12 @@ session cookie; `CSRF` means that session plus the `X-CSRF-Token` header.
 | GET | `/api/bootstrap` | Initial authenticated client state | Auth |
 | POST | `/api/login` | Create a session | Public |
 | POST | `/api/logout` | End the current session | CSRF |
+| GET | `/api/wahoo/callback` | Wahoo OAuth redirect target; answers with a 302 redirect to the app | Public |
+
+`/api/wahoo/callback` is the only API GET that needs no session: the
+SameSite=Strict session cookies are not sent on Wahoo's cross-site redirect.
+Its only accepted credential is the single-use, expiring `state` stored on the
+server by `POST /api/wahoo/connect`.
 
 ## Activity identifiers
 
@@ -28,8 +34,10 @@ provider-keyed.
 - The list `cursor` is versioned: `{"v": 2, "after": [sort_date, provider_id]}`,
   base64url-encoded. Unversioned cursors issued before this change are still
   accepted. Unrecognized cursors return the first page.
-- `POST /api/activities/{id}/feedback`, equipment assignment, duplicate
-  deletion and the Coach activity tools accept either form. Only Intervals.icu
+- `POST /api/activities/{id}/feedback` and the Coach activity tools, including
+  equipment assignment and duplicate deletion, accept either form. Those two
+  have no HTTP route of their own; a confirmed duplicate deletion runs through
+  `POST /api/coach/actions/execute`. Only Intervals.icu
   primary, non-deleted sessions resolve; each resolves to its own provider ID,
   including a duplicate. Any other `act_` reference (unknown, Garmin-primary or
   deleted) is passed through unchanged and receives the route's existing
@@ -42,6 +50,7 @@ provider-keyed.
 | --- | --- | --- | --- |
 | GET | `/api/plan`, `/api/library`, `/api/weather` | Planning, library and weather projections | Auth |
 | GET | `/api/performance`, `/api/profile`, `/api/feedback`, `/api/context-preview` | Athlete and performance projections | Auth |
+| GET | `/api/settings/activity-detail-floor` | Activity detail prefetch floor | Auth |
 | GET | `/api/activities`, `/api/activities/{id}` | Activity list and detail | Auth |
 | GET | `/api/sync/status`, `/api/sync/jobs/{id}` | Synchronization status and job result | Auth |
 | GET | `/api/chat/history`, `/api/chat/receipt`, `/api/chat/status` | Coach history, receipts and status | Auth |
@@ -49,7 +58,7 @@ provider-keyed.
 | GET | `/api/state/events` | Authenticated state event stream | Auth |
 | GET | `/api/logs`, `/api/logs/download`, `/api/diagnostics` | Diagnostics and redacted logs | Auth |
 | GET | `/api/privacy/export`, `/api/privacy/delete/preview`, `/api/privacy/backup` | Privacy export, deletion preview and backup | Auth |
-| GET | `/api/analysis/endurance`, `/api/analysis/power-profiles`, `/api/analysis/season`, `/api/analysis/training-records`, `/api/analysis/scenarios` | Analysis projections and scenarios | Auth |
+| GET | `/api/analysis/endurance`, `/api/analysis/power-profiles`, `/api/analysis/season`, `/api/analysis/training-records` | Analysis projections | Auth |
 | GET | `/api/nutrition/day`, `/api/nutrition/range`, `/api/nutrition/templates`, `/api/nutrition/week`, `/api/nutrition/products` | Nutrition projections and product search | Auth |
 
 ## Writes and jobs
@@ -62,22 +71,29 @@ provider-keyed.
 | POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback | CSRF |
 | POST | `/api/sync/jobs`, `/api/sync/jobs/{id}/resolve` | Queue or resolve a sync job | CSRF |
 | POST | `/api/sync`, `/api/garmin/sync`, `/api/wahoo/sync`, `/api/intervals/full-resync`, `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Queue provider synchronization | CSRF |
-| POST | `/api/performance/refresh`, `/api/external-calendar/sync`, `/api/weather/sync` | Queue or run a targeted refresh | CSRF |
-| POST | `/api/change-history/undo/preview`, `/api/change-history/undo` | Preview or apply an undo | CSRF |
+| POST | `/api/performance/refresh`, `/api/external-calendar/sync`, `/api/weather/sync`, `/api/analysis/refresh`, `/api/nutrition/refresh` | Queue or run a targeted refresh | CSRF |
+| POST | `/api/analysis/scenarios` | Project a training scenario without saving it | CSRF |
+| POST | `/api/change-history/undo/preview`, `/api/change-history/undo`, `/api/change-history/undo-turn` | Preview or apply an undo, or undo one Coach turn | CSRF |
 | POST | `/api/privacy/delete`, `/api/privacy/restore` | Delete or restore privacy data | CSRF |
 | POST | `/api/logs/delete`, `/api/diagnostics/delete` | Clear diagnostics data | CSRF |
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |
-| POST | `/api/nutrition/entry`, `/api/nutrition/sync` | Write or synchronize nutrition entries | CSRF |
+| POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/sync` | Write, delete or synchronize nutrition entries | CSRF |
+| POST | `/api/nutrition/products`, `/api/nutrition/products/lookup`, `/api/nutrition/products/extract`, `/api/nutrition/products/archive`, `/api/nutrition/products/database/delete` | Save, look up, extract or archive products, or forget a food database entry | CSRF |
+| POST | `/api/wahoo/connect`, `/api/wahoo/disconnect` | Start the Wahoo OAuth connection or disconnect Wahoo | CSRF |
+| POST | `/api/metric-export/preview` | Preview metric values for export without writing | CSRF |
+| POST | `/api/metric-export/execute` | Intervals.icu write: send the confirmed metric selection | CSRF |
+| POST | `/api/metric-export/automatic` | Intervals.icu write: switch the automatic Garmin metric export; needs `confirmed: true` and the `intervals` target | CSRF |
 | POST | `/api/transcribe` | Transcribe short-lived voice input | CSRF |
 
 ## PUT routes
 
 | Method | Path | Purpose | Requirement |
 | --- | --- | --- | --- |
-| PUT | `/api/settings/model`, `/api/settings/thinking-level`, `/api/settings/calendar-display` | Update settings | CSRF |
+| PUT | `/api/settings/model`, `/api/settings/service-tier`, `/api/settings/thinking-level`, `/api/settings/calendar-display`, `/api/settings/activity-detail-floor` | Update settings | CSRF |
 | PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile | CSRF |
 | PUT | `/api/athlete-context` | Replace profile and competitions | CSRF |
 | PUT | `/api/nutrition/entry` | Update a nutrition entry | CSRF |
+| PUT | `/api/nutrition/products` | Update a confirmed saved product | CSRF |
 | PUT | `/api/settings/credentials` | Save or clear provider credentials stored in the encrypted database (see below) | CSRF |
 
 ### Provider credentials and Garmin login

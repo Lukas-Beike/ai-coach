@@ -1,3 +1,4 @@
+import inspect
 import sqlite3
 import tempfile
 import threading
@@ -44,6 +45,19 @@ class DatabaseManagerTests(unittest.TestCase):
                     first.execute("PRAGMA cache_size").fetchone()[0], -16384
                 )
             manager.close()
+
+    def test_readme_states_the_page_cache_budget_of_the_default_pool(self):
+        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(
+            encoding="utf-8"
+        )
+        reader_count = inspect.signature(DatabaseManager).parameters["reader_count"]
+        pool_mib = 16 * (reader_count.default + 1)
+        self.assertIn(
+            "Each pooled database connection uses a 16 MiB page-cache budget", readme
+        )
+        self.assertIn(f"up to {pool_mib} MiB of page caches", readme)
+        self.assertNotIn("32 MiB", readme)
+        self.assertNotIn("160 MiB", readme)
 
     def make_manager(self, root: str) -> DatabaseManager:
         return DatabaseManager(
