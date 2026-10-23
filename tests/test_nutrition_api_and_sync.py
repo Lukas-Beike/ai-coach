@@ -1,18 +1,50 @@
 from __future__ import annotations
 
+import io
+import json
+import sqlite3
+import tempfile
+import threading
 import unittest
 from datetime import UTC, date, datetime
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
+from nutrition_service_support import build_nutrition_services
+
 from backend.config import Config
+from backend.db.manager import DatabaseManager
+from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.http_api.handler import RequestHandler
 from backend.http_api.nutrition import (
+    NUTRITION_ENTRY_PATH,
+    NUTRITION_PRODUCTS_PATH,
     NutritionGetRoutes,
     NutritionPostRoutes,
     NutritionPutRoutes,
 )
 from backend.nutrition.contracts import nutrition_approval_item
 from backend.nutrition.sync import IntervalsNutritionSyncService
+
+# server.py MAX_BODY_BYTES: the cap of every JSON route without its own.
+GLOBAL_BODY_BYTES = 1_000_000
+
+
+def json_route_handler(payload: Any, *, padding: int = 0) -> Any:
+    """Return a bare handler whose read_json is the production body reader."""
+    body = json.dumps(payload).encode() + b" " * padding
+    handler: Any = RequestHandler.__new__(RequestHandler)
+    handler.headers = {
+        "Content-Type": "application/json",
+        "Content-Length": str(len(body)),
+    }
+    handler._read_input = io.BytesIO(body).read
+    handler.dependencies = SimpleNamespace(max_body_bytes=GLOBAL_BODY_BYTES)
+    handler.send_json = Mock()
+    return handler
 
 
 class NutritionHttpApiTests(unittest.TestCase):
@@ -309,6 +341,59 @@ class NutritionHttpApiTests(unittest.TestCase):
                 },
             },
         )
+
+
+class NutritionRouteBodyTests(unittest.TestCase):
+    """Routes read real JSON bodies into the real diary on temporary storage."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        manager = DatabaseManager(
+            Path(directory.name) / "nutrition.db", sqlite3, row_factory=sqlite3.Row
+        )
+        self.addCleanup(manager.close)
+        with manager.unit_of_work() as db:
+            initialize_schema(db)
+        self.diary, self.library = build_nutrition_services(
+            manager,
+            threading.Lock(),
+            lambda: "2026-09-24T12:00:00+00:00",
+            lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
+        )
+        self.post_routes = NutritionPostRoutes(
+            lambda: self.diary, lambda: self.library, sync_job_queue=Mock
+        )
+        self.put_routes = NutritionPutRoutes(lambda: self.diary, lambda: self.library)
+
+    def test_put_entry_applies_the_calorie_alias_to_the_stored_entry(self) -> None:
+        saved = self.diary.log_meal(
+            {"meal_date": "2026-09-24", "description": "Lunch", "kcal": 500}
+        )
+        handler = json_route_handler({"id": saved["id"], "calories": 600})
+
+        self.assertTrue(self.put_routes.handle(handler, NUTRITION_ENTRY_PATH))
+
+        status, body = handler.send_json.call_args.args
+        self.assertEqual((status, body["entry"]["kcal"]), (200, 600))
+        self.assertEqual(self.diary.get_meal(saved["id"])["kcal"], 600)
+
+    def test_non_photo_json_routes_keep_the_global_body_cap(self) -> None:
+        for method, handle, path in (
+            ("POST", self.post_routes.handle, NUTRITION_ENTRY_PATH),
+            ("POST", self.post_routes.handle, f"{NUTRITION_PRODUCTS_PATH}/lookup"),
+            ("PUT", self.put_routes.handle, NUTRITION_ENTRY_PATH),
+        ):
+            handler = json_route_handler(
+                {"description": "Pasta", "kcal": 500}, padding=GLOBAL_BODY_BYTES
+            )
+            with (
+                self.subTest(method=method, path=path),
+                self.assertRaises(AppError) as raised,
+            ):
+                handle(handler, path)
+            self.assertEqual(raised.exception.status, 413)
+        self.assertEqual(self.diary.get_day_summary("2026-09-24")["entry_count"], 0)
 
 
 class IntervalsNutritionSyncServiceTests(unittest.TestCase):

@@ -280,9 +280,14 @@ class FoodDatabaseService:
 
     def _off_search(self, query: str) -> tuple[list[dict[str, Any]], str]:
         local = self._mirror.search(query) if self._mirror else []
-        if local:
+        if self._mirror and any(self._mirror.is_fresh(food) for food in local):
             return local, LOCAL_DATABASE
-        foods = self._off.search(query)
+        try:
+            foods = self._off.search(query)
+        except AppError:
+            if not local:
+                raise
+            return local, LOCAL_DATABASE_STALE
         if self._mirror:
             self._mirror.store(foods)
         return foods, LIVE
@@ -343,7 +348,8 @@ class FoodDatabaseService:
             return foods, PARTIAL_NOTICE if partial else ""
         if source == "open_food_facts":
             found, origin = self._off_search(query.strip())
-            return self._labelled(found, origin), ""
+            notice = STALE_NOTICE if origin == LOCAL_DATABASE_STALE else ""
+            return self._labelled(found, origin), notice
         raise AppError(400, "Ungültige Lebensmitteldatenbank.")
 
     def resolve(self, food_id: Any) -> dict[str, Any]:

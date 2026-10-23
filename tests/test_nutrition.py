@@ -117,6 +117,47 @@ class NutritionModelTests(unittest.TestCase):
         )
         self.assertEqual(entry["sync_state"], "local")
 
+    def test_grouped_thousands_text_is_rejected_instead_of_read_as_a_decimal(
+        self,
+    ) -> None:
+        for field, value in (
+            ("kcal", "1,200"),
+            ("kcal", "1.200"),
+            ("kcal", " 2.500 "),
+            ("calories", "1,200"),
+            ("carbs_g", "1,200"),
+            ("protein", "12,345"),
+        ):
+            payload = {"meal_date": "2026-09-24", "description": "Pasta", field: value}
+            if field not in {"kcal", "calories"}:
+                payload["kcal"] = "100"
+            with self.subTest(field=field, value=value):
+                with self.assertRaises(AppError) as raised:
+                    normalize_nutrition_entry(payload)
+                self.assertEqual(raised.exception.status, 400)
+
+    def test_decimal_text_and_json_numbers_keep_their_values(self) -> None:
+        entry = normalize_nutrition_entry(
+            {
+                "meal_date": "2026-09-24",
+                "description": "Pasta",
+                "kcal": "80,4",
+                "carbs_g": "1.200",
+                "protein_g": "0,500",
+                "fat_g": "12.5",
+            }
+        )
+        self.assertEqual(entry["kcal"], 80)
+        self.assertEqual(
+            (entry["carbs_g"], entry["protein_g"], entry["fat_g"]), (1.2, 0.5, 12.5)
+        )
+        for kcal, expected in ((1200, 1200), (1.234, 1), ("1200", 1200)):
+            with self.subTest(kcal=kcal):
+                entry = normalize_nutrition_entry(
+                    {"meal_date": "2026-09-24", "description": "Pasta", "kcal": kcal}
+                )
+                self.assertEqual(entry["kcal"], expected)
+
 
 class NutritionRepositoryAndServiceTests(unittest.TestCase):
     def test_missing_database_macros_do_not_fall_back_to_supplied_aliases(self):
@@ -507,6 +548,66 @@ class NutritionRepositoryAndServiceTests(unittest.TestCase):
         self.assertEqual(updated["description"], "Großer Salat mit Hähnchen")
         self.assertEqual(updated["kcal"], 450)
         self.assertEqual(updated["protein_g"], 35.0)
+
+    def test_log_meal_rejects_grouped_thousands_without_writing(self) -> None:
+        with self.assertRaises(AppError) as raised:
+            self.service.log_meal(
+                {"meal_date": "2026-09-24", "description": "Pasta", "kcal": "1,200"}
+            )
+        self.assertEqual(raised.exception.status, 400)
+        self.assertEqual(self.service.get_day_summary("2026-09-24")["entry_count"], 0)
+
+    def _logged_lunch(self) -> dict:
+        return self.service.log_meal(
+            {
+                "meal_date": "2026-09-24",
+                "logged_at": "2026-09-24T12:15:00",
+                "description": "Lunch",
+                "kcal": 500,
+                "carbs_g": 60,
+                "protein_g": 20,
+                "fat_g": 10,
+            }
+        )
+
+    def test_update_meal_applies_alias_fields_like_correct_meal(self) -> None:
+        saved = self._logged_lunch()
+        for changes, field, expected in (
+            ({"calories": 600}, "kcal", 600),
+            ({"carbohydrates": 70}, "carbs_g", 70),
+            ({"carbs": 65}, "carbs_g", 65),
+            ({"protein": 25}, "protein_g", 25),
+            ({"fat": 12}, "fat_g", 12),
+        ):
+            with self.subTest(changes=changes):
+                updated = self.service.update_meal(saved["id"], changes)
+                self.assertEqual(updated[field], expected)
+
+        moved = self.service.update_meal(
+            saved["id"], {"date": "2026-09-25", "meal_time": "13:30"}
+        )
+        self.assertEqual(moved["meal_date"], "2026-09-25")
+        self.assertEqual(moved["logged_at"], "2026-09-25T13:30")
+        self.assertTrue(moved["logged_time_known"])
+
+    def test_conflicting_alias_and_field_are_rejected_and_equal_values_accepted(
+        self,
+    ) -> None:
+        saved = self._logged_lunch()
+        for change in (self.service.update_meal, self.service.correct_meal):
+            for changes in (
+                {"kcal": 600, "calories": 700},
+                {"meal_date": "2026-09-25", "date": "2026-09-26"},
+            ):
+                with self.subTest(change=change.__name__, changes=changes):
+                    with self.assertRaises(AppError) as raised:
+                        change(saved["id"], changes)
+                    self.assertEqual(raised.exception.status, 400)
+        stored = self.service.get_meal(saved["id"])
+        self.assertEqual((stored["kcal"], stored["meal_date"]), (500, "2026-09-24"))
+
+        updated = self.service.update_meal(saved["id"], {"kcal": 600, "calories": 600})
+        self.assertEqual(updated["kcal"], 600)
 
     def test_correct_meal_preserves_omitted_fields_and_marks_old_and_new_days_pending(
         self,
