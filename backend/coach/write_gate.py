@@ -150,6 +150,8 @@ def normalize(text: str) -> str:
     value = unicodedata.normalize("NFC", str(text)).casefold().replace("ß", "ss")
     for source, folded in _UMLAUTS:
         value = value.replace(source, folded)
+    # A typographic apostrophe ("don’t") spells the same as a plain one.
+    value = value.replace("\u2019", "'")
     value = "".join(
         char
         for char in unicodedata.normalize("NFKD", value)
@@ -192,9 +194,17 @@ def _mentions_remote(text: str) -> bool:
     return bool(_REMOTE_PATTERN.search(_loose(normalize(text))))
 
 
+# What a repair sync leaves out ("..., ohne doppelte Einträge") is no sync target.
+_REPAIR_TOPICS = frozenset(_words("doppelt,duplikat,dublette,konflikt,reparier"))
+_SYNC_TARGET_PATTERN = _compile(
+    stem for stem in _REMOTE_STEMS if stem not in _REPAIR_TOPICS
+)
+# An "ohne"/"without" phrase runs to the next comma, semicolon or colon.
+_WITHOUT = re.compile(r"(?<![a-z])(?:ohne|without)(?![a-z])([^,;:]*)")
+
 _NEGATION = re.compile(
     r"(?<![a-z])(?:nein|nee|nicht|nichts|no|not|nope|nie|niemals|kein|keine|"
-    r"keinen|stop|stopp|nix|never|nothing|don'?t)(?![a-z])"
+    r"keinen|keinesfalls|keineswegs|stop|stopp|nix|never|nothing|don'?t)(?![a-z])"
 )
 _QUESTION = re.compile(r"[?？]")
 _AFFIRMATION_ANCHORS = frozenset(
@@ -208,8 +218,11 @@ _AFFIRMATION_FILLER = frozenset(
 )  # fmt: skip
 _AFFIRMATION_MAX_TOKENS = 5
 
-_SENTENCE = re.compile(r"[^.!?？]+[.!?？]*")
-_CLAUSE_BREAK = re.compile(r"[,;:]|(?<![a-z])(?:aber|sondern|but)(?![a-z])")
+# "Intervals.icu" is a name, not a sentence end.
+_SENTENCE = re.compile(r"(?:intervals\.icu|[^.!?？])+[.!?？]*")
+# A negation covers its whole sentence across commas, semicolons and colons
+# ("Ich will nicht, dass du synchronisierst"); only a contrast word ends it.
+_CONTRAST = re.compile(r"(?<![a-z])(?:aber|sondern|but)(?![a-z])")
 _INFORMATION_QUESTION = re.compile(
     r"^\s*(?:wie|was|wann|wo|woher|wohin|wer|wem|wen|welche[mnrs]?|warum|"
     r"wieso|weshalb|wozu|what|how|when|where|which|why|who)(?![a-z])"
@@ -225,12 +238,22 @@ _POLITE_REQUEST = re.compile(
 )
 
 
+def _negates(part: str) -> bool:
+    return bool(_NEGATION.search(part)) or any(
+        _SYNC_TARGET_PATTERN.search(_loose(normalize(phrase)))
+        for phrase in _WITHOUT.findall(part)
+    )
+
+
 def remote_requested(text: str) -> bool:
     """Whether the athlete's own text asks for a write to Intervals.icu.
 
     Information questions ("Wie synchronisiere ich?") ask nothing unless they
     address the coach with a request verb ("Kannst du ... syncen?"), and a
-    negated clause ("nicht zu Intervals hochladen") asks nothing.
+    negated part of a sentence ("nicht zu Intervals hochladen", "ohne Sync")
+    asks nothing until a contrast word ("..., sondern synchronisieren"). An
+    "ohne" negates only when its phrase names the sync, so "Sync mit Intervals
+    ohne die Ruhetage" still asks for it.
     """
     for sentence in _SENTENCE.findall(normalize(text)):
         if (
@@ -240,8 +263,8 @@ def remote_requested(text: str) -> bool:
         ):
             continue
         if any(
-            _mentions_remote(clause) and not _NEGATION.search(clause)
-            for clause in _CLAUSE_BREAK.split(sentence)
+            _mentions_remote(part) and not _negates(part)
+            for part in _CONTRAST.split(sentence)
         ):
             return True
     return False

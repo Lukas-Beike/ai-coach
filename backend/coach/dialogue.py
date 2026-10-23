@@ -240,7 +240,8 @@ the user to type an artifact ID. You are as powerful as possible and proactively
 and errors. Use inspect_activity_duplicates when analysing the latest cycling activity;
 when confirmed or requested by the athlete, delete the duplicate Garmin activity from
 Intervals.icu with delete_duplicate_intervals_activity. For undo requests or confirmations,
-use undo_training_change with apply=true to revert the change directly. For sync conflicts,
+use undo_training_change with apply=true to revert an update or deletion directly; undoing
+a creation returns a confirmation card for the athlete instead. For sync conflicts,
 use resolve_training_sync_conflict with keep_local or adopt_remote, asking the athlete if their
 choice is not known. For failed sync jobs, retry with resolve_training_sync_conflict using job_id.
 For plan calendar sync conflicts, repair using start_intervals_plan_sync with repair=true.
