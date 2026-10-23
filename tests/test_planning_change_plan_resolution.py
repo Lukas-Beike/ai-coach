@@ -252,6 +252,31 @@ class StructuredTrainingPlanResolverTests(unittest.TestCase):
                     reason="intent_scope_denied",
                 )
 
+    def test_authorized_plan_reads_unit_ids_as_the_writer_does(self) -> None:
+        unit_a = "8b6f3c1e-2d4a-4f7b-9c1d-0e5a6b7c8d9f"
+        unit_b = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        self.add_plan("plan-a")
+        self.add_plan("plan-b")
+        self.add_unit(unit_a, {"plan_id": "plan-a"})
+        self.add_unit(unit_b, {"plan_id": "plan-b"})
+
+        for spelling in (unit_b.upper(), "{" + unit_b + "}", unit_b.replace("-", "")):
+            for batch in (
+                [{"local_id": spelling}],
+                [{"local_id": unit_a}, {"local_id": spelling, "action": "delete"}],
+            ):
+                with self.subTest(batch=batch):
+                    self.assert_app_error(
+                        lambda batch=batch: self.derive(batch, "plan-a"),
+                        status=403,
+                        message="Die Planreferenzen der Änderung sind nicht eindeutig.",
+                        reason="intent_scope_denied",
+                    )
+        self.assertEqual(
+            self.derive([{"local_id": unit_a.upper()}], "plan-a"),
+            ({"plan_id": "plan-a", "plan_name": "Plan"}, set()),
+        )
+
     def test_create_plan_ids_support_implicit_explicit_and_standalone_cases(
         self,
     ) -> None:

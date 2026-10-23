@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
@@ -22,6 +23,14 @@ from backend.planning.workouts import normalize_workout
 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
     "SELECT payload FROM planned_units WHERE local_id=?"
 )
+
+
+def _stored_local_id(local_id: str) -> str:
+    """Return ``local_id`` as the planned-unit writer stores it, if it is a UUID."""
+    try:
+        return str(uuid.UUID(local_id))
+    except ValueError:
+        return local_id
 
 
 def _project_existing_training_change(
@@ -514,7 +523,9 @@ class StructuredTrainingPlanResolver:
         local_id = str(change.get("local_id") or "").strip()
         if action == "create" or not local_id:
             return None, None
-        row = db.execute(_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)).fetchone()
+        row = db.execute(
+            _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (_stored_local_id(local_id),)
+        ).fetchone()
         if not row:
             return None, None
         try:

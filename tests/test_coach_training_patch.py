@@ -112,6 +112,7 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
                     server.COACH_PLANNING_TOOLS.training_patch_service().apply(
                         arguments, action
                     )
+                self.assertEqual(error.exception.status, 400)
                 self.assertEqual(error.exception.reason, "intent_scope_denied")
         self.assertEqual(self.state(), before)
 
