@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from typing import Any
 
+from backend.canonical.decimal_text import comma_decimal_float, is_grouped_thousands
 from backend.errors import AppError
 
 VALID_MEAL_TYPES = ("breakfast", "lunch", "dinner", "snack")
@@ -17,6 +19,28 @@ MAX_KCAL = 10000
 MAX_MACRO_G = 1000.0
 MAX_DESCRIPTION_LEN = 500
 MEAL_DATE_REQUIRED = "meal_date ist erforderlich."
+# Whole-kcal text such as "1.200" is grouped thousands, never 1.2 kcal.
+_DOT_GROUPED_THOUSANDS = re.compile(r"[+-]?[1-9]\d{0,2}\.\d{3}", re.ASCII)
+
+
+def ambiguous_number_text(value: Any, *, kcal: bool = False) -> bool:
+    """Return whether text could be grouped thousands, e.g. "1,200" (kcal: "1.200").
+
+    JSON numbers are never ambiguous.
+    """
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    return is_grouped_thousands(text) or (
+        kcal and _DOT_GROUPED_THOUSANDS.fullmatch(text) is not None
+    )
+
+
+def nutrition_number(value: Any, *, kcal: bool = False) -> float:
+    """Read a number or comma/dot decimal text; raise ValueError if unreadable."""
+    if ambiguous_number_text(value, kcal=kcal):
+        raise ValueError("ambiguous grouped thousands")
+    return comma_decimal_float(value)
 
 
 def validate_iso_date(value: Any) -> str:
@@ -50,7 +74,7 @@ def _as_nonnegative_number(
     if value is None or value == "":
         return None
     try:
-        num = float(str(value).replace(",", "."))
+        num = nutrition_number(value)
     except TypeError, ValueError:
         raise AppError(400, f"Ungültiger Wert für {name}: {value}")
     if not math.isfinite(num):
@@ -224,7 +248,7 @@ def _normalize_calories(raw: dict[str, Any], clamp: bool) -> int:
     if value is None:
         raise AppError(400, "Kalorienangabe (kcal) ist erforderlich.")
     try:
-        calories = float(str(value).replace(",", "."))
+        calories = nutrition_number(value, kcal=True)
     except (TypeError, ValueError) as exc:
         raise AppError(400, f"Ungültige Kalorienangabe: {value}") from exc
     if not math.isfinite(calories):

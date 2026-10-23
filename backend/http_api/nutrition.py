@@ -13,6 +13,7 @@ from backend.http_api.auth import SessionAuthService
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.models import validate_iso_date
+from backend.nutrition.photo import PHOTO_REQUEST_MAX_BYTES
 
 NUTRITION_ENTRY_PATH = "/api/nutrition/entry"
 NUTRITION_PRODUCTS_PATH = "/api/nutrition/products"
@@ -252,7 +253,7 @@ class NutritionPostRoutes:
         handler.send_json(200, self._meal_library_service().lookup_product(payload))
 
     def _extract_product(self, handler: Any) -> None:
-        payload = _read_object(handler)
+        payload = _read_object(handler, PHOTO_REQUEST_MAX_BYTES)
         handler.send_json(
             200, self._meal_library_service().extract_packaging_photo(payload)
         )
@@ -337,8 +338,8 @@ class NutritionPutRoutes:
         return True
 
 
-def _read_object(handler: Any) -> dict[str, Any]:
-    payload = handler.read_json()
+def _read_object(handler: Any, max_bytes: int | None = None) -> dict[str, Any]:
+    payload = handler.read_json(max_bytes)
     if not isinstance(payload, dict):
         raise AppError(400, INVALID_BODY)
     return payload
