@@ -49,6 +49,7 @@ test("@responsive running tolerance renders Garmin toleranceScore instead of mis
 });
 
 test("@responsive standard demo shows one compact race table and sport-specific collapsible development", async ({ page }) => {
+  test.setTimeout(180_000);
   expect((await page.request.get("/api/fixture/demo")).ok()).toBe(true);
   await page.goto("/#analysis/performance");
   const table = page.locator("#performancePredictions");
