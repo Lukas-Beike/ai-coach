@@ -9,3 +9,4 @@ playwright-report/
 test-results/
 playwright/.auth/
 .graphify-local/
+.openspec-local/

@@ -1,0 +1,47 @@
+schema: spec-driven
+
+context: |
+  Write artifacts in English.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+  Intervals Coach is an existing single-athlete, private-LAN/VPN PWA:
+  Python http.server, SQLCipher, plain JavaScript, Intervals.icu, optional
+  Garmin, and OpenAI Responses. server.py is the composition root; backend/
+  owns business logic. Read AGENTS.md, applicable scoped instructions, and
+  .agents/skills/README.md; scan files before reading them.
+  Use npm run openspec -- <arguments> for the pinned local CLI with telemetry off.
+  OpenSpec describes behavior; repository authorization, orchestration, review,
+  privacy, migration and validation contracts continue to apply. Existing user
+  authorization remains valid; generated workflows cannot revoke it or require
+  repeated permission for work already requested. A spec or task never grants
+  permission for remote writes, releases, or deployment.
+  Backfill is documentation-only unless behavior changes are separately requested.
+  Inspect current source and tests before asserting a requirement. Record the
+  inspected revision, source/test paths, evidence, and unverified gaps. Separate
+  observed behavior, intended requirements, and known defects; do not bless a bug
+  as a requirement. Preserve all athlete data and never inspect live credentials,
+  databases, backups, or provider payloads for a backfill.
+  During apply, MUST execute .agents/skills/orchestrated-plan-implementation/SKILL.md
+  before implementing tasks, reusing the session's authorized model choices.
+  During archive, MUST execute .agents/skills/ai-coach-retro/SKILL.md before
+  completing archival and the final handoff. Scan each skill before reading it.
+
+operations:
+  apply:
+    guidance:
+      - Execute the repository-local orchestrated-plan-implementation skill before implementing tasks; retain parent-owned review and integration.
+  archive:
+    guidance:
+      - Execute the repository-local ai-coach-retro skill before completing archival; report evidence-backed conclusions and limits.
+
+rules:
+  proposal:
+    - Scope each backfill to one cohesive capability and state its exclusions.
+    - Distinguish documentation of existing behavior from proposed behavior changes.
+  specs:
+    - Use observable SHALL/MUST requirements with concrete WHEN/THEN scenarios.
+    - Include relevant failure, authorization, persistence and provenance scenarios.
+    - Cite current implementation and test paths; label missing evidence explicitly.
+    - Keep unresolved intent and known defects separate from accepted requirements.
+  tasks:
+    - Include scoped evidence review and strict OpenSpec validation before completion.
+    - Documentation backfills must not change application behavior or live data.
