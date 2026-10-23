@@ -21,6 +21,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
   const calls = [];
   const responses = new Map();
   const renders = [];
+  const updateChecks = [];
   const shell = { loading: false, hidden: false };
   shell.classList = { contains: () => shell.loading, add() {}, remove() {} };
   const state = {
@@ -52,6 +53,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     currentPlanLoadAreas: () => ["chat"],
     applyChatResult() {},
     finishAppShellLoading() {},
+    reloadForUpdateWhenSafe() { updateChecks.push(state.loadPromise); },
     api(requestPath) {
       calls.push(requestPath);
       const response = responses.get(requestPath) || deferred();
@@ -66,7 +68,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     responses.set(requestPath, response);
     response.resolve(body);
   };
-  return { context, state, shell, calls, renders, respond, storage };
+  return { context, state, shell, calls, renders, respond, storage, updateChecks };
 }
 
 test("area reads start before the bootstrap response arrives", async () => {
@@ -505,4 +507,79 @@ test("a load without the chat area leaves the cached-message sync note alone", a
   await loading;
   assert.equal(state.chatCacheSyncing, true);
   assert.deepEqual(syncCalls, []);
+});
+
+// Starts the next app version from a snapshot stored by the previous one, as the
+// "Update wird verarbeitet…" start does: the snapshot is not shown and the
+// bootstrap's placeholders replace all data.
+async function updateStart(storedData, libraryResponse) {
+  const previous = loader({ asset: "/state-loader.js?v=1" });
+  previous.state.initialStateLoaded = true;
+  previous.state.data = storedData;
+  previous.context.saveStateSnapshot();
+  const updated = loader({ storage: previous.storage, asset: "/state-loader.js?v=2" });
+  assert.equal(updated.context.readStateSnapshot().updated, true);
+  updated.state.replaceDataOnLoad = true;
+  const loading = updated.context.load("/api/bootstrap", ["performance", "library"]);
+  updated.respond("/api/bootstrap", { state_versions: {}, performance: {}, library: [], checkins: [], weather: {} });
+  updated.respond("/api/performance", { performance: { ctl: 41 } });
+  updated.respond("/api/library?limit=100", libraryResponse);
+  await loading;
+  return updated;
+}
+
+test("after an app update a failed area keeps its stored data", async () => {
+  const { context } = await updateStart(
+    { performance: { ctl: 40 }, library: [{ id: "w1" }], library_next_cursor: "c1" },
+    Promise.reject(new Error("offline")),
+  );
+  context.saveStateSnapshot();
+  const snapshot = context.readStateSnapshot();
+  assert.equal(snapshot.updated, false);
+  assert.deepEqual(plain([snapshot.data.performance, snapshot.data.library, snapshot.data.library_next_cursor]), [{ ctl: 41 }, [{ id: "w1" }], "c1"]);
+});
+
+test("after an app update a later load without the failed area keeps its stored data", async () => {
+  const { context, respond } = await updateStart(
+    { performance: { ctl: 40 }, library: [{ id: "w1" }] },
+    Promise.reject(new Error("offline")),
+  );
+  context.saveStateSnapshot();
+  const later = context.load("/api/bootstrap?local=1", ["feedback"]);
+  respond("/api/bootstrap?local=1", { state_versions: {}, library: [] });
+  respond("/api/feedback", { checkins: [{ id: "c1" }] });
+  await later;
+  context.saveStateSnapshot();
+  const stored = context.readStateSnapshot().data;
+  assert.deepEqual(plain([stored.library, stored.checkins]), [[{ id: "w1" }], [{ id: "c1" }]]);
+});
+
+test("after an app update a stored area of another shape is dropped, not replaced by a placeholder", async () => {
+  const { context } = await updateStart(
+    { performance: { ctl: 40 }, library: { w1: { id: "w1" } } },
+    Promise.reject(new Error("offline")),
+  );
+  context.saveStateSnapshot();
+  const stored = context.readStateSnapshot().data;
+  assert.equal("library" in stored, false);
+  assert.equal("library_next_cursor" in stored, false);
+  assert.deepEqual(plain(stored.performance), { ctl: 41 });
+});
+
+test("a finished load chain checks a held update reload once it is no longer loading", async () => {
+  const { context, respond, updateChecks } = loader();
+  const loading = context.load("/api/bootstrap", ["performance"]);
+  respond("/api/bootstrap", { state_versions: {} });
+  respond("/api/performance", { performance: {} });
+  await loading;
+  assert.deepEqual(updateChecks, [null]);
+});
+
+test("after an app update a loaded area stores its fresh data", async () => {
+  const { context } = await updateStart(
+    { performance: { ctl: 40 }, library: [{ id: "w1" }] },
+    { workouts: [{ id: "w2" }], next_cursor: null },
+  );
+  context.saveStateSnapshot();
+  assert.deepEqual(plain(context.readStateSnapshot().data.library), [{ id: "w2" }]);
 });

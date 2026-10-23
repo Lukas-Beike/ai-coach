@@ -622,11 +622,8 @@ async function sendMessage(event) {
   if (state.chatAttachmentsLoading || !message || voiceIsRecording() || state.voiceTranscribing) return;
   state.chatAttachments = [];
   renderChatAttachments();
-  if (state.chatRequest || state.chatServerOperationId) {
-    if (state.busy) queueChatMessage(message, "queue", requestKind, attachments);
-    return;
-  }
-  if (state.busy) {
+  // A recovering answer is not busy yet; its completion sends the queue.
+  if (state.busy || state.chatRequest || state.chatServerOperationId) {
     queueChatMessage(message, "queue", requestKind, attachments);
     return;
   }
@@ -834,6 +831,7 @@ function updateChatControls() {
   updateChatCancelButton($("#cancelChatButton"), controls);
   syncChatWorkingStatus(controls);
   updateChatQueueStatus();
+  reloadForUpdateWhenSafe();
 }
 
 function chatInputPlaceholder(controls) {
