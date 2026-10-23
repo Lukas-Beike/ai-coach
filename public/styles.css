@@ -1253,10 +1253,10 @@ dialog p { margin-bottom: 0; color: var(--muted); }
 body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 24px); }
 
 @media (min-width: 768px) {
-  .shell { display: grid; grid-template-columns: 72px minmax(0, 1fr); grid-template-areas: "nav header" "nav main"; gap: 0 24px; padding: 0 24px 32px 0; }
-  .desktop-nav { grid-area: nav; position: sticky; top: 0; display: flex; height: 100dvh; flex-direction: column; gap: 8px; padding: 24px 10px; border-right: 1px solid var(--line); }
-  .desktop-nav .nav-item { display: grid; min-height: 52px; place-items: center; gap: 5px; padding: 7px 4px; border-radius: 12px; color: var(--muted); text-decoration: none; }
-  .desktop-nav .nav-item > span { display: none; }
+  .shell { display: grid; grid-template-columns: 80px minmax(0, 1fr); grid-template-areas: "nav header" "nav main"; gap: 0 24px; padding: 0 24px 32px 0; }
+  .desktop-nav { grid-area: nav; position: sticky; top: 0; display: flex; height: 100dvh; flex-direction: column; gap: 8px; padding: 24px 6px; border-right: 1px solid var(--line); }
+  .desktop-nav .nav-item { display: grid; min-height: 52px; place-items: center; gap: 5px; padding: 7px 2px; border-radius: 12px; color: var(--muted); text-decoration: none; }
+  .desktop-nav .nav-item > span { font-size: .68rem; font-weight: 650; }
   .desktop-nav .nav-item.active { color: var(--ink); background: var(--accent-soft); }
   .desktop-nav .nav-item.active .nav-icon { color: var(--accent-bright); }
   .desktop-nav .nav-item:last-child { margin-top: auto; }
@@ -1684,6 +1684,8 @@ summary > .activity-analysis-error { flex: 0 0 auto; font-size: .72rem; font-wei
 /* Visibility, chart variants and motion preferences take precedence over components. */
 @layer overrides {
 [hidden] { display: none; }
+/* Route activation focuses the panel for screen readers; it is not an interactive control. */
+.panel[tabindex="-1"]:focus { outline: none; }
 .analysis-form-area { fill: var(--chart-series-2); opacity: .15; stroke: none; }
 .analysis-range-whisker { stroke-width: 8px; stroke-linecap: round; opacity: .25; }
 .nutrition-low-confidence { border-color: var(--nutrition-warning-border); }
