@@ -691,9 +691,15 @@ configuration. Existing
 AGENTS boundaries and authorization take precedence over generated workflows;
 OpenSpec does not replace repository review, orchestration, or validation.
 
-**Incremental backfill.** This setup contains no application specs yet; an empty
-inventory or validator with nothing to validate is not evidence of coverage.
-Build one cohesive capability at a time, in this suggested order:
+**Application specifications.** The [OpenSpec baseline](openspec/README.md)
+documents the existing application through 30 capabilities. Its
+[coverage and evidence ledger](openspec/COVERAGE.md) distinguishes inspected
+source/tests, executed checks, implementation boundaries and unresolved gaps.
+The [surface inventory](openspec/coverage.json) and
+[Coach tool map](openspec/COACH_TOOLS.md) make ownership and affected contracts
+discoverable. A valid document is not proof of complete runtime conformance.
+
+Maintain and extend one cohesive capability at a time, prioritizing:
 
 1. SQLCipher migrations, restart, backup/restore, and preservation of athlete data.
 2. Coach write authorization, durable effects, receipts, undo, and provenance.
