@@ -83,6 +83,11 @@ SHORT_ONLY_MAX_MINUTES = 60
 NO_TRAINING_MARKER = "[NO_TRAINING]"
 NO_INTENSITY_MARKER = "[NO_INTENSITY]"
 SHORT_ONLY_MARKER = "[SHORT_ONLY]"
+_MARKER_BY_REASON = {
+    "no_training": NO_TRAINING_MARKER,
+    "no_intensity": NO_INTENSITY_MARKER,
+    "short_only": SHORT_ONLY_MARKER,
+}
 
 
 def _workout_minutes(workout: dict[str, Any]) -> float | None:
@@ -97,20 +102,19 @@ def _workout_minutes(workout: dict[str, Any]) -> float | None:
     return None
 
 
+def calendar_event_has_constraint(event: dict[str, Any], reason: str) -> bool:
+    """Return whether an event sets one constraint flag or names its marker."""
+    marker_text = f"{event.get('name', '')} {event.get('description', '')}".casefold()
+    return bool(event.get(reason)) or has_marker(marker_text, _MARKER_BY_REASON[reason])
+
+
 def calendar_constraint_decision(
     workout: dict[str, Any], event: dict[str, Any]
 ) -> dict[str, Any] | None:
     """Centralize external event constraints used by every planning mutation."""
-    marker_text = f"{event.get('name', '')} {event.get('description', '')}".casefold()
-    no_training = bool(event.get("no_training")) or has_marker(
-        marker_text, NO_TRAINING_MARKER
-    )
-    no_intensity = bool(event.get("no_intensity")) or has_marker(
-        marker_text, NO_INTENSITY_MARKER
-    )
-    short_only = bool(event.get("short_only")) or has_marker(
-        marker_text, SHORT_ONLY_MARKER
-    )
+    no_training = calendar_event_has_constraint(event, "no_training")
+    no_intensity = calendar_event_has_constraint(event, "no_intensity")
+    short_only = calendar_event_has_constraint(event, "short_only")
     if no_training and not workout_is_rest(workout):
         return {
             "blocked": True,
@@ -131,6 +135,33 @@ def calendar_constraint_decision(
             "marker": SHORT_ONLY_MARKER,
         }
     return None
+
+
+def adaptive_change_calendar_blocked(
+    change: dict[str, Any], blockers: list[dict[str, Any]]
+) -> bool:
+    """Return whether current calendar blockers reject one adaptive change.
+
+    A kept replacement must pass every marker of its day. An archive is
+    re-checked only when it rested on a [NO_TRAINING] event and is rejected once
+    that event no longer blocks.
+    """
+    payload = change.get("payload")
+    if not isinstance(payload, dict) or not payload.get("archived"):
+        return bool(blockers)
+    no_training = [
+        event
+        for event in change.get("external_events") or []
+        if isinstance(event, dict) and event.get("no_training")
+    ]
+    if "calendar" not in (change.get("blocking_triggers") or []) or not no_training:
+        return False
+    original_ids = {str(event["id"]) for event in no_training if event.get("id")}
+    return not any(
+        blocker.get("reason") == "no_training"
+        and str(blocker.get("id") or "") in original_ids
+        for blocker in blockers
+    )
 
 
 MARKER_LABELS = {
