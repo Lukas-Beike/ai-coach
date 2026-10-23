@@ -143,7 +143,8 @@ def adaptive_change_calendar_blocked(
     """Return whether current calendar blockers reject one adaptive change.
 
     A kept replacement must pass every marker of its day. An archive is
-    calendar-bound only when it rested on a [NO_TRAINING] event that still blocks.
+    re-checked only when it rested on a [NO_TRAINING] event and is rejected once
+    that event no longer blocks.
     """
     payload = change.get("payload")
     if not isinstance(payload, dict) or not payload.get("archived"):
