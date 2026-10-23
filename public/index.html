@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=336">
+  <link rel="stylesheet" href="/styles.css?v=337">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -51,9 +51,9 @@
         <div><strong>Anbindung benötigt Aufmerksamkeit</strong><span id="providerAttentionDetail"></span></div>
         <a href="#more/connections">Anbindungen öffnen</a>
       </section>
-      <section id="setupBanner" class="provider-attention-banner setup-banner" aria-labelledby="setupBannerTitle" aria-live="polite" hidden>
-        <div><strong id="setupBannerTitle">Einrichtung nötig</strong><span id="setupBannerDetail"></span></div>
-        <div class="setup-banner-actions"><a href="#more/connections">Jetzt einrichten</a><button type="button" id="setupBannerDismiss" class="secondary-button">Für diese Sitzung ausblenden</button></div>
+      <section id="setupBanner" class="provider-attention-banner setup-banner" aria-labelledby="setupBannerDetail" aria-live="polite" hidden>
+        <strong id="setupBannerDetail"></strong>
+        <div class="setup-banner-actions"><a href="#more/connections">Jetzt einrichten</a><button type="button" id="setupBannerDismiss" class="secondary-button" aria-label="Für diese Sitzung ausblenden" title="Für diese Sitzung ausblenden">✕</button></div>
       </section>
 
       <section id="chatPanel" class="panel active" aria-label="Coach-Chat">
@@ -553,7 +553,7 @@
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=37" defer></script>
-  <script src="/shared.js?v=18" defer></script>
+  <script src="/shared.js?v=19" defer></script>
   <script src="/auth.js?v=13" defer></script>
   <script src="/sync-status.js?v=12" defer></script>
   <script src="/view-refresh.js?v=3" defer></script>
