@@ -33,7 +33,11 @@ plain JavaScript, athlete data, and local-action contracts; see
   with both sparse and complete synthetic data, never invented athlete facts.
 - Use the existing German product vocabulary and short, concrete action verbs.
   Keep an action's name consistent through buttons, confirmation, and receipts.
-  Explain the user-visible effect; omit internal implementation terminology.
+  Format numbers, dates, distances, and durations through `public/format.js`.
+- Cut eyebrows, taglines, intros, helper text, and secondary labels; name the
+  effect in the control or receipt itself. If a screen needs explanation, fix
+  the layout. Show source distinctions as a compact badge or suffix, not an
+  explanatory line. Omit internal implementation terminology.
 - Make local save, preview/apply, and explicit provider synchronization clear.
   Preserve separate approvals and durable-effect receipts; a new layout must not
   silently turn a preview or chat response into a write.
@@ -43,17 +47,21 @@ plain JavaScript, athlete data, and local-action contracts; see
 
 ## Build and inspect
 
-- Preserve semantic controls, visible keyboard focus, labels, adequate contrast,
-  touch usability, screen-reader feedback, and reduced motion. Never convey source,
-  severity, selection, or errors only through color. Keep DOM and visual order
-  aligned; avoid focus loss when dynamic content updates.
-- Check small mobile layouts, keyboard-open input, long German labels, large text,
-  scroll containers, and sticky controls; inspect the affected wider layout too.
-  Keep destructive actions distinguishable and microphone/notifications opt-in.
-- Preserve safe Markdown, login/CSRF, streaming, and the device-specific chat
-  keyboard contract. Update asset query versions and service-worker cache/assets
-  together when frontend assets change.
-- Use the host's supported collaborative browser when available and follow
+- Preserve semantic controls, visible keyboard focus, labels, WCAG AA contrast,
+  touch targets of at least 44 px, screen-reader feedback, and reduced motion.
+  Never convey source, severity, selection, or errors only through color. Keep
+  DOM and visual order aligned; avoid focus loss when dynamic content updates.
+- Add colors only as semantic tokens in both `:root` and `:root[data-theme="light"]`
+  of `public/styles.css`; component rules use `var()`. Add new text/background
+  pairs to `tests/test_css_design_tokens.py`. Put component rules in `@layer app`
+  and precedence rules in `@layer overrides`; do not use `!important`.
+- Check small mobile layouts, keyboard-open input, long German labels, 200% text
+  without horizontal overflow, scroll containers, and sticky controls in the dark
+  and light themes; inspect the affected wider layout too. Keep destructive
+  actions distinguishable and microphone/notifications opt-in.
+- Preserve safe Markdown, login/CSRF, streaming, and the chat keyboard and asset
+  version contracts in `public/AGENTS.md`.
+- Use the product-native preview when available and follow
   [the fixture/browser workflow](../ai-coach-pwa-e2e/SKILL.md). Inspect screenshots
   and interactions, then remove visual clutter that does not help the task.
 - Run [affected checks](../ai-coach-validation/SKILL.md). Report what changed,
