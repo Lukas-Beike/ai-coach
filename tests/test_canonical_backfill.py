@@ -2062,15 +2062,104 @@ class FollowupStageTests(unittest.TestCase):
         def mark_failed(self, db):
             self.failed = True
 
-    def run_worker(self, canonical, followups):
-        worker = CanonicalBackfillWorker(
+    class BlockedStage(Stage):
+        """Holds its first batch until the test releases it."""
+
+        def __init__(self, name, log, **kwargs):
+            super().__init__(name, log, **kwargs)
+            self.running = threading.Event()
+            self.release = threading.Event()
+
+        def run_batch(self, db):
+            if not self.running.is_set():
+                self.running.set()
+                self.release.wait(5)
+            return super().run_batch(db)
+
+    def make_worker(self, canonical, followups, **kwargs):
+        return CanonicalBackfillWorker(
             backfill=canonical,
             database=lambda: FakeDatabase(),
             maintenance_gate=MaintenanceGate(),
             poll_seconds=0,
             followups=followups,
+            **kwargs,
         )
-        worker.run_loop()
+
+    def run_worker(self, canonical, followups):
+        self.make_worker(canonical, followups).run_loop()
+
+    def start_worker(self, canonical, followups):
+        """Start the worker on its own thread; return it and every thread it created."""
+        threads = []
+
+        def factory(**kwargs):
+            thread = threading.Thread(**kwargs)
+            threads.append(thread)
+            return thread
+
+        worker = self.make_worker(canonical, followups, thread_factory=factory)
+        self.addCleanup(worker.join, 5)
+        self.addCleanup(worker.stop)
+        worker.start()
+        return worker, threads
+
+    def test_start_during_a_followup_reruns_the_canonical_stage(self):
+        log = []
+        canonical = self.Stage("canonical", log)
+        followup = self.BlockedStage("followup", log)
+        worker, threads = self.start_worker(canonical, [followup])
+        self.addCleanup(followup.release.set)
+        self.assertTrue(followup.running.wait(5))
+
+        # A restore lands while the follow-up runs, leaves the canonical stage
+        # incomplete and calls start() on the live worker.
+        worker.start()
+        followup.release.set()
+        worker.join(5)
+
+        self.assertEqual(["canonical", "followup", "canonical", "followup"], log)
+        self.assertEqual(1, len(threads))
+        self.assertFalse(threads[0].is_alive())
+
+    def test_start_during_a_failing_followup_retries_the_pass(self):
+        log = []
+        canonical = self.Stage("canonical", log)
+        followup = self.BlockedStage("followup", log, fail=True)
+        worker, threads = self.start_worker(canonical, [followup])
+        self.addCleanup(followup.release.set)
+        self.assertTrue(followup.running.wait(5))
+
+        with self.assertLogs(
+            "backend.sync.canonical_backfill_worker", level="ERROR"
+        ) as logs:
+            worker.start()
+            followup.release.set()
+            worker.join(5)
+
+        self.assertEqual(["canonical", "followup", "canonical", "followup"], log)
+        self.assertTrue(followup.failed)
+        self.assertEqual(
+            ["followup", "followup"],
+            [log_extra(record, "stage") for record in logs.records],
+        )
+        self.assertEqual(1, len(threads))
+
+    def test_start_after_the_thread_exited_runs_one_more_pass(self):
+        log = []
+        canonical = self.Stage("canonical", log)
+        followup = self.Stage("followup", log)
+        worker, threads = self.start_worker(canonical, [followup])
+        worker.join(5)
+        self.assertFalse(threads[0].is_alive())
+        self.assertEqual(["canonical", "followup"], log)
+
+        worker.start()
+        worker.join(5)
+
+        self.assertEqual(["canonical", "followup", "canonical", "followup"], log)
+        self.assertEqual(2, len(threads))
+        self.assertFalse(threads[1].is_alive())
 
     def test_followups_run_after_the_canonical_backfill_in_order(self):
         log = []

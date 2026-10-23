@@ -2,6 +2,14 @@ import unittest
 
 from backend.errors import AppError, ClientDisconnected
 from backend.http_api.state_events_transport import StateEventTransport
+from backend.runtime.events import StateEventBuffer
+
+
+class ImmediateStateEventBuffer(StateEventBuffer):
+    """A real buffer whose wait returns at once, so the stream loop runs inline."""
+
+    def wait(self, timeout=None):
+        return True
 
 
 class FakeEventBuffer:
@@ -146,6 +154,40 @@ class StateEventTransportTests(unittest.TestCase):
             ],
         )
         self.assertEqual(buffer.wait_timeouts, [15, 15])
+
+    def test_cursor_from_an_earlier_process_resets_and_keeps_later_events(self):
+        # A tab keeps its cursor across a server restart; the new buffer is behind it.
+        buffer = ImmediateStateEventBuffer()
+        for _ in range(3):
+            buffer.publish("job")
+        events = []
+
+        def send_event(*event):
+            events.append(event)
+            if event[0] == "ready":
+                buffer.publish("planning", {"status": "changed"})
+                buffer.publish("coach", {"status": "running"})
+            elif event[0] == "heartbeat":
+                raise ClientDisconnected()
+
+        StateEventTransport(buffer).handle(
+            "/api/state/events?since=40",
+            send_headers=lambda: None,
+            send_event=send_event,
+            set_connection_timeout=lambda _value: None,
+            session_is_active=lambda: True,
+        )
+
+        self.assertEqual(
+            events,
+            [
+                ("reset", {"reason": "gap", "latest_event_id": 3}, 3),
+                ("ready", {"latest_event_id": 3}, 3),
+                ("planning", {"status": "changed"}, 4),
+                ("coach", {"status": "running"}, 5),
+                ("heartbeat", {"latest_event_id": 5}),
+            ],
+        )
 
     def test_disconnect_while_sending_headers_is_swallowed(self):
         timeout_calls = []

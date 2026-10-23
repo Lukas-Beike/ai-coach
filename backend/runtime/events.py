@@ -46,10 +46,10 @@ class StateEventBuffer:
         with self._condition:
             latest = self._next_id
             retained = list(self._events)
-        if not retained:
-            return {"events": [], "latest_event_id": latest, "gap": False}
-        oldest = int(retained[0]["event_id"])
-        gap = cursor < oldest - 1
+        # A cursor ahead of latest comes from an earlier process; ids restart at 1.
+        gap = cursor > latest or (
+            bool(retained) and cursor < int(retained[0]["event_id"]) - 1
+        )
         events = (
             [] if gap else [item for item in retained if int(item["event_id"]) > cursor]
         )
