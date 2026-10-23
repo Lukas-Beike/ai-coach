@@ -465,10 +465,13 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 }
 .messages.has-empty-state { justify-content: center; }
 .messages.has-empty-state .empty-state { width: min(100%, 680px); margin: auto; }
-#chatPanel.chat-empty { min-height: 0; }
-#chatPanel .messages.has-empty-state {
-  flex: 0 0 auto;
-  min-height: clamp(220px, 38dvh, 440px);
+/* Without a bottom navigation the empty chat shrinks; on phones it fills the viewport so the composer rests above the navigation like in a long chat. */
+@media (min-width: 768px) {
+  #chatPanel.chat-empty { min-height: 0; }
+  #chatPanel .messages.has-empty-state {
+    flex: 0 0 auto;
+    min-height: clamp(220px, 38dvh, 440px);
+  }
 }
 .coach-action-review { display: grid; gap: 12px; margin: 0 0 14px; padding: 14px; border: 1px solid var(--accent-border-strong); border-radius: 16px; background: var(--accent-surface-subtle); box-shadow: var(--shadow-soft); }
 .coach-action-review[hidden] { display: none; }
