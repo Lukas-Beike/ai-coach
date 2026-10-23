@@ -147,21 +147,29 @@ The system SHALL build validated provider-neutral planned workout exports and pr
 Evidence: `backend/planning/workout_export.py:build_planned_workout_export`; `backend/sync/workout_export.py:WorkoutExportPort`, `backend/sync/workout_export.py:WorkoutLibraryExportPort`; `tests/test_workout_library_export.py:test_serialize_and_readback_never_open_the_transport`, `tests/test_workout_library_export.py:test_serialize_library_matches_the_planning_payload`; `tests/test_workout_export_parity.py:test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_planning_workouts.py:test_event_date_boundary_and_duration_limits`.
 
 ### Requirement: TL9 Library export identity and failure recovery
-The system SHALL preserve local-to-remote workout identities across explicit exports, verify readback before reporting synchronization, and retain recoverable identity when a remote create succeeded but parsing/readback failed.
+The system SHALL preserve the local template UUID across explicit exports, reuse a usable existing or recovered remote identity, and replace a missing remote identity only through the supported recovery path within an explicitly authorized library sync. It SHALL store a usable returned identity before readback validation and mark only unchanged local content synced after validation.
 
 #### Scenario: Known or recovered remote template
-- **WHEN** a local library record has a known remote link or an exact recoverable remote match
-- **THEN** explicit export updates/adopts that identity rather than creating another remote entry.
+- **WHEN** a local library record has a stored remote link whose update succeeds, or supported recovery finds an exact remote match
+- **THEN** explicit export updates/adopts that usable identity rather than creating another remote entry.
+
+#### Scenario: Update reports remote not found
+- **WHEN** an explicitly authorized library sync receives HTTP 404 while updating the stored remote identity, through either AppError.upstream_status or ProviderHTTPError.status
+- **THEN** it marks the entry remote_missing while retaining dirty local content and its local UUID, lists the remote library and adopts an exact recoverable match if present; otherwise it creates a replacement. The recovered or replacement identity is stored and its response verified through the normal state path before unchanged local content is marked synced.
+
+#### Scenario: Other remote update failure
+- **WHEN** updating the stored remote identity fails with an error other than HTTP 404
+- **THEN** the error propagates, the existing slot/link identity and dirty local content are retained with sync_error, and no remote-library listing or replacement create is attempted.
 
 #### Scenario: Failed readback or persistence
-- **WHEN** remote response verification fails after identity is known
-- **THEN** the identity remains available for a later update retry; local slot and link persistence remain atomic rather than claiming a verified sync.
+- **WHEN** readback or local identity/sync persistence fails after a remote write
+- **THEN** no verified sync is reported; local slot and link writes commit or roll back together, already persisted identity remains available for an update retry, and a later explicit retry without a usable identity searches for an exact recoverable remote match before creating another entry.
 
 #### Scenario: Provider refresh only
 - **WHEN** library refresh is requested while local entries are pending
 - **THEN** it reads through the target's cancellation-aware library path without implicitly uploading pending local entries or overwriting preserved dirty local content.
 
-Evidence: `backend/planning/library.py:library_workout_matches`; `backend/sync/library.py:WorkoutLibraryRemoteReconciler.reconcile`, `backend/sync/library.py:WorkoutLibraryRemoteReconciler._preserved_dirty_library_workout`; `tests/test_workout_library_export.py:test_known_entry_is_updated_by_the_link_identity`, `tests/test_workout_library_export.py:test_recovered_remote_entry_is_adopted_without_creating`, `tests/test_workout_library_export.py:test_failed_readback_keeps_identity_in_slot_and_link_together`, `tests/test_workout_library_export.py:test_finish_failure_rolls_back_slot_and_link_in_one_transaction`; `tests/test_server_planning.py:test_unparsed_library_export_keeps_identity_and_retries_as_update`, `tests/test_server_planning.py:test_library_refresh_is_read_only_even_with_pending_local_entries`.
+Evidence: `backend/planning/library.py:library_workout_matches`; `backend/sync/library.py:WorkoutLibrarySyncService.sync_entry`, `backend/sync/library.py:WorkoutLibrarySyncService._upsert_remote`, `backend/sync/library.py:WorkoutLibrarySyncService._sync_entry_unlocked`, `backend/sync/library.py:WorkoutLibrarySyncStateService.mark_remote_missing`, `backend/sync/library.py:WorkoutLibrarySyncStateService.store_remote_identity`, `backend/sync/library.py:WorkoutLibrarySyncStateService.finish`, `backend/sync/library.py:WorkoutLibraryRemoteReconciler.reconcile`, `backend/sync/library.py:WorkoutLibraryRemoteReconciler._preserved_dirty_library_workout`; `backend/db/remote_links.py:RemoteLinkRepository.refresh_from_slots`; `tests/test_sync_library.py:test_update_upstream_not_found_recreates_remote_workout`, `tests/test_sync_library.py:test_update_provider_http_not_found_recreates_remote_workout`, `tests/test_sync_library.py:test_update_upstream_failure_other_than_not_found_keeps_sync_error`, `tests/test_sync_library.py:test_update_provider_http_failure_other_than_not_found_keeps_sync_error`, `tests/test_sync_library.py:test_sync_entry_recovers_remote_missing_before_creating`, `tests/test_sync_library.py:test_retry_after_lost_identity_adopts_the_created_remote_workout`, `tests/test_sync_library.py:test_create_response_keeps_a_local_edit_made_during_upload`, `tests/test_sync_library.py:test_update_response_keeps_a_local_edit_made_during_upload`; `tests/test_workout_library_export.py:test_known_entry_is_updated_by_the_link_identity`, `tests/test_workout_library_export.py:test_recovered_remote_entry_is_adopted_without_creating`, `tests/test_workout_library_export.py:test_failed_readback_keeps_identity_in_slot_and_link_together`, `tests/test_workout_library_export.py:test_finish_failure_rolls_back_slot_and_link_in_one_transaction`; `tests/test_server_planning.py:test_unparsed_library_export_keeps_identity_and_retries_as_update`, `tests/test_server_planning.py:test_library_refresh_is_read_only_even_with_pending_local_entries`. Slot/link atomicity is local; these checks do not provide remote compare-and-swap or rollback of a completed provider write.
 
 ### Requirement: TL10 Exact explicit sync selection and complete repair manifests
 The system SHALL bind explicit plan pushes to concrete local IDs/current hashes, resolve created/all-pending selections on the server, and require a complete future-period manifest for repair rather than widening a partial model selection.

@@ -24,7 +24,7 @@ is not an OpenAPI document. Historical review documents, skills, test-fixture
 corpora and generated/local state are evidence or development material rather
 than additional athlete-facing capabilities.
 
-The reviewed baseline contains 30 capabilities, 272 requirements and 757 scenarios.
+The reviewed baseline contains 30 capabilities, 272 requirements and 759 scenarios.
 The executable Coach catalog has 49 canonical schemas, 52 dialogue schemas,
 53 union tool names and 17 read-only tools. The [complete tool map](COACH_TOOLS.md)
 links each to specific requirement names and existing test evidence. The parent
@@ -70,6 +70,18 @@ configuration or contacting providers.
   zero actionable findings. It checked all 30 main/delta pairs, all 53 tool
   mappings, the updated counts and the required apply/archive workflow guidance;
   all 49 focused component tests and 31 strict OpenSpec items passed again.
+- The pre-PR rebase onto `d8f6a629a` includes later application fixes. PR-gate
+  round 1 found TL9's original unconditional remote-identity reuse promise no
+  longer matched the supported library-update 404 recovery. The paired main and
+  archived requirement now distinguishes usable identity reuse, explicit 404
+  recover-or-create, non-404 failure preservation and recoverable persistence.
+  The parent accepted the narrow two-file revision after source/test review;
+  all 79 mocked library-sync/export tests passed in the isolated worker. The
+  original snapshot above remains the initial backfill evidence identity.
+- PR preparation also built the application image and ran the complete isolated
+  SQLCipher suite: 7,113 tests discovered, 57 skipped, no failures or errors.
+  All 234 Node regressions passed. The later correction changes documentation
+  only; application/test source is unchanged from this full-run evidence.
 - 128 existing platform regressions passed in the SQLCipher runtime image with
   `--network none`, a read-only tests mount and temporary `/tmp`/`/data`.
   Selected modules: `test_db_migrations`, `test_database_restore_validation`,

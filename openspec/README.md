@@ -2,7 +2,7 @@
 
 This baseline backfills the existing application at
 `b8c911c9dda83a7920171916ace32681c0c38ba0` (version 1.13.22, schema v13).
-The 30 capabilities contain 272 observable requirements and 757 scenarios.
+The 30 capabilities contain 272 observable requirements and 759 scenarios.
 Each requirement cites current code and existing tests; citations alone do not
 mean every scenario was executed. Read the [coverage and evidence ledger](COVERAGE.md)
 for executed checks, boundaries, discrepancies and source identity.

@@ -6825,7 +6825,7 @@
     },
     "training-library": {
       "requirements": 15,
-      "scenarios": 55
+      "scenarios": 57
     },
     "training-plans-and-adaptation": {
       "requirements": 11,
