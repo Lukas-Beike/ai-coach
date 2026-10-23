@@ -245,3 +245,28 @@ test("@responsive composite meal shows immutable ingredient snapshots and proven
   await expect(page.locator("#nutritionEntries .nutrition-card").filter({ hasText: "Mixed meal" })).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("@responsive a failed diary load keeps the requested date, shows one error and retries the day", async ({ page }) => {
+  let failing = true;
+  await page.goto("/#nutrition/diary");
+  await expect(page.locator("#nutritionStatus")).not.toContainText("wird geladen");
+  await page.evaluate(() => localStorage.removeItem("coach-view-cache"));
+  await page.route("**/api/nutrition/day**", (route) => failing ? route.fulfill({ status: 503, json: { error: "Dienst nicht verfügbar" } }) : route.continue());
+  await page.locator("#nutritionDate").fill("2026-10-05");
+  await page.locator("#nutritionDate").dispatchEvent("change");
+  await expect(page.locator("#nutritionStatus")).toContainText("Ernährung konnte nicht geladen werden");
+  await expect(page.locator("#nutritionDate")).toHaveValue("2026-10-05");
+  await expect(page.locator("#nutritionExpenditure")).toBeHidden();
+  await expect(page.locator("#nutritionPanel").getByText("konnte nicht geladen werden")).toHaveCount(1);
+  await page.locator("#nutritionNext").click();
+  await expect(page.locator("#nutritionDate")).toHaveValue("2026-10-06");
+  await page.locator("#nutritionPrevious").click();
+  await expect(page.locator("#nutritionDate")).toHaveValue("2026-10-05");
+  failing = false;
+  await page.getByRole("button", { name: "Erneut laden" }).click();
+  await expect(page.locator("#nutritionStatus")).not.toContainText("konnte nicht geladen werden");
+  await expect(page.locator("#nutritionStatus").getByRole("button")).toHaveCount(0);
+  await expect(page.locator("#nutritionDate")).toHaveValue("2026-10-05");
+  await expect(page.locator("#nutritionExpenditure")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
