@@ -211,6 +211,7 @@ function nutritionExpenditureTimestamp(value) {
 
 function clearNutritionExpenditure(message = "Garmin-Tagesverbrauch wird geladen…") {
   const section = nutritionExpenditureSection();
+  section.hidden = false;
   section.querySelector("#nutritionExpenditureStatus").textContent = message;
   section.querySelector("#nutritionExpenditureTotals").replaceChildren();
   section.querySelector("#nutritionExpenditureDate").textContent = "";
@@ -218,6 +219,7 @@ function clearNutritionExpenditure(message = "Garmin-Tagesverbrauch wird geladen
 
 function renderNutritionExpenditure(expenditure, selectedDate) {
   const section = nutritionExpenditureSection();
+  section.hidden = false;
   const status = section.querySelector("#nutritionExpenditureStatus");
   const totals = section.querySelector("#nutritionExpenditureTotals");
   const date = section.querySelector("#nutritionExpenditureDate");
@@ -464,14 +466,23 @@ function renderNutritionDay(day) {
   document.querySelector("#nutritionEntries").replaceChildren(...day.entries.map((item) => nutritionCard(item, false)));
 }
 
-function showNutritionDayLoadError(status, cached, error) {
+function showNutritionDayLoadError(status, cached, error, dateInput, requestedDate) {
   if (cached) {
     status.textContent = `Gespeicherter Stand. Aktualisierung fehlgeschlagen: ${error.message}`;
     nutritionExpenditureSection().querySelector("#nutritionExpenditureStatus").textContent = `Gespeicherter Stand. Tagesverbrauch konnte nicht aktualisiert werden: ${error.message}`;
-  } else {
-    status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
-    clearNutritionExpenditure(`Tagesverbrauch konnte nicht geladen werden: ${error.message}`);
+    return;
   }
+  // The requested day stays in the date field so ← and → still have a day to move from.
+  dateInput.value = requestedDate;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "secondary-button";
+  retry.textContent = "Erneut laden";
+  retry.addEventListener("click", () => void loadNutrition());
+  status.textContent = `Ernährung konnte nicht geladen werden: ${error.message}`;
+  status.append(document.createElement("br"), retry);
+  clearNutritionExpenditure("");
+  nutritionExpenditureSection().hidden = true;
 }
 
 async function loadNutrition({ preserve = false, expectedRoute = null, expectedDate = null, throwOnError = false } = {}) {
@@ -484,7 +495,8 @@ async function loadNutrition({ preserve = false, expectedRoute = null, expectedD
   const path = dateInput.value ? `/api/nutrition/day?date=${encodeURIComponent(dateInput.value)}` : "/api/nutrition/day";
   // A start without a date asks for today, so its cached view is keyed by today.
   const cacheEpoch = viewCacheEpoch;
-  const cacheKey = `/api/nutrition/day?date=${encodeURIComponent(dateInput.value || todayIso())}`;
+  const requestedDate = dateInput.value || todayIso();
+  const cacheKey = `/api/nutrition/day?date=${encodeURIComponent(requestedDate)}`;
   const cached = showCachedNutritionView(cacheKey, renderNutritionDay);
   if (!cached && !preserve) {
     status.textContent = "Ernährung wird geladen…";
@@ -499,7 +511,7 @@ async function loadNutrition({ preserve = false, expectedRoute = null, expectedD
     rememberViewCache(`/api/nutrition/day?date=${encodeURIComponent(day.date)}`, day, cacheEpoch);
   } catch (error) {
     if (isCurrentNutritionDayLoad(sequence, generation, cacheEpoch, dateInput, expectedRoute, expectedDate)) {
-      showNutritionDayLoadError(status, cached, error);
+      showNutritionDayLoadError(status, cached, error, dateInput, requestedDate);
       if (throwOnError) throw error;
     }
   }

@@ -1495,6 +1495,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-component-list li > span { white-space: normal; }
 .nutrition-component-list small { display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .nutrition-tools { display: grid; gap: 12px; margin: 20px 0; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.nutrition-tools[hidden] { display: none; }
 .nutrition-tools h3, .nutrition-tools p { margin: 0; }
 .nutrition-week-table { overflow-x: auto; margin-top: 12px; }
 .nutrition-week-table table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
