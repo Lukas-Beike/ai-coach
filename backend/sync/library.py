@@ -36,6 +36,7 @@ from backend.sync.workout_export import WorkoutLibraryExportPort
 
 _REMOTE_LINKS = RemoteLinkRepository()
 _OPEN_SYNC_STATES = ("local", "sync_error", "remote_missing", "conflict")
+_LIBRARY_PAYLOAD_SQL = "SELECT payload FROM workout_library WHERE local_id=?"
 _WORKOUT_LIBRARY_SYNC_LOCK = threading.Lock()
 _REMOTE_LIBRARY_METADATA_FIELDS = (
     "date",
@@ -364,9 +365,7 @@ class WorkoutLibrarySyncStateService:
 
     def update(self, local_id: str, state: str, error: str | None = None) -> bool:
         with self._database_manager.unit_of_work() as db:
-            row = db.execute(
-                "SELECT payload FROM workout_library WHERE local_id=?", (local_id,)
-            ).fetchone()
+            row = db.execute(_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
             if row is None:
                 return False
             payload = self._object_payload(row["payload"])
@@ -388,9 +387,7 @@ class WorkoutLibrarySyncStateService:
     def mark_remote_missing(self, local_id: str) -> None:
         """Record a remote deletion found mid-sync; the local edit stays dirty."""
         with self._database_manager.unit_of_work() as db:
-            row = db.execute(
-                "SELECT payload FROM workout_library WHERE local_id=?", (local_id,)
-            ).fetchone()
+            row = db.execute(_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
             if row is None:
                 return
             payload = self._object_payload(row["payload"])
@@ -594,9 +591,7 @@ class WorkoutLibrarySyncStateService:
 
     def persist_calendar_identity(self, local_id: str, event: dict[str, Any]) -> bool:
         with self._database_manager.unit_of_work() as db:
-            row = db.execute(
-                "SELECT payload FROM workout_library WHERE local_id=?", (local_id,)
-            ).fetchone()
+            row = db.execute(_LIBRARY_PAYLOAD_SQL, (local_id,)).fetchone()
             if row is None:
                 return False
             payload = self._parse_payload(row["payload"])
