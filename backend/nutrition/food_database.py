@@ -69,8 +69,9 @@ def _occurrence_score(
     if at_start and at_end:
         return 4
     # Across words only whole words count, not "frei S" for "reis".
-    spans = any(position < start < end for start in starts)
-    if (at_start or at_end) and not spans:
+    if any(position < start < end for start in starts):
+        return 0
+    if at_start or at_end:
         return 3 if at_end else 2
     return int(len(variant) >= 3)
 

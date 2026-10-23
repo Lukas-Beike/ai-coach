@@ -98,6 +98,7 @@ class FoodDatabaseTests(unittest.TestCase):
         rice = names("Reis")
         self.assertIn("Reis poliert, roh", rice)
         self.assertNotIn("Erdbeereis", rice)
+        self.assertFalse(any("frei S" in name for name in rice))
         eggs = names("Ei")
         self.assertIn("Hühnerei roh", eggs)
         self.assertFalse(any("Reis" in name for name in eggs))

@@ -180,6 +180,15 @@ class NutritionProductContractTests(unittest.TestCase):
         self.food_database.lookup.assert_not_called()
         # A word the product lacks leaves the search to the food database.
         self.assertEqual(self.library.list_products(query="Champignons roh"), [])
+        # Letters across a word boundary are no word: "Glutenfrei Salzstangen"
+        # and "Erdbeer" by "Eisberg" do not contain "Reis".
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Glutenfrei Salzstangen")
+        )
+        self.library.save_product(
+            self.product_payload(barcode=None, name="Erdbeer", brand="Eisberg")
+        )
+        self.assertEqual(self.library.list_products(query="Reis"), [])
 
     def test_search_ignores_separators_around_words(self):
         self.library.save_product(
