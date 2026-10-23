@@ -65,8 +65,11 @@ configuration or contacting providers.
   remote calendar repair to capabilities that did not specify those effects.
   Parent source review confirmed both. The adopted two-file revision qualifies
   TL2 and adds TL11-TL15 for identity-bound calendar sync/removal, repair,
-  verification, local-edit recovery and partial batch outcomes. A focused
-  independent re-review checks their resolution before closure.
+  verification, local-edit recovery and partial batch outcomes. The focused
+  independent re-review at `24b435650` confirmed both findings resolved with
+  zero actionable findings. It checked all 30 main/delta pairs, all 53 tool
+  mappings, the updated counts and the required apply/archive workflow guidance;
+  all 49 focused component tests and 31 strict OpenSpec items passed again.
 - 128 existing platform regressions passed in the SQLCipher runtime image with
   `--network none`, a read-only tests mount and temporary `/tmp`/`/data`.
   Selected modules: `test_db_migrations`, `test_database_restore_validation`,
@@ -123,6 +126,14 @@ configuration or contacting providers.
   reference errors remained. The revision adds 59 checked named references.
   All seven existing AI documentation contract tests passed. Compile checks,
   the local CLI wrapper syntax check and whitespace checks also passed.
+- The reviewed main specs are synchronized and the completed baseline change is
+  [archived with all 16 tasks complete](changes/archive/2026-10-23-backfill-application-specs/tasks.md).
+  Final strict validation covers all 30 main specs and archived task completion.
+  The parent closing retrospective ran during archival: the independent review
+  caught semantic omissions beyond structural validation, source/patch identity
+  and bounded mock checks supported correction, and existing application gaps
+  below remain outside this documentation change. No additional skill or runtime
+  changes were made from the retrospective.
 
 ## Evidence limits and follow-up policy
 

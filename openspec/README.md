@@ -53,6 +53,7 @@ remain in the repository README.
 - [Coverage, executed checks and explicit gaps](COVERAGE.md)
 - [Complete Coach tool-to-requirement map](COACH_TOOLS.md)
 - [Machine-readable source/HTTP/tool ownership inventory](coverage.json)
+- [Completed baseline change](changes/archive/2026-10-23-backfill-application-specs/proposal.md)
 - Change artifacts live under `changes/`; completed changes move to
   `changes/archive/` after reviewed specs are synchronized. The archived baseline
   retains its proposal, design, task/evidence state and deltas.

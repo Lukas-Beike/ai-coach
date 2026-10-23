@@ -14,8 +14,8 @@ implementation so later changes can identify the contracts they affect.
   modules to the baseline, with explicit evidence limits and unresolved gaps.
 - Preserve application behavior and all existing data; newly `ADDED` requirements
   mean newly documented contracts, not new features.
-- Validate the specifications, review their evidence and archive this baseline
-  change into `openspec/specs/`.
+- Validate the specifications, review their evidence, sync the baseline into
+  `openspec/specs/` and archive the completed change under `openspec/changes/archive/`.
 
 ## Capabilities
 
@@ -26,7 +26,7 @@ implementation so later changes can identify the contracts they affect.
 - `coach-tool-authority`: tool capabilities, write gates and durable receipts.
 - `athlete-profile-and-checkins`: profile, local dates and athlete check-ins.
 - `competitions-and-seasons`: competition records, priorities and season context.
-- `training-library`: reusable local workouts and explicit library export.
+- `training-library`: reusable local workouts, explicit exports and guarded calendar repair.
 - `training-plans-and-adaptation`: plans, scheduled units and approved adaptation.
 - `change-history-and-undo`: local change records and guarded reversal.
 - `model-selection-and-usage`: Responses configuration, selected options and usage.
@@ -38,7 +38,7 @@ implementation so later changes can identify the contracts they affect.
 - `performance-and-readiness`: derived training, body and recovery projections.
 - `external-calendars`: imported availability and public-event discovery.
 - `weather-and-location`: location-scoped forecasts, freshness and failure states.
-- `nutrition-diary-and-targets`: dated intake, nutrients and derived targets.
+- `nutrition-diary-and-targets`: dated intake, nutrients and derived expenditure; no saved target workflow.
 - `food-catalog-and-meal-library`: foods, products, reusable meals and portions.
 - `nutrition-provider-sync`: explicit nutrition exports and conflict handling.
 - `nutrition-photo-analysis`: bounded photo interpretation and provenance.

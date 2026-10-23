@@ -17,11 +17,11 @@
 - [x] 3.2 Reconcile the domain, route, Coach-tool and frontend module coverage inventories.
 - [x] 3.3 Check reference existence, requirement/scenario structure and strict OpenSpec validation.
 - [x] 3.4 Run focused documentation and representative mocked regression checks; record exact limits.
-- [ ] 3.5 Resolve review findings or record evidence-backed gaps outside accepted requirements.
+- [x] 3.5 Resolve review findings or record evidence-backed gaps outside accepted requirements.
 
 ## 4. Publish the local baseline
 
 - [x] 4.1 Update README and the durable coverage/evidence ledger.
 - [x] 4.2 Sync approved requirements into main specs and compare all main/delta content and counts.
-- [ ] 4.3 Archive the completed change and validate main specs and archived task completion.
-- [ ] 4.4 Inspect the final complete diff, confirm application source is unchanged, and run the session retro.
+- [x] 4.3 Archive the completed change and validate main specs and archived task completion.
+- [x] 4.4 Inspect the final complete diff, confirm application source is unchanged, and run the session retro.
