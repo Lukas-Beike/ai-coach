@@ -79,38 +79,46 @@ class CoachPlanningActionToolService:
                 raise AppError(
                     403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
                 )
-            change_id = str(arguments.get("change_id") or "").strip()
-            require_coach_scope(intent, f"change:{change_id}")
-            preview = self._history_undo_service().preview(change_id)
-            # Undoing a creation deletes the record for good (an undo cannot be
-            # undone), so only the athlete's confirmation of the card runs it.
-            deletes_record = (preview.get("change") or {}).get("action") == "create"
-            if arguments.get("apply") and not deletes_record:
-                payload = {
-                    "change_id": change_id,
-                    "expected_current_hash": (
-                        preview.get("proposal", {})
-                        .get("payload", {})
-                        .get("expected_current_hash")
-                        or preview.get("undo_target_hash")
-                        or ""
-                    ),
-                }
-                result = self._history_undo_service().apply(payload)
-                return {
-                    "ok": True,
-                    "status": "applied",
-                    "change": preview.get("change"),
-                    **result,
-                }
-            proposal = self._proposal_creation_service().create(
-                preview.pop("proposal"), session_csrf_hash
-            )
-            return {
-                "ok": True,
-                **preview,
-                **({"confirmation_required": True} if deletes_record else {}),
-                "proposed_action": proposal["proposed_action"],
-            }
+            return self._undo_training_change(arguments, intent, session_csrf_hash)
 
         return None
+
+    def _undo_training_change(
+        self,
+        arguments: dict[str, Any],
+        intent: dict[str, Any],
+        session_csrf_hash: str,
+    ) -> dict[str, Any]:
+        change_id = str(arguments.get("change_id") or "").strip()
+        require_coach_scope(intent, f"change:{change_id}")
+        preview = self._history_undo_service().preview(change_id)
+        # Undoing a creation deletes the record for good (an undo cannot be
+        # undone), so only the athlete's confirmation of the card runs it.
+        deletes_record = (preview.get("change") or {}).get("action") == "create"
+        if arguments.get("apply") and not deletes_record:
+            payload = {
+                "change_id": change_id,
+                "expected_current_hash": (
+                    preview.get("proposal", {})
+                    .get("payload", {})
+                    .get("expected_current_hash")
+                    or preview.get("undo_target_hash")
+                    or ""
+                ),
+            }
+            result = self._history_undo_service().apply(payload)
+            return {
+                "ok": True,
+                "status": "applied",
+                "change": preview.get("change"),
+                **result,
+            }
+        proposal = self._proposal_creation_service().create(
+            preview.pop("proposal"), session_csrf_hash
+        )
+        return {
+            "ok": True,
+            **preview,
+            **({"confirmation_required": True} if deletes_record else {}),
+            "proposed_action": proposal["proposed_action"],
+        }
