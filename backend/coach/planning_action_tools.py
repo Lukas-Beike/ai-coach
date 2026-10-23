@@ -82,7 +82,10 @@ class CoachPlanningActionToolService:
             change_id = str(arguments.get("change_id") or "").strip()
             require_coach_scope(intent, f"change:{change_id}")
             preview = self._history_undo_service().preview(change_id)
-            if arguments.get("apply"):
+            # Undoing a creation deletes the record for good (an undo cannot be
+            # undone), so only the athlete's confirmation of the card runs it.
+            deletes_record = (preview.get("change") or {}).get("action") == "create"
+            if arguments.get("apply") and not deletes_record:
                 payload = {
                     "change_id": change_id,
                     "expected_current_hash": (
@@ -106,6 +109,7 @@ class CoachPlanningActionToolService:
             return {
                 "ok": True,
                 **preview,
+                **({"confirmation_required": True} if deletes_record else {}),
                 "proposed_action": proposal["proposed_action"],
             }
 

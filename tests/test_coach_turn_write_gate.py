@@ -163,6 +163,46 @@ class TurnWriteGateTests(unittest.TestCase):
         named, _factory = make_gate("Synchronisier den Plan mit Intervals")
         self.assertIsNone(named.denial("start_intervals_plan_sync", {}))
 
+    def test_negated_sync_wording_never_opens_a_remote_write(self) -> None:
+        for message in (
+            "Passe die Woche an ohne Intervals zu synchronisieren.",
+            "Ich will nicht, dass du mit Intervals synchronisierst.",
+            "Ich will nicht, dass du mit Intervals.icu synchronisierst.",
+            "Don\u2019t sync it to Intervals.",
+            "Bitte keinesfalls zu Intervals hochladen.",
+        ):
+            with self.subTest(message=message):
+                gate, factory = make_gate(message)
+                denial = denied(gate, "start_intervals_plan_sync", {})
+                self.assertEqual(denial["gate_reason"], "remote_not_requested")
+                factory.assert_not_called()
+        repair, _factory = make_gate(
+            "Korrigiere den Lauf und gleiche alle Einheiten erneut mit Intervals ab, "
+            "ohne doppelte Eintraege."
+        )
+        self.assertIsNone(repair.denial("start_intervals_plan_sync", {}))
+
+    def test_a_reply_to_a_sync_offer_opens_it_only_without_a_negation(self) -> None:
+        offer = "Soll ich die drei Einheiten zu Intervals.icu übertragen?"
+        for reply, allowed in (
+            ("ja, ohne zu synchronisieren", False),
+            ("Ja, ohne Upload.", False),
+            ("Yes, without uploading.", False),
+            ("nein, nicht synchronisieren", False),
+            ("Nein danke", False),
+            ("ja", True),
+            ("Ja, synchronisiere alle", True),
+            ("ja, aber synchronisiere", True),
+        ):
+            with self.subTest(reply=reply):
+                messages = [
+                    {"id": 9, "role": "assistant", "content": offer},
+                    {"id": 10, "role": "user", "content": reply},
+                ]
+                gate, _factory = make_gate(reply, context(messages))
+                denial = gate.denial("start_intervals_plan_sync", {})
+                self.assertEqual(denial is None, allowed, denial)
+
     def test_applying_a_preview_needs_the_classifier_to_confirm_the_request(
         self,
     ) -> None:
