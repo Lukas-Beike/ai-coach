@@ -537,6 +537,30 @@ class CoachContextSelectionTests(unittest.TestCase):
             ]
         )
 
+    def test_food_amount_answer_keeps_a_meal_clarification(self):
+        pending = {
+            "summary": "Abendessen: 100g Risottoreis, 125g Zucchini",
+            "source_message_ids": [1],
+            "status": "needs_clarification",
+            "domain": "nutrition_or_profile",
+            "question": "Ist der Reis trocken oder gekocht gewogen?",
+        }
+        answer = "Trocken. Ergänze auch noch 130g Champignons roh"
+
+        selection = select_coach_context(answer, {"pending_request": pending})
+
+        self.assertTrue(selection.retain_pending_request)
+        self.assertIn("nutrition_products", selection.sections)
+        self.assertEqual(infer_coach_domain(answer), "nutrition_or_profile")
+        self.assertEqual(
+            infer_coach_domain(tools=["lookup_food"]), "nutrition_or_profile"
+        )
+        self.assertFalse(
+            select_coach_context(
+                "Plane Samstag 3 Stunden Rad", {"pending_request": pending}
+            ).retain_pending_request
+        )
+
     def test_missing_current_message_id_does_not_remove_unidentified_messages(self):
         context = {
             "messages": [{"role": "user", "content": "Synthetic earlier message"}]

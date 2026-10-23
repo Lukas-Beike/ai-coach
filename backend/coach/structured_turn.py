@@ -241,6 +241,7 @@ class CoachStructuredTurnService:
             cancelled=False,
             state=round_state,
         )
+        budget_exhausted = round_state.budget_exhausted
         status, text, failures = self._deps.outcome.finalize(
             response,
             command_receipts,
@@ -249,6 +250,7 @@ class CoachStructuredTurnService:
             allow_mutations=allow_mutations,
             context=context,
             message=message,
+            budget_exhausted=budget_exhausted,
         )
         final_receipt = self._deps.final_receipt.build(
             receipt,
@@ -261,6 +263,7 @@ class CoachStructuredTurnService:
             rounds=rounds,
             failures=failures,
             awaiting_clarification=bool(question),
+            budget_exhausted=budget_exhausted,
         )
         final_receipt["text"] = text
         return self._deps.final_receipt.persist(

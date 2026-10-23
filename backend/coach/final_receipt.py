@@ -46,6 +46,7 @@ class CoachFinalReceiptService:
         rounds: int,
         failures: list[dict[str, Any]],
         awaiting_clarification: bool,
+        budget_exhausted: bool = False,
     ) -> dict[str, Any]:
         final_receipt = {
             **receipt,
@@ -60,6 +61,7 @@ class CoachFinalReceiptService:
             "sync_job_ids": sync_job_ids,
             "intent": intent,
             "tool_rounds": rounds,
+            "tool_budget_exhausted": budget_exhausted,
             "pending_operations": sorted({entry["tool"] for entry in failures}),
             "proposed_actions": [
                 entry["result"]["proposed_action"]

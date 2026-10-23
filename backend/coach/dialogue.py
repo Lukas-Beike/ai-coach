@@ -27,6 +27,44 @@ __all__ = [
     "validate_request",
 ]
 
+# Found foods carry into the next turn, so "nochmal" reuses them instead of
+# searching again; bounded because every recent command is projected.
+_LOOKUP_MATCHES_PER_QUERY = 3
+_LOOKUP_MATCHES_PER_STEP = 24
+
+
+def _group_matches(group: Any) -> list[dict[str, Any]]:
+    """Return the best matches of one successful lookup_food query."""
+    if not isinstance(group, dict) or not group.get("ok"):
+        return []
+    local = group.get("local") is True
+    candidates = [
+        *((item, True) for item in group.get("local_products") or []),
+        *((item, local) for item in group.get("foods") or []),
+    ]
+    query = group.get("query")
+    return [
+        {
+            "id": item["id"][:80],
+            "name": str(item.get("name") or "")[:120],
+            "kind": "local_product" if is_local else "database",
+            **({"query": query[:120]} if isinstance(query, str) else {}),
+        }
+        for item, is_local in candidates[:_LOOKUP_MATCHES_PER_QUERY]
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    ]
+
+
+def _lookup_matches(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the ids, names and component kinds a lookup_food step found."""
+    groups = result.get("results")
+    return [
+        match
+        for group in (groups if isinstance(groups, list) else [result])
+        for match in _group_matches(group)
+    ][:_LOOKUP_MATCHES_PER_STEP]
+
+
 INSTRUCTIONS = """
 You are the athlete's conversational Coach. Understand the current message in
 the local dialogue and pending_request, including short replies, corrections,
@@ -318,6 +356,11 @@ class CoachDialogueReadService:
                     )
                     > 40,
                     "artifact_id": step.get("result", {}).get("artifact_id"),
+                    **(
+                        {"found": _lookup_matches(step.get("result") or {})}
+                        if step.get("tool") == "lookup_food"
+                        else {}
+                    ),
                 }
                 for step in steps[:40]
             ],
