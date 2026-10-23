@@ -8,9 +8,10 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from activity_row_support import FixedActivityRows
-from canonical_detail_support import open_manager, seed_intervals_activity
+from canonical_detail_support import INTERVALS, open_manager, seed_intervals_activity
 
-from backend.activities.detail_store import ActivityDetailStore
+from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+from backend.canonical.vocabulary import ActivityDetailOrigin
 from backend.errors import AppError, ProviderErrorClassifier, provider_error
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import (
@@ -19,6 +20,8 @@ from backend.sync.activity_details import (
     normalize_streams,
 )
 from backend.sync.jobs import JobValidationError, normalize_sync_job_request
+
+DETAIL_KEY_PREFIX = "activity_detail:"
 
 
 class Manager:
@@ -179,27 +182,54 @@ class ActivityDetailRefreshTests(unittest.TestCase):
 
 
 class ActivityDetailPrefetchTests(unittest.TestCase):
+    """Prefetch staleness comes from the canonical fingerprints, kv as fallback."""
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.manager = Manager(Path(self.directory.name) / "fixture.sqlite")
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
-            )
+        self.manager = open_manager(self.directory.name)
+        self.addCleanup(self.manager.close)
         self.store = ActivityDetailStore(self.manager)
-        self.rows = [
-            {"id": f"a{day:02d}", "start_date_local": f"2026-10-{day:02d}T08:00:00"}
-            for day in range(1, 13)
-        ]
+        self.rows = []
+        self.add_rows(
+            [
+                {
+                    "id": f"a{day:02d}",
+                    "start_date_local": f"2026-10-{day:02d}T08:00:00",
+                }
+                for day in range(1, 13)
+            ]
+        )
         self.api = Mock()
         self.api.get.side_effect = self.provider
+
+    def add_rows(self, rows):
+        """Add summaries and their local activity records, so details can be stored."""
+        for row in rows:
+            seed_intervals_activity(self.manager, row["id"])
+        self.rows += rows
 
     def provider(self, path, params):
         activity_id = path.split("/")[2]
         if path.endswith("/streams.json"):
-            return [{"type": "time", "data": [0, 1]}]
-        return {"id": activity_id}
+            return [
+                {"type": "time", "data": [0, 1, 2]},
+                {"type": "watts", "data": [200, 210, 220]},
+            ]
+        return {"id": activity_id, "moving_time": 1000}
+
+    def drop_kv_details(self):
+        with self.manager.unit_of_work() as db:
+            db.execute("DELETE FROM kv WHERE key LIKE ?", (f"{DETAIL_KEY_PREFIX}%",))
+
+    def canonical_update(self, sql, parameters=()):
+        with self.manager.unit_of_work() as db:
+            db.execute(sql, parameters)
+
+    def prefetched_service(self):
+        """Prefetch once, then forget the provider calls of that run."""
+        self.service().prefetch_new()
+        self.api.get.reset_mock()
 
     def service(self, configured=True):
         return ActivityDetailRefreshService(
@@ -209,6 +239,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
             store=self.store,
             utc_now=lambda: "2026-10-18T08:00:00Z",
             configured=configured,
+            canonical=CanonicalDetailWriter(),
         )
 
     def fetched_ids(self):
@@ -228,17 +259,77 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
         self.api.get.assert_not_called()
 
-    def test_records_from_an_older_projection_are_loaded_again(self):
-        self.service().prefetch_new()
+    def drop_projection_versions(self):
         with self.manager.unit_of_work() as db:
             for row in self.rows[2:]:
                 record = self.store.get(row["id"])
                 record.pop("projection_version")
                 self.store.save_in(db, row["id"], record)
-        self.api.get.reset_mock()
+
+    def test_kv_records_from_an_older_projection_are_loaded_again(self):
+        self.prefetched_service()
+        self.canonical_update("DELETE FROM activity_detail_sets")
+        self.canonical_update("DELETE FROM activity_detail_analysis")
+        self.drop_projection_versions()
         self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_new())
         self.api.get.reset_mock()
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
+
+    def test_kv_records_of_an_older_projection_reload_despite_canonical_rows(self):
+        # The detail view still reads the kv record, so it must not stay outdated.
+        self.prefetched_service()
+        self.drop_projection_versions()
+        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_new())
+
+    def test_kv_only_details_match_without_canonical_rows(self):
+        self.prefetched_service()
+        self.canonical_update("DELETE FROM activity_detail_sets")
+        self.canonical_update("DELETE FROM activity_detail_analysis")
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
+        self.api.get.assert_not_called()
+
+    def test_legacy_backfilled_set_with_matching_hash_is_not_loaded_again(self):
+        self.prefetched_service()
+        self.drop_kv_details()
+        self.canonical_update(
+            "UPDATE activity_detail_sets SET origin = ?",
+            (ActivityDetailOrigin.LEGACY_BACKFILL.value,),
+        )
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
+        self.api.get.assert_not_called()
+
+    def test_set_of_an_older_mapper_with_matching_hash_is_not_loaded_again(self):
+        self.prefetched_service()
+        self.drop_kv_details()
+        self.canonical_update("UPDATE activity_detail_sets SET mapper_version = 1")
+        self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
+        self.api.get.assert_not_called()
+
+    def test_changed_hash_without_kv_record_is_loaded_again(self):
+        self.prefetched_service()
+        self.drop_kv_details()
+        self.rows[-1] = {**self.rows[-1], "name": "Renamed in Intervals.icu"}
+        self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_new())
+        self.assertEqual(["a12"], self.fetched_ids())
+
+    def test_analysis_only_row_with_matching_hash_is_not_loaded_again(self):
+        self.prefetched_service()
+        self.drop_kv_details()
+        self.canonical_update("DELETE FROM activity_detail_sets")
+        # Payloads written before analysis version 2 carry no summary hash.
+        self.canonical_update(
+            "UPDATE activity_detail_analysis "
+            "SET payload = json_remove(payload, '$.summary_sha256')"
+        )
+        self.canonical_update(
+            "UPDATE activity_detail_analysis SET payload = json_set(payload, "
+            "'$.summary_sha256', ?) WHERE activity_id = ("
+            "SELECT activity_id FROM activity_records WHERE provider = ? "
+            "AND provider_activity_id = ?)",
+            (summary_fingerprint(self.rows[-1]), INTERVALS, "a12"),
+        )
+        self.assertEqual({"fetched": 9, "failed": 0}, self.service().prefetch_new())
+        self.assertNotIn("a12", self.fetched_ids())
 
     def test_changed_summary_is_loaded_again(self):
         self.service().prefetch_new()
@@ -316,6 +407,8 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.api.get.reset_mock()
         with self.manager.unit_of_work() as db:
             db.execute("DELETE FROM kv")
+            db.execute("DELETE FROM activity_detail_sets")
+            db.execute("DELETE FROM activity_detail_analysis")
 
         def failing(path, params):
             if "a11" in path:
@@ -392,10 +485,15 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
     def test_every_new_activity_loads_while_older_ones_stay_unloaded(self):
         self.service().prefetch_new()
         self.assertEqual("2026-10-03T08:00:00", self.store.prefetch_floor())
-        self.rows += [
-            {"id": f"n{index:02d}", "start_date_local": f"2026-11-{index:02d}T08:00:00"}
-            for index in range(1, 31)
-        ]
+        self.add_rows(
+            [
+                {
+                    "id": f"n{index:02d}",
+                    "start_date_local": f"2026-11-{index:02d}T08:00:00",
+                }
+                for index in range(1, 31)
+            ]
+        )
         self.api.get.reset_mock()
         # More new activities than one run loads: the rest follow on the next refresh.
         self.assertEqual({"fetched": 25, "failed": 0}, self.service().prefetch_new())
@@ -423,10 +521,13 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.rows = []
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
         self.assertEqual("2026-10-18", self.store.prefetch_floor())
-        self.rows = [
-            {"id": "old", "start_date_local": "2026-10-17T08:00:00"},
-            {"id": "new", "start_date_local": "2026-10-18T07:00:00"},
-        ]
+        self.rows = []
+        self.add_rows(
+            [
+                {"id": "old", "start_date_local": "2026-10-17T08:00:00"},
+                {"id": "new", "start_date_local": "2026-10-18T07:00:00"},
+            ]
+        )
         self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_new())
         self.assertEqual(["new"], self.fetched_ids())
 

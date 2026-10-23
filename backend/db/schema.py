@@ -450,6 +450,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "elevation_gain_m",
         "load",
         "intensity_pct",
+        "max_speed_mps",
     },
     "activity_zone_times": {
         "provider",
@@ -509,7 +510,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -812,6 +813,7 @@ ACTIVITY_DETAIL_DDL = f"""
         elevation_gain_m REAL,
         load REAL,
         intensity_pct REAL,
+        max_speed_mps REAL,
         PRIMARY KEY (provider, provider_activity_id, lap_index),
         FOREIGN KEY (provider, provider_activity_id, detail_kind)
             REFERENCES activity_detail_sets(provider, provider_activity_id, detail_kind)

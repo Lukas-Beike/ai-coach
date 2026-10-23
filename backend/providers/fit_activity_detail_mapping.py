@@ -58,7 +58,8 @@ from backend.canonical.vocabulary import (
 from backend.providers.fit_file import FitMessage, fit_field, fit_messages
 
 # Version 1: first mapping of FIT activity detail sets (streams and device laps).
-MAPPER_VERSION: Final = 1
+# Version 2: maximum speed per lap.
+MAPPER_VERSION: Final = 2
 
 # Same limit as the Garmin and Intervals mappers, so issues stay bounded.
 MAX_FIT_ACTIVITY_ID_LENGTH: Final = 200
@@ -85,6 +86,7 @@ _LAP_METRIC_FIELDS: Final[tuple[tuple[str, int], ...]] = (
     ("moving_duration_s", 8),
     ("distance_m", 9),
     ("avg_speed_mps", 13),
+    ("max_speed_mps", 14),
     ("avg_hr", 15),
     ("max_hr", 16),
     ("avg_cadence", 17),

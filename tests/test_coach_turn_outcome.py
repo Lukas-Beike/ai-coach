@@ -52,6 +52,7 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
             allow_mutations=options.get("allow_mutations", True),
             context=options.get("context", {"current_user_message_id": 17}),
             message=options.get("message", "Synthetic user request"),
+            budget_exhausted=options.get("budget_exhausted", False),
         )
 
     def test_successful_effect_uses_provider_text_and_clears_pending_request(self):
@@ -659,6 +660,44 @@ class CoachStructuredOutcomeTests(DialogueHarness, unittest.TestCase):
         stored = json.loads(server.key_value_service().get("coach_pending_request"))
         self.assertEqual(stored["summary"], "Schiebe den Donnerstag\nDer erste")
         self.assertEqual(stored["source_message_ids"], [15, 17])
+
+    def test_exhausted_budget_after_clarification_keeps_original_and_answer(self):
+        pending = {
+            "summary": "Abendessen: 100g Risottoreis",
+            "source_message_ids": [15],
+            "status": "needs_clarification",
+            "domain": "nutrition_or_profile",
+        }
+        answer = "Trocken. Ergänze auch noch 130g Champignons roh"
+        context = {
+            "current_user_message_id": 17,
+            "messages": [
+                {"id": 15, "role": "user", "content": "Abendessen: 100g Risottoreis"},
+                {"id": 17, "role": "user", "content": answer},
+            ],
+            "pending_request": pending,
+        }
+        lookup = {
+            "call_id": "lookup",
+            "tool": "lookup_food",
+            "result": {"ok": True, "results": []},
+        }
+        status, text, failures = self.finalize(
+            self.response("Ich habe die Zutaten gesucht."),
+            [lookup],
+            context=context,
+            message=answer,
+            budget_exhausted=True,
+        )
+        self.assertEqual(status, "completed")
+        self.assertEqual(failures, [])
+        self.assertTrue(text.startswith("Ich habe die Zutaten gesucht.\n"))
+        self.assertIn("„weiter“", text)
+        stored = json.loads(server.key_value_service().get("coach_pending_request"))
+        self.assertEqual(stored["status"], "failed")
+        self.assertEqual(stored["domain"], "nutrition_or_profile")
+        self.assertEqual(stored["source_message_ids"], [15, 17])
+        self.assertEqual(stored["summary"], f"Abendessen: 100g Risottoreis\n{answer}")
 
     def test_failed_new_request_does_not_fall_back_to_the_retained_request(self):
         pending = {

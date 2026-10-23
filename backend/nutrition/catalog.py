@@ -11,7 +11,7 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import NutritionProductRepository
 from backend.errors import AppError
 from backend.nutrition.components import MealComponentCalculator
-from backend.nutrition.food_database import FoodDatabaseService
+from backend.nutrition.food_database import FoodDatabaseService, matches_all_terms
 from backend.nutrition.photo import validate_packaging_extraction
 
 PRODUCT_NOT_FOUND = "Produkt nicht gefunden."
@@ -43,13 +43,28 @@ class ProductCatalogService:
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         with self._database_manager.reader() as db:
-            return self._products.list(
+            found = self._products.list(
                 db,
                 query=query,
                 barcode=barcode,
                 include_archived=include_archived,
                 limit=limit,
             )
+            if found or not (query and query.strip()) or barcode:
+                return found
+            # Plurals, umlauts and one typo ("Champignons", "Hüttenkase") still
+            # find a saved product before any database is asked; every word
+            # must fit, so a loose match never hides a better database food.
+            recent = self._products.list(
+                db, include_archived=include_archived, limit=100
+            )
+        return [
+            product
+            for product in recent
+            if matches_all_terms(
+                query, f"{product.get('name') or ''} {product.get('brand') or ''}"
+            )
+        ][: max(1, min(int(limit), 100))]
 
     def get_product(self, product_id: str) -> dict[str, Any]:
         with self._db_lock, self._database_manager.unit_of_work() as db:

@@ -41,7 +41,8 @@ from backend.providers.intervals_activity_detail_mapping import (
 )
 
 # Version 1: session analysis stored as target snapshot, analysis and calendar profile.
-ACTIVITY_DETAIL_ANALYSIS_VERSION: Final = 1
+# Version 2: the payload also carries the summary hash and observation time.
+ACTIVITY_DETAIL_ANALYSIS_VERSION: Final = 2
 _ANALYSIS_KEYS: Final = ("target_snapshot", "session_analysis", "calendar_profile")
 _SHA256_PATTERN: Final = re.compile(r"[0-9a-f]{64}")
 _INTERVALS: Final = ProviderId.INTERVALS.value
@@ -192,6 +193,8 @@ def _write_analysis(
     if activity_id is None or not _has_analysis_payload(record):
         return None
     payload = {key: record.get(key) for key in _ANALYSIS_KEYS}
+    payload["summary_sha256"] = record.get("summary_sha256")
+    payload["observed_at"] = record.get("observed_at")
     return save_analysis(
         db,
         activity_id,

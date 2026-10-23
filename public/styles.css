@@ -1591,7 +1591,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 
 .current-performance-groups { display: grid; gap: 24px; margin-top: 0; }
 .current-performance-table { width: 100%; border-collapse: collapse; }
-.current-performance-general { grid-column: 1 / -1; }
 .current-performance-table caption { text-align: left; color: var(--accent-bright); font-size: .9rem; font-weight: 600; padding-bottom: 8px; }
 .current-performance-table th, .current-performance-table td { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .current-performance-table th { text-align: left; font-size: .85rem; font-weight: 500; }

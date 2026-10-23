@@ -39,14 +39,14 @@ container, and do not replace or reset the data directory to resolve a
 rejected schema. A fresh database is only required when the athlete explicitly
 chooses to start over. Future schema changes add explicit, versioned and
 transactional migrations from version 9 with upgrade regression tests.
-The current schema is version 12. Version 10 adds canonical activity detail
-(streams, laps and zone times), version 11 the food-database mirror, and
-version 12 stores the Garmin collection as one keyed row per element instead
-of one large `garmin_snapshot` value. A version 9, 10 or 11 database or backup
-is upgraded to it in place within one transaction, and a failed upgrade leaves
-it unchanged. The upgrade splits the stored Garmin value into rows, reads every
-element back to verify it, and keeps the original value unread as
-`garmin_snapshot_legacy`.
+The current schema is version 13. Version 10 adds canonical activity detail
+(streams, laps and zone times), version 11 the food-database mirror, version 12
+stores the Garmin collection as one keyed row per element instead of one large
+`garmin_snapshot` value, and version 13 adds the maximum speed of each lap. A
+version 9, 10, 11 or 12 database or backup is upgraded to it in place within
+one transaction, and a failed upgrade leaves it unchanged. The version 12 step
+splits the stored Garmin value into rows, reads every element back to verify
+it, and keeps the original value unread as `garmin_snapshot_legacy`.
 
 Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types.
 
@@ -571,7 +571,7 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`.
-5. The replacement database must have the current schema (version 12) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must have the current schema (version 13) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
 
 ### Privacy Export & Data Purge
@@ -605,6 +605,36 @@ demand; keep deployment commands here. All project skills have one canonical
 root, `.agents/skills/`; full review and `pr` were moved from the legacy `.codex/`
 root without duplicate copies. No duplicate `CLAUDE.md` or app-specific rules
 layer is needed.
+
+The local [code-review skill](.agents/skills/code-review/SKILL.md) adapts
+Claude's review workflow for PRs and pre-push branch diffs. Agents read it
+directly; the `pr` workflow requires no host-specific slash command.
+
+The [orchestration skill](.agents/skills/orchestrated-plan-implementation/SKILL.md)
+is the mandatory default for repository work, including documentation/skill
+changes, implementation, reviews, evaluations, and retrospectives. It starts by
+choosing delegated or sequential parent-only mode. Only work that will dispatch
+workers proposes live model tiers and asks for missing selections; hosted or
+noninteractive read-only reviews can complete sequentially without prompts or
+child tasks. Explicit worker requirements remain binding. Explicit session
+choices are reused across phases; status answers do not launch new workers.
+Workers use isolated source trees;
+the current parent reviews and
+verifies results and alone adopts authorized source patches. Review/evaluation
+criteria and PR gates remain with their owning workflows; review-only work does
+not implement fixes. T3 and native-host adapters use the capabilities actually
+available, without requiring a particular provider CLI or global installation.
+
+The [retro skill](.agents/skills/ai-coach-retro/SKILL.md) must run before every
+final session completion or blocked handoff, without a separate request,
+including documentation-only sessions. It examines process friction,
+skill/instruction gaps, and related application defects, using concrete evidence
+and scoped synthetic checks. It proposes prioritized improvements, distinguishes
+open defects from repaired issues and hypotheses, and preserves existing action
+authorization; a retro alone does not apply fixes or update global memories.
+Intermediate questions/status and waits are not session endings. These are
+agent instructions; an abrupt host shutdown cannot execute a retro, so a missed
+one is completed on resumption before final handoff.
 
 Coding tasks default to the repository's [Ponytail workflow](.agents/skills/ai-coach-ponytail/SKILL.md)
 in `full` mode: the smallest complete change, reusing existing code before adding
@@ -994,6 +1024,8 @@ Intervals Coach is open-source software licensed under the **GNU Affero General 
 
 Die Tagesübersicht zeigt neben Kalorien, Kohlenhydraten, Protein und Fett auch aufgenommenen Zucker und Salz in Gramm. Beide Werte werden aus den gespeicherten Produkt- und Lebensmitteldaten mit der verzehrten Menge berechnet; spätere Produktänderungen ändern den Verzehr nicht. Fehlende Angaben bleiben unbekannt, bekannte Teilsummen heißen „unvollständig“. Der Verlauf zeigt Durchschnittswerte für Zucker und Salz mit der Anzahl vollständig erfasster Tage. Das Tagebuch zeigt jedes zusammengesetzte Essen als einen Eintrag; Zutaten lassen sich in der Karte aufklappen. Gespeicherte Produkt- und Datenbank-Snapshots bewahren die verwendete Herkunft auch nach späteren Produktänderungen. Unbekannte Nährwerte bleiben unbekannt und werden in Karten und Tagessummen nicht als Null ausgegeben. Der Eintrag bleibt lokal; eine Synchronisierung nach Intervals.icu erfolgt nur nach ausdrücklicher Freigabe.
 
+Beim Energieverbrauch steht der letzte Garmin-Sync kompakt als **Sync: Datum, Uhrzeit**; ohne Sync-Zeit wird ein vorhandener Abrufzeitpunkt als **Abgerufen** angezeigt. Zutatenquellen zusammengesetzter Mahlzeiten stehen in der aufklappbaren Zutatenliste.
+
 Der Tab **Ernährung** zeigt **Tagebuch**, **Verlauf**, **Body** und **Produkte**. **Verlauf** zeigt wahlweise 14 abgeschlossene Tage oder 12 Wochen bis gestern: den erfassten Kalorienüberschuss oder das Defizit, durchschnittliche Aufnahme und Garmin-Gesamtverbrauch sowie durchschnittliche Kohlenhydrate, Protein und Fett. Unter den Werten zeigt das Diagramm Aufnahme und Verbrauch als getrennte Balken mit Tageswerten oder Wochendurchschnitten; genaue Tageswerte lassen sich aufklappen. Jeder Durchschnitt nennt die Zahl berücksichtigter Tage. Die Wochenbalken nennen für Aufnahme und Verbrauch jeweils ihre eigene Datenabdeckung; ihre Differenz ist bei unterschiedlicher Abdeckung keine Bilanz. Verbrauch bleibt auch ohne Ernährungstracking sichtbar. Die Bilanz verwendet nur Tage mit Aufnahme und Gesamtverbrauch; bei Lücken ist sie eine Teilbilanz. Makro-Durchschnitte verwenden nur vollständige Angaben je Makro. Fehlende Tage zählen nicht als null; die Aussagekraft hängt von vollständig erfassten Mahlzeiten ab. Erfassung, Korrekturen und Löschen laufen über den Coach per Text, Sprache oder Foto. Aktionen im Tab bereiten eine bearbeitbare Nachricht vor; sie speichern und senden nichts automatisch. Ein vorhandener Chatentwurf bleibt erhalten. Nennst du keine Uhrzeit, speichert der Coach den Eintrag mit „Uhrzeit unbekannt“ und dem Mahlzeitentyp; die Karte zeigt dann nur den Typ statt einer erfundenen Uhrzeit.
 
 Mit "Definiere mein Standardfrühstück" lassen sich wiederverwendbare Mahlzeiten mit Zutaten, Mengen und Nährwerten für eine Portion anlegen. Der Coach zeigt die Vorlage zur Bestätigung, bevor er sie speichert. Eine Vorlage zählt noch nicht als gegessen. "Ich habe eine halbe Portion meines Standardfrühstücks gegessen" erfasst den Verzehr mit entsprechend skalierten Nährwerten. Einmalige Abweichungen verändern nur den Tagebucheintrag; dauerhafte Änderungen verändern die Vorlage und niemals frühere Einträge.
@@ -1026,7 +1058,9 @@ Intervals.icu-Aktualisierung lädt die Details aller neuen Aktivitäten
 automatisch und nur lesend nach und speichert sie dauerhaft im kanonischen
 Datenmodell. Als neu gilt jede Einheit ab der ältesten der zehn neuesten
 Aktivitäten beim ersten automatischen Laden; ältere Einheiten werden nicht
-automatisch nachgeladen. Pro Aktualisierung lädt die App höchstens 25 Einheiten,
+automatisch nachgeladen. Das Startdatum lässt sich unter Mehr › Anbindungen bei
+Intervals.icu-Aktivitätsdetails („Laden ab“) auf einen Tag setzen; bereits
+gespeicherte Details bleiben unverändert. Pro Aktualisierung lädt die App höchstens 25 Einheiten,
 die neuesten zuerst; übrige folgen bei der nächsten Aktualisierung. Bleiben die
 Daten einer Einheit dabei aus, steht sie
 trotzdem in der Liste und nennt den Grund, ohne bis zur nächsten Änderung
@@ -1075,10 +1109,24 @@ Beschreibt der Athlet eine Mahlzeit mit Zutaten und Mengen, gleicht der Coach
 jede Zutat zuerst mit den gespeicherten Produkten ab und nutzt passende
 Produkte mit ihrer ID; die Textsuche findet ein Produkt, wenn jedes Suchwort in
 Name oder Marke vorkommt (`%` und `_` zählen wörtlich; Wörter mit weniger als
-drei Zeichen müssen ein Wort beginnen, damit „Ei“ nicht „Reisnudeln“ findet; Satzzeichen wie Kommas oder Klammern um ein Wort werden ignoriert). Erst für Zutaten ohne passendes Produkt fragt er BLS
-oder Open Food Facts ab; auch dann liefert die Suche passende
+drei Zeichen müssen ein Wort beginnen, damit „Ei“ nicht „Reisnudeln“ findet; Satzzeichen wie Kommas oder Klammern um ein Wort werden ignoriert). Findet
+diese Suche nichts, prüft sie die 100 zuletzt geänderten Produkte erneut ohne
+Groß-/Kleinschreibung und Umlaute, mit Pluralformen und einem Tippfehler
+(„Champignons“ findet „Champignon“, „zuccini“ findet „Zucchini“); auch dann muss
+jedes Suchwort passen. Erst für Zutaten ohne passendes Produkt fragt er BLS
+oder Open Food Facts ab. Die BLS-Suche toleriert ebenfalls Pluralformen,
+Tippfehler und „Soße“/„Sauce“; ganze Wörter und Wortenden ranken vor
+Wortanfängen, damit „Reis“ Reis statt „Erdbeereis“ liefert. Enthält kein Eintrag
+alle Suchwörter, liefert sie Teiltreffer aus den bekannten Wortteilen
+(„Risottoreis“ findet Reis und Risotto) und kennzeichnet sie als solche; auch dann liefert die Suche passende
 gespeicherte Produkte mit, auch wenn die externe Datenbank nicht erreichbar ist
-oder die Anfrage ablehnt. Ein
+oder die Anfrage ablehnt. Alle Zutaten einer Mahlzeit werden in einer Suche
+abgefragt (höchstens 20 Begriffe); ein fehlgeschlagener Begriff lässt die
+Treffer der übrigen nutzbar. Der Coach speichert die Mahlzeit danach direkt mit
+allen Komponenten, ohne vorherige Nährwertvorschau; das Speichern berechnet und
+nennt die Summen. Erreicht eine Antwort das Schrittlimit, sagt der Coach, was
+erledigt ist und was nicht; „weiter“ setzt den Auftrag mit den bereits
+gefundenen Lebensmittel-IDs fort. Ein
 Treffer aus einer Onlinequelle wird erst nach Prüfung und ausdrücklicher
 Bestätigung lokal gespeichert; BLS, Open Food Facts, Verpackungsangabe und
 Das Modell kennt die Quellenkennzeichnung `fddb_export`, aber es gibt keinen

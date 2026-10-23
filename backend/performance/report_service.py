@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+from backend.activities.detail_analysis_reads import analysis_summaries
+from backend.activities.detail_store import summary_fingerprint
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
 from backend.performance.canonical_inputs import (
@@ -79,7 +80,7 @@ class TrainingRecordsService:
         )
         known = {str(row.get("id")): row for row in rows}
         records = []
-        for stored in ActivityDetailStore(self._database_manager).analysis_summaries():
+        for stored in analysis_summaries(self._database_manager):
             row = known.get(stored["activity_id"])
             if row is None or stored["summary_sha256"] != summary_fingerprint(row):
                 continue

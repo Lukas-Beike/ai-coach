@@ -81,7 +81,8 @@ from backend.providers.intervals_performance_fields import (
 )
 
 # Version 1: first mapping of activity detail sets (streams, laps, zones).
-MAPPER_VERSION: Final = 1
+# Version 2: maximum speed per lap.
+MAPPER_VERSION: Final = 2
 
 # 800 bits render to at most 241 decimal digits, far below Python's int-to-str
 # digit limit, so wider integers are rejected before str() is called.
@@ -115,6 +116,7 @@ _LAP_METRIC_KEYS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ),
     ("avg_cadence", ("average_cadence",)),
     ("avg_speed_mps", ("average_speed",)),
+    ("max_speed_mps", ("max_speed",)),
     ("elevation_gain_m", ("total_elevation_gain",)),
     ("load", (TRAINING_LOAD,)),
     ("intensity_pct", (INTENSITY,)),

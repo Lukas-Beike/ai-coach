@@ -304,6 +304,24 @@ class IntervalsActivityDetailLapTests(unittest.TestCase):
             result.issues, (_issue("average_watts", IssueReason.OUT_OF_RANGE),)
         )
 
+    def test_lap_max_speed_is_mapped_and_out_of_range_values_are_dropped(self):
+        detail = {
+            "id": ID,
+            "icu_intervals": [
+                {"start_time": 0, "end_time": 60, "max_speed": 7.25},
+                {"start_time": 60, "end_time": 120, "max_speed": 500},
+            ],
+        }
+
+        result = _fresh(detail)
+
+        first, second = _only(result, ActivityLapSet).laps
+        self.assertEqual(first.max_speed_mps, 7.25)
+        self.assertIsNone(second.max_speed_mps)
+        self.assertEqual(
+            result.issues, (_issue("max_speed", IssueReason.OUT_OF_RANGE),)
+        )
+
     def test_fractional_lap_intensity_is_stored_as_percent(self):
         rows = [
             {"start_time": 0, "end_time": 60, "icu_intensity": 0.78},
@@ -425,8 +443,8 @@ class IntervalsActivityDetailZoneTests(unittest.TestCase):
 
 
 class IntervalsActivityDetailCoreTests(unittest.TestCase):
-    def test_mapper_version_is_one(self):
-        self.assertEqual(MAPPER_VERSION, 1)
+    def test_mapper_version_includes_the_lap_max_speed(self):
+        self.assertGreaterEqual(MAPPER_VERSION, 2)
 
     def test_records_are_ordered_streams_laps_heart_rate_then_power(self):
         detail = {

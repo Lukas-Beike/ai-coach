@@ -158,6 +158,26 @@ async function saveCalendarDisplaySettings(event) {
   }
 }
 
+async function loadActivityDetailFloor() {
+  const input = $("#activityDetailFloorDate");
+  try {
+    const result = await api("/api/settings/activity-detail-floor");
+    if (input && document.activeElement !== input) input.value = result.date || "";
+  } catch { /* The field stays empty; saving still works. */ }
+}
+
+async function saveActivityDetailFloor() {
+  const button = $("#activityDetailFloorSaveButton");
+  button.disabled = true;
+  try {
+    const result = await api("/api/settings/activity-detail-floor", { method: "PUT", body: JSON.stringify({ date: $("#activityDetailFloorDate")?.value }) });
+    $("#activityDetailFloorDate").value = result.date;
+    toast("Startdatum für Detaildaten gespeichert");
+  } catch (error) {
+    toast(error.message, true);
+  } finally { button.disabled = false; }
+}
+
 async function downloadPrivacyExport() {
   try {
     const blob = await downloadRequest(

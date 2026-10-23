@@ -192,6 +192,7 @@ class ActivityLap:
     elevation_gain_m: float | None = None
     load: float | None = None
     intensity_pct: float | None = None
+    max_speed_mps: float | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.index, bool) or not isinstance(self.index, int):
@@ -231,6 +232,7 @@ _LAP_METRIC_BOUNDS: Final[Mapping[str, tuple[float, float]]] = {
     "elevation_gain_m": (0.0, MAX_ACTIVITY_ELEVATION_M),
     "load": (0.0, MAX_ACTIVITY_LOAD),
     "intensity_pct": (0.0, MAX_INTENSITY_PCT),
+    "max_speed_mps": (0.0, MAX_SPEED_MPS),
 }
 LAP_METRIC_FIELDS: Final = tuple(_LAP_METRIC_BOUNDS)
 

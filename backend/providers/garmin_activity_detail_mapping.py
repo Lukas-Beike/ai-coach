@@ -68,7 +68,8 @@ from backend.canonical.vocabulary import (
 from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 
 # Version 1: first mapping of Garmin activity detail sets (streams, laps, zones).
-MAPPER_VERSION: Final = 1
+# Version 2: maximum speed per lap.
+MAPPER_VERSION: Final = 2
 
 # Same limit as the Intervals mapper; kept local so providers do not import each other.
 MAX_GARMIN_ACTIVITY_ID_LENGTH: Final = 200
@@ -103,6 +104,7 @@ _LAP_METRIC_KEYS: Final[tuple[tuple[str, str], ...]] = (
     ("maxPower", "max_power"),
     ("normalizedPower", "normalized_power"),
     ("averageSpeed", "avg_speed_mps"),
+    ("maxSpeed", "max_speed_mps"),
     ("elevationGain", "elevation_gain_m"),
 )
 _LAP_CADENCE_KEY: Final = "averageBikeCadence"

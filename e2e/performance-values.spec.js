@@ -33,18 +33,11 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
     renderPerformance(state.data.performance);
   });
   const current = page.locator("#currentPerformance");
-  await expect(current.getByRole("rowheader", { name: "Maximale Herzfrequenz" })).toHaveCount(1);
-  await expect(current.locator('[data-metric="max_hr_bpm"]')).toContainText("187 bpm");
+  await expect(current.getByRole("rowheader", { name: "Maximale Herzfrequenz" })).toHaveCount(0);
+  await expect(current.locator('[data-metric="max_hr_bpm"]')).toHaveCount(0);
+  await expect(current.locator("caption")).toHaveText(["Laufen", "Radfahren"]);
   await expect(current.locator('[data-metric="cycling_w_per_kg"]')).toContainText("3,8 W/kg");
   await expect(current.locator('[data-metric="run_threshold_watts"]')).toHaveCount(0);
-  const order = await current.evaluate((root) => {
-    const tables = root.querySelectorAll(".current-performance-table");
-    const general = tables[0].getBoundingClientRect();
-    const running = tables[1].getBoundingClientRect();
-    return { generalHeight: general.height, generalBottom: general.bottom, runningTop: running.top };
-  });
-  expect(order.generalHeight).toBeGreaterThan(0);
-  expect(order.generalBottom).toBeLessThanOrEqual(order.runningTop);
   await expect(page.locator("#analysisHistoryCharts").getByRole("heading", { name: "Rad-Leistung pro Gewicht" })).toHaveCount(0);
   const ftp = page.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Leistungsschwelle · FTP / eFTP", exact: true }) });
   await expect(ftp.locator('circle[data-series="0"]')).toHaveCount(3);

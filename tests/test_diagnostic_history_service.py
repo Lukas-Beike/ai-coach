@@ -68,6 +68,8 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
                 "status": "failed",
                 "response_status": "incomplete",
                 "awaiting_clarification": True,
+                "tool_rounds": 12,
+                "tool_budget_exhausted": True,
                 "diagnostic_error": {
                     "type": "ProviderError",
                     "reason": "athlete_secret",
@@ -107,6 +109,8 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
         self.assertEqual(entry["status"], "failed")
         self.assertEqual(entry["response_status"], "incomplete")
         self.assertTrue(entry["awaiting_clarification"])
+        self.assertEqual(entry["tool_rounds"], 12)
+        self.assertTrue(entry["tool_budget_exhausted"])
         self.assertEqual(entry["error"]["reason"], "[REDACTED]")
         self.assertEqual(entry["error"]["status"], 503)
         self.assertEqual(
@@ -180,6 +184,8 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
             {
                 "status": ["failed"],
                 "response_status": {"failed": True},
+                "tool_rounds": "12",
+                "tool_budget_exhausted": "yes",
                 "diagnostic_error": {"frames": "not a frame list"},
                 "command_receipts": [None, {"tool": [], "result": []}],
             },
@@ -189,6 +195,8 @@ class CoachDiagnosticHistoryServiceTests(unittest.TestCase):
 
         self.assertEqual(entry["status"], "unknown")
         self.assertIsNone(entry["response_status"])
+        self.assertIsNone(entry["tool_rounds"])
+        self.assertFalse(entry["tool_budget_exhausted"])
         self.assertEqual(entry["error"], {})
         self.assertEqual(
             entry["steps"], [{"tool": "unknown", "ok": False, "error": None}]

@@ -13,6 +13,41 @@ async function performanceFixture(page, changes, route = "performance") {
   await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise);
 }
 
+test("@responsive running tolerance renders Garmin toleranceScore instead of missing data", async ({ page }) => {
+  await page.goto("/#analysis/performance");
+  await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise && !!state.data?.performance?.history?.end);
+  await page.evaluate(() => {
+    const history = structuredClone(state.data.performance.history);
+    history.provider_metrics.running_tolerance = {
+      source: "Garmin Connect",
+      status: "current",
+      points: [{ date: history.end, values: { toleranceScore: 72 } }],
+    };
+    renderAnalysisHistory(history);
+  });
+  const running = page.locator("[data-analysis-section='development-Lauf']");
+  const chart = running.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Lauf-Belastbarkeit", exact: true }) });
+  await expect(chart).toBeVisible();
+  await chart.getByText("Werte ansehen", { exact: true }).click();
+  await expect(chart.locator("tbody td")).toContainText(["72"]);
+  await expect(running).not.toContainText("Keine Daten: Lauf-Belastbarkeit");
+  await page.evaluate(() => {
+    const history = structuredClone(state.data.performance.history);
+    history.provider_metrics.running_tolerance = {
+      source: "Garmin Connect",
+      status: "current",
+      points: [
+        { date: addDateKey(history.end, -7), values: { toleranceScore: 70 } },
+        { date: history.end, values: { toleranceScore: 72 } },
+      ],
+    };
+    renderAnalysisHistory(history);
+  });
+  await expect(chart.locator("circle[data-series]")).toHaveCount(2);
+  await expect(chart.locator("circle[data-series] title").last()).toContainText("72");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test("@responsive standard demo shows one compact race table and sport-specific collapsible development", async ({ page }) => {
   expect((await page.request.get("/api/fixture/demo")).ok()).toBe(true);
   await page.goto("/#analysis/performance");

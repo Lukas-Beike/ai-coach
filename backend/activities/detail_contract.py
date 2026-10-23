@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
 
@@ -21,11 +22,15 @@ from backend.activities.detail_merge import (
     clock_offset,
     stream_average,
 )
-from backend.activities.detail_projection import _downsample_series
+from backend.activities.detail_projection import (
+    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
+    _downsample_series,
+)
 from backend.canonical.activity_detail import (
     LAP_METRIC_FIELDS,
     ActivityLap,
     ActivityLapSet,
+    ActivityStreamSet,
     ZoneDistribution,
 )
 from backend.canonical.records import ActivityRecord, Provenance
@@ -34,6 +39,7 @@ from backend.db.activity_detail_store import StoredDetailSet
 
 ACTIVITY_DETAIL_CONTRACT: Final = "activity_detail.v1"
 
+_ENVELOPE_KEYS: Final = ("activity_feedback", "equipment", "activity_validation")
 _PROVIDER_ORDER: Final[tuple[ProviderId, ...]] = (
     ProviderId.INTERVALS,
     ProviderId.GARMIN,
@@ -68,6 +74,18 @@ _GAP_FILL: Final[Mapping[str, tuple[StreamChannel, str]]] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderStatus:
+    """Freshness of one provider's stored detail against its current summary.
+
+    ``load_error`` is the ``{message, observed_at}`` note of a failed load of the
+    current summary version, already filtered by the caller.
+    """
+
+    stale: bool = False
+    load_error: Mapping[str, Any] | None = None
+
+
 def measured_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
     """Order records by how much their measured values win.
 
@@ -90,23 +108,38 @@ def activity_detail_contract(
     *,
     analysis: Mapping[str, Any] | None,
     refreshable: frozenset[ProviderId],
+    status: Mapping[ProviderId, ProviderStatus] | None = None,
+    envelope: Mapping[str, Any] | None = None,
+    summary_metrics: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Assemble the ``activity_detail.v1`` document of one canonical session."""
+    """Assemble the ``activity_detail.v1`` document of one canonical session.
+
+    ``status`` adds stale, load error and coverage to each provider entry.
+    ``envelope`` adds the feedback, equipment and activity validation blocks.
+    ``summary_metrics`` fill metrics that no measured or derived value provides.
+    """
     if not records:
         raise ValueError("records must not be empty")
     measured = measured_order(records)
-    return {
+    metrics = _metrics(measured, _derived_order(records), merged)
+    for key, entry in (summary_metrics or {}).items():
+        metrics.setdefault(key, dict(entry))
+    document = {
         "contract": ACTIVITY_DETAIL_CONTRACT,
         "session": _session(session_id, measured[0]),
-        "metrics": _metrics(measured, _derived_order(records), merged),
+        "metrics": metrics,
         "streams": _streams(merged.streams),
         "laps": _laps(merged.laps, merged.streams),
         "zones": _zones(merged.zones),
         "analysis": analysis,
         "detail_data": {
-            "providers": _providers(records, stored, refreshable),
+            "providers": _providers(records, stored, refreshable, status),
+            "display_sampled": _display_sampled(merged.streams),
         },
     }
+    if envelope is not None:
+        document.update({key: envelope.get(key) for key in _ENVELOPE_KEYS})
+    return document
 
 
 def _session(session_id: str, primary: ActivityRecord) -> dict[str, Any]:
@@ -278,6 +311,7 @@ def _providers(
     records: Sequence[ActivityRecord],
     stored: Sequence[StoredDetailSet],
     refreshable: frozenset[ProviderId],
+    status: Mapping[ProviderId, ProviderStatus] | None,
 ) -> list[dict[str, Any]]:
     labels: dict[ProviderId, str | None] = {}
     for record in records:
@@ -287,16 +321,49 @@ def _providers(
     providers: list[dict[str, Any]] = []
     for provider in sorted(labels, key=_provider_rank):
         sets = [item for item in stored if item.provider == provider.value]
-        providers.append(
-            {
-                "provider": provider.value,
-                "label": labels[provider],
-                "kinds": sorted({item.detail.kind.value for item in sets}),
-                "fetched_at": _newest_text([item.fetched_at for item in sets]),
-                "refreshable": provider in refreshable,
-            }
-        )
+        entry: dict[str, Any] = {
+            "provider": provider.value,
+            "label": labels[provider],
+            "kinds": sorted({item.detail.kind.value for item in sets}),
+            "fetched_at": _newest_text([item.fetched_at for item in sets]),
+            "refreshable": provider in refreshable,
+        }
+        if status is not None:
+            state = status.get(provider, ProviderStatus())
+            entry["stale"] = state.stale
+            entry["load_error"] = (
+                None if state.load_error is None else dict(state.load_error)
+            )
+            entry["coverage"] = _coverage(sets)
+        providers.append(entry)
     return providers
+
+
+def _coverage(sets: Sequence[StoredDetailSet]) -> dict[str, dict[str, int]]:
+    """Return points and valid points per stream channel; the fullest set wins."""
+    coverage: dict[str, dict[str, int]] = {}
+    for item in sets:
+        detail = item.detail
+        if not isinstance(detail, ActivityStreamSet):
+            continue
+        for channel, values in detail.channels.items():
+            if channel is StreamChannel.TIME_S:
+                continue
+            entry = {
+                "points": len(values),
+                "valid_points": sum(value is not None for value in values),
+            }
+            known = coverage.get(channel.value)
+            if known is None or entry["points"] > known["points"]:
+                coverage[channel.value] = entry
+    return dict(sorted(coverage.items()))
+
+
+def _display_sampled(streams: MergedStreams | None) -> bool:
+    """Return True when a merged stream is longer than the display cap."""
+    return streams is not None and len(streams.time_s) > (
+        COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
+    )
 
 
 def _newest_text(texts: Sequence[str]) -> str | None:

@@ -105,6 +105,8 @@ Use [README.md](README.md) for setup and operational commands.
   short-lived transcription; never persist audio.
 - Frontend changes update `public/index.html` query versions and
   `public/service-worker.js` cache name/assets together.
+- Cut taglines, helper texts and secondary labels. If the screen needs them to
+  make sense, fix the layout.
 
 ## Development and validation
 
@@ -139,8 +141,26 @@ affected checks against the final tree. Diagnose failures before retrying; never
 relax a guard to obtain success. Report behavior, evidence, and unrun checks.
 Preserve scope, decisions, changed paths, outstanding work, and validation evidence
 when handing off. Keep temporary plans/reports outside tracked source unless
-requested as deliverables. Delegate only when requested, using the orchestration
-skill and the user's model choices. External actions retain their authorization.
+requested as deliverables. Always use the repository's
+[orchestration workflow](.agents/skills/orchestrated-plan-implementation/SKILL.md)
+for repository work, including implementation, documentation/skill changes,
+reviews, evaluations, and retrospectives. This is standing authorization for
+bounded delegation under that workflow. Choose its sequential parent-only mode
+before model questions when no worker is needed or delegation/prompting is
+unavailable; select/reuse model choices only for workers that will be dispatched.
+An explicit worker requirement remains binding. The current parent remains the
+sole review/integration owner. Status answers and coordination do not need new
+workers. External actions retain their authorization.
+
+Always run the [retro skill](.agents/skills/ai-coach-retro/SKILL.md) at the end of
+every repository work session, before the final completion or blocked handoff,
+without waiting for a separate request. Include process, skills/instructions,
+and relevant application evidence; scale depth to the work and briefly report
+findings or no actionable findings with limits. Intermediate questions, status
+updates, and waits for active work are not session endings. Do not recursively
+run a retro on its own report; update it only when substantive work follows.
+After an abrupt host stop, perform any missed retro on resumption before the
+next final handoff. A retro does not authorize additional fixes or remote actions.
 
 For requested local security reviews or scans, use
 `.agents/skills/ai-coach-codex-security/SKILL.md`. Authenticate through the

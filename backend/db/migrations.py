@@ -28,6 +28,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V9,
     SHAPE_SCHEMA_V10,
     SHAPE_SCHEMA_V11,
+    SHAPE_SCHEMA_V12,
     released_shape,
 )
 
@@ -110,8 +111,18 @@ def _upgrade_v11_to_v12(db: Any) -> None:
     split_garmin_snapshot(db)
 
 
+def _upgrade_v12_to_v13(db: Any) -> None:
+    # Adds the maximum speed of a lap; existing laps keep NULL until refetched.
+    # The v9 step creates the detail tables from the current DDL, which already
+    # has the column, so it is only added to tables written by v10 or later.
+    columns = {row[1] for row in db.execute("PRAGMA table_info(activity_laps)")}
+    if "max_speed_mps" not in columns:
+        db.execute("ALTER TABLE activity_laps ADD COLUMN max_speed_mps REAL")
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V9: (SHAPE_SCHEMA_V10, _upgrade_v9_to_v10),
     SHAPE_SCHEMA_V10: (SHAPE_SCHEMA_V11, _upgrade_v10_to_v11),
-    SHAPE_SCHEMA_V11: (SHAPE_CURRENT, _upgrade_v11_to_v12),
+    SHAPE_SCHEMA_V11: (SHAPE_SCHEMA_V12, _upgrade_v11_to_v12),
+    SHAPE_SCHEMA_V12: (SHAPE_CURRENT, _upgrade_v12_to_v13),
 }

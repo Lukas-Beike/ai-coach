@@ -25,6 +25,7 @@ from backend.errors import AppError
 from backend.providers import canonical_plans as plans
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.providers.descriptors import GARMIN_ID
+from backend.providers.garmin_activity_detail_mapping import MAPPER_VERSION
 from backend.sync.canonical_ingest import ingest_plan
 from backend.sync.garmin_activity_details import (
     BACKFILL_BATCH_SIZE,
@@ -112,7 +113,11 @@ def _set_summary_hash(
 
 
 def _candidate_ids(
-    manager: Any, *, limit: int = 100, retry_ids: tuple[str, ...] = ()
+    manager: Any,
+    *,
+    limit: int = 100,
+    retry_ids: tuple[str, ...] = (),
+    mapper_version: int = MAPPER_VERSION,
 ) -> list[str]:
     with manager.reader() as db:
         rows = activity_detail_backfill_candidates(
@@ -121,6 +126,7 @@ def _candidate_ids(
             ACTIVITY_RECORD_KIND,
             since=SINCE,
             limit=limit,
+            mapper_version=mapper_version,
             retry_ids=retry_ids,
         )
     return [row["provider_activity_id"] for row in rows]
@@ -286,6 +292,22 @@ class BackfillCandidateTests(_Base):
         self.service(_Details({"1001": _payload("1001")})).backfill()
         _set_summary_hash(self.manager, "1001")
 
+        self.assertEqual(_candidate_ids(self.manager), ["1001"])
+
+    def test_sets_from_an_older_mapper_version_are_candidates_again(self) -> None:
+        _seed(self.manager, [("1001", "2026-10-01 07:00:00")])
+        self.service(_Details({"1001": _payload("1001")})).backfill()
+        self.assertEqual(_candidate_ids(self.manager), [])
+
+        self.assertEqual(
+            _candidate_ids(self.manager, mapper_version=MAPPER_VERSION + 1), ["1001"]
+        )
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_detail_sets SET mapper_version = ? "
+                "WHERE provider = ? AND provider_activity_id = ?",
+                (MAPPER_VERSION - 1, GARMIN_ID, "1001"),
+            )
         self.assertEqual(_candidate_ids(self.manager), ["1001"])
 
     def test_one_set_for_the_current_summary_ends_the_candidacy(self) -> None:
