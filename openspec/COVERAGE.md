@@ -78,6 +78,11 @@ configuration or contacting providers.
   The parent accepted the narrow two-file revision after source/test review;
   all 79 mocked library-sync/export tests passed in the isolated worker. The
   original snapshot above remains the initial backfill evidence identity.
+- Final PR preparation rebased onto `fe42af398`, including the later calendar
+  bounds/UNTIL fixes and Coach authorization changes. HU6 now qualifies direct
+  undo to updates/deletions and documents the mandatory creation-undo confirmation
+  card. The parent traced the new guard and passed all 103 focused Coach tests
+  plus all 43 calendar parser/sync tests; no runtime code changed in this branch.
 - PR preparation also built the application image and ran the complete isolated
   SQLCipher suite: 7,113 tests discovered, 57 skipped, no failures or errors.
   All 234 Node regressions passed. The later correction changes documentation

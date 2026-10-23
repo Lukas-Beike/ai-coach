@@ -92,21 +92,21 @@ The system SHALL preserve supported current metadata while restoring audited loc
 Evidence: `backend/change_history.py:accepted_audit_hashes`; `backend/athlete/profile.py:ProfileService.restore_in_transaction`; `backend/planning/planned_unit_service.py:PlannedUnitService.restore_in_transaction`; `tests/test_history_undo_service.py:test_legacy_profile_row_stays_undoable_and_later_edits_still_conflict`, `tests/test_history_undo_service.py:test_legacy_row_accepts_batch_after_hash_and_rejects_wrong_expected_hash`; `tests/test_server_planning.py:test_planned_unit_undo_rejects_a_new_date_conflict`, `tests/test_server_planning.py:test_deleted_local_library_entry_can_be_undone_without_provider_write`; `tests/test_athlete_profile_service.py:test_restore_of_location_change_invokes_location_hook_and_clears_weather`.
 
 ### Requirement: HU6 Scoped Coach undo and explicit proposal path
-The system SHALL require matching operation/change scope for the Coach undo tool, support direct local apply when explicitly requested by that tool path, and otherwise return a session-bound proposal requiring explicit approval.
+The system SHALL require matching operation/change scope for the Coach undo tool, support direct local apply of an update or deletion when explicitly requested by that tool path, and return a session-bound proposal for previews and creation undo requiring explicit approval.
 
-#### Scenario: Coach preview
-- **WHEN** `undo_training_change` requests preview for an authorized change ID
-- **THEN** the current-state preview is converted to a session-bound local proposal without applying the restore.
+#### Scenario: Coach preview or creation undo
+- **WHEN** `undo_training_change` requests preview for an authorized change ID, or requests apply for a change whose action is create
+- **THEN** the current-state preview is converted to a session-bound local proposal without applying the restore; creation undo returns confirmation_required and deletes the created record only after the athlete confirms the card.
 
 #### Scenario: Direct authorized apply
-- **WHEN** the Coach requests apply for that scoped change under the current athlete-started turn
+- **WHEN** the Coach requests apply to undo an update or deletion for that scoped change under the current athlete-started turn
 - **THEN** the server creates a fresh preview hash and uses the same conflict-checked local undo service; no remote reversal is implied.
 
 #### Scenario: Proposal confirmation or replay
 - **WHEN** the owning session confirms and executes an eligible undo proposal
 - **THEN** the token/hash/session checks apply and only one execution consumes it; foreign, expired or used approvals cannot dispatch another restore.
 
-Evidence: `backend/coach/planning_action_tools.py:CoachPlanningActionToolService.execute`; `backend/http_api/history_undo_post.py:HistoryUndoPostRoutes.handle`; `backend/coach/proposal_execution.py:CoachProposalExecutionService.execute`; `tests/test_coach_tool_coverage.py:test_undo_is_a_bound_preview_until_explicit_confirmation`; `tests/test_coach_planning_action_tools.py` (preview/apply/scoped undo contracts); `tests/test_coach_proposal_execution.py:test_valid_undo_consumes_token_and_replay_is_rejected`, `tests/test_coach_proposal_execution.py:test_foreign_session_wrong_hash_and_expiry_cannot_consume_or_dispatch`.
+Evidence: `backend/coach/planning_action_tools.py:CoachPlanningActionToolService.execute`; `backend/http_api/history_undo_post.py:HistoryUndoPostRoutes.handle`; `backend/coach/proposal_execution.py:CoachProposalExecutionService.execute`; `tests/test_coach_tool_coverage.py:test_undo_is_a_bound_preview_until_explicit_confirmation`; `tests/test_coach_planning_action_tools.py` (preview/apply/scoped undo contracts); `tests/test_coach_planning_action_tools.py:test_create_undo_with_apply_is_only_offered_as_a_card`, `tests/test_coach_planning_action_tools.py:test_create_undo_deletes_only_after_the_athlete_confirms_the_card`, `tests/test_coach_planning_action_tools.py:test_update_undo_with_apply_still_runs_directly`; `tests/test_coach_proposal_execution.py:test_valid_undo_consumes_token_and_replay_is_rejected`, `tests/test_coach_proposal_execution.py:test_foreign_session_wrong_hash_and_expiry_cannot_consume_or_dispatch`.
 
 ### Requirement: HU7 Complete-effect receipt undo eligibility
 The system SHALL summarize applied Coach record changes on receipts/answers and expose whole-turn undo only when every applied effect is fully tracked with history references.
