@@ -10,6 +10,9 @@ for example) is served between two batches instead of queuing behind the loop.
 Follow-up stages run one after another once the canonical backfill is complete. Each
 keeps its own state, so a failed follow-up is recorded on its own and leaves the
 canonical backfill complete.
+
+A start() while the thread runs a pass requests one more pass instead of a second
+thread, so a restore that lands mid-pass is backfilled from the restored state.
 """
 
 from __future__ import annotations
@@ -63,11 +66,17 @@ class CanonicalBackfillWorker:
         self._stop_event = threading.Event()
         self._start_lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        # Guarded by _start_lock. _passes_active stays True until the thread has
+        # decided to exit, so a start() either reaches its next pass or a new thread.
+        self._passes_active = False
+        self._rerun_requested = False
 
     def start(self) -> None:
-        """Start the worker thread unless it is already alive."""
+        """Start the worker thread, or request one more pass from the running thread."""
         with self._start_lock:
-            if self._thread is not None and self._thread.is_alive():
+            thread = self._thread
+            if self._passes_active and thread is not None and thread.is_alive():
+                self._rerun_requested = True
                 return
             self._stop_event.clear()
             self._thread = self._thread_factory(
@@ -76,6 +85,7 @@ class CanonicalBackfillWorker:
                 daemon=True,
             )
             self._thread.start()
+            self._passes_active = True
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -86,11 +96,23 @@ class CanonicalBackfillWorker:
             thread.join(timeout)
 
     def run_loop(self) -> None:
-        """Run batches until the backfill is complete, a batch fails, or stop is requested."""
+        """Run batch passes until one ends without a rerun request, or stop is requested."""
         with background_writer():
             self._run_batches()
 
     def _run_batches(self) -> None:
+        """Run passes until stop is requested or no start() asked for another one."""
+        with self._start_lock:
+            self._rerun_requested = False
+        while True:
+            self._run_pass()
+            with self._start_lock:
+                if self._stop_event.is_set() or not self._rerun_requested:
+                    self._passes_active = False
+                    return
+                self._rerun_requested = False
+
+    def _run_pass(self) -> None:
         """Run the canonical backfill to completion, then each follow-up in order."""
         if not self._run_stage(self._backfill, "canonical"):
             return

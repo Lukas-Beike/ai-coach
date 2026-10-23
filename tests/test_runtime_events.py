@@ -45,6 +45,27 @@ class StateEventBufferTests(unittest.TestCase):
             [item["event_id"] for item in buffer.since("4")["events"]], [5]
         )
 
+    def test_cursor_ahead_of_latest_reports_gap(self):
+        # A cursor kept across a server restart is ahead of the new sequence.
+        buffer = StateEventBuffer()
+        for _ in range(3):
+            buffer.publish("job")
+
+        self.assertEqual(
+            buffer.since(40), {"events": [], "latest_event_id": 3, "gap": True}
+        )
+        self.assertFalse(buffer.since(3)["gap"])
+
+    def test_empty_buffer_reports_gap_only_for_a_positive_cursor(self):
+        buffer = StateEventBuffer()
+
+        self.assertEqual(
+            buffer.since(40), {"events": [], "latest_event_id": 0, "gap": True}
+        )
+        self.assertEqual(
+            buffer.since(0), {"events": [], "latest_event_id": 0, "gap": False}
+        )
+
     def test_invalid_cursor_is_app_error(self):
         buffer = StateEventBuffer()
         for cursor in ("not-a-number", None):
