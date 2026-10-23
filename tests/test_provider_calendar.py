@@ -102,10 +102,39 @@ class CalendarProviderTests(unittest.TestCase):
             "https://calendar.example/feed.ics#secret",
             "https://localhost/feed.ics",
             "https://calendar.local/feed.ics",
-            "https://calendar.example/\r\nHost:bad",
         ):
             with self.subTest(value=value), self.assertRaises(AppError):
                 calendar_provider.external_calendar_url(value)
+
+    def test_calendar_url_rejects_control_characters_before_resolution(self):
+        with (
+            patch.object(calendar_provider, "_resolve_calendar_addresses") as resolve,
+            self.assertRaises(AppError) as raised,
+        ):
+            calendar_provider.external_calendar_url(
+                "https://calendar.example/\r\nHost:bad"
+            )
+        self.assertEqual(raised.exception.status, 400)
+        self.assertIn("ungültige Zeichen", raised.exception.message)
+        self.assertNotIn("Host:bad", raised.exception.message)
+        resolve.assert_not_called()
+        for char in ("\r", "\n", "\t", "\x00"):
+            value = f"https://calendar.example/feed{char}.ics"
+            with (
+                self.subTest(char=repr(char)),
+                patch.object(calendar_provider.socket, "getaddrinfo") as lookup,
+                patch.object(calendar_provider.socket, "create_connection") as connect,
+                patch.object(calendar_provider, "LOGGER") as logger,
+            ):
+                with self.assertRaisesRegex(AppError, "ungültige Zeichen") as direct:
+                    calendar_provider._calendar_feed_request(value, app_version="test")
+                with self.assertRaises(AppError) as fetched:
+                    calendar_provider.fetch_calendar_feed(value, app_version="test")
+                self.assertEqual(direct.exception.status, 400)
+                self.assertEqual(fetched.exception.status, 400)
+                lookup.assert_not_called()
+                connect.assert_not_called()
+                self.assertEqual(logger.method_calls, [])
 
     def test_calendar_dns_rejects_private_mixed_and_resolution_errors(self):
         with patch.object(
@@ -719,6 +748,57 @@ class CalendarProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(AppError, "COUNT.*zwischen"):
             parse(over, start=date(2026, 9, 1), end=date(2026, 10, 27))
 
+    def test_date_only_until_includes_the_until_day_in_the_source_zone(self):
+        berlin = ZoneInfo("Europe/Berlin")
+
+        def source_dates(rule, *, zone=UTC, end=date(2026, 10, 8)):
+            events = parse(
+                feed(
+                    "UID:until\r\nDTSTART;TZID=Europe/Berlin:20261001T180000\r\n"
+                    f"RRULE:{rule}"
+                ),
+                start=date(2026, 10, 1),
+                end=end,
+                zone=zone,
+            )
+            return [
+                datetime.fromisoformat(item["start_local"])
+                .astimezone(berlin)
+                .date()
+                .isoformat()
+                for item in events
+            ]
+
+        five_days = [f"2026-10-0{day}" for day in range(1, 6)]
+        for zone in ("Europe/Berlin", "UTC", "Pacific/Kiritimati"):
+            with self.subTest(zone=zone):
+                self.assertEqual(
+                    source_dates("FREQ=DAILY;UNTIL=20261005", zone=ZoneInfo(zone)),
+                    five_days,
+                )
+        self.assertEqual(source_dates("FREQ=DAILY;UNTIL=20261001"), ["2026-10-01"])
+        self.assertEqual(
+            source_dates("FREQ=WEEKLY;UNTIL=20261008"), ["2026-10-01", "2026-10-08"]
+        )
+        self.assertEqual(
+            source_dates("FREQ=MONTHLY;UNTIL=20261101", end=date(2026, 11, 25)),
+            ["2026-10-01", "2026-11-01"],
+        )
+        self.assertEqual(source_dates("FREQ=DAILY;UNTIL=20261005T160000Z"), five_days)
+        self.assertEqual(
+            source_dates("FREQ=DAILY;UNTIL=20261005T155959Z"), five_days[:4]
+        )
+        all_day = parse(
+            feed(
+                "UID:all-day\r\nDTSTART;VALUE=DATE:20261001\r\n"
+                "RRULE:FREQ=DAILY;UNTIL=20261005"
+            ),
+            start=date(2026, 10, 1),
+            end=date(2026, 10, 8),
+            zone=berlin,
+        )
+        self.assertEqual([item["event_date"] for item in all_day], five_days)
+
     def test_week_start_and_malformed_byday_contract(self):
         weekly = feed(
             "UID:recurring\r\nDTSTART;VALUE=DATE:20260901\r\n"
@@ -879,6 +959,31 @@ class CalendarProviderTests(unittest.TestCase):
                     [],
                 )
             self.assertEqual(period_calls, 3)
+
+    def test_feed_expansion_budget_bounds_unsatisfiable_recurrences(self):
+        message = "Der Kalender-Feed ist zu aufwendig auszuwerten."
+        for frequency in ("DAILY", "WEEKLY", "MONTHLY"):
+            payload = feed(
+                *(
+                    f"UID:impossible-{index}\r\nDTSTART:00010101T080000Z\r\n"
+                    f"RRULE:FREQ={frequency};COUNT=5;BYMONTH=2;BYMONTHDAY=30"
+                    for index in range(3)
+                )
+            )
+            with self.subTest(frequency=frequency):
+                with (
+                    patch.object(calendar_provider, "ICAL_MAX_EXPANSION_STEPS", 50),
+                    patch.object(
+                        calendar_provider,
+                        "_ical_shift_local",
+                        wraps=calendar_provider._ical_shift_local,
+                    ) as steps,
+                    self.assertRaises(AppError) as raised,
+                ):
+                    parse(payload, start=date(2026, 9, 1), end=date(2026, 9, 30))
+                self.assertEqual(raised.exception.status, 400)
+                self.assertEqual(raised.exception.message, message)
+                self.assertLessEqual(steps.call_count, 50 + 1)
 
 
 if __name__ == "__main__":
