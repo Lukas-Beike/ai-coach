@@ -13,7 +13,7 @@
 
 ## 3. Review and validation
 
-- [ ] 3.1 Independent L3 review of fixtures and trace; resolve findings with evidence.
+- [x] 3.1 Independent L3 review of fixtures and trace; resolve findings with evidence.
 - [ ] 3.2 Run the focused tests, `python -m unittest discover -s tests -v`, `python -m compileall -q server.py backend tests`, repo-wide Ruff/mypy as in CI, and `npm run openspec -- validate performance-method-input-fixtures --strict`.
 
 ## Workflow follow-up

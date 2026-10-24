@@ -166,14 +166,17 @@ class M1SessionRpeInputs(linking.LinkingCase):
         self.assertEqual(self._stored_feedback(alias["activity_id"]), [])
 
     def test_incomplete(self) -> None:
-        self._ingest_wahoo([linking.wahoo_workout()], linking.FIRST)
+        workout = linking.wahoo_workout()
+        workout["workout_summary"]["duration_total_accum"] = "3900"
+        self._ingest_wahoo([workout], linking.FIRST)
         record = self._record(ProviderId.WAHOO.value, linking.WAHOO_ID)
         self.assertEqual(
             (record["duration_s"], record["moving_duration_s"]), (3600.0, 3600.0)
         )
         self.assertIsNone(
             canonical_store.activity_elapsed_duration(record["details"]),
-            msg="#1427: a Wahoo-only session has no elapsed duration anywhere",
+            msg="#1427: the Wahoo total duration is dropped when an active duration "
+            "exists; expected an elapsed duration once one is stored",
         )
         local_id = self._sessions()[linking.WAHOO_ID]["activity_id"]
         self.assertEqual(self._stored_feedback(linking.WAHOO_ID), [])
@@ -250,7 +253,8 @@ def _baseline(
         if (item["metric"], item["source_provider"]) == (metric, provider)
         and measurement in (None, item["measurement"])
     ]
-    assert len(matches) == 1, matches
+    if len(matches) != 1:
+        raise AssertionError(f"expected one {metric} baseline, got {matches}")
     return matches[0]
 
 
@@ -384,8 +388,11 @@ class M3SleepInputs(unittest.TestCase):
         ]
         garmin = {"sleep": [_night(offset) for offset in range(29)]}
         result = personal_recovery(wellness, garmin, self.profile, TODAY)
-        deficit = result["sleep_deficits"][1]
-        self.assertEqual(deficit["source"], "Intervals.icu")
+        deficit = next(
+            item
+            for item in result["sleep_deficits"]
+            if item["source"] == "Intervals.icu"
+        )
         self.assertEqual(
             (deficit["known_nights"], deficit["deficit_hours"], deficit["status"]),
             (7, 8.0, "ok"),
