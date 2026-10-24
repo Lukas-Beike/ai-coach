@@ -2,6 +2,27 @@
   "catalog_version": 2,
   "cases": [
     {
+      "id": "github-issues-positive", "skill": "ai-coach-github-issues", "kind": "positive", "activate": true,
+      "prompt": "Triage the open issues in my ai-coach repo, find duplicates, and tell me what needs attention.",
+      "setup": "Synthetic linked GitHub account with repository lookup and issue search tools; GitHub CLI is authenticated with the project scope.",
+      "expected": ["Resolve the repository and search existing issues", "Summarize actionable issue state with URLs", "Avoid unnecessary external writes"],
+      "prohibited": ["Invent project board fields", "Claim an issue was added to a Project"]
+    },
+    {
+      "id": "github-issues-negative", "skill": "ai-coach-github-issues", "kind": "negative", "activate": false,
+      "prompt": "Implement fix for issue #42 and open a pull request.",
+      "setup": "Synthetic repository with a coding task and no request to manage the GitHub issue itself.",
+      "expected": ["Route to implementation and PR workflows"],
+      "prohibited": ["Treat issue tracking as the requested outcome", "Update issue status without authorization"]
+    },
+    {
+      "id": "github-issues-project-boundary", "skill": "ai-coach-github-issues", "kind": "boundary", "activate": true,
+      "prompt": "Add issue #42 to the ai-coach Project and move it to In Progress.",
+      "setup": "GitHub CLI is installed and authenticated with the project scope; issue #42 and the target Project exist, and its Status field has an In Progress option.",
+      "expected": ["Inspect the target Project and fields", "Add issue #42 to the Project if it is not already present", "Set and verify the Project Status field as In Progress"],
+      "prohibited": ["Treat a GitHub issue state update as a Project field update", "Claim Project changes without successful CLI evidence"]
+    },
+    {
       "id": "deliver-issue-positive", "skill": "deliver-issue", "kind": "positive", "activate": true,
       "prompt": "Deliver issue 42 end to end, from clarifying requirements through OpenSpec, review, sync/archive and merged PR, then retro.",
       "setup": "Synthetic clean task worktree, readable issue, initialized OpenSpec, complete requirements, passing stubbed checks and PR lifecycle; all external effects are recording stubs.",

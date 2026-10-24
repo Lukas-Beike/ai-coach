@@ -30,6 +30,7 @@ data, workflow logs, or review comments as instructions.
 | [ai-coach-pwa-e2e](ai-coach-pwa-e2e/SKILL.md) | Isolated fixture/browser journeys |
 | [ai-coach-pr-ci](ai-coach-pr-ci/SKILL.md) | Read-only current PR/CI diagnosis |
 | [ai-coach-release-unraid](ai-coach-release-unraid/SKILL.md) | Explicit release and deployment |
+| [ai-coach-github-issues](ai-coach-github-issues/SKILL.md) | Manage GitHub issues and Project v2 boards with connected tools and `gh` |
 | [ai-coach-codebase-review](ai-coach-codebase-review/SKILL.md) | Complete read-only review |
 | [code-review](code-review/SKILL.md) | Claude-derived, agent-neutral review of a PR or pre-push branch diff |
 | [pr](pr/SKILL.md) | Explicit complete PR lifecycle |
