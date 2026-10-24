@@ -670,7 +670,9 @@ npm.cmd run openspec -- list --specs
 npm.cmd run openspec -- validate --all --strict --no-interactive
 ```
 
-Use `npm` instead of `npm.cmd` outside Windows. The repository script disables
+Use `npm` instead of `npm.cmd` outside Windows. In T3 Code, a project setup
+script `npm.cmd ci --ignore-scripts` with "run on worktree creation" installs
+these dependencies in every new task worktree. The repository script disables
 OpenSpec telemetry on every invocation; no global CLI, skills, profile changes,
 store, hosted service, or model credentials are required. Its config/data homes
 are isolated under ignored `.openspec-local/` in the working directory, including
