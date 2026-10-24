@@ -117,6 +117,9 @@ A dry-run resolution of `graphifyy[mcp]==0.9.93` on Windows/Python 3.14 yields
     it; a changed file still refuses the update, and the retry rescans only it. Any
     finding, scanner failure, binding mismatch or unreadable cache fails closed
     or falls back to a full scan; every graph input hash has been scanned clean.
+    Graph read paths never need the scanner: published-graph metadata omits the
+    binding, and only `update` treats a graph as warm while the cache binding
+    still matches the current scanner, so a changed scanner rescans first.
 11. **Separate preparation budget (user decision 2026-10-24).** Hooks and plain
     `update` keep the 180 s budget. `prepare_worktree.py` runs the first update
     with a 600 s budget through an explicit update option; no environment

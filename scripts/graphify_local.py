@@ -564,7 +564,6 @@ def _config_signature() -> str:
         sorted(DENIED),
         sorted(EXTENSIONS),
         ["update", "--no-cluster"],
-        _scan_binding(),
     ]
     return hashlib.sha256(
         json.dumps(config, separators=(",", ":")).encode()
@@ -808,9 +807,22 @@ def _prune_generations(base: Path, current_id: str, previous_id: str | None) -> 
             shutil.rmtree(old, ignore_errors=True)
 
 
+def _scanned_with(root: Path) -> bool:
+    """Whether the recorded scan used the current scanner; reads skip this."""
+    try:
+        binding = _scan_binding()
+    except Unavailable:
+        return False
+    return read_json(runtime(root) / "scan-cache.json").get("binding") == binding
+
+
 def _update_locked(root: Path, base: Path, deadline: float) -> None:
     current = read_json(base / CURRENT_FILE)
-    if _metadata_current(root, current) and verify_version(root):
+    if (
+        _metadata_current(root, current)
+        and verify_version(root)
+        and _scanned_with(root)
+    ):
         print("Graphify local: current")
         return
     metadata = _metadata(root)

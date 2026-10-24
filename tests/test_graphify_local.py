@@ -454,6 +454,9 @@ class GraphifyLocalTests(unittest.TestCase):
             "graph_sha256": hashlib.sha256(graph_file.read_bytes()).hexdigest(),
         }
         (rt / "current.json").write_text(json.dumps(pointer))
+        (rt / "scan-cache.json").write_text(
+            json.dumps({"binding": graph._scan_binding(), "clean_hashes": []})
+        )
         source_read_bytes = Path.read_bytes
 
         def guarded_read_bytes(path):
@@ -694,9 +697,11 @@ class GraphifyLocalTests(unittest.TestCase):
             "graph_sha256": hashlib.sha256(graph_file.read_bytes()).hexdigest(),
         }
         (rt / "current.json").write_text(json.dumps(pointer))
+        # Reads must not need the Sonar scanner; only updates scan.
         with (
             patch.object(graph, "scan", side_effect=AssertionError("scan")),
             patch.object(graph, "verify_version", return_value=True),
+            patch.object(graph.shutil, "which", return_value=None),
         ):
             self.assertEqual(graph.active_graph(self.root)[1], graph_file)
             with (
