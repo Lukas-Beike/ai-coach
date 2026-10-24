@@ -441,6 +441,17 @@ def state(
     ):
         clean = []
     clean_hashes = set(clean)
+
+    def clean_key(rel: str) -> str:
+        # Bind each verdict to its path; the scanner may treat paths differently.
+        return hashlib.sha256(f"{rel}\0{hashes[rel]}".encode()).hexdigest()
+
+    def unchanged(rel: str, path: Path) -> bool:
+        try:
+            return _signature(path) == before[rel]
+        except OSError:
+            return False
+
     rows, hashes = [], {}
     for rel, path in paths:
         before_sig = _signature(path)
@@ -449,16 +460,16 @@ def state(
             raise Unavailable(SOURCE_CHANGED)
         rows.append((rel, digest))
         hashes[rel] = digest
-    pending = [(rel, path) for rel, path in paths if hashes[rel] not in clean_hashes]
+    pending = [(rel, path) for rel, path in paths if clean_key(rel) not in clean_hashes]
     if pending:
         scan(pending, deadline, scanner=binding["scanner"])
-    changed = {rel for rel, path in paths if _signature(path) != before[rel]}
+    changed = {rel for rel, path in paths if not unchanged(rel, path)}
     if _scan_binding() != binding:
         raise Unavailable("secret scanner changed during scan; graph update refused")
     # No hashes from a failed scan or a file changed during the scan are
     # recorded. Only the current corpus is kept, so the cache stays bounded;
     # stable files stay recorded so a retry rescans only the changed ones.
-    stable = {hashes[rel] for rel, _ in paths if rel not in changed}
+    stable = {clean_key(rel) for rel, _ in paths if rel not in changed}
     _write_json(cache_path, {"binding": binding, "clean_hashes": sorted(stable)})
     if changed:
         raise Unavailable(SOURCE_CHANGED)
@@ -610,7 +621,7 @@ def verify_version(root: Path) -> bool:
         return False
 
 
-def _installed_version(root: Path) -> bool:
+def _installed_version(root: Path, timeout: float = 10) -> bool:
     py = python_executable(root)
     if not py.is_file() or not executable(root).is_file():
         return False
@@ -624,7 +635,7 @@ def _installed_version(root: Path) -> bool:
             capture_output=True,
             check=False,
             text=True,
-            timeout=10,
+            timeout=timeout,
             env=local_env(root),
         )
         return result.returncode == 0 and result.stdout.strip() == VERSION
@@ -894,7 +905,11 @@ def _setup(root: Path) -> int:
     identity = lock_identity()
     venv = shared_environment()
     with process_lock(venv.with_name(venv.name + ".lock"), time.monotonic() + 900):
-        if verify_version(root):
+        # A slow probe under load must not discard an environment in use.
+        if verify_version(root) or (
+            read_json(venv / "ready.json") == identity
+            and _installed_version(root, timeout=120)
+        ):
             print(f"Graphify {VERSION} shared environment ready (reused); run update")
             return 0
         if venv.is_symlink() or (

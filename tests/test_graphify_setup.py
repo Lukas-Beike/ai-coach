@@ -97,6 +97,23 @@ class GraphifySetupTests(unittest.TestCase):
             self.assertEqual(run.call_count, 1)
             self.assertIn("-c", run.call_args.args[0])
 
+    def test_slow_probe_with_matching_marker_reuses_environment(self):
+        with patch.object(graph.subprocess, "run", side_effect=self.fake_run):
+            graph._setup(self.root)
+
+        def slow_probe(command, **kwargs):
+            if "-c" in command and kwargs.get("timeout") == 10:
+                raise subprocess.TimeoutExpired(command, 10)
+            return self.fake_run(command, **kwargs)
+
+        with (
+            patch.object(graph.subprocess, "run", side_effect=slow_probe) as run,
+            patch.object(graph, "_discard") as discard,
+        ):
+            self.assertEqual(graph._setup(self.root), 0)
+        discard.assert_not_called()
+        self.assertFalse(any("pip" in call.args[0] for call in run.call_args_list))
+
     def test_ready_marker_is_published_atomically(self):
         marker = graph.shared_environment() / "ready.json"
         replace = graph.os.replace
@@ -411,6 +428,31 @@ class GraphifyScanCacheTests(unittest.TestCase):
                         self.state()
                 self.assertEqual(self.scans, [[str(self.paths[0][1])]])
 
+    def test_identical_content_at_a_new_path_is_scanned(self):
+        self.state()
+        copy = self.root / "backend/copy.py"
+        copy.write_bytes(self.paths[0][1].read_bytes())
+        self.paths.append(("backend/copy.py", copy))
+        self.scans.clear()
+        self.state()
+        self.assertEqual(self.scans, [[str(copy)]])
+
+    def test_file_deleted_during_scan_is_a_source_change(self):
+        stable = self.root / "backend/stable.py"
+        stable.write_text("value = 1\n")
+        self.paths.append(("backend/stable.py", stable))
+
+        def delete(paths, deadline, **kwargs):
+            stable.unlink()
+
+        with (
+            patch.object(graph, "scan", side_effect=delete),
+            self.assertRaises(graph.Unavailable) as raised,
+        ):
+            self.state()
+        self.assertEqual(str(raised.exception), graph.SOURCE_CHANGED)
+        self.assertEqual(len(json.loads(self.cache.read_text())["clean_hashes"]), 1)
+
     def test_update_retries_once_after_source_change(self):
         changed = graph.Unavailable(graph.SOURCE_CHANGED)
         for effects, code, calls in (
@@ -481,10 +523,10 @@ class GraphifyScanCacheTests(unittest.TestCase):
         for changed in (self.paths[0][1], self.scanner):
             with self.subTest(changed=changed.name):
                 self.cache.unlink(missing_ok=True)
-                hashes = {
-                    rel: hashlib.sha256(path.read_bytes()).hexdigest()
-                    for rel, path in self.paths
-                }
+                content = hashlib.sha256(stable.read_bytes()).hexdigest()
+                key = hashlib.sha256(
+                    f"backend/stable.py\0{content}".encode()
+                ).hexdigest()
 
                 def edit(paths, deadline, target=changed, **kwargs):
                     target.write_text("pass # concurrent edit\n")
@@ -500,7 +542,7 @@ class GraphifyScanCacheTests(unittest.TestCase):
                     # Only the file scanned unchanged is recorded for a retry.
                     self.assertEqual(
                         json.loads(self.cache.read_text())["clean_hashes"],
-                        [hashes["backend/stable.py"]],
+                        [key],
                     )
 
     def test_cache_is_published_atomically(self):

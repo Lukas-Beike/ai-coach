@@ -75,22 +75,32 @@ class GraphifyLocalPureTests(TestCase):
             )
 
     def test_scanner_failure_in_state_never_records_clean_hashes(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            source = root / "source.py"
-            source.write_text("pass\n")
-            with (
-                patch.object(
-                    graph, "corpus_paths", return_value=[("backend/x.py", source)]
-                ),
-                patch.object(graph, "scan", side_effect=graph.Unavailable("failed")),
-                patch.object(
-                    graph, "_scan_binding", return_value={"scanner": "synthetic"}
-                ),
-                self.assertRaises(graph.Unavailable),
-            ):
-                graph.state(root)
-            self.assertFalse((graph.runtime(root) / "scan-cache.json").exists())
+        binding = {"scanner": "synthetic", "engine": [["engine", [1]]]}
+        for prior in (None, {"binding": binding, "clean_hashes": []}):
+            with self.subTest(prior=prior), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                source = root / "source.py"
+                source.write_text("pass\n")
+                cache = graph.runtime(root) / "scan-cache.json"
+                if prior is not None:
+                    cache.parent.mkdir(parents=True)
+                    cache.write_text(json.dumps(prior))
+                before = cache.read_bytes() if prior is not None else None
+                with (
+                    patch.object(
+                        graph, "corpus_paths", return_value=[("backend/x.py", source)]
+                    ),
+                    patch.object(
+                        graph, "scan", side_effect=graph.Unavailable("failed")
+                    ),
+                    patch.object(graph, "_scan_binding", return_value=binding),
+                    self.assertRaises(graph.Unavailable),
+                ):
+                    graph.state(root)
+                if prior is None:
+                    self.assertFalse(cache.exists())
+                else:
+                    self.assertEqual(cache.read_bytes(), before)
 
     def test_local_environment_excludes_secrets_and_disables_backends(self):
         with (

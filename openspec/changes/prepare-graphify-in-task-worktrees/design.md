@@ -101,8 +101,8 @@ A dry-run resolution of `graphifyy[mcp]==0.9.93` on Windows/Python 3.14 yields
 10. **Incremental secret scan (user decision 2026-10-24).** Measured on this
     host: cold update 178 s, update after a one-file edit 146-152 s, no-op
     1.2 s, against the 180 s budget; about 82 s is the full Sonar scan of
-    ~1,200 files. `.graphify-local/scan-cache.json` records SHA-256 content
-    hashes that the scanner reported clean, bound to the wrapper schema, the
+    ~1,200 files. `.graphify-local/scan-cache.json` records SHA-256 keys of path and content
+    that the scanner reported clean, bound to the wrapper schema, the
     scanner's resolved path and file signature, and the corpus rules. An update
     hashes every corpus file, scans only files whose hash is not recorded clean,
     binds the cache also to the signatures of the Sonar CLI's `sonar-secrets-*`

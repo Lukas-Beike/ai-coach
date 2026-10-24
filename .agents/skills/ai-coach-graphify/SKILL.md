@@ -19,7 +19,7 @@ on Windows and `$XDG_DATA_HOME/ai-coach/graphify` (default
 `~/.local/share/ai-coach/graphify`) on POSIX. Graph state and isolated home stay
 under each worktree's `.graphify-local/`; app dependencies are separate.
 Preparation uses `update --preparation` with a 600-second budget; hooks and
-plain `update` retain 180 seconds. `scan-cache.json` keeps the clean content
+plain `update` retain 180 seconds. `scan-cache.json` keeps path-bound clean content
 hashes of the current corpus and reuses them only while the wrapper schema,
 scanner launcher, Sonar secrets engine and corpus rules match; without a
 resolvable engine every update scans everything. An update retries once when
