@@ -164,6 +164,7 @@ and any other selected run. Never select or pass `xhigh`, `max`, or a higher
 reasoning level unless the user explicitly authorizes it for the current task.
 If a selected model or inherited setting would use a level above `high`, ask the
 user first; do not silently inherit or substitute that setting.
+The repository code-review `depth=max` is a review-scope parameter, not an effort level.
 
 Always run the [retro skill](.agents/skills/ai-coach-retro/SKILL.md) at the end of
 every repository work session, before the final completion or blocked handoff,
