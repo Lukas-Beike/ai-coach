@@ -34,6 +34,7 @@ VERSION = lock_version(LOCK_FILE)
 WRAPPER_SCHEMA = 5
 TIMEOUT = 180
 PREPARATION_TIMEOUT = 600
+LEASE_WAIT = 15
 EXTENSIONS = {
     ".py",
     ".js",
@@ -911,12 +912,28 @@ def environment_lease(venv: Path, deadline: float):
     """
     lease = _leases(venv) / f"{os.getpid()}-{uuid.uuid4().hex}"
     with contextlib.ExitStack() as stack:
-        with process_lock(venv.with_name(venv.name + ".lock"), deadline):
+        with contextlib.ExitStack() as registration:
+            try:
+                # Setup may hold the lock for a whole install; fail fast instead.
+                registration.enter_context(
+                    process_lock(
+                        venv.with_name(venv.name + ".lock"),
+                        min(deadline, time.monotonic() + LEASE_WAIT),
+                    )
+                )
+            except Unavailable:
+                raise Unavailable("shared environment busy (setup or prune)") from None
             lease.parent.mkdir(parents=True, exist_ok=True)
             # Runs after the lease handle closes; Windows cannot unlink it open.
-            stack.callback(lease.unlink, missing_ok=True)
+            stack.callback(_remove_lease, lease)
             stack.enter_context(process_lock(lease))
         yield
+
+
+def _remove_lease(lease: Path) -> None:
+    # A concurrent _in_use check may still have it open; it removes leftovers.
+    with contextlib.suppress(OSError):
+        lease.unlink(missing_ok=True)
 
 
 def _in_use(venv: Path) -> bool:

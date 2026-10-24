@@ -310,6 +310,25 @@ class GraphifySetupTests(unittest.TestCase):
         self.assertFalse(graph._in_use(environment))
         self.assertEqual(list(graph._leases(environment).iterdir()), [])
 
+    def test_lease_open_elsewhere_at_exit_does_not_fail_the_command(self):
+        environment = graph.shared_environment()
+        with graph.environment_lease(environment, time.monotonic() + 5):
+            (lease,) = graph._leases(environment).iterdir()
+            observer = lease.open("rb")
+        observer.close()
+        self.assertFalse(graph._in_use(environment))
+        self.assertEqual(list(graph._leases(environment).iterdir()), [])
+
+    def test_lease_fails_fast_while_setup_holds_the_environment(self):
+        environment = graph.shared_environment()
+        with (
+            graph.process_lock(environment.with_name(environment.name + ".lock")),
+            patch.object(graph, "LEASE_WAIT", 0.2),
+            self.assertRaisesRegex(graph.Unavailable, "busy"),
+            graph.environment_lease(environment, time.monotonic() + 180),
+        ):
+            pass
+
     def test_lock_line_endings_do_not_change_the_environment(self):
         content = self.lock.read_bytes().replace(b"\r\n", b"\n")
         names = set()
@@ -379,6 +398,8 @@ class GraphifyScanCacheTests(unittest.TestCase):
         self.engine = [["sonar-secrets-1", [1, 2, 3]]]
         for patcher in (
             patch.object(graph, "_scan_engine", side_effect=lambda: self.engine),
+            # Environment leases must never touch the real shared directory.
+            patch.object(graph, "shared_base", return_value=self.root / "shared"),
             patch.object(graph, "corpus_paths", side_effect=lambda root: self.paths),
             patch.object(graph.shutil, "which", return_value=str(self.scanner)),
             patch.object(graph.subprocess, "run", side_effect=self.fake_run),
