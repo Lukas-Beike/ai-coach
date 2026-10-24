@@ -15,7 +15,7 @@
 ## 3. Review and validation
 
 - [x] 3.1 Obtain an independent L3 review of the register and cards for unsupported claims, citation mismatches and untagged rules; resolve findings with evidence.
-- [ ] 3.2 Present the cards to the athlete for the G0 review and record the result (`released` per interpretation, or `blocked` with the open points) on each card.
+- [x] 3.2 Present the cards to the athlete for the G0 review and record the result (`released` per interpretation, or `blocked` with the open points) on each card.
 - [ ] 3.3 Run `python -m unittest discover -s tests -v`, `python -m compileall -q server.py backend tests`, repo-wide Ruff/mypy as in CI, and `npm run openspec -- validate performance-method-evidence-cards --strict`.
 
 ## Workflow follow-up

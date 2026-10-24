@@ -148,16 +148,20 @@ class PerformanceMethodCardTests(unittest.TestCase):
 
     def test_check_validates_front_values_and_rule_cells(self) -> None:
         card = (CARDS_DIR / CARD_NAMES[0]).read_text("utf-8")
-        blocked = "- **Review:** blocked"
-        released = card.replace(
-            blocked, "- **Review:** released 2026-10-24 (athlete)", 1
-        )
-        self.assertEqual(card_problems(released, self.known_ids), [])
+
+        def with_review(review: str) -> str:
+            return re.sub(
+                r"(?m)^- \*\*Review:\*\* .+$", f"- **Review:** {review}", card
+            )
+
+        for review in ("blocked", "released 2026-10-24 (athlete)"):
+            with self.subTest(review=review):
+                self.assertEqual(card_problems(with_review(review), self.known_ids), [])
         for review in ("blocked junk", "released 2026-10-24 (athlete)x"):
             with self.subTest(review=review):
-                broken = card.replace(blocked, f"- **Review:** {review}", 1)
                 self.assertIn(
-                    "invalid review state", card_problems(broken, self.known_ids)
+                    "invalid review state",
+                    card_problems(with_review(review), self.known_ids),
                 )
         broken = card.replace("- **Card version:** 1", "- **Card version:** x", 1)
         self.assertIn("invalid card version", card_problems(broken, self.known_ids))
