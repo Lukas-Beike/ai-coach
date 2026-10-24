@@ -70,6 +70,34 @@ class PerformanceHistoryTests(unittest.TestCase):
             [{"date": "2026-08-31", "metrics": {"weight_kg": 72.0, "readiness": 85}}],
         )
 
+    def test_unreadable_colon_text_is_absent_and_valid_values_are_kept(self):
+        for text in ("²:30", "1" * 4301 + ":30"):
+            with self.subTest(length=len(text)):
+                payload = {
+                    "race_predictions": {"5k": text, "marathon": "3:30:00"},
+                    "running_threshold": {
+                        "thresholdPace": text,
+                        "power": {"functionalThresholdPower": 320},
+                    },
+                    "source_freshness": {
+                        "race_predictions": current_source(),
+                        "running_threshold": current_source(),
+                    },
+                }
+                append_garmin_performance_history(payload, None, date(2026, 9, 1))
+                self.assertEqual(
+                    payload["performance_history"],
+                    [
+                        {
+                            "date": "2026-08-31",
+                            "metrics": {
+                                "run_marathon_seconds": 12600,
+                                "run_threshold_watts": 320,
+                            },
+                        }
+                    ],
+                )
+
     def test_missing_stale_and_undated_values_are_not_added(self):
         payload = {
             "weight": [{"date": "2026-08-31", "weightKg": 72}],

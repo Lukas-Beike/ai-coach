@@ -268,6 +268,7 @@ button { cursor: pointer; }
 .desktop-nav { display: none; }
 
 h1, h2, h3, p { margin-top: 0; }
+h1, h2, h3, h4 { overflow-wrap: anywhere; }
 h1 {
   margin-bottom: 0;
   font-size: clamp(1.95rem, 8vw, 2.75rem);
@@ -367,8 +368,8 @@ h2 {
 .action-receipt-heading strong { color: var(--ink); font-size: .78rem; }
 .action-receipt p { margin: 0; color: var(--muted); font-size: .74rem; line-height: 1.4; }
 .action-receipt ul { display: grid; gap: 3px; margin: 0; padding-left: 17px; color: var(--subtle); font-size: .68rem; }
-.plan-segment-nav { display: flex; gap: 4px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--translucent-surface); }
-.plan-segment-nav a { display: grid; min-width: 0; min-height: 44px; flex: 1 1 140px; place-items: center; border-radius: var(--radius-sm); color: var(--muted); font-size: .75rem; font-weight: 750; text-decoration: none; }
+.plan-segment-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--translucent-surface); }
+.plan-segment-nav a { display: grid; min-width: min-content; min-height: 44px; flex: 1 1 0; place-items: center; border-radius: var(--radius-sm); color: var(--muted); font-size: .75rem; font-weight: 750; text-decoration: none; }
 .plan-segment-nav a:hover, .plan-segment-nav a.active { color: var(--ink); background: var(--accent-soft); }
 .plan-segment-nav a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 /* Five segments no longer fit one row on the smallest phones. */
@@ -377,7 +378,7 @@ h2 {
 .analysis-history-charts { display: grid; gap: 16px; margin-bottom: 24px; }
 .analysis-chart-card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
 .analysis-chart-card h3 { margin: 0; color: var(--ink); font-size: 1rem; }
-.analysis-chart-stack { display: grid; gap: 12px; }
+.analysis-chart-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .analysis-subchart { min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
 .analysis-subchart h4 { margin: 0; color: var(--ink); font-size: .9rem; }
 .analysis-period-controls { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -437,6 +438,7 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .season-event > summary, .season-archive > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-height: 44px; color: var(--ink); cursor: pointer; font-size: .8rem; }
 .season-event > summary h4 { margin: 0; font-size: 1rem; }
 .season-event-when { color: var(--muted); }
+.season-evidence p { overflow-wrap: anywhere; }
 .analysis-chart-table { max-height: 300px; overflow: auto; }
 .analysis-chart-table:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .analysis-chart-table table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: .75rem; }
@@ -465,10 +467,13 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 }
 .messages.has-empty-state { justify-content: center; }
 .messages.has-empty-state .empty-state { width: min(100%, 680px); margin: auto; }
-#chatPanel.chat-empty { min-height: 0; }
-#chatPanel .messages.has-empty-state {
-  flex: 0 0 auto;
-  min-height: clamp(220px, 38dvh, 440px);
+/* Without a bottom navigation the empty chat shrinks; on phones it fills the viewport so the composer rests above the navigation like in a long chat. */
+@media (min-width: 768px) {
+  #chatPanel.chat-empty { min-height: 0; }
+  #chatPanel .messages.has-empty-state {
+    flex: 0 0 auto;
+    min-height: clamp(220px, 38dvh, 440px);
+  }
 }
 .coach-action-review { display: grid; gap: 12px; margin: 0 0 14px; padding: 14px; border: 1px solid var(--accent-border-strong); border-radius: 16px; background: var(--accent-surface-subtle); box-shadow: var(--shadow-soft); }
 .coach-action-review[hidden] { display: none; }
@@ -555,7 +560,7 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .message-undo { min-height: 44px; margin: -8px 0; padding: 0 8px; border: 0; color: var(--accent-bright); background: var(--transparent); font: inherit; font-weight: 650; }
 .message-undo:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 .message-undo:disabled { color: var(--subtle); }
-.empty { margin: auto; padding: 48px 24px; color: var(--muted); text-align: center; }
+.empty { margin: auto; padding: 48px 24px; overflow-wrap: anywhere; color: var(--muted); text-align: center; }
 .empty strong { display: block; margin-bottom: 8px; color: var(--ink); font-size: 1.35rem; letter-spacing: -.03em; }
 
 .composer {
@@ -1127,9 +1132,11 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .garmin-credential-form > .credential-row-head { align-items: center; }
 .garmin-credential-form > .credential-row-head h4 { margin: 0; }
 .credential-form .secondary-button:disabled { cursor: wait; }
-.setup-banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.setup-banner { flex-wrap: wrap; gap: 4px 14px; }
+.setup-banner > strong { flex: 1 1 11rem; min-width: 0; }
+.setup-banner > .setup-banner-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .setup-banner-actions a { min-height: 44px; display: inline-flex; align-items: center; }
-.setup-banner-actions .secondary-button { min-height: 44px; }
+.setup-banner-actions .secondary-button { width: 44px; min-height: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .connections-sync-progress { display: grid; gap: 8px; padding: 11px; border: 1px solid var(--sync-progress-border); border-radius: 13px; background: var(--sync-progress-surface); }
 .connections-sync-progress[hidden] { display: none; }
 .connection-sync-progress-item { display: grid; gap: 6px; }
@@ -1249,9 +1256,9 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
 
 @media (min-width: 768px) {
   .shell { display: grid; grid-template-columns: 72px minmax(0, 1fr); grid-template-areas: "nav header" "nav main"; gap: 0 24px; padding: 0 24px 32px 0; }
-  .desktop-nav { grid-area: nav; position: sticky; top: 0; display: flex; height: 100dvh; flex-direction: column; gap: 8px; padding: 24px 10px; border-right: 1px solid var(--line); }
-  .desktop-nav .nav-item { display: grid; min-height: 52px; place-items: center; gap: 5px; padding: 7px 4px; border-radius: 12px; color: var(--muted); text-decoration: none; }
-  .desktop-nav .nav-item > span { display: none; }
+  .desktop-nav { grid-area: nav; position: sticky; top: 0; display: flex; height: 100dvh; flex-direction: column; gap: 8px; padding: 24px 4px; border-right: 1px solid var(--line); }
+  .desktop-nav .nav-item { display: grid; min-height: 52px; place-items: center; gap: 5px; padding: 7px 2px; border-radius: 12px; color: var(--muted); text-decoration: none; }
+  .desktop-nav .nav-item > span { font-size: .68rem; font-weight: 650; }
   .desktop-nav .nav-item.active { color: var(--ink); background: var(--accent-soft); }
   .desktop-nav .nav-item.active .nav-icon { color: var(--accent-bright); }
   .desktop-nav .nav-item:last-child { margin-top: auto; }
@@ -1359,6 +1366,7 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .connection-card .connection-resync-status { grid-column: 1 / -1; grid-row: 5; }
   .connection-card .provider-setup-hint { grid-column: 1 / -1; grid-row: 6; }
   .provider-attention-banner { align-items: flex-start; flex-direction: column; }
+  .provider-attention-banner.setup-banner { align-items: center; flex-direction: row; }
   .provider-attention-banner a { min-height: 44px; display: inline-flex; align-items: center; }
   .settings-message { overflow-wrap: anywhere; }
   .settings-message code { overflow-wrap: anywhere; }
@@ -1476,7 +1484,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 
 .nutrition-toolbar { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
 .nutrition-toolbar label { flex: 1; min-width: 140px; }
-.nutrition-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+.nutrition-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); gap: 12px; margin: 18px 0; }
 .nutrition-total, .nutrition-card { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .nutrition-total strong { display: block; font-size: 1.4rem; }
 .nutrition-list { display: grid; gap: 12px; margin: 18px 0; }
@@ -1494,7 +1502,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-component-list li { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .nutrition-component-list li > span { white-space: normal; }
 .nutrition-component-list small { display: block; margin-top: 3px; overflow-wrap: anywhere; }
-.nutrition-tools { display: grid; gap: 12px; margin: 20px 0; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.nutrition-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 20px 0; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.nutrition-tools[hidden] { display: none; }
 .nutrition-tools h3, .nutrition-tools p { margin: 0; }
 .nutrition-week-table { overflow-x: auto; margin-top: 12px; }
 .nutrition-week-table table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
@@ -1507,9 +1516,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-week-legend span::before { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; background: var(--chart-series-1); content: ""; }
 .nutrition-week-legend span + span::before { background: var(--chart-series-3); }
 .nutrition-week-chart-days { display: grid; margin-top: 12px; }
-.nutrition-week-chart-day { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 4px 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: .78rem; }
+.nutrition-week-chart-day { display: grid; grid-template-columns: minmax(48px, auto) minmax(0, 1fr); gap: 4px 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: .78rem; }
 .nutrition-week-chart-day > strong { grid-row: span 2; align-self: center; }
-.nutrition-week-chart-series { display: grid; grid-template-columns: minmax(0, 1fr) 76px; align-items: center; gap: 8px; }
+.nutrition-week-chart-series { display: grid; grid-template-columns: minmax(0, 1fr) minmax(76px, auto); align-items: center; gap: 8px; }
 .nutrition-week-chart-series > span:last-child { text-align: right; white-space: nowrap; }
 .nutrition-week-chart-track { display: block; height: 12px; border-radius: 3px; background: var(--translucent-surface); }
 .nutrition-week-chart-bar { display: block; height: 100%; border-radius: inherit; background: var(--chart-series-1); }
@@ -1578,6 +1587,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 
 .analysis-report-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 0.9rem; overflow-wrap: anywhere; }
 
+.table-scroll { overflow-x: auto; }
 .race-predictions-table { width: 100%; margin-top: 12px; border-collapse: collapse; }
 .race-predictions-table th, .race-predictions-table td { padding: 12px 4px; border-bottom: 1px solid var(--line); }
 .race-predictions-table thead th { color: var(--muted); font-size: .8rem; font-weight: 500; text-align: left; }
@@ -1677,6 +1687,8 @@ summary > .activity-analysis-error { flex: 0 0 auto; font-size: .72rem; font-wei
 /* Visibility, chart variants and motion preferences take precedence over components. */
 @layer overrides {
 [hidden] { display: none; }
+/* Route activation focuses the panel for screen readers; it is not an interactive control. */
+.panel[tabindex="-1"]:focus { outline: none; }
 .analysis-form-area { fill: var(--chart-series-2); opacity: .15; stroke: none; }
 .analysis-range-whisker { stroke-width: 8px; stroke-linecap: round; opacity: .25; }
 .nutrition-low-confidence { border-color: var(--nutrition-warning-border); }

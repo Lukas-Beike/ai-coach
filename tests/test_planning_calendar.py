@@ -1,6 +1,7 @@
 import unittest
 from copy import deepcopy
 
+from backend.planning import calendar as planning_calendar
 from backend.planning import conflicts as planning_conflicts
 
 
@@ -166,6 +167,65 @@ class PlanningCalendarTests(unittest.TestCase):
         planning_conflicts.calendar_conflicts_for_items(candidate, items, "external")
 
         self.assertEqual((candidate, items), originals)
+
+
+class AdaptiveChangeCalendarBlockedTests(unittest.TestCase):
+    @staticmethod
+    def change(payload: dict, triggers: list[str], events: list[dict]) -> dict:
+        return {
+            "payload": payload,
+            "blocking_triggers": triggers,
+            "external_events": events,
+        }
+
+    def test_kept_replacement_is_blocked_by_any_current_marker(self) -> None:
+        change = self.change({"duration_minutes": 45}, ["calendar"], [])
+
+        self.assertFalse(planning_calendar.adaptive_change_calendar_blocked(change, []))
+        self.assertTrue(
+            planning_calendar.adaptive_change_calendar_blocked(
+                change, [{"id": "kita", "reason": "short_only"}]
+            )
+        )
+
+    def test_no_training_archive_needs_its_original_blocker(self) -> None:
+        change = self.change(
+            {"archived": True},
+            ["calendar"],
+            [{"id": "travel", "no_training": True}],
+        )
+
+        for blockers, blocked in (
+            ([], True),
+            ([{"id": "other", "reason": "no_training"}], True),
+            ([{"id": "travel", "reason": "no_intensity"}], True),
+            ([{"id": "travel", "reason": "no_training"}], False),
+        ):
+            with self.subTest(blockers=blockers):
+                self.assertIs(
+                    planning_calendar.adaptive_change_calendar_blocked(
+                        change, blockers
+                    ),
+                    blocked,
+                )
+
+    def test_illness_archive_beside_an_ordinary_event_is_not_calendar_bound(
+        self,
+    ) -> None:
+        change = self.change(
+            {"archived": True},
+            ["illness", "calendar"],
+            [{"id": "family", "no_training": False, "no_intensity": True}],
+        )
+
+        self.assertFalse(planning_calendar.adaptive_change_calendar_blocked(change, []))
+
+    def test_archive_without_calendar_trigger_is_not_calendar_bound(self) -> None:
+        change = self.change(
+            {"archived": True}, ["illness"], [{"id": "travel", "no_training": True}]
+        )
+
+        self.assertFalse(planning_calendar.adaptive_change_calendar_blocked(change, []))
 
 
 if __name__ == "__main__":

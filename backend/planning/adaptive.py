@@ -13,6 +13,7 @@ from backend import change_history
 from backend.athlete.checkins import CHECKIN_TEXT_LIMITS
 from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.errors import AppError
+from backend.planning import calendar as planning_calendar
 from backend.planning import workouts as planning_workouts
 from backend.planning.planned_unit_service import UPDATE_SQL as PLANNED_UNIT_UPDATE_SQL
 from backend.planning.sport import planned_activity_type
@@ -21,6 +22,7 @@ DEFAULT_ILLNESS_PAUSE_DAYS = 3
 WEATHER_ADAPTIVE_MAX_MINUTES = 90
 # The only planned-unit fields an adaptive replacement may change on apply.
 ADAPTIVE_REPLACEMENT_KEYS = (
+    "name",
     "duration_minutes",
     "description",
     "target",
@@ -28,6 +30,8 @@ ADAPTIVE_REPLACEMENT_KEYS = (
     "archived",
     "private_calendar_adjustment",
 )
+# Neutral title for a hard draft replaced on a [NO_INTENSITY] day.
+ADAPTIVE_EASY_NAME = "Lockere Einheit"
 
 
 def workout_is_hard(workout: dict[str, Any]) -> bool:
@@ -344,13 +348,7 @@ class AdaptiveReplanApplyService:
             if archived:
                 candidate = {**(change.get("before") or {}), "date": change.get("date")}
             blockers = self._calendar_conflict_service.constraints(candidate)
-            calendar_archive = archived and "calendar" in (
-                change.get("blocking_triggers") or []
-            )
-            changed = calendar_archive and not self._original_calendar_blocker_present(
-                change, blockers
-            )
-            if changed or (not archived and blockers):
+            if planning_calendar.adaptive_change_calendar_blocked(change, blockers):
                 stale.append(
                     {
                         "library_workout_id": change.get("library_workout_id"),
@@ -361,21 +359,6 @@ class AdaptiveReplanApplyService:
             else:
                 applicable.append(change)
         return applicable, stale
-
-    @staticmethod
-    def _original_calendar_blocker_present(
-        change: dict[str, Any], blockers: list[dict[str, Any]]
-    ) -> bool:
-        original_ids = {
-            str(event["id"])
-            for event in change.get("external_events") or []
-            if isinstance(event, dict) and event.get("id") and event.get("no_training")
-        }
-        return any(
-            event.get("reason") == "no_training"
-            and str(event.get("id") or "") in original_ids
-            for event in blockers
-        )
 
     @staticmethod
     def _illness_checkin_values(

@@ -157,6 +157,7 @@ jobs:
           --volume "${GITHUB_WORKSPACE}/requirements-dev.in:/review/requirements-dev.in:ro"
           --volume "${GITHUB_WORKSPACE}/requirements-dev.txt:/review/requirements-dev.txt:ro"
           --volume "${GITHUB_WORKSPACE}/pyproject.toml:/review/pyproject.toml:ro"
+          --volume "${GITHUB_WORKSPACE}/README.md:/review/README.md:ro"
           --volume "${GITHUB_WORKSPACE}/tools:/review/tools:ro"
           --volume "${GITHUB_WORKSPACE}/tools:/app/tools:ro"
           --volume "${GITHUB_WORKSPACE}/docs:/review/docs:ro"

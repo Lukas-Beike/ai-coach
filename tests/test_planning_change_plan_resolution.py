@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from test_coach_dialogue import DialogueHarness, server
+
 from backend.db.repositories import TrainingPlanRepository
 from backend.errors import AppError
 from backend.planning.changes import StructuredTrainingPlanResolver
@@ -228,6 +230,53 @@ class StructuredTrainingPlanResolverTests(unittest.TestCase):
             ({"plan_id": "plan-b", "plan_name": "Other"}, set()),
         )
 
+    def test_authorized_plan_rejects_mixed_and_missing_unit_memberships(self) -> None:
+        self.add_plan("plan-a")
+        self.add_plan("plan-b")
+        self.add_unit("unit-a", {"plan_id": "plan-a"})
+        self.add_unit("unit-b", {"plan_id": "plan-b"})
+        self.add_unit("unit-empty", {"plan_id": "  ", "date": "2031-02-10"})
+        self.add_unit("unit-standalone", {"date": "2031-02-11"})
+
+        for batch in (
+            [{"local_id": "unit-a"}, {"local_id": "unit-b"}],
+            [{"local_id": "unit-a"}, {"local_id": "unit-b", "action": "delete"}],
+            [{"local_id": "unit-empty"}],
+            [{"local_id": "unit-a"}, {"local_id": "unit-standalone"}],
+        ):
+            with self.subTest(batch=batch):
+                self.assert_app_error(
+                    lambda batch=batch: self.derive(batch, "plan-a"),
+                    status=403,
+                    message="Die Planreferenzen der Änderung sind nicht eindeutig.",
+                    reason="intent_scope_denied",
+                )
+
+    def test_authorized_plan_reads_unit_ids_as_the_writer_does(self) -> None:
+        unit_a = "8b6f3c1e-2d4a-4f7b-9c1d-0e5a6b7c8d9f"
+        unit_b = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        self.add_plan("plan-a")
+        self.add_plan("plan-b")
+        self.add_unit(unit_a, {"plan_id": "plan-a"})
+        self.add_unit(unit_b, {"plan_id": "plan-b"})
+
+        for spelling in (unit_b.upper(), "{" + unit_b + "}", unit_b.replace("-", "")):
+            for batch in (
+                [{"local_id": spelling}],
+                [{"local_id": unit_a}, {"local_id": spelling, "action": "delete"}],
+            ):
+                with self.subTest(batch=batch):
+                    self.assert_app_error(
+                        lambda batch=batch: self.derive(batch, "plan-a"),
+                        status=403,
+                        message="Die Planreferenzen der Änderung sind nicht eindeutig.",
+                        reason="intent_scope_denied",
+                    )
+        self.assertEqual(
+            self.derive([{"local_id": unit_a.upper()}], "plan-a"),
+            ({"plan_id": "plan-a", "plan_name": "Plan"}, set()),
+        )
+
     def test_create_plan_ids_support_implicit_explicit_and_standalone_cases(
         self,
     ) -> None:
@@ -266,6 +315,60 @@ class StructuredTrainingPlanResolverTests(unittest.TestCase):
         self.derive(changes)
 
         self.assertEqual(changes, original)
+
+
+class AuthorizedPlanChangeServiceTests(DialogueHarness, unittest.TestCase):
+    def add_plan(self, plan_id: str) -> None:
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            server.TRAINING_PLAN_REPOSITORY.create(
+                db,
+                plan_id,
+                plan_id,
+                "Build",
+                "2026-09-01",
+                "2026-09-30",
+                "planned",
+                "2026-09-01T00:00:00Z",
+            )
+
+    def add_unit(self, day: str, plan_id: str | None = None) -> str:
+        workout = self.workout(day=day)
+        if plan_id:
+            workout.update(plan_id=plan_id, plan_name=plan_id)
+        return server.PLANNING_DATA.planned_unit().create(workout)["id"]
+
+    def persisted(self) -> tuple[list[dict[str, Any]], int]:
+        with server.database_manager().unit_of_work() as db:
+            rows = db.execute(
+                "SELECT local_id, payload FROM planned_units ORDER BY local_id"
+            ).fetchall()
+        return [dict(row) for row in rows], self.state()["planning_revision"]
+
+    def test_named_plan_batch_with_foreign_or_missing_membership_writes_nothing(
+        self,
+    ) -> None:
+        self.add_plan("plan-a")
+        self.add_plan("plan-b")
+        unit_a = self.add_unit("2026-09-10", "plan-a")
+        unit_b = self.add_unit("2026-09-11", "plan-b")
+        standalone = self.add_unit("2026-09-12")
+
+        for local_ids in ((unit_a, unit_b), (standalone,)):
+            with self.subTest(local_ids=local_ids):
+                before = self.persisted()
+                with self.assertRaises(AppError) as raised:
+                    server.PLANNING_WORKFLOWS.structured_training_change_service().apply(
+                        {
+                            "changes": [
+                                {"local_id": local_id, "action": "update", "name": "X"}
+                                for local_id in local_ids
+                            ]
+                        },
+                        authorized_plan_id="plan-a",
+                    )
+                self.assertEqual(raised.exception.status, 403)
+                self.assertEqual(raised.exception.reason, "intent_scope_denied")
+                self.assertEqual(self.persisted(), before)
 
 
 if __name__ == "__main__":

@@ -162,6 +162,13 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(page.locator("#seasonPreparation .season-evidence").first().locator("svg")).toHaveCount(2);
   await expect(page.locator("#seasonPreparation .season-evidence").first()).toContainText("Zieldistanzvergleich");
   await expect(page.locator("#seasonPreparation .season-evidence").first()).toContainText("bekannt");
+  const seasonCard = page.locator("#seasonPreparation .season-event").first();
+  const seasonText = await seasonCard.innerText();
+  expect(seasonText).not.toMatch(/Sport: |Quelle: |Status: |confirmed|recorded activities|cached activity|Beobachtungen/);
+  expect(seasonText.match(/in \d+ Tagen/g) ?? []).toHaveLength(1);
+  expect(seasonText).not.toMatch(/\d+:\d{2}:\d{2}/);
+  await expect(seasonCard.locator(".season-evidence dt", { hasText: "Sport" }).locator("xpath=following-sibling::dd")).toHaveText("Rad");
+  await expect(seasonCard.locator(".season-evidence dt", { hasText: "Quelle" }).first().locator("xpath=following-sibling::dd")).toHaveText("Bestätigter Wettkampf");
   await page.locator("#seasonPreparation").getByRole("button", { name: /Szenarien vergleichen/ }).first().click();
   await expect(page.locator("#seasonPreparation").getByText(/Lokales Standardmodell/).first()).toBeVisible();
 

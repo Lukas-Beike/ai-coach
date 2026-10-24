@@ -33,12 +33,25 @@ LOGGER = logging.getLogger("intervals_coach")
 EXTERNAL_CALENDAR_WINDOW_DAYS = 56
 ICAL_MAX_RECURRENCE_COUNT = 1000
 ICAL_MAX_RECURRENCE_PERIODS = 10000
+ICAL_MAX_EXPANSION_STEPS = 1_000_000
 ICAL_MAX_RAW_EVENTS = 10000
 ICAL_DAY_NUMBERS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 
 
 class _CalendarResolveTimeout(TimeoutError):
     """Address resolution did not finish within the caller's deadline."""
+
+
+class _IcalExpansionBudget:
+    """Bound the recurrence expansion steps of one feed parse."""
+
+    def __init__(self) -> None:
+        self._remaining = ICAL_MAX_EXPANSION_STEPS
+
+    def spend(self) -> None:
+        self._remaining -= 1
+        if self._remaining < 0:
+            raise AppError(400, "Der Kalender-Feed ist zu aufwendig auszuwerten.")
 
 
 def _getaddrinfo_bounded(hostname: str, timeout: float) -> list[Any]:
@@ -97,6 +110,8 @@ def _resolve_calendar_addresses(
 
 def _calendar_url_parts(value: Any) -> tuple[str, Any, str, int]:
     raw = str(value or "").strip()
+    if any(ord(char) < 32 or ord(char) == 127 for char in raw):
+        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.")
     try:
         parsed = urlparse(raw)
         port = parsed.port
@@ -122,11 +137,6 @@ def _calendar_url_parts(value: Any) -> tuple[str, Any, str, int]:
             400,
             "Lokale Kalenderadressen werden aus Sicherheitsgründen nicht abgerufen.",
         )
-    request_target = parsed.path or "/"
-    if parsed.query:
-        request_target += "?" + parsed.query
-    if any(char in request_target for char in "\r\n"):
-        raise AppError(400, "Die Kalenderadresse enthält ungültige Zeichen.")
     return raw, parsed, hostname, port or 443
 
 
@@ -557,12 +567,12 @@ def _ical_rrule(raw: str, local_zone: tzinfo) -> dict[str, Any]:
     wkst = ICAL_DAY_NUMBERS.get(values.get("WKST", "MO"))
     if wkst is None:
         raise AppError(400, "WKST der Kalender-Wiederholung ist ungültig.")
-    until = None
+    until: date | None = None
     if values.get("UNTIL"):
         temporal = _ical_temporal_value(values["UNTIL"], {}, local_zone)
         if temporal is None:
             raise AppError(400, "UNTIL der Kalender-Wiederholung ist ungültig.")
-        until = temporal[0]
+        until = temporal[0].date() if temporal[1] else temporal[0]
     return {
         "frequency": frequency,
         "count": count,
@@ -582,6 +592,15 @@ def _ical_shift_local(value: datetime, days: int) -> datetime:
         value.timetz().replace(tzinfo=None),
         value.tzinfo,
     )
+
+
+def _ical_past_until(value: datetime, until: date | None) -> bool:
+    """A date-only UNTIL includes its whole day in the instance's own zone."""
+    if until is None:
+        return False
+    if isinstance(until, datetime):
+        return value > until
+    return value.date() > until
 
 
 def _ical_matches_byday(value: date, bydays: list[tuple[int, int | None]]) -> bool:
@@ -649,8 +668,14 @@ def _ical_add_start(
 
 
 def _ical_daily(
-    base: datetime, rule: dict[str, Any], first: date, last: date
+    base: datetime,
+    rule: dict[str, Any],
+    first: date,
+    last: date,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> list[datetime]:
+    budget = budget or _IcalExpansionBudget()
     starts: list[datetime] = []
     first_index = (
         0
@@ -660,8 +685,9 @@ def _ical_daily(
     index = first_index
     occurrences = 0
     while index <= first_index + ICAL_MAX_RECURRENCE_COUNT * 366:
+        budget.spend()
         value = _ical_shift_local(base, index * rule["interval"])
-        if value.date() > last or (rule["until"] is not None and value > rule["until"]):
+        if value.date() > last or _ical_past_until(value, rule["until"]):
             break
         if _ical_matches_date_filters(value.date(), rule):
             if rule["count"] is not None and occurrences >= rule["count"]:
@@ -694,7 +720,7 @@ def _ical_weekly_slot(
         value = _ical_shift_local(base, (day - base_date).days)
         if rule["count"] is not None and occurrences >= rule["count"]:
             return starts, occurrences, True
-        if rule["until"] is not None and value > rule["until"]:
+        if _ical_past_until(value, rule["until"]):
             return starts, occurrences, True
         occurrences += 1
         _ical_add_start(starts, value, first, last)
@@ -702,8 +728,14 @@ def _ical_weekly_slot(
 
 
 def _ical_weekly(
-    base: datetime, rule: dict[str, Any], first: date, last: date
+    base: datetime,
+    rule: dict[str, Any],
+    first: date,
+    last: date,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> list[datetime]:
+    budget = budget or _IcalExpansionBudget()
     base_date = base.date()
     base_week = base_date - timedelta(days=(base_date.weekday() - rule["wkst"]) % 7)
     target = first - timedelta(days=(first.weekday() - rule["wkst"]) % 7)
@@ -717,6 +749,7 @@ def _ical_weekly(
     starts: list[datetime] = []
     occurrences = 0
     while slot <= first_slot + ICAL_MAX_RECURRENCE_PERIODS:
+        budget.spend()
         week = base_week + timedelta(days=slot * rule["interval"] * 7)
         if week > last:
             break
@@ -767,7 +800,7 @@ def _ical_period_slot(
         day for day in _ical_apply_bysetpos(candidates, rule) if day >= base_date
     ]:
         value = _ical_shift_local(base, (candidate - base_date).days)
-        if rule["until"] is not None and value > rule["until"]:
+        if _ical_past_until(value, rule["until"]):
             return starts, occurrences, True
         if rule["count"] is not None and occurrences >= rule["count"]:
             return starts, occurrences, True
@@ -777,8 +810,14 @@ def _ical_period_slot(
 
 
 def _ical_period(
-    base: datetime, rule: dict[str, Any], first: date, last: date
+    base: datetime,
+    rule: dict[str, Any],
+    first: date,
+    last: date,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> list[datetime]:
+    budget = budget or _IcalExpansionBudget()
     base_date = base.date()
     monthly = rule["frequency"] == "MONTHLY"
     base_period = (
@@ -794,6 +833,7 @@ def _ical_period(
     starts: list[datetime] = []
     occurrences = 0
     while period <= first_period + ICAL_MAX_RECURRENCE_PERIODS:
+        budget.spend()
         year, months, is_monthly = _ical_period_context(base_date, rule, period)
         slot_starts, occurrences, stop = _ical_period_slot(
             base, base_date, year, months, rule, first, last, occurrences
@@ -809,13 +849,18 @@ def _ical_period(
 
 
 def _ical_recurrence_starts(
-    event: dict[str, Any], rule: dict[str, Any], first: date, last: date
+    event: dict[str, Any],
+    rule: dict[str, Any],
+    first: date,
+    last: date,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> list[datetime]:
     if rule["frequency"] == "DAILY":
-        return _ical_daily(event["start"], rule, first, last)
+        return _ical_daily(event["start"], rule, first, last, budget=budget)
     if rule["frequency"] == "WEEKLY":
-        return _ical_weekly(event["start"], rule, first, last)
-    return _ical_period(event["start"], rule, first, last)
+        return _ical_weekly(event["start"], rule, first, last, budget=budget)
+    return _ical_period(event["start"], rule, first, last, budget=budget)
 
 
 def _ical_duration(event: dict[str, Any]) -> timedelta:
@@ -861,6 +906,8 @@ def _ical_base_starts(
     first: date,
     last: date,
     local_zone: tzinfo,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> list[datetime]:
     if not event.get("rrules"):
         return [event["start"]]
@@ -877,6 +924,7 @@ def _ical_base_starts(
                 _ical_rrule(raw, local_zone),
                 recurrence_first,
                 recurrence_last,
+                budget=budget,
             )
         )
     return sorted(set(starts))
@@ -888,9 +936,11 @@ def _ical_instances(
     last: date,
     local_zone: tzinfo,
     excluded: set[datetime] | None = None,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> Iterator[dict[str, Any]]:
     duration = _ical_duration(event)
-    starts = _ical_base_starts(event, duration, first, last, local_zone)
+    starts = _ical_base_starts(event, duration, first, last, local_zone, budget=budget)
     excluded_values = set(event.get("exdates", [])) | set(excluded or ())
     seen: set[datetime] = set()
     for source_start in chain(starts, event.get("rdates", [])):
@@ -1117,8 +1167,12 @@ def _ical_add_result_instances(
     last: date,
     local_zone: tzinfo,
     excluded: set[datetime] | None = None,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> None:
-    for item in _ical_instances(event, first, last, local_zone, excluded):
+    for item in _ical_instances(
+        event, first, last, local_zone, excluded, budget=budget
+    ):
         key = (item["uid"], item["start_local"])
         if key not in result and len(result) >= ICAL_MAX_RECURRENCE_COUNT:
             raise AppError(
@@ -1134,6 +1188,8 @@ def _ical_add_master_results(
     first: date,
     last: date,
     local_zone: tzinfo,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> None:
     exceptions_by_uid: dict[str, set[datetime]] = {}
     for item in events:
@@ -1141,7 +1197,9 @@ def _ical_add_master_results(
             exceptions_by_uid.setdefault(item["uid"], set()).add(item["recurrence_id"])
     for event in filter(_ical_is_master_event, events):
         exceptions = exceptions_by_uid.get(event["uid"], set())
-        _ical_add_result_instances(result, event, first, last, local_zone, exceptions)
+        _ical_add_result_instances(
+            result, event, first, last, local_zone, exceptions, budget=budget
+        )
 
 
 def _ical_add_exception_results(
@@ -1150,17 +1208,26 @@ def _ical_add_exception_results(
     first: date,
     last: date,
     local_zone: tzinfo,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> None:
     for event in filter(_ical_is_exception_event, events):
-        _ical_add_result_instances(result, event, first, last, local_zone)
+        _ical_add_result_instances(
+            result, event, first, last, local_zone, budget=budget
+        )
 
 
 def _ical_expanded_results(
-    events: list[dict[str, Any]], first: date, last: date, local_zone: tzinfo
+    events: list[dict[str, Any]],
+    first: date,
+    last: date,
+    local_zone: tzinfo,
+    *,
+    budget: _IcalExpansionBudget | None = None,
 ) -> list[dict[str, Any]]:
     result: dict[tuple[str, str], dict[str, Any]] = {}
-    _ical_add_master_results(result, events, first, last, local_zone)
-    _ical_add_exception_results(result, events, first, last, local_zone)
+    _ical_add_master_results(result, events, first, last, local_zone, budget=budget)
+    _ical_add_exception_results(result, events, first, last, local_zone, budget=budget)
     return sorted(
         result.values(),
         key=lambda item: (item["start_local"], item["name"], item["uid"]),
@@ -1177,4 +1244,6 @@ def parse_ical_calendar(
 ) -> list[dict[str, Any]]:
     first, last = _ical_window(window_start, window_end, today)
     events = _ical_parsed_events(payload, local_zone)
-    return _ical_expanded_results(events, first, last, local_zone)
+    return _ical_expanded_results(
+        events, first, last, local_zone, budget=_IcalExpansionBudget()
+    )

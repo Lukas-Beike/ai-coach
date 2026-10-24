@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import urlencode
 
 import test_coach_dialogue as dialogue
+from support import canonical_backfill_stopped
 
 from backend.coach import dialogue as coach_dialogue
 from backend.coach import streams as coach_streams
@@ -569,6 +570,7 @@ with patch.object(Path, 'read_text', deny):
                 patch.object(server, "DATA_DIR", root),
                 patch.object(server, "DB_PATH", root / "test.db"),
                 patch.object(server, "LOG_PATH", root / "test.log"),
+                canonical_backfill_stopped(server),
             ):
                 try:
                     server.initialise_database()

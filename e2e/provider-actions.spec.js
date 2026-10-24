@@ -50,3 +50,28 @@ test("@responsive setup banner is shown on every tab and Jetzt einrichten opens 
   await expect(page.locator('details[data-more-segment-panel="connections"]')).toHaveAttribute("open", "");
   await expect(page.locator("#intervalsSetupHint")).toBeVisible();
 });
+
+test("@responsive setup banner names the missing item compactly without server-configuration advice", async ({ page, context }) => {
+  await page.goto("/#coach");
+  const banner = page.locator("#setupBanner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("Intervals.icu-API-Schlüssel fehlt");
+  await expect(banner).not.toContainText(/Serverkonfiguration|Einrichtung nötig|Ergänze/);
+  await expect(banner.getByRole("link", { name: "Jetzt einrichten" })).toBeVisible();
+  const dismiss = banner.getByRole("button", { name: "Für diese Sitzung ausblenden" });
+  const [linkBox, dismissBox, bannerBox] = await Promise.all([
+    banner.getByRole("link", { name: "Jetzt einrichten" }).boundingBox(),
+    dismiss.boundingBox(),
+    banner.boundingBox(),
+  ]);
+  // Link and dismiss share one row, and the banner stays about one text line plus one touch row.
+  expect(Math.abs(linkBox.y - dismissBox.y)).toBeLessThan(4);
+  expect(bannerBox.height).toBeLessThanOrEqual(96);
+
+  await context.setOffline(true);
+  const notice = page.locator("#connectivityNotice");
+  await expect(notice).toBeVisible();
+  const [noticeBox, offlineBannerBox] = await Promise.all([notice.boundingBox(), banner.boundingBox()]);
+  expect(noticeBox.height + offlineBannerBox.height).toBeLessThanOrEqual(175);
+  await context.setOffline(false);
+});

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import errno
+import os
 import sqlite3
 import tempfile
 import threading
@@ -10,7 +12,8 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock, patch
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.restore import (
@@ -41,6 +44,7 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         self.coach_wake = Mock()
         self.diagnostics_suspended = Mock()
         self.canonical_backfill_start = Mock()
+        self.logger = Mock()
         self.calls: list[str] = []
 
         def stage(payload: bytes | Iterable[bytes]) -> Path:
@@ -109,6 +113,7 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
                 redact=lambda _message: "redacted",
                 diagnostics_suspended=self.diagnostics_suspended,
                 canonical_backfill_start=self.canonical_backfill_start,
+                logger=self.logger,
                 refresh_credentials=lambda: self.calls.append("credentials-refresh"),
             )
         )
@@ -128,9 +133,11 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
             (self.data_dir / result["previous_database_backup"]).read_bytes(),
             b"previous database",
         )
-        self.assertFalse(Path(f"{self.database_path}-wal").exists())
-        self.assertFalse(Path(f"{self.database_path}-shm").exists())
-        self.assertFalse((self.data_dir / "staged.db").exists())
+        # The old sidecars never stay next to the restored file, under any name.
+        self.assertEqual(
+            sorted(path.name for path in self.data_dir.iterdir()),
+            ["coach.db", result["previous_database_backup"]],
+        )
         self.assertEqual(
             self.calls,
             [
@@ -275,11 +282,107 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         ):
             self.service.restore(b"replacement database")
 
-        self.assertEqual(raised.exception.status, 400)
+        # A storage failure is not an invalid backup and never forwards OS text.
+        self.assertEqual(raised.exception.status, 500)
+        self.assertEqual(raised.exception.reason, "restore_storage_failed")
+        self.assertNotIn("validiert", raised.exception.message)
+        self.assertNotIn("sensitive path", raised.exception.message)
         self.assertEqual(self.database_path.read_bytes(), b"previous database")
         self.assertFalse((self.data_dir / "staged.db").exists())
         self.sync_jobs.resume_interrupted.assert_not_called()
         self.assertFalse(self.gate.state()["active"])
+
+    def recovery_copies(self) -> list[Path]:
+        return sorted(self.data_dir.glob("coach.db.pre-restore-*"))
+
+    def test_full_disk_during_recovery_copy_reports_507_without_partial_copy(
+        self,
+    ) -> None:
+        def copy2(_source: Path, target: Path) -> None:
+            Path(target).write_bytes(b"partial")
+            raise OSError(errno.ENOSPC, "No space left on device", str(target))
+
+        with (
+            patch("backend.backup.restore.shutil.copy2", side_effect=copy2),
+            self.assertRaises(AppError) as raised,
+        ):
+            self.service.restore(b"replacement database")
+
+        self.assertEqual(raised.exception.status, 507)
+        self.assertEqual(raised.exception.reason, "restore_storage_full")
+        self.assertNotIn("Errno", raised.exception.message)
+        self.assertNotIn(str(self.data_dir), raised.exception.message)
+        self.assertEqual(self.recovery_copies(), [])
+        self.assertEqual(self.database_path.read_bytes(), b"previous database")
+        self.assertFalse((self.data_dir / "staged.db").exists())
+        self.sync_jobs.resume_interrupted.assert_not_called()
+        self.assertFalse(self.gate.state()["active"])
+
+    def test_free_space_check_rejects_before_the_recovery_copy_starts(self) -> None:
+        backup = DatabaseBackupService(
+            MagicMock(),
+            self.lock,
+            DatabaseBackupConfig(
+                database_path=self.database_path,
+                data_dir=self.data_dir,
+                maximum_bytes=1_000_000,
+                minimum_free_bytes=10,
+                time_limit_seconds=5,
+                disk_usage=lambda _path: SimpleNamespace(free=20),
+            ),
+            Mock(),
+        )
+        self.service._dependencies = replace(self.service._dependencies, backup=backup)
+
+        with (
+            patch("backend.backup.restore.shutil.copy2") as copy2,
+            self.assertRaises(AppError) as raised,
+        ):
+            self.service.restore(b"replacement database")
+
+        # 17 database bytes plus the 10-byte reserve exceed the 20 free bytes.
+        self.assertEqual(raised.exception.status, 507)
+        self.assertEqual(raised.exception.reason, "restore_storage_full")
+        copy2.assert_not_called()
+        self.assertEqual(self.recovery_copies(), [])
+        self.assertEqual(self.database_path.read_bytes(), b"previous database")
+        self.assertFalse(self.gate.state()["active"])
+
+    def test_refused_swap_puts_the_live_sidecars_back(self) -> None:
+        wal = Path(f"{self.database_path}-wal")
+        shm = Path(f"{self.database_path}-shm")
+        wal.write_bytes(b"live wal")
+        shm.write_bytes(b"live shm")
+        real_replace = os.replace
+
+        def replace_file(source: Path, target: Path) -> None:
+            if Path(target) == self.database_path:
+                raise PermissionError("sensitive path")
+            real_replace(source, target)
+
+        with (
+            patch("backend.backup.restore.os.replace", side_effect=replace_file),
+            self.assertRaises(AppError) as raised,
+        ):
+            self.service.restore(b"replacement database")
+
+        self.assertEqual(raised.exception.status, 500)
+        self.assertEqual(raised.exception.reason, "restore_storage_failed")
+        self.assertNotIn("sensitive path", raised.exception.message)
+        self.assertEqual(self.database_path.read_bytes(), b"previous database")
+        self.assertEqual(wal.read_bytes(), b"live wal")
+        self.assertEqual(shm.read_bytes(), b"live shm")
+        self.assertEqual(list(self.data_dir.glob("*.restore-aside")), [])
+        self.sync_jobs.resume_interrupted.assert_not_called()
+        self.assertFalse(self.gate.state()["active"])
+        self.logger.warning.assert_called_once()
+        extra = self.logger.warning.call_args.kwargs["extra"]
+        self.assertEqual(extra["event"], "database_restore_storage_failed")
+        self.assertEqual(
+            extra["context"],
+            {"error_class": "PermissionError", "errno": None, "status": 500},
+        )
+        self.assertNotIn("sensitive path", repr(self.logger.warning.call_args))
 
     def test_resume_failure_after_replace_reports_restored_and_still_wakes_workers(
         self,

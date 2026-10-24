@@ -338,7 +338,9 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
       row.append(distance, reportNode("td", formatDuration(metric.value)));
       body.append(row);
     }
-    table.append(body); root.append(table);
+    table.append(body);
+    const scroll = makeScrollRegionFocusable(reportNode("div", null, "table-scroll"), "Geschätzte Zeiten nach Distanz");
+    scroll.append(table); root.append(scroll);
   }
   renderAnalysisSegments(state.route);
 }

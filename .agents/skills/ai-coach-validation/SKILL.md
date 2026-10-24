@@ -11,6 +11,7 @@ Use after changes or when validating a suspected regression.
 - JavaScript: run affected `tests/*.cjs` with `node --test` and syntax-check changed scripts with `node --check`.
 - PWA assets: when `public/index.html`, any asset listed in `service-worker.js`, or `service-worker.js` changes, verify matching asset query and cache versions.
 - Docker or startup changes: run `docker build -t ai-coach:local .`.
+- Dependency upgrades: follow [dependency maintenance](references/dependency-maintenance.md) for upstream changes, actual call sites, hash locks, and compatibility evidence.
 - Use temporary data and mocked providers. Never use real `.env`, `/data`, credentials, or athlete data.
 - Optional real-model checks: agents may use the existing local CLIProxyAPI for bounded synthetic manual probes under the [README runbook](../../../README.md#optional-local-cliproxyapi-probes). Use confirmed OAuth/subscription routing with paid API-key fallbacks disabled; check availability/models first, keep probes out of ordinary tests/CI, and report subscription quota use and compatibility limits. Fixtures remain the default; proxy success does not validate remote conversations, background jobs, or production behavior.
 - Verify the final changed state: bind results to the revision and any uncommitted changes tested. After a material edit or rebase, rerun affected checks before reusing earlier success. Inspect child-test failures and artifacts rather than relying only on a wrapper exit code.

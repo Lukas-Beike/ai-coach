@@ -65,5 +65,48 @@ function notifyState(data) {
 }
 
 function registerServiceWorker() {
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  if (!("serviceWorker" in navigator)) return;
+  // The first install also takes control of the page; only a replaced worker brings new assets.
+  const replacesWorker = Boolean(navigator.serviceWorker.controller);
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!replacesWorker) return;
+    serviceWorkerReplaced = true;
+    reloadForUpdateWhenSafe();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") reloadForUpdateWhenSafe();
+  });
+  // Leaving a field may end the last edit; focus moves on after focusout.
+  document.addEventListener("focusout", () => setTimeout(reloadForUpdateWhenSafe, 0));
+  navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+}
+
+// A replaced service worker serves the new assets, so the page reloads once to run
+// them, but only while nothing would be lost. Otherwise the reload waits for the
+// next check: when a chat or load state ends, or when the page is hidden.
+let serviceWorkerReplaced = false;
+let serviceWorkerReloaded = false;
+
+// Settings fields that start empty, so any value in them is still being entered.
+const UPDATE_RELOAD_INPUT_FIELDS = "#cred-form-openai input, #cred-form-intervals input, #cred-form-wahoo input, #garmin-login-form input, #garmin-mfa-form input, #nutritionProductQuery";
+
+function pageInputPending() {
+  const active = document.activeElement;
+  return Boolean(active?.matches?.("input, textarea, select") && !active.closest?.("#chatForm"))
+    || [...document.querySelectorAll(UPDATE_RELOAD_INPUT_FIELDS)].some((field) => field.value.trim())
+    || (typeof providerCredentialBusy !== "undefined" && providerCredentialBusy.size > 0)
+    || Boolean($("#calendarDisplaySaveButton")?.disabled);
+}
+
+function updateReloadIsSafe() {
+  return !hasUnsavedChanges() && !pageInputPending()
+    && !(state.chatAttachments || []).length && !state.chatAttachmentsLoading
+    && !chatStatusJobActive() && !voiceIsRecording() && !state.voiceTranscribing
+    && !state.loadPromise && !$("#backupRestoreButton")?.disabled && !$("dialog[open]");
+}
+
+function reloadForUpdateWhenSafe() {
+  if (!serviceWorkerReplaced || serviceWorkerReloaded || !updateReloadIsSafe()) return;
+  serviceWorkerReloaded = true;
+  location.reload();
 }

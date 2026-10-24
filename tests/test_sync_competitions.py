@@ -637,6 +637,85 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(self.reconciler.records()[0], [])
         self.assertEqual(self.stored_competition("local-push")["sync_state"], "synced")
 
+    def test_linked_unsupported_sport_edit_stays_dirty_and_survives_refresh(self):
+        row = self.local_competition(
+            "local-swim",
+            sport="swim",
+            intervals_event_id="remote-linked",
+            external_id="external-linked",
+            sync_state="local_override",
+        )
+        row["sport_detail"] = "Open water"
+        self.insert_competition(row)
+        client = FakeCompetitionClient(
+            events=[self.remote_event("remote-linked", "external-linked")]
+        )
+        service = self.make_sync_service(client)
+
+        pushed = service.sync(push_local=True)
+
+        self.assertEqual(client.upsert_calls, [])
+        stored = self.stored_competition("local-swim")
+        self.assertEqual(stored["sync_dirty"], 1)
+        self.assertEqual(stored["sync_state"], "local_override")
+        self.assertEqual(stored["sport"], "swim")
+        self.assertEqual(stored["sport_detail"], "Open water")
+        self.assertIsNone(stored["last_synced_at"])
+        self.assertEqual(pushed["pushed"], 0)
+        self.assertEqual(pushed["updated"], 0)
+        self.assertEqual(pushed["skipped"], 1)
+        self.assertEqual(
+            pushed["skipped_items"],
+            [
+                {
+                    "id": "local-swim",
+                    "reason": planning_competitions.COMPETITION_SKIP_UNSUPPORTED_SPORT,
+                }
+            ],
+        )
+
+        service.sync(push_local=False)
+
+        stored = self.stored_competition("local-swim")
+        self.assertEqual(client.upsert_calls, [])
+        self.assertEqual(stored["sync_dirty"], 1)
+        self.assertNotEqual(stored["sync_state"], "synced")
+        self.assertEqual(stored["sport"], "swim")
+        self.assertEqual(stored["sport_detail"], "Open water")
+
+    def test_linked_supported_sport_edit_pushes_and_becomes_synced(self):
+        row = self.local_competition(
+            "local-run",
+            sport="run",
+            intervals_event_id="remote-linked",
+            external_id="external-linked",
+            sync_state="local_override",
+        )
+        self.insert_competition(row)
+        pushed_event = self.remote_event("remote-linked", "external-linked")
+        pushed_event["type"] = "Run"
+        client = FakeCompetitionClient(
+            events=[self.remote_event("remote-linked", "external-linked")],
+            pushed=[pushed_event],
+        )
+        service = self.make_sync_service(client)
+
+        result = service.sync(push_local=True)
+
+        self.assertEqual(len(client.upsert_calls), 1)
+        stored = self.stored_competition("local-run")
+        self.assertEqual(stored["sync_dirty"], 0)
+        self.assertEqual(stored["sync_state"], "synced")
+        self.assertEqual(stored["sport"], "run")
+
+        client.events = [pushed_event]
+        service.sync(push_local=False)
+
+        self.assertEqual(self.stored_competition("local-run")["sport"], "run")
+        self.assertEqual(result["pushed"], 1)
+        self.assertEqual(result["skipped"], 0)
+        self.assertEqual(result["skipped_items"], [])
+
     def test_failed_remote_delete_does_not_clear_tombstones_or_upsert(self):
         self.insert_tombstone("tombstone", "remote-delete", None, "created")
         error = RuntimeError("delete failed")
@@ -714,6 +793,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
                 "updated": 1,
                 "pushed": 0,
                 "skipped": 0,
+                "skipped_items": [],
                 "conflicts": 0,
                 "removed": 0,
                 "deleted_remote": 0,

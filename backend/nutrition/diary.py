@@ -29,6 +29,27 @@ from backend.runtime.ports import ObservationReader
 
 INVALID_ENTRY_ID = "Ungültige Eintrags-ID."
 ENTRY_NOT_FOUND = "Ernährungseintrag nicht gefunden."
+# Alternative names the Coach and API clients use for stored entry fields.
+MEAL_FIELD_ALIASES = {
+    "date": "meal_date",
+    "meal_time": "logged_at",
+    "calories": "kcal",
+    "carbs": "carbs_g",
+    "carbohydrates": "carbs_g",
+    "protein": "protein_g",
+    "fat": "fat_g",
+}
+
+
+def _canonical_meal_changes(changes: dict[str, Any]) -> dict[str, Any]:
+    """Rename alias keys to stored field names; reject conflicting values."""
+    canonical: dict[str, Any] = {}
+    for key, value in changes.items():
+        name = str(MEAL_FIELD_ALIASES.get(key, key))
+        if name in canonical and canonical[name] != value:
+            raise AppError(400, f"Widersprüchliche Werte für {name}.")
+        canonical[name] = value
+    return canonical
 
 
 def _names_time_without_flag(changes: dict[str, Any]) -> bool:
@@ -245,6 +266,7 @@ class NutritionDiaryService:
             raise AppError(400, INVALID_ENTRY_ID)
         if not isinstance(payload, dict):
             raise AppError(400, "Ernährungseintrag muss ein Objekt sein.")
+        payload = _canonical_meal_changes(payload)
         resolved_database = (
             self._meal_library.prepare_component_resolutions(payload["components"])
             if "components" in payload
@@ -293,6 +315,7 @@ class NutritionDiaryService:
             raise AppError(
                 400, "Korrektur muss mindestens ein gültiges Ernährungsfeld enthalten."
             )
+        changes = _canonical_meal_changes(changes)
         resolved_database = (
             self._meal_library.prepare_component_resolutions(changes["components"])
             if "components" in changes
@@ -352,20 +375,8 @@ class NutritionDiaryService:
         calculation: dict[str, Any] | None,
         resolved_database: dict[int, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        aliases = {
-            "date": "meal_date",
-            "meal_time": "logged_at",
-            "calories": "kcal",
-            "carbs": "carbs_g",
-            "carbohydrates": "carbs_g",
-            "protein": "protein_g",
-            "fat": "fat_g",
-        }
-        canonical = {
-            str(aliases.get(key, key)): value for key, value in changes.items()
-        }
-        merged = {**existing, **canonical}
-        if _names_time_without_flag(canonical):
+        merged = {**existing, **changes}
+        if _names_time_without_flag(changes):
             merged["logged_time_known"] = True
         if "components" in changes:
             validate_component_payload(changes)
@@ -375,15 +386,15 @@ class NutritionDiaryService:
                 )
             )
             merged.pop("components", None)
-        elif set(canonical) & {*NUTRIENTS, "food_ingredients", "packaging_label"}:
+        elif set(changes) & {*NUTRIENTS, "food_ingredients", "packaging_label"}:
             merged.update(
                 calculation
                 if calculation is not None
                 else self._meal_library.prepare_values(merged)
             )
             if (
-                "food_ingredients" not in canonical
-                and canonical.get("packaging_label") is not True
+                "food_ingredients" not in changes
+                and changes.get("packaging_label") is not True
             ):
                 merged["nutrition_basis"] = {"kind": "manual_correction"}
         entry = normalize_nutrition_entry(merged, local_now_factory=self._local_now)

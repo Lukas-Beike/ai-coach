@@ -15,7 +15,10 @@ from backend.db.repositories import PlanAdjustmentRepository, PlanningStateRepos
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning import adaptive
+from backend.planning import calendar as planning_calendar
 from backend.planning.adaptive import AdaptiveReplanApplyService
+from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
+from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.revision import PlanningRevisionService
 
 NOW = "2026-09-20T08:00:00+00:00"
@@ -421,6 +424,148 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
                     self.assertEqual(
                         result["stale"][0]["reason"], "calendar_constraint_changed"
                     )
+
+    @staticmethod
+    def calendar_event(**marker):
+        return {
+            "id": "family-1",
+            "name": "Family",
+            "event_date": "2026-09-22",
+            "start_local": "2026-09-22T10:00:00",
+            "end_local": "2026-09-22T11:00:00",
+            "duration_minutes": 60,
+            "training_relevant": True,
+            **marker,
+        }
+
+    def preview_and_apply(self, drafts, events, feedback=None):
+        for draft in drafts:
+            self.add_workout(draft["id"], draft)
+
+        class Checkins:
+            def context(self):
+                return {"today": feedback or {}}
+
+        class PlannedUnits:
+            def list(self, _limit, *, future_only=False):
+                return drafts
+
+        class Calendar:
+            def list_events(self, _limit, training_relevant_only=False):
+                return events
+
+        class Weather:
+            def state(self, **_kwargs):
+                return {"days": []}
+
+        preview = AdaptiveReplanPreviewService(
+            self.manager,
+            self.repository,
+            Checkins(),
+            PlannedUnits(),
+            Calendar(),
+            Weather(),
+            lambda: TODAY,
+            lambda: NOW,
+            lambda: str(uuid.uuid4()),
+            56,
+            1000,
+            3,
+            90,
+        ).preview()
+        service = self.make_service(
+            calendar_conflict_service=CalendarConflictService(self.manager, Calendar())
+        )
+        return preview, service.apply(preview["id"])
+
+    def saved(self, workout_id):
+        return json.loads(
+            self.row(
+                "SELECT payload FROM planned_units WHERE local_id=?", (workout_id,)
+            )["payload"]
+        )
+
+    def test_short_only_preview_round_trip_applies_within_the_marker_limit(self):
+        for minutes in (90, 70):
+            with self.subTest(minutes=minutes):
+                event = self.calendar_event(short_only=True)
+                workout_id = str(uuid.uuid4())
+                draft = self.workout(
+                    workout_id,
+                    "2026-09-22",
+                    duration_minutes=minutes,
+                    description=f"- {minutes}m 60% Easy",
+                )
+
+                preview, result = self.preview_and_apply([draft], [event])
+
+                payload = preview["changes"][0]["payload"]
+                self.assertLessEqual(payload["duration_minutes"], 60)
+                self.assertIsNone(
+                    planning_calendar.calendar_constraint_decision(payload, event)
+                )
+                self.assertEqual((result["status"], result["updated"]), ("applied", 1))
+                self.assertLessEqual(self.saved(workout_id)["duration_minutes"], 60)
+
+    def test_no_intensity_preview_round_trip_applies_easy_replacement(self):
+        event = self.calendar_event(no_intensity=True)
+        workout_id = str(uuid.uuid4())
+        draft = self.workout(
+            workout_id,
+            "2026-09-22",
+            name="Threshold intervals",
+            duration_minutes=60,
+            description="- 60m 95%",
+            target="POWER",
+        )
+
+        preview, result = self.preview_and_apply([draft], [event])
+
+        self.assertEqual(
+            preview["changes"][0]["payload"]["name"], adaptive.ADAPTIVE_EASY_NAME
+        )
+        self.assertEqual((result["status"], result["updated"]), ("applied", 1))
+        saved = self.saved(workout_id)
+        self.assertEqual(saved["name"], adaptive.ADAPTIVE_EASY_NAME)
+        self.assertEqual(saved["target"], "AUTO")
+        self.assertIsNone(planning_calendar.calendar_constraint_decision(saved, event))
+
+    def test_no_intensity_description_only_hard_keyword_keeps_title_and_applies(self):
+        event = self.calendar_event(no_intensity=True)
+        workout_id = str(uuid.uuid4())
+        draft = self.workout(
+            workout_id,
+            "2026-09-22",
+            name="Morning ride",
+            duration_minutes=60,
+            description="- 60m threshold",
+        )
+
+        preview, result = self.preview_and_apply([draft], [event])
+
+        self.assertEqual(preview["changes"][0]["payload"]["name"], "Morning ride")
+        self.assertEqual((result["status"], result["updated"]), ("applied", 1))
+        saved = self.saved(workout_id)
+        self.assertEqual(saved["name"], "Morning ride")
+        self.assertIsNone(planning_calendar.calendar_constraint_decision(saved, event))
+
+    def test_illness_archive_beside_an_ordinary_event_applies(self):
+        workout_id = str(uuid.uuid4())
+        draft = self.workout(
+            workout_id, "2026-09-22", name="Tempo ride", description="- 30m 80%"
+        )
+
+        preview, result = self.preview_and_apply(
+            [draft],
+            [self.calendar_event()],
+            {"checkin_date": TODAY.isoformat(), "illness": "Infekt"},
+        )
+
+        change = preview["changes"][0]
+        self.assertTrue(change["payload"]["archived"])
+        self.assertEqual(change["blocking_triggers"], ["illness", "calendar"])
+        self.assertEqual((result["status"], result["updated"]), ("applied", 1))
+        self.assertTrue(self.saved(workout_id)["archived"])
 
     def test_apply_keeps_athlete_edits_outside_the_replaced_fields(self):
         workout_id = str(uuid.uuid4())

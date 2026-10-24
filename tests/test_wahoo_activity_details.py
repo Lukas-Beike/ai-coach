@@ -6,11 +6,15 @@ placeholder. Stored sets come from the real canonical tables of the sync fixture
 
 from __future__ import annotations
 
+import io
 import json
 import threading
 import unittest
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from http.client import BadStatusLine
 from typing import Any
+from unittest import mock
 
 from backend.canonical.vocabulary import RecordingOrigin, SourceKind
 from backend.db.activity_detail_store import detail_sets_for
@@ -18,7 +22,10 @@ from backend.db.canonical_store import active_provider_record_hash
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.providers.fit_activity_detail_mapping import MAPPER_VERSION
 from backend.providers.wahoo_client import WahooWorkoutFetch
-from backend.providers.wahoo_fit_download import WahooFitUnavailable
+from backend.providers.wahoo_fit_download import (
+    WahooFitUnavailable,
+    download_wahoo_fit,
+)
 from backend.sync.wahoo_activity_details import (
     DETAIL_IMPORT_BUDGET_SECONDS,
     MAX_DETAIL_ATTEMPTS,
@@ -89,11 +96,16 @@ class WahooActivityDetailTests(WahooSyncCase):
         super().setUp()
         self.clock = FakeClock()
         self.download = FakeDownload(self.clock)
-        self.importer = WahooActivityDetailImport(
+        self.importer = self.importer_with(self.download)
+
+    def importer_with(
+        self, download: Callable[[str], bytes]
+    ) -> WahooActivityDetailImport:
+        return WahooActivityDetailImport(
             database_manager=lambda: self.database,
             database_lock=threading.RLock(),
             key_values=self.key_values,
-            download=self.download,
+            download=download,
             monotonic=self.clock.monotonic,
             logger=self.logger,
         )
@@ -204,6 +216,29 @@ class WahooActivityDetailTests(WahooSyncCase):
         self.assertEqual(MAX_DETAIL_ATTEMPTS, self.state()["1"]["attempts"])
         self.assertFalse(self.state()["1"]["empty"])
         self.assertEqual([], self.stored_sets())
+
+    def test_transport_failure_of_the_real_download_does_not_block_the_next(
+        self,
+    ) -> None:
+        rows = self.sync(with_url(1), with_url(2, index=1))
+        opener = mock.Mock(side_effect=[BadStatusLine(URL), io.BytesIO(fit_bytes())])
+        self.importer = self.importer_with(
+            lambda url: download_wahoo_fit(url, opener=opener)
+        )
+
+        result = self.run_import(rows)
+
+        self.assertEqual(
+            {"status": "ok", "stored": 1, "failed": 1, "skipped": 0, "empty": 0},
+            result,
+        )
+        self.assertEqual(2, opener.call_count)
+        self.assertEqual([], self.stored_sets("1"))
+        self.assertTrue(self.stored_sets("2"))
+        self.assertEqual(1, self.state()["1"]["attempts"])
+        self.assertFalse(self.state()["1"]["empty"])
+        for marker in LEAK_MARKERS:
+            self.assertNotIn(marker, repr(self.logger.mock_calls))
 
     def test_rate_limit_stops_the_run_without_counting_an_attempt(self) -> None:
         rows = self.sync(with_url(1), with_url(2, index=1))

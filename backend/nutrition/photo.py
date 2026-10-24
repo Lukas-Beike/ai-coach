@@ -11,9 +11,13 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.errors import AppError
+from backend.nutrition.models import ambiguous_number_text, nutrition_number
 from backend.providers.openai_responses import response_text
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# Body cap of the extract route: the base64 data URL of the largest accepted
+# photo plus room for the JSON around it. Other JSON routes keep the global cap.
+PHOTO_REQUEST_MAX_BYTES = 4 * math.ceil(MAX_IMAGE_BYTES / 3) + 64 * 1024
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _DATA_URL = re.compile(r"^data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$")
 INVALID_BASIS_AMOUNT = "Ungültige Bezugsmenge."
@@ -26,8 +30,10 @@ def _validated_number(value: Any, *, field: str) -> float | None:
         raise AppError(
             400, f"Ungültiger Wert für {field}.", reason="invalid_food_extraction"
         )
+    if ambiguous_number_text(value, kcal=field == "kcal"):
+        return None
     try:
-        number = float(str(value).replace(",", "."))
+        number = nutrition_number(value)
     except (TypeError, ValueError) as exc:
         raise AppError(
             400, f"Ungültiger Wert für {field}.", reason="invalid_food_extraction"

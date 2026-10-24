@@ -299,7 +299,7 @@ function renderSetupBanner(missing) {
   if (!banner) return;
   banner.hidden = !missing.length || setupBannerDismissed();
   const detail = $("#setupBannerDetail");
-  if (detail) detail.textContent = `Fehlt: ${missing.join(" + ")}. Ergänze die fehlende Serverkonfiguration.`;
+  if (detail) detail.textContent = `${missing.join(" und ")} ${missing.length > 1 ? "fehlen" : "fehlt"}`;
 }
 
 
@@ -307,7 +307,8 @@ function renderStatus(data) {
   const configured = data.configured;
   const morning = data.morning_checkin || {};
   const missing = [];
-  if (!configured.openai) missing.push("OpenAI-API-Schlüssel");
+  // The OpenAI key is read from the server environment only; the Intervals.icu key can be entered in the app.
+  if (!configured.openai) missing.push("OpenAI-API-Schlüssel (Server)");
   if (!configured.intervals) missing.push("Intervals.icu-API-Schlüssel");
   // The setup state is shown by the page-wide setup banner on every tab, so the
   // status card only reports runtime problems.

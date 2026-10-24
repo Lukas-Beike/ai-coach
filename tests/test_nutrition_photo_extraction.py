@@ -5,8 +5,18 @@ import json
 import unittest
 from unittest.mock import Mock
 
+from test_nutrition_api_and_sync import GLOBAL_BODY_BYTES, json_route_handler
+
 from backend.errors import AppError
-from backend.nutrition.photo import NutritionPhotoExtractionService
+from backend.http_api.nutrition import NUTRITION_PRODUCTS_PATH, NutritionPostRoutes
+from backend.nutrition.photo import (
+    MAX_IMAGE_BYTES,
+    PHOTO_REQUEST_MAX_BYTES,
+    NutritionPhotoExtractionService,
+)
+from backend.nutrition.photo_service import PhotoExtractionService
+
+EXTRACT_PATH = f"{NUTRITION_PRODUCTS_PATH}/extract"
 
 
 class NutritionPhotoExtractionTests(unittest.TestCase):
@@ -94,6 +104,74 @@ class NutritionPhotoExtractionTests(unittest.TestCase):
         with self.assertRaises(AppError) as raised:
             unavailable.extract(self.data_url())
         self.assertEqual(raised.exception.reason, "provider_unavailable")
+
+    def test_grouped_thousands_become_unknown_while_other_fields_extract(self):
+        for kcal in ("1,200", "1.200"):
+            candidate = {
+                **json.loads(self.candidate_json()),
+                "kcal": kcal,
+                "carbs_g": "1,200",
+                "sugar_g": "1.200",
+                "fat_g": "5,5",
+            }
+            service = NutritionPhotoExtractionService(
+                selected_model=lambda: "gpt-6-luna",
+                openai_request=Mock(
+                    return_value={"output_text": json.dumps(candidate)}
+                ),
+            )
+            with self.subTest(kcal=kcal):
+                result = service.extract(self.data_url())["candidate"]
+                self.assertIsNone(result["kcal"])
+                self.assertIsNone(result["carbs_g"])
+                self.assertEqual(
+                    (result["sugar_g"], result["fat_g"], result["protein_g"]),
+                    (1.2, 5.5, 78),
+                )
+
+
+class NutritionPhotoRouteBodyTests(unittest.TestCase):
+    """The extract route reads photo bodies above the global JSON cap."""
+
+    def setUp(self) -> None:
+        self.request = Mock(
+            return_value={"output_text": NutritionPhotoExtractionTests.candidate_json()}
+        )
+        extractor = NutritionPhotoExtractionService(
+            selected_model=lambda: "gpt-6-luna", openai_request=self.request
+        )
+        library = Mock()
+        library.extract_packaging_photo = PhotoExtractionService(
+            extractor
+        ).extract_packaging_photo
+        self.routes = NutritionPostRoutes(Mock, lambda: library, sync_job_queue=Mock)
+
+    def test_compressed_and_largest_valid_photos_are_extracted_once(self):
+        for size in (1_200_000, MAX_IMAGE_BYTES):
+            self.request.reset_mock()
+            image = b"\xff\xd8\xff" + bytes(size - 3)
+            handler = json_route_handler(
+                {"image_data_url": NutritionPhotoExtractionTests.data_url(image)}
+            )
+            with self.subTest(size=size):
+                self.assertGreater(
+                    int(handler.headers["Content-Length"]), GLOBAL_BODY_BYTES
+                )
+                self.assertTrue(self.routes.handle(handler, EXTRACT_PATH))
+                self.assertEqual(handler.send_json.call_args.args[0], 200)
+                self.request.assert_called_once()
+
+    def test_body_above_the_photo_cap_is_rejected_before_extraction(self):
+        handler = json_route_handler(
+            {"image_data_url": NutritionPhotoExtractionTests.data_url()},
+            padding=PHOTO_REQUEST_MAX_BYTES,
+        )
+
+        with self.assertRaises(AppError) as raised:
+            self.routes.handle(handler, EXTRACT_PATH)
+
+        self.assertEqual(raised.exception.status, 413)
+        self.request.assert_not_called()
 
 
 if __name__ == "__main__":

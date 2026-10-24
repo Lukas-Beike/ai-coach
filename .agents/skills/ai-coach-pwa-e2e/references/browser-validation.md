@@ -27,11 +27,24 @@ Run from the repository root. Follow the current isolated runtime commands in
    fresh disposable fixture runtime, prewarming the next one. The non-desktop
    projects select only `@responsive` tests. Keep the configured single worker
    within each run; the CI loop provides isolation across runs, not parallel safety.
+   On Docker Desktop for Windows the full isolated matrix takes more than two
+   hours; start one background run per project. Before each run, confirm
+   `node_modules/@playwright/test` exists (run `npm ci` otherwise), because `npx`
+   silently falls back to an unrelated cached Playwright.
+   Classify a local failure only after an isolated rerun on a fresh fixture. For
+   a timeout, read the step durations in the local trace and compare with CI for
+   the same commit; report runner slowness as such and never raise timeouts or
+   relax assertions to obtain a pass.
 6. Use the product-native preview for manual inspection when available. Inspect
    DOM, console/network failures, screenshot-level alignment, reduced motion,
    login, fresh PWA/offline assets, safe Markdown, keyboard behavior, opt-in
    microphone/notifications, and the affected flow. Fixtures do not prove live
-   provider behavior or permissions on a real mobile device.
+   provider behavior or permissions on a real mobile device. Reproduce failed
+   and stale-data states by routing `/api/**` to an error response in
+   Playwright. Shrinking the viewport does not trigger the chat keyboard
+   detection, which follows `visualViewport`; verify keyboard-open on a device.
+   Confirm automated touch-target and label flags in the rendered state:
+   controls inside closed `<details>` and `::before` hit areas are false positives.
 7. In `finally`, stop/remove only the observed disposable container, never with
    `docker rm -v`. Restore previous E2E environment values. Keep artifact and
    authentication-state cleanup inside verified generated directories.

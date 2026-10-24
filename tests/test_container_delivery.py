@@ -270,6 +270,23 @@ class ContainerRuntimeTests(unittest.TestCase):
         self.assertIn("EXPOSE 8090", dockerfile)
         self.assertIn('CMD ["python", "/app/server.py"]', dockerfile)
 
+    def test_app_user_ids_match_the_documented_bind_mount_owner(self):
+        dockerfile = _read("Dockerfile")
+        self.assertIn("addgroup --system --gid 101 app", dockerfile)
+        self.assertIn("adduser --system --uid 100 --ingroup app app", dockerfile)
+        readme = _read("README.md")
+        installation = readme.split("## Installation & Deployment\n", 1)[1]
+        for heading in (
+            "### Docker Run\n",
+            "### Docker Compose\n",
+            "### Unraid Deployment Guide\n",
+        ):
+            with self.subTest(section=heading.strip()):
+                section = installation.split(heading, 1)[1].split("\n### ", 1)[0]
+                self.assertIn("chown -R 100:101 ", section)
+                self.assertIn("UID 100", section)
+                self.assertIn("GID 101", section)
+
     def test_ci_fixture_container_declares_itself_disposable(self):
         workflow = _read(".github/workflows/publish-container.yml")
         e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]

@@ -143,6 +143,7 @@ class BackupAssembly:
             redact=self._redact,
             diagnostics_suspended=self._diagnostics_suspended,
             canonical_backfill_start=self._canonical_backfill_start,
+            logger=self._logger,
             refresh_credentials=self._refresh_credentials,
         )
         return DatabaseRestoreService(dependencies)

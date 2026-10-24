@@ -117,16 +117,19 @@ def _calendar_limits(
         calendar_limit = 60
     else:
         calendar_limit = 75
+    if any(
+        calendar.calendar_event_has_constraint(event, "short_only")
+        for event in calendar_events
+    ):
+        calendar_limit = min(calendar_limit, calendar.SHORT_ONLY_MAX_MINUTES)
     calendar_reason = (
         f"family calendar has {len(calendar_events)} event(s), including "
         f"'{longest_event.get('name') or 'calendar event'}' for about "
         f"{total_minutes} minutes"
     )
-    no_intensity = [
-        event for event in calendar_events if bool(event.get("no_intensity"))
-    ]
-    no_intensity_limited = bool(
-        no_intensity
+    no_intensity_limited = any(
+        calendar.calendar_event_has_constraint(event, "no_intensity")
+        for event in calendar_events
     ) and not calendar.workout_is_explicitly_easy(draft)
     no_training = any(bool(event.get("no_training")) for event in calendar_events)
     calendar_limited = adaptive.workout_is_hard(draft) or (
@@ -268,6 +271,10 @@ def _replacement(
             state["available_minutes"] if state["limited"] else None,
             min(limits) if limits else None,
         )
+        if state["no_intensity_limited"] and not calendar.workout_is_explicitly_easy(
+            replacement
+        ):
+            replacement["name"] = adaptive.ADAPTIVE_EASY_NAME
     if state["calendar_limited"]:
         replacement["private_calendar_adjustment"] = (
             adaptive.private_calendar_adjustment_context(
@@ -363,7 +370,19 @@ def _change(
     )
     reason = "; ".join(reasons)
     replacement = _replacement(draft, reason, state, weather_adaptive_max_minutes)
-    return _change_result(draft, state, replacement, blocking_triggers)
+    change = _change_result(draft, state, replacement, blocking_triggers)
+    # Apply re-checks archives against the current calendar; a kept replacement
+    # that would still break a marker of its day is never proposed.
+    blockers = [
+        decision
+        for event in state["calendar_events"]
+        if (decision := calendar.calendar_constraint_decision(replacement, event))
+    ]
+    if not replacement.get("archived") and calendar.adaptive_change_calendar_blocked(
+        change, blockers
+    ):
+        return None
+    return change
 
 
 class AdaptiveReplanPreviewService:

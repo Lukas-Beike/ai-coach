@@ -23,6 +23,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import CORRUPT_LIBRARY_ERROR, INVALID_LIBRARY_ID_ERROR, AppError
 from backend.planning import workouts as planning_workouts
 from backend.planning.library_service import UPDATE_LIBRARY_SQL
+from backend.providers.http import ProviderHTTPError
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.library import (
     WorkoutLibraryRefreshService,
@@ -724,6 +725,72 @@ class WorkoutLibrarySyncServiceTests(unittest.TestCase):
         self.client.create_library_workouts.assert_not_called()
         self.client.update_library_workout.assert_not_called()
         self.assertEqual(synced["external_id"], "remote-recovered")
+
+    def assert_update_not_found_recreates_remote(self, error):
+        self.add_entry(state="local", external_id="remote-gone")
+        self.client.update_library_workout.side_effect = error
+        states_during_recovery = []
+
+        def list_remote():
+            row = self.library_row()
+            states_during_recovery.append((row["sync_state"], row["sync_dirty"]))
+            return []
+
+        self.client.get_workout_library.side_effect = list_remote
+        self.client.create_library_workouts.return_value = [
+            {**self.workout(), "id": "remote-new"}
+        ]
+
+        synced = self.service.sync_entry(LIBRARY_ID)
+
+        self.client.update_library_workout.assert_called_once_with(
+            "remote-gone", planning_workouts.library_workout_payload(self.workout())
+        )
+        self.client.create_library_workouts.assert_called_once_with(
+            [planning_workouts.library_workout_payload(self.workout())]
+        )
+        self.assertEqual(states_during_recovery, [("remote_missing", 1)])
+        self.assertEqual(synced["external_id"], "remote-new")
+        row = self.library_row()
+        self.assertEqual(row["external_id"], "remote-new")
+        self.assertEqual(row["sync_state"], "synced")
+        self.assertEqual(row["sync_dirty"], 0)
+        self.assertIsNone(row["sync_error"])
+
+    def test_update_upstream_not_found_recreates_remote_workout(self):
+        self.assert_update_not_found_recreates_remote(
+            AppError(502, "Intervals.icu not found", upstream_status=404)
+        )
+
+    def test_update_provider_http_not_found_recreates_remote_workout(self):
+        self.assert_update_not_found_recreates_remote(
+            ProviderHTTPError("intervals", "http", 404)
+        )
+
+    def assert_update_failure_keeps_sync_error(self, error):
+        self.add_entry(state="local", external_id="remote-old")
+        self.client.update_library_workout.side_effect = error
+
+        with self.assertRaises(type(error)):
+            self.service.sync_entry(LIBRARY_ID)
+
+        self.client.get_workout_library.assert_not_called()
+        self.client.create_library_workouts.assert_not_called()
+        row = self.library_row()
+        self.assertEqual(row["sync_state"], "sync_error")
+        self.assertEqual(row["sync_dirty"], 1)
+        self.assertEqual(row["external_id"], "remote-old")
+        self.assertEqual(row["sync_error"], f"redacted:{error}")
+
+    def test_update_upstream_failure_other_than_not_found_keeps_sync_error(self):
+        self.assert_update_failure_keeps_sync_error(
+            AppError(502, "Intervals.icu unauthorized", upstream_status=401)
+        )
+
+    def test_update_provider_http_failure_other_than_not_found_keeps_sync_error(self):
+        self.assert_update_failure_keeps_sync_error(
+            ProviderHTTPError("intervals", "http", 500, "server failure")
+        )
 
     def test_sync_entry_creates_when_no_remote_match_exists(self):
         self.add_entry()

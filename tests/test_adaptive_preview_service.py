@@ -13,7 +13,7 @@ from backend.db import row_factory
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import PlanAdjustmentRepository
 from backend.errors import AppError
-from backend.planning import adaptive_preview_service
+from backend.planning import adaptive, adaptive_preview_service, calendar
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 
 
@@ -189,6 +189,114 @@ class AdaptiveReplanPreviewServiceTests(unittest.TestCase):
         self.assertTrue(
             preview["changes"][0]["after"]["description"].startswith("Sportpause")
         )
+
+    def _marker_day(self, **marker) -> dict:
+        event = {
+            "id": "family-1",
+            "name": "Family",
+            "event_date": "2026-09-22",
+            "start_local": "2026-09-22T10:00:00",
+            "end_local": "2026-09-22T11:00:00",
+            "duration_minutes": 60,
+            "training_relevant": True,
+            **marker,
+        }
+        self.events[:] = [event]
+        return event
+
+    def test_short_only_day_caps_every_proposed_duration_at_the_marker_limit(self):
+        for marker in (
+            {"short_only": True},
+            {"name": "Kita [SHORT_ONLY]", "short_only": False},
+        ):
+            with self.subTest(marker=marker):
+                event = self._marker_day(**marker)
+                self.drafts[:] = [
+                    {
+                        "id": f"ride-{minutes}",
+                        "date": "2026-09-22",
+                        "name": "Easy ride",
+                        "type": "Ride",
+                        "duration_minutes": minutes,
+                        "description": f"- {minutes}m 60% Easy",
+                    }
+                    for minutes in (90, 70, 60)
+                ]
+
+                changes = self.service.preview()["changes"]
+
+                self.assertEqual(
+                    [change["library_workout_id"] for change in changes],
+                    ["ride-90", "ride-70"],
+                )
+                for change in changes:
+                    self.assertEqual(change["payload"]["duration_minutes"], 60)
+                    self.assertIsNone(
+                        calendar.calendar_constraint_decision(change["payload"], event)
+                    )
+                    self.assertEqual(change["blocking_triggers"], ["calendar"])
+
+    def test_no_intensity_day_replaces_hard_draft_with_easy_unit(self):
+        event = self._marker_day(no_intensity=True)
+        self.drafts[:] = [
+            {
+                "id": "threshold",
+                "date": "2026-09-22",
+                "name": "Threshold intervals",
+                "type": "Ride",
+                "duration_minutes": 90,
+                "description": "- 4x 10m 95%",
+                "target": "POWER",
+            },
+            {
+                "id": "description-only",
+                "date": "2026-09-22",
+                "name": "Morning ride",
+                "type": "Ride",
+                "duration_minutes": 60,
+                "description": "- 60m threshold",
+            },
+        ]
+
+        changes = {
+            change["library_workout_id"]: change
+            for change in self.service.preview()["changes"]
+        }
+
+        easy = changes["threshold"]
+        payload = easy["payload"]
+        self.assertEqual(payload["name"], adaptive.ADAPTIVE_EASY_NAME)
+        self.assertEqual(easy["after"]["name"], adaptive.ADAPTIVE_EASY_NAME)
+        self.assertFalse(calendar.workout_is_hard_effort({"name": payload["name"]}))
+        self.assertTrue(calendar.workout_is_explicitly_easy(payload))
+        self.assertEqual(payload["target"], "AUTO")
+        self.assertEqual(payload["duration_minutes"], 75)
+        decision = calendar.calendar_constraint_decision(payload, event)
+        self.assertIsNone(decision)
+        self.assertFalse(calendar.adaptive_change_calendar_blocked(easy, []))
+        self.assertIn("calendar", easy["blocking_triggers"])
+        # A hard keyword only in the description keeps the athlete's title.
+        kept = changes["description-only"]["payload"]
+        self.assertEqual(kept["name"], "Morning ride")
+        self.assertIsNone(calendar.calendar_constraint_decision(kept, event))
+
+    def test_no_intensity_day_omits_hard_draft_without_compliant_replacement(self):
+        # Calendar limits always leave a valid duration, so only a kept hard step
+        # field can leave the easy replacement blocked; apply would reject it.
+        self._marker_day(no_intensity=True)
+        self.drafts[:] = [
+            {
+                "id": "structured",
+                "date": "2026-09-22",
+                "name": "Threshold intervals",
+                "type": "Ride",
+                "duration_minutes": 60,
+                "description": "- 60m 95%",
+                "intervals": "4x 8m threshold",
+            }
+        ]
+
+        self.assertEqual(self.service.preview()["changes"], [])
 
     def test_corrupt_latest_payload_is_empty_and_invalid_illness_payload_is_skipped(
         self,

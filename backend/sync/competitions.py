@@ -223,6 +223,11 @@ class CompetitionSyncReconciler:
                 self._record_conflict(db, row, now, self._remote_missing_conflict(now))
                 return 1
             return 0
+        if not planning_competitions.supported_competition_sport(
+            row.get("sport"), row.get("environment")
+        ):
+            # The plan pushed nothing for this row, so its edit stays dirty.
+            return 0
         if remote:
             db.execute(
                 "UPDATE competitions SET intervals_event_id=?, external_id=?, sync_dirty=0, "
@@ -578,6 +583,17 @@ class CompetitionSyncService:
                 "updated": reconciled["updated"],
                 "pushed": len(outbound),
                 "skipped": plan["skipped"],
+                "skipped_items": [
+                    {
+                        "id": str(row["id"]),
+                        "reason": planning_competitions.COMPETITION_SKIP_UNSUPPORTED_SPORT,
+                    }
+                    for row in local_rows
+                    if row.get("sync_dirty")
+                    and not planning_competitions.supported_competition_sport(
+                        row.get("sport"), row.get("environment")
+                    )
+                ],
                 "conflicts": reconciled["conflicts"],
                 "removed": 0,
                 "deleted_remote": deleted_remote,

@@ -10,9 +10,11 @@ AGENTS.md
 .agents/
 .codex/
 docs/
+openspec/
 
 .worktrees/
 .graphify-local/
+.openspec-local/
 graphify-out/
 .claude/
 node_modules/

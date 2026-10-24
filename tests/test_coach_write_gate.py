@@ -535,6 +535,7 @@ class DestructiveTierTests(unittest.TestCase):
 
 
 class RemoteTierTests(unittest.TestCase):
+    OFFER = "Soll ich die drei Einheiten zu Intervals.icu übertragen?"
     REMOTE = (
         ("Synchronisier den Plan mit Intervals", "start_intervals_plan_sync"),
         ("Sync die Wettkämpfe zu Intervals.icu", "sync_competitions"),
@@ -587,6 +588,79 @@ class RemoteTierTests(unittest.TestCase):
             )
         )
 
+    def test_negation_covers_its_sentence_up_to_a_contrast_word(self):
+        for text in (
+            "ohne Sync",
+            "nein, nicht synchronisieren",
+            "Passe die Woche an ohne Intervals zu synchronisieren.",
+            "Passe die Woche an, ohne dass du mit Intervals synchronisierst.",
+            "Ich will nicht, dass du mit Intervals synchronisierst.",
+            "Move the run without syncing it to Intervals",
+            "Ich will nicht, dass du mit Intervals.icu synchronisierst.",
+            "Bitte nicht zu Intervals.icu hochladen.",
+            "Passe die Woche an ohne Intervals.icu zu synchronisieren.",
+            "Nicht mit Intervals.icu syncen, nur lokal.",
+            "Don\u2019t sync it to Intervals.",
+            "Bitte keinesfalls zu Intervals hochladen.",
+            "Zu Intervals hochladen, lieber nicht.",
+            "Nein; nur lokal: Intervals bleibt so.",
+            # Accepted fail-closed limits: a leading "nein" covers its sentence,
+            # and an "ohne" phrase that names the target negates its part.
+            "Nein, synchronisiere den Plan mit Intervals.",
+            "Lade die Woche ohne die Krafteinheiten zu Intervals hoch.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(gate.remote_requested(text))
+                decision = _check(
+                    "start_intervals_plan_sync",
+                    text,
+                    classifier=_Classifier(_verdict(sorted(gate.DOMAINS), True, True)),
+                )
+                self.assertEqual(decision.reason, "remote_not_requested")
+        for text in (
+            "ja, aber synchronisiere",
+            "Nicht hochladen, sondern synchronisieren.",
+            "Don't move it, but sync it to Intervals",
+            "Sync mit Intervals bitte.",
+            "Nicht verschieben. Sync den Plan zu Intervals.",
+            "Synchronisiere mit Intervals.icu.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(gate.remote_requested(text))
+
+    def test_without_negates_only_a_phrase_that_names_the_sync(self):
+        for text in (
+            "Korrigiere den Lauf und gleiche alle Einheiten erneut mit Intervals ab, ohne doppelte Eintraege.",
+            "Synchronisiere den Plan mit Intervals ohne die Ruhetage.",
+            "Push the week to Intervals without the strength sessions.",
+            "Sync the plan to Intervals without changing anything else.",
+            "Synchronisiere den Plan mit Intervals, ohne etwas anderes zu ändern.",
+            "Synchronisiere den Plan mit Intervals, ohne Konflikte.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(gate.remote_requested(text))
+                self.assertTrue(_check("start_intervals_plan_sync", text).allowed)
+
+    def test_a_negated_reply_to_a_sync_offer_does_not_inherit_it(self):
+        previous = self.OFFER
+        for reply, expected in (
+            ("ja, ohne zu synchronisieren", False),
+            ("Ja, ohne Upload.", False),
+            ("Yes, without uploading.", False),
+            ("nein, nicht synchronisieren", False),
+            ("Nein danke", False),
+            ("ja", True),
+            ("Ja, synchronisiere alle", True),
+            ("ja, aber synchronisiere", True),
+        ):
+            with self.subTest(reply=reply):
+                self.assertEqual(_authority(reply, previous).remote_requested, expected)
+        # Guard: "ohne"/"without" are outside both affirmation allowlists.
+        for reply in ("ja ohne", "Ja, ohne Upload.", "ok without", "Yes, without."):
+            with self.subTest(reply=reply):
+                self.assertFalse(gate.is_bare_affirmation(reply))
+                self.assertFalse(gate.is_contextual_affirmation(reply))
+
     def test_remote_flags_on_local_tools_need_a_named_sync(self):
         text = "Schieb den Lauf auf Mittwoch"
         confirming = _Classifier(_verdict(["planning"], accepts=True))
@@ -631,7 +705,7 @@ class RemoteTierTests(unittest.TestCase):
         self.assertTrue(_authority("nochmal", pending_origin=origin).remote_requested)
 
     def test_contextual_affirmation_accepts_a_detailed_yes_to_a_sync_offer(self):
-        previous = "Soll ich die drei Einheiten zu Intervals.icu übertragen?"
+        previous = self.OFFER
         for reply in (
             "Ja, bitte übertrage die drei Einheiten dorthin.",
             "Ja, mach das bitte für diese drei Einheiten.",
@@ -656,7 +730,7 @@ class RemoteTierTests(unittest.TestCase):
         )
 
     def test_contextual_affirmation_denies_qualified_or_negated_replies(self):
-        previous = "Soll ich die drei Einheiten zu Intervals.icu übertragen?"
+        previous = self.OFFER
         for reply in (
             "Ja, aber nur lokal speichern.",
             "Ja, aber nicht hochladen.",

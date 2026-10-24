@@ -171,6 +171,33 @@ class FoodDatabaseServiceMirrorTests(MirrorFixture):
         self.assertEqual(local["foods"][0]["data_origin"], "local_database")
         self.assertEqual(self.off.calls, [("search", "knoppers")])
 
+    def test_expired_search_hits_are_refreshed_online_when_available(self):
+        search = {"query": "knoppers", "source": "open_food_facts"}
+        self.service.lookup(search)
+        self.now += MAX_AGE + timedelta(days=1)
+
+        result = self.service.lookup(search)
+
+        self.assertEqual(result["foods"][0]["data_origin"], "live")
+        self.assertNotIn("gespeicherte Stand", result["notice"])
+        self.assertEqual(
+            self.off.calls, [("search", "knoppers"), ("search", "knoppers")]
+        )
+        stored = self.mirror.get(f"off:{BARCODE}")
+        self.assertEqual(stored["fetched_at"], self.now.isoformat())
+
+    def test_offline_search_falls_back_to_expired_hits_with_a_notice(self):
+        search = {"query": "knoppers", "source": "open_food_facts"}
+        self.service.lookup(search)
+        self.now += MAX_AGE + timedelta(days=1)
+        self.off.offline = True
+
+        result = self.service.lookup(search)
+
+        self.assertEqual(result["foods"][0]["data_origin"], "local_database_stale")
+        self.assertEqual(result["foods"][0]["stored_at"], START.isoformat())
+        self.assertIn("gespeicherte Stand", result["notice"])
+
     def test_resolve_uses_the_mirror_without_calling_online(self):
         self.mirror.store([food()])
 

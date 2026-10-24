@@ -29,12 +29,29 @@ $dataDirectory = Join-Path $appDirectory "data"
 New-Item -ItemType Directory -Path $dataDirectory -Force | Out-Null
 $logPath = Join-Path $dataDirectory "server.log"
 
+# The app's own log handler already writes every entry to intervals-coach.log,
+# so this launcher log keeps stderr only. Rotate it with the same limits.
+$maxLogBytes = 1000000
+$logBackupCount = 3
+if ((Test-Path -LiteralPath $logPath -PathType Leaf) -and
+    (Get-Item -LiteralPath $logPath).Length -gt $maxLogBytes) {
+    if (Test-Path -LiteralPath "$logPath.$logBackupCount" -PathType Leaf) {
+        Remove-Item -LiteralPath "$logPath.$logBackupCount" -Force
+    }
+    for ($index = $logBackupCount - 1; $index -ge 1; $index--) {
+        if (Test-Path -LiteralPath "$logPath.$index" -PathType Leaf) {
+            Move-Item -LiteralPath "$logPath.$index" -Destination "$logPath.$($index + 1)"
+        }
+    }
+    Move-Item -LiteralPath $logPath -Destination "$logPath.1"
+}
+
 # Keep the native invocation tolerant of stderr so an unexpected Python
 # traceback is captured in the launcher log instead of stopping PowerShell's
 # wrapper before it can report the exit code.
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-& $pythonExecutable (Join-Path $appDirectory "server.py") *>> $logPath
+& $pythonExecutable (Join-Path $appDirectory "server.py") > $null 2>> $logPath
 $pythonExitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousErrorActionPreference
 if ($pythonExitCode -ne 0) {

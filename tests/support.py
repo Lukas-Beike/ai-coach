@@ -165,6 +165,16 @@ def isolated_server(server, root: Path, *, app_password: str = ""):
             item.stop()
 
 
+@contextmanager
+def canonical_backfill_stopped(server, timeout: float = 10.0):
+    """Stop and join the backfill thread a real restore starts before cleanup."""
+    try:
+        yield
+    finally:
+        server.CANONICAL_BACKFILL.worker.stop()
+        server.CANONICAL_BACKFILL.worker.join(timeout)
+
+
 def create_test_session(server) -> str:
     """Create one authenticated session without depending on a test case."""
     import uuid

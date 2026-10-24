@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
@@ -22,6 +23,14 @@ from backend.planning.workouts import normalize_workout
 _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL = (
     "SELECT payload FROM planned_units WHERE local_id=?"
 )
+
+
+def _stored_local_id(local_id: str) -> str:
+    """Return ``local_id`` as the planned-unit writer stores it, if it is a UUID."""
+    try:
+        return str(uuid.UUID(local_id))
+    except ValueError:
+        return local_id
 
 
 def _project_existing_training_change(
@@ -514,7 +523,9 @@ class StructuredTrainingPlanResolver:
         local_id = str(change.get("local_id") or "").strip()
         if action == "create" or not local_id:
             return None, None
-        row = db.execute(_PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (local_id,)).fetchone()
+        row = db.execute(
+            _PLANNED_UNIT_PAYLOAD_BY_LOCAL_ID_SQL, (_stored_local_id(local_id),)
+        ).fetchone()
         if not row:
             return None, None
         try:
@@ -557,13 +568,10 @@ class StructuredTrainingPlanResolver:
 
     def _apply_authorized_plan(
         self,
-        derived_plan: dict[str, str],
-        authorized_plan_id: str | None,
+        referenced_memberships: set[str],
+        authorized_plan_id: str,
         db: Any,
     ) -> dict[str, str]:
-        authorized_plan_id = str(authorized_plan_id or "").strip()
-        if not authorized_plan_id:
-            return derived_plan
         authorized_plan = self.repository.get(db, authorized_plan_id)
         if not authorized_plan or authorized_plan.get("status") == "archived":
             raise AppError(
@@ -571,7 +579,9 @@ class StructuredTrainingPlanResolver:
                 "Der benannte Trainingsplan ist nicht aktiv.",
                 reason="plan_not_available",
             )
-        if derived_plan and derived_plan["plan_id"] != authorized_plan_id:
+        # A named plan covers only units that already belong to it: a foreign,
+        # empty or mixed membership is rejected before any write.
+        if referenced_memberships - {authorized_plan_id}:
             raise AppError(
                 403,
                 "Die Planreferenzen der Änderung sind nicht eindeutig.",
@@ -588,8 +598,12 @@ class StructuredTrainingPlanResolver:
         authorized_plan_id: str | None,
         db: Any,
     ) -> dict[str, str]:
-        derived_plan = self._derived_plan(referenced_memberships, db)
-        return self._apply_authorized_plan(derived_plan, authorized_plan_id, db)
+        authorized_plan_id = str(authorized_plan_id or "").strip()
+        if not authorized_plan_id:
+            return self._derived_plan(referenced_memberships, db)
+        return self._apply_authorized_plan(
+            referenced_memberships, authorized_plan_id, db
+        )
 
     @staticmethod
     def _validate_create_plan_ids(

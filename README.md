@@ -60,7 +60,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Durable Turn Queueing**: Every chat request is persisted in a durable SQLite background queue before processing, enabling seamless answer recovery across network drops or browser reloads.
 - **Permanent Fact Memorization**: Conversational profile updates save athlete preferences, equipment notes, and constraints to the durable profile when the athlete explicitly asks in Coach Chat; no separate UI confirmation is needed.
 - **Sport-Specific Training Preferences**: The profile keeps general training preferences plus separate preferences for running, cycling, swimming, strength training, and mobility; the Coach saves sport-specific wishes in the matching field.
-- **Server-Side Write Gate**: Every Coach write tool call is checked by impact, not by wording. In a turn started by the athlete's own message, reversible local edits run directly and appear under the answer as "Geändert: …" with undo where fully tracked. Deleting or archiving records, replacing or committing a whole plan, and changing more than 7 records in one turn additionally need a small model classifier to confirm that the athlete explicitly asked for exactly that in the same data area (a requested deletion of a meal never confirms deleting a race); otherwise, or when the classifier fails, the Coach asks one clarification question and nothing is changed. Intervals.icu writes need the athlete's message (or a short "ja" to the Coach's sync offer) to name the sync; the classifier can never authorize them. Adaptive replans keep their preview approval: only the athlete's very next message after the published preview can apply it, and the classifier must confirm that this message accepts the previewed change as proposed (a bare "danke", an unrelated message, or a rejection that asks for a different change instead does not); an illness-pause sync to Intervals.icu additionally needs the named sync and is built from the stored preview. A turn makes at most 25 changes.
+- **Server-Side Write Gate**: Every Coach write tool call is checked by impact, not by wording. In a turn started by the athlete's own message, reversible local edits run directly and appear under the answer as "Geändert: …" with undo where fully tracked. Deleting or archiving records, replacing or committing a whole plan, and changing more than 7 records in one turn additionally need a small model classifier to confirm that the athlete explicitly asked for exactly that in the same data area (a requested deletion of a meal never confirms deleting a race); otherwise, or when the classifier fails, the Coach asks one clarification question and nothing is changed. Undoing a creation deletes the record, so the Coach offers it as a confirmation card instead of running it directly. Intervals.icu writes need the athlete's message (or a short "ja" to the Coach's sync offer) to name the sync; the classifier can never authorize them. Adaptive replans keep their preview approval: only the athlete's very next message after the published preview can apply it, and the classifier must confirm that this message accepts the previewed change as proposed (a bare "danke", an unrelated message, or a rejection that asks for a different change instead does not); an illness-pause sync to Intervals.icu additionally needs the named sync and is built from the stored preview. A turn makes at most 25 changes.
 - **Request-Specific Context Projection**: Compact daily, activity and dialogue windows for routine turns; detailed local context and additional tools are available on demand, with conservative fallback for continuations.
 - **Targeted Clarification Protocol**: Ambiguous coaching prompts generate a single, concrete clarification question stored locally across reloads and model switches until answered.
 - **Atomic Training Changesets**: Plan updates, session moves, and workout creations use transactional revision tracking and object hashes to prevent race conditions.
@@ -127,7 +127,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 ### External Calendars & Schedule Constraints
 - **Read-Only iCalendar (ICS) Sync**: Secure polling of private external iCalendar feeds (Google Calendar, Apple iCloud, Microsoft Outlook) without write permissions.
 - **Rolling 8-Week Event Horizon**: Bounded calendar expansion mapping external life events across an 8-week (56-day) forward-looking window.
-- **RFC 5545 Recurrence Engine**: Comprehensive expansion of standard recurring rules (daily, weekly, monthly, yearly) and Google Calendar recurrence exceptions capped at 1,000 instances.
+- **RFC 5545 Recurrence Engine**: Comprehensive expansion of standard recurring rules (daily, weekly, monthly, yearly) and Google Calendar recurrence exceptions capped at 1,000 instances. A date-only `UNTIL` includes recurrences on that day in the event's own time zone, and feeds whose recurrence expansion is too expensive are rejected.
 - **Bounded Calendar Processing**: Feeds are limited to 5 MB and 10,000 parsed event components; folded lines, RDATE deduplication and recurrence-exception lookup are processed linearly. Instance records are generated incrementally and feeds exceeding 1,000 unique events in the sync window are rejected. Connected calendar HTTP transfers have a 30-second total deadline.
 - **Calendar Training Constraints**: `[NO_TRAINING]`, `[NO_INTENSITY]`, and `[SHORT_ONLY]` are recognized in event titles and descriptions. `[NO_TRAINING]` and `[NO_INTENSITY]` are enforced against planned-workout changes on the affected local calendar day: training is blocked for the former, the latter requires an explicitly easy workout, and `[SHORT_ONLY]` blocks workouts longer than 60 minutes.
 - **Visual Schedule Conflict Markers**: Distinctive visual indicators on the planned calendar alerting the athlete to busy days and potential scheduling conflicts.
@@ -152,9 +152,9 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 ### PWA, Mobile Experience & Offline Capabilities
 - **Installable Progressive Web App**: Responsive PWA optimized for mobile, tablet, and desktop viewports, installable on iOS, Android, macOS, and Windows.
 - **Reliable Hash-Based Navigation**: Accessible URL routing (`#coach`, `#plan`, `#analysis`, `#more`) preserving browser history, deep links, and screen-reader announcements.
-- **Immutable Static Asset Caching**: Versioned static asset serving with one-year immutable cache headers, accompanied by instant service worker cache eviction on updates.
+- **Immutable Static Asset Caching**: Versioned static asset serving with one-year immutable cache headers. A new service worker takes over at once and removes the old caches; the open app then reloads once without a prompt, but only while no message is typed, no attachment is staged, no Coach answer is running or queued, no unsaved profile change is open, no setting or credential is being entered or saved and no load or restore is running. Otherwise the reload waits until that has ended or the app is hidden.
 - **Resilient Offline App Shell**: Pre-cached application shell allowing view navigation and inspection of previously loaded training data during network drops. Changes are not queued while offline: saving shows a connection message and nothing is sent later.
-- **Instant Start from Device Data**: The last loaded training state is stored on this device and shown immediately at every start, before the session check and fresh data complete; each area is shown and stored on the device as soon as its own data arrives, without waiting for slower areas; an area that fails to load keeps its previously stored data. Nutrition and season views likewise show their last loaded data while they refresh. The latest 20 Coach messages are stored on the device as soon as they are shown, so a start shows the current conversation even when the rest of the stored state is older; earlier messages load when scrolling up. While the Coach shows these stored messages the chat stays at the newest one, unless the athlete has already scrolled the chat, and a "Nachrichten werden synchronisiert…" note replaces the jump-to-latest button until the fresh messages have loaded or the load has failed. If the network is slow, the cached app page starts after 2.5 seconds, and an offline start keeps the stored data and checks the session again every 15 seconds or as soon as the network returns. After an app update the start shows an "Update wird verarbeitet…" loading screen until the fresh start data arrives; if the server cannot be reached, the previous data is shown instead. Logout, an expired session and a privacy deletion remove this device data.
+- **Instant Start from Device Data**: The last loaded training state is stored on this device and shown immediately at every start, before the session check and fresh data complete; each area is shown and stored on the device as soon as its own data arrives, without waiting for slower areas; an area that fails to load keeps its previously stored data, also after an app update as long as that data still has the current shape. Nutrition and season views likewise show their last loaded data while they refresh. The latest 20 Coach messages are stored on the device as soon as they are shown, so a start shows the current conversation even when the rest of the stored state is older; earlier messages load when scrolling up. While the Coach shows these stored messages the chat stays at the newest one, unless the athlete has already scrolled the chat, and a "Nachrichten werden synchronisiert…" note replaces the jump-to-latest button until the fresh messages have loaded or the load has failed. If the network is slow, the cached app page starts after 2.5 seconds, and an offline start keeps the stored data and checks the session again every 15 seconds or as soon as the network returns. After an app update the start shows an "Update wird verarbeitet…" loading screen until the fresh start data arrives; if the server cannot be reached, the previous data is shown instead. Logout, an expired session and a privacy deletion remove this device data.
 - **Auto-Reconnecting SSE Streaming**: Server-Sent Events stream with exponential backoff (capping at 30 seconds) ensuring smooth recovery after connection drops.
 - **Touch-Friendly Collapsible Views**: Ergonomic mobile interface featuring collapsible profile headers, compact calendar cards, and thumb-friendly bottom navigation.
 - **Light and Dark Appearance**: Choose the system setting, light mode, or dark mode under More → Appearance; the choice is stored on this device.
@@ -293,9 +293,12 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 
 ### Docker Run
 
-Run the published container image with a persistent data volume and read-only container root:
+Run the published container image with a persistent data volume and read-only container root. The app runs as UID 100 / GID 101, so on a Linux host the data directory must belong to that user before the first start:
 
 ```sh
+mkdir -p /mnt/user/appdata/ai-coach/data
+chown -R 100:101 /mnt/user/appdata/ai-coach/data
+
 docker pull ghcr.io/lukas-beike/ai-coach:latest
 
 docker run -d \
@@ -340,18 +343,21 @@ services:
       - TZ=Europe/Berlin
 ```
 
-Start the service:
+Start the service. The app runs as UID 100 / GID 101, so on a Linux host give it the data directory first:
 
 ```sh
+mkdir -p data
+chown -R 100:101 data
 docker compose up -d
 ```
 
 ### Unraid Deployment Guide
 
 1. **Prepare Appdata Directory**:
-   Create the storage folder on your cache pool and ensure it is writable by the container user (UID 100 / GID 101 or standard app permissions):
+   Create the storage folder on your cache pool and give it to the container user, which runs as UID 100 / GID 101:
    ```sh
    mkdir -p /mnt/user/appdata/ai-coach/data
+   chown -R 100:101 /mnt/user/appdata/ai-coach/data
    chmod -R 770 /mnt/user/appdata/ai-coach/data
    ```
 2. **Container Template Setup**:
@@ -427,7 +433,7 @@ Garmin Connect enforces Multi-Factor Authentication (MFA). The primary way to co
 
 An existing token file at `/data/garmin_tokens` is imported once when the database has no Garmin tokens yet. The file is left in place and is not deleted by the import. Because it is plaintext JSON protected only by owner-only file permissions, keep `/data` and every backup of it on encrypted host storage, and treat the file like a password.
 
-The bundled `garmin-login.py` helper is still available as an alternative for headless setups. It runs inside a temporary container attached to your data directory:
+The bundled `garmin-login.py` helper is still available as an alternative for headless setups. It runs inside a temporary container attached to your data directory, which on a Linux host must already belong to UID 100 / GID 101 (`chown -R 100:101`, see [Docker Run](#docker-run)):
 
 ```sh
 docker run --rm -it \
@@ -563,16 +569,16 @@ Cooldown
 ### SQLCipher Encryption
 All persistent application state is stored in `/data/intervals-coach.db` encrypted with AES-256 via SQLCipher. The database key is derived from `APP_PASSWORD`. The application will refuse to start without SQLCipher libraries present.
 
-Each pooled database connection uses a 32 MiB page-cache budget to reduce repeated encrypted reads of large histories. The default pool has four readers and one writer (up to 160 MiB of page caches, allocated as needed).
+Each pooled database connection uses a 16 MiB page-cache budget to reduce repeated encrypted reads of large histories. The default pool has four readers and one writer (up to 80 MiB of page caches, allocated as needed).
 
 ### Maintenance Mode & Database Restoration
 When a database restore is initiated:
-1. The uploaded backup is first written in 1 MiB chunks to a new staging file in `/data`, so it is never held in memory as a whole; the size limit is enforced while writing. Staging does not touch the live database, and the staging file is removed on every outcome.
+1. The uploaded backup is first written in 1 MiB chunks to a new staging file in `/data`, so it is never held in memory as a whole; the size limit is enforced while writing. Staging does not touch the live database, and the staging file is removed when the restore ends. If the process is killed first, leftover staging files, unencrypted privacy-export archives and database-backup snapshots stay in `/data` until the next start removes them before any worker runs.
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
-4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`.
+4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`. The restore is refused with HTTP 507 when `/data` lacks the free space for this copy, and a partial copy is deleted.
 5. The replacement database must have the current schema (version 13) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
-6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss.
+6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Privacy Export & Data Purge
 - **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 6 also includes the canonical provider tables (provider records, activity sessions and records, observations) and the canonical activity detail (detail sets, stream channels as decoded point lists with `null` gaps, laps, zone times and session analyses) as JSON Lines, the owning provider of each activity note, when known, and the remote links that map local workouts, planned units and competitions to their provider counterparts (including the provider of each competition sync tombstone). Stored sports are exported in the canonical vocabulary (`sport`, `environment` and a lossless `sport_detail`); credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
@@ -649,6 +655,91 @@ acceptance check; select the relevant skill, implement the complete flow, inspec
 the final diff, and run affected validation. Include final-state evidence and
 unverified checks in the handoff. Source code and current workflow behavior take
 precedence over remembered paths or stale operating assumptions.
+
+#### Optional local OpenSpec
+
+[OpenSpec](https://github.com/Fission-AI/OpenSpec) 1.14.3 is pinned as a local
+development dependency. It manages behavior specifications and change plans;
+the application does not load it. Node.js >=20.19.0 is required. Install and
+check it from the task worktree:
+
+```powershell
+npm.cmd ci --ignore-scripts
+npm.cmd run openspec -- --version
+npm.cmd run openspec -- list --specs
+npm.cmd run openspec -- validate --all --strict --no-interactive
+```
+
+Use `npm` instead of `npm.cmd` outside Windows. The repository script disables
+OpenSpec telemetry on every invocation; no global CLI, skills, profile changes,
+store, hosted service, or model credentials are required. Its config/data homes
+are isolated under ignored `.openspec-local/` in the working directory, including
+profile migrations triggered by `init` or `update`. The universal
+`agents` adapter installs six skills directly into `.agents/skills/`, shared
+by agents that support that directory. Other agents scan and read the linked
+skills in the index. Restart a session if its skill catalog was already loaded.
+Host-specific slash commands are not installed; plain-language requests such
+as "use openspec-propose to plan a backfill of Coach write authorization" work
+through the repository skill index.
+
+To regenerate those skills from the installed, pinned CLI:
+
+```powershell
+npm.cmd run openspec -- init --tools agents --profile core --no-animation
+```
+
+Review the generated diff and retain the project context/rules in
+`openspec/config.yaml`. Do not pass `--language` when regenerating an existing
+project; the language instruction is already in its context. Deliberate upgrades
+update the exact dependency pin, lockfile, generated skills, and their provenance
+together. Do not run the bare `openspec config profile`: that changes user-global
+configuration. Existing
+AGENTS boundaries and authorization take precedence over generated workflows;
+OpenSpec does not replace repository review, orchestration, or validation.
+
+**Application specifications.** The [OpenSpec baseline](openspec/README.md)
+documents the existing application through 30 capabilities. Its
+[coverage and evidence ledger](openspec/COVERAGE.md) distinguishes inspected
+source/tests, executed checks, implementation boundaries and unresolved gaps.
+The [surface inventory](openspec/coverage.json) and
+[Coach tool map](openspec/COACH_TOOLS.md) make ownership and affected contracts
+discoverable. A valid document is not proof of complete runtime conformance.
+
+Maintain and extend one cohesive capability at a time, prioritizing:
+
+1. SQLCipher migrations, restart, backup/restore, and preservation of athlete data.
+2. Coach write authorization, durable effects, receipts, undo, and provenance.
+3. Provider startup/daily/manual sync, freshness, conflicts, and explicit remote writes.
+4. Login/session/CSRF, PWA/offline behavior, and failure/recovery states.
+5. Planning, activities, nutrition, performance, and the remaining athlete flows.
+
+For each slice, record the inspected Git revision and scope, then inspect its
+current owner, callers, tests, and existing contracts. Write observable
+requirements with concrete `WHEN`/`THEN` scenarios, citing source and test paths.
+Distinguish observed behavior, intended requirements, known defects, and missing
+evidence; do not turn a discovered bug into an accepted requirement or quietly
+fix application behavior during a documentation backfill. Include negative,
+authorization, persistence, provenance, and recovery cases where applicable.
+Use synthetic fixtures only.
+
+Reviewed current-behavior baselines live in
+`openspec/specs/<capability>/spec.md` with `## Purpose` and `## Requirements`.
+Create change plans with the CLI rather than hand-making change metadata:
+
+```powershell
+npm.cmd run openspec -- new change backfill-coach-write-authorization
+npm.cmd run openspec -- status --change backfill-coach-write-authorization --json
+npm.cmd run openspec -- instructions proposal --change backfill-coach-write-authorization --json
+```
+
+Read the schema instructions for subsequent artifacts. For backfills, `ADDED`
+means newly documented requirements, not newly implemented app behavior. Review
+the evidence, run strict validation, complete the documented scope, then sync
+and archive the change. Track uncovered scenarios and domains explicitly in
+each slice; task completion and format validation alone do not prove that the
+application satisfies the spec. Later behavior changes update the affected
+spec and tests in the same change. Keep small fixes proportional; a repository-wide
+backfill is not a prerequisite for normal maintenance.
 
 #### Optional local code graph
 

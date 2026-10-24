@@ -508,7 +508,8 @@ class PrivacyArchiveExportService:
             if temporary.stat().st_size > self._config.maximum_bytes:
                 raise AppError(413, "Der Export überschreitet das Größenlimit.")
             return temporary
-        except Exception:
+        except BaseException:
+            # The archive is plaintext athlete data; an interrupt must not leave it.
             try:
                 temporary.unlink(missing_ok=True)
             except OSError:

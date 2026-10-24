@@ -321,6 +321,41 @@ class ExternalCalendarSyncTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in self.rows()], ["event-old"])
         self.assertFalse(service.running())
 
+    def test_expansion_budget_failure_preserves_last_good_events(self):
+        self.add_existing_event()
+        payload = (
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+            + "".join(
+                f"BEGIN:VEVENT\r\nUID:impossible-{index}\r\n"
+                "DTSTART:00010101T080000Z\r\n"
+                "RRULE:FREQ=DAILY;COUNT=5;BYMONTH=2;BYMONTHDAY=30\r\nEND:VEVENT\r\n"
+                for index in range(3)
+            )
+            + "END:VCALENDAR\r\n"
+        ).encode()
+        with (
+            patch(
+                "backend.providers.calendar.external_calendar_url",
+                return_value="https://calendar.example/feed.ics",
+            ),
+            patch(
+                "backend.providers.calendar.fetch_calendar_feed", return_value=payload
+            ),
+            patch("backend.providers.calendar.ICAL_MAX_EXPANSION_STEPS", 50),
+            self.assertRaises(AppError) as caught,
+        ):
+            self.service.sync()
+        self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(
+            caught.exception.message, "Der Kalender-Feed ist zu aufwendig auszuwerten."
+        )
+        self.assertEqual([row["id"] for row in self.rows()], ["event-old"])
+        self.assertEqual(
+            self.kv("last_external_calendar_sync_error"), caught.exception.message
+        )
+        self.assertIsNone(self.kv("last_external_calendar_sync_at"))
+        self.assertFalse(self.service.running())
+
     def test_generic_failure_maps_to_safe_provider_error_and_preserves_cause(self):
         cause = RuntimeError("private feed data")
         with (

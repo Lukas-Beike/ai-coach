@@ -30,6 +30,8 @@ COMPETITION_TEXT_LIMITS = {
 }
 
 COMPETITION_EXTERNAL_PREFIX = "intervals-coach-competition-"
+# Sync skip reason for a dirty row whose sport has no provider race type.
+COMPETITION_SKIP_UNSUPPORTED_SPORT = "unsupported_sport"
 # Free-text competition spellings and the provider race type they stand for.
 COMPETITION_SPORTS = dict(LEGACY_COMPETITION_ALIASES)
 _ISO_MIDNIGHT_SUFFIX = "T00:00:00"

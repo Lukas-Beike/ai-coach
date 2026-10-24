@@ -36,6 +36,7 @@ from backend.backup.assembly import (
     RestoreLifecycleDependencies,
     RestoreValidationDependencies,
 )
+from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.calendar import local as calendar_local
 from backend.coach import attachments as coach_attachments
 from backend.coach import context as coach_context_module
@@ -463,7 +464,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.22"
+APP_VERSION = "1.13.23"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -2203,6 +2204,7 @@ def main() -> None:
         },
     )
     initialise_database()
+    remove_orphaned_staging_files(DATA_DIR, LOGGER)
     server = http_server.CoachHTTPServer(
         ("0.0.0.0", CONFIG.port), HTTP_API.request_handler_class()
     )
