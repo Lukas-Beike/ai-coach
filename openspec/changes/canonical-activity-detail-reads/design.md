@@ -107,6 +107,8 @@ Ownership: backend modules must not import `server.py`, so the assembly passes a
 
 **Comparison steps.** An empty set of compared kinds is verified only when the analysis comparison below passes.
 
+Both stream cases in step 6 require equal channel sets. A record with no compared kinds and no analysis keys still needs an existing canonical analysis payload; otherwise it counts `analysis_mismatch`. The analysis payload is read with `analysis_row_for_record` only; the session-row fallback reads the same row and is omitted.
+
 1. Validate the record shape. If the value is not a dict, or `activity_id` is not a non-empty string, count `invalid`.
 2. Resolve `link = activity_record_link(db, "intervals", activity_id)`. If it is absent or not ACTIVE, count `no_record`.
 3. Map with `map_legacy_activity_detail(record, recorded_by=link.recorded_by)`. If the result has any issues, count `mapping_issues`.
@@ -118,13 +120,13 @@ Ownership: backend modules must not import `server.py`, so the assembly passes a
    - Any other combination or inequality counts `streams_unproven`.
 7. Compare laps:
    - Compare legacy laps `L[0..n)` against canonical laps `C[0..n)`. Canonical may have more laps, because kv is capped at 200.
-   - Per index, require `index`, `kind`, `start_offset_s` and `end_offset_s` to be equal.
+   - Per index, require `index`, `start_offset_s` and `end_offset_s` to be equal. Kind is compatible when equal, or when the legacy-mapped kind is `LAP`: kv laps never store the Intervals.icu interval type, so the legacy mapper always yields `LAP` while the FETCH set carries `work`/`recovery`.
    - `name` must be equal, or the kv name must be exactly 120 characters and a prefix of the canonical name.
    - Every `LAP_METRIC_FIELDS` value that is non-null in `L[i]` must equal `C[i]` after the refill in D6.
    - Any failure counts `laps_mismatch`.
 8. Compare zones: for each mapped zone metric, every bucket's `index`, `seconds`, `lower`, `upper` and `label` must be equal. Otherwise count `zones_mismatch`.
 9. Compare analysis:
-   - Load the payload with `analysis_row_for_record(db, "intervals", activity_id)`, else `analysis_rows_for` of the link's session.
+   - Load the payload with `analysis_row_for_record(db, "intervals", activity_id)`.
    - If the record has any of `target_snapshot`, `session_analysis` or `calendar_profile`, the payload must exist.
    - The payload's `summary_sha256` must equal the record's.
    - Each of those three keys must be JSON-equal to the record's value; a missing key equals `null`.
@@ -144,7 +146,7 @@ This is a deliberate decision; see Conflicts C9.
 
 This step runs before step 7, inside the same batch transaction. Its target is the canonical Intervals lap set of that activity, whatever its origin.
 
-- Refill only when, for each compared index, `index`, `kind`, `start_offset_s` and `end_offset_s` are equal. If any differs, there is no refill and step 7 fails.
+- Refill only after steps 1–6 pass and when, for each compared index, `index`, `start_offset_s` and `end_offset_s` are equal and the kind is compatible as defined in step 7. If any differs, there is no refill and step 7 fails.
 - For every lap metric that is NULL canonically and non-null in the legacy-mapped lap, write the legacy value.
 - Use a new `backend/db/activity_detail_store.py:refill_lap_metrics(db, provider, provider_activity_id, values)`. It runs `UPDATE ... SET col = COALESCE(col, ?)` and then recomputes `content_sha256` and `updated_at`.
 - `origin`, `mapper_version`, `fetched_at` and `summary_sha256` are unchanged.
