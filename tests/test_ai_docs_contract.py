@@ -80,8 +80,8 @@ class AiDocsContractTests(unittest.TestCase):
         cases = catalogue["cases"]
         self.assertIsInstance(cases, list)
         self.assertTrue(cases)
-        ids = set()
-        coverage = {}
+        ids: set[str] = set()
+        coverage: dict[str, set[str]] = {}
         for case in cases:
             with self.subTest(case=case.get("id")):
                 for field in ("id", "skill", "kind", "prompt", "setup"):
