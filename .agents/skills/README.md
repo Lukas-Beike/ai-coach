@@ -120,8 +120,9 @@ or a request tied to an existing OpenSpec change; ordinary fixes, reviews, and
 status requests retain their existing routing. They supplement the repository
 workflows and do not replace orchestration, validation, review, or retro.
 Run CLI examples through `npm run openspec -- <arguments>`; this uses the local
-installation and disables telemetry. A new worktree needs `npm ci --ignore-scripts`
-once before the first CLI call, unless its setup already ran it. Follow the
+installation and disables telemetry. A new worktree needs
+`python scripts/prepare_worktree.py` once before the first CLI call, unless its
+setup already ran it. Follow the
 setup, regeneration, and incremental backfill guidance in [README](../../README.md#optional-local-openspec).
 Root/scoped instructions and explicit user authorization take precedence over
 generated workflow text, including redundant confirmation or stop requirements.
