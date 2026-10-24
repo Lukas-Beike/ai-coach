@@ -314,13 +314,14 @@ function renderCompletedState(payload, liveAreasOnly, failedAreas, options) {
 }
 
 // A failed sign-in is handled by the login flow, not the status card.
-function showStateLoadFailure(error) {
+function showStateLoadFailure(error, requestedAreas = [], bootstrapRead = true) {
   if (error?.status === 401 || /Authentication/.test(error.message)) return;
   const statusCard = $("#statusCard");
   statusCard.hidden = false;
   statusCard.classList.add("warning");
   $("#statusTitle").textContent = "Trainingsdaten konnten nicht geladen werden";
   $("#statusDetail").textContent = error.message;
+  if (!bootstrapRead && (!requestedAreas || requestedAreas.includes("profile"))) renderCompetitionReadStatus("error");
 }
 
 function stateLoadRequest(path, requestedAreas) {
@@ -396,10 +397,7 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     }
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
-    if (sessionGeneration === state.sessionGeneration) {
-      showStateLoadFailure(error);
-      if (!bootstrapRead && (!requestedAreas || requestedAreas.includes("profile"))) renderCompetitionReadStatus("error");
-    }
+    if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error, requestedAreas, bootstrapRead);
   } finally {
     if (sessionGeneration === state.sessionGeneration) finishStateLoad(path, requestedAreas);
   }

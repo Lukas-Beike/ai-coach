@@ -217,8 +217,9 @@ function competitionDate(competition, todayKey) {
 function competitionDistance(value) {
   if (value == null || String(value).trim() === "") return "Distanz unbekannt";
   const numeric = Number(value);
-  if (Number.isFinite(numeric)) return numeric < 0 ? "Distanz unbekannt" : numeric === 0 ? "0 km" : AppFormat.distance(numeric);
-  return String(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  if (numeric < 0) return "Distanz unbekannt";
+  return numeric === 0 ? "0 km" : AppFormat.distance(numeric);
 }
 
 function competitionFact(labelText, value) {
@@ -984,7 +985,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     card.append(summary);
     const source = document.createElement("small");
     source.className = "competition-sync-state";
-    source.textContent = competition.sync_state === "local_override" ? "Lokal geändert" : competition.external_id ? "Intervals.icu" : "Lokal";
+    source.textContent = competition.external_id ? "Intervals.icu" : "Lokal";
+    if (competition.sync_state === "local_override") source.textContent = "Lokal geändert";
     card.append(source);
     const details = document.createElement("div");
     details.className = "competition-card-facts";
@@ -1056,8 +1058,13 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const retry = $("#competitionRetry");
     if (!node || !retry) return;
     const hasData = Array.isArray(state.data?.competitions);
-    node.textContent = status === "error" ? (hasData ? "Gespeicherter Stand. Aktualisierung fehlgeschlagen." : "Wettkämpfe konnten nicht geladen werden.")
-      : status === "loading" ? (hasData ? "Gespeicherter Stand wird aktualisiert …" : "Wettkämpfe werden geladen …") : "";
+    let message = "";
+    if (status === "error") {
+      message = hasData ? "Gespeicherter Stand. Aktualisierung fehlgeschlagen." : "Wettkämpfe konnten nicht geladen werden.";
+    } else if (status === "loading") {
+      message = hasData ? "Gespeicherter Stand wird aktualisiert …" : "Wettkämpfe werden geladen …";
+    }
+    node.textContent = message;
     retry.hidden = status !== "error";
   }
 
