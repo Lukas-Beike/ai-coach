@@ -374,6 +374,20 @@ def process_lock(path: Path, deadline: float | None = None):
         handle.close()
 
 
+def _scan_engine() -> list | None:
+    """Signatures of the detection engines the Sonar CLI runs, if resolvable."""
+    engines = Path.home() / ".sonar" / "sonarqube-cli" / "bin"
+    try:
+        found = [
+            [path.name, list(_signature(path))]
+            for path in sorted(engines.glob("sonar-secrets-*"))
+            if path.is_file()
+        ]
+    except OSError:
+        return None
+    return found or None
+
+
 def _scan_binding() -> dict:
     scanner = shutil.which("sonar")
     if not scanner:
@@ -387,6 +401,7 @@ def _scan_binding() -> dict:
         "schema": WRAPPER_SCHEMA,
         "scanner": str(path),
         "signature": list(signature),
+        "engine": _scan_engine(),
         "rules": [
             sorted(SOURCE_DIRS),
             sorted(ROOT_FILES),
@@ -417,6 +432,7 @@ def state(
     clean = cache.get("clean_hashes")
     if (
         cache.get("binding") != binding
+        or binding["engine"] is None
         or not isinstance(clean, list)
         or any(
             not isinstance(h, str) or not re.fullmatch(r"[0-9a-f]{64}", h)
@@ -441,12 +457,10 @@ def state(
     if _scan_binding() != binding:
         raise Unavailable("secret scanner changed during scan; graph update refused")
     # No hashes from a failed scan or an unstable source snapshot are recorded.
+    # Only the current corpus is kept, so the cache stays bounded.
     _write_json(
         cache_path,
-        {
-            "binding": binding,
-            "clean_hashes": sorted(clean_hashes | set(hashes.values())),
-        },
+        {"binding": binding, "clean_hashes": sorted(set(hashes.values()))},
     )
     branch = (
         subprocess.run(
@@ -807,7 +821,14 @@ def update(root: Path, *, preparation: bool = False) -> int:
         return 2
     try:
         with process_lock(base / "update.lock", deadline):
-            _update_locked(root, base, deadline)
+            try:
+                _update_locked(root, base, deadline)
+            except Unavailable as exc:
+                # A branch rename or save during the scan; unchanged content
+                # is not rescanned, so one retry is cheap.
+                if str(exc) != SOURCE_CHANGED:
+                    raise
+                _update_locked(root, base, deadline)
             return 0
     except (OSError, subprocess.SubprocessError, Unavailable) as exc:
         # Do not mutate current.json outside the updater lock. Freshness is
@@ -858,6 +879,17 @@ def helper(
     ).returncode
 
 
+def _discard(path: Path) -> None:
+    """Delete a shared environment only after moving it out of use.
+
+    The rename fails on Windows while a process runs from the environment, so
+    a partial deletion never leaves a directory that still looks ready.
+    """
+    doomed = path.with_name(f".deleting-{uuid.uuid4().hex}")
+    path.rename(doomed)
+    shutil.rmtree(doomed, ignore_errors=True)
+
+
 def _setup(root: Path) -> int:
     identity = lock_identity()
     venv = shared_environment()
@@ -870,7 +902,7 @@ def _setup(root: Path) -> int:
         ):
             raise Unavailable("unsafe shared environment path")
         if venv.exists():
-            shutil.rmtree(venv)
+            _discard(venv)
         subprocess.run(
             [sys.executable, "-m", "venv", str(venv)],
             check=True,
@@ -919,10 +951,15 @@ def _prune() -> int:
             with process_lock(
                 candidate.with_name(candidate.name + ".lock"), time.monotonic() + 0.01
             ):
-                shutil.rmtree(candidate)
+                _discard(candidate)
                 print(f"Graphify removed: {candidate.name}")
         except Unavailable:
             print(f"Graphify retained (locked): {candidate.name}")
+        except OSError:
+            print(f"Graphify retained (in use): {candidate.name}")
+    for leftover in sorted(base.glob(".deleting-*")):
+        if leftover.is_dir() and not leftover.is_symlink():
+            shutil.rmtree(leftover, ignore_errors=True)
     return 0
 
 

@@ -51,6 +51,11 @@ A dry-run resolution of `graphifyy[mcp]==0.9.93` on Windows/Python 3.14 yields
    verifies by compiling on Windows and in a Linux `python:3.14` container
    and comparing package sets. A test asserts that every package without
    Linux wheels in the lock carries a matching marker (pywin32 today).
+   Evidence (2026-10-24, pip-tools 7.6.1): Linux compiles, fresh or over the
+   existing lock, yield 58 packages without `pywin32`; Windows yields 59. The
+   lock is therefore compiled on Windows. Dependabot PRs (Linux) fail the
+   contract test and get a Windows-regenerated lock pushed (user decision
+   2026-10-24); the README documents this.
 3. **Version from the lock.** `VERSION` is parsed from the `graphifyy==` line of
    `requirements-graphify.txt`; a missing/ambiguous line makes Graphify
    unavailable rather than guessing. A Dependabot bump therefore cannot leave
@@ -100,6 +105,9 @@ A dry-run resolution of `graphifyy[mcp]==0.9.93` on Windows/Python 3.14 yields
     hashes that the scanner reported clean, bound to the wrapper schema, the
     scanner's resolved path and file signature, and the corpus rules. An update
     hashes every corpus file, scans only files whose hash is not recorded clean,
+    binds the cache also to the signatures of the Sonar CLI's `sonar-secrets-*`
+    engine binaries (no resolvable engine: no reuse), keeps only the current
+    corpus hashes,
     re-checks file signatures after the scan exactly as today, and records new
     hashes only after their batch passed and signatures are unchanged. Any
     finding, scanner failure, binding mismatch or unreadable cache fails closed

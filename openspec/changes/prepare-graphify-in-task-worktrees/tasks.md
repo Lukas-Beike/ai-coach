@@ -2,7 +2,7 @@
 
 ## 1. Hash-locked Graphify dependencies
 
-- [x] 1.1 Add `requirements-graphify.in` and generate `requirements-graphify.txt` with `pip-compile --allow-unsafe --generate-hashes` on Python 3.14; verify the lock contains `graphifyy==0.9.93` and `pywin32` only with a `sys_platform == "win32"` marker, and that a Linux `python:3.14` compile yields the same package set
+- [x] 1.1 Add `requirements-graphify.in` and generate `requirements-graphify.txt` with `pip-compile --allow-unsafe --generate-hashes` on Python 3.14; verify the lock contains `graphifyy==0.9.93` and `pywin32` only with a `sys_platform == "win32"` marker, and compare a Linux `python:3.14` compile (result: Linux drops `pywin32`; compile on Windows, see design decision 2)
 - [x] 1.2 Extend `tests/test_ci_contracts.py` lock/manifest coverage to the Graphify pair and assert the Dockerfile and CI install steps never reference it; verify with `python -m unittest tests.test_ci_contracts -v`
 - [x] 1.3 Add the Graphify pair to README's dependency-maintenance recipe; verify the documented command matches the one used in 1.1
 
@@ -14,6 +14,7 @@
 - [x] 2.4 Add the explicit `prune` command; verify with a test that only non-current, unlocked sibling environments are removed
 - [x] 2.5 Add the offline test: `update`, `status`, `query` and the session-start path never call pip, `-m venv` or npm, including with a missing environment; verify with `python -m unittest tests.test_graphify_hooks -v` and the new test module
 - [x] 2.7 Add the content-hash scan cache (design decision 10); verify with synthetic tests that unchanged content is not rescanned, changed/new content is scanned, a finding or scanner failure records nothing and refuses the update, a changed scanner/schema binding forces a full scan, a corrupt cache falls back to a full scan, and a file changed during the scan is not recorded
+- [x] 2.9 Address the independent review: bind the scan cache to the Sonar secrets engine, keep only current corpus hashes, retry an update once after `SOURCE_CHANGED`, delete shared environments only after moving them aside (prune keeps in-use ones), and document the Windows lock regeneration for Dependabot PRs; verify with synthetic tests
 - [x] 2.8 Make `shared_base()` fail closed with `Unavailable` when `LOCALAPPDATA` is unset on Windows and write `ready.json` atomically (temporary file + `os.replace`); verify with unit tests
 - [x] 2.6 Run a real local `setup` (network allowed for this step only), `update`, `status` and `query activity_detail`; verify `status` prints `Graphify local: current`, an update after a one-file edit completes well inside the 180 s budget (record cold and warm timings), a second `setup` performs no install, and a tampered lock hash makes setup fail
 

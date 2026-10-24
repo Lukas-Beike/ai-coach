@@ -210,6 +210,30 @@ class GraphifySetupTests(unittest.TestCase):
         self.assertTrue(locked.is_dir())
         self.assertTrue(unrelated.is_dir())
 
+    def test_prune_and_setup_keep_environments_that_cannot_be_moved(self):
+        current = graph.shared_environment()
+        current.mkdir(parents=True)
+        (current / "incomplete").touch()
+        old = current.parent / ("0.8.1-" + "a" * 16)
+        old.mkdir()
+        (old / "ready.json").write_text("{}")
+        leftover = current.parent / ".deleting-stale"
+        leftover.mkdir()
+        with (
+            patch.object(Path, "rename", side_effect=OSError("in use")),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(graph._prune(), 0)
+            with (
+                patch.object(graph.subprocess, "run", side_effect=self.fake_run),
+                self.assertRaises(OSError),
+            ):
+                graph._setup(self.root)
+        self.assertIn("retained (in use)", output.getvalue())
+        self.assertTrue((old / "ready.json").is_file())
+        self.assertTrue((current / "incomplete").is_file())
+        self.assertFalse(leftover.exists())
+
     def test_navigation_and_session_start_never_install_even_when_missing(self):
         commands = (
             ["update"],
@@ -268,7 +292,9 @@ class GraphifyScanCacheTests(unittest.TestCase):
         self.cache = graph.runtime(self.root) / "scan-cache.json"
         self.scans = []
         self.scan_result = 0
+        self.engine = [["sonar-secrets-1", [1, 2, 3]]]
         for patcher in (
+            patch.object(graph, "_scan_engine", side_effect=lambda: self.engine),
             patch.object(graph, "corpus_paths", side_effect=lambda root: self.paths),
             patch.object(graph.shutil, "which", return_value=str(self.scanner)),
             patch.object(graph.subprocess, "run", side_effect=self.fake_run),
@@ -298,7 +324,7 @@ class GraphifyScanCacheTests(unittest.TestCase):
         self.assertIn(self.paths[0][1], [call.args[0] for call in read.call_args_list])
         self.assertEqual(self.scans, [])
 
-    def test_changed_and_new_content_are_scanned_and_reverts_are_reused(self):
+    def test_changed_and_new_content_are_scanned_and_cache_keeps_current_only(self):
         initial = self.state()
         source = self.paths[0][1]
         source.write_text("pass # changed\n")
@@ -308,12 +334,14 @@ class GraphifyScanCacheTests(unittest.TestCase):
         self.scans.clear()
         self.state()
         self.assertEqual(self.scans, [[str(source), str(new)]])
+        cached = json.loads(self.cache.read_text())["clean_hashes"]
+        self.assertNotIn(initial[2]["backend/fixture.py"], cached)
         source.write_text("pass\n")
         self.scans.clear()
         self.assertEqual(
             self.state()[2]["backend/fixture.py"], initial[2]["backend/fixture.py"]
         )
-        self.assertEqual(self.scans, [])
+        self.assertEqual(self.scans, [[str(source)]])
 
     def test_finding_and_scanner_failure_refuse_update_and_record_nothing(self):
         self.state()
@@ -353,7 +381,7 @@ class GraphifyScanCacheTests(unittest.TestCase):
         self.assertFalse(self.cache.exists())
 
     def test_scanner_schema_and_rules_changes_force_full_scan(self):
-        for change in ("signature", "path", "schema", "rules"):
+        for change in ("signature", "path", "engine", "schema", "rules"):
             with self.subTest(change=change):
                 self.state()
                 self.scans.clear()
@@ -367,6 +395,9 @@ class GraphifyScanCacheTests(unittest.TestCase):
                         graph.shutil, "which", return_value=str(other_scanner)
                     ):
                         self.state()
+                elif change == "engine":
+                    self.engine = [["sonar-secrets-2", [4, 5, 6]]]
+                    self.state()
                 elif change == "schema":
                     with patch.object(
                         graph, "WRAPPER_SCHEMA", graph.WRAPPER_SCHEMA + 1
@@ -378,6 +409,29 @@ class GraphifyScanCacheTests(unittest.TestCase):
                     ):
                         self.state()
                 self.assertEqual(self.scans, [[str(self.paths[0][1])]])
+
+    def test_update_retries_once_after_source_change(self):
+        changed = graph.Unavailable(graph.SOURCE_CHANGED)
+        for effects, code, calls in (
+            ([changed, None], 0, 2),
+            ([changed, changed], 2, 2),
+            ([graph.Unavailable("other")], 2, 1),
+        ):
+            with (
+                self.subTest(code=code, calls=calls),
+                patch.object(graph, "verify_version", return_value=True),
+                patch.object(graph, "_update_locked", side_effect=effects) as locked,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(graph.update(self.root), code)
+                self.assertEqual(locked.call_count, calls)
+
+    def test_unresolved_engine_never_reuses_cache(self):
+        self.engine = None
+        self.state()
+        self.scans.clear()
+        self.state()
+        self.assertEqual(self.scans, [[str(self.paths[0][1])]])
 
     def test_scanner_change_invalidates_current_graph_without_source_edits(self):
         output = graph.runtime(self.root) / "cache/graph.json"
