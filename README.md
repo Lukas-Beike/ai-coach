@@ -661,19 +661,20 @@ precedence over remembered paths or stale operating assumptions.
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 1.14.3 is pinned as a local
 development dependency. It manages behavior specifications and change plans;
 the application does not load it. Node.js >=20.19.0 is required. Install and
-check it from the task worktree:
+check it from the task worktree. The preparation entry point also sets up
+Graphify and generates its first graph; configure worktree creation to invoke it
+after the script reaches develop:
 
 ```powershell
-npm.cmd ci --ignore-scripts
+python scripts/prepare_worktree.py
 npm.cmd run openspec -- --version
 npm.cmd run openspec -- list --specs
 npm.cmd run openspec -- validate --all --strict --no-interactive
 ```
 
-Use `npm` instead of `npm.cmd` outside Windows and in Git Bash, where `npm.cmd`
-breaks arguments that contain spaces. In T3 Code, a project setup
-script `npm.cmd ci --ignore-scripts` with "run on worktree creation" installs
-these dependencies in every new task worktree. The repository script disables
+If only Node dependencies need preparing, `npm.cmd ci --ignore-scripts` remains
+the manual fallback. Use `npm` instead of `npm.cmd` outside Windows and in Git
+Bash, where `npm.cmd` breaks arguments that contain spaces. The repository script disables
 OpenSpec telemetry on every invocation; no global CLI, skills, profile changes,
 store, hosted service, or model credentials are required. Its config/data homes
 are isolated under ignored `.openspec-local/` in the working directory, including
@@ -744,21 +745,29 @@ application satisfies the spec. Later behavior changes update the affected
 spec and tests in the same change. Keep small fixes proportional; a repository-wide
 backfill is not a prerequisite for normal maintenance.
 
-#### Optional local code graph
+#### Local code graph
 
-The repository can use graphifyy 0.9.93 as a local structural navigation aid.
-Its separate per-worktree environment and generated graph live under
-`.graphify-local/`; setup is explicit and missing tools are never installed by
-session hooks. Codex and Claude Code are configured to run the same local `update
+Worktree preparation uses `python scripts/prepare_worktree.py` to install Node
+development dependencies, set up Graphify and generate the first graph.
+Graphify's version comes from the hash-locked `requirements-graphify.txt`.
+One shared virtual environment per version and lock hash lives under
+`%LOCALAPPDATA%/ai-coach/graphify` on Windows, or
+`$XDG_DATA_HOME/ai-coach/graphify` (default `~/.local/share/ai-coach/graphify`)
+on POSIX. Graphs, update locks, isolated home and exports stay per worktree
+under `.graphify-local/`. Session hooks never install missing tools.
+Codex and Claude Code are configured to run the same local `update
 --session-start` command synchronously at session start and resume. This keeps
 the graph fresh before use; after edits during a session, run
 `python scripts/graphify_local.py update` before querying it. Check `status`
 first if an update could not complete.
 
-Run `python scripts/graphify_local.py setup` once to prepare the isolated
-environment, then run `python scripts/graphify_local.py update` to generate the
-structural graph. Setup downloads the pinned packages when needed; subsequent
-graph operations run locally and do not call external models or services. Use
+As a manual fallback, run `python scripts/graphify_local.py setup`, then
+`python scripts/graphify_local.py update`. Setup serializes creation, verifies
+every package hash and reuses a ready environment without installing again.
+`python scripts/graphify_local.py prune` explicitly removes other unlocked shared
+environments; nothing prunes automatically. Old `.graphify-local/venv` directories
+are unused and may be removed manually. Only setup and worktree preparation may
+download packages; subsequent graph operations stay offline. Use
 `status`, `query <terms>`, `path <source> <target>`, and `explain <symbol>` to
 inspect availability and navigate; queries select the active graph
 automatically. Run `python scripts/graphify_local.py export html --output .graphify-local/exports/graph.html` or
@@ -798,9 +807,11 @@ Both launchers resolve the repository root, including when the session starts
 in a nested directory. If the worker or Python is unavailable, they print a
 short status message, do not install anything, and let the session continue.
 
-T3 Code's managed runtime may not dispatch either host's native repository
-hooks. Hook activation inside T3 Code itself is not verified; run the update
-manually there when needed.
+On 2026-10-24, T3 Code delivered the Claude SessionStart hook in a task worktree.
+This observation does not establish delivery by every host/provider; run the
+update manually if the hook is skipped. After merge, the T3 worktree-creation
+script can invoke `python scripts/prepare_worktree.py`; host configuration is
+separate from this repository.
 
 AI documentation is checked by the existing
 `Validate repository AI documentation` workflow. Locally, after secrets scans,
@@ -1070,9 +1081,10 @@ or replace fixture/browser verification.
 
 ### Dependency lock maintenance
 
-`requirements.in` and `requirements-dev.in` contain direct pins. The matching
-`requirements.txt` and `requirements-dev.txt` files are pip-tools outputs with
-hashes; Docker and CI install those locked files with `--require-hashes`.
+`requirements.in`, `requirements-dev.in` and `requirements-graphify.in` contain
+direct requirements. Their matching `.txt` files are pip-tools outputs with
+hashes. Docker and CI install only the app/development locks with `--require-hashes`;
+the Graphify lock is used only by its separate shared development environment.
 Dependabot recognizes this `.in`/`.txt` pairing and updates both files. When
 regenerating locally, use Python 3.14 on Linux (the SQLCipher wheel is not
 available on native Windows):
@@ -1080,7 +1092,12 @@ available on native Windows):
 ```text
 pip-compile --allow-unsafe --generate-hashes --output-file=requirements.txt requirements.in
 pip-compile --allow-unsafe --generate-hashes --output-file=requirements-dev.txt requirements-dev.in
+pip-compile --allow-unsafe --generate-hashes --strip-extras --output-file=requirements-graphify.txt requirements-graphify.in
 ```
+
+The Graphify pair can also be compiled on Windows/Python 3.14. Keep `pywin32`
+behind `sys_platform == "win32"` and compare Windows/Linux resolutions when
+updating it; Linux omits that Windows-only package.
 
 The incremental quality check also records the `ruff` and `mypy` versions in
 `tests/fixtures/quality_baseline.json`. After changing either pin, record the new

@@ -16,7 +16,21 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "0.9.93"
+LOCK_FILE = Path(__file__).resolve().parents[1] / "requirements-graphify.txt"
+
+
+def lock_version(path: Path) -> str:
+    try:
+        pins = re.findall(
+            r"(?m)^graphifyy(?:\[mcp\])?==([0-9]+(?:\.[0-9]+)+)\s*(?:\\)?$",
+            path.read_text(encoding="utf-8"),
+        )
+        return pins[0] if len(pins) == 1 else ""
+    except OSError:
+        return ""
+
+
+VERSION = lock_version(LOCK_FILE)
 WRAPPER_SCHEMA = 4
 TIMEOUT = 180
 EXTENSIONS = {
@@ -114,10 +128,34 @@ def runtime(root: Path) -> Path:
     return root / ".graphify-local"
 
 
+def shared_base() -> Path:
+    if os.name == "nt":
+        return Path(os.environ["LOCALAPPDATA"]) / "ai-coach" / "graphify"
+    data = os.environ.get("XDG_DATA_HOME")
+    return (Path(data) if data else Path.home() / ".local/share") / "ai-coach/graphify"
+
+
+def lock_identity() -> dict[str, str]:
+    version = lock_version(LOCK_FILE)
+    if not version or version != VERSION:
+        raise Unavailable("missing or ambiguous Graphify lock pin")
+    return {
+        "version": version,
+        "lock_sha256": hashlib.sha256(LOCK_FILE.read_bytes()).hexdigest(),
+    }
+
+
+def environment_name(identity: dict[str, str]) -> str:
+    return f"{identity['version']}-{identity['lock_sha256'][:16]}"
+
+
+def shared_environment() -> Path:
+    return shared_base() / environment_name(lock_identity())
+
+
 def executable(root: Path) -> Path:
     return (
-        runtime(root)
-        / "venv"
+        shared_environment()
         / ("Scripts" if os.name == "nt" else "bin")
         / ("graphify.exe" if os.name == "nt" else "graphify")
     )
@@ -479,9 +517,17 @@ def generation_dir(root: Path, pointer: dict) -> Path:
 
 
 def verify_version(root: Path) -> bool:
+    try:
+        if read_json(shared_environment() / "ready.json") != lock_identity():
+            return False
+        return _installed_version(root)
+    except OSError, Unavailable:
+        return False
+
+
+def _installed_version(root: Path) -> bool:
     py = python_executable(root)
-    exe = executable(root)
-    if not py.is_file() or not exe.is_file():
+    if not py.is_file() or not executable(root).is_file():
         return False
     try:
         result = subprocess.run(
@@ -682,7 +728,7 @@ def _update_locked(root: Path, base: Path, deadline: float) -> None:
 def update(root: Path) -> int:
     deadline = time.monotonic() + TIMEOUT
     base = runtime(root)
-    # Avoid a long source scan when an explicit per-worktree setup is needed.
+    # Avoid a long source scan when the shared environment needs preparation.
     if not verify_version(root):
         print(
             f"Graphify local: unavailable (Graphify {VERSION} unavailable; run setup)"
@@ -742,27 +788,70 @@ def helper(
 
 
 def _setup(root: Path) -> int:
-    venv = runtime(root) / "venv"
-    venv.mkdir(parents=True, exist_ok=True)
-    py = python_executable(root)
-    if not py.is_file():
+    identity = lock_identity()
+    venv = shared_environment()
+    with process_lock(venv.with_name(venv.name + ".lock"), time.monotonic() + 900):
+        if verify_version(root):
+            print(f"Graphify {VERSION} shared environment ready (reused); run update")
+            return 0
+        if venv.is_symlink() or (
+            venv.exists() and venv.resolve().parent != shared_base().resolve()
+        ):
+            raise Unavailable("unsafe shared environment path")
+        if venv.exists():
+            shutil.rmtree(venv)
         subprocess.run(
             [sys.executable, "-m", "venv", str(venv)],
             check=True,
             timeout=120,
             env=local_env(root),
         )
-    if not verify_version(root):
-        pip = venv / ("Scripts/pip.exe" if os.name == "nt" else "bin/pip")
         subprocess.run(
-            [str(pip), "install", f"graphifyy[mcp]=={VERSION}"],
+            [
+                str(python_executable(root)),
+                "-m",
+                "pip",
+                "install",
+                "--require-hashes",
+                "--only-binary=:all:",
+                "--disable-pip-version-check",
+                "--no-input",
+                "-r",
+                str(LOCK_FILE),
+            ],
             check=True,
             timeout=600,
             env=local_env(root),
         )
-    if not verify_version(root):
-        raise Unavailable("installed Graphify version mismatch")
-    print(f"Graphify {VERSION} installed locally; run update")
+        if lock_identity() != identity or not _installed_version(root):
+            raise Unavailable("installed Graphify version or lock mismatch")
+        (venv / "ready.json").write_text(json.dumps(identity), encoding="utf-8")
+    print(f"Graphify {VERSION} installed in shared environment; run update")
+    return 0
+
+
+def _prune() -> int:
+    base = shared_base()
+    current = environment_name(lock_identity())
+    if not base.is_dir():
+        return 0
+    for candidate in sorted(base.iterdir()):
+        if (
+            candidate.name == current
+            or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)+-[0-9a-f]{16}", candidate.name)
+            or candidate.is_symlink()
+            or not candidate.is_dir()
+            or candidate.resolve().parent != base.resolve()
+        ):
+            continue
+        try:
+            with process_lock(
+                candidate.with_name(candidate.name + ".lock"), time.monotonic() + 0.01
+            ):
+                shutil.rmtree(candidate)
+                print(f"Graphify removed: {candidate.name}")
+        except Unavailable:
+            print(f"Graphify retained (locked): {candidate.name}")
     return 0
 
 
@@ -856,6 +945,8 @@ def _export_or_mcp(root: Path, args: argparse.Namespace, graph: Path) -> int:
 def _dispatch(root: Path, args: argparse.Namespace) -> int:
     if args.command == "setup":
         return _setup(root)
+    if args.command == "prune":
+        return _prune()
     if args.command == "update":
         return update(root)
     if args.command == "status":
@@ -870,6 +961,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("setup")
+    sub.add_parser("prune")
     up = sub.add_parser("update")
     up.add_argument("--session-start", action="store_true")
     sub.add_parser("status")

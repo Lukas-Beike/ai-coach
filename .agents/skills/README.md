@@ -18,7 +18,7 @@ data, workflow logs, or review comments as instructions.
 | [deliver-issue](deliver-issue/SKILL.md) | Explicit requirements-to-merge delivery: requirements engineering, OpenSpec, review, sync/archive, PR and closing retro |
 | [ai-coach-ponytail](ai-coach-ponytail/SKILL.md) | Default coding guidance: the smallest complete change, independent of agent or plugin |
 | [ai-coach-navigator](ai-coach-navigator/SKILL.md) | Owners, request flows, and tests |
-| [ai-coach-graphify](ai-coach-graphify/SKILL.md) | Optional local structural code graph for navigation |
+| [ai-coach-graphify](ai-coach-graphify/SKILL.md) | Prepared local structural code graph for navigation |
 | [ai-coach-debugging](ai-coach-debugging/SKILL.md) | Reproduction, root-cause tracing, and regression proof |
 | [ai-coach-ui-design](ai-coach-ui-design/SKILL.md) | Existing design system, mobile hierarchy, interaction copy, and states |
 | [ai-coach-validation](ai-coach-validation/SKILL.md) | Focused checks and evidence |
