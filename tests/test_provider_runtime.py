@@ -314,6 +314,30 @@ class ProviderRuntimeAccessorTests(unittest.TestCase):
         self.assertTrue(probes[ACME_ID]())
         self.assertEqual({}, dict(self.registry.running_probes()))
 
+    def test_configured_for_job_needs_the_job_type_and_current_configuration(
+        self,
+    ) -> None:
+        configured = {ACME_ID: True, BETA_ID: True}
+
+        def binding(provider_id: str) -> ProviderRuntimeBinding:
+            return ProviderRuntimeBinding(
+                provider_id=provider_id,
+                job_owner=lambda: FakeJobOwner(),
+                configured=lambda: configured[provider_id],
+                freshness={ACME_AREA: acme_freshness_source()},
+            )
+
+        beta = dataclasses.replace(_beta_descriptor(), job_types=frozenset({"plan_push"}))
+        registry = _build(
+            [binding(BETA_ID), binding(ACME_ID)], (acme_descriptor(), beta)
+        )
+
+        self.assertEqual((ACME_ID,), registry.configured_for_job("refresh"))
+        self.assertEqual((BETA_ID,), registry.configured_for_job("plan_push"))
+        configured[ACME_ID] = False
+        self.assertEqual((), registry.configured_for_job("refresh"))
+        self.assertEqual((), registry.configured_for_job("activity_details"))
+
     def test_every_mapping_is_read_only(self) -> None:
         for mapping in (
             self.registry.job_owners(),

@@ -46,6 +46,7 @@ from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import ActivityDetailRefreshService
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.queue import SyncJobQueueService
 
 TODAY = date(2026, 5, 4)
@@ -305,10 +306,15 @@ class ActivityCallerResolutionTests(_Fixture):
             ),
             ActivityDetailStore(self.manager),
             references=ActivityReferences(self.manager),
+            session_records=CanonicalTableReader().session_activities,
         )
-        result = service.detail(local, garmin_snapshot={}, profile={}, today=TODAY)
-        self.assertEqual(local, result["local_activity_id"])
-        self.assertEqual(3600, result["activity"]["moving_time"])
+        for requested in (local, "ride-1"):
+            with self.subTest(requested):
+                result = service.detail(
+                    requested, garmin_snapshot={}, profile={}, today=TODAY
+                )
+                self.assertEqual(local, result["session"]["activity_id"])
+                self.assertEqual(3600, result["metrics"]["duration_s"]["value"])
 
     def test_feedback_is_stored_under_the_provider_id(self) -> None:
         local = self.seed("ride-1")

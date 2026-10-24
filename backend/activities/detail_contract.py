@@ -388,6 +388,7 @@ def _source(provenance: Provenance, kind: str) -> dict[str, Any]:
         "provider": None if provider is None else provider.value,
         "label": provenance.label,
         "kind": kind,
+        "recorded_by": provenance.recorded_by.value,
     }
 
 

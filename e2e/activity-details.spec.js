@@ -37,8 +37,9 @@ test("@responsive activity details preserve calendar without Coach shortcuts", a
   await page.reload();
   const response = await request.get("/api/activities/FixtureCase-1");
   const payload = await response.json();
-  expect(payload.detail_data.full_resolution).toBe(true);
-  expect(payload.activity.streams.time.length).toBe(2000);
+  expect(payload.contract).toBe("activity_detail.v1");
+  expect(payload.detail_data.display_sampled).toBe(true);
+  expect(payload.streams.time_s.length).toBe(2000);
   expect(payload.activity_feedback.session_rpe).toBe(6.5);
   expect(payload.activity_feedback.notes).toBe("Synthetic feedback");
 });
@@ -77,25 +78,71 @@ test("@responsive Garmin charts select named measurements and athlete maintenanc
   expect(date).toBe("2026-10-06");
 });
 
-test("@responsive activity stream aliases render once with canonical preference", async ({ page }) => {
+test("@responsive activity details chart each document channel once", async ({ page }) => {
   await page.goto("/#plan/overview");
   await expect(page.locator("#appShell")).toBeVisible();
-  const result = await page.evaluate(async () => {
-    const headings = [];
-    for (const canonical of [false, true]) {
-      const streams = { time: [0, 1, 2], power: [100, 110, 120], velocity: [3, 4, 5] };
-      if (canonical) { streams.watts = [200, 210, 220]; streams.velocity_smooth = [6, 7, 8]; }
-      const data = { activity: { id: "synthetic-alias", name: "Synthetic alias activity", streams } };
-      await ActivityDetails.open(data.activity, { api: async () => data, showDialog: (dialog) => dialog.showModal() });
-      headings.push([...document.querySelectorAll(".activity-series h3")].map((node) => node.textContent));
-      ActivityDetails.close(false);
-    }
-    return headings;
+  const headings = await page.evaluate(async () => {
+    const channel = (values) => ({ values, source: { label: "Intervals.icu" }, aligned: true });
+    const data = {
+      contract: "activity_detail.v1",
+      session: { activity_id: "act_channels", name: "Synthetic channel activity", sport: "ride" },
+      streams: { time_s: [0, 1, 2], channels: { power_w: channel([200, 210, 220]), speed_mps: channel([6, 7, 8]), moving: channel([1, 1, 1]) } },
+      detail_data: { providers: [] },
+    };
+    await ActivityDetails.open({ id: "act_channels" }, { api: async () => data, showDialog: (dialog) => dialog.showModal() });
+    const result = [...document.querySelectorAll(".activity-series h3")].map((node) => node.textContent);
+    ActivityDetails.close(false);
+    return result;
   });
-  for (const headings of result) {
-    expect(headings.filter((heading) => heading.startsWith("Leistung"))).toHaveLength(1);
-    expect(headings.filter((heading) => heading.startsWith("Geschwindigkeit"))).toHaveLength(1);
-  }
+  expect(headings).toEqual(["Leistung (W)", "Geschwindigkeit (m/s)"]);
+});
+
+test("@responsive Garmin-only session shows per-provider notes and its own refresh", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(async () => {
+    const entry = (provider, label, fields) => ({ provider, label, kinds: ["streams"], fetched_at: "2026-10-17T09:00:00Z", refreshable: false, stale: false, load_error: null, coverage: {}, ...fields });
+    const data = {
+      contract: "activity_detail.v1",
+      session: { activity_id: "act_garmin", name: "Synthetic Garmin ride <img src=x>", sport: "ride", started_at: "2026-10-17T06:00:00+00:00" },
+      metrics: { duration_s: { value: 3600, unit: "s" } },
+      streams: { time_s: [0, 60, 120], channels: { power_w: { values: [180, 190, 200], source: { label: "Garmin Connect" }, aligned: true } } },
+      laps: null,
+      zones: {},
+      analysis: null,
+      detail_data: {
+        providers: [
+          entry("garmin", "Garmin Connect", { refreshable: true, stale: true, load_error: { message: "Garmin Connect lieferte keine Runden.", observed_at: "2026-10-17T09:30:00Z" }, coverage: { power_w: { points: 3, valid_points: 3 } } }),
+          entry("wahoo", "Wahoo", { load_error: { message: "Wahoo-Datei unvollständig.", observed_at: "2026-10-17T09:40:00Z" } }),
+        ],
+        display_sampled: false,
+      },
+      activity_feedback: null,
+      equipment: [],
+    };
+    globalThis.syntheticCalls = [];
+    const fakeApi = async (url, options) => {
+      syntheticCalls.push({ url, body: options?.body ? JSON.parse(options.body) : null });
+      if (url === "/api/sync/jobs") return { id: "synthetic-job", status: "completed" };
+      return data;
+    };
+    await ActivityDetails.open({ id: "act_garmin" }, { api: fakeApi, showDialog: (dialog) => dialog.showModal() });
+  });
+  const dialog = page.getByRole("dialog", { name: "Synthetic Garmin ride <img src=x>" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("img", { name: "Leistung, Zeitachse in Minuten" })).toBeVisible();
+  await expect(dialog.getByText("Garmin Connect: Die Zusammenfassung hat sich seit dem Laden geändert.", { exact: false })).toBeVisible();
+  await expect(dialog.locator(".activity-analysis-error").filter({ hasText: "Garmin Connect: Garmin Connect lieferte keine Runden." })).toBeVisible();
+  await expect(dialog.locator(".activity-analysis-error").filter({ hasText: "Wahoo: Wahoo-Datei unvollständig." })).toBeVisible();
+  await expect(dialog.getByText("Datenabdeckung Garmin Connect · power_w: 3/3 Messwerte")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Wahoo/ })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Garmin Connect: Detaildaten aktualisieren" }).click();
+  await expect.poll(() => page.evaluate(() => syntheticCalls.filter((call) => call.url === "/api/activities/act_garmin").length)).toBe(2);
+  const job = await page.evaluate(() => syntheticCalls.find((call) => call.url === "/api/sync/jobs").body);
+  expect(job).toEqual({ provider: "garmin", type: "activity_details", payload: { activity_id: "act_garmin" } });
+  expect(await dialog.locator("img").count()).toBe(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.evaluate(() => ActivityDetails.close(false));
 });
 
 test("@responsive running cadence shows step frequency of both legs", async ({ page }) => {
@@ -104,8 +151,8 @@ test("@responsive running cadence shows step frequency of both legs", async ({ p
   const headings = await page.evaluate(async () => {
     const result = {};
     for (const type of ["Run", "Ride"]) {
-      const data = { activity: { id: `synthetic-${type}`, name: `Synthetic ${type}`, type, streams: { time: [0, 1, 2], cadence: [86, 88, 90] } } };
-      await ActivityDetails.open(data.activity, { api: async () => data, showDialog: (dialog) => dialog.showModal() });
+      const data = { session: { activity_id: `synthetic-${type}`, name: `Synthetic ${type}`, sport: type.toLowerCase() }, streams: { time_s: [0, 1, 2], channels: { cadence_rpm: { values: [86, 88, 90] } } }, detail_data: { providers: [] } };
+      await ActivityDetails.open({ id: `synthetic-${type}` }, { api: async () => data, showDialog: (dialog) => dialog.showModal() });
       result[type] = [...document.querySelectorAll(".activity-series")].map((node) => node.textContent);
       ActivityDetails.close(false);
     }
@@ -117,13 +164,18 @@ test("@responsive running cadence shows step frequency of both legs", async ({ p
 
 test("@responsive analysis shows running step frequency and cycling cadence", async ({ page }) => {
   const summaries = [
-    { id: "synthetic-run", name: "Synthetic run", type: "Run", start_date_local: "2026-10-17T08:00:00", moving_time: 3, average_cadence: 86, max_cadence: 90 },
-    { id: "synthetic-ride", name: "Synthetic ride cadence", type: "Ride", start_date_local: "2026-10-16T08:00:00", moving_time: 3, average_cadence: 86, max_cadence: 90 },
+    { id: "synthetic-run", name: "Synthetic run", type: "Run", start_date_local: "2026-10-17T08:00:00", moving_time: 3 },
+    { id: "synthetic-ride", name: "Synthetic ride cadence", type: "Ride", start_date_local: "2026-10-16T08:00:00", moving_time: 3 },
   ];
   await page.route(/\/api\/activities(\?|\/)/, (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[3];
     const body = id
-      ? { activity: { id, streams: { time: [0, 1, 2], cadence: [84, 86, 90] } }, detail_data: {} }
+      ? {
+        session: { activity_id: id, sport: id === "synthetic-run" ? "run" : "ride" },
+        metrics: { avg_cadence: { value: 86 }, max_cadence: { value: 90 } },
+        streams: { time_s: [0, 1, 2], channels: { cadence_rpm: { values: [84, 86, 90] } } },
+        detail_data: { providers: [] },
+      }
       : { activities: summaries, snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null };
     return route.fulfill({ json: body });
   });
@@ -147,7 +199,7 @@ test("@responsive analysis lists sessions whose details failed to load", async (
   await page.route(/\/api\/activities(\?|\/)/, (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[3];
     const body = id
-      ? { activity: { id }, detail_data: { load_error: { message, observed_at: "2026-10-17T09:00:00Z" } } }
+      ? { session: { activity_id: id, sport: "ride" }, metrics: {}, detail_data: { providers: [{ provider: "intervals", label: "Intervals.icu", kinds: [], fetched_at: null, refreshable: true, stale: false, load_error: { message, observed_at: "2026-10-17T09:00:00Z" }, coverage: {} }] } }
       : { activities: summaries, snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null };
     return route.fulfill({ json: body });
   });

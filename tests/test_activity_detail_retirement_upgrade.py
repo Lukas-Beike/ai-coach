@@ -258,7 +258,7 @@ class RetirementUpgradeTestCase(unittest.TestCase):
         self.assertEqual(expected, counters)
         reader = CanonicalDetailReader(
             CanonicalTableReader().session_activities,
-            refreshable=frozenset({ProviderId.INTERVALS}),
+            refreshable=lambda: frozenset({ProviderId.INTERVALS}),
         )
         with manager.reader() as db:
             for activity_id in SEEDED_IDS:

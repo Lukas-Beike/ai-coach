@@ -53,7 +53,7 @@ class _Adaptive:
 def read_document(manager, activity_id):
     reader = CanonicalDetailReader(
         CanonicalTableReader().session_activities,
-        refreshable=frozenset({ProviderId.INTERVALS}),
+        refreshable=lambda: frozenset({ProviderId.INTERVALS}),
     )
     with manager.reader() as db:
         return reader.read(db, activity_id)

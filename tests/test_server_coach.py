@@ -10,6 +10,7 @@ from datetime import datetime as _local_datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from canonical_detail_support import NOW, seed_intervals_activity
 from garmin_support import read_garmin, save_garmin
 from server_test_support import ServerTestCase, server
 
@@ -27,6 +28,7 @@ from backend.planning import competitions as planning_competitions
 from backend.providers import openai as openai_provider
 from backend.runtime import clock as runtime_clock
 from backend.sync import queue as sync_queue
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.authority import competition_push_manifest
 
 
@@ -202,9 +204,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertEqual(len(enqueue.call_args.args[2]["approval_manifest"]), 1)
         self.assertEqual(enqueue.call_args.kwargs, {"requested_by": "coach"})
 
-    def test_explicit_activity_detail_reads_only_the_requested_complete_raw_record(
-        self,
-    ):
+    def test_explicit_activity_detail_reads_only_the_requested_local_session(self):
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(
             {
                 "synced_at": "2026-09-11T08:00:00+00:00",
@@ -255,6 +255,31 @@ class ServerCoachTests(ServerTestCase):
                 },
             }
         )
+        manager = server.database_manager()
+        seed_intervals_activity(manager, "activity-1", name="Tempo", type="Run")
+        seed_intervals_activity(
+            manager,
+            "activity-2",
+            name="Recovery",
+            start_date_local="2026-09-11T07:00:00",
+        )
+        with server.DB_LOCK, manager.unit_of_work() as db:
+            CanonicalDetailWriter().write_legacy(
+                db,
+                record={
+                    "activity_id": "activity-1",
+                    "activity": {
+                        "streams": {
+                            "time": [0, 1, 2],
+                            "watts": [200, 250, 280],
+                            "latlng": [[1, 2], [3, 4], [5, 6]],
+                        }
+                    },
+                    "observed_at": NOW,
+                    "full_resolution": True,
+                },
+                now=NOW,
+            )
         intent = {
             "intent": "local_action",
             "operation": "get_activity_details",
@@ -275,15 +300,23 @@ class ServerCoachTests(ServerTestCase):
         )
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["activity"]["streams"], {"watts": [200, 250, 280]})
-        self.assertNotIn("id", result["activity"])
-        self.assertNotIn("latlng", result["activity"]["streams"])
-        self.assertNotIn("provider_extra", result["activity"])
+        self.assertEqual("activity_detail.v1", result["contract"])
+        self.assertEqual("Tempo", result["session"]["name"])
+        self.assertEqual(
+            {"power_w": [200, 250, 280]},
+            {
+                channel: entry["values"]
+                for channel, entry in result["streams"]["channels"].items()
+            },
+        )
+        self.assertNotIn("provider_extra", json.dumps(result))
         self.assertEqual(
             result["data_scope"],
-            "bounded sanitized detail projection of exactly one Intervals.icu activity",
+            "bounded sanitized activity_detail.v1 document of exactly one local "
+            "session; providers: Intervals.icu; recorded by: unknown",
         )
         self.assertNotIn("activity-2", json.dumps(result))
+        self.assertNotIn("Recovery", json.dumps(result))
         self.assertEqual(
             result["activity_validation"]["activity"]["activity_id"], "activity-1"
         )

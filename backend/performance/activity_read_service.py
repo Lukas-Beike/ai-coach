@@ -1,16 +1,20 @@
 """Completed-activity analysis combining activity reads and performance context."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from backend.activities import detail_projection
 from backend.activities.activity_reference import ActivityReferenceResolver
-from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+from backend.activities.detail_contract import measured_order
+from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.read_service import ActivityReadService, _first_present
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.records import ActivityRecord
 from backend.errors import AppError
-from backend.performance.activity_validation import activity_performance_validation
+from backend.performance.canonical_detail import (
+    CanonicalDetailReader,
+    RefreshableProviders,
+    SessionRecordReader,
+)
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
@@ -18,11 +22,7 @@ from backend.performance.canonical_inputs import (
     read_performance_inputs,
 )
 from backend.performance.context import current_performance_context
-from backend.providers.intervals_performance_fields import (
-    HEART_RATE_ZONE_TIMES,
-    ZONE_TIMES,
-)
-from backend.providers.source_labels import SourceView, provider_label
+from backend.performance.detail_envelope import DetailEnvelopeReader
 from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 
 
@@ -39,6 +39,8 @@ class ActivityAnalysisReadService(ActivityReadService):
         references: ActivityReferenceResolver | None = None,
         canonical: CanonicalPerformanceSource | None = None,
         summary_rows: ActivityRowReader | None = None,
+        session_records: SessionRecordReader | None = None,
+        refreshable: RefreshableProviders = frozenset,
     ) -> None:
         super().__init__(
             database_manager,
@@ -51,6 +53,8 @@ class ActivityAnalysisReadService(ActivityReadService):
             summary_rows=summary_rows,
         )
         self._canonical = canonical
+        self._session_records = session_records
+        self._refreshable = refreshable
 
     def _performance_inputs(
         self, as_of: date, activity_id: str | None = None
@@ -98,70 +102,55 @@ class ActivityAnalysisReadService(ActivityReadService):
                 "Die Aktivität konnte nicht eindeutig zugeordnet werden.",
                 reason="invalid_activity_request",
             )
-        normalized_id = str(self._references.resolve(normalized_id))
-        snapshot, canonical, rows = self._performance_inputs(today, normalized_id)
-        activity = _raw_activity(snapshot, normalized_id, rows)
-        fingerprint = summary_fingerprint(activity)
-        cached = self._detail_store.get(normalized_id) if self._detail_store else None
-        stale = bool(
-            cached
-            and cached.get("summary_sha256")
-            and cached["summary_sha256"] != fingerprint
-        )
-        if cached:
-            # Zone times are outside the fingerprint, so the live row stays authoritative.
-            live_zones = {
-                key: activity[key]
-                for key in (HEART_RATE_ZONE_TIMES, ZONE_TIMES)
-                if key in activity
-            }
-            activity = {**activity, **cached["activity"], **live_zones}
-        feedback = next(
-            (
-                item
-                for item in self._feedback_service.list(500)
-                if item.get("activity_id") == normalized_id
+        if self._session_records is None:
+            raise RuntimeError("activity detail reads need the session records")
+        inputs: dict[str, Any] = {}
+
+        def summary_row(_db: Any, provider_activity_id: str) -> dict | None:
+            # Snapshot first, then the full local history, like the summary read.
+            snapshot, canonical, rows = self._performance_inputs(
+                today, provider_activity_id
+            )
+            inputs.update(snapshot=snapshot, canonical=canonical)
+            return _find_activity(
+                _snapshot_activities(snapshot) if rows is None else rows,
+                provider_activity_id,
+            )
+
+        def performance() -> Mapping[str, Any]:
+            if not inputs:
+                snapshot, canonical, _rows = self._performance_inputs(today)
+                inputs.update(snapshot=snapshot, canonical=canonical)
+            return current_performance_context(
+                inputs["snapshot"],
+                garmin_snapshot,
+                profile,
+                today,
+                **performance_options(inputs["canonical"]),
+            )
+
+        reader = CanonicalDetailReader(
+            self._session_records,
+            refreshable=self._refreshable,
+            summary_row=summary_row,
+            failures=None if self._detail_store is None else self._detail_store.failures,
+            envelope=DetailEnvelopeReader(
+                feedback_service=self._feedback_service,
+                read_equipment=self._read_equipment,
+                references=self._references,
+                performance=performance,
             ),
-            None,
         )
-        performance = current_performance_context(
-            snapshot,
-            garmin_snapshot,
-            profile,
-            today,
-            **performance_options(canonical),
-        )
-        equipment = _activity_equipment(
-            self._read_equipment(normalized_id), normalized_id
-        )
-        local_ids = self._references.local_ids([normalized_id])
-        failure = (
-            self._detail_store.failures([normalized_id]).get(normalized_id)
-            if self._detail_store
-            else None
-        )
-        # A note left by another summary version no longer describes this one.
-        if failure and failure.get("summary_sha256") != fingerprint:
-            failure = None
-        return {
-            "ok": True,
-            "snapshot_synced_at": snapshot.get("synced_at"),
-            "activity": detail_projection.detailed_activity(activity),
-            "activity_validation": activity_performance_validation(
-                [activity],
-                performance.get("metrics", {}),
-                performance.get("comparisons", {}),
-            ),
-            "activity_feedback": feedback,
-            "equipment": equipment,
-            "session_analysis": cached.get("session_analysis", {})
-            if cached and not stale
-            else {},
-            "activity_id": normalized_id,
-            "local_activity_id": local_ids.get(normalized_id),
-            "detail_data": _detail_metadata(cached, stale, activity, failure),
-            "data_scope": "bounded sanitized detail projection of exactly one Intervals.icu activity",
-        }
+        with self._database_manager.read_snapshot() as db:
+            document = reader.read(db, normalized_id)
+            if document is None:
+                raise AppError(
+                    404,
+                    "Diese Aktivität ist lokal nicht vorhanden.",
+                    reason="activity_details_not_found",
+                )
+            records = self._session_records(db, document["session"]["activity_id"])
+        return {"ok": True, **document, "data_scope": _data_scope(document, records)}
 
 
 def _find_activity(raw_activities: Any, normalized_id: str) -> dict | None:
@@ -179,64 +168,20 @@ def _find_activity(raw_activities: Any, normalized_id: str) -> dict | None:
     )
 
 
-def _raw_activity(
-    snapshot: dict,
-    normalized_id: str,
-    activity_rows: Sequence[Any] | None = None,
-) -> dict:
-    """Find one raw activity row, in the canonical rows when they were read."""
-    raw_activities: Any = activity_rows
-    if raw_activities is None:
-        raw_provider_data = snapshot.get("raw_provider_data")
-        if isinstance(raw_provider_data, dict):
-            raw_activities = raw_provider_data.get("activities")
-    activity = _find_activity(raw_activities, normalized_id)
-    if activity is None:
-        raise AppError(
-            404,
-            "Die vollständigen Rohdaten dieser Aktivität sind im lokalen Intervals.icu-Snapshot nicht vorhanden.",
-            reason="activity_details_not_found",
-        )
-
-    return activity
+def _snapshot_activities(snapshot: dict) -> Any:
+    raw_provider_data = snapshot.get("raw_provider_data")
+    if isinstance(raw_provider_data, dict):
+        return raw_provider_data.get("activities")
+    return None
 
 
-def _detail_metadata(
-    cached: dict | None, stale: bool, activity: dict, failure: dict | None = None
-) -> dict[str, Any]:
-    return {
-        "load_error": {
-            "message": failure.get("message"),
-            "observed_at": failure.get("observed_at"),
-        }
-        if failure
-        else None,
-        "source": provider_label(ProviderId.INTERVALS, SourceView.ACTIVITY_DETAIL),
-        "observed_at": cached.get("observed_at") if cached else None,
-        "full_resolution": bool(cached and cached.get("full_resolution")),
-        "stale": stale,
-        "content_sha256": cached.get("content_sha256") if cached else None,
-        "coverage": cached.get("coverage", {}) if cached else {},
-        "available_streams": cached.get("available_streams", []) if cached else [],
-        "display_sampled": bool(
-            cached
-            and any(
-                len(series) > detail_projection.COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
-                for series in activity.get("streams", {}).values()
-            )
-        ),
-    }
-
-
-def _activity_equipment(equipment: dict, activity_id: str) -> list[dict]:
-    # Garmin can link one activity to several main items.
-    equipment_ids = {
-        row["equipment_id"]
-        for row in equipment.get("assignments", [])
-        if row["activity_id"] == activity_id and row["equipment_id"]
-    }
-    return [
-        row
-        for row in equipment.get("items", [])
-        if row["id"] in equipment_ids or row.get("parent_id") in equipment_ids
-    ]
+def _data_scope(document: Mapping[str, Any], records: Sequence[ActivityRecord]) -> str:
+    """Name the document's providers and the recorder of its primary record."""
+    labels = ", ".join(
+        str(entry["label"]) for entry in document["detail_data"]["providers"]
+    )
+    recorder = measured_order(records)[0].provenance.recorded_by.value
+    return (
+        "bounded sanitized activity_detail.v1 document of exactly one local "
+        f"session; providers: {labels}; recorded by: {recorder}"
+    )

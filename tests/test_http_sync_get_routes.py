@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from datetime import date
 from unittest.mock import Mock
 
+from activity_row_support import SnapshotActivityRows
+from canonical_detail_support import add_session_record, open_manager
+
+from backend.canonical.vocabulary import ProviderId
+from backend.errors import AppError
+from backend.http_api.activity_assembly import ActivityReadAssembly, ActivityReadSources
 from backend.http_api.sync_get import SyncGetRoutes
 
 
@@ -141,37 +148,137 @@ class SyncGetRoutesTests(unittest.TestCase):
             [(200, {"activity_id": "CaseSensitive-1"})], self.handler.responses
         )
 
-    def test_activity_page_and_detail_use_neutral_metric_names(self) -> None:
+    def test_activity_page_uses_neutral_names_and_detail_is_passed_through(
+        self,
+    ) -> None:
         self.activities.page.return_value = {
             "activities": [{"id": "a1", "icu_training_load": 40, "icu_rpe": 4}]
         }
         self.handler.path = "/api/activities"
         self.assertTrue(self.routes.handle(self.handler, "/api/activities"))
-        self.activities.detail.return_value = {
-            "activity": {
-                "id": "a1",
-                "icu_intensity": 0.75,
-                "laps": [{"icu_training_load": 12}],
-            }
+        # The v1 document already names its metrics provider-neutrally.
+        document = {
+            "contract": "activity_detail.v1",
+            "metrics": {"intensity": {"value": 0.75}},
+            "laps": {"laps": [{"metrics": {"load": 12}}]},
         }
+        self.activities.detail.return_value = dict(document)
         self.assertTrue(self.routes.handle(self.handler, "/api/activities/a1"))
 
         self.assertEqual(
             [
                 (200, {"activities": [{"id": "a1", "training_load": 40, "rpe": 4}]}),
-                (
-                    200,
-                    {
-                        "activity": {
-                            "id": "a1",
-                            "intensity": 0.75,
-                            "laps": [{"training_load": 12}],
-                        }
-                    },
-                ),
+                (200, document),
             ],
             self.handler.responses,
         )
+
+
+class _Snapshots:
+    def latest_snapshot(self, _db: object) -> dict:
+        return {
+            "synced_at": "2026-09-20T08:00:00+00:00",
+            "athlete": {},
+            "raw_provider_data": {
+                "activities": [
+                    {
+                        "id": "i1",
+                        "type": "Ride",
+                        "start_date_local": "2026-09-10T07:00:00",
+                        "average_speed": 8.5,
+                    }
+                ]
+            },
+        }
+
+
+class _Feedback:
+    def list(self, _limit: int = 100) -> list:
+        return []
+
+
+class ActivityDetailRouteTests(unittest.TestCase):
+    """Serve canonical detail documents through the production read assembly."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.manager = open_manager(directory.name)
+        self.addCleanup(self.manager.close)
+        add_session_record(self.manager, ProviderId.INTERVALS, "i1", "act_i")
+        add_session_record(
+            self.manager, ProviderId.GARMIN, "g1", "act_g", duration_s=3600.0
+        )
+        snapshots = _Snapshots()
+        self.assembly = ActivityReadAssembly(
+            lambda: self.manager,
+            ActivityReadSources(snapshots, lambda: SnapshotActivityRows(snapshots)),
+            _Feedback,
+            lambda _activity_id: {"items": [], "assignments": []},
+            refreshable_providers=lambda: ("intervals", "garmin"),
+        )
+        self.auth = Mock()
+        self.reads = Mock(side_effect=self.assembly.activity_read)
+        self.routes = SyncGetRoutes(
+            Mock(return_value=self.auth),
+            Mock(),
+            Mock(),
+            self.reads,
+            lambda: date(2026, 9, 20),
+            -1,
+        )
+
+    def get(self, activity_id: str) -> dict:
+        handler = FakeHandler()
+        self.assertTrue(self.routes.handle(handler, f"/api/activities/{activity_id}"))
+        ((status, payload),) = handler.responses
+        self.assertEqual(200, status)
+        assert isinstance(payload, dict)
+        return payload
+
+    def test_authentication_precedes_every_detail_read(self) -> None:
+        self.auth.require_auth.side_effect = AppError(401, "Anmeldung erforderlich.")
+        handler = FakeHandler()
+        with self.assertRaises(AppError) as denied:
+            self.routes.handle(handler, "/api/activities/act_i")
+        self.assertEqual(401, denied.exception.status)
+        self.reads.assert_not_called()
+        self.assertEqual([], handler.responses)
+
+    def test_detail_body_is_the_v1_document_without_validation(self) -> None:
+        for requested in ("act_i", "i1"):
+            with self.subTest(requested):
+                body = self.get(requested)
+                self.assertEqual("activity_detail.v1", body["contract"])
+                self.assertEqual("act_i", body["session"]["activity_id"])
+                self.assertEqual(8.5, body["metrics"]["avg_speed_mps"]["value"])
+                self.assertEqual(
+                    {"activity_feedback", "equipment"},
+                    {"activity_feedback", "equipment", "activity_validation"}
+                    & set(body),
+                )
+                self.assertTrue(body["ok"])
+                self.assertIn("providers: Intervals.icu", body["data_scope"])
+                self.assertNotIn("activity", body)
+
+    def test_garmin_only_session_is_served(self) -> None:
+        body = self.get("act_g")
+        self.assertEqual("act_g", body["session"]["activity_id"])
+        self.assertEqual(3600.0, body["metrics"]["duration_s"]["value"])
+        self.assertEqual(
+            [("garmin", "Garmin Connect", True)],
+            [
+                (entry["provider"], entry["label"], entry["refreshable"])
+                for entry in body["detail_data"]["providers"]
+            ],
+        )
+
+    def test_unknown_session_is_not_found(self) -> None:
+        for activity_id in ("act_missing", "missing"):
+            with self.subTest(activity_id), self.assertRaises(AppError) as missing:
+                self.routes.handle(FakeHandler(), f"/api/activities/{activity_id}")
+            self.assertEqual(404, missing.exception.status)
+            self.assertEqual("activity_details_not_found", missing.exception.reason)
 
 
 if __name__ == "__main__":

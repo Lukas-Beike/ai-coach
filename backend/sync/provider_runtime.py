@@ -254,6 +254,15 @@ class ProviderRuntimeRegistry:
             "synchronous_refresh", lambda binding: binding.synchronous_refresh
         )
 
+    def configured_for_job(self, job_type: str) -> tuple[str, ...]:
+        """Return the bound providers that accept the job type and are configured now."""
+        return tuple(
+            binding.provider_id
+            for binding in self._ordered
+            if self._static.supports_job(binding.provider_id, job_type)
+            and binding.configured()
+        )
+
     def running_probes(self) -> Mapping[str, Callable[[], bool]]:
         probes: dict[str, Callable[[], bool]] = {}
         for binding in self._ordered:

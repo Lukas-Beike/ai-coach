@@ -26,23 +26,23 @@
 
 ## 2. Served `activity_detail.v1` contract (slice B)
 
-- [ ] 2.1 Add `recorded_by` to `backend/activities/detail_contract.py:_source` and to the summary metric sources in `backend/activities/detail_summary_metrics.py` (design D3). Verify in `tests/test_activity_detail_contract.py` that every `source` carries `recorded_by`, that `"unknown"` is used when the recorder is unknown, and that the existing keys are unchanged.
-- [ ] 2.2 Extend `CanonicalDetailReader` (design D1/D2):
+- [x] 2.1 Add `recorded_by` to `backend/activities/detail_contract.py:_source` and to the summary metric sources in `backend/activities/detail_summary_metrics.py` (design D3). Verify in `tests/test_activity_detail_contract.py` that every `source` carries `recorded_by`, that `"unknown"` is used when the recorder is unknown, and that the existing keys are unchanged.
+- [x] 2.2 Extend `CanonicalDetailReader` (design D1/D2):
   - accept a `refreshable` provider callable;
   - substitute live Intervals zone sets from the summary row without affecting `_status`;
   - return `analysis: null` when any merged provider is stale.
   Verify in `tests/test_canonical_detail_reader.py` with tests for live zones overriding stored zones, stale withholding, sets without a fingerprint never being stale, failure notes being ignored for another fingerprint, and the current summary scalars being shown when stale.
-- [ ] 2.3 Add the production envelope reader under `backend/performance/` (feedback, equipment, activity validation; design D1) and wire `CanonicalDetailReader` in `backend/http_api/activity_assembly.py` with session records, the refreshable callable, the summary-row lookup and failures. Verify with a test that the envelope keys are populated for Intervals, Garmin and Wahoo sessions and that validation for sessions without an Intervals summary returns its explicit no-data result.
-- [ ] 2.4 Switch `ActivityAnalysisReadService.detail()` to the canonical reader:
+- [x] 2.3 Add the production envelope reader under `backend/performance/` (feedback, equipment, activity validation; design D1) and wire `CanonicalDetailReader` in `backend/http_api/activity_assembly.py` with session records, the refreshable callable, the summary-row lookup and failures. Verify with a test that the envelope keys are populated for Intervals, Garmin and Wahoo sessions and that validation for sessions without an Intervals summary returns its explicit no-data result.
+- [x] 2.4 Switch `ActivityAnalysisReadService.detail()` to the canonical reader:
   - keep the 400 response;
   - return a provider-neutral 404;
   - add `ok` and the `data_scope` template from design D3;
   - emit no legacy keys.
   Update `tests/test_characterization_activity_reads.py`. Record `test_changed_provider_summary_marks_record_stale_and_hides_analysis` as an intended behavior change (current scalars) and port the other staleness characterizations to canonical seeds. Verify with `tests/test_activity_read_service.py` and the characterization module.
-- [ ] 2.5 Update the HTTP route `backend/http_api/sync_get.py`: keep popping `activity_validation`, drop `neutral_activity_metrics` for the detail body, and keep authentication first. Verify with HTTP route tests for authentication before reads, the v1 body shape, a Garmin-only `act_` id returning 200, and an unknown id returning 404.
-- [ ] 2.6 Update the Coach tool `get_activity_details` (`backend/coach/activity_read_tools.py`) and its provider-neutral descriptions in `backend/coach/tool_schemas.py:258` and, if wording requires it, `backend/coach/dialogue.py:118-124`. Verify with Coach tool tests for the v1 result including `activity_validation`, a bounded result size, and description text that no longer limits the tool to Intervals.icu.
-- [ ] 2.7 Add parity tests over synthetic Intervals.icu, Garmin and Wahoo/FIT sessions in `tests/test_activity_detail_parity.py`. For the same seeded data, the old projection values (duration, distance, laps, zones, stream presence, analysis/stale handling) appear in the corresponding v1 fields, and `data_scope` names provider(s) and recorder. Verify by running the module.
-- [ ] 2.8 Switch `public/activity-details.js` and `public/activity-analysis.js` to the v1 document following the design D8 mapping:
+- [x] 2.5 Update the HTTP route `backend/http_api/sync_get.py`: keep popping `activity_validation`, drop `neutral_activity_metrics` for the detail body, and keep authentication first. Verify with HTTP route tests for authentication before reads, the v1 body shape, a Garmin-only `act_` id returning 200, and an unknown id returning 404.
+- [x] 2.6 Update the Coach tool `get_activity_details` (`backend/coach/activity_read_tools.py`) and its provider-neutral descriptions in `backend/coach/tool_schemas.py:258` and, if wording requires it, `backend/coach/dialogue.py:118-124`. Verify with Coach tool tests for the v1 result including `activity_validation`, a bounded result size, and description text that no longer limits the tool to Intervals.icu.
+- [x] 2.7 Add parity tests over synthetic Intervals.icu, Garmin and Wahoo/FIT sessions in `tests/test_activity_detail_parity.py`. For the same seeded data, the old projection values (duration, distance, laps, zones, stream presence, analysis/stale handling) appear in the corresponding v1 fields, and `data_scope` names provider(s) and recorder. Verify by running the module.
+- [x] 2.8 Switch `public/activity-details.js` and `public/activity-analysis.js` to the v1 document following the design D8 mapping:
   - per-provider notes;
   - a refresh offer from `detail_data.providers[]` with `refreshable: true`;
   - zone and analysis labels from their sources;

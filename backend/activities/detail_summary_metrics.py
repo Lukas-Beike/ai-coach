@@ -11,13 +11,14 @@ import math
 from collections.abc import Mapping
 from typing import Any, Final
 
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import ProviderId, RecordingOrigin
 from backend.providers.intervals_activity_keys import (
     CONFIGURED_FTP,
     INTENSITY,
     LACTATE_THRESHOLD_HR,
     ROLLING_FTP,
     RPE,
+    WEIGHTED_AVG_WATTS,
 )
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -28,10 +29,13 @@ _SUMMARY_METRICS: Final[tuple[tuple[str, str, str | None, str], ...]] = (
     ("avg_temp_c", "average_temp", "°C", "measured"),
     ("min_temp_c", "min_temp", "°C", "measured"),
     ("max_temp_c", "max_temp", "°C", "measured"),
+    ("avg_cadence", "average_cadence", "rpm", "measured"),
     ("max_cadence", "max_cadence", "rpm", "measured"),
+    ("elevation_gain_m", "total_elevation_gain", "m", "measured"),
     ("elevation_loss_m", "total_elevation_loss", "m", "measured"),
     ("rpe", RPE, None, "measured"),
     ("feel", "feel", None, "measured"),
+    ("normalized_power", WEIGHTED_AVG_WATTS, "W", "derived"),
     ("intensity", INTENSITY, None, "derived"),
     ("ftp_w", CONFIGURED_FTP, "W", "derived"),
     ("rolling_ftp_w", ROLLING_FTP, "W", "derived"),
@@ -40,8 +44,13 @@ _SUMMARY_METRICS: Final[tuple[tuple[str, str, str | None, str], ...]] = (
 )
 
 
-def intervals_summary_metrics(summary: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    """Return the metric entries of the finite numeric scalars of one summary row."""
+def intervals_summary_metrics(
+    summary: Mapping[str, Any], *, recorded_by: RecordingOrigin
+) -> dict[str, dict[str, Any]]:
+    """Return the metric entries of the finite numeric scalars of one summary row.
+
+    ``recorded_by`` is the recording device of the Intervals.icu record.
+    """
     label = provider_label(ProviderId.INTERVALS, SourceView.ACTIVITY_DETAIL)
     metrics: dict[str, dict[str, Any]] = {}
     for key, summary_key, unit, kind in _SUMMARY_METRICS:
@@ -57,6 +66,7 @@ def intervals_summary_metrics(summary: Mapping[str, Any]) -> dict[str, dict[str,
                 "provider": ProviderId.INTERVALS.value,
                 "label": label,
                 "kind": kind,
+                "recorded_by": recorded_by.value,
             },
             "alternatives": [],
         }
