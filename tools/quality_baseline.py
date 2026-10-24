@@ -22,6 +22,7 @@ TOOLS = ("ruff", "mypy")
 IDENTITY_FIELDS = ("tool", "path", "code", "message_sha256")
 NON_SOURCE_DIRECTORIES = {
     ".git",
+    ".graphify-local",
     ".venv",
     "venv",
     "node_modules",
