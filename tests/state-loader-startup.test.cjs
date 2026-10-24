@@ -52,6 +52,7 @@ function loader({ asset = "/state-loader.js?v=1", storage = new Map() } = {}) {
     providerIds: () => ({ garmin: "garmin" }),
     currentPlanLoadAreas: () => ["chat"],
     applyChatResult() {},
+    renderCompetitionReadStatus() {},
     finishAppShellLoading() {},
     reloadForUpdateWhenSafe() { updateChecks.push(state.loadPromise); },
     api(requestPath) {

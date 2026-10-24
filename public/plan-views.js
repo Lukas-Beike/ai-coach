@@ -210,6 +210,17 @@ function competitionSportLabel(sport, environment) {
   return ({ Cycling: "Radfahren", Ride: "Radfahren", ride: "Radfahren", VirtualRide: "Rad indoor", Running: "Laufen", Run: "Laufen", run: "Laufen", Swim: "Schwimmen", swim: "Schwimmen", Strength: "Krafttraining", strength: "Krafttraining", other: "Andere" })[sport] || sport || "–";
 }
 
+function competitionDate(competition, todayKey) {
+  return AppFormat.relativeDay(competition.event_date, todayKey) !== null;
+}
+
+function competitionDistance(value) {
+  if (value == null || String(value).trim() === "") return "Distanz unbekannt";
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric < 0 ? "Distanz unbekannt" : numeric === 0 ? "0 km" : AppFormat.distance(numeric);
+  return String(value);
+}
+
 function competitionFact(labelText, value) {
   const item = document.createElement("div");
   const label = document.createElement("span");
@@ -956,75 +967,98 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
 
 
-  function competitionCard(competition = {}, index = 0) {
-    const card = document.createElement("article");
+  function competitionCard(competition, todayKey, openIds) {
+    const card = document.createElement("details");
     card.className = "competition-card";
-
-    const top = document.createElement("div");
-    top.className = "competition-card-top";
+    card.dataset.competitionId = String(competition.id);
+    card.open = openIds.has(String(competition.id));
+    const summary = document.createElement("summary");
     const title = document.createElement("strong");
-    title.textContent = competition.name || `Wettkampf ${index + 1}`;
-    const priority = document.createElement("span");
-    priority.className = "competition-priority";
-    priority.textContent = `${competition.priority || "B"}-Wettkampf`;
-    top.append(title, priority);
-
-    if (competition.sync_state === "local_override") {
-      const status = document.createElement("small");
-      status.className = "competition-sync-state";
-      status.textContent = "Lokal priorisiert · der Coach kann den nächsten Sync ausführen";
-      card.append(status);
+    title.textContent = `${competitionDate(competition, todayKey) ? dateLabel(competition.event_date) : "Datum unbekannt"} · ${competition.name || "Wettkampf"}`;
+    const facts = document.createElement("span");
+    facts.className = "competition-summary-facts";
+    const sport = competition.sport_detail || competitionSportLabel(competition.sport, competition.environment);
+    const when = AppFormat.relativeDay(competition.event_date, todayKey);
+    facts.textContent = [sport, competitionDistance(competition.distance), `Priorität ${competition.priority || "B"}`, when].filter(Boolean).join(" · ");
+    summary.append(title, facts);
+    card.append(summary);
+    const source = document.createElement("small");
+    source.className = "competition-sync-state";
+    source.textContent = competition.sync_state === "local_override" ? "Lokal geändert" : competition.external_id ? "Intervals.icu" : "Lokal";
+    card.append(source);
+    const details = document.createElement("div");
+    details.className = "competition-card-facts";
+    const optional = [
+      ["Startzeit", competition.start_date_local ? formatLocalCompetitionTime(competition.start_date_local) : null],
+      ["Ziel", competition.target],
+      ["Erwartete Dauer", competition.moving_time == null ? null : AppFormat.duration(competition.moving_time)],
+      ["Streckenprofil", competition.course_profile],
+      ["Beschreibung", competition.description],
+      ["Notizen", competition.notes],
+    ];
+    for (const [label, value] of optional) {
+      if (value != null && String(value).trim() !== "") details.append(competitionFact(label, value));
     }
-
-    const facts = document.createElement("div");
-    facts.className = "competition-card-facts";
-    facts.append(
-      competitionFact("Datum", competition.event_date ? dateLabel(competition.event_date) : ""),
-      competitionFact("Sportart", competitionSportLabel(competition.sport, competition.environment)),
-      competitionFact("Distanz", distanceLabel(competition.distance)),
-      competitionFact("Zielpace / Zielzeit", competition.target)
-    );
-    const additional = document.createElement("details");
-    additional.className = "competition-additional-fields";
-    const additionalSummary = document.createElement("summary");
-    additionalSummary.textContent = "Weitere Intervals.icu-Felder";
-    const additionalGrid = document.createElement("div");
-    additionalGrid.className = "competition-card-facts competition-additional-grid";
-    additionalGrid.append(
-      competitionFact("Startzeit", competition.start_date_local ? formatLocalCompetitionTime(competition.start_date_local) : ""),
-      competitionFact("Erwartete Dauer (hh:mm)", formatDuration(competition.moving_time)),
-      competitionFact("Streckenprofil", competition.course_profile),
-      competitionFact("Beschreibung", competition.description),
-      competitionFact("Notizen", competition.notes)
-    );
-    additional.append(additionalSummary, additionalGrid);
-    card.append(top, facts, additional);
+    if (details.childElementCount) card.append(details);
     return card;
   }
 
   function renderCompetitions(competitions) {
     const root = $("#competitionList");
-    const summary = $("#plannedCompetitionsSummary");
-    if (summary) {
-      const next = competitions.filter((competition) => competition.event_date).sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)))[0];
-      if (!competitions.length) summary.textContent = "Noch keine Wettkämpfe";
-      else {
-        const competitionLabel = competitions.length === 1 ? "Wettkampf" : "Wettkämpfe";
-        const nextLabel = next ? ` · nächster ${dateLabel(next.event_date)}` : "";
-        summary.textContent = `${competitions.length} ${competitionLabel}${nextLabel}`;
-      }
-    }
+    if (!root || !Array.isArray(competitions)) return;
+    const todayKey = timezoneDateKey(state.data?.profile?.timezone, new Date());
+    const snapshot = JSON.stringify([competitions, todayKey]);
+    if (root.dataset.snapshot === snapshot) return;
+    const openIds = new Set([...root.querySelectorAll("details[data-competition-id][open]")].map((node) => node.dataset.competitionId));
+    const focusedId = document.activeElement?.closest("details[data-competition-id]")?.dataset.competitionId;
+    const archiveOpen = root.querySelector(".competition-archive")?.open || false;
+    root.dataset.snapshot = snapshot;
     root.replaceChildren();
     if (!competitions.length) {
       const empty = document.createElement("p");
       empty.className = "context-empty";
-      empty.textContent = "Noch keine Zielwettkämpfe gespeichert.";
+      empty.textContent = "Noch keine Wettkämpfe gespeichert.";
       root.append(empty);
       return;
     }
-    [...competitions]
-      .sort((a, b) => String(a.event_date || "9999-12-31").localeCompare(String(b.event_date || "9999-12-31")))
-      .forEach((competition, index) => root.append(competitionCard(competition, index)));
+    const ordered = [...competitions].sort((a, b) =>
+      String(a.event_date || "").localeCompare(String(b.event_date || ""))
+      || String(a.priority || "B").localeCompare(String(b.priority || "B"))
+      || String(a.name || "").localeCompare(String(b.name || ""), "de")
+      || String(a.id).localeCompare(String(b.id)));
+    const past = [], undated = [];
+    for (const competition of ordered) {
+      if (!competitionDate(competition, todayKey)) undated.push(competition);
+      else if (competition.event_date < todayKey) past.push(competition);
+      else root.append(competitionCard(competition, todayKey, openIds));
+    }
+    if (undated.length) {
+      const heading = document.createElement("h4");
+      heading.textContent = "Ohne gültiges Datum";
+      root.append(heading, ...undated.map((event) => competitionCard(event, todayKey, openIds)));
+    }
+    if (past.length) {
+      const archive = document.createElement("details");
+      archive.className = "competition-archive";
+      archive.open = archiveOpen;
+      const summary = document.createElement("summary");
+      summary.textContent = `Vergangene Wettkämpfe (${past.length})`;
+      archive.append(summary);
+      past.sort((a, b) => b.event_date.localeCompare(a.event_date) || ordered.indexOf(a) - ordered.indexOf(b));
+      archive.append(...past.map((event) => competitionCard(event, todayKey, openIds)));
+      root.append(archive);
+    }
+    if (focusedId) [...root.querySelectorAll("details[data-competition-id]")].find((node) => node.dataset.competitionId === focusedId)?.querySelector("summary")?.focus();
+  }
+
+  function renderCompetitionReadStatus(status) {
+    const node = $("#competitionReadStatus");
+    const retry = $("#competitionRetry");
+    if (!node || !retry) return;
+    const hasData = Array.isArray(state.data?.competitions);
+    node.textContent = status === "error" ? (hasData ? "Gespeicherter Stand. Aktualisierung fehlgeschlagen." : "Wettkämpfe konnten nicht geladen werden.")
+      : status === "loading" ? (hasData ? "Gespeicherter Stand wird aktualisiert …" : "Wettkämpfe werden geladen …") : "";
+    retry.hidden = status !== "error";
   }
 
   function formatLocalCompetitionTime(value) {
@@ -1044,5 +1078,5 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   function bindExternalCalendar(syncExternalCalendar) {
     $("#externalCalendarSyncButton").addEventListener("click", syncExternalCalendar);
   }
-  return Object.freeze({ renderAdaptivePlanning, renderExternalCalendar, renderTrainingPlans, renderPlanned, renderLibrary, renderCompetitions, focusPlannedToday, bindPlanNavigation, bindExternalCalendar });
+  return Object.freeze({ renderAdaptivePlanning, renderExternalCalendar, renderTrainingPlans, renderPlanned, renderLibrary, renderCompetitions, renderCompetitionReadStatus, focusPlannedToday, bindPlanNavigation, bindExternalCalendar });
 }

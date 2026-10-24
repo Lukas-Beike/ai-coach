@@ -114,9 +114,9 @@ class ServerRuntimeTests(ServerTestCase):
         self.assertIn('name="sports" multiple', index)
         self.assertIn('name="timezone" autocomplete="off"', index)
         self.assertIn('id="profileContextNotice"', index)
-        self.assertIn("Erwartete Dauer (hh:mm)", plan_views)
+        self.assertIn('"Erwartete Dauer"', plan_views)
         self.assertIn(
-            'competitionFact("Distanz", distanceLabel(competition.distance))',
+            "competitionDistance(competition.distance)",
             plan_views,
         )
         self.assertNotIn('data-more-segment-panel="privacy"', index)

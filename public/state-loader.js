@@ -15,6 +15,7 @@ function render(data, { reloadRoute = true } = {}) {
   renderPlanned(data.training_calendar || data.planned || []);
   renderLibrary(data.library || []);
   renderProfile(data.profile);
+  renderCompetitions(data.competitions);
   renderGarmin(data.garmin);
   renderAdaptivePlanning(data);
   renderExternalCalendar(data);
@@ -344,6 +345,7 @@ async function renderAreasAsTheyArrive(domainData, areas, load) {
   let rendered = false;
   await Promise.all(domainData.map(async (request) => {
     const result = await request;
+    if (current() && result[0] === "profile") renderCompetitionReadStatus(result[2] ? "error" : "ready");
     if (!current()) return;
     // Incorporate changes that arrived while these requests were in flight.
     payload.messages = state.data?.messages || [];
@@ -361,6 +363,7 @@ async function renderAreasAsTheyArrive(domainData, areas, load) {
 }
 
 async function loadState(path = "/api/bootstrap", requestedAreas = null) {
+  let bootstrapRead = false;
   const requestSequence = ++state.loadSequence;
   const sessionGeneration = state.sessionGeneration;
   const chatGeneration = state.chatGeneration;
@@ -369,10 +372,12 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
   try {
     const { liveAreasOnly, liveVersions, query, areas } = stateLoadRequest(path, requestedAreas);
     // The area reads do not depend on the bootstrap, so they run alongside it.
+    if (areas.has("profile")) renderCompetitionReadStatus("loading");
     const domainData = loadStateRequests(areas, query);
     // Startup syncs and the one-time canonical backfill can keep the server busy for longer than the default timeout.
     const bootstrap = liveAreasOnly ? {} : await api(path, { timeoutMs: 90_000 });
     if (sessionGeneration !== state.sessionGeneration) return;
+    bootstrapRead = true;
     const payload = bootstrapPayload(bootstrap, liveAreasOnly);
     if (initialLoad && requestSequence === state.loadSequence) {
       renderLoadedState(payload, liveAreasOnly);
@@ -391,7 +396,10 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
     }
     if (failures.length) throw new Error(failures.join("; "));
   } catch (error) {
-    if (sessionGeneration === state.sessionGeneration) showStateLoadFailure(error);
+    if (sessionGeneration === state.sessionGeneration) {
+      showStateLoadFailure(error);
+      if (!bootstrapRead && (!requestedAreas || requestedAreas.includes("profile"))) renderCompetitionReadStatus("error");
+    }
   } finally {
     if (sessionGeneration === state.sessionGeneration) finishStateLoad(path, requestedAreas);
   }

@@ -1,7 +1,7 @@
 const { test, expect } = require("@playwright/test");
 
 const routes = [
-  ["plan/season", (page) => page.locator("#seasonPreparation .season-event").first()],
+  ["plan/season", (page) => page.locator("#seasonPreparation .competition-card").first()],
   ["nutrition/diary", (page) => page.locator("#nutritionTotals .nutrition-total").first()],
   ["nutrition/week", (page) => page.locator("#nutritionWeek .nutrition-week-chart-day").first()],
   ["nutrition/products", (page) => page.locator("#nutritionProductsPanel")],

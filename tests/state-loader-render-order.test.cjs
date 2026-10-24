@@ -22,7 +22,7 @@ function loader(route) {
   });
   for (const name of [
     "renderAppVersion", "renderCoachOverview", "renderCoachReceipts", "renderQuickMessageTemplates", "notifyState",
-    "renderStatus", "renderMessages", "renderPlanned", "renderLibrary", "renderProfile", "renderGarmin",
+    "renderStatus", "renderMessages", "renderPlanned", "renderLibrary", "renderProfile", "renderCompetitions", "renderGarmin",
     "renderAdaptivePlanning", "renderExternalCalendar", "renderPerformance", "renderModel", "renderThinkingLevel",
     "renderServiceTier", "renderDiagnosticCapture", "renderSettings", "updateVoiceButton",
   ]) context[name] = () => {};

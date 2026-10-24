@@ -129,7 +129,6 @@ function renderActiveRoute(mainRoute, panelRoute) {
   if (mainRoute === "plan") {
     const planSegment = AppRouter.planSegmentFromRoute(panelRoute);
     AppState.setPlanSegment(planSegment);
-    if (planSegment === "season" && state.data) void renderSeasonPreparation();
     AppViews.renderPlanSegments(planSegment);
   }
   if (mainRoute === "nutrition") { renderNutritionSegments(panelRoute); if (state.data) { if (panelRoute === "nutrition/products") void loadNutritionProducts(); else void loadNutrition(); } }
