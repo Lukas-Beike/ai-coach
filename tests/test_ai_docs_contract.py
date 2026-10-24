@@ -1,5 +1,6 @@
 """Keep repository-local AI instructions aligned with the source tree."""
 
+import json
 import os
 import re
 import unittest
@@ -61,10 +62,49 @@ class AiDocsContractTests(unittest.TestCase):
             if match is None:
                 self.fail(str(skill_file))
             skill_name = match.group(1).strip().strip('"')
+            self.assertLessEqual(len(skill_name), 64, skill_file)
+            self.assertRegex(skill_name, r"^[a-z0-9]+(?:-[a-z0-9]+)*$", skill_file)
             skills.append((skill_name, skill_file))
             self.assertEqual(skill_file.parent.name, skill_name, skill_file)
         names = [name for name, _ in skills]
         self.assertEqual(len(names), len(set(names)), names)
+
+    def test_skill_evaluation_cases_are_valid_and_targets_exist(self) -> None:
+        catalogue = json.loads(
+            (
+                SKILL_ROOT / "ai-coach-skill-evaluation" / "evals" / "cases.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertIs(type(catalogue["catalog_version"]), int)
+        self.assertGreater(catalogue["catalog_version"], 0)
+        cases = catalogue["cases"]
+        self.assertIsInstance(cases, list)
+        self.assertTrue(cases)
+        ids = set()
+        coverage = {}
+        for case in cases:
+            with self.subTest(case=case.get("id")):
+                for field in ("id", "skill", "kind", "prompt", "setup"):
+                    self.assertIsInstance(case[field], str)
+                    self.assertTrue(case[field].strip(), field)
+                self.assertRegex(case["id"], r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+                self.assertNotIn(case["id"], ids, "Duplicate evaluation case")
+                ids.add(case["id"])
+                self.assertRegex(case["skill"], r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+                self.assertTrue((SKILL_ROOT / case["skill"] / "SKILL.md").is_file())
+                self.assertIn(case["kind"], ("positive", "negative", "boundary"))
+                self.assertIs(type(case["activate"]), bool)
+                if case["kind"] != "boundary":
+                    self.assertEqual(case["activate"], case["kind"] == "positive")
+                for field in ("expected", "prohibited"):
+                    self.assertIsInstance(case[field], list)
+                    self.assertTrue(case[field], field)
+                    for assertion in case[field]:
+                        self.assertIsInstance(assertion, str)
+                        self.assertTrue(assertion.strip(), field)
+                coverage.setdefault(case["skill"], set()).add(case["kind"])
+        for skill, kinds in coverage.items():
+            self.assertEqual(kinds, {"positive", "negative", "boundary"}, skill)
 
     def test_repository_guidance_links_resolve(self) -> None:
         markdown_files = [ROOT / relative for relative in REQUIRED_GUIDANCE]

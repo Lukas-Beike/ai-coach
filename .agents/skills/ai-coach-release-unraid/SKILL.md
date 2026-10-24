@@ -1,6 +1,6 @@
 ---
 name: ai-coach-release-unraid
-description: Run Intervals Coach's daily release, verify the GHCR image, then update its Unraid container.
+description: Carry out an explicitly requested Intervals Coach release, verify the exact GHCR image, then update its Unraid container. Do not use for release-status questions, release planning, or unrelated server maintenance.
 ---
 
 # AI Coach release to Unraid

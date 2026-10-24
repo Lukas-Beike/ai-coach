@@ -1,6 +1,6 @@
 ---
 name: orchestrated-plan-implementation
-description: Always use for repository work, including implementation, documentation and skill changes, reviews, evaluations, and retrospectives. Coordinate isolated subagents with three user-selected model tiers and live provider discovery; the parent verifies results and alone adopts patches. Status answers and coordination do not require new workers.
+description: Always use for repository work, including implementation, documentation, reviews, skill evaluations, and retrospectives. Choose sequential parent-only or delegated execution first; only delegated work selects live models and user model tiers. The parent verifies results and alone adopts worker patches. Status answers need no new workers.
 license: MIT adaptations; see ../THIRD_PARTY.md.
 ---
 
@@ -153,33 +153,12 @@ Do not busy-poll, spawn watchers, or treat a wait timeout as cancellation.
 
 ## Runtime binding
 
-Inspect the host's current schemas; do not invent flags or capabilities.
-
-- **T3:** use `delegate_task` with `isolation: "worktree"`, explicit
-  `target.providerInstanceId`, `target.model`, supported `target.options`, role,
-  complete brief, and normally `mode: "async"`. This is required for isolated
-  checkout binding, cross-provider work, native-unsupported models, requested
-  options, and same-model nonempty inherited options. Its worktree starts from
-  the parent's local commit, excludes uncommitted edits, and runs project setup.
-- T3 task handles are `taskId` for `task_status`/`task_cancel`; `childThreadId`
-  is backing storage. Use stable `clientRequestId` on retries of a lost response
-  to avoid duplicates. For each new revision/review round call `delegate_task`
-  again with a new key, original brief, current baseline/candidate, prior findings,
-  responses, and unresolved objections. Do not continue review rounds through
-  `t3_thread_send`. Use `workState`/`hasPendingChildRuns` to check remaining writers.
-- Missing lazy T3 tools warrant one bounded direct capabilities attempt; use the
-  host-documented `acp-mcp-call` fallback when advertised, without raw provider
-  CLI/account setup. `t3_thread_launch`/`create_threads` are top-level conversations
-  and require a separate-thread request; do not substitute them for child tasks.
-- **Other hosts:** native delegation is suitable only if exact model/options,
-  isolated source, and lifecycle requirements are supported. Prepare worker
-  worktrees in the parent when no binding facility exists. With
-  `collaboration.spawn_agent`, overrides require `fork_turns: "none"` and a
-  complete brief. Use no invented enum values or inheritance modes.
-- Keep runtime permissions inherited unless the user chooses a supported mode.
-  Answer factual child questions from authorized context; pending permission
-  approvals stay with their existing approval holder. Question tools cannot
-  grant permission. Cancel through the adapter owning the task handle.
+When dispatching workers, scan and read [runtime binding adapters](references/runtime-binding.md)
+before selecting or calling a host adapter. Inspect the live schemas and preserve
+exact model/options, isolated worktrees, inherited permissions, and task handles.
+Sequential parent-only work does not need this reference. A missing adapter must
+not silently change an explicit worker requirement. Keep task authorization and
+parent verification under the rules above and below.
 
 ## Verify results and adopt patches
 
