@@ -16,6 +16,9 @@ M5 (own smoothed load curves, passive CP/CS, HRV-based recommendations, #1432)
 is deferred and has no card. It needs its own card and G0 review before work
 starts.
 
+[Method inputs](inputs.md) records where each card's inputs are stored, how
+they reach API, UI and Coach, and which data gaps remain (gate G1, #1425).
+
 ## Three separate proofs
 
 1. **Computational correctness:** formula, units, filters and edge cases match
