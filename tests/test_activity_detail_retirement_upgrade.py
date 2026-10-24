@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import Mock, patch
 
+import legacy_detail_kv
 from activity_row_support import FixedActivityRows
 from canonical_detail_support import NOW, open_manager, seed_intervals_activity
 from test_activity_detail_retirement import (
@@ -131,7 +132,7 @@ class ReleasedSource:
         for activity_id, record in self.records.items():
             target.execute(
                 "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                (ActivityDetailStore._key(activity_id), json.dumps(record), NOW),
+                (legacy_detail_kv.key(activity_id), json.dumps(record), NOW),
             )
 
 
@@ -245,7 +246,7 @@ class RetirementUpgradeTestCase(unittest.TestCase):
         self.assertEqual(("failed", "", 0), (state["status"], state["cursor"], state["batches"]))
 
     def assert_retired(self, manager, version):
-        keys = {ActivityDetailStore._key(item) for item in (UNVERIFIABLE, UNLINKED)}
+        keys = {legacy_detail_kv.key(item) for item in (UNVERIFIABLE, UNLINKED)}
         self.assertEqual(keys, self.detail_keys(manager))
         state = self.counters(manager)
         self.assertEqual("complete", state["status"])

@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+import legacy_detail_kv
 from activity_row_support import FixedActivityRows
 from canonical_detail_support import (
     INTERVALS,
@@ -117,17 +118,17 @@ class RetirementTestCase(unittest.TestCase):
             canonical=writer,
         ).refresh(activity_id)
         record = writer.records[activity_id]
-        self.store.save(activity_id, record)
+        legacy_detail_kv.save(self.manager, activity_id, record)
         return record
 
     def save_record(self, record):
-        self.store.save(record["activity_id"], record)
+        legacy_detail_kv.save(self.manager, record["activity_id"], record)
 
     def save_raw_record(self, record):
         """Store a record as given, keeping its analysis values unchanged."""
         with self.manager.unit_of_work() as db:
             self.key_values.set(
-                db, ActivityDetailStore._key(record["activity_id"]), json.dumps(record)
+                db, legacy_detail_kv.key(record["activity_id"]), json.dumps(record)
             )
 
     def make(self, batch_size=20):
@@ -163,7 +164,7 @@ class RetirementTestCase(unittest.TestCase):
 
     def kv_record(self, activity_id):
         with self.manager.reader() as db:
-            raw = self.key_values.get(db, ActivityDetailStore._key(activity_id))
+            raw = self.key_values.get(db, legacy_detail_kv.key(activity_id))
         return None if raw is None else json.loads(raw)
 
     def canonical_snapshot(self):
@@ -266,7 +267,7 @@ class KeptRecordTests(RetirementTestCase):
         before_kv = self.kv_rows()
         before = self.canonical_snapshot()
         self.assertIn(
-            ActivityDetailStore._key(activity_id), [key for key, _ in before_kv]
+            legacy_detail_kv.key(activity_id), [key for key, _ in before_kv]
         )
         counters = self.run_to_completion()
         self.assertEqual(0, counters["retired"])
@@ -286,14 +287,14 @@ class KeptRecordTests(RetirementTestCase):
     def test_value_that_is_not_a_record(self):
         self.execute(
             "INSERT INTO kv(key, value, updated_at) VALUES (?, '[1]', ?)",
-            (ActivityDetailStore._key("9300"), NOW),
+            (legacy_detail_kv.key("9300"), NOW),
         )
         self.assert_kept("invalid", "9300")
 
     def test_record_without_an_activity_record(self):
         record = self.load("9301")
-        self.store.save("9399", {**record, "activity_id": "9399"})
-        self.execute("DELETE FROM kv WHERE key = ?", (ActivityDetailStore._key("9301"),))
+        legacy_detail_kv.save(self.manager, "9399", {**record, "activity_id": "9399"})
+        self.execute("DELETE FROM kv WHERE key = ?", (legacy_detail_kv.key("9301"),))
         self.assert_kept("no_record", "9399")
 
     def test_record_the_mapper_reports_issues_for(self):
@@ -379,7 +380,7 @@ class KeptRecordTests(RetirementTestCase):
             "observed_at": NOW,
             "activity": {},
         }
-        self.store.save("9313", bare)
+        legacy_detail_kv.save(self.manager, "9313", bare)
         self.assert_kept("analysis_mismatch", "9313")
 
 

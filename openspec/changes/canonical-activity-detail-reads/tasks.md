@@ -48,14 +48,14 @@
   - zone and analysis labels from their sources;
   - the feedback POST from `session`.
   Then bump the `public/index.html` query versions and the `public/service-worker.js` cache name and `ASSETS` together. Verify with `node --test tests/*.cjs` (asset-version test) and by updating `e2e/activity-details.spec.js` and `e2e/activity-detail-floor.spec.js`.
-- [ ] 2.9 Run `npm run test:e2e -- e2e/activity-details.spec.js e2e/activity-detail-floor.spec.js` on mobile-small, mobile, tablet, tablet-landscape and desktop. Verify that all pass, including a Garmin-only session opening and a stale/load-error note per provider.
+- [x] 2.9 Run `npm run test:e2e -- e2e/activity-details.spec.js e2e/activity-detail-floor.spec.js` on mobile-small, mobile, tablet, tablet-landscape and desktop. Verify that all pass, including a Garmin-only session opening and a stale/load-error note per provider.
 
 ## 3. Cleanup and guard (slice C)
 
-- [ ] 3.1 Reduce `backend/activities/detail_store.py:ActivityDetailStore` to failure notes, the prefetch floor and `records_after`. Remove `get`, `save`, `save_in`, `fingerprints`, `calendar_profiles` and `analysis_summaries`, and keep `summary_fingerprint`. Verify with `python -m compileall -q server.py backend tests` and repository-wide mypy showing no remaining callers.
-- [ ] 3.2 Add `tests/test_activity_detail_kv_guard.py`, implementing the design D7 scan and allowlist. Verify that it passes on the final tree and fails when a probe production module referencing `activity_detail:` is introduced in a temporary copy inside the test.
-- [ ] 3.3 Migrate test and e2e seeds from kv detail documents to canonical sets: `e2e/fixture_runtime.py` (the `ActivityDetailStore(...).save` uses near lines 583, 733, 1591 and 2084–2119), `tests/test_fixture_standard_data.py:446`, and `tests/test_activity_reference.py` (lines 304, 458, 465). Verify with those modules and with the Playwright specs from 2.9.
-- [ ] 3.4 Check `README.md` for kv-detail, detail-response or Intervals-only detail wording and update it to the canonical behavior and the retirement stage. Verify with a grep for `activity_detail:` and the changed sections.
+- [x] 3.1 Reduce `backend/activities/detail_store.py:ActivityDetailStore` to failure notes, the prefetch floor and `records_after`. Remove `get`, `save`, `save_in`, `fingerprints`, `calendar_profiles` and `analysis_summaries`, and keep `summary_fingerprint`. Verify with `python -m compileall -q server.py backend tests` and repository-wide mypy showing no remaining callers.
+- [x] 3.2 Add `tests/test_activity_detail_kv_guard.py`, implementing the design D7 scan and allowlist. Verify that it passes on the final tree and fails when a probe production module referencing `activity_detail:` is introduced in a temporary copy inside the test.
+- [x] 3.3 Migrate test and e2e seeds from kv detail documents to canonical sets: `e2e/fixture_runtime.py` (the `ActivityDetailStore(...).save` uses near lines 583, 733, 1591 and 2084–2119), `tests/test_fixture_standard_data.py:446`, and `tests/test_activity_reference.py` (lines 304, 458, 465). Verify with those modules and with the Playwright specs from 2.9.
+- [x] 3.4 Check `README.md` for kv-detail, detail-response or Intervals-only detail wording and update it to the canonical behavior and the retirement stage. Verify with a grep for `activity_detail:` and the changed sections.
 
 ## 4. Validation (slice D)
 

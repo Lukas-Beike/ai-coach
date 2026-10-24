@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import Mock
 
+import legacy_detail_kv
 from activity_row_support import FixedActivityRows
 from canonical_detail_support import INTERVALS, open_manager, seed_intervals_activity
 
@@ -321,7 +322,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
                     "summary_sha256": summary_fingerprint(row),
                     **changes,
                 }
-                self.store.save_in(db, row["id"], record)
+                legacy_detail_kv.save_in(db, row["id"], record)
 
     def test_leftover_kv_record_does_not_settle_prefetch(self):
         self.prefetched_service()

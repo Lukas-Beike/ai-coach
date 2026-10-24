@@ -10,6 +10,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 
+import legacy_detail_kv
 from activity_row_support import FixedActivityRows
 from canonical_detail_support import INTERVALS, NOW, ZONE, open_manager
 
@@ -139,10 +140,13 @@ class AnalysisReadsTestCase(unittest.TestCase):
         self.records = writer.records
         # The legacy kv records, as an earlier release stored them with each load.
         for activity_id, record in self.records.items():
-            self.store.save(activity_id, record)
+            legacy_detail_kv.save(self.manager, activity_id, record)
 
     def old_reads(self):
-        return self.store.calendar_profiles(), self.store.analysis_summaries()
+        return (
+            legacy_detail_kv.calendar_profiles(self.manager),
+            legacy_detail_kv.analysis_summaries(self.manager),
+        )
 
     def new_reads(self):
         return calendar_profiles(self.manager), analysis_summaries(self.manager)
@@ -252,11 +256,11 @@ class CanonicalAnalysisReadTests(AnalysisReadsTestCase):
 
     def test_unlinked_kv_records_no_longer_use_limit_slots(self):
         expected_ids = [row["activity_id"] for row in self.old_reads()[1]]
-        ghost = json.loads(json.dumps(self.store.get(self.ids[0])))
+        ghost = json.loads(json.dumps(legacy_detail_kv.get(self.manager, self.ids[0])))
         ghost["activity_id"] = "ghost"
         ghost["observed_at"] = "2026-10-03T00:00:00Z"
-        self.store.save("ghost", ghost)
-        old_ids = [row["activity_id"] for row in self.store.analysis_summaries()]
+        legacy_detail_kv.save(self.manager, "ghost", ghost)
+        old_ids = [row["activity_id"] for row in legacy_detail_kv.analysis_summaries(self.manager)]
         self.assertIn("ghost", old_ids)
         new_ids = [row["activity_id"] for row in analysis_summaries(self.manager)]
         self.assertNotIn("ghost", new_ids)
@@ -280,7 +284,7 @@ class KvRecordsAreNotReadTests(AnalysisReadsTestCase):
             missing & {row["activity_id"] for row in self.old_reads()[1]}
         )
         self.delete_analysis(missing)
-        self.assertIsNotNone(self.store.get(self.ids[3]))
+        self.assertIsNotNone(legacy_detail_kv.get(self.manager, self.ids[3]))
         profiles, summaries = self.new_reads()
         self.assertTrue(missing.isdisjoint(profiles))
         self.assertTrue(missing.isdisjoint(row["activity_id"] for row in summaries))
@@ -288,7 +292,7 @@ class KvRecordsAreNotReadTests(AnalysisReadsTestCase):
         with self.manager.unit_of_work() as db:
             for activity_id in missing:
                 db.execute(
-                    "DELETE FROM kv WHERE key = ?", (ActivityDetailStore._key(activity_id),)
+                    "DELETE FROM kv WHERE key = ?", (legacy_detail_kv.key(activity_id),)
                 )
         self.assert_matches_kv()
 
@@ -300,7 +304,7 @@ class KvRecordsAreNotReadTests(AnalysisReadsTestCase):
         expected = self.old_reads()
         with self.manager.unit_of_work() as db:
             db.execute("DELETE FROM kv WHERE key LIKE 'activity_detail:%'")
-        self.assertIsNone(self.store.get(self.ids[0]))
+        self.assertIsNone(legacy_detail_kv.get(self.manager, self.ids[0]))
         self.assert_matches_kv(expected)
 
 

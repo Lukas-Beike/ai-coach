@@ -9,9 +9,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import legacy_detail_kv
 from test_activity_detail_retirement import POINTS, RetirementTestCase
 
-from backend.activities.detail_store import ActivityDetailStore
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.export import (
     PrivacyArchiveExportConfig,
@@ -131,7 +131,7 @@ class RetiredDetailBackupTests(RetirementTestCase):
         self.assertEqual(
             self.record["summary_sha256"], analysis[0]["payload"]["summary_sha256"]
         )
-        self.assertNotIn(ActivityDetailStore._key(ACTIVITY), state)
+        self.assertNotIn(legacy_detail_kv.key(ACTIVITY), state)
         self.assertFalse([key for key in state if key.startswith("activity_detail:")])
         self.assertIn(STATE_KEY, state)
 
@@ -170,7 +170,7 @@ class RetiredDetailBackupTests(RetirementTestCase):
             self.assertEqual(self.document, read_document(restored, ACTIVITY))
             with restored.reader() as db:
                 self.assertIsNone(
-                    self.key_values.get(db, ActivityDetailStore._key(ACTIVITY))
+                    self.key_values.get(db, legacy_detail_kv.key(ACTIVITY))
                 )
         finally:
             restored.close()
