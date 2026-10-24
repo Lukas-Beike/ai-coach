@@ -670,7 +670,8 @@ npm.cmd run openspec -- list --specs
 npm.cmd run openspec -- validate --all --strict --no-interactive
 ```
 
-Use `npm` instead of `npm.cmd` outside Windows. In T3 Code, a project setup
+Use `npm` instead of `npm.cmd` outside Windows and in Git Bash, where `npm.cmd`
+breaks arguments that contain spaces. In T3 Code, a project setup
 script `npm.cmd ci --ignore-scripts` with "run on worktree creation" installs
 these dependencies in every new task worktree. The repository script disables
 OpenSpec telemetry on every invocation; no global CLI, skills, profile changes,
