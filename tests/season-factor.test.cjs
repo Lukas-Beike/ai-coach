@@ -29,3 +29,16 @@ test("out-of-range, empty and malformed load factors are rejected", () => {
   assert.equal(parse("abc"), null);
   assert.equal(parse(""), null);
 });
+
+test("season distances show 0 km only for a real zero and unbekannt for invalid values", () => {
+  const distanceStart = source.indexOf("function seasonDistance(");
+  const distanceEnd = source.indexOf("\n}\n", distanceStart) + 2;
+  const context = vm.createContext({ AppFormat: require("../public/format.js") });
+  vm.runInContext(`${source.slice(distanceStart, distanceEnd)};globalThis.seasonDistance = seasonDistance;`, context);
+  const seasonDistance = context.seasonDistance;
+  assert.equal(seasonDistance(0), "0 km");
+  assert.equal(seasonDistance(-1000), "unbekannt", "a negative confirmed distance is not shown as zero");
+  assert.equal(seasonDistance("abc"), "unbekannt");
+  assert.equal(seasonDistance(null), "unbekannt");
+  assert.equal(seasonDistance(42195), "42,2 km");
+});
