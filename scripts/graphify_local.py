@@ -31,8 +31,9 @@ def lock_version(path: Path) -> str:
 
 
 VERSION = lock_version(LOCK_FILE)
-WRAPPER_SCHEMA = 4
+WRAPPER_SCHEMA = 5
 TIMEOUT = 180
+PREPARATION_TIMEOUT = 600
 EXTENSIONS = {
     ".py",
     ".js",
@@ -130,7 +131,12 @@ def runtime(root: Path) -> Path:
 
 def shared_base() -> Path:
     if os.name == "nt":
-        return Path(os.environ["LOCALAPPDATA"]) / "ai-coach" / "graphify"
+        data = os.environ.get("LOCALAPPDATA")
+        if not data:
+            raise Unavailable(
+                "LOCALAPPDATA unavailable; Graphify shared environment unavailable"
+            )
+        return Path(data) / "ai-coach" / "graphify"
     data = os.environ.get("XDG_DATA_HOME")
     return (Path(data) if data else Path.home() / ".local/share") / "ai-coach/graphify"
 
@@ -286,11 +292,16 @@ def corpus_paths(root: Path) -> list[tuple[str, Path]]:
     return sorted(found.items())
 
 
-def scan(paths: list[tuple[str, Path]], deadline: float | None = None) -> None:
+def scan(
+    paths: list[tuple[str, Path]],
+    deadline: float | None = None,
+    *,
+    scanner: str | None = None,
+) -> None:
     deadline = deadline or time.monotonic() + TIMEOUT
     if not paths:
         raise Unavailable("no approved source files to scan")
-    scanner = shutil.which("sonar")
+    scanner = scanner or shutil.which("sonar")
     if not scanner:
         raise Unavailable("Sonar secrets scanner unavailable; graph update refused")
     # One bounded argument list per batch avoids Windows' per-process startup
@@ -363,13 +374,57 @@ def process_lock(path: Path, deadline: float | None = None):
         handle.close()
 
 
+def _scan_binding() -> dict:
+    scanner = shutil.which("sonar")
+    if not scanner:
+        raise Unavailable("Sonar secrets scanner unavailable; graph update refused")
+    try:
+        path = Path(scanner).resolve(strict=True)
+        signature = _signature(path)
+    except OSError as exc:
+        raise Unavailable("secret scan failed; graph update refused") from exc
+    return {
+        "schema": WRAPPER_SCHEMA,
+        "scanner": str(path),
+        "signature": list(signature),
+        "rules": [
+            sorted(SOURCE_DIRS),
+            sorted(ROOT_FILES),
+            sorted(DENIED),
+            sorted(EXTENSIONS),
+        ],
+    }
+
+
+def _write_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pending = path.with_name(path.name + ".tmp")
+    pending.write_text(json.dumps(value), encoding="utf-8")
+    os.replace(pending, path)
+
+
 def state(
     root: Path, deadline: float | None = None
 ) -> tuple[list[tuple[str, Path]], str, dict[str, str]]:
     deadline = deadline or time.monotonic() + TIMEOUT
     paths = corpus_paths(root)
     before = {rel: _signature(path) for rel, path in paths}
-    scan(paths, deadline)
+    if not paths:
+        raise Unavailable("no approved source files to scan")
+    binding = _scan_binding()
+    cache_path = runtime(root) / "scan-cache.json"
+    cache = read_json(cache_path)
+    clean = cache.get("clean_hashes")
+    if (
+        cache.get("binding") != binding
+        or not isinstance(clean, list)
+        or any(
+            not isinstance(h, str) or not re.fullmatch(r"[0-9a-f]{64}", h)
+            for h in clean
+        )
+    ):
+        clean = []
+    clean_hashes = set(clean)
     rows, hashes = [], {}
     for rel, path in paths:
         before_sig = _signature(path)
@@ -378,6 +433,21 @@ def state(
             raise Unavailable(SOURCE_CHANGED)
         rows.append((rel, digest))
         hashes[rel] = digest
+    pending = [(rel, path) for rel, path in paths if hashes[rel] not in clean_hashes]
+    if pending:
+        scan(pending, deadline, scanner=binding["scanner"])
+    if any(_signature(path) != before[rel] for rel, path in paths):
+        raise Unavailable(SOURCE_CHANGED)
+    if _scan_binding() != binding:
+        raise Unavailable("secret scanner changed during scan; graph update refused")
+    # No hashes from a failed scan or an unstable source snapshot are recorded.
+    _write_json(
+        cache_path,
+        {
+            "binding": binding,
+            "clean_hashes": sorted(clean_hashes | set(hashes.values())),
+        },
+    )
     branch = (
         subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -456,6 +526,7 @@ def _config_signature() -> str:
         sorted(DENIED),
         sorted(EXTENSIONS),
         ["update", "--no-cluster"],
+        _scan_binding(),
     ]
     return hashlib.sha256(
         json.dumps(config, separators=(",", ":")).encode()
@@ -725,8 +796,8 @@ def _update_locked(root: Path, base: Path, deadline: float) -> None:
     print("Graphify local: current (updated)")
 
 
-def update(root: Path) -> int:
-    deadline = time.monotonic() + TIMEOUT
+def update(root: Path, *, preparation: bool = False) -> int:
+    deadline = time.monotonic() + (PREPARATION_TIMEOUT if preparation else TIMEOUT)
     base = runtime(root)
     # Avoid a long source scan when the shared environment needs preparation.
     if not verify_version(root):
@@ -825,7 +896,7 @@ def _setup(root: Path) -> int:
         )
         if lock_identity() != identity or not _installed_version(root):
             raise Unavailable("installed Graphify version or lock mismatch")
-        (venv / "ready.json").write_text(json.dumps(identity), encoding="utf-8")
+        _write_json(venv / "ready.json", identity)
     print(f"Graphify {VERSION} installed in shared environment; run update")
     return 0
 
@@ -948,7 +1019,7 @@ def _dispatch(root: Path, args: argparse.Namespace) -> int:
     if args.command == "prune":
         return _prune()
     if args.command == "update":
-        return update(root)
+        return update(root, preparation=args.preparation)
     if args.command == "status":
         return _status(root)
     if not verify_version(root):
@@ -963,7 +1034,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("setup")
     sub.add_parser("prune")
     up = sub.add_parser("update")
-    up.add_argument("--session-start", action="store_true")
+    budget = up.add_mutually_exclusive_group()
+    budget.add_argument("--session-start", action="store_true")
+    budget.add_argument("--preparation", action="store_true")
     sub.add_parser("status")
     for name in ("query", "path", "explain"):
         p = sub.add_parser(name)

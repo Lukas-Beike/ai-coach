@@ -755,6 +755,9 @@ One shared virtual environment per version and lock hash lives under
 `$XDG_DATA_HOME/ai-coach/graphify` (default `~/.local/share/ai-coach/graphify`)
 on POSIX. Graphs, update locks, isolated home and exports stay per worktree
 under `.graphify-local/`. Session hooks never install missing tools.
+Preparation uses `update --preparation` with a 600-second budget; hooks and
+plain `update` keep 180 seconds. A local content-hash cache skips secret scans
+only for content already reported clean by the same scanner and corpus rules.
 Codex and Claude Code are configured to run the same local `update
 --session-start` command synchronously at session start and resume. This keeps
 the graph fresh before use; after edits during a session, run

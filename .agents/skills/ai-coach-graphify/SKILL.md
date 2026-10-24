@@ -18,6 +18,9 @@ environment per version and lock hash. The base is `%LOCALAPPDATA%/ai-coach/grap
 on Windows and `$XDG_DATA_HOME/ai-coach/graphify` (default
 `~/.local/share/ai-coach/graphify`) on POSIX. Graph state and isolated home stay
 under each worktree's `.graphify-local/`; app dependencies are separate.
+Preparation uses `update --preparation` with a 600-second budget; hooks and
+plain `update` retain 180 seconds. `scan-cache.json` reuses clean content hashes
+only while the wrapper schema, scanner identity and corpus rules match.
 Manual `setup` followed by `update` remains the fallback. Only setup and
 preparation may download packages; hooks, updates, queries and exports stay
 offline and never install packages or call external/paid models. Do not bypass

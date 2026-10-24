@@ -15,7 +15,7 @@ def main() -> int:
     steps = [
         ("Node dependencies", [npm, "ci", "--ignore-scripts"] if npm else None),
         ("Graphify setup", [sys.executable, worker, "setup"]),
-        ("Graphify update", [sys.executable, worker, "update"]),
+        ("Graphify update", [sys.executable, worker, "update", "--preparation"]),
     ]
     failed = False
     for label, command in steps:

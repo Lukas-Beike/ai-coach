@@ -189,7 +189,12 @@ class QualityBaselineTests(unittest.TestCase):
                 "tests/new.py",
                 "tools/new.py",
             ]
-            for filename in [*expected, ".venv/generated.py", "data/private.py"]:
+            for filename in [
+                *expected,
+                ".venv/generated.py",
+                "data/private.py",
+                ".graphify-local/inputs/corpus/backend/generated.py",
+            ]:
                 path = root / filename
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.touch()

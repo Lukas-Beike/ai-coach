@@ -13,16 +13,16 @@
 - [x] 2.3 Install with `--require-hashes --only-binary=:all:` from the lock; verify with a test that the pip command is exactly hash-based and that a failed install leaves no marker
 - [x] 2.4 Add the explicit `prune` command; verify with a test that only non-current, unlocked sibling environments are removed
 - [x] 2.5 Add the offline test: `update`, `status`, `query` and the session-start path never call pip, `-m venv` or npm, including with a missing environment; verify with `python -m unittest tests.test_graphify_hooks -v` and the new test module
-- [ ] 2.7 Add the content-hash scan cache (design decision 10); verify with synthetic tests that unchanged content is not rescanned, changed/new content is scanned, a finding or scanner failure records nothing and refuses the update, a changed scanner/schema binding forces a full scan, a corrupt cache falls back to a full scan, and a file changed during the scan is not recorded
-- [ ] 2.8 Make `shared_base()` fail closed with `Unavailable` when `LOCALAPPDATA` is unset on Windows and write `ready.json` atomically (temporary file + `os.replace`); verify with unit tests
-- [ ] 2.6 Run a real local `setup` (network allowed for this step only), `update`, `status` and `query activity_detail`; verify `status` prints `Graphify local: current`, an update after a one-file edit completes well inside the 180 s budget (record cold and warm timings), a second `setup` performs no install, and a tampered lock hash makes setup fail
+- [x] 2.7 Add the content-hash scan cache (design decision 10); verify with synthetic tests that unchanged content is not rescanned, changed/new content is scanned, a finding or scanner failure records nothing and refuses the update, a changed scanner/schema binding forces a full scan, a corrupt cache falls back to a full scan, and a file changed during the scan is not recorded
+- [x] 2.8 Make `shared_base()` fail closed with `Unavailable` when `LOCALAPPDATA` is unset on Windows and write `ready.json` atomically (temporary file + `os.replace`); verify with unit tests
+- [x] 2.6 Run a real local `setup` (network allowed for this step only), `update`, `status` and `query activity_detail`; verify `status` prints `Graphify local: current`, an update after a one-file edit completes well inside the 180 s budget (record cold and warm timings), a second `setup` performs no install, and a tampered lock hash makes setup fail
 
 ## 3. Worktree preparation entry point
 
 - [x] 3.1 Add `scripts/prepare_worktree.py` running `npm ci --ignore-scripts`, Graphify `setup` and `update`, continuing independent steps and exiting non-zero on any failure; verify with synthetic subprocess tests for success, npm failure and Graphify failure
-- [ ] 3.3 Give the preparation update a 600 s budget through an explicit `update` option while hooks and plain `update` keep 180 s (design decision 11); verify with tests for both budgets
-- [ ] 3.4 Exclude `.graphify-local` in `tools/quality_baseline.py` (design decision 12); verify with `tests/test_quality_baseline.py`
-- [ ] 3.2 Run `python scripts/prepare_worktree.py` in this worktree; verify `npm run openspec -- --version` succeeds and `graphify_local.py status` reports current
+- [x] 3.3 Give the preparation update a 600 s budget through an explicit `update` option while hooks and plain `update` keep 180 s (design decision 11); verify with tests for both budgets
+- [x] 3.4 Exclude `.graphify-local` in `tools/quality_baseline.py` (design decision 12); verify with `tests/test_quality_baseline.py`
+- [x] 3.2 Run `python scripts/prepare_worktree.py` in this worktree; verify `npm run openspec -- --version` succeeds and `graphify_local.py status` reports current
 
 ## 4. Guidance
 
@@ -30,7 +30,7 @@
 
 ## 5. Integration checks
 
-- [ ] 5.1 Run `python -m unittest discover -s tests -v`, `python -m compileall -q server.py backend tests scripts`, repo-wide ruff/mypy as CI does, and `npm run openspec -- validate prepare-graphify-in-task-worktrees --strict`; record results
+- [x] 5.1 Run `python -m unittest discover -s tests -v`, `python -m compileall -q server.py backend tests scripts`, repo-wide ruff/mypy as CI does, and `npm run openspec -- validate prepare-graphify-in-task-worktrees --strict`; record results
 
 ## Workflow follow-up
 
