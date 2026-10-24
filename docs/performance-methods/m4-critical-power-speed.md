@@ -139,5 +139,3 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 - R4 participant count and recovery for its repeated-effort protocol were not
   reachable.
 - Passive CS from everyday runs (R16) stays deferred to M5.
-- Funding and declared interests of the cited sources are not yet recorded
-  (see README).

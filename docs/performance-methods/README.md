@@ -96,10 +96,31 @@ Checked 2026-10-24. Access: *abstract* = abstract and metadata only;
 For every source the correction check found no erratum, correction or
 retraction.
 
-Funding and declared interests were checked for R10 only (no competing
-interests declared; public research funding). For the other sources they are
-not yet checked; each card lists this as an open point, and it must be
-recorded before the affected interpretation is released.
+### Funding and declared interests
+
+Checked 2026-10-24 from the publication text. "No statement" means none in the
+accessible text, not a declared absence.
+
+| ID | Funding | Declared interests | Relevant industry tie | Access |
+| --- | --- | --- | --- | --- |
+| R1 | no statement | no statement | unknown | full text (third-party copy) |
+| R2 | no statement | no statement | unknown | abstract |
+| R3 | AHA and NIH grants (in part) | no statement | no (funding) | full text (author manuscript) |
+| R4 | none received | none declared | no | full text |
+| R5 | Czech Ministry of Education via university grant | none declared | no | full text |
+| R6 | open-access funding only | none declared | no | full text |
+| R7 | Finnish Ministry of Education and Culture | none declared | no | full text (author draft) |
+| R8 | Spanish ministry grants | one author: one-time fees from PUSH, Inc. and Head's Up Health | yes, minor (wearable and HRV-app vendors) | full text |
+| R9 | none received | none declared | no | full text |
+| R10 | Air Force Research Laboratory | none declared | no | full text |
+| R11 | CNPq scholarship | none declared | no | full text |
+| R12 | no specific grant | one author: consulting for Fitbit and sleep, supplement and pharma companies; others: sport-agency grants | yes (wearable maker, one author) | full text (author version) |
+| R13 | NIH, NSBRI and others | several authors: equity, royalties or consulting with wearable and sleep-technology makers (e.g. Empatica, Apple, Philips, Actiwatch devices) | yes (wearable and sleep technology) | full text |
+| R14 | none received | none declared | no | full text |
+| R15 | Shanghai science commission grant | none declared | no | full text |
+| R16 | no statement | none declared | no | full text |
+| R17 | Engineering research council of Canada | no statement | no | full text (third-party copy) |
+| L1 | no statement | one author: funding from lighting and circadian-health companies, company co-founder | yes, indirect (lighting) | full text |
 
 | ID | Source | Access | Use and limits |
 | --- | --- | --- | --- |

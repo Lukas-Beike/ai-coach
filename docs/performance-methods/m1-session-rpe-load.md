@@ -128,6 +128,6 @@ endurance athlete.
   (schema change needs migrations from v9).
 - Choose the canonical elapsed-duration field and its behaviour for Garmin
   records that have only moving time (#1423, #1425).
-- R2 full text (participant count, duration definition) was not reachable.
-- Funding and declared interests of the cited sources are not yet recorded
-  (see README).
+- R2 full text (participant count, duration definition, funding and declared
+  interests) was not reachable; R1 has no funding or interest statement in
+  the accessible copy.

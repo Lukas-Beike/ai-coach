@@ -66,7 +66,9 @@ no known direction.
 R13 associations were found in students and concern academic performance and
 circadian timing; they do not transfer to individual athlete prognosis. R12
 recommends individual needs over a blanket 7-9 h target. Daytime naps are
-usually absent from the provider data used here.
+usually absent from the provider data used here. R13 authors and one R12
+author declare ties to wearable and sleep-technology makers; L1's author
+declares lighting-industry funding.
 
 ## Deviations from the studied procedure
 
@@ -134,5 +136,3 @@ usually absent from the provider data used here.
 - Decide whether naps are recorded compatibly enough to be added to duration.
 - SRI stays out of scope until a full sleep/wake series exists; then name the
   calculator and settings.
-- Funding and declared interests of the cited sources are not yet recorded
-  (see README).

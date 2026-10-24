@@ -68,7 +68,9 @@ R10 covers specific device models at the firmware used during the study, in heal
 not validate all Garmin models or later firmware. R11 comes from clinical
 practice. HRV is non-specific: illness, alcohol, travel, sleep, cycle phase and
 training all move it, and a higher value is not always better (R9). R10 has a
-critical industry letter in response (see register).
+critical industry letter in response (see register). One R8 author declared
+minor fees from wearable and HRV-app vendors; R10 declares government funding
+and no competing interests.
 
 ## Deviations from the studied procedure
 
@@ -131,5 +133,3 @@ critical industry letter in response (see register).
 - Canonical reads for HRV and sleep inputs (#1411) and method/aggregation
   fields (#1418).
 - Garmin resting HR has no validation data in R10.
-- Funding and declared interests of the cited sources are not yet recorded
-  (see README).
