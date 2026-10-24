@@ -35,8 +35,10 @@ Consumer trace (no M1 method exists yet):
   (`backend/performance/training_report.py:284`); rows are deduplicated by
   `deduplicated_rows` (`:35`), a second rule beside the session state.
 - Coach: feedback tools (`backend/coach/athlete_record_tools.py:102`,
-  `backend/coach/tool_schemas.py:651`) and the planning context field list
-  (`backend/planning/context.py:26`).
+  `backend/coach/tool_schemas.py:651`). The planning context projects feedback
+  only with notes and without `session_rpe` (`FEEDBACK_FIELDS`,
+  `backend/planning/context.py:95`, `:388`); its `session_rpe` at `:26` is the
+  daily check-in value.
 - `athlete_checkins.session_rpe` (`backend/db/schema.py:1037`) is a daily
   check-in value and is not an M1 input.
 
@@ -114,6 +116,7 @@ Consumer trace (no M4 method exists yet):
 | Elapsed duration in three provider-specific places; Wahoo keeps none | M1 | mapping, maybe persistence | #1427; no #1408 sub-issue yet |
 | `icu_rpe` has no canonical field | M1 | mapping, maybe persistence | D3 on #1406; no #1408 sub-issue yet |
 | Two duplicate rules (session state and `deduplicated_rows`) | M1 | read path | #1427 |
+| Planning context omits feedback `session_rpe` | M1 | read path | #1427 |
 | HRV and sleep duration read from raw rows | M2, M3 | read path | #1411 |
 | Canonical resting HR only replaces an equal legacy value | M2 | read path | #1415 |
 | No method, aggregation or measurement window on observations | M2, M3 | persistence | #1418 (#1408) |

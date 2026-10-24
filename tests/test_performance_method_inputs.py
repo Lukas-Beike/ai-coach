@@ -43,6 +43,7 @@ from backend.db.activity_detail_store import (
     replace_detail_set,
 )
 from backend.db.repositories import ActivityFeedbackRepository
+from backend.db.schema import CURRENT_DATABASE_SCHEMA
 from backend.errors import AppError
 from backend.performance.analysis_input import analysis_input
 from backend.performance.canonical_personal_recovery import (
@@ -64,8 +65,15 @@ RECOVERY_S = 1800
 
 
 class _NoActivityRows:
-    def activity_rows(self, db: Any, **_: Any) -> list[dict[str, Any]]:
-        return []
+    def activity_rows(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        limit: int | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        return ()
 
 
 class M1SessionRpeInputs(linking.LinkingCase):
@@ -476,6 +484,18 @@ class M3SleepInputs(unittest.TestCase):
             msg="#1419: no canonical sleep start/end kind; sleep-regularity-v1 reads "
             "raw provider fields",
         )
+        sleep_storage = [
+            f"{table}.{column}"
+            for table, columns in CURRENT_DATABASE_SCHEMA.items()
+            for column in {table, *columns}
+            if "sleep" in column.lower()
+        ]
+        self.assertEqual(
+            sleep_storage,
+            [],
+            msg="#1419: no sleep-period table or column; expected one once sleep "
+            "periods are stored",
+        )
         series = personal_recovery([], {"sleep": [_night(0)]}, self.profile, TODAY)[
             "regularity"
         ]["series"][0]
@@ -620,6 +640,26 @@ class M4BestEffortInputs(linking.LinkingCase):
             ("ok", 250.0),
             msg="#1430: power_profile has no full-resolution filter and uses a "
             "downsampled stream; expected exclusion or a downsampled label",
+        )
+        self.assertEqual(
+            set(profile),
+            {
+                "duration_curve",
+                "method",
+                "points",
+                "scope",
+                "source",
+                "status",
+            },
+            msg="#1430: power_profile carries no resolution or quality label; "
+            "expected one once downsampled input is labelled",
+        )
+        self.assertFalse(
+            any(
+                "resolution" in point or "quality" in point
+                for point in profile["duration_curve"]
+            ),
+            msg="#1430: best-effort points carry no resolution label",
         )
         empty = power_profile({"type": "Ride", "streams": {}})
         self.assertEqual(

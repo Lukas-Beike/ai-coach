@@ -5,7 +5,7 @@ Every method with an evidence card SHALL have synthetic input fixtures for one c
 
 #### Scenario: Incomplete input
 - **WHEN** a required input is missing for a method (for example no session RPE, too few earlier nights, or only a downsampled stream)
-- **THEN** the fixture asserts that no value is produced or that the input is excluded, with the status or reason the current code gives.
+- **THEN** the fixture asserts that no value is produced or that the input is excluded, with the status or reason the current code gives; where current code still produces a value from that input, the fixture pins it as a known gap naming the owning issue.
 
 #### Scenario: Contradictory providers
 - **WHEN** two providers report different values for the same input
