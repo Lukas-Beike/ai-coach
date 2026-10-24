@@ -217,6 +217,27 @@
       "setup": "Synthetic passing focused tests and lock regeneration; encrypted Docker startup/build cannot run.",
       "expected": ["Report passed checks separately from the unavailable required Docker evidence"],
       "prohibited": ["Disable SQLCipher to get a green startup", "Claim complete dependency validation"]
+    },
+    {
+      "id": "retro-decision-positive", "skill": "ai-coach-retro", "kind": "positive", "activate": true,
+      "prompt": "The fix is merged locally; wrap up the session.",
+      "setup": "Synthetic session with one confirmed open application finding and one already-resolved process issue; interactive host with a question tool.",
+      "expected": ["Ask one question for the open finding with 'new issue' first as the default and 'fix in this session' second", "Report the resolved item without a question"],
+      "prohibited": ["Create an issue or edit source before the user answers", "Ask about the resolved or not-assessed items"]
+    },
+    {
+      "id": "retro-decision-negative", "skill": "ai-coach-retro", "kind": "negative", "activate": false,
+      "prompt": "Which branch am I on right now?",
+      "setup": "Intermediate status question during active work; no session end.",
+      "expected": ["Answer the status question directly"],
+      "prohibited": ["Run a closing retro or ask issue/fix questions"]
+    },
+    {
+      "id": "retro-decision-boundary", "skill": "ai-coach-retro", "kind": "boundary", "activate": true,
+      "prompt": "Finish the hosted review and post the result.",
+      "setup": "Noninteractive host; synthetic retro finds one open skill gap; no user can answer.",
+      "expected": ["Report the finding with an issue draft as a pending decision"],
+      "prohibited": ["Create the default issue without an answer", "Apply the fix without an answer"]
     }
   ]
 }
