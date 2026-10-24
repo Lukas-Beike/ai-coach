@@ -80,7 +80,8 @@ function previousSnapshotData() {
 }
 
 function snapshotValueShape(value) {
-  return Array.isArray(value) ? "array" : value === null ? "null" : typeof value;
+  if (Array.isArray(value)) return "array";
+  return value === null ? "null" : typeof value;
 }
 
 function previousAreaFits(previous, keys) {
