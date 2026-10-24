@@ -70,19 +70,38 @@ function areaSnapshotKeys(area) {
   return area === "performance" ? ["performance", providerIds().garmin, "activities"] : AREA_SNAPSHOT_KEYS[area] || [];
 }
 
+// Also the snapshot of the previous app version: after an update a failed area
+// keeps its stored data while that data still has the current shape.
 function previousSnapshotData() {
   try {
     const snapshot = JSON.parse(localStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
-    return snapshot?.asset === STATE_SNAPSHOT_ASSET && snapshot.data && typeof snapshot.data === "object" ? snapshot.data : {};
+    return snapshot?.data && typeof snapshot.data === "object" ? snapshot.data : {};
   } catch { return {}; }
 }
 
+function snapshotValueShape(value) {
+  if (Array.isArray(value)) return "array";
+  return value === null ? "null" : typeof value;
+}
+
+function previousAreaFits(previous, keys) {
+  return keys.some((key) => key in previous) && keys.every((key) => previous[key] == null || state.data?.[key] == null
+    || snapshotValueShape(previous[key]) === snapshotValueShape(state.data[key]));
+}
+
 // The current state, with the stored keys of areas that are pending or failed.
+// Without fitting stored data these keys are left out, so placeholders are never
+// stored; only data shown from the snapshot itself is kept.
 function stateSnapshotData() {
   const previous = stateSnapshotFailedAreas.length ? previousSnapshotData() : {};
   const data = { ...state.data };
   for (const area of stateSnapshotFailedAreas) {
-    for (const key of areaSnapshotKeys(area)) if (key && key in previous) data[key] = previous[key];
+    const keys = areaSnapshotKeys(area).filter(Boolean);
+    const fits = previousAreaFits(previous, keys);
+    for (const key of keys) {
+      if (fits && key in previous) data[key] = previous[key];
+      else if (!stateSnapshotShown) delete data[key];
+    }
   }
   return data;
 }
@@ -318,8 +337,9 @@ function stateLoadRequest(path, requestedAreas) {
 async function renderAreasAsTheyArrive(domainData, areas, load) {
   const { current, payload, bootstrap, chatGeneration, chatContentVersion, liveVersions, liveAreasOnly } = load;
   const failures = [];
-  // Areas without loaded data yet, still pending or failed, keep their stored values.
-  const unsettled = new Set(areas);
+  // Areas without loaded data yet, still pending or failed, keep their stored values;
+  // a failed area stays so until a later load brings its data.
+  const unsettled = new Set(liveAreasOnly ? areas : [...areas, ...stateSnapshotFailedAreas]);
   if (areas.has("plan")) unsettled.delete("weather");
   let rendered = false;
   await Promise.all(domainData.map(async (request) => {
@@ -409,6 +429,7 @@ function load(path = "/api/bootstrap", requestedAreas = null) {
     state.loadPromise = null;
     // Versions are only "already requested" while their load chain is open.
     if (!state.pendingLoads.size && !state.deferredLoad) state.requestedStateVersions = {};
+    reloadForUpdateWhenSafe();
   });
   state.loadPromise = tracked;
   return tracked;

@@ -97,6 +97,7 @@ function frontend({ eventSource = false } = {}) {
     renderSettings() {},
     renderQuickMessageTemplates() {},
     updateChatControls() {},
+    reloadForUpdateWhenSafe() {},
     renderMessages() {},
     rememberChatTurn() {},
     api(requestPath) {
