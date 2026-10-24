@@ -92,7 +92,7 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
       try {
-        const raw = rpe.value.trim(); const value = { activity_name: session?.name || "", activity_date: String(session?.started_at || "").slice(0, 40), notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
+        const raw = rpe.value.trim(); const value = { activity_name: session?.name || "", activity_date: localDateTime(session?.started_at), notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
         if (raw !== "" && (!Number.isFinite(value.session_rpe) || value.session_rpe < 0 || value.session_rpe > 10)) throw new Error("RPE muss zwischen 0 und 10 liegen.");
         const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });
         status.textContent = result.activity_feedback ? "Feedback gespeichert." : "Feedback entfernt.";
@@ -100,6 +100,14 @@
     });
   }
 
+
+  // Feedback keeps the local wall-clock start, as the provider's local start did.
+  function localDateTime(value) {
+    const date = new Date(value || "");
+    if (Number.isNaN(date.getTime())) return "";
+    const pad = (number) => String(number).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
 
   function renderMetadata(session, metrics, content) {
     const duration = metrics.moving_duration_s ?? metrics.duration_s;

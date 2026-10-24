@@ -25,7 +25,11 @@ from backend.canonical.vocabulary import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
 from backend.errors import AppError, ProviderErrorClassifier, provider_error
-from backend.sync.activity_detail_canonical import CanonicalDetailWriter
+from backend.sync.activity_detail_canonical import (
+    CanonicalDetailWriter,
+    DetailWriteOutcome,
+    DetailWriteResult,
+)
 from backend.sync.activity_details import (
     MAX_STREAM_POINTS,
     ActivityDetailRefreshService,
@@ -596,6 +600,17 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertEqual("2026-10-19", self.store.prefetch_floor())
 
 
+class UnstoredWriter(CanonicalDetailWriter):
+    """A writer whose fetch write stores nothing."""
+
+    def __init__(self, outcome):
+        super().__init__()
+        self.outcome = outcome
+
+    def write_fetch(self, db, **kwargs):
+        return DetailWriteResult(self.outcome)
+
+
 class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
     """A refresh writes only canonical rows and clears the failure note with them."""
 
@@ -680,6 +695,23 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
         self.assertEqual([], kv_detail_keys(self.manager))
         # The failure note rolls back with the rows that would have replaced it.
         self.assertIn("9001", self.store.failures(["9001"]))
+
+    def test_unstored_write_fails_and_keeps_the_failure_note(self):
+        for outcome in (DetailWriteOutcome.NO_RECORD, DetailWriteOutcome.INVALID):
+            with self.subTest(outcome):
+                self.save_failure()
+                with self.assertRaises(AppError) as raised:
+                    self.service(UnstoredWriter(outcome)).refresh("9001")
+                self.assertEqual(502, raised.exception.status)
+                self.assertIn("9001", self.store.failures(["9001"]))
+
+    def test_prefetch_records_a_failure_when_nothing_was_stored(self):
+        service = self.service(UnstoredWriter(DetailWriteOutcome.NO_RECORD))
+        self.assertEqual({"fetched": 0, "failed": 1}, service.prefetch_new())
+        self.assertIn("9001", self.store.failures(["9001"]))
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 0, "failed": 0}, service.prefetch_new())
+        self.api.get.assert_not_called()
 
     def test_frozen_targets_are_reused_from_the_canonical_analysis(self):
         self.service(CanonicalDetailWriter()).refresh("9001")

@@ -43,7 +43,10 @@ from backend.providers.intervals_activity_fields import (
     activity_detail_laps,
 )
 from backend.runtime.ports import ActivityRowReader
-from backend.sync.activity_detail_canonical import CanonicalDetailWriter
+from backend.sync.activity_detail_canonical import (
+    CanonicalDetailWriter,
+    DetailWriteOutcome,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +59,7 @@ MAX_PREFETCH_PER_RUN = 25
 PREFETCH_LOOKUP_BATCH = 100
 MAX_DETAIL_BYTES = 24 * 1024 * 1024
 _INTERVALS = ProviderId.INTERVALS.value
+_NOT_STORED = frozenset({DetailWriteOutcome.NO_RECORD, DetailWriteOutcome.INVALID})
 ACTIVITY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
 
 
@@ -184,7 +188,13 @@ class ActivityDetailRefreshService:
                 record=record,
                 now=observed_at,
             )
-            self._store.clear_failure_in(db, activity_id)
+            if written.outcome not in _NOT_STORED:
+                self._store.clear_failure_in(db, activity_id)
+        if written.outcome in _NOT_STORED:
+            # Nothing was stored, so a failure note keeps prefetch from retrying it.
+            raise AppError(
+                502, "Die Detaildaten konnten lokal nicht gespeichert werden."
+            )
         if written.issues:
             _LOGGER.warning(
                 "activity detail mapping produced issues",
