@@ -85,7 +85,11 @@ A dry-run resolution of `graphifyy[mcp]==0.9.93` on Windows/Python 3.14 yields
 7. **Explicit prune.** `python scripts/graphify_local.py prune` removes sibling
    environments in the shared base other than the current name, skipping any
    whose lock is held, and prints what it removed. Only `prune` deletes shared
-   environments.
+   environments. Every command that runs from an environment holds a lease
+   file next to it, registered under the environment lock; `prune` and `setup`
+   keep an environment while any lease is held, because Windows allows renaming
+   a directory that a running process uses. The lock hash ignores CRLF versus LF
+   so checkouts with different line-ending settings share one environment.
 8. **Python preparation entry point.** `scripts/prepare_worktree.py` resolves
    the repository root, runs `npm ci --ignore-scripts` (resolving `npm`/
    `npm.cmd` via `shutil.which`), then `graphify_local.py setup`, then

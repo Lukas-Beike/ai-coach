@@ -768,7 +768,7 @@ As a manual fallback, run `python scripts/graphify_local.py setup`, then
 `python scripts/graphify_local.py update`. Setup serializes creation, verifies
 every package hash and reuses a ready environment without installing again.
 `python scripts/graphify_local.py prune` explicitly removes other unlocked shared
-environments; nothing prunes automatically. Old `.graphify-local/venv` directories
+environments that no running Graphify command uses; nothing prunes automatically. Old `.graphify-local/venv` directories
 are unused and may be removed manually. Only setup and worktree preparation may
 download packages; subsequent graph operations stay offline. Use
 `status`, `query <terms>`, `path <source> <target>`, and `explain <symbol>` to

@@ -39,7 +39,7 @@ normal tools before proceeding.
 Commands (run from the repository root):
 
 - `python scripts/graphify_local.py setup` prepares or reuses the shared environment.
-- `python scripts/graphify_local.py prune` removes other unlocked shared environments; nothing prunes automatically.
+- `python scripts/graphify_local.py prune` removes other unlocked shared environments that no running Graphify command uses; nothing prunes automatically.
 - `python scripts/graphify_local.py update` generates or refreshes the graph.
 - `python scripts/graphify_local.py status` reports local availability/freshness.
 - `python scripts/graphify_local.py query <terms>` searches the active graph.

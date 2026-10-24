@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -15,6 +16,9 @@ from unittest.mock import patch
 
 from scripts import graphify_local as graph
 from scripts import prepare_worktree as prepare
+
+REPO = Path(__file__).resolve().parents[1]
+LEASE_HOLDER = Path(__file__).with_name("graphify_lease_holder.py")
 
 
 class GraphifySetupTests(unittest.TestCase):
@@ -251,6 +255,68 @@ class GraphifySetupTests(unittest.TestCase):
         self.assertTrue((old / "ready.json").is_file())
         self.assertTrue((current / "incomplete").is_file())
         self.assertFalse(leftover.exists())
+
+    def _lease_holder(self, environment):
+        holder = subprocess.Popen(
+            [sys.executable, str(LEASE_HOLDER), str(environment)],
+            cwd=REPO,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+
+        def stop():
+            holder.kill()
+            holder.wait(timeout=30)
+            holder.stdin.close()
+            holder.stdout.close()
+
+        self.addCleanup(stop)
+        self.assertEqual(holder.stdout.readline().strip(), "leased")
+        return holder
+
+    def test_prune_and_setup_keep_environments_leased_by_a_running_process(self):
+        current = graph.shared_environment()
+        current.mkdir(parents=True)
+        (current / "incomplete").touch()
+        old = current.parent / ("0.8.1-" + "a" * 16)
+        old.mkdir()
+        (old / "ready.json").write_text("{}")
+        self._lease_holder(current)
+        old_holder = self._lease_holder(old)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(graph._prune(), 0)
+            with (
+                patch.object(graph.subprocess, "run", side_effect=self.fake_run),
+                self.assertRaises(graph.EnvironmentInUse),
+            ):
+                graph._setup(self.root)
+        self.assertIn(f"retained (in use): {old.name}", output.getvalue())
+        self.assertTrue((old / "ready.json").is_file())
+        self.assertTrue((current / "incomplete").is_file())
+        # A killed process leaves its lease file, but no longer holds it.
+        old_holder.kill()
+        old_holder.wait(timeout=30)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(graph._prune(), 0)
+        self.assertIn(f"removed: {old.name}", output.getvalue())
+        self.assertFalse(old.exists())
+        self.assertEqual(list(graph._leases(old).iterdir()), [])
+
+    def test_finished_lease_is_released_and_removed(self):
+        environment = graph.shared_environment()
+        with graph.environment_lease(environment, time.monotonic() + 5):
+            self.assertTrue(graph._in_use(environment))
+        self.assertFalse(graph._in_use(environment))
+        self.assertEqual(list(graph._leases(environment).iterdir()), [])
+
+    def test_lock_line_endings_do_not_change_the_environment(self):
+        content = self.lock.read_bytes().replace(b"\r\n", b"\n")
+        names = set()
+        for data in (content, content.replace(b"\n", b"\r\n")):
+            self.lock.write_bytes(data)
+            names.add(graph.environment_name(graph.lock_identity()))
+        self.assertEqual(len(names), 1)
 
     def test_navigation_and_session_start_never_install_even_when_missing(self):
         commands = (
@@ -578,6 +644,9 @@ class WorktreePreparationTests(unittest.TestCase):
                 tempfile.TemporaryDirectory() as temp,
                 patch.object(graph, "repo_root", return_value=Path(temp)),
                 patch.object(graph, "verify_version", return_value=True),
+                patch.object(
+                    graph, "environment_lease", return_value=contextlib.nullcontext()
+                ),
                 patch.object(graph.time, "monotonic", return_value=100),
                 patch.object(
                     graph, "process_lock", return_value=contextlib.nullcontext()

@@ -134,6 +134,10 @@ class GraphifyLocalTests(unittest.TestCase):
         scanner_path = patch.object(graph.shutil, "which", return_value=str(scanner))
         scanner_path.start()
         self.addCleanup(scanner_path.stop)
+        # Environment leases must never touch the real shared directory.
+        shared = patch.object(graph, "shared_base", return_value=self.root / "shared")
+        shared.start()
+        self.addCleanup(shared.stop)
         (self.root / ".gitignore").write_text(".graphify-local/\ngraphify-out/\n")
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         (self.root / "backend").mkdir()

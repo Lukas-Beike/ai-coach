@@ -107,6 +107,10 @@ class Unavailable(RuntimeError):
     pass
 
 
+class EnvironmentInUse(Unavailable):
+    pass
+
+
 def repo_root(start: Path | None = None) -> Path:
     result = subprocess.run(
         [
@@ -147,7 +151,10 @@ def lock_identity() -> dict[str, str]:
         raise Unavailable("missing or ambiguous Graphify lock pin")
     return {
         "version": version,
-        "lock_sha256": hashlib.sha256(LOCK_FILE.read_bytes()).hexdigest(),
+        # Line endings depend on checkout settings, not on the pinned content.
+        "lock_sha256": hashlib.sha256(
+            LOCK_FILE.read_bytes().replace(b"\r\n", b"\n")
+        ).hexdigest(),
     }
 
 
@@ -824,23 +831,24 @@ def _update_locked(root: Path, base: Path, deadline: float) -> None:
 def update(root: Path, *, preparation: bool = False) -> int:
     deadline = time.monotonic() + (PREPARATION_TIMEOUT if preparation else TIMEOUT)
     base = runtime(root)
-    # Avoid a long source scan when the shared environment needs preparation.
-    if not verify_version(root):
-        print(
-            f"Graphify local: unavailable (Graphify {VERSION} unavailable; run setup)"
-        )
-        return 2
     try:
-        with process_lock(base / "update.lock", deadline):
-            try:
-                _update_locked(root, base, deadline)
-            except Unavailable as exc:
-                # A branch rename or save during the scan; unchanged content
-                # is not rescanned, so one retry is cheap.
-                if str(exc) != SOURCE_CHANGED:
-                    raise
-                _update_locked(root, base, deadline)
-            return 0
+        with environment_lease(shared_environment(), deadline):
+            # Avoid a long source scan when the shared environment needs preparation.
+            if not verify_version(root):
+                print(
+                    f"Graphify local: unavailable (Graphify {VERSION} unavailable; run setup)"
+                )
+                return 2
+            with process_lock(base / "update.lock", deadline):
+                try:
+                    _update_locked(root, base, deadline)
+                except Unavailable as exc:
+                    # A branch rename or save during the scan; unchanged content
+                    # is not rescanned, so one retry is cheap.
+                    if str(exc) != SOURCE_CHANGED:
+                        raise
+                    _update_locked(root, base, deadline)
+                return 0
     except (OSError, subprocess.SubprocessError, Unavailable) as exc:
         # Do not mutate current.json outside the updater lock. Freshness is
         # derived from the source fingerprint and graph pointer at read time.
@@ -890,12 +898,51 @@ def helper(
     ).returncode
 
 
-def _discard(path: Path) -> None:
-    """Delete a shared environment only after moving it out of use.
+def _leases(venv: Path) -> Path:
+    return venv.with_name(venv.name + ".leases")
 
-    The rename fails on Windows while a process runs from the environment, so
-    a partial deletion never leaves a directory that still looks ready.
+
+@contextlib.contextmanager
+def environment_lease(venv: Path, deadline: float):
+    """Mark the shared environment in use while this process runs from it.
+
+    Leases are registered under the environment lock, which setup and prune
+    hold while they check leases and delete, so no lease appears mid-delete.
     """
+    lease = _leases(venv) / f"{os.getpid()}-{uuid.uuid4().hex}"
+    with contextlib.ExitStack() as stack:
+        with process_lock(venv.with_name(venv.name + ".lock"), deadline):
+            lease.parent.mkdir(parents=True, exist_ok=True)
+            # Runs after the lease handle closes; Windows cannot unlink it open.
+            stack.callback(lease.unlink, missing_ok=True)
+            stack.enter_context(process_lock(lease))
+        yield
+
+
+def _in_use(venv: Path) -> bool:
+    """Report held leases and remove those left behind by exited processes."""
+    if not _leases(venv).is_dir():
+        return False
+    held = False
+    for lease in sorted(_leases(venv).iterdir()):
+        try:
+            with process_lock(lease, time.monotonic() + 0.2):
+                pass
+        except Unavailable:
+            held = True
+            continue
+        lease.unlink(missing_ok=True)
+    return held
+
+
+def _discard(path: Path) -> None:
+    """Delete a shared environment that no process holds a lease on.
+
+    Callers hold the environment lock. Moving the directory first means a
+    partial deletion never leaves a directory that still looks ready.
+    """
+    if _in_use(path):
+        raise EnvironmentInUse(f"shared environment {path.name} is in use")
     doomed = path.with_name(f".deleting-{uuid.uuid4().hex}")
     path.rename(doomed)
     shutil.rmtree(doomed, ignore_errors=True)
@@ -968,6 +1015,8 @@ def _prune() -> int:
             ):
                 _discard(candidate)
                 print(f"Graphify removed: {candidate.name}")
+        except EnvironmentInUse:
+            print(f"Graphify retained (in use): {candidate.name}")
         except Unavailable:
             print(f"Graphify retained (locked): {candidate.name}")
         except OSError:
@@ -1072,12 +1121,13 @@ def _dispatch(root: Path, args: argparse.Namespace) -> int:
         return _prune()
     if args.command == "update":
         return update(root, preparation=args.preparation)
-    if args.command == "status":
-        return _status(root)
-    if not verify_version(root):
-        raise Unavailable("pinned Graphify unavailable; run setup")
-    generation, graph = active_graph(root)
-    return _graph_command(root, args, generation, graph)
+    with environment_lease(shared_environment(), time.monotonic() + TIMEOUT):
+        if args.command == "status":
+            return _status(root)
+        if not verify_version(root):
+            raise Unavailable("pinned Graphify unavailable; run setup")
+        generation, graph = active_graph(root)
+        return _graph_command(root, args, generation, graph)
 
 
 def main(argv: list[str] | None = None) -> int:
