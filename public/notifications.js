@@ -76,6 +76,8 @@ function registerServiceWorker() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") reloadForUpdateWhenSafe();
   });
+  // Leaving a field may end the last edit; focus moves on after focusout.
+  document.addEventListener("focusout", () => setTimeout(reloadForUpdateWhenSafe, 0));
   navigator.serviceWorker.register("/service-worker.js").catch(() => {});
 }
 
@@ -85,8 +87,19 @@ function registerServiceWorker() {
 let serviceWorkerReplaced = false;
 let serviceWorkerReloaded = false;
 
+// Settings fields that start empty, so any value in them is still being entered.
+const UPDATE_RELOAD_INPUT_FIELDS = "#cred-form-openai input, #cred-form-intervals input, #cred-form-wahoo input, #garmin-login-form input, #garmin-mfa-form input, #nutritionProductQuery";
+
+function pageInputPending() {
+  const active = document.activeElement;
+  return Boolean(active?.matches?.("input, textarea, select") && !active.closest?.("#chatForm"))
+    || [...document.querySelectorAll(UPDATE_RELOAD_INPUT_FIELDS)].some((field) => field.value.trim())
+    || (typeof providerCredentialBusy !== "undefined" && providerCredentialBusy.size > 0)
+    || Boolean($("#calendarDisplaySaveButton")?.disabled);
+}
+
 function updateReloadIsSafe() {
-  return !hasUnsavedChanges()
+  return !hasUnsavedChanges() && !pageInputPending()
     && !(state.chatAttachments || []).length && !state.chatAttachmentsLoading
     && !chatStatusJobActive() && !voiceIsRecording() && !state.voiceTranscribing
     && !state.loadPromise && !$("#backupRestoreButton")?.disabled && !$("dialog[open]");

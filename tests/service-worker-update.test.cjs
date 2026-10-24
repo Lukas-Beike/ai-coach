@@ -59,7 +59,9 @@ test("an activated service worker removes old caches and controls open pages", a
 function page({ controlled = true } = {}) {
   const workerListeners = {};
   const documentListeners = {};
-  const nodes = { "#messageInput": { value: "" }, "#backupRestoreButton": { disabled: false }, "dialog[open]": null };
+  const nodes = { "#messageInput": { value: "" }, "#backupRestoreButton": { disabled: false }, "#calendarDisplaySaveButton": { disabled: false }, "dialog[open]": null };
+  const credentialFields = [{ value: "" }, { value: "" }];
+  const providerCredentialBusy = new Set();
   const pendingTurn = new Map();
   const state = {
     profileDirty: false,
@@ -78,13 +80,17 @@ function page({ controlled = true } = {}) {
   };
   const document = {
     visibilityState: "visible",
+    activeElement: null,
     querySelector: (selector) => nodes[selector] ?? null,
+    querySelectorAll: (selector) => (selector.includes("#cred-form-openai input") ? credentialFields : []),
     addEventListener: (type, handler) => { documentListeners[type] = handler; },
   };
   const reloads = [];
   const context = vm.createContext({
     state,
     document,
+    providerCredentialBusy,
+    setTimeout: (handler) => handler(),
     sessionStorage: { getItem: (key) => pendingTurn.get(key) ?? null },
     location: { reload: () => reloads.push(1) },
     navigator: {
@@ -108,6 +114,10 @@ function page({ controlled = true } = {}) {
     context,
     state,
     nodes,
+    document,
+    credentialFields,
+    providerCredentialBusy,
+    leaveField: () => { document.activeElement = null; documentListeners.focusout(); },
     pendingTurn,
     reloads,
     replaceWorker: () => workerListeners.controllerchange(),
@@ -163,6 +173,13 @@ const blockers = {
   "a state load": ({ state }) => { state.loadPromise = Promise.resolve(); return () => { state.loadPromise = null; }; },
   "a backup restore": ({ nodes }) => { nodes["#backupRestoreButton"].disabled = true; return () => { nodes["#backupRestoreButton"].disabled = false; }; },
   "an open dialog": ({ nodes }) => { nodes["dialog[open]"] = {}; return () => { nodes["dialog[open]"] = null; }; },
+  "a typed credential": ({ credentialFields }) => { credentialFields[1].value = "123456"; return () => { credentialFields[1].value = ""; }; },
+  "a credential save": ({ providerCredentialBusy }) => { providerCredentialBusy.add("garmin-login"); return () => { providerCredentialBusy.clear(); }; },
+  "a calendar settings save": ({ nodes }) => { nodes["#calendarDisplaySaveButton"].disabled = true; return () => { nodes["#calendarDisplaySaveButton"].disabled = false; }; },
+  "a focused settings field": ({ document }) => {
+    document.activeElement = { matches: () => true, closest: () => null };
+    return () => { document.activeElement = null; };
+  },
 };
 
 for (const [name, block] of Object.entries(blockers)) {
@@ -186,6 +203,22 @@ test("a hidden page runs a held update reload once nothing is in progress", () =
   assert.equal(view.reloads.length, 0);
   clear();
   view.hide();
+  assert.equal(view.reloads.length, 1);
+});
+
+test("a focused empty chat input does not hold the update reload", () => {
+  const view = page();
+  view.document.activeElement = { matches: () => true, closest: (selector) => (selector === "#chatForm" ? {} : null) };
+  view.replaceWorker();
+  assert.equal(view.reloads.length, 1);
+});
+
+test("leaving a settings field runs a held update reload", () => {
+  const view = page();
+  blockers["a focused settings field"](view);
+  view.replaceWorker();
+  assert.equal(view.reloads.length, 0);
+  view.leaveField();
   assert.equal(view.reloads.length, 1);
 });
 
