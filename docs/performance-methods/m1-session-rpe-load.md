@@ -98,6 +98,8 @@ endurance athlete.
 | Duration unit | minutes | source | R1 uses minutes for 30/60/90-min bouts. |
 | Duration includes warm-up and cool-down | yes | product assumption | R1 text read does not say; R2 rated sessions including warm-up and cool-down. Decided to match the rated whole session. |
 | Fallback rating source | Intervals `icu_rpe` only without local rating | product assumption | Decision D3 on #1406; keeps provider value labelled and separate. |
+| Existing ATL reconstruction decay (not M1) | exp(-1/7) per day | product assumption | `backend/performance/load.py:121`; fitness-fatigue form from R17, the 7-day constant is not individually validated. Applies to imported load, never to AU. |
+| Existing scenario model constants (not M1) | 42 and 7 days | product assumption | `backend/planning/season_preparation.py:260` and `:478-479`; R17 model form, parameters not validated for this athlete. |
 | Duplicate session matching | start within 30 min, duration within max(120 s, 10 %), distance within max(500 m, 10 %) | product assumption | Existing canonical session bundling in `bundle_sessions`; not a scientific rule. |
 
 ## Allowed statements
@@ -127,3 +129,5 @@ endurance athlete.
 - Choose the canonical elapsed-duration field and its behaviour for Garmin
   records that have only moving time (#1423, #1425).
 - R2 full text (participant count, duration definition) was not reachable.
+- Funding and declared interests of the cited sources are not yet recorded
+  (see README).

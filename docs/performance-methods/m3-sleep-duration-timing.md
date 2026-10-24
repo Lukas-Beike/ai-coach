@@ -56,8 +56,10 @@ configured timezone.
 R12: research-grade and consumer devices overestimate sleep duration and
 underestimate wake after sleep onset versus polysomnography, and do worse in
 fragmented sleep. No error figure is available for the athlete's device. The
-shortfall sum has no uncertainty interval; missing nights and unrecorded naps
-make it a lower-bound bookkeeping figure only.
+shortfall sum has no uncertainty interval. It is bookkeeping over recorded
+duration on known nights only: missing nights leave it incomplete, unrecorded
+naps can make it larger than a shortfall of total sleep, and device error has
+no known direction.
 
 ## Bias and transferability
 
@@ -72,6 +74,9 @@ usually absent from the provider data used here.
 - Timing deviation uses one main interval per night, not a sleep/wake series
   with naps, so it cannot be an SRI.
 - The goal is entered by the athlete, not derived from measured need.
+- Current `sleep-regularity-v1` still computes medians and per-night
+  deviations from any number of earlier intervals and only marks the status
+  `insufficient_data` (`personal_recovery.py:384-403`).
 - Today the path walks raw provider payloads for start/end fields; canonical
   sleep periods are pending (#1411, #1419).
 
@@ -81,8 +86,9 @@ usually absent from the provider data used here.
   is a valid state.
 - Shortfall status `ok` only with 7 known nights, otherwise `partial` with the
   known count.
-- Timing: fewer than 14 earlier intervals gives no comparison; 14 to 27 is
-  `provisional`; 28 or more is `ok`.
+- Timing: fewer than 14 earlier intervals gives status `insufficient_data`;
+  14 to 27 is `provisional`; 28 or more is `ok`. Required for M3: no deviation
+  is shown or interpreted below 14.
 - Durations above 24 h and non-positive values are excluded.
 - SRI enters scope only with a sufficiently complete sleep/wake series
   including daytime segments, and with the exact calculator named.
@@ -99,6 +105,8 @@ usually absent from the provider data used here.
 | Timing history loaded | 83 days | product assumption | Existing rule, `personal_recovery.py:327`. |
 | Minimum earlier intervals | 14 | product assumption | Existing rule, `personal_recovery.py:377`; no source fixes a minimum. |
 | Intervals for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:379`. |
+| Shortfall rounding | 0.01 h after summing | product assumption | Existing rule, `personal_recovery.py:192-193`; display precision only. |
+| Deviation rounding | 0.1 min | product assumption | Existing rule, `personal_recovery.py:361`; display precision only. |
 | Circular day length | 1,440 min | source | Clock time wraps at midnight; R13 also uses 24-h comparison. |
 | No blanket sleep target | individual goal only | source | R12 recommends individual sleep needs over 7-9 h for everyone. |
 
@@ -126,3 +134,5 @@ usually absent from the provider data used here.
 - Decide whether naps are recorded compatibly enough to be added to duration.
 - SRI stays out of scope until a full sleep/wake series exists; then name the
   calculator and settings.
+- Funding and declared interests of the cited sources are not yet recorded
+  (see README).

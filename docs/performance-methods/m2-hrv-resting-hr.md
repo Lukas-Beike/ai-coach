@@ -131,3 +131,5 @@ critical industry letter in response (see register).
 - Canonical reads for HRV and sleep inputs (#1411) and method/aggregation
   fields (#1418).
 - Garmin resting HR has no validation data in R10.
+- Funding and declared interests of the cited sources are not yet recorded
+  (see README).

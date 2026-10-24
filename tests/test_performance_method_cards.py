@@ -50,7 +50,8 @@ FRONT_FIELD = re.compile(r"^- \*\*([^*]+):\*\* (.+)$", re.MULTILINE)
 SECTION = re.compile(r"^## (.+)$", re.MULTILINE)
 EVIDENCE_ID = re.compile(r"\b(R\d{1,2}|L\d)\b")
 REGISTER_ROW = re.compile(r"^\| (R\d{1,2}|L\d) \|", re.MULTILINE)
-REVIEW = re.compile(r"^(blocked|released \d{4}-\d{2}-\d{2} \([^)]+\))\b")
+REVIEW = re.compile(r"blocked|released \d{4}-\d{2}-\d{2} \([^)]+\)")
+VERSION = re.compile(r"[1-9]\d*")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -87,7 +88,9 @@ def card_problems(card: str, known_ids: set[str]) -> list[str]:
     problems += [f"missing field {name}" for name in FRONT_FIELDS if name not in front]
     if front.get("Classification") not in CLASSIFICATIONS:
         problems.append("invalid classification")
-    if not REVIEW.match(front.get("Review", "")):
+    if not VERSION.fullmatch(front.get("Card version", "")):
+        problems.append("invalid card version")
+    if not REVIEW.fullmatch(front.get("Review", "")):
         problems.append("invalid review state")
     if not DATE.match(front.get("Literature checked", "")):
         problems.append("invalid literature check date")
@@ -101,7 +104,9 @@ def card_problems(card: str, known_ids: set[str]) -> list[str]:
     if not rules:
         problems.append("numeric rules table missing or malformed")
     for row in rules:
-        if len(row) < 4 or row[2] not in TAGS or not row[3]:
+        if len(row) < 4 or not row[0] or not row[1]:
+            problems.append(f"incomplete numeric rule {row[0]}")
+        elif row[2] not in TAGS or not row[3]:
             problems.append(f"untagged numeric rule {row[0]}")
         elif row[2] == "source" and not EVIDENCE_ID.search(row[3]):
             problems.append(f"source rule without evidence ID {row[0]}")
@@ -140,6 +145,25 @@ class PerformanceMethodCardTests(unittest.TestCase):
         self.assertIn("missing section Open points", problems)
         self.assertIn("unknown evidence ID R99", problems)
         self.assertTrue(any(item.startswith("untagged") for item in problems))
+
+    def test_check_validates_front_values_and_rule_cells(self) -> None:
+        card = (CARDS_DIR / CARD_NAMES[0]).read_text("utf-8")
+        blocked = "- **Review:** blocked"
+        released = card.replace(
+            blocked, "- **Review:** released 2026-10-24 (athlete)", 1
+        )
+        self.assertEqual(card_problems(released, self.known_ids), [])
+        for review in ("blocked junk", "released 2026-10-24 (athlete)x"):
+            with self.subTest(review=review):
+                broken = card.replace(blocked, f"- **Review:** {review}", 1)
+                self.assertIn(
+                    "invalid review state", card_problems(broken, self.known_ids)
+                )
+        broken = card.replace("- **Card version:** 1", "- **Card version:** x", 1)
+        self.assertIn("invalid card version", card_problems(broken, self.known_ids))
+        broken = card.replace("| Rating scale range | 0 to 10 |", "|  |  |", 1)
+        problems = card_problems(broken, self.known_ids)
+        self.assertTrue(any(item.startswith("incomplete") for item in problems))
 
 
 if __name__ == "__main__":

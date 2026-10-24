@@ -52,8 +52,9 @@ recreational marathon runners, no lab reference.
   min from training and race files. These are checked, not prompted: the app
   does not ask the athlete to do maximal tests.
 - Running: a running-specific protocol from R5, with fixed durations or
-  distances of 3 to 12 min, trials longest to shortest or randomised, at least
-  7 min recovery between trials. CP protocols are not transferred to running.
+  distances of 3 to 12 min whose durations differ by at least 7 min, trials
+  longest to shortest or randomised. Recovery comes from the selected original
+  running study, not from R5. CP protocols are not transferred to running.
 - Inputs need real power for cycling and reliable time and distance for
   running. Record test intent, date, recovery, sensor, indoor/outdoor and
   conditions, or mark them unknown.
@@ -105,7 +106,8 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 | Cycling effort durations | about 180, 420 and 720 s | source | R4 3/7/12-min protocol. |
 | Recovery between cycling efforts in one session | 30 min | source | R4 single-session protocol. |
 | Running trial durations | 3 to 12 min | source | R5 recommendation. |
-| Recovery between running trials | at least 7 min | source | R5; 3-4 min gaps failed validity criteria. |
+| Duration difference between running trials | at least 7 min | source | R5: shorter differences between trial durations failed validity criteria. Not a recovery time. |
+| Recovery between running trials | not fixed | product assumption | R5 reports 30-60 min in included studies; taken from the selected original study before use. |
 | Primary fit | work or distance on time | product assumption | Chosen in advance per #1431; other fit shown as sensitivity. |
 | Existing cycling windows | 5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600 s | product assumption | `backend/performance/power_profile.py:10`; display windows, not a CP protocol. |
 | Existing running windows | 60, 300, 1200 s; 1,000 and 5,000 m | product assumption | `backend/performance/power_profile.py:12-13`. |
@@ -131,8 +133,11 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 ## Open points
 
 - Fix residual, plausibility and sensitivity limits before real data.
-- Decide the running protocol from R5's included studies (full texts).
+- Decide the running protocol and its recovery from R5's included studies
+  (full texts).
 - Persistence of test protocols may need a schema migration from v9.
 - R4 participant count and recovery for its repeated-effort protocol were not
   reachable.
 - Passive CS from everyday runs (R16) stays deferred to M5.
+- Funding and declared interests of the cited sources are not yet recorded
+  (see README).
