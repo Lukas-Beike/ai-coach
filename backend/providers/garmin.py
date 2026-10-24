@@ -151,11 +151,16 @@ def targeted_analysis_sources() -> dict[str, dict[str, tuple[str | None, Any]]]:
                     aggregation="daily",
                 ),
             ),
-            "endurance_score": ("get_endurance_score", date_range),
+            "endurance_score": (
+                "get_endurance_score",
+                lambda method, first, last: method(
+                    first.isoformat(), last.isoformat(), aggregation="daily"
+                ),
+            ),
             "running_tolerance": (
                 "get_running_tolerance",
                 lambda method, first, last: method(
-                    first.isoformat(), last.isoformat(), aggregation="weekly"
+                    first.isoformat(), last.isoformat(), aggregation="daily"
                 ),
             ),
             "training_readiness_history": ("get_training_readiness_range", date_range),
@@ -1034,16 +1039,20 @@ def _collect_historic_metrics(
         (
             "endurance_score",
             getattr(client, "get_endurance_score", None),
-            lambda fetch: fetch(start.isoformat(), end.isoformat()),
-            "weekly",
+            # Weekly buckets are keyed by their week start and hide newer days;
+            # the analysis view picks the latest daily reading per week itself.
+            lambda fetch: fetch(
+                start.isoformat(), end.isoformat(), aggregation="daily"
+            ),
+            "daily",
         ),
         (
             "running_tolerance",
             getattr(client, "get_running_tolerance", None),
             lambda fetch: fetch(
-                start.isoformat(), end.isoformat(), aggregation="weekly"
+                start.isoformat(), end.isoformat(), aggregation="daily"
             ),
-            "weekly",
+            "daily",
         ),
         (
             "training_readiness_history",

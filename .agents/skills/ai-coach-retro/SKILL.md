@@ -82,8 +82,9 @@ application fix from a prevention measure; a skill edit does not fix runtime cod
   Use [UI design](../ai-coach-ui-design/SKILL.md) for a supported usability issue
   and [PWA validation](../ai-coach-pwa-e2e/SKILL.md) for browser evidence.
 - Use [PR/CI diagnosis](../ai-coach-pr-ci/SKILL.md) when hosted check evidence is
-  needed. A retro does not authorize PR comments, issue creation, pushes,
-  merges, deployments, provider writes, or relaxed gates.
+  needed. A retro alone does not authorize PR comments, issue creation, pushes,
+  merges, deployments, provider writes, or relaxed gates; only the per-finding
+  decision below authorizes an issue or an in-session fix.
 - Use [skill evaluation](../ai-coach-skill-evaluation/SKILL.md) to design or
   verify a proposed skill change. Include a positive case, a nearby non-trigger,
   and a relevant boundary. Static documentation checks do not demonstrate a
@@ -99,7 +100,7 @@ application fix from a prevention measure; a skill edit does not fix runtime cod
 
 A requested or mandatory closing retro authorizes analysis and safe, scoped
 reproduction, not automatic source/skill edits or new global memories. Continue improvements already expressly
-authorized in the session; otherwise report concrete proposals. Do not repeatedly
+authorized in the session; otherwise ask per finding as described below. Do not repeatedly
 ask permission for authorized work. Store temporary evidence outside tracked
 source; write a tracked report only when requested. Never modify personal/global
 skills, app caches, or memories as a side effect of learning.
@@ -124,8 +125,37 @@ coverage and limits across all three areas, checks run/unrun, and the inspected
 revision/state. No claim of exhaustive coverage, merged fixes, or measured gains
 without the relevant evidence.
 
+## Decide each finding with the user
+
+After the summary, present every actionable finding (confirmed and open, or a
+hypothesis with a concrete next check) as one question in the user's language.
+Skip resolved, not-assessed, and keep-as-is items. Each question names the ID,
+a one-line observation, impact, and proposed action, and offers exactly:
+
+1. **New issue (default, recommended, listed first)**: create one GitHub issue.
+2. **Fix in this session**: implement it now.
+
+Use the host's structured question tool when available, batching within its
+limits; otherwise ask in plain text with numbered findings. One answer such as
+"default" or "ok" applies the default to all unanswered findings. An explicit
+choice authorizes only that action for that finding. Without an answer, or on a
+noninteractive host, create nothing: report the findings with issue drafts as
+pending decisions.
+
+- **New issue**: search open issues for a duplicate first and link it instead
+  of filing another. Write the title as `<type>(<scope>): <description>` and the
+  body in English with observation, cause/hypothesis, impact, owning path,
+  proposed action, and success check. Never include athlete data, provider
+  payloads, credentials, or unredacted logs. Report each issue URL.
+- **Fix in this session**: follow the owning workflow, orchestration, and
+  validation as for any authorized change, then update this retro once with the
+  outcome; do not run a new retro on it.
+
+Answering these questions is part of the session close, not a new session end.
+
 When maintaining this skill, use skill evaluation with positive/non-trigger cases
 and boundaries: already-repaired defects, ignored correct instructions, failed
 CI wrappers without child evidence, missing historical evidence, passing tests
-with a broken synthetic UI flow, and retro-only versus authorized fixes.
+with a broken synthetic UI flow, retro-only versus authorized fixes, and
+per-finding issue/fix decisions including unanswered and noninteractive cases.
 Manual walkthroughs and static checks are not measured behavioral improvements.

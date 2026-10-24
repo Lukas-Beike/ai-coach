@@ -43,6 +43,42 @@ class AnalysisHistoryTests(unittest.TestCase):
             6850,
         )
 
+    def test_daily_weekly_view_metrics_reach_the_newest_measurement(self):
+        result = analysis_history(
+            None,
+            {
+                "endurance_score": {
+                    "groupMap": {
+                        day: {"groupAverage": score}
+                        for day, score in (
+                            ("2026-10-18", 6850),
+                            ("2026-10-21", 6870),
+                            ("2026-10-23", 6890),
+                        )
+                    },
+                    "enduranceScoreDTO": {
+                        "calendarDate": "2026-10-23",
+                        "overallScore": 6890,
+                    },
+                },
+                "running_tolerance": [
+                    {"calendarDate": "2026-10-18", "toleranceScore": 70},
+                    {"calendarDate": "2026-10-22", "toleranceScore": 72},
+                ],
+            },
+            date(2026, 10, 24),
+        )
+        endurance = result["provider_metrics"]["endurance_score"]
+        self.assertEqual(endurance["aggregation"], "daily")
+        self.assertEqual(endurance["observed_at"], "2026-10-23")
+        self.assertEqual(
+            [point["date"] for point in endurance["points"]],
+            ["2026-10-18", "2026-10-21", "2026-10-23"],
+        )
+        tolerance = result["provider_metrics"]["running_tolerance"]
+        self.assertEqual(tolerance["aggregation"], "daily")
+        self.assertEqual(tolerance["observed_at"], "2026-10-22")
+
     def test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load(
         self,
     ):

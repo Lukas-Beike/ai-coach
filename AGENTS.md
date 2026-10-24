@@ -165,7 +165,9 @@ findings or no actionable findings with limits. Intermediate questions, status
 updates, and waits for active work are not session endings. Do not recursively
 run a retro on its own report; update it only when substantive work follows.
 After an abrupt host stop, perform any missed retro on resumption before the
-next final handoff. A retro does not authorize additional fixes or remote actions.
+next final handoff. A retro alone does not authorize fixes or remote actions;
+it asks per finding whether to file a new issue (default) or fix it in-session,
+and only that answer authorizes the chosen action.
 
 For requested local security reviews or scans, use
 `.agents/skills/ai-coach-codex-security/SKILL.md`. Authenticate through the
