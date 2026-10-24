@@ -1,12 +1,13 @@
 ---
 name: pr
-description: "When the user's entire message is `pr`, rebase the current feature branch onto develop, repair conflicts, validate Conventional Commits and tests, run `/code-review` and resolve its findings, create a GitHub pull request, enable squash auto-merge, and monitor it through merge. Do not use for ordinary PR questions or longer requests."
+description: "Run the complete PR lifecycle for the standalone `pr` command or the authorized PR phase of deliver-issue: rebase onto develop, validate, review, create the PR, enable squash auto-merge, and monitor through merge. Do not use for ordinary PR questions or unrelated longer requests."
 ---
 
 # Pull Request Workflow
 
-Use this skill only when the user's message consists of the standalone command `pr` (ignoring
-surrounding whitespace). Treat that command as authorization for the complete workflow below,
+Use this skill when the user's message consists of the standalone command `pr` (ignoring
+surrounding whitespace), or when [deliver-issue](../deliver-issue/SKILL.md) invokes its PR
+phase under the user's explicit complete-delivery request. Treat either entry as authorization for the complete workflow below,
 including rewriting the current feature branch, pushing it, creating a pull request, enabling
 squash auto-merge, and fixing branch conflicts or failed CI tests. Keep the user updated at
 meaningful state changes.
