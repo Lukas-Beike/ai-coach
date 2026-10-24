@@ -22,7 +22,7 @@ LOCK_FILE = Path(__file__).resolve().parents[1] / "requirements-graphify.txt"
 def lock_version(path: Path) -> str:
     try:
         pins = re.findall(
-            r"(?m)^graphifyy(?:\[mcp\])?==([0-9]+(?:\.[0-9]+)+)\s*(?:\\)?$",
+            r"(?m)^graphifyy(?:\[mcp\])?==(\d+(?:\.\d+)+)\s*(?:\\)?$",
             path.read_text(encoding="utf-8"),
         )
         return pins[0] if len(pins) == 1 else ""
@@ -34,6 +34,7 @@ VERSION = lock_version(LOCK_FILE)
 WRAPPER_SCHEMA = 5
 TIMEOUT = 180
 PREPARATION_TIMEOUT = 600
+READY_FILE = "ready.json"
 LEASE_WAIT = 15
 EXTENSIONS = {
     ".py",
@@ -163,11 +164,15 @@ def environment_name(identity: dict[str, str]) -> str:
     return f"{identity['version']}-{identity['lock_sha256'][:16]}"
 
 
+def _environment_lock(venv: Path) -> Path:
+    return venv.with_name(venv.name + ".lock")
+
+
 def shared_environment() -> Path:
     return shared_base() / environment_name(lock_identity())
 
 
-def executable(root: Path) -> Path:
+def executable() -> Path:
     return (
         shared_environment()
         / ("Scripts" if os.name == "nt" else "bin")
@@ -175,8 +180,8 @@ def executable(root: Path) -> Path:
     )
 
 
-def python_executable(root: Path) -> Path:
-    return executable(root).with_name("python.exe" if os.name == "nt" else "python")
+def python_executable() -> Path:
+    return executable().with_name("python.exe" if os.name == "nt" else "python")
 
 
 def local_env(root: Path, graph_out: Path | None = None) -> dict[str, str]:
@@ -622,7 +627,7 @@ def generation_dir(root: Path, pointer: dict) -> Path:
 
 def verify_version(root: Path) -> bool:
     try:
-        if read_json(shared_environment() / "ready.json") != lock_identity():
+        if read_json(shared_environment() / READY_FILE) != lock_identity():
             return False
         return _installed_version(root)
     except OSError, Unavailable:
@@ -630,8 +635,8 @@ def verify_version(root: Path) -> bool:
 
 
 def _installed_version(root: Path, timeout: float = 10) -> bool:
-    py = python_executable(root)
-    if not py.is_file() or not executable(root).is_file():
+    py = python_executable()
+    if not py.is_file() or not executable().is_file():
         return False
     try:
         result = subprocess.run(
@@ -724,7 +729,7 @@ def _copy_inputs(
 
 def _run_graphify(root: Path, base: Path, inputs: Path, deadline: float) -> Path:
     out = base / "cache"
-    command = [str(executable(root)), "update", str(inputs), "--no-cluster"]
+    command = [str(executable()), "update", str(inputs), "--no-cluster"]
     result = subprocess.run(
         command,
         cwd=base,
@@ -884,7 +889,7 @@ def helper(
     script = Path(__file__).with_name("graphify_views.py").resolve()
     if not script.is_file():
         raise Unavailable("local graph view helper unavailable")
-    args = [str(python_executable(root)), str(script), command, str(graph)]
+    args = [str(python_executable()), str(script), command, str(graph)]
     if command == "export":
         if output is None:
             raise Unavailable("local graph export destination missing")
@@ -917,7 +922,7 @@ def environment_lease(venv: Path, deadline: float):
                 # Setup may hold the lock for a whole install; fail fast instead.
                 registration.enter_context(
                     process_lock(
-                        venv.with_name(venv.name + ".lock"),
+                        _environment_lock(venv),
                         min(deadline, time.monotonic() + LEASE_WAIT),
                     )
                 )
@@ -942,14 +947,19 @@ def _in_use(venv: Path) -> bool:
         return False
     held = False
     for lease in sorted(_leases(venv).iterdir()):
-        try:
-            with process_lock(lease, time.monotonic() + 0.2):
-                pass
-        except Unavailable:
+        if _held(lease):
             held = True
-            continue
-        lease.unlink(missing_ok=True)
+        else:
+            lease.unlink(missing_ok=True)
     return held
+
+
+def _held(lease: Path) -> bool:
+    try:
+        with process_lock(lease, time.monotonic() + 0.2):
+            return False
+    except Unavailable:
+        return True
 
 
 def _discard(path: Path) -> None:
@@ -968,10 +978,10 @@ def _discard(path: Path) -> None:
 def _setup(root: Path) -> int:
     identity = lock_identity()
     venv = shared_environment()
-    with process_lock(venv.with_name(venv.name + ".lock"), time.monotonic() + 900):
+    with process_lock(_environment_lock(venv), time.monotonic() + 900):
         # A slow probe under load must not discard an environment in use.
         if verify_version(root) or (
-            read_json(venv / "ready.json") == identity
+            read_json(venv / READY_FILE) == identity
             and _installed_version(root, timeout=120)
         ):
             print(f"Graphify {VERSION} shared environment ready (reused); run update")
@@ -990,7 +1000,7 @@ def _setup(root: Path) -> int:
         )
         subprocess.run(
             [
-                str(python_executable(root)),
+                str(python_executable()),
                 "-m",
                 "pip",
                 "install",
@@ -1007,29 +1017,27 @@ def _setup(root: Path) -> int:
         )
         if lock_identity() != identity or not _installed_version(root):
             raise Unavailable("installed Graphify version or lock mismatch")
-        _write_json(venv / "ready.json", identity)
+        _write_json(venv / READY_FILE, identity)
     print(f"Graphify {VERSION} installed in shared environment; run update")
     return 0
 
 
-def _prune() -> int:
+def _prune() -> None:
     base = shared_base()
     current = environment_name(lock_identity())
     if not base.is_dir():
-        return 0
+        return
     for candidate in sorted(base.iterdir()):
         if (
             candidate.name == current
-            or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)+-[0-9a-f]{16}", candidate.name)
+            or not re.fullmatch(r"\d+(?:\.\d+)+-[0-9a-f]{16}", candidate.name)
             or candidate.is_symlink()
             or not candidate.is_dir()
             or candidate.resolve().parent != base.resolve()
         ):
             continue
         try:
-            with process_lock(
-                candidate.with_name(candidate.name + ".lock"), time.monotonic() + 0.01
-            ):
+            with process_lock(_environment_lock(candidate), time.monotonic() + 0.01):
                 _discard(candidate)
                 print(f"Graphify removed: {candidate.name}")
         except EnvironmentInUse:
@@ -1041,7 +1049,6 @@ def _prune() -> int:
     for leftover in sorted(base.glob(".deleting-*")):
         if leftover.is_dir() and not leftover.is_symlink():
             shutil.rmtree(leftover, ignore_errors=True)
-    return 0
 
 
 def _status(root: Path) -> int:
@@ -1094,7 +1101,7 @@ def _graph_command(
     if args.command in {"mcp", "export"}:
         return _export_or_mcp(root, args, graph)
     positional, flags = _query_arguments(args.command, args.terms)
-    command = [str(executable(root))]
+    command = [str(executable())]
     if args.command == "query":
         command.extend(["query", *positional, "--graph", str(graph)])
     elif args.command == "path":
@@ -1135,7 +1142,8 @@ def _dispatch(root: Path, args: argparse.Namespace) -> int:
     if args.command == "setup":
         return _setup(root)
     if args.command == "prune":
-        return _prune()
+        _prune()
+        return 0
     if args.command == "update":
         return update(root, preparation=args.preparation)
     with environment_lease(shared_environment(), time.monotonic() + TIMEOUT):

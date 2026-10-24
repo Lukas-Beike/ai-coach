@@ -138,6 +138,12 @@ class GraphifyLocalTests(unittest.TestCase):
         shared = patch.object(graph, "shared_base", return_value=self.root / "shared")
         shared.start()
         self.addCleanup(shared.stop)
+        # CI hosts have no Sonar secrets engine; without one no cache is reused.
+        engine = patch.object(
+            graph, "_scan_engine", return_value=[["sonar-secrets-1", [1, 2, 3]]]
+        )
+        engine.start()
+        self.addCleanup(engine.stop)
         (self.root / ".gitignore").write_text(".graphify-local/\ngraphify-out/\n")
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         (self.root / "backend").mkdir()

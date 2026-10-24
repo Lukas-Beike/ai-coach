@@ -48,9 +48,9 @@ class GraphifySetupTests(unittest.TestCase):
             output = b"backend/fixture.py\0" if "ls-files" in command else b"fixture\n"
             return subprocess.CompletedProcess(command, 0, stdout=output)
         if command[1:3] == ["-m", "venv"]:
-            graph.executable(self.root).parent.mkdir(parents=True, exist_ok=True)
-            graph.executable(self.root).touch()
-            graph.python_executable(self.root).touch()
+            graph.executable().parent.mkdir(parents=True, exist_ok=True)
+            graph.executable().touch()
+            graph.python_executable().touch()
         if command[1:2] == ["update"]:
             out = Path(kwargs["env"]["GRAPHIFY_OUT"])
             out.mkdir(parents=True, exist_ok=True)
@@ -80,7 +80,7 @@ class GraphifySetupTests(unittest.TestCase):
         with patch.object(graph.subprocess, "run", side_effect=self.fake_run) as run:
             self.assertEqual(graph._setup(self.root), 0)
             expected = [
-                str(graph.python_executable(self.root)),
+                str(graph.python_executable()),
                 "-m",
                 "pip",
                 "install",
@@ -226,7 +226,7 @@ class GraphifySetupTests(unittest.TestCase):
         for directory in (old, locked, unrelated):
             directory.mkdir()
         with graph.process_lock(locked.with_name(locked.name + ".lock")):
-            self.assertEqual(graph._prune(), 0)
+            self.assertIsNone(graph._prune())
         self.assertFalse(old.exists())
         self.assertTrue(current.is_dir())
         self.assertTrue(locked.is_dir())
@@ -245,7 +245,7 @@ class GraphifySetupTests(unittest.TestCase):
             patch.object(Path, "rename", side_effect=OSError("in use")),
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
-            self.assertEqual(graph._prune(), 0)
+            self.assertIsNone(graph._prune())
             with (
                 patch.object(graph.subprocess, "run", side_effect=self.fake_run),
                 self.assertRaises(OSError),
@@ -285,7 +285,7 @@ class GraphifySetupTests(unittest.TestCase):
         self._lease_holder(current)
         old_holder = self._lease_holder(old)
         with contextlib.redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(graph._prune(), 0)
+            self.assertIsNone(graph._prune())
             with (
                 patch.object(graph.subprocess, "run", side_effect=self.fake_run),
                 self.assertRaises(graph.EnvironmentInUse),
@@ -298,7 +298,7 @@ class GraphifySetupTests(unittest.TestCase):
         old_holder.kill()
         old_holder.wait(timeout=30)
         with contextlib.redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(graph._prune(), 0)
+            self.assertIsNone(graph._prune())
         self.assertIn(f"removed: {old.name}", output.getvalue())
         self.assertFalse(old.exists())
         self.assertEqual(list(graph._leases(old).iterdir()), [])
