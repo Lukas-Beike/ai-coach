@@ -108,8 +108,9 @@ A dry-run resolution of `graphifyy[mcp]==0.9.93` on Windows/Python 3.14 yields
     binds the cache also to the signatures of the Sonar CLI's `sonar-secrets-*`
     engine binaries (no resolvable engine: no reuse), keeps only the current
     corpus hashes,
-    re-checks file signatures after the scan exactly as today, and records new
-    hashes only after their batch passed and signatures are unchanged. Any
+    re-checks file signatures after the scan exactly as today, and records
+    hashes only after the whole scan passed, and only for files unchanged during
+    it; a changed file still refuses the update, and the retry rescans only it. Any
     finding, scanner failure, binding mismatch or unreadable cache fails closed
     or falls back to a full scan; every graph input hash has been scanned clean.
 11. **Separate preparation budget (user decision 2026-10-24).** Hooks and plain

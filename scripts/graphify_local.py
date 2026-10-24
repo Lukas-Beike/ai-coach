@@ -452,16 +452,16 @@ def state(
     pending = [(rel, path) for rel, path in paths if hashes[rel] not in clean_hashes]
     if pending:
         scan(pending, deadline, scanner=binding["scanner"])
-    if any(_signature(path) != before[rel] for rel, path in paths):
-        raise Unavailable(SOURCE_CHANGED)
+    changed = {rel for rel, path in paths if _signature(path) != before[rel]}
     if _scan_binding() != binding:
         raise Unavailable("secret scanner changed during scan; graph update refused")
-    # No hashes from a failed scan or an unstable source snapshot are recorded.
-    # Only the current corpus is kept, so the cache stays bounded.
-    _write_json(
-        cache_path,
-        {"binding": binding, "clean_hashes": sorted(set(hashes.values()))},
-    )
+    # No hashes from a failed scan or a file changed during the scan are
+    # recorded. Only the current corpus is kept, so the cache stays bounded;
+    # stable files stay recorded so a retry rescans only the changed ones.
+    stable = {hashes[rel] for rel, _ in paths if rel not in changed}
+    _write_json(cache_path, {"binding": binding, "clean_hashes": sorted(stable)})
+    if changed:
+        raise Unavailable(SOURCE_CHANGED)
     branch = (
         subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],

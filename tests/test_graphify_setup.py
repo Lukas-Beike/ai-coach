@@ -1,6 +1,7 @@
 """Shared Graphify setup uses only locked packages and isolated synthetic state."""
 
 import contextlib
+import hashlib
 import io
 import json
 import subprocess
@@ -474,8 +475,16 @@ class GraphifyScanCacheTests(unittest.TestCase):
         self.assertEqual(self.scans, [[str(self.paths[0][1])]])
 
     def test_file_or_scanner_changed_during_scan_is_not_recorded(self):
+        stable = self.root / "backend/stable.py"
+        stable.write_text("value = 1\n")
+        self.paths.append(("backend/stable.py", stable))
         for changed in (self.paths[0][1], self.scanner):
             with self.subTest(changed=changed.name):
+                self.cache.unlink(missing_ok=True)
+                hashes = {
+                    rel: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for rel, path in self.paths
+                }
 
                 def edit(paths, deadline, target=changed, **kwargs):
                     target.write_text("pass # concurrent edit\n")
@@ -485,7 +494,14 @@ class GraphifyScanCacheTests(unittest.TestCase):
                     self.assertRaises(graph.Unavailable),
                 ):
                     self.state()
-                self.assertFalse(self.cache.exists())
+                if changed == self.scanner:
+                    self.assertFalse(self.cache.exists())
+                else:
+                    # Only the file scanned unchanged is recorded for a retry.
+                    self.assertEqual(
+                        json.loads(self.cache.read_text())["clean_hashes"],
+                        [hashes["backend/stable.py"]],
+                    )
 
     def test_cache_is_published_atomically(self):
         replace = graph.os.replace
