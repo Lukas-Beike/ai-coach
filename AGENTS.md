@@ -158,8 +158,10 @@ sole review/integration owner. Status answers and coordination do not need new
 workers. External actions retain their authorization.
 
 Reasoning effort is capped at `high` for the agent itself, workers, reviews,
-and any other selected run. Never choose `xhigh`, `max`, or another level above
-`high` without first asking the user and receiving explicit approval for that run.
+and any other selected run. Never select or pass `xhigh`, `max`, or a higher
+reasoning level unless the user explicitly authorizes it for the current task.
+If a selected model or inherited setting would use a level above `high`, ask the
+user first; do not silently inherit or substitute that setting.
 
 Always run the [retro skill](.agents/skills/ai-coach-retro/SKILL.md) at the end of
 every repository work session, before the final completion or blocked handoff,
