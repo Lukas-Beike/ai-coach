@@ -1,33 +1,19 @@
-"""Compact activity analyses for reports and the calendar, read canonically first.
-
-Temporary kv fallback: linked activities whose analysis is not yet in the
-canonical tables are served from the legacy detail records until those stop.
-"""
+"""Compact activity analyses for reports and the calendar, read from canonical rows."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from backend.db.activity_analysis_reads import (
-    recent_intervals_analyses,
-    recent_kv_analyses,
-)
+from backend.db.activity_analysis_reads import recent_intervals_analyses
 
 _LIMIT = 100
 
 
 def _recent(database_manager: Any) -> list[dict[str, Any]]:
+    """Newest first; equal instants keep their id order."""
     with database_manager.reader() as db:
-        rows = recent_intervals_analyses(db, _LIMIT)
-        rows += recent_kv_analyses(db, _LIMIT)
-    rows.sort(key=lambda row: row["id"])
-    # The reverse sort is stable, so equal instants keep their id order.
-    rows.sort(
-        key=lambda row: float("-inf") if row["instant"] is None else row["instant"],
-        reverse=True,
-    )
-    return rows[:_LIMIT]
+        return recent_intervals_analyses(db, _LIMIT)
 
 
 def _decoded(value: Any) -> Any:

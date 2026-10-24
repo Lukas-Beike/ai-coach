@@ -29,7 +29,9 @@ from backend.activities.detail_projection import (
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.workout_profile import recorded_profile
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
+from backend.canonical.vocabulary import ProviderId
 from backend.db.activity_detail_fingerprints import intervals_detail_fingerprints
+from backend.db.activity_detail_store import analysis_row_for_record
 from backend.errors import AppError, public_error_contract
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
@@ -53,6 +55,7 @@ MAX_PREFETCH_PER_RUN = 25
 # Stored fingerprints are read in batches of this many candidates.
 PREFETCH_LOOKUP_BATCH = 100
 MAX_DETAIL_BYTES = 24 * 1024 * 1024
+_INTERVALS = ProviderId.INTERVALS.value
 ACTIVITY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,200}")
 
 
@@ -91,7 +94,7 @@ class ActivityDetailRefreshService:
         configured: bool,
         read_planned_units: Callable[[], list[dict[str, Any]]] = list,
         references: ActivityReferenceResolver | None = None,
-        canonical: CanonicalDetailWriter | None = None,
+        canonical: CanonicalDetailWriter,
         local_date: Callable[[], str] | None = None,
     ) -> None:
         self._api_client = api_client
@@ -138,8 +141,7 @@ class ActivityDetailRefreshService:
         projected = detailed_activity({**detail, "laps": activity_detail_laps(detail)})
         projected["streams"] = streams
         observed_at = self._utc_now()
-        previous = self._store.get(activity_id) or {}
-        targets = previous.get("target_snapshot") or freeze_targets(
+        targets = self._stored_targets(activity_id) or freeze_targets(
             self._read_planned_units(), rows, activity_id, projected, observed_at
         )
         record = {
@@ -171,30 +173,35 @@ class ActivityDetailRefreshService:
         }
         if len(json.dumps(record, allow_nan=False).encode()) > MAX_DETAIL_BYTES:
             raise AppError(502, "Die Detaildaten überschreiten die unterstützte Größe.")
-        if self._canonical is None:
-            self._store.save(activity_id, record)
-        else:
-            # One transaction: the kv record and the canonical rows commit together.
-            record = {**record, "calendar_profile": recorded_profile(projected)}
-            with self._database_manager.unit_of_work() as db:
-                written = self._canonical.write_fetch(
-                    db,
-                    activity_id=activity_id,
-                    detail=detail,
-                    streams=streams,
-                    record=record,
-                    now=observed_at,
-                )
-                self._store.save_in(db, activity_id, record)
-            if written.issues:
-                _LOGGER.warning(
-                    "activity detail mapping produced issues",
-                    extra={
-                        "event": "activity_detail_mapping_issues",
-                        "issues": written.issues,
-                    },
-                )
+        record = {**record, "calendar_profile": recorded_profile(projected)}
+        # One transaction: the canonical rows commit with the cleared failure note.
+        with self._database_manager.unit_of_work() as db:
+            written = self._canonical.write_fetch(
+                db,
+                activity_id=activity_id,
+                detail=detail,
+                streams=streams,
+                record=record,
+                now=observed_at,
+            )
+            self._store.clear_failure_in(db, activity_id)
+        if written.issues:
+            _LOGGER.warning(
+                "activity detail mapping produced issues",
+                extra={
+                    "event": "activity_detail_mapping_issues",
+                    "issues": written.issues,
+                },
+            )
         return {"status": "completed", "activity_id": activity_id}
+
+    def _stored_targets(self, activity_id: str) -> dict[str, Any] | None:
+        """Return the target snapshot frozen by an earlier load, so targets stay fixed."""
+        with self._database_manager.reader() as db:
+            row = analysis_row_for_record(db, _INTERVALS, activity_id)
+        payload = row["payload"] if row is not None else None
+        targets = payload.get("target_snapshot") if isinstance(payload, dict) else None
+        return targets if isinstance(targets, dict) else None
 
     def prefetch_new(
         self,
@@ -257,13 +264,12 @@ class ActivityDetailRefreshService:
                 canonical = intervals_detail_fingerprints(
                     db, ids, batch_size=PREFETCH_LOOKUP_BATCH
                 )
-            stored = self._store.fingerprints(ids)
             known_failures = self._store.failures(ids)
             for row in batch:
                 activity_id = str(row["id"])
                 fingerprint = summary_fingerprint(row)
                 if not self._prefetch_settled(
-                    activity_id, fingerprint, canonical, stored, known_failures
+                    activity_id, fingerprint, canonical, known_failures
                 ):
                     yield activity_id, fingerprint
 
@@ -314,22 +320,11 @@ class ActivityDetailRefreshService:
         activity_id: str,
         fingerprint: str,
         canonical_fingerprints: dict[str, set[str]],
-        stored_fingerprints: dict[str, dict[str, Any]],
         known_failures: dict[str, dict[str, Any]],
     ) -> bool:
-        """Whether details match the summary or already failed for it."""
-        stored = stored_fingerprints.get(activity_id)
+        """Whether canonical details match the summary or already failed for it."""
         failure = known_failures.get(activity_id)
-        # While a legacy kv record exists it is what the detail view reads, so its
-        # projection must stay current; otherwise the canonical rows decide.
-        if stored:
-            settled = (
-                stored.get("summary_sha256") == fingerprint
-                and stored.get("projection_version") == DETAIL_PROJECTION_VERSION
-            )
-        else:
-            settled = fingerprint in canonical_fingerprints.get(activity_id, ())
-        if settled:
+        if fingerprint in canonical_fingerprints.get(activity_id, ()):
             # A summary that reverted to the stored version leaves a stale note.
             if failure:
                 self._store.clear_failure(activity_id)

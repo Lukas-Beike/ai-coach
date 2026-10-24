@@ -102,6 +102,11 @@ _CHANNEL_ALIASES: Final[Mapping[StreamChannel, tuple[str, ...]]] = {
 _KNOWN_STREAM_KEYS: Final = frozenset(_TIME_ALIASES).union(
     key for aliases in _CHANNEL_ALIASES.values() for key in aliases
 )
+# The canonical channel of each stream key the mappers read; other keys are dropped.
+STREAM_KEY_CHANNELS: Final[Mapping[str, StreamChannel]] = {
+    **dict.fromkeys(_TIME_ALIASES, StreamChannel.TIME_S),
+    **{key: channel for channel, aliases in _CHANNEL_ALIASES.items() for key in aliases},
+}
 # Legacy records hold the projected lap keys, fresh rows the raw Intervals keys.
 _LAP_METRIC_KEYS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("moving_duration_s", ("moving_time",)),

@@ -37,12 +37,14 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.db import DatabaseManager, canonical_store, row_factory
+from backend.db.activity_detail_store import detail_sets_for
 from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.queue import SyncJobQueueService
 
@@ -459,10 +461,12 @@ class ActivityCallerResolutionTests(_Fixture):
             utc_now=lambda: "2026-10-02T08:00:00Z",
             configured=True,
             references=ActivityReferences(self.manager),
+            canonical=CanonicalDetailWriter(),
         )
         service.refresh(local)
         self.assertEqual("/activity/ride-1", api.get.call_args_list[0].args[0])
-        self.assertIsNotNone(ActivityDetailStore(self.manager).get("ride-1"))
+        with self.manager.reader() as db:
+            self.assertTrue(detail_sets_for(db, "intervals", "ride-1"))
 
 
 class ActivityFeedbackProviderColumnTests(_Fixture):

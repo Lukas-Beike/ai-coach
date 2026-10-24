@@ -2,27 +2,27 @@
 
 ## 1. Retirement and canonical data path (slice A)
 
-- [ ] 1.1 Add `refill_lap_metrics(db, provider, provider_activity_id, values)` to `backend/db/activity_detail_store.py`. It fills only NULL lap metric columns and recomputes `content_sha256`/`updated_at` (design D6). Verify with a new test that a NULL `max_speed_mps` is filled, a non-NULL value is never overwritten, and the content hash changes only when a value was filled.
-- [ ] 1.2 Create `backend/sync/activity_detail_retirement.py:ActivityDetailRetirement` implementing `BackfillStage` with the state, counters, cursor and version restart from design D5, and the exact comparison steps 1–10 plus the D6 refill. Verify with new tests in `tests/test_activity_detail_retirement.py`:
+- [x] 1.1 Add `refill_lap_metrics(db, provider, provider_activity_id, values, *, now)` (returns the number of filled metric values) to `backend/db/activity_detail_store.py`. It fills only NULL lap metric columns and recomputes `content_sha256`/`updated_at` (design D6). Verify with a new test that a NULL `max_speed_mps` is filled, a non-NULL value is never overwritten, and the content hash changes only when a value was filled.
+- [x] 1.2 Create `backend/sync/activity_detail_retirement.py:ActivityDetailRetirement` implementing `BackfillStage` with the state, counters, cursor and version restart from design D5, and the exact comparison steps 1–10 plus the D6 refill. Verify with new tests in `tests/test_activity_detail_retirement.py`:
   - a verified record is deleted in the batch and counted `retired`;
   - each unverifiable reason (`invalid`, `no_record`, `mapping_issues`, `unmapped_stream`, `no_canonical`, `fingerprint_mismatch`, `streams_unproven`, `laps_mismatch`, `zones_mismatch`, `analysis_mismatch`) leaves the kv row and the canonical rows unchanged and increments its counter;
   - a downsampled kv stream is proven against a FULL canonical set through the `_downsample_series` index selection;
   - failure notes and the prefetch floor are untouched;
   - no provider client is called.
-- [ ] 1.3 Wire the stage after `ActivityDetailBackfill` in `backend/sync/canonical_backfill_assembly.py` (`followups=(detail_backfill, detail_retirement)`) and expose its summary. Verify with a worker test that retirement runs only after the detail backfill completes, that an exception in a retirement batch rolls back every refill and deletion of that batch and marks the stage failed in its own transaction, and that a same-build restart resumes from the cursor and is idempotent (a second pass changes no rows).
-- [ ] 1.4 Make `ActivityDetailRefreshService` (`backend/sync/activity_details.py`) canonical-only (design D4):
+- [x] 1.3 Wire the stage after `ActivityDetailBackfill` in `backend/sync/canonical_backfill_assembly.py` (`followups=(detail_backfill, detail_retirement)`) and expose its summary. Verify with a worker test that retirement runs only after the detail backfill completes, that an exception in a retirement batch rolls back every refill and deletion of that batch and marks the stage failed in its own transaction, and that a same-build restart resumes from the cursor and is idempotent (a second pass changes no rows).
+- [x] 1.4 Make `ActivityDetailRefreshService` (`backend/sync/activity_details.py`) canonical-only (design D4):
   - require the canonical writer;
   - write `write_fetch` and the new `ActivityDetailStore.clear_failure_in` in one unit of work;
   - reuse `target_snapshot` from the canonical analysis payload;
   - base prefetch settledness only on `intervals_detail_fingerprints` and same-fingerprint failure notes.
   Verify by updating `tests/test_activity_detail_refresh.py`. It must show that no `activity_detail:` kv row is written, the failure note is deleted atomically, a failed canonical write commits nothing, the frozen targets are reused, a leftover kv record does not settle prefetch, and the existing ten-newest/floor/25-per-pass tests still pass.
-- [ ] 1.5 Remove the kv analysis fallback (`backend/db/activity_analysis_reads.py:recent_kv_analyses`, `_KV_SQL`) and make `backend/activities/detail_analysis_reads.py:_recent` canonical-only. Verify that the tests covering `calendar_profiles` (`backend/http_api/public_plan.py`) and `analysis_summaries` (`backend/performance/report_service.py`) pass with canonical rows only, and that a kv-only analysis is no longer returned (intended, decision 11).
-- [ ] 1.6 Add populated upgrade evidence in `tests/test_activity_detail_retirement_upgrade.py`. For each of `tests/fixtures/schema_v9.sql.txt` through `tests/fixtures/schema_v13.sql.txt`:
+- [x] 1.5 Remove the kv analysis fallback (`backend/db/activity_analysis_reads.py:recent_kv_analyses`, `_KV_SQL`) and make `backend/activities/detail_analysis_reads.py:_recent` canonical-only. Verify that the tests covering `calendar_profiles` (`backend/http_api/public_plan.py`) and `analysis_summaries` (`backend/performance/report_service.py`) pass with canonical rows only, and that a kv-only analysis is no longer returned (intended, decision 11).
+- [x] 1.6 Add populated upgrade evidence in `tests/test_activity_detail_retirement_upgrade.py`. For each of `tests/fixtures/schema_v9.sql.txt` through `tests/fixtures/schema_v13.sql.txt`:
   - build a temporary SQLCipher database with Intervals records and seeded kv detail records (one current full-resolution record, one old downsampled record, and one pre-v13 FETCH lap set with realistic `work`/`recovery` kinds lacking `max_speed_mps`);
   - upgrade it, then run the backfill and retirement stages;
   - assert that every seeded detail is readable as `activity_detail.v1`, that verified kv rows are gone and unverifiable ones remain, and that the refilled lap speed is present.
   Also verify that an interrupted retirement rolls back and that a same-build restart is idempotent.
-- [ ] 1.7 Extend backup/restore and privacy-export tests (`backend/backup/export.py`). After retirement, assert that `activity_detail_sets`, `activity_stream_channels`, `activity_laps`, `activity_zone_times` and `activity_detail_analysis` JSONL files contain the detail, that the retired kv keys are absent from `application_state`, and that a restored backup serves the same v1 document. Verify with the focused backup/export test modules.
+- [x] 1.7 Extend backup/restore and privacy-export tests (`backend/backup/export.py`). After retirement, assert that `activity_detail_sets`, `activity_stream_channels`, `activity_laps`, `activity_zone_times` and `activity_detail_analysis` JSONL files contain the detail, that the retired kv keys are absent from `application_state`, and that a restored backup serves the same v1 document. Verify with the focused backup/export test modules.
 
 ## 2. Served `activity_detail.v1` contract (slice B)
 

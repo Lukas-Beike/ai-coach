@@ -109,9 +109,11 @@ class ActivityDetailStore:
     def clear_failure(self, activity_id: str) -> None:
         """Forget a recorded failure once the stored details match again."""
         with self._database_manager.unit_of_work() as db:
-            db.execute(
-                "DELETE FROM kv WHERE key=?", (self._key(activity_id, _FAILURE),)
-            )
+            self.clear_failure_in(db, activity_id)
+
+    def clear_failure_in(self, db: Any, activity_id: str) -> None:
+        """Forget a recorded failure inside the caller's unit of work."""
+        db.execute("DELETE FROM kv WHERE key=?", (self._key(activity_id, _FAILURE),))
 
     def failures(self, activity_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
         """Return the recorded load failure per activity id."""

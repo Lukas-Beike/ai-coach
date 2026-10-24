@@ -19,10 +19,11 @@ from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from activity_row_support import SnapshotActivityRows
-from canonical_detail_support import seed_intervals_activity
+from canonical_detail_support import NOW, seed_intervals_activity
 
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.read_service import PAGE_DEFAULT, PAGE_MAX, ActivityReadService
+from backend.activities.workout_profile import recorded_profile
 from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
 from backend.http_api.compact_activity_rows import CompactActivityRows
@@ -35,6 +36,7 @@ from backend.performance.report_service import TrainingRecordsService
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
 from backend.planning.compact_activities import ActivityRowSource
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 
 TODAY = date(2026, 5, 4)
 DAY = "2026-05-04T08:00:00"
@@ -103,6 +105,15 @@ class _StorageCase(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.database = _Database(Path(directory.name) / "fixture.sqlite")
+
+
+def _save_canonical(database: Any, record: dict[str, Any]) -> None:
+    """Store a detail record in the canonical tables, the only source analyses are read from."""
+    manager = cast(DatabaseManager, database)
+    seed_intervals_activity(manager, record["activity_id"])
+    record = {**record, "calendar_profile": recorded_profile(record["activity"])}
+    with manager.unit_of_work() as db:
+        CanonicalDetailWriter().write_legacy(db, record=record, now=NOW)
 
 
 def _activity(activity_id: Any, start: str = DAY, **fields: Any) -> dict[str, Any]:
@@ -683,9 +694,8 @@ class TrainingRecordObservationCharacterizationTests(_StorageCase):
         self, activity_id: str, fingerprint: str | None, aerobic: Any = None
     ) -> None:
         # Analyses are read for linked activities only.
-        seed_intervals_activity(cast(DatabaseManager, self.database), activity_id)
-        ActivityDetailStore(self.database).save(
-            activity_id,
+        _save_canonical(
+            self.database,
             {
                 "activity_id": activity_id,
                 "activity": {},
@@ -755,9 +765,8 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
     COMPACT_LEAN = _activity("ride-1", DAY, name="Threshold")
 
     def _save_profile(self) -> None:
-        seed_intervals_activity(cast(DatabaseManager, self.database), "ride-1")
-        ActivityDetailStore(self.database).save(
-            "ride-1",
+        _save_canonical(
+            self.database,
             {
                 "activity_id": "ride-1",
                 "activity": {
