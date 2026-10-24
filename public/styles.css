@@ -435,10 +435,6 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .analysis-grid-line { stroke: var(--line); }
 .analysis-zero-line { stroke: var(--muted); stroke-dasharray: 3 3; }
 .analysis-chart-card summary { display: flex; align-items: center; min-height: 44px; color: var(--ink); cursor: pointer; font-size: .8rem; }
-.season-event > summary, .season-archive > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-height: 44px; color: var(--ink); cursor: pointer; font-size: .8rem; }
-.season-event > summary h4 { margin: 0; font-size: 1rem; }
-.season-event-when { color: var(--muted); }
-.season-evidence p { overflow-wrap: anywhere; }
 .analysis-chart-table { max-height: 300px; overflow: auto; }
 .analysis-chart-table:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .analysis-chart-table table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: .75rem; }
@@ -1020,17 +1016,19 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .profile-subsection { display: grid; gap: 12px; min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
 .profile-subsection legend { padding: 0 6px; color: var(--ink); font-size: .85rem; font-weight: 700; }
 .competition-list { display: grid; gap: 12px; }
-.competition-card { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--card-hover-surface); }
-.competition-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.competition-priority { padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--accent-bright); font-size: .68rem; font-weight: 700; white-space: nowrap; }
-.competition-card-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.competition-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--card-hover-surface); }
+.competition-card > summary, .competition-archive > summary { min-height: 44px; cursor: pointer; color: var(--ink); overflow-wrap: anywhere; }
+.competition-card > summary strong { font-size: .95rem; }
+.competition-summary-facts { display: block; margin-top: 6px; color: var(--muted); font-size: .82rem; line-height: 1.6; }
+.competition-archive { min-width: 0; }
+.competition-archive > .competition-card { margin-top: 12px; }
+.competition-read-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: .85rem; }
+.competition-read-state output:empty { display: none; }
+.competition-card-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; margin-top: 12px; }
 .competition-card-facts > div { display: grid; gap: 3px; min-width: 0; }
 .competition-card-facts span { color: var(--subtle); font-size: .66rem; }
 .competition-card-facts strong { color: var(--muted); font-size: .78rem; font-weight: 500; overflow-wrap: anywhere; }
-.competition-additional-fields { border-top: 1px solid var(--line); padding-top: 11px; }
-.competition-additional-fields > summary { cursor: pointer; color: var(--accent-bright); font-size: .72rem; }
-.competition-additional-grid { margin-top: 12px; }
-.competition-sync-state { color: var(--subtle); line-height: 1.4; }
+.competition-sync-state { display: block; margin-top: 12px; color: var(--subtle); line-height: 1.4; }
 .context-empty { margin: 0; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 13px; color: var(--subtle); text-align: center; font-size: .78rem; }
 
 @media (max-width: 479px) {

@@ -594,10 +594,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertNotIn("AppState.setPlanSegment(selected)", views)
         self.assertNotIn("renderSeasonPreparation()", views)
         self.assertIn("AppState.setPlanSegment(planSegment);", app)
-        self.assertIn(
-            'if (planSegment === "season" && state.data) void renderSeasonPreparation();',
-            app,
-        )
+        self.assertNotIn("renderSeasonPreparation()", app)
         public_source = "\n".join(
             path.read_text(encoding="utf-8") for path in (root / "public").glob("*.js")
         )
@@ -822,7 +819,8 @@ class ServerFrontendTests(ServerTestCase):
         plan_markup = index[
             index.index('id="workoutsPanel"') : index.index('id="dataPanel"')
         ]
-        self.assertNotIn("<button", plan_markup)
+        self.assertEqual(plan_markup.count("<button"), 1)
+        self.assertIn('id="competitionRetry" type="button"', plan_markup)
         self.assertNotIn("planningEditDirty", state)
         self.assertNotIn("plannedWeekOpen", state)
 
@@ -1111,7 +1109,8 @@ class ServerFrontendTests(ServerTestCase):
         wrapper = (
             'makeScrollRegionFocusable(reportNode("div", null, "analysis-chart-table")'
         )
-        self.assertEqual(analysis.count(wrapper), 2)
+        # The weekly season-evidence table was removed; the equipment table remains.
+        self.assertEqual(analysis.count(wrapper), 1)
         self.assertIn(
             'makeScrollRegionFocusable(node("div", null, "analysis-chart-table")',
             details,
@@ -1397,19 +1396,20 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn("ältere Nachrichten geladen", coach)
         self.assertIn("IntersectionObserver", coach)
 
-    def test_season_preparation_uses_relative_labels_archive_and_comma_factor(self):
+    def test_competition_overview_uses_local_state_without_preparation_controls(self):
         public = Path(__file__).resolve().parents[1] / "public"
         analysis = (public / "analysis.js").read_text(encoding="utf-8")
-        card_start = analysis.index("function seasonEventCard(")
-        card_end = analysis.index("\nfunction seasonStatusLabel(", card_start)
-        card = analysis[card_start:card_end]
-        self.assertIn("AppFormat.relativeDay(", card)
-        self.assertNotIn("${event.days_until} Tage · kalendarische", analysis)
-        self.assertIn("season-archive", analysis)
-        self.assertIn("parseSeasonLoadFactor", analysis)
-        self.assertIn('scale.inputMode="decimal"', analysis)
-        self.assertNotIn("scale.pattern", analysis)
+        self.assertNotIn('"/api/analysis/season"', analysis)
+        self.assertNotIn('"/api/analysis/scenarios"', analysis)
+        self.assertNotIn("parseSeasonLoadFactor", analysis)
         plan_views = (public / "plan-views.js").read_text(encoding="utf-8")
+        self.assertIn("AppFormat.relativeDay(", plan_views)
+        self.assertIn("competition-archive", plan_views)
+        self.assertIn("card.open = openIds.has(", plan_views)
+        loader = (public / "state-loader.js").read_text(encoding="utf-8")
+        self.assertIn("renderCompetitions(data.competitions)", loader)
+        index = (public / "index.html").read_text(encoding="utf-8")
+        self.assertIn('data-plan-segment="season">Wettkämpfe</a>', index)
         self.assertIn("SEASON_PHASE_LABELS[next.phase]", plan_views)
 
     def test_ux_copy_labels_and_readable_context_preview(self):

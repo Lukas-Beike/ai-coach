@@ -211,7 +211,7 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
                 calls.append("max_metrics")
                 return []
 
-            def get_endurance_score(self, *_args):
+            def get_endurance_score(self, *_args, **_kwargs):
                 calls.append("endurance_score")
                 return []
 
@@ -289,8 +289,8 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
                 calls.append(("ftp", start, end, kwargs))
                 return []
 
-            def get_endurance_score(self, start, end=None):
-                calls.append(("endurance", start, end))
+            def get_endurance_score(self, start, end=None, aggregation="weekly"):
+                calls.append(("endurance", start, end, aggregation))
                 return []
 
             def get_running_tolerance(self, start, end, aggregation="weekly"):
@@ -321,14 +321,14 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
                     "2026-10-06",
                     {"sport": "CYCLING", "aggregation": "daily"},
                 ),
-                ("endurance", "2026-07-09", "2026-10-06"),
-                ("tolerance", "2026-07-09", "2026-10-06", "weekly"),
+                ("endurance", "2026-07-09", "2026-10-06", "daily"),
+                ("tolerance", "2026-07-09", "2026-10-06", "daily"),
             ],
         )
         self.assertEqual(result["errors"], [])
         self.assertEqual(
             result["provider_sync"]["pagination"]["endurance_score"]["aggregation"],
-            "weekly",
+            "daily",
         )
 
     def test_missing_capabilities_are_explained_without_failing_other_sources(self):
@@ -365,7 +365,7 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
             def get_functional_threshold_power_range(self, *_args, **_kwargs):
                 raise RuntimeError("synthetic FTP failure")
 
-            def get_endurance_score(self, start, end=None):
+            def get_endurance_score(self, start, end=None, aggregation="weekly"):
                 return {"date": end, "undocumentedMetric": 12}
 
             def get_running_tolerance(self, start, end, aggregation="weekly"):
@@ -399,7 +399,7 @@ class GarminHistoricMetricCollectorTests(unittest.TestCase):
             def get_functional_threshold_power_range(self, *_args, **_kwargs):
                 return ["invalid"]
 
-            def get_endurance_score(self, *_args):
+            def get_endurance_score(self, *_args, **_kwargs):
                 return []
 
             def get_running_tolerance(self, *_args, **_kwargs):

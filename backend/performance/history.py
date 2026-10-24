@@ -76,8 +76,8 @@ def _provider_metrics(
             payload, source, aggregation, start, current_date
         )
         for source, aggregation in (
-            ("endurance_score", "weekly"),
-            ("running_tolerance", "weekly"),
+            ("endurance_score", "daily"),
+            ("running_tolerance", "daily"),
             ("training_readiness_history", "daily"),
             ("weekly_training_status", "weekly"),
         )

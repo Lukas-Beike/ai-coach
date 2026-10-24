@@ -93,8 +93,8 @@ are involved. Read only the references needed for the current step.
 - Always run `ai-coach-retro` before the final session completion or blocked
   handoff, without a separate request. Intermediate questions/status and waits
   are not session endings. It connects process friction, skill gaps, and
-  application symptoms and proposes scoped improvements;
-  implementation/evaluation stays with the relevant owner and existing authorization.
+  application symptoms and asks per finding: new issue (default) or fix in
+  this session. Implementation/evaluation stays with the relevant owner.
 
 If a tool is unavailable, report which check is blocked and continue independent
 authorized work. Do not invent an equivalent capability, relax a boundary, or
