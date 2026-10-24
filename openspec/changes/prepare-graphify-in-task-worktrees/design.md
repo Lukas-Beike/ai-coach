@@ -93,6 +93,26 @@ A dry-run resolution of `graphifyy[mcp]==0.9.93` on Windows/Python 3.14 yields
    `status`, `query` and the session-start path must never call pip, `-m venv`
    or `npm`, including when the environment is missing.
 
+10. **Incremental secret scan (user decision 2026-10-24).** Measured on this
+    host: cold update 178 s, update after a one-file edit 146-152 s, no-op
+    1.2 s, against the 180 s budget; about 82 s is the full Sonar scan of
+    ~1,200 files. `.graphify-local/scan-cache.json` records SHA-256 content
+    hashes that the scanner reported clean, bound to the wrapper schema, the
+    scanner's resolved path and file signature, and the corpus rules. An update
+    hashes every corpus file, scans only files whose hash is not recorded clean,
+    re-checks file signatures after the scan exactly as today, and records new
+    hashes only after their batch passed and signatures are unchanged. Any
+    finding, scanner failure, binding mismatch or unreadable cache fails closed
+    or falls back to a full scan; every graph input hash has been scanned clean.
+11. **Separate preparation budget (user decision 2026-10-24).** Hooks and plain
+    `update` keep the 180 s budget. `prepare_worktree.py` runs the first update
+    with a 600 s budget through an explicit update option; no environment
+    variable changes the hook budget.
+12. **Quality runner excludes local Graphify state (user decision 2026-10-24).**
+    `.graphify-local/` now exists in every prepared worktree and contains copied
+    Python inputs, so `tools/quality_baseline.py` adds it to its root-level
+    non-source directories, with a test that tracked sources remain included.
+
 ## Risks / Trade-offs
 
 - [pip-compile drops platform-gated packages on the generating platform] →
