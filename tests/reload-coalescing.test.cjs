@@ -92,6 +92,7 @@ function frontend({ eventSource = false } = {}) {
     $: (selector) => (selector === "#appShell" ? shell : statusElements[selector] || null),
     currentPlanLoadAreas: () => ["chat"],
     applyChatResult() {},
+    renderCompetitionReadStatus() {},
     finishAppShellLoading() {},
     renderPerformance() {},
     renderSettings() {},

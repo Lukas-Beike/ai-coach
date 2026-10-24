@@ -26,7 +26,7 @@ document.querySelectorAll(".nav-item").forEach((link) => link.addEventListener("
   const linkedRoute = String(link.getAttribute("href") || "").replace(/^#/, "").trim();
   void AppRouter.navigate(linkedRoute || link.dataset.route, { historyMode: "push" });
 }));
-const { renderAdaptivePlanning, renderExternalCalendar, renderTrainingPlans, renderPlanned, renderLibrary, renderCompetitions, focusPlannedToday, bindPlanNavigation, bindExternalCalendar } = AppPlanViews.create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue });
+const { renderAdaptivePlanning, renderExternalCalendar, renderTrainingPlans, renderPlanned, renderLibrary, renderCompetitions, renderCompetitionReadStatus, focusPlannedToday, bindPlanNavigation, bindExternalCalendar } = AppPlanViews.create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue });
 bindPlanNavigation();
 document.querySelectorAll("[data-analysis-segment]").forEach((link) => link.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -142,3 +142,5 @@ AppRouter.configure({
 });
 void AppRouter.syncFromHash();
 void bootstrapAuth();
+
+$("#competitionRetry").addEventListener("click", () => load("/api/bootstrap?local=1", ["profile"]));

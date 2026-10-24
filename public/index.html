@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=339">
+  <link rel="stylesheet" href="/styles.css?v=341">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -106,9 +106,13 @@
         <nav class="plan-segment-nav" aria-label="Kalenderbereiche">
           <a href="#plan/overview" data-plan-segment="overview" aria-current="page">Übersicht</a>
           <a href="#plan/library" data-plan-segment="library">Bibliothek</a>
-          <a href="#plan/season" data-plan-segment="season">Saison</a>
+          <a href="#plan/season" data-plan-segment="season">Wettkämpfe</a>
         </nav>
-        <section id="seasonPreparation" class="plan-segment" data-plan-segment-panel="season" aria-label="Saison und Szenarien" hidden></section>
+        <section id="seasonPreparation" class="plan-segment" data-plan-segment-panel="season" aria-labelledby="competitionsTitle" hidden>
+          <h3 id="competitionsTitle">Wettkämpfe</h3>
+          <div class="competition-read-state"><output id="competitionReadStatus">Wettkämpfe werden geladen …</output><button id="competitionRetry" type="button" class="secondary-button" hidden>Erneut laden</button></div>
+          <div id="competitionList" class="competition-list"></div>
+        </section>
         <section id="planOverviewSegment" class="plan-segment" data-plan-segment-panel="overview" aria-labelledby="planOverviewTitle">
           <div class="plan-segment-heading"><div><h3 id="planOverviewTitle">Trainingskalender</h3><span id="plannedSummary" class="tab-sync-detail"></span></div></div>
           <div id="plannedCalendar" class="planned-calendar" aria-live="polite"></div>
@@ -549,26 +553,26 @@
   <script src="/navigation.js?v=236" defer></script>
   <script src="/state.js?v=226" defer></script>
   <script src="/views.js?v=232" defer></script>
-  <script src="/plan-views.js?v=16" defer></script>
+  <script src="/plan-views.js?v=18" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
   <script src="/coach.js?v=38" defer></script>
-  <script src="/shared.js?v=19" defer></script>
+  <script src="/shared.js?v=20" defer></script>
   <script src="/auth.js?v=13" defer></script>
   <script src="/sync-status.js?v=12" defer></script>
   <script src="/view-refresh.js?v=3" defer></script>
   <script src="/notifications.js?v=5" defer></script>
   <script src="/nutrition.js?v=43" defer></script>
-  <script src="/analysis.js?v=135" defer></script>
+  <script src="/analysis.js?v=136" defer></script>
   <script src="/activity-details.js?v=16" defer></script>
   <script src="/activity-analysis.js?v=4" defer></script>
   <script src="/performance-view.js?v=27" defer></script>
   <script src="/diagnostics.js?v=4" defer></script>
-  <script src="/state-loader.js?v=18" defer></script>
+  <script src="/state-loader.js?v=20" defer></script>
   <script src="/sync-actions.js?v=5" defer></script>
   <script src="/wahoo-connection.js?v=4" defer></script>
   <script src="/provider-connections.js?v=3" defer></script>
   <script src="/settings.js?v=11" defer></script>
-  <script src="/app.js?v=294" defer></script>
+  <script src="/app.js?v=295" defer></script>
 </body>
 </html>
