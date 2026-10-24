@@ -1,6 +1,6 @@
 ---
 name: ai-coach-coach-contracts
-description: Review Coach capability parity, authorization, durable effects, receipts, and provenance for focused changes.
+description: Review Coach tools, prompts, dialogue, planning actions, and durable mutations for capability parity, authorization, effects, receipts, and provenance. Use for focused Coach changes; route whole-repository audits to ai-coach-codebase-review.
 ---
 
 Use for Coach tools, prompts, dialogue, planning actions, or durable mutations.
