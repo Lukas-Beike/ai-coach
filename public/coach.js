@@ -1849,7 +1849,7 @@ function renderMessages(messages, forceScroll = false, preserveScroll = false) {
   root.replaceChildren();
   appendHistoryPageButton(root, "chat");
   if (!visibleMessages.length && !state.chatRequest && !state.chatQueue.length) {
-    root.append(appShellLoading ? createSkeletonStack(4) : createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest oder starte mit einer Schnellaktion."));
+    root.append(appShellLoading ? createSkeletonStack(4) : createEmptyState("Dein Coach ist bereit", "Lege deine Ziele im Profil fest."));
   }
   visibleMessages.forEach((message) => root.append(renderMessageNode(message)));
   state.chatQueue.forEach((entry, index) => root.append(createPendingMessage(entry, index)));

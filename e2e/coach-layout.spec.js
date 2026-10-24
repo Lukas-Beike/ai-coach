@@ -66,3 +66,31 @@ test("coach composer keeps a stable bottom edge while the voice status is visibl
 
   await expectComposerBottomStable(page);
 });
+
+test("empty coach chat does not promise quick actions and keeps the composer gap @responsive", async ({ page }) => {
+  await page.goto("/#coach");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => !state.loadPromise)).toBe(true);
+  await expect(page.locator("#chatPanel")).toHaveClass(/active/);
+  // Quick actions appear only after inactivity, so a first visit must not be pointed at them.
+  await page.evaluate(() => { state.quickTemplatesVisible = false; renderQuickMessageTemplates(); });
+  const empty = page.locator("#messages .empty-state");
+  await expect(empty).toBeVisible();
+  await expect(empty).not.toContainText("Schnellaktion");
+
+  const nav = page.locator(".bottom-nav");
+  const composerGap = async () => {
+    await nextFrames(page);
+    const composer = await page.locator("#chatForm").boundingBox();
+    return (await nav.boundingBox()).y - (composer.y + composer.height);
+  };
+  if (!(await nav.isVisible())) return;
+  const emptyGap = await composerGap();
+  await page.evaluate(() => {
+    const spacer = document.createElement("div");
+    spacer.dataset.e2eSpacer = "true";
+    spacer.style.height = "2400px";
+    document.querySelector("#messages").append(spacer);
+  });
+  expect(Math.abs(emptyGap - (await composerGap()))).toBeLessThanOrEqual(1);
+});
