@@ -1130,9 +1130,11 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .garmin-credential-form > .credential-row-head { align-items: center; }
 .garmin-credential-form > .credential-row-head h4 { margin: 0; }
 .credential-form .secondary-button:disabled { cursor: wait; }
-.setup-banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.setup-banner { flex-wrap: wrap; gap: 4px 14px; }
+.setup-banner > strong { flex: 1 1 11rem; min-width: 0; }
+.setup-banner > .setup-banner-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .setup-banner-actions a { min-height: 44px; display: inline-flex; align-items: center; }
-.setup-banner-actions .secondary-button { min-height: 44px; }
+.setup-banner-actions .secondary-button { width: 44px; min-height: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .connections-sync-progress { display: grid; gap: 8px; padding: 11px; border: 1px solid var(--sync-progress-border); border-radius: 13px; background: var(--sync-progress-surface); }
 .connections-sync-progress[hidden] { display: none; }
 .connection-sync-progress-item { display: grid; gap: 6px; }
@@ -1362,6 +1364,7 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
   .connection-card .connection-resync-status { grid-column: 1 / -1; grid-row: 5; }
   .connection-card .provider-setup-hint { grid-column: 1 / -1; grid-row: 6; }
   .provider-attention-banner { align-items: flex-start; flex-direction: column; }
+  .provider-attention-banner.setup-banner { align-items: center; flex-direction: row; }
   .provider-attention-banner a { min-height: 44px; display: inline-flex; align-items: center; }
   .settings-message { overflow-wrap: anywhere; }
   .settings-message code { overflow-wrap: anywhere; }
