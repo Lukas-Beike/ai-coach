@@ -621,7 +621,9 @@ function cyclingPowerProfileTable(result) {
     body.append(row);
   }
   table.append(body);
-  return table;
+  const scroll = makeScrollRegionFocusable(reportNode("div", null, "table-scroll"), "Leistung nach Dauer");
+  scroll.append(table);
+  return scroll;
 }
 
 async function renderCyclingPowerProfile() {
