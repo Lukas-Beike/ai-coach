@@ -259,8 +259,8 @@ def _provider_metrics(
     cached = garmin.get("provider_metrics") or {}
     metrics = dict(cached) if isinstance(cached, dict) else {}
     for key, aggregation in (
-        ("endurance_score", "weekly"),
-        ("running_tolerance", "weekly"),
+        ("endurance_score", "daily"),
+        ("running_tolerance", "daily"),
         ("training_readiness_history", "daily"),
         ("weekly_training_status", "weekly"),
     ):

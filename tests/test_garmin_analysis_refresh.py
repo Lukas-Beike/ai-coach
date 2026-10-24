@@ -29,6 +29,22 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         )
         self.assertEqual(sources["recovery"]["daily_stats"][0], "get_daily_summaries")
 
+    def test_targeted_weekly_view_metrics_request_daily_readings(self) -> None:
+        for key, expected in (
+            ("endurance_score", "get_endurance_score"),
+            ("running_tolerance", "get_running_tolerance"),
+        ):
+            with self.subTest(key=key):
+                method_name, invoke = targeted_analysis_sources()["performance"][key]
+                method = Mock(return_value={})
+
+                invoke(method, date(2026, 7, 27), date(2026, 10, 24))
+
+                self.assertEqual(method_name, expected)
+                method.assert_called_once_with(
+                    "2026-07-27", "2026-10-24", aggregation="daily"
+                )
+
     def test_recovery_keeps_resting_hr_days_after_one_day_fails(self) -> None:
         reader = cast(Any, GarminRemoteReader.__new__(GarminRemoteReader))
         client = Mock(spec=["get_heart_rates"])
@@ -247,7 +263,8 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         )
         writer.write_refresh.assert_called_once()
         self.assertEqual(
-            writer.write_refresh.call_args.kwargs["sections"], {"activities": [activity]}
+            writer.write_refresh.call_args.kwargs["sections"],
+            {"activities": [activity]},
         )
 
     def test_refresh_rejects_ranges_over_ninety_days(self) -> None:

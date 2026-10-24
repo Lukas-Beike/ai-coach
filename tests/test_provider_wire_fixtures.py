@@ -213,7 +213,7 @@ class FixtureGarminClient:
     ) -> Any:
         return self._value("cycling_ftp_history")
 
-    def get_endurance_score(self, start: str, end: str) -> Any:
+    def get_endurance_score(self, start: str, end: str, *, aggregation: str) -> Any:
         return self._value("endurance_score")
 
     def get_running_tolerance(self, start: str, end: str, *, aggregation: str) -> Any:
