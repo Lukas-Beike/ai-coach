@@ -41,7 +41,7 @@ class ManualMorningCheckinService:
         local_today: Callable[[], date],
         logger: logging.Logger,
         *,
-        observations: GarminSleepObservations | None = None,
+        observations: GarminSleepObservations,
     ) -> None:
         self._observations = observations
         self._garmin_sync = garmin_sync
@@ -79,10 +79,6 @@ class ManualMorningCheckinService:
 
     def _sleep_ready(self, checkin_date: date) -> bool:
         snapshot = self._garmin_payload.recent_view(SLEEP_READY_DAYS)
-        if self._observations is None:
-            return garmin_observations.garmin_sleep_ready_for_checkin(
-                checkin_date, snapshot
-            )
         with self._observations.database_manager.reader() as db:
             day = read_garmin_sleep_day(self._observations.reader(), db)
         return garmin_observations.garmin_sleep_ready_for_checkin(

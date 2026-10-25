@@ -78,6 +78,7 @@ class CanonicalVocabularyTests(unittest.TestCase):
                 "resting_hr": "bpm",
                 "hrv_rmssd": "ms",
                 "hrv_sdnn": "ms",
+                "hrv_weekly_average": "ms",
                 "sleep_duration": "s",
                 "sleep_score": "score",
                 "vo2max": "ml/kg/min",

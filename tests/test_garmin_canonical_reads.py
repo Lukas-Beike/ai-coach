@@ -323,18 +323,18 @@ class GarminServiceEqualityTests(GarminReadFixture):
 
 
 class GarminSleepReadinessTests(GarminReadFixture):
-    def test_observed_day_replaces_the_snapshot_sleep_fallback(self) -> None:
+    def test_observed_day_decides_without_the_raw_sleep_section(self) -> None:
         populate(self)
         day = self.read(lambda db: read_garmin_sleep_day(self.table, db))
         assert day is not None
         with_sections = {"sleep": self.garmin["sleep"]}
         without_sections: dict[str, Any] = {}
 
-        self.assertTrue(
-            garmin_observations.garmin_sleep_ready_for_checkin(day, with_sections)
-        )
+        # The raw sleep section alone never makes the check-in ready (#1411).
         self.assertFalse(
-            garmin_observations.garmin_sleep_ready_for_checkin(day, without_sections)
+            garmin_observations.garmin_sleep_ready_for_checkin(
+                day, with_sections, None
+            )
         )
         self.assertTrue(
             garmin_observations.garmin_sleep_ready_for_checkin(

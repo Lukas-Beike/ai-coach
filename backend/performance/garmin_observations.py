@@ -71,17 +71,14 @@ def garmin_source_observed_at(value: Any) -> str | None:
     return max(dates, default=None)
 
 
-_FROM_SNAPSHOT: Any = object()
-
-
 def garmin_sleep_observation_date(
-    snapshot: dict[str, Any], observed_day: Any = _FROM_SNAPSHOT
+    snapshot: dict[str, Any], observed_day: str | None
 ) -> str | None:
-    """Return the authoritative sleep observation date from a snapshot.
+    """Return the authoritative sleep observation date.
 
-    Stored freshness stays authoritative. Without it the date comes from the
-    snapshot's sleep records, or from ``observed_day`` (an ISO date string or
-    None) when the caller read the day from the canonical sleep observations.
+    Stored freshness stays authoritative. Without it the date is ``observed_day``,
+    the latest canonical Garmin sleep observation day (an ISO date string or None);
+    the snapshot's raw sleep records are not read.
     """
     if not isinstance(snapshot, dict):
         return None
@@ -94,13 +91,11 @@ def garmin_sleep_observation_date(
                 # Preserve the source-owned value exactly; malformed values
                 # must remain authoritative and must not fall back to raw data.
                 return iso_date_prefix(str(observed_at))
-    if observed_day is not _FROM_SNAPSHOT:
-        return observed_day
-    return garmin_source_observed_at(snapshot.get("sleep"))
+    return observed_day
 
 
 def garmin_sleep_ready_for_checkin(
-    checkin_date: date, snapshot: dict[str, Any], observed_day: Any = _FROM_SNAPSHOT
+    checkin_date: date, snapshot: dict[str, Any], observed_day: str | None
 ) -> bool:
     """Allow a check-in only for current-day sleep with usable freshness."""
     if not isinstance(checkin_date, date) or isinstance(checkin_date, datetime):

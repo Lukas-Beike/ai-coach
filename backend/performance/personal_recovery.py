@@ -1,26 +1,49 @@
-"""Personal recovery distributions, separated by provider and measurement field."""
+"""Personal recovery distributions, separated by provider and measurement field.
+
+The baselines and sleep deficits read the daily canonical observations of each
+provider. Sleep regularity is the one exception: sleep onset and wake times have
+no canonical form yet (#1419), so it still reads the stored provider sleep and
+wellness records.
+"""
 
 import math
 from datetime import UTC, date, timedelta, tzinfo
 from functools import partial
 from statistics import median, quantiles
-from typing import Any
+from typing import Any, Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.vocabulary import ProviderId
-from backend.performance.canonical_personal_recovery import (
-    CanonicalPersonalRecoveryInputs,
-)
-from backend.performance.canonical_recovery import prefer_canonical
+from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.performance.canonical_recovery import CanonicalRecoveryInputs
 from backend.performance.display_sources import preferred_providers
 from backend.performance.morning_battery import timestamp
-from backend.performance.recovery import (
-    dated_garmin_recovery_records,
-    garmin_recovery_metric,
-)
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.source_labels import SourceView, provider_label
+
+# Each provider's series: (provider, kind) -> (metric, measurement label, scale).
+# The measurement is fixed by the provider field, so RMSSD and SDNN form separate,
+# never mixed, baselines.
+_SERIES: Final = {
+    (ProviderId.INTERVALS, MetricKind.SLEEP_DURATION): ("sleep", "sleepSecs", 3600),
+    (ProviderId.INTERVALS, MetricKind.RESTING_HR): ("resting_hr", "restingHR", 1),
+    (ProviderId.INTERVALS, MetricKind.HRV_RMSSD): ("hrv", "RMSSD", 1),
+    (ProviderId.INTERVALS, MetricKind.HRV_SDNN): ("hrv", "SDNN", 1),
+    (ProviderId.GARMIN, MetricKind.SLEEP_DURATION): (
+        "sleep",
+        garmin_perf_fields.SLEEP_SECONDS,
+        3600,
+    ),
+    (ProviderId.GARMIN, MetricKind.RESTING_HR): (
+        "resting_hr",
+        garmin_perf_fields.RESTING_HEART_RATE,
+        1,
+    ),
+    (ProviderId.GARMIN, MetricKind.HRV_RMSSD): (
+        "hrv",
+        garmin_perf_fields.HRV_NIGHT_AVERAGE,
+        1,
+    ),
+}
 
 
 def _number(value: Any) -> float | None:
@@ -35,8 +58,12 @@ def personal_recovery(
     profile: dict[str, Any],
     today: date,
     *,
-    canonical: CanonicalPersonalRecoveryInputs | None = None,
+    canonical: CanonicalRecoveryInputs | None = None,
 ) -> dict[str, Any]:
+    """Return baselines, deficits and regularity; no baselines without ``canonical``.
+
+    ``wellness`` and ``garmin`` feed only the sleep regularity (#1419).
+    """
     cutoff = (today - timedelta(days=42)).isoformat()
     history_start = (today - timedelta(days=83)).isoformat()
     current_day = today.isoformat()
@@ -44,17 +71,10 @@ def personal_recovery(
 
     add = partial(_add_record, groups, (history_start, current_day))
 
-    for row in wellness:
-        day = iso_date_prefix(str(row.get("id") or row.get("date") or ""))
-        intervals = ProviderId.INTERVALS
-        add((intervals, "sleep", "sleepSecs"), day, row.get("sleepSecs"), 3600)
-        add((intervals, "resting_hr", "restingHR"), day, row.get("restingHR"))
-        # The measurement method is fixed by the Intervals.icu field name, so rMSSD
-        # (`hrv`) and SDNN (`hrvSDNN`) form separate, never mixed, baselines.
-        add((intervals, "hrv", "RMSSD"), day, row.get("hrv"))
-        add((intervals, "hrv", "SDNN"), day, row.get("hrvSDNN"))
-    _add_garmin_records(garmin, history_start, current_day, add)
-    _prefer_canonical_resting_hr(groups, canonical)
+    if canonical is not None:
+        for (provider, kind), (metric, field, scale) in _SERIES.items():
+            for day, value in sorted(canonical.daily(kind, provider).items()):
+                add((provider, metric, field), day.isoformat(), value, scale)
     baselines = [
         _baseline(key, records, cutoff, today)
         for key, records in sorted(groups.items())
@@ -100,21 +120,6 @@ def _add_record(
     ):
         return
     groups.setdefault(key, {})[day] = number
-
-
-def _prefer_canonical_resting_hr(
-    groups: dict[tuple[ProviderId, str, str], dict[str, float]],
-    canonical: CanonicalPersonalRecoveryInputs | None,
-) -> None:
-    """Replace each resting HR day with its canonical record when it matches."""
-    if canonical is None:
-        return
-    for (provider, metric, _), records in groups.items():
-        if metric != "resting_hr":
-            continue
-        daily = canonical.resting_hr.get(provider, {})
-        for day, value in records.items():
-            records[day] = prefer_canonical(daily.get(day), value, provider, day)
 
 
 def _baseline(
@@ -199,27 +204,6 @@ def _sleep_deficits(
     return deficits
 
 
-def _add_garmin_records(
-    garmin: dict, history_start: str, current_day: str, add: Any
-) -> None:
-    specifications = (
-        ("sleep", "sleep", garmin_perf_fields.SLEEP_SECONDS, 3600),
-        ("resting_hr", "resting_hr", garmin_perf_fields.RESTING_HEART_RATE, 1),
-        ("hrv", "hrv", garmin_perf_fields.HRV_NIGHT_AVERAGE, 1),
-    )
-    for section, metric, field, scale in specifications:
-        for day, record in sorted(
-            dated_garmin_recovery_records(garmin.get(section)), key=lambda item: item[0]
-        ):
-            if not history_start <= day <= current_day:
-                continue
-            value, observed = garmin_recovery_metric(
-                {section: [record]}, section, (field,)
-            )
-            if observed == day:
-                add((ProviderId.GARMIN, metric, field), day, value, scale)
-
-
 _SLEEP_START_FIELDS = (
     "sleepStartTimestampGMT",
     "sleepStartTimestamp",
@@ -244,7 +228,10 @@ def sleep_regularity(
     timezone_name: str,
     today: date,
 ) -> dict[str, Any]:
-    """Summarize actual sleep intervals without turning them into a score."""
+    """Summarize actual sleep intervals without turning them into a score.
+
+    Reads the stored provider records until canonical sleep periods exist (#1419).
+    """
     try:
         zone: tzinfo = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError, ValueError:

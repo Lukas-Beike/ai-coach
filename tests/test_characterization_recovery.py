@@ -12,7 +12,8 @@ import unittest
 from datetime import date, timedelta
 from typing import Any
 
-from backend.performance.personal_recovery import personal_recovery
+from canonical_recovery_support import mapped_personal_recovery, mapped_recovery_inputs
+
 from backend.performance.planning_recovery import planning_recovery_by_date
 from backend.performance.recovery_context import performance_recovery_context
 
@@ -58,74 +59,79 @@ def _garmin_baseline(result: dict[str, Any], metric: str) -> dict[str, Any]:
     )
 
 
+def _context(
+    garmin: dict[str, Any] | None = None, rows: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Run the recovery context on the observations the raw fixtures map to."""
+    return performance_recovery_context(mapped_recovery_inputs(garmin, rows), TODAY)
+
+
 class RecoveryContextPrecedenceTests(unittest.TestCase):
+    """Precedence of the canonical recovery context.
+
+    Since #1411 the values come from canonical observations only; the fixtures go
+    through the real mappers. Tests marked "Intended (#1411)" record where the
+    canonical result differs from the legacy raw-view reader.
+    """
+
     def test_sleep_and_resting_hr_choose_sources_independently(self) -> None:
         garmin = {"sleep": [_garmin_record("2026-05-04", sleepTimeSeconds=28_800)]}
-        latest = {"restingHR": 56}
-        rows = [_wellness_row("2026-05-03", restingHR=58)]
+        rows = [
+            _wellness_row("2026-05-03", restingHR=58),
+            _wellness_row("2026-05-04", restingHR=56),
+        ]
 
-        result = performance_recovery_context(garmin, latest, rows, TODAY)
+        result = _context(garmin, rows)
 
         self.assertEqual(result["sleep_source"], GARMIN)
         self.assertEqual(result["sleep_hours"], 8.0)
         self.assertEqual(result["resting_hr_source"], INTERVALS)
         self.assertEqual(result["resting_hr"], 56)
-        self.assertEqual(result["resting_hr_average"], 58.0)
+        self.assertEqual(result["resting_hr_average"], 57.0)
         self.assertIsNone(result["resting_hr_date"])
 
-    def test_garmin_sleep_hours_key_sets_sleep_date_even_when_seconds_are_newer(
-        self,
-    ) -> None:
-        # Quirk: the sleep_hours search and the seconds search run independently.
-        # A dated sleep_hours record wins over a newer seconds record, and
-        # sleep_date reports the sleep_hours record's date.
+    def test_garmin_sleep_comes_from_seconds_and_carries_its_date(self) -> None:
+        # Intended (#1411): the projection-only ``sleep_hours`` key has no
+        # canonical form, so the newest Garmin duration wins and the Garmin value
+        # always carries its observation day.
         garmin = {
             "sleep": [
                 _garmin_record("2026-05-02", sleep_hours=6.5),
-                _garmin_record("2026-05-04", sleepTimeSeconds=28_800),
+                _garmin_record("2026-05-04", sleepTimeSeconds=27_000),
             ]
         }
 
-        result = performance_recovery_context(garmin, {}, [], TODAY)
-
-        self.assertEqual(result["sleep_hours"], 6.5)
-        self.assertEqual(result["sleep_date"], "2026-05-02")
-        self.assertEqual(result["sleep_source"], GARMIN)
-        self.assertEqual(result["sleep_average"], 8.0)
-
-    def test_garmin_seconds_derived_sleep_has_no_sleep_date(self) -> None:
-        garmin = {"sleep": [_garmin_record("2026-05-04", sleepTimeSeconds=27_000)]}
-
-        result = performance_recovery_context(garmin, {}, [], TODAY)
+        result = _context(garmin)
 
         self.assertEqual(result["sleep_hours"], 7.5)
-        self.assertIsNone(result["sleep_date"])
+        self.assertEqual(result["sleep_date"], "2026-05-04")
         self.assertEqual(result["sleep_source"], GARMIN)
+        self.assertEqual(result["sleep_average"], 7.5)
 
-    def test_zero_garmin_sleep_is_a_present_value_and_does_not_fall_back(self) -> None:
-        # Quirk: sleep duration has no plausibility bounds on the Garmin path, so
-        # a zero-second night is a present value and blocks the Intervals fallback.
+    def test_zero_garmin_sleep_is_not_a_measurement(self) -> None:
+        # Intended (#1411): legacy showed a zero-second Garmin night as 0 h and
+        # blocked the Intervals fallback; the mapper stores no such night.
         garmin = {"sleep": [_garmin_record("2026-05-04", sleepTimeSeconds=0)]}
 
-        result = performance_recovery_context(garmin, {"sleepSecs": 25_200}, [], TODAY)
-
-        self.assertEqual(result["sleep_hours"], 0.0)
-        self.assertEqual(result["sleep_source"], GARMIN)
-
-    def test_garmin_sleep_without_duration_defers_whole_sleep_block_to_intervals(
-        self,
-    ) -> None:
-        # Quirk: a Garmin record with a sleep score but no duration does not
-        # produce a Garmin sleep block, so Intervals supplies the score too.
-        garmin = {"sleep": [_garmin_record("2026-05-04", sleepScore=88)]}
-        latest = {"sleepSecs": 25_200, "sleepScore": 70}
-
-        result = performance_recovery_context(garmin, latest, [], TODAY)
+        result = _context(garmin, [_wellness_row("2026-05-04", sleepSecs=25_200)])
 
         self.assertEqual(result["sleep_hours"], 7.0)
         self.assertEqual(result["sleep_source"], INTERVALS)
-        self.assertEqual(result["sleep_score"], 70)
-        self.assertEqual(result["sleep_score_source"], INTERVALS)
+
+    def test_garmin_sleep_score_without_duration_is_selected_independently(
+        self,
+    ) -> None:
+        # Intended (#1411): duration and score are selected independently, so a
+        # Garmin score without a Garmin duration is no longer dropped.
+        garmin = {"sleep": [_garmin_record("2026-05-04", sleepScore=88)]}
+        rows = [_wellness_row("2026-05-04", sleepSecs=25_200, sleepScore=70)]
+
+        result = _context(garmin, rows)
+
+        self.assertEqual(result["sleep_hours"], 7.0)
+        self.assertEqual(result["sleep_source"], INTERVALS)
+        self.assertEqual(result["sleep_score"], 88)
+        self.assertEqual(result["sleep_score_source"], GARMIN)
 
     def test_out_of_range_garmin_sleep_score_falls_back_to_intervals_score(
         self,
@@ -136,10 +142,8 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
             ]
         }
 
-        with_intervals = performance_recovery_context(
-            garmin, {"sleepScore": 74}, [], TODAY
-        )
-        without_intervals = performance_recovery_context(garmin, {}, [], TODAY)
+        with_intervals = _context(garmin, [_wellness_row("2026-05-04", sleepScore=74)])
+        without_intervals = _context(garmin)
 
         self.assertEqual(with_intervals["sleep_source"], GARMIN)
         self.assertEqual(with_intervals["sleep_score"], 74)
@@ -158,23 +162,23 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
             "sleep": [_garmin_record("2026-04-27", sleepTimeSeconds=28_800)]
         }
 
-        recent = performance_recovery_context(in_window, {}, rows, TODAY)
-        stale = performance_recovery_context(outside_window, {}, rows, TODAY)
+        recent = _context(in_window, rows)
+        stale = _context(outside_window, rows)
 
         self.assertEqual(recent["sleep_average"], 8.0)
-        # Quirk: Garmin values have no freshness window for the current value, so a
-        # night from 7 days ago beats newer Intervals sleep (5 h on 2026-05-03).
+        # Garmin values have no freshness window for the current value, so a night
+        # from 7 days ago beats newer Intervals sleep (5 h on 2026-05-03).
         self.assertEqual(stale["sleep_hours"], 8.0)
         self.assertEqual(stale["sleep_source"], GARMIN)
-        # Quirk: the Garmin average is None outside the 7-day window and does not
-        # fall back to the Intervals rows that are inside it.
+        # The Garmin average is None outside the 7-day window and does not fall
+        # back to the Intervals rows inside it.
         self.assertIsNone(stale["sleep_average"])
 
     def test_out_of_bounds_garmin_resting_hr_uses_older_valid_garmin_first(
         self,
     ) -> None:
-        # Quirk: an implausible latest Garmin value is skipped, not treated as
-        # "no Garmin data", so an older valid Garmin value is used before Intervals.
+        # An implausible latest Garmin value is skipped, not treated as "no Garmin
+        # data", so an older valid Garmin value is used before Intervals.
         garmin = {
             "resting_hr": [
                 _garmin_record("2026-05-04", restingHeartRate=15),
@@ -182,12 +186,7 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
             ]
         }
 
-        result = performance_recovery_context(
-            garmin,
-            {"restingHR": 56},
-            [_wellness_row("2026-05-03", restingHR=54)],
-            TODAY,
-        )
+        result = _context(garmin, [_wellness_row("2026-05-03", restingHR=54)])
 
         self.assertEqual(result["resting_hr"], 48)
         self.assertEqual(result["resting_hr_source"], GARMIN)
@@ -209,9 +208,7 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
                     ]
                 }
 
-                result = performance_recovery_context(
-                    garmin, {"restingHR": 56}, rows, TODAY
-                )
+                result = _context(garmin, rows)
 
                 self.assertEqual(result["resting_hr"], 56)
                 self.assertEqual(result["resting_hr_source"], INTERVALS)
@@ -219,7 +216,7 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
                 self.assertEqual(result["resting_hr_average"], 57.0)
 
     def test_plausibility_bounds_are_inclusive_at_their_edges(self) -> None:
-        # Bounds come from garmin_bounded_metric: resting HR 30..230, sleep score 0..100.
+        # Garmin bounds of the source rules: resting HR 30..230, sleep score 0..100.
         for resting_hr in (30, 230):
             with self.subTest(resting_hr=resting_hr):
                 garmin = {
@@ -228,9 +225,7 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
                     ]
                 }
 
-                result = performance_recovery_context(
-                    garmin, {"restingHR": 56}, [], TODAY
-                )
+                result = _context(garmin, [_wellness_row("2026-05-04", restingHR=56)])
 
                 self.assertEqual(result["resting_hr"], resting_hr)
                 self.assertEqual(result["resting_hr_source"], GARMIN)
@@ -246,9 +241,7 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
                     ]
                 }
 
-                result = performance_recovery_context(
-                    garmin, {"sleepScore": 74}, [], TODAY
-                )
+                result = _context(garmin, [_wellness_row("2026-05-04", sleepScore=74)])
 
                 self.assertEqual(result["sleep_score"], sleep_score)
                 self.assertEqual(result["sleep_score_source"], GARMIN)
@@ -256,46 +249,47 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
     def test_garmin_resting_hr_average_is_not_backfilled_from_intervals(self) -> None:
         garmin = {"resting_hr": [_garmin_record("2026-04-27", restingHeartRate=50)]}
 
-        result = performance_recovery_context(
-            garmin, {}, [_wellness_row("2026-05-03", restingHR=60)], TODAY
-        )
+        result = _context(garmin, [_wellness_row("2026-05-03", restingHR=60)])
 
-        # Quirk: a 7-day-old Garmin value beats newer Intervals resting HR (60), and
-        # the average stays None instead of using the Intervals row.
+        # A 7-day-old Garmin value beats newer Intervals resting HR (60), and the
+        # average stays None instead of using the Intervals row.
         self.assertEqual(result["resting_hr"], 50)
         self.assertEqual(result["resting_hr_source"], GARMIN)
         self.assertEqual(result["resting_hr_date"], "2026-04-27")
         self.assertIsNone(result["resting_hr_average"])
 
-    def test_readiness_uses_first_present_intervals_key_even_when_unparseable(
-        self,
-    ) -> None:
-        # Quirk: the first non-empty readiness key wins even when it cannot be
-        # parsed, so a valid readinessScore later in the list is never considered.
-        latest = {"readiness": {"label": "unknown"}, "readinessScore": 81}
+    def test_unparseable_intervals_readiness_falls_back_to_garmin(self) -> None:
+        # The Intervals mapper reports the unparseable first alias instead of
+        # reading a later one, so there is no Intervals readiness and Garmin wins.
+        rows = [
+            _wellness_row(
+                "2026-05-04", readiness={"label": "unknown"}, readinessScore=81
+            )
+        ]
         garmin = {"readiness": [_garmin_record("2026-05-04", score=64)]}
 
-        result = performance_recovery_context(garmin, latest, [], TODAY)
+        result = _context(garmin, rows)
 
         self.assertEqual(result["readiness"], 64)
         self.assertEqual(result["readiness_source"], GARMIN)
-        self.assertIsNone(result["readiness_average"])
+        self.assertEqual(result["readiness_average"], 64.0)
 
-    def test_readiness_average_is_always_the_intervals_rows(self) -> None:
+    def test_readiness_average_uses_the_selected_provider(self) -> None:
         garmin = {"readiness": [_garmin_record("2026-05-04", score=60)]}
-        rows = [_wellness_row("2026-05-01", readiness=70)]
+        older = _wellness_row("2026-05-01", readiness=70)
 
-        intervals_current = performance_recovery_context(
-            garmin, {"readiness": 72}, rows, TODAY
+        intervals_current = _context(
+            garmin, [older, _wellness_row("2026-05-04", readiness=72)]
         )
-        garmin_current = performance_recovery_context(garmin, {}, rows, TODAY)
+        garmin_only = _context(garmin, [_wellness_row("2026-05-04", restingHR=50)])
 
         self.assertEqual(intervals_current["readiness"], 72)
         self.assertEqual(intervals_current["readiness_source"], INTERVALS)
-        self.assertEqual(intervals_current["readiness_average"], 70.0)
-        self.assertEqual(garmin_current["readiness"], 60)
-        self.assertEqual(garmin_current["readiness_source"], GARMIN)
-        self.assertEqual(garmin_current["readiness_average"], 70.0)
+        self.assertEqual(intervals_current["readiness_average"], 71.0)
+        self.assertEqual(garmin_only["readiness"], 60)
+        self.assertEqual(garmin_only["readiness_source"], GARMIN)
+        # Intended (#1411): legacy always averaged the Intervals rows.
+        self.assertEqual(garmin_only["readiness_average"], 60.0)
 
 
 class PlanningRecoveryPrecedenceTests(unittest.TestCase):
@@ -435,7 +429,9 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
                     "restingHeartRate", nights, value=50, latest_value=100
                 )
 
-                result = personal_recovery([], {"resting_hr": records}, {}, self.today)
+                result = mapped_personal_recovery(
+                    [], {"resting_hr": records}, {}, self.today
+                )
                 baseline = _garmin_baseline(result, "resting_hr")
 
                 self.assertEqual(baseline["status"], status)
@@ -467,7 +463,9 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
                     latest_value=6 * 3600,
                 )
 
-                result = personal_recovery([], {"sleep": records}, {}, self.today)
+                result = mapped_personal_recovery(
+                    [], {"sleep": records}, {}, self.today
+                )
                 baseline = _garmin_baseline(result, "sleep")
 
                 self.assertEqual(baseline["status"], status)
@@ -492,7 +490,9 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
                     field, 20, value=valid, latest_value=implausible
                 )
 
-                result = personal_recovery([], {section: records}, {}, self.today)
+                result = mapped_personal_recovery(
+                    [], {section: records}, {}, self.today
+                )
                 baseline = _garmin_baseline(
                     result, "resting_hr" if section == "resting_hr" else "sleep"
                 )
@@ -510,7 +510,7 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
         # when enough earlier nights exist, and no median is reported.
         records = _garmin_nights("restingHeartRate", 30, value=50, latest_offset=2)
 
-        result = personal_recovery([], {"resting_hr": records}, {}, self.today)
+        result = mapped_personal_recovery([], {"resting_hr": records}, {}, self.today)
         baseline = _garmin_baseline(result, "resting_hr")
 
         self.assertEqual(baseline["status"], "insufficient_data")
@@ -521,7 +521,7 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
     def test_yesterday_measurement_still_counts_as_current(self) -> None:
         records = _garmin_nights("restingHeartRate", 28, value=50, latest_offset=1)
 
-        result = personal_recovery([], {"resting_hr": records}, {}, self.today)
+        result = mapped_personal_recovery([], {"resting_hr": records}, {}, self.today)
 
         self.assertEqual(_garmin_baseline(result, "resting_hr")["status"], "ok")
 
@@ -530,7 +530,7 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
     ) -> None:
         records = _garmin_nights("restingHeartRate", 90, value=50)
 
-        result = personal_recovery([], {"resting_hr": records}, {}, self.today)
+        result = mapped_personal_recovery([], {"resting_hr": records}, {}, self.today)
         baseline = _garmin_baseline(result, "resting_hr")
 
         self.assertEqual(len(baseline["history"]), 84)
@@ -542,7 +542,7 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
     def test_garmin_sleep_deficit_uses_seven_known_nights(self) -> None:
         records = _garmin_nights("sleepTimeSeconds", 6, value=6 * 3600)
 
-        result = personal_recovery(
+        result = mapped_personal_recovery(
             [], {"sleep": records}, {"sleep_target_hours": 8}, self.today
         )
 
@@ -570,7 +570,7 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
         )
         for raw, expected_target, expected_deficits in cases:
             with self.subTest(target=raw):
-                result = personal_recovery(
+                result = mapped_personal_recovery(
                     [], {"sleep": records}, {"sleep_target_hours": raw}, self.today
                 )
 
@@ -581,7 +581,7 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
         records = _garmin_nights("sleepTimeSeconds", 6, value=6 * 3600)
         for target, deficit_hours in ((4, 0.0), (12, 42.0)):
             with self.subTest(target=target):
-                result = personal_recovery(
+                result = mapped_personal_recovery(
                     [], {"sleep": records}, {"sleep_target_hours": target}, self.today
                 )
 
@@ -602,7 +602,9 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
                     field, 20, value=past_value, latest_value=latest_value
                 )
 
-                result = personal_recovery([], {section: records}, {}, self.today)
+                result = mapped_personal_recovery(
+                    [], {section: records}, {}, self.today
+                )
                 baseline = _garmin_baseline(
                     result, "resting_hr" if section == "resting_hr" else "sleep"
                 )

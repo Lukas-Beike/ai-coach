@@ -8,9 +8,10 @@ import tempfile
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from backend.coach.morning import (
+    GarminSleepObservations,
     ManualMorningCheckinService,
     MorningCheckinStateService,
 )
@@ -30,12 +31,21 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
         self.morning_battery = Mock()
         self.local_today = Mock(return_value=TODAY)
         self.logger = Mock(spec=logging.Logger)
+        # The latest canonical Garmin sleep day; the raw view only adds freshness.
+        self.sleep_day: date | None = TODAY
+        sleep_day = patch(
+            "backend.coach.morning.read_garmin_sleep_day",
+            side_effect=lambda _reader, _db: self.sleep_day,
+        )
+        sleep_day.start()
+        self.addCleanup(sleep_day.stop)
         self.service = ManualMorningCheckinService(
             self.garmin_sync,
             self.garmin_payload,
             self.morning_battery,
             self.local_today,
             self.logger,
+            observations=GarminSleepObservations(MagicMock(), Mock()),
         )
 
     def test_unconfigured_garmin_returns_without_reading_or_refreshing(self) -> None:
@@ -53,8 +63,7 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
         self.garmin_sync.configured.return_value = True
         self.garmin_sync.sync.side_effect = lambda **_: events.append("sync")
         self.garmin_payload.recent_view.side_effect = lambda _days=None: (
-            events.append("snapshot")
-            or {"sleep": [{"calendarDate": TODAY.isoformat()}]}
+            events.append("snapshot") or {}
         )
         self.morning_battery.refresh.side_effect = lambda day: events.append(
             f"battery:{day.isoformat()}"
@@ -71,11 +80,14 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
         self.assertEqual(events, ["sync", "snapshot", "battery:2026-09-23"])
 
     def test_missing_or_stale_sleep_raises_without_refreshing_battery(self) -> None:
-        for snapshot in (
-            {},
-            {"sleep": [{"calendarDate": (TODAY - timedelta(days=1)).isoformat()}]},
+        for sleep_day, snapshot in (
+            (None, {}),
+            (TODAY - timedelta(days=1), {}),
+            # The raw view's sleep for today does not count without an observation.
+            (None, {"sleep": [{"calendarDate": TODAY.isoformat()}]}),
         ):
-            with self.subTest(snapshot=snapshot):
+            with self.subTest(sleep_day=sleep_day, snapshot=snapshot):
+                self.sleep_day = sleep_day
                 self.garmin_payload.recent_view.return_value = snapshot
                 self.morning_battery.refresh.reset_mock()
 
@@ -89,6 +101,7 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
     def test_sync_failure_logs_and_stale_snapshot_still_blocks(self) -> None:
         self.garmin_sync.sync.side_effect = RuntimeError("provider unavailable")
         self.garmin_payload.recent_view.return_value = {}
+        self.sleep_day = TODAY - timedelta(days=1)
 
         with self.assertRaises(AppError) as raised:
             self.service.prepare()
@@ -103,9 +116,7 @@ class ManualMorningCheckinServiceTests(unittest.TestCase):
 
     def test_sync_failure_with_fresh_snapshot_logs_then_refreshes(self) -> None:
         self.garmin_sync.sync.side_effect = RuntimeError("provider unavailable")
-        self.garmin_payload.recent_view.return_value = {
-            "sleep": [{"calendarDate": TODAY.isoformat()}]
-        }
+        self.garmin_payload.recent_view.return_value = {}
 
         self.service.prepare()
 

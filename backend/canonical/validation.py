@@ -40,6 +40,7 @@ METRIC_BOUNDS: Final[Mapping[MetricKind, tuple[float, float]]] = {
     MetricKind.RESTING_HR: HEART_RATE_BOUNDS,
     MetricKind.HRV_RMSSD: (0.0, 500.0),
     MetricKind.HRV_SDNN: (0.0, 500.0),
+    MetricKind.HRV_WEEKLY_AVERAGE: (0.0, 500.0),
     MetricKind.SLEEP_DURATION: (0.0, 86_400.0),
     MetricKind.SLEEP_SCORE: (0.0, 100.0),
     MetricKind.VO2MAX: (5.0, 120.0),

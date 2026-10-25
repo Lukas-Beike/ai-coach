@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from canonical_recovery_support import mapped_recovery_inputs
+
 from backend.canonical.mapping import IssueReason, MappingResult
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
@@ -283,8 +285,10 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.snapshot = _fixture_snapshot()
         self.result = _map(self.snapshot)
+        # Since #1411 the recovery context reads the mapped observations, so this
+        # checks that the context shows the mapped value and day it selects.
         self.context = recovery_context.performance_recovery_context(
-            self.snapshot, {}, [], TODAY
+            mapped_recovery_inputs(self.snapshot), TODAY
         )
         self.metrics = garmin_metrics.garmin_performance_metrics(self.snapshot, TODAY)
 
@@ -313,7 +317,9 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
             "sleep": [{"calendarDate": DAY, "sleepScore": 0, "sleepTimeSeconds": 25200}]
         }
 
-        context = recovery_context.performance_recovery_context(snapshot, {}, [], TODAY)
+        context = recovery_context.performance_recovery_context(
+            mapped_recovery_inputs(snapshot), TODAY
+        )
         result = _map(snapshot)
 
         self.assertEqual(context["sleep_score"], 0)
@@ -462,16 +468,24 @@ class NamedDeviationTests(unittest.TestCase):
             [("heart_rate_zones[0]", "maxHeartRateUsed", IssueReason.OUT_OF_RANGE)],
         )
 
-    def test_weekly_hrv_average_is_used_by_legacy_but_not_mapped(self) -> None:
+    def test_weekly_hrv_average_is_its_own_kind_and_a_labelled_fallback(self) -> None:
+        # Legacy showed the weekly average as the HRV value under the plain Garmin
+        # label. Since #1411 it is mapped as its own kind and labelled.
         snapshot: dict[str, Any] = {
             "hrv": {"calendarDate": DAY, "weeklyAvg": 58},
         }
 
-        context = recovery_context.performance_recovery_context(snapshot, {}, [], TODAY)
+        context = recovery_context.performance_recovery_context(
+            mapped_recovery_inputs(snapshot), TODAY
+        )
         result = _map(snapshot)
 
         self.assertEqual(context["hrv"], 58)
-        self.assertEqual(result.records, ())
+        self.assertEqual(context["hrv_source"], "Garmin Connect (Wochenmittel)")
+        self.assertEqual(
+            [(item.kind, item.value.value) for item in result.records],
+            [(MetricKind.HRV_WEEKLY_AVERAGE, 58.0)],
+        )
 
 
 if __name__ == "__main__":

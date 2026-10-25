@@ -52,7 +52,7 @@ Detailed contract: Wahoo work in joules SHALL convert to kJ; zero ascent remains
 Evidence: `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/providers/wahoo_activity_mapping.py:map_wahoo_activities`; `tests/test_intervals_activity_mapping.py:test_moving_time_precedes_elapsed_time`, `tests/test_intervals_activity_mapping.py:test_zero_load_is_kept_with_the_intervals_model`, `tests/test_wahoo_activity_mapping.py:test_summary_metrics_map_from_decimal_text`, `tests/test_wahoo_activity_mapping.py:test_planned_minutes_are_never_the_duration`.
 
 ### Requirement: Health and body unit normalization
-The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.
+The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.
 
 #### Scenario: Declared weight unit
 - **WHEN** a valid Garmin weigh-in explicitly declares pounds or grams
@@ -60,7 +60,11 @@ The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, restin
 
 #### Scenario: Different HRV windows
 - **WHEN** a payload has only a weekly HRV average and no last-night value
-- **THEN** the canonical last-night observation stays absent rather than borrowing the weekly statistic.
+- **THEN** the canonical last-night observation stays absent rather than borrowing the weekly statistic, and the weekly average is stored as its own weekly HRV observation.
+
+#### Scenario: Stored Garmin health records after the weekly HRV mapping
+- **WHEN** the Garmin health mapper version changes to add the weekly HRV kind
+- **THEN** stored Garmin health records are reprojected through the existing canonical backfill without a provider refetch, schema change or remote write.
 
 Detailed contract: Zero SHALL remain valid for sleep score, steps, floors, and active energy where implemented, while absent or invalid measurements remain unknown.
 
