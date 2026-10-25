@@ -39,6 +39,7 @@ UNAVAILABLE = "Yazio ist momentan nicht verfügbar. Nächste Datenquelle verwend
 SOURCE = "Yazio"
 _PRODUCT_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.IGNORECASE)
 _SEARCH_LIMIT = 8
+_BARCODE_DETAILS = 3
 _SERVING_LIMIT = 10
 _LOGIN_BACKOFF_SECONDS = 900
 _TOKEN_MARGIN_SECONDS = 60
@@ -99,7 +100,7 @@ def project_product(raw: Any, product_id: Any = None) -> dict[str, Any] | None:
         "fat_g": _per_100(nutrients, "nutrient.fat", 100),
     }
     # A scale error shows as macros above 100 g per 100 g; never guess a value.
-    if sum(value or 0 for value in macros.values()) > 100:
+    if sum(value or 0 for value in macros.values()) > 110:
         kcal, macros = None, dict.fromkeys(macros)
     unit = {"g": "g", "ml": "ml"}.get(str(raw.get("base_unit") or "").lower())
     food: dict[str, Any] = {
@@ -189,7 +190,7 @@ class YazioClient:
 
     def barcode(self, barcode: str) -> dict[str, Any] | None:
         """Return the product whose EAN equals the barcode, if Yazio has one."""
-        for hit in self.search(barcode):
+        for hit in self.search(barcode)[:_BARCODE_DETAILS]:
             detail = self._get("/products/" + quote(hit["id"][6:], safe=""))
             eans = detail.get("eans") if isinstance(detail, dict) else None
             if isinstance(eans, list) and barcode in {str(ean) for ean in eans}:

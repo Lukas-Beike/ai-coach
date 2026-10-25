@@ -1252,7 +1252,7 @@ keinen passenden Treffer hat (jedes Suchwort im Namen, bekannter Kalorienwert),
 nicht erreichbar ist oder ihr Limit erreicht hat; ein Treffer in einer früheren
 Quelle verhindert alle externen Anfragen. Barcodes laufen über Spiegel, Yazio
 und Open Food Facts. Ohne Yazio-Zugangsdaten bleibt es bei eigenen Produkten und
-BLS, Open Food Facts nur auf ausdrückliche Anfrage. Der Coach kann `yazio` auch
+BLS, Open Food Facts nur auf ausdrückliche Anfrage; mit Yazio werden Suchbegriffe ohne Quellenangabe also auch an Yazio und Open Food Facts gesendet. Der Coach kann `yazio` auch
 als ausdrückliche Quelle nennen.
 
 Yazio-Treffer tragen die Quelle „Yazio“, Werte pro 100 g oder 100 ml und, wo

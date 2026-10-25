@@ -35,7 +35,7 @@ class FoodDatabaseMirror:
         with self._database_manager().reader() as db:
             return self._entries.get(db, food_id)
 
-    def by_barcode(self, barcode: str) -> dict[str, Any] | None:
+    def by_barcode(self, barcode: str) -> list[dict[str, Any]]:
         with self._database_manager().reader() as db:
             return self._entries.by_barcode(db, barcode)
 

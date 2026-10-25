@@ -191,12 +191,15 @@ class FoodDatabaseEntryRepository:
         row = db.execute(self._SELECT + " WHERE food_id=?", (food_id,)).fetchone()
         return self._entry(row) if row else None
 
-    def by_barcode(self, db: Any, barcode: str) -> dict[str, Any] | None:
-        row = db.execute(
-            self._SELECT + " WHERE barcode=? ORDER BY fetched_at DESC LIMIT 1",
+    def by_barcode(self, db: Any, barcode: str) -> list[dict[str, Any]]:
+        """Return the entries of any source with this barcode, newest first."""
+        if not barcode:
+            return []
+        rows = db.execute(
+            self._SELECT + " WHERE barcode=? ORDER BY fetched_at DESC LIMIT 5",
             (barcode,),
-        ).fetchone()
-        return self._entry(row) if row else None
+        ).fetchall()
+        return [self._entry(row) for row in rows]
 
     def search(
         self,

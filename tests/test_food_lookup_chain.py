@@ -19,6 +19,7 @@ from backend.nutrition.food_mirror import FoodDatabaseMirror
 START = datetime(2026, 10, 1, 8, 0, tzinfo=UTC)
 YAZIO_ID = "11111111-2222-3333-4444-555555555555"
 BARCODE = "4006381333931"
+OTHER = "66666666-7777-8888-9999-000000000000"
 
 
 def yazio_food(name="Synthetic Haferflocken", kcal=370.0, food_id=YAZIO_ID):
@@ -142,6 +143,30 @@ class LookupChainTests(unittest.TestCase):
         self.yazio.hits = [{**yazio_food(), "basis_unit": None}]
         self.off.hits = [off_food()]
         self.assertEqual(self.ids(query="Haferflocken"), [f"off:{BARCODE}"])
+
+    def test_stale_yazio_barcode_entry_is_used_when_every_source_fails(self):
+        self.mirror.store([{**yazio_food(), "barcode": BARCODE}])
+        self.now = datetime(2027, 1, 20, tzinfo=UTC)
+        self.yazio.error = UNAVAILABLE
+        self.off.error = UNAVAILABLE
+        result = self.service.lookup({"barcode": BARCODE})
+        self.assertEqual(result["foods"][0]["id"], f"yazio:{YAZIO_ID}")
+        self.assertEqual(result["foods"][0]["data_origin"], "local_database_stale")
+        self.assertIn("Onlinequelle", result["notice"])
+
+    def test_fresh_entry_of_another_source_beats_a_newer_stale_one(self):
+        self.mirror.store([off_food()])
+        self.now = datetime(2027, 1, 20, tzinfo=UTC)
+        self.mirror.store([{**yazio_food(), "barcode": BARCODE}])
+        self.now = datetime(2027, 6, 1, tzinfo=UTC)
+        self.mirror.store([off_food()])
+        self.assertEqual(self.ids(barcode=BARCODE), [f"off:{BARCODE}"])
+        self.assertEqual(self.yazio.calls, [])
+
+    def test_unsuitable_stored_hit_does_not_hide_live_yazio_results(self):
+        self.mirror.store([yazio_food("Haferflocken", kcal=None)])
+        self.yazio.hits = [yazio_food("Haferflocken zart", food_id=OTHER)]
+        self.assertEqual(self.ids(query="Haferflocken"), [f"yazio:{OTHER}"])
 
     def test_failing_providers_end_at_bls(self):
         self.yazio.error = UNAVAILABLE

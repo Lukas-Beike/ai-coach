@@ -303,10 +303,19 @@ class FoodDatabaseService:
         return food, LIVE
 
     def _search_source(
-        self, prefix: str, search: Callable[[str], list[dict[str, Any]]], query: str
+        self,
+        prefix: str,
+        search: Callable[[str], list[dict[str, Any]]],
+        query: str,
+        *,
+        live: bool = False,
     ) -> tuple[list[dict[str, Any]], str]:
         local = self._mirror.search(query, prefix=prefix) if self._mirror else []
-        if self._mirror and any(self._mirror.is_fresh(food) for food in local):
+        if (
+            not live
+            and self._mirror
+            and any(self._mirror.is_fresh(food) for food in local)
+        ):
             return local, LOCAL_DATABASE
         try:
             foods = search(query)
@@ -321,8 +330,10 @@ class FoodDatabaseService:
     def _off_product(self, barcode: str) -> tuple[dict[str, Any], str]:
         return self._product("off:" + barcode, lambda: self._off.product(barcode))
 
-    def _off_search(self, query: str) -> tuple[list[dict[str, Any]], str]:
-        return self._search_source("off:", self._off.search, query)
+    def _off_search(
+        self, query: str, *, live: bool = False
+    ) -> tuple[list[dict[str, Any]], str]:
+        return self._search_source("off:", self._off.search, query, live=live)
 
     def _require_yazio(self) -> YazioClient:
         if self._yazio is None or not self._yazio.configured:
@@ -336,27 +347,40 @@ class FoodDatabaseService:
             food_id, lambda: self._require_yazio().product(food_id[6:])
         )
 
-    def _yazio_search(self, query: str) -> tuple[list[dict[str, Any]], str]:
+    def _yazio_search(
+        self, query: str, *, live: bool = False
+    ) -> tuple[list[dict[str, Any]], str]:
         return self._search_source(
-            "yazio:", lambda text: self._require_yazio().search(text), query
+            "yazio:", lambda text: self._require_yazio().search(text), query, live=live
         )
 
-    def _barcode_product(self, barcode: str) -> tuple[dict[str, Any], str]:
-        """Local mirror, then Yazio when configured, then Open Food Facts."""
-        if self._mirror:
-            stored = self._mirror.by_barcode(barcode)
-            if stored and self._mirror.is_fresh(stored):
-                return stored, LOCAL_DATABASE
+    def _barcode_product(self, barcode: str) -> tuple[dict[str, Any], str, bool]:
+        """Mirror, then Yazio when configured, then Open Food Facts.
+
+        The last value tells whether Yazio was asked and failed.
+        """
+        stored = self._mirror.by_barcode(barcode) if self._mirror else []
+        if self._mirror and (
+            fresh := next((e for e in stored if self._mirror.is_fresh(e)), None)
+        ):
+            return fresh, LOCAL_DATABASE, False
+        failed = False
         if self.yazio_configured and re.fullmatch(r"\d{8,14}", barcode):
             try:
                 food = self._require_yazio().barcode(barcode)
             except AppError:
-                food = None
+                food, failed = None, True
             if food is not None:
                 if self._mirror:
                     self._mirror.store([food])
-                return food, LIVE
-        return self._off_product(barcode)
+                return food, LIVE, False
+        try:
+            food, origin = self._off_product(barcode)
+        except AppError:
+            if not stored:
+                raise
+            return stored[0], LOCAL_DATABASE_STALE, failed
+        return food, origin, failed
 
     @staticmethod
     def _labelled(foods: list[dict[str, Any]], origin: str) -> list[dict[str, Any]]:
@@ -396,8 +420,10 @@ class FoodDatabaseService:
         if barcode:
             if not isinstance(barcode, str) or query:
                 raise AppError(400, "Entweder Suchbegriff oder Barcode angeben.")
-            food, origin = self._barcode_product(barcode)
+            food, origin, yazio_failed = self._barcode_product(barcode)
             foods = self._labelled([food], origin)
+            if yazio_failed:
+                notice += FALLBACK_NOTICE
             if origin == LOCAL_DATABASE_STALE:
                 notice += STALE_NOTICE
         else:
@@ -431,10 +457,15 @@ class FoodDatabaseService:
         for search in (self._yazio_search, self._off_search):
             try:
                 found, origin = search(query)
+                suitable = [food for food in found if _suitable(query, food)]
+                if not suitable and origin == LOCAL_DATABASE:
+                    # Unsuitable stored hits must not hide the live results.
+                    found, origin = search(query, live=True)
+                    suitable = [food for food in found if _suitable(query, food)]
             except AppError:
                 skipped = True
                 continue
-            if suitable := [food for food in found if _suitable(query, food)]:
+            if suitable:
                 notice = STALE_NOTICE if origin == LOCAL_DATABASE_STALE else ""
                 return self._labelled(suitable, origin), notice
             skipped = True
