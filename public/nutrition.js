@@ -593,9 +593,15 @@ function nutritionProductValue(value) {
   return value == null || value === "" ? "" : String(value);
 }
 
+function nutritionDatabaseSource(source) {
+  if (source === "Open Food Facts" || source === "open_food_facts") return "open_food_facts";
+  if (source === "Yazio" || source === "yazio") return "yazio";
+  return source || "packaging_label";
+}
+
 function normalizeNutritionProduct(product = {}) {
   const per100 = product.per_100 || {};
-  const source = product.source === "Open Food Facts" || product.source === "open_food_facts" ? "open_food_facts" : (product.source || "packaging_label");
+  const source = nutritionDatabaseSource(product.source);
   const normalized = {
     ...product,
     brand: product.brand || product.brands || "",
@@ -611,6 +617,10 @@ function normalizeNutritionProduct(product = {}) {
     normalized.external_id = normalized.external_id || product.id;
     const barcode = /^off:(\d{8,14})$/.exec(String(product.id));
     if (barcode && !normalized.barcode) normalized.barcode = barcode[1];
+    delete normalized.id;
+  }
+  if (source === "yazio" && String(product.id || "").startsWith("yazio:")) {
+    normalized.external_id = normalized.external_id || product.id;
     delete normalized.id;
   }
   return normalized;

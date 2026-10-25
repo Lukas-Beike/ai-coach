@@ -19,6 +19,7 @@ from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.photo import NutritionPhotoExtractionService
 from backend.nutrition.sync import IntervalsNutritionSyncService
 from backend.providers.intervals import IntervalsApiClient
+from backend.providers.yazio import YazioClient
 from backend.runtime.ports import ObservationReader
 
 
@@ -61,7 +62,9 @@ class NutritionAssembly:
         self._food_mirror = FoodDatabaseMirror(
             self._database_manager, self._database_lock, self._utc_now
         )
-        self._food_database = FoodDatabaseService(mirror=self._food_mirror)
+        self._food_database = FoodDatabaseService(
+            mirror=self._food_mirror, yazio=YazioClient(self._config)
+        )
         self._product_repository = NutritionProductRepository()
         self._template_repository = NutritionTemplateRepository()
         self._runtime_photo_extractor = dependencies.runtime.photo_extractor

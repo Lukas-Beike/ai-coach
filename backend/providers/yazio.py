@@ -119,6 +119,13 @@ def project_product(raw: Any, product_id: Any = None) -> dict[str, Any] | None:
         "preparation": "unknown",
         "last_modified": None,
     }
+    eans = raw.get("eans")
+    if isinstance(eans, list):
+        barcode = next(
+            (str(e) for e in eans if re.fullmatch(r"\d{8,14}", str(e))), None
+        )
+        if barcode:
+            food["barcode"] = barcode
     if servings := _servings(raw.get("servings")):
         food["servings"] = servings
     return food

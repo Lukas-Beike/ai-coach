@@ -35,11 +35,17 @@ class FoodDatabaseMirror:
         with self._database_manager().reader() as db:
             return self._entries.get(db, food_id)
 
+    def by_barcode(self, barcode: str) -> dict[str, Any] | None:
+        with self._database_manager().reader() as db:
+            return self._entries.by_barcode(db, barcode)
+
     def search(
-        self, query: str, *, limit: int = 8, offset: int = 0
+        self, query: str, *, limit: int = 8, offset: int = 0, prefix: str = ""
     ) -> list[dict[str, Any]]:
         with self._database_manager().reader() as db:
-            return self._entries.search(db, query, limit=limit, offset=offset)
+            return self._entries.search(
+                db, query, limit=limit, offset=offset, prefix=prefix
+            )
 
     def is_fresh(self, entry: dict[str, Any]) -> bool:
         try:
