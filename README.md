@@ -39,11 +39,12 @@ container, and do not replace or reset the data directory to resolve a
 rejected schema. A fresh database is only required when the athlete explicitly
 chooses to start over. Future schema changes add explicit, versioned and
 transactional migrations from version 9 with upgrade regression tests.
-The current schema is version 13. Version 10 adds canonical activity detail
+The current schema is version 14. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
-`garmin_snapshot` value, and version 13 adds the maximum speed of each lap. A
-version 9, 10, 11 or 12 database or backup is upgraded to it in place within
+`garmin_snapshot` value, version 13 adds the maximum speed of each lap, and
+version 14 lets Yazio foods into the food-database mirror and saved products. A
+version 9, 10, 11, 12 or 13 database or backup is upgraded to it in place within
 one transaction, and a failed upgrade leaves it unchanged. The version 12 step
 splits the stored Garmin value into rows, reads every element back to verify
 it, and keeps the original value unread as `garmin_snapshot_legacy`.
@@ -278,6 +279,9 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 | `WAHOO_CLIENT_ID` | *None* | No | Wahoo Cloud API application client ID. Wahoo counts as configured only when all three `WAHOO_*` values are set. |
 | `WAHOO_CLIENT_SECRET` | *None* | No | Wahoo Cloud API application client secret. Stored server-side only and redacted from logs. |
 | `WAHOO_REDIRECT_URI` | *None* | No | Full HTTPS callback URL, `https://<app-host>/api/wahoo/callback`. Never derived from the request Host header. |
+| `YAZIO_EMAIL`, `YAZIO_PASSWORD` | *None* | No | Yazio account used for the optional read-only product lookup. Stored server-side only and redacted from logs; also editable under **Mehr > Anbindungen > Zugangsdaten**, where a stored value wins. |
+| `YAZIO_CLIENT_ID`, `YAZIO_CLIENT_SECRET` | *None* | No | Identifiers of the Yazio mobile app that the unofficial API requires. Yazio counts as configured only when all four `YAZIO_*` values are set. |
+| `YAZIO_USER_AGENT` | built-in iOS client string | No | User-Agent sent to Yazio, which blocks unrecognized client versions (`version_blocked`). Set a current value when lookups fail with that error. |
 | `CALENDAR_ICAL_URL` | *None* | No | Private read-only iCalendar (ICS) feed URL from Google Calendar, iCloud, or Outlook. |
 | `COOKIE_SECURE` | `false` | No | Set to `true` when running behind an HTTPS reverse proxy to add the `Secure` flag to cookies. |
 | `TRUSTED_PROXY_IPS` | *None* | No | Comma- or space-separated reverse-proxy addresses or CIDR networks (e.g. `192.168.1.6`). Only requests whose direct peer is in this list have `X-Forwarded-For` honored; the rightmost untrusted hop then becomes the client IP for login and API rate limits. The proxy must append the address it sees (nginx: `$proxy_add_x_forwarded_for`). List only the proxies themselves: a network that also contains clients, such as the whole LAN, lets those clients choose their rate-limit address through the header. Invalid entries, including a host address with a mask such as `192.168.1.6/24`, are ignored with a startup warning. |
@@ -577,7 +581,7 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`. The restore is refused with HTTP 507 when `/data` lacks the free space for this copy, and a partial copy is deleted.
-5. The replacement database must have the current schema (version 13) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must have the current schema (version 14) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Privacy Export & Data Purge
@@ -1164,7 +1168,7 @@ Der Tab **Ernährung** zeigt **Tagebuch**, **Verlauf**, **Body** und **Produkte*
 
 Mit "Definiere mein Standardfrühstück" lassen sich wiederverwendbare Mahlzeiten mit Zutaten, Mengen und Nährwerten für eine Portion anlegen. Der Coach zeigt die Vorlage zur Bestätigung, bevor er sie speichert. Eine Vorlage zählt noch nicht als gegessen. "Ich habe eine halbe Portion meines Standardfrühstücks gegessen" erfasst den Verzehr mit entsprechend skalierten Nährwerten. Einmalige Abweichungen verändern nur den Tagebucheintrag; dauerhafte Änderungen verändern die Vorlage und niemals frühere Einträge.
 
-Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts** für Markenprodukte und Barcodes. Der Backend-Code berechnet Kalorien und Makros aus den ausgewählten Lebensmittel-IDs und Mengen; Datenbankquelle, Bezugsmenge und Zutatenmengen bleiben im Eintrag und in Mahlzeitvorlagen erhalten und werden im Ernährungstab angezeigt. Die aktuelle OFF-Produkt-API wird über ihre strukturierte Nährwertdarstellung gelesen; automatisch ergänzte OFF-Schätzwerte und Angaben wie „kleiner als“ werden nicht als exakte Etikettwerte übernommen. Rohes und gegartes Gewicht sind nicht austauschbar; Gramm und Milliliter werden nicht ohne Dichte umgerechnet. Mehrdeutige Produkte oder unbekannte Mengen müssen geklärt werden. Ohne passenden Treffer bleiben Verpackungswerte oder ausdrücklich gekennzeichnete KI-Schätzungen möglich. Fehlende Makros und nicht erfasste Tage werden nicht als vollständige Nullwerte dargestellt. Fehlen einzelnen Einträgen Makros, zeigt das Tagebuch die Summe der bekannten Werte als „unvollständig“ und nennt die Zahl der betroffenen Einträge; Freigabevorschau und Coach-Kontext verwenden weiterhin nur vollständige Tagessummen. Die Synchronisierung sendet Kalorien und die bekannten Makros, markiert den Tag als synchronisiert und löscht unbekannte Makros auf Intervals.icu (Wert -1), damit dort kein früherer Wert stehen bleibt; ergänzt eine spätere Änderung die fehlenden Makros, wird der Tag erneut synchronisiert.
+Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts** für Markenprodukte und Barcodes; ist **Yazio** eingerichtet, sucht er ohne ausdrückliche Quelle zuerst dort (siehe „Yazio-Produktsuche“). Der Backend-Code berechnet Kalorien und Makros aus den ausgewählten Lebensmittel-IDs und Mengen; Datenbankquelle, Bezugsmenge und Zutatenmengen bleiben im Eintrag und in Mahlzeitvorlagen erhalten und werden im Ernährungstab angezeigt. Die aktuelle OFF-Produkt-API wird über ihre strukturierte Nährwertdarstellung gelesen; automatisch ergänzte OFF-Schätzwerte und Angaben wie „kleiner als“ werden nicht als exakte Etikettwerte übernommen. Rohes und gegartes Gewicht sind nicht austauschbar; Gramm und Milliliter werden nicht ohne Dichte umgerechnet. Mehrdeutige Produkte oder unbekannte Mengen müssen geklärt werden. Ohne passenden Treffer bleiben Verpackungswerte oder ausdrücklich gekennzeichnete KI-Schätzungen möglich. Fehlende Makros und nicht erfasste Tage werden nicht als vollständige Nullwerte dargestellt. Fehlen einzelnen Einträgen Makros, zeigt das Tagebuch die Summe der bekannten Werte als „unvollständig“ und nennt die Zahl der betroffenen Einträge; Freigabevorschau und Coach-Kontext verwenden weiterhin nur vollständige Tagessummen. Die Synchronisierung sendet Kalorien und die bekannten Makros, markiert den Tag als synchronisiert und löscht unbekannte Makros auf Intervals.icu (Wert -1), damit dort kein früherer Wert stehen bleibt; ergänzt eine spätere Änderung die fehlenden Makros, wird der Tag erneut synchronisiert.
 
 **Zugang und Limits:** BLS ist als lokaler Datensatz eingebunden und funktioniert ohne API-Key, Konto oder laufende API-Abfragen. Open Food Facts benötigt für Lesezugriffe keinen API-Key; die Anwendung identifiziert sich mit einem User-Agent. Die aktuell dokumentierten IP-Limits sind 15 Produktabfragen und 10 Suchabfragen pro Minute. Die Anwendung begrenzt sich auf 14 bzw. 9 Abfragen pro Minute, speichert Antworten maximal 24 Stunden im begrenzten Arbeitsspeicher-Cache und pausiert bei 429/503. Andere Anwendungen hinter derselben öffentlichen IP teilen sich die Anbieterlimits. Keine Suche bei jedem Tastendruck. An Open Food Facts gehen nur Suchbegriffe/Barcodes für Lebensmittel, keine Mahlzeitmengen, Fotos, Profile oder Chatverläufe; der Anbieter sieht die Server-IP. Bei Ausfall oder Limit wird kein erfundener Datenbankwert verwendet.
 
@@ -1227,7 +1231,7 @@ Trainingsverpflegung hat keine eigene Anzeige, API oder Coach-Aktion mehr. Die l
 
 Jedes Open-Food-Facts-Produkt, das die App online abruft, wird automatisch und
 dauerhaft in der lokalen Datenbank gespeichert (Tabelle `food_database_entries`,
-Schema v11, getrennt von den eigenen Produkten). Abfragen lesen erst die
+Schema v11, seit v14 auch Yazio, getrennt von den eigenen Produkten). Abfragen lesen erst die
 eigenen Produkte, dann diesen Spiegel und fragen Open Food Facts nur ab, wenn
 ein Treffer fehlt oder älter als 90 Tage ist. Ist der Online-Abruf nicht
 möglich, wird der gespeicherte Stand mit Datum („Stand vom …“) verwendet.
@@ -1237,6 +1241,39 @@ Treffer tragen für den Coach die Herkunft `data_origin` (`live`,
 Eintrag nach Prüfung als eigenes Produkt, „Aus Datenbank entfernen“ löscht nur
 den Spiegeleintrag. Der Spiegel gehört zu Backup, Export und Datenlöschung. Das
 Upgrade von Schema v9 oder v10 legt die leere Tabelle an und erhält alle Daten.
+
+#### Yazio-Produktsuche (optional)
+
+Mit eingerichteten Yazio-Zugangsdaten (`YAZIO_*` oder **Mehr > Anbindungen >
+Zugangsdaten**) gilt für Produktsuchen ohne ausdrückliche Quelle diese
+Reihenfolge: eigene gespeicherte Produkte, lokale Datenbank (Spiegel), Yazio,
+Open Food Facts, BLS. Die nächste Quelle wird gefragt, wenn die vorherige
+keinen passenden Treffer hat (jedes Suchwort im Namen, bekannter Kalorienwert),
+nicht erreichbar ist oder ihr Limit erreicht hat; ein Treffer in einer früheren
+Quelle verhindert alle externen Anfragen. Barcodes laufen über Spiegel, Yazio
+und Open Food Facts. Ohne Yazio-Zugangsdaten bleibt es bei eigenen Produkten und
+BLS, Open Food Facts nur auf ausdrückliche Anfrage. Der Coach kann `yazio` auch
+als ausdrückliche Quelle nennen.
+
+Yazio-Treffer tragen die Quelle „Yazio“, Werte pro 100 g oder 100 ml und, wo
+Yazio sie liefert, Portionsangaben. Sie werden wie Open-Food-Facts-Treffer im
+lokalen Spiegel gespeichert (Schema v14) und können nach Prüfung als eigenes
+Produkt gespeichert werden. Es gibt keine Tagebuch-Synchronisierung und keine
+Schreibzugriffe auf Yazio. An Yazio gehen nur das Konto (Anmeldung), Suchbegriffe
+und Barcodes; Zugangsdaten und Tokens erscheinen nicht in Logs, Diagnose, Export
+oder Coach-Kontext, Tokens bleiben im Arbeitsspeicher. Anfragen sind begrenzt
+(10 s Zeitlimit, 20 Anfragen pro Minute, 24 h Zwischenspeicher, Pause bei 429;
+nach abgelehnter Anmeldung 15 Minuten keine weiteren Anmeldeversuche).
+
+**Bekannte Einschränkungen:** Die Schnittstelle ist inoffiziell und nicht
+dokumentiert ([Spezifikation der Community](https://yazio-community.github.io/yazio-api-specification/),
+[öffentliche Beschreibung](https://saganos.github.io/yazio_public_api/)); sie kann
+sich ohne Ankündigung ändern oder die Nutzung blockieren. Sie benötigt die
+Client-ID und das Client-Secret der Yazio-App sowie eine bekannte App-Version im
+User-Agent, die du selbst bereitstellst. Die Nährwerte werden als Werte pro
+Gramm beziehungsweise Milliliter gelesen und mit 100 multipliziert; unplausible
+Werte bleiben unbekannt. Diese Annahme ist nur mit synthetischen Fixtures
+getestet, nicht mit einem echten Konto. Prüfe Treffer vor dem Speichern.
 
 #### Lokale Produkte und Verpackungsfotos
 
