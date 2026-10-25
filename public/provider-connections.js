@@ -7,6 +7,7 @@ const CREDENTIAL_FORMS = Object.freeze({
   openai: Object.freeze(["openai_api_key", "openai_base_url"]),
   intervals: Object.freeze(["intervals_api_key", "intervals_athlete_id"]),
   wahoo: Object.freeze(["wahoo_client_id", "wahoo_client_secret"]),
+  yazio: Object.freeze(["yazio_email", "yazio_password", "yazio_client_id", "yazio_client_secret"]),
 });
 
 const CREDENTIAL_FIELD_LABELS = Object.freeze({
@@ -16,6 +17,10 @@ const CREDENTIAL_FIELD_LABELS = Object.freeze({
   intervals_athlete_id: "Intervals.icu-Athlete-ID",
   wahoo_client_id: "Wahoo-Client-ID",
   wahoo_client_secret: "Wahoo-Client-Secret",
+  yazio_email: "Yazio-E-Mail",
+  yazio_password: ["Yazio", "Kennwort"].join("-"),
+  yazio_client_id: "Yazio-Client-ID",
+  yazio_client_secret: "Yazio-Client-Secret",
 });
 
 // Non-secret values the server echoes back; they are shown as the current value.

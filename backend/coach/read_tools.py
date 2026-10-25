@@ -218,7 +218,7 @@ class CoachReadToolService:
         if (
             query
             and not arguments.get("barcode")
-            and source in {"bls", "open_food_facts"}
+            and source in {"bls", "open_food_facts", "yazio"}
         ):
             local_products = nutrition.list_products(query=query)
             try:

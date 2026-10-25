@@ -341,3 +341,20 @@ test("the Garmin card mode follows garmin_connection and the legacy flag", () =>
   assert.equal(garminCardView({ connected: false, mfa_pending: true }, false, { loginRestarted: true }).mode, "login");
   assert.equal(garminCardView({ connected: false }).status, "Nicht verbunden");
 });
+
+test("the Yazio form saves only filled fields and clears every input", async () => {
+  const harness = loadProviderConnections();
+  harness.setData({ credentials: { fields: { ...statusFields, yazio_email: { source: "db", configured: true } } } });
+  assert.equal(harness.element(credentialFieldIds("yazio_email").source).textContent, "In der App gespeichert");
+  assert.equal(harness.element(credentialFieldIds("yazio_email").current).textContent, "");
+  harness.element("cred-yazio_email").value = " athlete@example.test ";
+  harness.element("cred-yazio_password").value = "synthetic-password";
+  harness.setApi(async () => ({ fields: statusFields }));
+
+  await harness.fn("saveProviderCredentials")(event(), "yazio");
+
+  assert.deepEqual(JSON.parse(harness.calls[0].body), { yazio_email: "athlete@example.test", yazio_password: "synthetic-password" });
+  for (const field of ["yazio_email", "yazio_password", "yazio_client_id", "yazio_client_secret"]) {
+    assert.equal(harness.element(`cred-${field}`).value, "");
+  }
+});
