@@ -84,6 +84,7 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertEqual(config["tool"]["mypy"]["python_version"], "3.14")
         self.assertEqual(config["tool"]["mypy"]["files"], ["."])
         self.assertNotIn("exclude", config["tool"]["mypy"])
+        self.assertEqual(config["tool"]["mypy"]["platform"], "linux")
         coverage = config["tool"]["coverage"]["run"]
         self.assertEqual(coverage["source"], ["server", "backend"])
         self.assertTrue(coverage["branch"])

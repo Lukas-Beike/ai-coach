@@ -10,6 +10,8 @@ python_version = "3.14"
 files = ["."]
 ignore_missing_imports = true
 follow_imports = "skip"
+# CI runs on Linux; checking for it everywhere keeps Windows runs consistent.
+platform = "linux"
 
 [tool.coverage.run]
 branch = true

@@ -31,6 +31,25 @@ NON_SOURCE_DIRECTORIES = {
     ".mypy_cache",
     ".ruff_cache",
 }
+# Windows limits a command line to 32767 characters, which the repository's
+# file list exceeds: Ruff checks files independently, so it runs in batches
+# within this path budget, while mypy reads the complete list from an argument
+# file to keep cross-module analysis.
+COMMAND_LINE_PATH_BUDGET = 30000
+
+
+def path_batches(files: list[str]) -> list[list[str]]:
+    batches: list[list[str]] = [[]]
+    size = 0
+    for path in files:
+        # A separator and possible quotes accompany each path.
+        length = len(path) + 3
+        if batches[-1] and size + length > COMMAND_LINE_PATH_BUDGET:
+            batches.append([])
+            size = 0
+        batches[-1].append(path)
+        size += length
+    return batches
 
 
 def source_files(root: Path) -> list[str]:
@@ -90,20 +109,26 @@ def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
             raise RuntimeError(f"Cannot identify {tool} version")
         versions[tool] = match.group()
 
-    ruff_output = run(
-        [
-            "ruff",
-            "check",
-            "--no-cache",
-            "--config",
-            "pyproject.toml",
-            "--output-format=json",
-            *files,
-        ],
-        root,
-    )
-    diagnostics = [diagnostic("ruff", item, root) for item in json.loads(ruff_output)]
+    diagnostics: list[dict] = []
+    for batch in path_batches(files):
+        ruff_output = run(
+            [
+                "ruff",
+                "check",
+                "--no-cache",
+                "--config",
+                "pyproject.toml",
+                "--output-format=json",
+                *batch,
+            ],
+            root,
+        )
+        diagnostics.extend(
+            diagnostic("ruff", item, root) for item in json.loads(ruff_output)
+        )
     with tempfile.TemporaryDirectory(prefix="quality-mypy-") as cache:
+        file_list = Path(cache) / "files.txt"
+        file_list.write_text("\n".join(files) + "\n", encoding="utf-8")
         mypy_output = run(
             [
                 "mypy",
@@ -114,7 +139,7 @@ def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
                 cache,
                 "--no-error-summary",
                 "--output=json",
-                *files,
+                f"@{file_list}",
             ],
             root,
         )
