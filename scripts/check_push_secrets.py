@@ -20,10 +20,9 @@ def outgoing_objects(updates: str) -> set[str]:
     objects = set()
     for line in updates.splitlines():
         _, local, _, remote = line.split()
-        if not all(
-            re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", oid)
-            for oid in (local, remote)
-        ):
+        if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", local):
+            raise ValueError("Invalid Git object ID; push refused")
+        if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", remote):
             raise ValueError("Invalid Git object ID; push refused")
         if set(local) == {"0"}:
             continue
