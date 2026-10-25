@@ -1,19 +1,35 @@
-"""Read-only provider refresh, durable cache and failure atomicity contracts."""
+"""Read-only provider refresh, canonical storage and failure atomicity contracts."""
 
+import json
 import sqlite3
 import tempfile
 import unittest
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import Mock
 
+import legacy_detail_kv
 from activity_row_support import FixedActivityRows
 from canonical_detail_support import INTERVALS, open_manager, seed_intervals_activity
 
+from backend.activities.detail_analysis_reads import calendar_profiles
+from backend.activities.detail_projection import DETAIL_PROJECTION_VERSION
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
-from backend.canonical.vocabulary import ActivityDetailOrigin
+from backend.canonical.vocabulary import (
+    ActivityDetailKind,
+    ActivityDetailOrigin,
+    ProviderId,
+    StreamChannel,
+    StreamResolution,
+)
+from backend.db import DatabaseManager, row_factory
+from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
 from backend.errors import AppError, ProviderErrorClassifier, provider_error
-from backend.sync.activity_detail_canonical import CanonicalDetailWriter
+from backend.sync.activity_detail_canonical import (
+    CanonicalDetailWriter,
+    DetailWriteOutcome,
+    DetailWriteResult,
+)
 from backend.sync.activity_details import (
     MAX_STREAM_POINTS,
     ActivityDetailRefreshService,
@@ -24,31 +40,56 @@ from backend.sync.jobs import JobValidationError, normalize_sync_job_request
 DETAIL_KEY_PREFIX = "activity_detail:"
 
 
-class Manager:
-    def __init__(self, path):
-        self.path = path
+def detail_sets(manager, activity_id):
+    """Return the stored canonical detail sets of one Intervals activity by kind."""
+    with manager.reader() as db:
+        return {
+            item.detail.kind: item for item in detail_sets_for(db, INTERVALS, activity_id)
+        }
 
-    @contextmanager
-    def unit_of_work(self):
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.row_factory = sqlite3.Row
-            yield db
 
-    def reader(self):
-        return self.unit_of_work()
+def analysis_payload(manager, activity_id):
+    with manager.reader() as db:
+        row = analysis_row_for_record(db, INTERVALS, activity_id)
+    return None if row is None else row["payload"]
 
-    read_snapshot = reader
+
+def kv_detail_keys(manager):
+    with manager.reader() as db:
+        return [
+            row["key"]
+            for row in db.execute(
+                "SELECT key FROM kv WHERE substr(key, 1, ?) = ?",
+                (len(DETAIL_KEY_PREFIX), DETAIL_KEY_PREFIX),
+            )
+        ]
+
+
+def canonical_snapshot(manager):
+    """Every canonical detail row, to prove that nothing changed."""
+    with manager.reader() as db:
+        return [
+            [
+                tuple(row.values())
+                for row in db.execute(f"SELECT * FROM {table} ORDER BY 1, 2, 3")
+            ]
+            for table in (
+                "activity_detail_sets",
+                "activity_stream_channels",
+                "activity_laps",
+                "activity_zone_times",
+                "activity_detail_analysis",
+            )
+        ]
 
 
 class ActivityDetailRefreshTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.manager = Manager(Path(self.directory.name) / "fixture.sqlite")
-        with self.manager.unit_of_work() as db:
-            db.execute(
-                "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
-            )
+        self.manager = open_manager(self.directory.name)
+        self.addCleanup(lambda: self.manager.close())
+        seed_intervals_activity(self.manager, "CaseSensitive-1")
         self.store = ActivityDetailStore(self.manager)
         self.api = Mock()
         self.rows = FixedActivityRows([{"id": "CaseSensitive-1"}])
@@ -59,6 +100,7 @@ class ActivityDetailRefreshTests(unittest.TestCase):
             store=self.store,
             utc_now=lambda: "2026-10-02T08:00:00Z",
             configured=True,
+            canonical=CanonicalDetailWriter(),
         )
 
     def responses(self):
@@ -77,11 +119,22 @@ class ActivityDetailRefreshTests(unittest.TestCase):
     def test_refresh_keeps_full_resolution_and_provenance_across_restart(self):
         self.api.get.side_effect = self.responses()
         self.assertEqual("completed", self.service.refresh("CaseSensitive-1")["status"])
-        saved = ActivityDetailStore(self.manager).get("CaseSensitive-1")
-        self.assertEqual(3001, len(saved["activity"]["streams"]["watts"]))
-        self.assertEqual("Intervals.icu", saved["source"])
-        self.assertEqual("2026-10-02T08:00:00Z", saved["observed_at"])
-        self.assertNotIn("private_field", saved["activity"])
+        # A new manager on the same file stands in for an application restart.
+        self.manager.close()
+        self.manager = DatabaseManager(
+            Path(self.directory.name) / "detail.db", sqlite3, row_factory=row_factory
+        )
+        streams = detail_sets(self.manager, "CaseSensitive-1")[ActivityDetailKind.STREAMS]
+        self.assertEqual(StreamResolution.FULL, streams.detail.resolution)
+        self.assertEqual(3001, len(streams.detail.channels[StreamChannel.POWER_W]))
+        self.assertIs(ProviderId.INTERVALS, streams.detail.provenance.provider)
+        self.assertEqual(ActivityDetailOrigin.FETCH, streams.detail.origin)
+        self.assertEqual("2026-10-02T08:00:00+00:00", streams.fetched_at)
+        payload = analysis_payload(self.manager, "CaseSensitive-1")
+        self.assertEqual("2026-10-02T08:00:00Z", payload["observed_at"])
+        self.assertNotIn("private_field", json.dumps(payload))
+        # The refresh writes canonical rows only, never a kv detail record.
+        self.assertEqual([], kv_detail_keys(self.manager))
         self.assertEqual(
             "/activity/CaseSensitive-1", self.api.get.call_args_list[0].args[0]
         )
@@ -108,21 +161,23 @@ class ActivityDetailRefreshTests(unittest.TestCase):
             ],
         ]
         self.service.refresh("CaseSensitive-1")
-        streams = self.store.get("CaseSensitive-1")["activity"]["streams"]
-        self.assertEqual([14, 15], streams["temperature"])
-        self.assertNotIn("temp", streams)
+        streams = detail_sets(self.manager, "CaseSensitive-1")[ActivityDetailKind.STREAMS]
+        self.assertEqual(
+            (14.0, 15.0), streams.detail.channels[StreamChannel.TEMPERATURE_C]
+        )
 
     def test_failed_second_fetch_preserves_previous_record(self):
         self.api.get.side_effect = self.responses()
         self.service.refresh("CaseSensitive-1")
-        before = self.store.get("CaseSensitive-1")
+        before = canonical_snapshot(self.manager)
+        self.assertTrue(before[0])
         self.api.get.side_effect = [
             self.responses()[0],
             AppError(503, "Synthetic failure"),
         ]
         with self.assertRaises(AppError):
             self.service.refresh("CaseSensitive-1")
-        self.assertEqual(before, self.store.get("CaseSensitive-1"))
+        self.assertEqual(before, canonical_snapshot(self.manager))
 
     def test_unknown_id_and_path_syntax_never_reach_provider(self):
         with self.assertRaises(AppError):
@@ -136,7 +191,8 @@ class ActivityDetailRefreshTests(unittest.TestCase):
         self.api.get.return_value = {"id": "other"}
         with self.assertRaises(AppError):
             self.service.refresh("CaseSensitive-1")
-        self.assertIsNone(self.store.get("CaseSensitive-1"))
+        self.assertEqual({}, detail_sets(self.manager, "CaseSensitive-1"))
+        self.assertIsNone(analysis_payload(self.manager, "CaseSensitive-1"))
 
     def test_stream_limits_alignment_and_missing_values(self):
         for streams in (
@@ -182,7 +238,7 @@ class ActivityDetailRefreshTests(unittest.TestCase):
 
 
 class ActivityDetailPrefetchTests(unittest.TestCase):
-    """Prefetch staleness comes from the canonical fingerprints, kv as fallback."""
+    """Prefetch staleness comes from the canonical fingerprints only."""
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -218,9 +274,8 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
             ]
         return {"id": activity_id, "moving_time": 1000}
 
-    def drop_kv_details(self):
-        with self.manager.unit_of_work() as db:
-            db.execute("DELETE FROM kv WHERE key LIKE ?", (f"{DETAIL_KEY_PREFIX}%",))
+    def has_details(self, activity_id):
+        return bool(detail_sets(self.manager, activity_id))
 
     def canonical_update(self, sql, parameters=()):
         with self.manager.unit_of_work() as db:
@@ -254,43 +309,43 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertEqual(
             [f"a{day:02d}" for day in range(12, 2, -1)], self.fetched_ids()
         )
-        self.assertIsNone(self.store.get("a02"))
+        self.assertFalse(self.has_details("a02"))
         self.api.get.reset_mock()
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
         self.api.get.assert_not_called()
 
-    def drop_projection_versions(self):
+    def leave_legacy_kv_records(self, **changes):
+        """Store kv records like an earlier release, matching the current summaries."""
         with self.manager.unit_of_work() as db:
-            for row in self.rows[2:]:
-                record = self.store.get(row["id"])
-                record.pop("projection_version")
-                self.store.save_in(db, row["id"], record)
+            for row in self.rows:
+                record = {
+                    "activity_id": row["id"],
+                    "projection_version": DETAIL_PROJECTION_VERSION,
+                    "observed_at": "2026-10-01T08:00:00Z",
+                    "activity": {"streams": {}},
+                    "summary_sha256": summary_fingerprint(row),
+                    **changes,
+                }
+                legacy_detail_kv.save_in(db, row["id"], record)
 
-    def test_kv_records_from_an_older_projection_are_loaded_again(self):
+    def test_leftover_kv_record_does_not_settle_prefetch(self):
         self.prefetched_service()
         self.canonical_update("DELETE FROM activity_detail_sets")
         self.canonical_update("DELETE FROM activity_detail_analysis")
-        self.drop_projection_versions()
+        self.leave_legacy_kv_records()
         self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_new())
         self.api.get.reset_mock()
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
 
-    def test_kv_records_of_an_older_projection_reload_despite_canonical_rows(self):
-        # The detail view still reads the kv record, so it must not stay outdated.
+    def test_leftover_kv_record_of_an_older_projection_does_not_reload(self):
+        # Canonical rows decide; the kv projection version no longer participates.
         self.prefetched_service()
-        self.drop_projection_versions()
-        self.assertEqual({"fetched": 10, "failed": 0}, self.service().prefetch_new())
-
-    def test_kv_only_details_match_without_canonical_rows(self):
-        self.prefetched_service()
-        self.canonical_update("DELETE FROM activity_detail_sets")
-        self.canonical_update("DELETE FROM activity_detail_analysis")
+        self.leave_legacy_kv_records(projection_version=None)
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
         self.api.get.assert_not_called()
 
     def test_legacy_backfilled_set_with_matching_hash_is_not_loaded_again(self):
         self.prefetched_service()
-        self.drop_kv_details()
         self.canonical_update(
             "UPDATE activity_detail_sets SET origin = ?",
             (ActivityDetailOrigin.LEGACY_BACKFILL.value,),
@@ -300,21 +355,18 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
 
     def test_set_of_an_older_mapper_with_matching_hash_is_not_loaded_again(self):
         self.prefetched_service()
-        self.drop_kv_details()
         self.canonical_update("UPDATE activity_detail_sets SET mapper_version = 1")
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
         self.api.get.assert_not_called()
 
     def test_changed_hash_without_kv_record_is_loaded_again(self):
         self.prefetched_service()
-        self.drop_kv_details()
         self.rows[-1] = {**self.rows[-1], "name": "Renamed in Intervals.icu"}
         self.assertEqual({"fetched": 1, "failed": 0}, self.service().prefetch_new())
         self.assertEqual(["a12"], self.fetched_ids())
 
     def test_analysis_only_row_with_matching_hash_is_not_loaded_again(self):
         self.prefetched_service()
-        self.drop_kv_details()
         self.canonical_update("DELETE FROM activity_detail_sets")
         # Payloads written before analysis version 2 carry no summary hash.
         self.canonical_update(
@@ -351,8 +403,8 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertEqual(
             [f"a{day:02d}" for day in range(12, 2, -1)], self.fetched_ids()
         )
-        self.assertIsNone(self.store.get("a11"))
-        self.assertIsNotNone(self.store.get("a03"))
+        self.assertFalse(self.has_details("a11"))
+        self.assertTrue(self.has_details("a03"))
         self.assertNotIn("Synthetic invalid streams", "\n".join(logs.output))
         failure = self.store.failures(["a11", "a12"])
         self.assertEqual(["a11"], list(failure))
@@ -360,7 +412,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.assertIn("fehlerhaft", failure["a11"]["message"])
         self.assertNotIn("Synthetic", failure["a11"]["message"])
         # Detail scans for calendar and analysis ignore failure records.
-        self.assertNotIn("a11", self.store.calendar_profiles())
+        self.assertNotIn("a11", calendar_profiles(self.manager))
 
     def test_recorded_failure_waits_for_changed_summary_or_manual_reload(self):
         self.test_activity_specific_failure_skips_only_that_activity()
@@ -370,7 +422,7 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.api.get.assert_not_called()
 
         self.service().refresh("a11")
-        self.assertIsNotNone(self.store.get("a11"))
+        self.assertTrue(self.has_details("a11"))
         self.assertEqual({}, self.store.failures(["a11"]))
 
     def test_recorded_failure_is_retried_after_summary_change(self):
@@ -508,8 +560,8 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
         self.api.get.reset_mock()
         self.assertEqual({"fetched": 0, "failed": 0}, self.service().prefetch_new())
         self.api.get.assert_not_called()
-        self.assertIsNone(self.store.get("a01"))
-        self.assertIsNone(self.store.get("a02"))
+        self.assertFalse(self.has_details("a01"))
+        self.assertFalse(self.has_details("a02"))
 
     def test_floor_is_kept_once_set(self):
         self.service().prefetch_new()
@@ -541,14 +593,26 @@ class ActivityDetailPrefetchTests(unittest.TestCase):
             # 23:30 UTC on the 18th is already the 19th in the athlete's zone.
             utc_now=lambda: "2026-10-18T23:30:00Z",
             configured=True,
+            canonical=CanonicalDetailWriter(),
             local_date=lambda: "2026-10-19",
         )
         service.prefetch_new()
         self.assertEqual("2026-10-19", self.store.prefetch_floor())
 
 
+class UnstoredWriter(CanonicalDetailWriter):
+    """A writer whose fetch write stores nothing."""
+
+    def __init__(self, outcome):
+        super().__init__()
+        self.outcome = outcome
+
+    def write_fetch(self, db, **kwargs):
+        return DetailWriteResult(self.outcome)
+
+
 class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
-    """A refresh writes the kv record and its canonical rows in one transaction."""
+    """A refresh writes only canonical rows and clears the failure note with them."""
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -558,13 +622,16 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
         seed_intervals_activity(self.manager, "9001")
         self.store = ActivityDetailStore(self.manager)
         self.api = Mock()
-        self.api.get.side_effect = [
-            {"id": "9001", "name": "Synthetic ride", "moving_time": 1000},
-            [
+        self.api.get.side_effect = self.provider
+        self.planned_units = Mock(return_value=[])
+
+    def provider(self, path, params):
+        if path.endswith("/streams.json"):
+            return [
                 {"type": "time", "data": [0, 1, 2]},
                 {"type": "watts", "data": [200, 210, 220]},
-            ],
-        ]
+            ]
+        return {"id": "9001", "name": "Synthetic ride", "moving_time": 1000}
 
     def service(self, canonical):
         return ActivityDetailRefreshService(
@@ -574,6 +641,7 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
             store=self.store,
             utc_now=lambda: "2026-10-02T08:00:00Z",
             configured=True,
+            read_planned_units=self.planned_units,
             canonical=canonical,
         )
 
@@ -586,11 +654,17 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
             ).fetchone()
         return row["n"]
 
-    def test_refresh_writes_canonical_rows_with_the_kv_record(self):
+    def save_failure(self):
+        self.store.save_failure(
+            "9001", "0" * 64, "Synthetic note", "2026-10-01T08:00:00Z"
+        )
+
+    def test_refresh_writes_canonical_rows_without_a_kv_record(self):
         result = self.service(CanonicalDetailWriter()).refresh("9001")
         self.assertEqual("completed", result["status"])
-        self.assertIsNotNone(self.store.get("9001"))
         self.assertGreater(self.canonical_rows(), 0)
+        self.assertIsNotNone(analysis_payload(self.manager, "9001"))
+        self.assertEqual([], kv_detail_keys(self.manager))
 
     def test_prefetch_stores_new_activity_in_the_canonical_tables(self):
         self.assertEqual(
@@ -598,14 +672,63 @@ class ActivityDetailCanonicalRefreshTests(unittest.TestCase):
             self.service(CanonicalDetailWriter()).prefetch_new(),
         )
         self.assertGreater(self.canonical_rows(), 0)
+        self.assertEqual([], kv_detail_keys(self.manager))
 
-    def test_failed_canonical_write_leaves_neither_record_nor_rows(self):
+    def test_refresh_clears_the_failure_note_with_the_canonical_rows(self):
+        self.save_failure()
+        self.assertIn("9001", self.store.failures(["9001"]))
+        self.service(CanonicalDetailWriter()).refresh("9001")
+        self.assertEqual({}, self.store.failures(["9001"]))
+        self.assertGreater(self.canonical_rows(), 0)
+
+    def test_failed_canonical_write_commits_nothing(self):
         class RaisingWriter(CanonicalDetailWriter):
             def write_fetch(self, db, **kwargs):
                 super().write_fetch(db, **kwargs)
                 raise RuntimeError("simulated canonical failure")
 
+        self.save_failure()
         with self.assertRaises(RuntimeError):
             self.service(RaisingWriter()).refresh("9001")
-        self.assertIsNone(self.store.get("9001"))
         self.assertEqual(0, self.canonical_rows())
+        self.assertIsNone(analysis_payload(self.manager, "9001"))
+        self.assertEqual([], kv_detail_keys(self.manager))
+        # The failure note rolls back with the rows that would have replaced it.
+        self.assertIn("9001", self.store.failures(["9001"]))
+
+    def test_unstored_write_fails_and_keeps_the_failure_note(self):
+        for outcome in (DetailWriteOutcome.NO_RECORD, DetailWriteOutcome.INVALID):
+            with self.subTest(outcome):
+                self.save_failure()
+                with self.assertRaises(AppError) as raised:
+                    self.service(UnstoredWriter(outcome)).refresh("9001")
+                self.assertEqual(502, raised.exception.status)
+                self.assertIn("9001", self.store.failures(["9001"]))
+
+    def test_prefetch_records_a_failure_when_nothing_was_stored(self):
+        service = self.service(UnstoredWriter(DetailWriteOutcome.NO_RECORD))
+        self.assertEqual({"fetched": 0, "failed": 1}, service.prefetch_new())
+        self.assertIn("9001", self.store.failures(["9001"]))
+        self.api.get.reset_mock()
+        self.assertEqual({"fetched": 0, "failed": 0}, service.prefetch_new())
+        self.api.get.assert_not_called()
+
+    def test_frozen_targets_are_reused_from_the_canonical_analysis(self):
+        self.service(CanonicalDetailWriter()).refresh("9001")
+        self.planned_units.assert_called_once_with()
+        frozen = {"frozen_at": "2026-10-01T08:00:00Z", "basis": "synthetic"}
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_detail_analysis "
+                "SET payload = json_set(payload, '$.target_snapshot', json(?))",
+                (json.dumps(frozen),),
+            )
+        self.planned_units.reset_mock()
+        self.service(CanonicalDetailWriter()).refresh("9001")
+        payload = analysis_payload(self.manager, "9001")
+        self.assertEqual(frozen, payload["target_snapshot"])
+        self.planned_units.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

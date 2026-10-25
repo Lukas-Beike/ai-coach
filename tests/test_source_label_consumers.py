@@ -7,10 +7,10 @@ from datetime import date
 
 from canonical_recovery_support import recovery_observation
 
+from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.activities.duplicates import duplicate_delete_action
-from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId, RecordingOrigin
 from backend.performance import (
-    activity_read_service,
     body,
     current_metrics,
     daily_health,
@@ -64,9 +64,11 @@ class EmittedSourceOutputTests(unittest.TestCase):
         self.assertEqual("Garmin", diff["source"])
         self.assertEqual("Wahoo", diff["kept_source"])
 
-    def test_activity_detail_metadata_names_intervals_source(self):
-        metadata = activity_read_service._detail_metadata(None, False, {})
-        self.assertEqual("Intervals.icu", metadata["source"])
+    def test_activity_detail_summary_metrics_name_intervals_source(self):
+        metrics = intervals_summary_metrics(
+            {"average_speed": 8.5}, recorded_by=RecordingOrigin.UNKNOWN
+        )
+        self.assertEqual("Intervals.icu", metrics["avg_speed_mps"]["source"]["label"])
 
     def test_season_preparation_wellness_basis_names_recorded_wellness(self):
         basis_day = date(2026, 10, 1)

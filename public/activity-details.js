@@ -1,4 +1,4 @@
-/* Local activity view. Provider reads require an explicit durable refresh job. */
+/* Local activity view of the served activity_detail.v1 document. Provider reads require an explicit durable refresh job. */
 (() => {
   const SVG_NS = "http://www.w3.org/2000/svg";
   let dialog;
@@ -11,9 +11,7 @@
     return element;
   }
 
-  function chart(streams, key, label, unit) {
-    const times = streams.time;
-    const values = streams[key];
+  function chart(times, values, label, unit) {
     if (!Array.isArray(times) || !Array.isArray(values) || times.length !== values.length) return null;
     const points = times.map((time, index) => [time, values[index]])
       .filter(([time, value]) => typeof time === "number" && typeof value === "number" && Number.isFinite(time) && Number.isFinite(value));
@@ -60,21 +58,30 @@
     return section;
   }
 
+  // Served metric values by key; metrics the document does not carry stay absent.
+  function metricValues(payload) {
+    const values = {};
+    for (const [key, metric] of Object.entries(payload?.metrics || {})) {
+      if (metric?.value != null) values[key] = metric.value;
+    }
+    return values;
+  }
+
   function render(payload, content, api, activityId) {
     content.replaceChildren();
-    const activity = payload.activity || {};
-    const metadata = payload.detail_data || {};
-    renderMetadata(activity, metadata, content);
-    renderSeries(activity, content);
-    renderLaps(activity, content);
+    const session = payload.session || {};
+    renderMetadata(session, metricValues(payload), content);
+    content.append(...providerNotes(payload));
+    renderSeries(session, payload.streams, content);
+    renderLaps(payload.laps, content);
     renderIntervalQuality(payload, content);
     renderAerobic(payload, content);
     renderPower(payload, content);
     for (const item of payload.equipment || []) content.append(node("p", `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
-    renderFeedback(payload.activity_feedback, payload.activity, api, activityId, content);
+    renderFeedback(payload.activity_feedback, session, api, activityId, content);
   }
 
-  function renderFeedback(feedback, activity, api, activityId, content) {
+  function renderFeedback(feedback, session, api, activityId, content) {
     const section = node("section", null, "activity-feedback"); section.append(node("h3", "Dein Feedback"));
     const form = document.createElement("form"); form.className = "activity-feedback-form";
     const rpeLabel = node("label", "Session-RPE (0–10)"); const rpe = document.createElement("input"); rpe.name = "session_rpe"; rpe.type = "number"; rpe.min = "0"; rpe.max = "10"; rpe.step = "0.5"; rpe.inputMode = "decimal"; rpe.value = feedback?.session_rpe ?? ""; rpeLabel.append(rpe);
@@ -85,7 +92,7 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
       try {
-        const raw = rpe.value.trim(); const value = { activity_name: activity?.name || "", activity_date: String(activity?.start_date_local || "").slice(0, 40), notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
+        const raw = rpe.value.trim(); const value = { activity_name: session?.name || "", activity_date: session?.started_at_local || "", notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
         if (raw !== "" && (!Number.isFinite(value.session_rpe) || value.session_rpe < 0 || value.session_rpe > 10)) throw new Error("RPE muss zwischen 0 und 10 liegen.");
         const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });
         status.textContent = result.activity_feedback ? "Feedback gespeichert." : "Feedback entfernt.";
@@ -94,68 +101,112 @@
   }
 
 
-  function renderMetadata(activity, metadata, content) {
+  function renderMetadata(session, metrics, content) {
+    const duration = metrics.moving_duration_s ?? metrics.duration_s;
     const values = [
-      activity.type,
-      activity.start_date_local?.replace("T", " "),
-      activity.moving_time != null ? `${Math.round(activity.moving_time / 60)} min` : null,
-      AppFormat.distance(activity.distance),
-      activity.training_load != null ? `Belastung ${activity.training_load}` : null,
+      session.sport ? activitySportLabel({ type: session.sport }) : null,
+      session.started_at ? formatTime(session.started_at) : null,
+      duration != null ? `${Math.round(duration / 60)} min` : null,
+      AppFormat.distance(metrics.distance_m),
+      metrics.load != null ? `Belastung ${metrics.load}` : null,
     ].filter(Boolean);
     content.append(node("p", values.join(" · ")));
-    let description = "Zusammenfassung aus dem lokalen Snapshot. Detaildaten wurden noch nicht geladen.";
-    if (metadata.observed_at) {
-      const sampled = metadata.display_sampled ? " \u00b7 Diagramme vereinfacht dargestellt" : "";
-      description = `${metadata.source} \u00b7 Detaildaten geladen: ${new Date(metadata.observed_at).toLocaleString("de-DE")}${sampled}`;
+  }
+
+  // Each contributing provider reports its own load state; provider text is shown as plain text only.
+  function providerNotes(payload) {
+    const detail = payload?.detail_data || {};
+    const notes = [];
+    for (const entry of detail.providers || []) {
+      const label = entry.label || entry.provider;
+      notes.push(node("p", entry.fetched_at ? `${label} · Detaildaten geladen: ${formatTime(entry.fetched_at)}` : `${label} · Detaildaten wurden noch nicht geladen.`, "muted"));
+      if (entry.stale) notes.push(node("p", `${label}: Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten vor einer neuen Bewertung.`, "muted"));
+      if (entry.load_error?.message) notes.push(node("p", `${label}: ${entry.load_error.message} Automatischer Ladeversuch: ${formatTime(entry.load_error.observed_at)}`, "activity-analysis-error"));
+      const coverage = Object.entries(entry.coverage || {}).map(([name, value]) => `${name}: ${value?.valid_points}/${value?.points} Messwerte`);
+      if (coverage.length) notes.push(node("p", `Datenabdeckung ${label} · ${coverage.join(" · ")}`, "muted"));
     }
-    content.append(node("p", description, "muted"));
-    if (metadata.stale) content.append(node("p", "Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten vor einer neuen Bewertung.", "muted"));
-    if (metadata.load_error?.message) content.append(node("p", `${metadata.load_error.message} Automatischer Ladeversuch: ${new Date(metadata.load_error.observed_at).toLocaleString("de-DE")}`, "activity-analysis-error"));
-    const channels = Object.entries(metadata.coverage || {}).map(([name, coverage]) => `${name}: ${coverage.valid_points}/${coverage.points} Messwerte`);
-    if (channels.length) content.append(node("p", `Datenabdeckung · ${channels.join(" · ")}`, "muted"));
+    if (detail.display_sampled) notes.push(node("p", "Diagramme vereinfacht dargestellt", "muted"));
+    return notes;
+  }
+
+  // One explicit detail load per provider entry the server marks refreshable.
+  function refreshActions(payload, { api, isCurrent, onStatus, onLoaded, onSetup = () => {} }) {
+    const actions = node("div", null, "dialog-actions");
+    const activityId = String(payload?.session?.activity_id || "");
+    for (const entry of payload?.detail_data?.providers || []) {
+      const label = entry.label || entry.provider;
+      if (!entry.refreshable || !activityId) {
+        if (state.data?.configured?.[entry.provider] !== false) continue;
+        const hint = node("p", `${label} ist nicht konfiguriert. `, "muted provider-setup-hint");
+        const link = node("a", "Anbindung einrichten");
+        link.href = "#more/connections";
+        link.addEventListener("click", onSetup);
+        hint.append(link);
+        actions.append(hint);
+        continue;
+      }
+      const button = node("button", `${label}: Detaildaten ${entry.fetched_at ? "aktualisieren" : "laden"}`, "secondary-button");
+      button.type = "button";
+      button.addEventListener("click", async () => {
+        const buttons = [...actions.querySelectorAll("button")];
+        buttons.forEach((item) => { item.disabled = true; });
+        onStatus("Ladejob wird gestartet …");
+        try {
+          if (await requestDetails(activityId, { provider: entry.provider, api, isCurrent, onStatus })) { await onLoaded(); return; }
+          if (isCurrent()) onStatus("Der Ladejob läuft im Hintergrund weiter.");
+        } catch (error) {
+          if (isCurrent()) onStatus(error.message);
+        }
+        buttons.forEach((item) => { item.disabled = false; });
+      });
+      actions.append(button);
+    }
+    return actions;
   }
 
 
-  // Intervals.icu stores running cadence per leg; foot sports show steps per minute of both legs.
+  // Running cadence is stored per leg; foot sports show steps per minute of both legs.
   function cadenceDisplay(activity) {
     if (/run|walk|hike/i.test(String(activity?.type || ""))) return { label: "Schrittfrequenz", unit: "spm", factor: 2 };
     return { label: "Kadenz", unit: "rpm", factor: 1 };
   }
 
-  function renderSeries(activity, content) {
+  function renderSeries(session, streams, content) {
     let charts = 0;
-    const cadence = cadenceDisplay(activity);
-    const labels = { watts: ["Leistung", "W"], power: ["Leistung", "W"], heartrate: ["Herzfrequenz", "bpm"], velocity_smooth: ["Geschwindigkeit", "m/s"], velocity: ["Geschwindigkeit", "m/s"], speed: ["Geschwindigkeit", "m/s"], altitude: ["Höhe", "m"], distance: ["Distanz", "m"], grade: ["Steigung", "%"], grade_smooth: ["Steigung geglättet", "%"], pace: ["Pace", "s/km"], cadence: [cadence.label, cadence.unit], temperature: ["Temperatur", "°C"] };
-    const streams = { ...activity.streams };
-    if (cadence.factor !== 1 && Array.isArray(streams.cadence)) streams.cadence = streams.cadence.map((value) => (typeof value === "number" ? value * cadence.factor : value));
-    const preferred = new Set(["watts", "power", "heartrate", "velocity_smooth", "velocity", "speed", "altitude", "distance", "grade_smooth", "grade", "pace", "cadence", "temperature"]);
-    const channels = Object.keys(labels).filter((key) => preferred.has(key) && Array.isArray(streams[key]) && !(key === "speed" && (streams.velocity_smooth || streams.velocity)) && !(key === "velocity" && streams.velocity_smooth) && !(key === "grade" && streams.grade_smooth) && !(key === "power" && streams.watts));
-    for (const key of channels) {
-      const [label, unit] = labels[key];
-      const series = chart(streams, key, label, unit);
+    const cadence = cadenceDisplay({ type: session.sport });
+    const labels = { power_w: ["Leistung", "W"], heart_rate_bpm: ["Herzfrequenz", "bpm"], speed_mps: ["Geschwindigkeit", "m/s"], altitude_m: ["Höhe", "m"], distance_m: ["Distanz", "m"], grade_pct: ["Steigung", "%"], cadence_rpm: [cadence.label, cadence.unit], temperature_c: ["Temperatur", "°C"] };
+    const channels = streams?.channels || {};
+    for (const [key, [label, unit]] of Object.entries(labels)) {
+      let values = channels[key]?.values;
+      if (!Array.isArray(values)) continue;
+      if (key === "cadence_rpm" && cadence.factor !== 1) values = values.map((value) => (typeof value === "number" ? value * cadence.factor : value));
+      const series = chart(streams.time_s, values, label, unit);
       if (series) { content.append(series); charts += 1; }
     }
     if (!charts) content.append(node("p", "Keine darstellbaren Messreihen vorhanden. Fehlende Sensorwerte werden nicht als Null interpretiert."));
   }
 
 
-  function renderLaps(activity, content) {
-    if (activity.laps?.length) {
+  function renderLaps(laps, content) {
+    if (laps?.laps?.length) {
       content.append(node("h3", "Intervalle / Runden"));
       const list = node("ol", null, "activity-laps");
-      activity.laps.forEach((lap, index) => list.append(node("li", [
-        lap.name || `Intervall ${index + 1}`,
-        lap.moving_time != null ? `${Math.round(lap.moving_time)} s` : null,
-        lap.average_watts != null ? `${Math.round(lap.average_watts)} W` : null,
-        lap.average_heartrate != null ? `${Math.round(lap.average_heartrate)} bpm` : null,
-      ].filter(Boolean).join(" · "))));
+      laps.laps.forEach((lap, index) => {
+        const seconds = lap.moving_duration_s ?? lap.end_offset_s - lap.start_offset_s;
+        list.append(node("li", [
+          lap.name || `Intervall ${index + 1}`,
+          Number.isFinite(seconds) ? `${Math.round(seconds)} s` : null,
+          lap.avg_power != null ? `${Math.round(lap.avg_power)} W` : null,
+          lap.avg_hr != null ? `${Math.round(lap.avg_hr)} bpm` : null,
+        ].filter(Boolean).join(" · ")));
+      });
       content.append(list);
     }
   }
 
 
   function renderIntervalQuality(payload, content) {
-    const quality = payload.session_analysis?.interval_quality;
+    const quality = payload.analysis?.interval_quality;
     if (quality) {
       content.append(node("h3", "Trainingsqualität"));
       if (quality.reason) content.append(node("p", quality.reason));
@@ -174,14 +225,15 @@
 
 
   function renderAerobic(payload, content) {
-    const aerobic = payload.session_analysis?.aerobic;
+    const aerobic = payload.analysis?.aerobic;
     if (aerobic) {
       content.append(node("h3", "Aerobe Effizienz"));
-      if (aerobic.provider_decoupling?.value != null) content.append(node("p", `Intervals.icu Decoupling: ${aerobic.provider_decoupling.value}% (Anbieterberechnung)`));
+      const decoupling = aerobic.provider_decoupling;
+      if (decoupling?.value != null) content.append(node("p", `${decoupling.source} Decoupling: ${decoupling.value}% (Anbieterberechnung)`));
       let description = aerobic.reason;
       if (aerobic.status === "ok") {
-        const longSession = aerobic.long_session ? " \u00b7 lange Einheit" : "";
-        description = `${aerobic.efficiency} ${aerobic.unit} \u00b7 lokale Herzfrequenzdrift ${aerobic.drift_percent}%${longSession}`;
+        const longSession = aerobic.long_session ? " · lange Einheit" : "";
+        description = `${aerobic.efficiency} ${aerobic.unit} · lokale Herzfrequenzdrift ${aerobic.drift_percent}%${longSession}`;
       }
       content.append(node("p", description));
       content.append(node("p", "Lokale Methode: zehn Minuten Aufwärmen ausgeschlossen, danach zwei gleich lange Hälften bei gleichmäßiger Belastung und mindestens 85% Messabdeckung. Temperatur, Gelände und Indoor/Outdoor beeinflussen den Vergleich; keine pauschale Fitnessbewertung.", "muted"));
@@ -190,12 +242,12 @@
 
 
   function renderPower(payload, content) {
-    const power = payload.session_analysis?.power_profile;
+    const power = payload.analysis?.power_profile;
     if (power) {
       content.append(node("h3", "Beobachtete Bestleistung"));
       for (const point of power.points || []) {
         const duration = point.duration_seconds < 60 ? `${point.duration_seconds} s` : `${point.duration_seconds / 60} min`;
-        const measurement = point.watts == null ? "keine l\u00fcckenlose Messung" : `${point.watts} W`;
+        const measurement = point.watts == null ? "keine lückenlose Messung" : `${point.watts} W`;
         content.append(node("p", `${duration}: ${measurement}`));
       }
       content.append(node("p", "Zeitgewichtete Mittelwerte aus den Originaldaten dieser Aufzeichnung. Keine FTP-, Critical-Power- oder W′-Schätzung; Nullleistung zählt, Sensorausfälle und Stopps unterbrechen das Fenster.", "muted"));
@@ -221,21 +273,7 @@
     const content = node("div");
     const status = node("p", "Lokale Daten werden geladen …", "muted");
     status.setAttribute("role", "status");
-    const actions = node("div", null, "dialog-actions");
-    const setupHint = node("p", "Intervals.icu ist nicht konfiguriert. ", "muted provider-setup-hint");
-    const setupLink = node("a", "Anbindung einrichten");
-    setupLink.href = "#more/connections";
-    setupLink.addEventListener("click", () => close(false));
-    setupHint.append(setupLink);
-    const refresh = node("button", "Detaildaten laden", "secondary-button");
-    refresh.type = "button";
-    // Detail jobs read Intervals.icu only, so they are offered for Intervals.icu
-    // activities and need a configured Intervals.icu connection.
-    const detailsAvailable = isIntervalsActivity(activity);
-    const canRefresh = () => Boolean(state.data?.configured?.intervals);
-    refresh.disabled = !canRefresh();
-    setupHint.hidden = canRefresh();
-    if (detailsAvailable) actions.append(refresh, setupHint);
+    const actions = node("div");
     dialog.append(back, title, content, status, actions);
     document.body.append(dialog);
     const currentDialog = dialog;
@@ -247,32 +285,23 @@
       if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     }, { once: true });
     showDialog(currentDialog, back);
+    const isCurrent = () => token === generation;
     async function load() {
       const payload = await api(`/api/activities/${encodeURIComponent(activityId)}`);
-      if (token !== generation) return;
+      if (!isCurrent()) return;
       render(payload, content, api, activityId);
-      title.textContent = payload.activity?.name || activity.name || "Aktivitätsdetails";
-      refresh.textContent = payload.detail_data?.observed_at ? "Detaildaten aktualisieren" : "Detaildaten laden";
+      title.textContent = payload.session?.name || activity.name || "Aktivitätsdetails";
       status.textContent = "";
+      actions.replaceChildren(refreshActions(payload, {
+        api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: load, onSetup: () => close(false),
+      }));
     }
-    refresh.addEventListener("click", async () => {
-      refresh.disabled = true;
-      status.textContent = "Ladejob wird gestartet …";
-      try {
-        if (!await requestDetails(activityId, { api, isCurrent: () => token === generation, onStatus: (text) => { status.textContent = text; } })) return;
-        await load();
-      } catch (error) {
-        if (token === generation) status.textContent = error.message;
-      } finally {
-        if (token === generation) refresh.disabled = !canRefresh();
-      }
-    });
-    try { await load(); } catch (error) { if (token === generation) status.textContent = error.message; }
+    try { await load(); } catch (error) { if (isCurrent()) status.textContent = error.message; }
   }
 
-  // Runs the explicit Intervals.icu detail job; resolves false when the caller is no longer current.
-  async function requestDetails(activityId, { api, isCurrent = () => true, onStatus = () => {} }) {
-    let job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider: providerIds().intervals, type: "activity_details", payload: { activity_id: activityId } }) });
+  // Runs the explicit detail job of one provider; resolves false when the caller is no longer current.
+  async function requestDetails(activityId, { provider, api, isCurrent = () => true, onStatus = () => {} }) {
+    let job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "activity_details", payload: { activity_id: activityId } }) });
     const deadline = Date.now() + 120_000;
     while (!["completed", "failed", "partial"].includes(job.status)) {
       if (!isCurrent()) return false;
@@ -286,15 +315,6 @@
     return isCurrent();
   }
 
-  function isIntervalsActivity(activity) {
-    // Intervals.icu rows keep their device origin (for example "GARMIN") in
-    // `source`, so only an explicit provider field marks a non-Intervals record.
-    const intervalsId = providerIds().intervals;
-    if (!intervalsId) return true;
-    const provider = String(activity?.provider ?? intervalsId).trim().toLowerCase();
-    return provider === intervalsId || provider === coachProviderLabel(intervalsId).toLowerCase();
-  }
-
   function close(navigateBack = true) {
     generation += 1;
     if (dialog?.open) dialog.close();
@@ -305,5 +325,5 @@
 
   globalThis.addEventListener("popstate", () => { if (dialog) close(false); });
 
-  globalThis.ActivityDetails = { open, close, requestDetails, isIntervalsActivity, cadenceDisplay };
+  globalThis.ActivityDetails = { open, close, requestDetails, cadenceDisplay, metricValues, providerNotes, refreshActions };
 })();

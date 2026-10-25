@@ -706,6 +706,9 @@ ACTIVITY_READS = ActivityReadAssembly(
     ),
     ATHLETE_DATA.activity_feedback,
     lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
+    refreshable_providers=lambda: provider_runtime().configured_for_job(
+        "activity_details"
+    ),
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 

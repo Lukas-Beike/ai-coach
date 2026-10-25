@@ -2,20 +2,39 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import SnapshotActivityRows
+from canonical_detail_support import NOW, open_manager, seed_intervals_activity
 
+from backend.activities.activity_reference import ActivityReferences
+from backend.activities.detail_projection import (
+    COACH_ACTIVITY_DETAIL_MAX_LAPS,
+    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
+)
 from backend.canonical.vocabulary import MetricKind
 from backend.coach.activity_read_tools import CoachActivityReadToolService
+from backend.coach.context import coach_context_json_size
 from backend.errors import AppError
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.runtime.ports import ObservationSourceSelector
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
+from backend.sync.canonical_table_reader import CanonicalTableReader
+
+LEGACY_KEYS = {
+    "activity",
+    "session_analysis",
+    "activity_id",
+    "local_activity_id",
+    "snapshot_synced_at",
+}
 
 
 class CoachActivityReadToolServiceTests(unittest.TestCase):
@@ -124,7 +143,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             )
             self.assertEqual(caught.exception.reason, "invalid_list_request")
 
-    def test_detail_uses_local_sources_and_keeps_sanitized_detail_projection(self):
+    def test_detail_returns_the_v1_document_with_its_envelope(self):
         raw_activity = {
             "id": "synthetic-1",
             "name": "Synthetic tempo",
@@ -133,51 +152,96 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             "average_speed": 3.2,
             "average_heartrate": 166,
             "average_watts": 245,
-            "streams": {"watts": [200, 250], "latlng": [[1, 2], [3, 4]]},
             "provider_extra": "must not pass",
         }
-        manager = MagicMock()
-        manager.unit_of_work.return_value.__enter__.return_value = object()
-        snapshot_repository = Mock()
-        snapshot_repository.latest_snapshot.return_value = {
-            "synced_at": "synthetic-sync",
-            "recent_activities": [{"id": "synthetic-1", "type": "Run"}],
-            "raw_provider_data": {"activities": [raw_activity]},
-        }
-        feedback = Mock()
-        feedback.list.return_value = []
-        activity_read = ActivityAnalysisReadService(
-            manager,
-            snapshot_repository,
-            CompactActivityRows(SnapshotActivityRows(snapshot_repository)),
-            feedback,
-        )
-        garmin_snapshot = {"recent_wellness": []}
-        profile_value = {"weight_kg": "70"}
-        garmin = Mock(recent_view=Mock(return_value=garmin_snapshot))
-        profile = Mock(get=Mock(return_value=profile_value))
-        today = date(2026, 9, 23)
-        service = CoachActivityReadToolService(
-            activity_read, garmin, profile, lambda: today
-        )
+        other = {**raw_activity, "id": "synthetic-2", "name": "Other run"}
+        manager = _sessions(self, raw_activity, other)
+        _store_streams(manager, "synthetic-1", {"time": [0, 1], "watts": [200, 250]})
+        garmin = Mock(recent_view=Mock(return_value={"recent_wellness": []}))
+        profile = Mock(get=Mock(return_value={"weight_kg": "70"}))
+        service = _detail_tool(manager, [raw_activity, other], garmin, profile)
 
         result = service.execute("get_activity_details", {"activity_id": "synthetic-1"})
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["snapshot_synced_at"], "synthetic-sync")
-        self.assertEqual(result["activity"]["streams"], {"watts": [200, 250]})
-        self.assertNotIn("id", result["activity"])
-        self.assertNotIn("provider_extra", result["activity"])
-        self.assertNotIn("latlng", result["activity"]["streams"])
+        self.assertEqual("activity_detail.v1", result["contract"])
+        self.assertEqual("Synthetic tempo", result["session"]["name"])
         self.assertEqual(
+            [200, 250], result["streams"]["channels"]["power_w"]["values"]
+        )
+        self.assertEqual(
+            "bounded sanitized activity_detail.v1 document of exactly one local "
+            "session; providers: Intervals.icu; recorded by: unknown",
             result["data_scope"],
-            "bounded sanitized detail projection of exactly one Intervals.icu activity",
+        )
+        self.assertTrue(result["activity_validation"]["available"])
+        self.assertEqual(
+            "synthetic-1", result["activity_validation"]["activity"]["activity_id"]
         )
         self.assertEqual(
-            result["activity_validation"]["activity"]["activity_id"], "synthetic-1"
+            {"activity_feedback", "equipment", "activity_validation"},
+            {"activity_feedback", "equipment", "activity_validation"} & set(result),
         )
+        self.assertFalse(LEGACY_KEYS & set(result))
+        text = json.dumps(result)
+        self.assertNotIn("provider_extra", text)
+        self.assertNotIn("synthetic-2", text)
+        self.assertNotIn("Other run", text)
         garmin.recent_view.assert_called_once_with()
         profile.get.assert_called_once_with()
+
+    def test_detail_result_size_does_not_grow_with_the_recording(self):
+        raw_activity = {
+            "id": "synthetic-1",
+            "type": "Ride",
+            "start_date_local": "2026-09-22T07:00:00",
+        }
+        laps = [
+            {"type": "work", "start_time": index * 30, "end_time": index * 30 + 30}
+            for index in range(COACH_ACTIVITY_DETAIL_MAX_LAPS)
+        ]
+        sizes = []
+        for points in (8_000, 16_000):
+            with self.subTest(points=points):
+                manager = _sessions(self, raw_activity)
+                _store_streams(
+                    manager,
+                    "synthetic-1",
+                    {
+                        "time": list(range(points)),
+                        "watts": [200 + index % 50 for index in range(points)],
+                        "heartrate": [140 + index % 20 for index in range(points)],
+                        "cadence": [90] * points,
+                        "velocity_smooth": [9.5] * points,
+                        "altitude": [100.0] * points,
+                        "distance": [index * 9.5 for index in range(points)],
+                    },
+                    laps=laps,
+                )
+                service = _detail_tool(
+                    manager,
+                    [raw_activity],
+                    Mock(recent_view=Mock(return_value={})),
+                    Mock(get=Mock(return_value={})),
+                )
+                result = service.execute(
+                    "get_activity_details", {"activity_id": "synthetic-1"}
+                )
+                streams = result["streams"]
+                self.assertTrue(result["detail_data"]["display_sampled"])
+                self.assertEqual(
+                    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS, len(streams["time_s"])
+                )
+                for channel in streams["channels"].values():
+                    self.assertLessEqual(
+                        len(channel["values"]), COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS
+                    )
+                self.assertLessEqual(
+                    len(result["laps"]["laps"]), COACH_ACTIVITY_DETAIL_MAX_LAPS
+                )
+                sizes.append(coach_context_json_size(result))
+        # Twice the recording only lengthens the sampled numbers, not the lists.
+        self.assertLess(sizes[1], sizes[0] * 1.1)
 
     def test_unknown_tool_is_unclaimed_and_invalid_detail_ids_keep_error(self):
         activity_read = Mock()
@@ -198,7 +262,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
 
     def test_detail_passes_canonical_inputs_resolved_once_per_call(self):
         selector, service = _canonical_activity_tool(
-            _activity_snapshot([{"id": "2026-09-22"}])
+            self, _activity_snapshot([{"id": "2026-09-22"}])
         )
         with patch(
             "backend.performance.activity_read_service.current_performance_context",
@@ -217,7 +281,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         self.assertIn(MetricKind.ATL, served_kinds)
 
     def test_detail_without_wellness_rows_keeps_legacy_call_shape(self):
-        selector, service = _canonical_activity_tool(_activity_snapshot([]))
+        selector, service = _canonical_activity_tool(self, _activity_snapshot([]))
         with patch(
             "backend.performance.activity_read_service.current_performance_context",
             return_value={},
@@ -243,8 +307,59 @@ def _activity_snapshot(recent_wellness: list[dict]) -> dict:
     }
 
 
-def _canonical_activity_tool(snapshot: dict):
+def _sessions(case: unittest.TestCase, *activities: dict):
+    """Return a temporary database holding the canonical sessions of ``activities``."""
+    directory = tempfile.TemporaryDirectory()
+    case.addCleanup(directory.cleanup)
+    manager = open_manager(directory.name)
+    case.addCleanup(manager.close)
+    for activity in activities:
+        fields = {key: value for key, value in activity.items() if key != "id"}
+        seed_intervals_activity(manager, activity["id"], **fields)
+    return manager
+
+
+def _store_streams(manager, activity_id: str, streams: dict, laps=None) -> None:
+    activity = {"streams": streams, **({} if laps is None else {"laps": laps})}
+    with manager.unit_of_work() as db:
+        CanonicalDetailWriter().write_legacy(
+            db,
+            record={
+                "activity_id": activity_id,
+                "activity": activity,
+                "observed_at": NOW,
+                "full_resolution": True,
+            },
+            now=NOW,
+        )
+
+
+def _detail_tool(manager, activities: list[dict], garmin, profile):
+    """Wire the Coach tool over the canonical detail read of ``manager``."""
+    snapshot_repository = Mock()
+    snapshot_repository.latest_snapshot.return_value = {
+        "synced_at": "synthetic-sync",
+        "recent_activities": [],
+        "raw_provider_data": {"activities": activities},
+    }
+    feedback = Mock()
+    feedback.list.return_value = []
+    activity_read = ActivityAnalysisReadService(
+        manager,
+        snapshot_repository,
+        CompactActivityRows(SnapshotActivityRows(snapshot_repository)),
+        feedback,
+        references=ActivityReferences(manager),
+        session_records=CanonicalTableReader().session_activities,
+    )
+    return CoachActivityReadToolService(
+        activity_read, garmin, profile, lambda: date(2026, 9, 23)
+    )
+
+
+def _canonical_activity_tool(case: unittest.TestCase, snapshot: dict):
     """Wire the coach tool over the real activity service with a selecting source."""
+    sessions = _sessions(case, *snapshot["raw_provider_data"]["activities"])
     inner = Mock()
     inner.observations.return_value = ()
     selector = Mock(spec=ObservationSourceSelector)
@@ -255,7 +370,7 @@ def _canonical_activity_tool(snapshot: dict):
     feedback.list.return_value = []
     manager = MagicMock()
     activity_read = ActivityAnalysisReadService(
-        manager,
+        sessions,
         snapshot_reader,
         CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
         feedback,
@@ -263,6 +378,8 @@ def _canonical_activity_tool(snapshot: dict):
             database_manager=lambda: manager,
             observation_reader=lambda: selector,
         ),
+        references=ActivityReferences(sessions),
+        session_records=CanonicalTableReader().session_activities,
     )
     garmin = Mock(recent_view=Mock(return_value={}))
     profile = Mock(get=Mock(return_value={}))

@@ -12,6 +12,7 @@ from backend.errors import AppError, public_error_contract
 from backend.http_api.sync_commands import SyncCommandEndpoint
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.providers.descriptors import GARMIN_ID, INTERVALS_ID
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.external_calendar import ExternalCalendarSyncService
 from backend.sync.full_resync import FullProviderResyncService
@@ -62,6 +63,7 @@ def _activity_details_not_configured() -> None:
         store=Mock(),
         utc_now=Mock(return_value="2026-10-09T12:00:00+00:00"),
         configured=False,
+        canonical=CanonicalDetailWriter(),
     )
     service.refresh("a1")
 

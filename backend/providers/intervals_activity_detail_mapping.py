@@ -102,6 +102,11 @@ _CHANNEL_ALIASES: Final[Mapping[StreamChannel, tuple[str, ...]]] = {
 _KNOWN_STREAM_KEYS: Final = frozenset(_TIME_ALIASES).union(
     key for aliases in _CHANNEL_ALIASES.values() for key in aliases
 )
+# The canonical channel of each stream key the mappers read; other keys are dropped.
+STREAM_KEY_CHANNELS: Final[Mapping[str, StreamChannel]] = {
+    **dict.fromkeys(_TIME_ALIASES, StreamChannel.TIME_S),
+    **{key: channel for channel, aliases in _CHANNEL_ALIASES.items() for key in aliases},
+}
 # Legacy records hold the projected lap keys, fresh rows the raw Intervals keys.
 _LAP_METRIC_KEYS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("moving_duration_s", ("moving_time",)),
@@ -241,6 +246,32 @@ def map_legacy_activity_detail(
         activity=activity,
     )
     return MappingResult(records=mapped.records, issues=(*issues, *mapped.issues))
+
+
+def map_intervals_summary_zones(
+    summary: Mapping[str, object],
+    *,
+    provider_activity_id: str,
+    provenance: Provenance,
+) -> MappingResult[ZoneDistribution]:
+    """Map the zone times of a current summary row of one Intervals.icu record.
+
+    Same zone mapping as a fresh fetch (origin FETCH), with the record's own
+    provenance; the summary carries no streams or laps.
+    """
+    header = _Header(
+        provider_activity_id=provider_activity_id,
+        provenance=provenance,
+        origin=ActivityDetailOrigin.FETCH,
+    )
+    issues: list[MappingIssue] = []
+    records = tuple(
+        distribution
+        for key, metric in _ZONE_KEYS
+        if (distribution := _zone_distribution(header, summary, key, metric, issues))
+        is not None
+    )
+    return MappingResult(records=records, issues=tuple(issues))
 
 
 def _map_detail(

@@ -1,15 +1,29 @@
 import json
+import tempfile
 import unittest
 from contextlib import contextmanager
 from datetime import date
 
 from activity_row_support import SnapshotActivityRows
+from canonical_detail_support import add_session_record, open_manager
 
+from backend.activities.activity_reference import ActivityReferences
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
+
+INTERVALS = ProviderId.INTERVALS
+LEGACY_KEYS = {
+    "activity",
+    "session_analysis",
+    "activity_id",
+    "local_activity_id",
+    "snapshot_synced_at",
+}
 
 
 class _Manager:
@@ -86,6 +100,30 @@ class _FailedDetails:
 
 
 class ActivityReadServiceTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.manager = open_manager(directory.name)
+        self.addCleanup(self.manager.close)
+        add_session_record(
+            self.manager, INTERVALS, "new", "act_new", sport="run", name="Morning run"
+        )
+        add_session_record(
+            self.manager, INTERVALS, "old", "act_old", sport="run", name="Winter run"
+        )
+
+    def detail_service(self, snapshot, **kwargs):
+        """Serve details from the canonical sessions stored in ``setUp``."""
+        return ActivityAnalysisReadService(
+            self.manager,
+            _Snapshots(snapshot),
+            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
+            _Feedback(),
+            references=ActivityReferences(self.manager),
+            session_records=CanonicalTableReader().session_activities,
+            **kwargs,
+        )
+
     def service(self, detail_store=None):
         snapshot = {
             "synced_at": "2026-09-20T08:00:00+00:00",
@@ -144,15 +182,24 @@ class ActivityReadServiceTests(unittest.TestCase):
         self.assertEqual(before, service._snapshot())
 
     def test_detail_is_bounded_and_includes_feedback(self):
-        result = self.service().detail(
+        snapshot = self.service()._snapshot()
+        result = self.detail_service(snapshot).detail(
             "new", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
         )
-        self.assertEqual("Morning run", result["activity"]["name"])
+        self.assertTrue(result["ok"])
+        self.assertEqual("activity_detail.v1", result["contract"])
+        self.assertEqual("act_new", result["session"]["activity_id"])
+        self.assertEqual("Morning run", result["session"]["name"])
         self.assertEqual("good", result["activity_feedback"]["notes"])
         self.assertEqual(
-            "bounded sanitized detail projection of exactly one Intervals.icu activity",
+            "bounded sanitized activity_detail.v1 document of exactly one local "
+            "session; providers: Intervals.icu; recorded by: garmin",
             result["data_scope"],
         )
+        self.assertFalse(LEGACY_KEYS & set(result))
+        self.assertEqual(result, self.detail_service(snapshot).detail(
+            "act_new", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
+        ))
 
     def test_detail_reads_an_activity_older_than_the_performance_window(self):
         snapshot = {"synced_at": "2026-09-20T08:00:00+00:00", "athlete": {}}
@@ -164,14 +211,12 @@ class ActivityReadServiceTests(unittest.TestCase):
                     "name": "Winter run",
                     "type": "Run",
                     "start_date_local": "2024-01-10T08:00:00",
+                    "average_speed": 3.1,
                 },
             ]
         )
-        service = ActivityAnalysisReadService(
-            _Manager(),
-            _Snapshots(snapshot),
-            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
-            _Feedback(),
+        service = self.detail_service(
+            snapshot,
             canonical=CanonicalPerformanceSource(
                 database_manager=_Manager,
                 observation_reader=_NoObservations,
@@ -180,28 +225,37 @@ class ActivityReadServiceTests(unittest.TestCase):
         )
         today = date(2026, 9, 20)
         recent = service.detail("new", garmin_snapshot={}, profile={}, today=today)
-        self.assertEqual("new", recent["activity_id"])
+        self.assertEqual("act_new", recent["session"]["activity_id"])
         self.assertEqual([date(2025, 9, 21)], rows.starts)
         old = service.detail("old", garmin_snapshot={}, profile={}, today=today)
-        self.assertEqual("Winter run", old["activity"]["name"])
+        # The current summary row of the old activity fills its summary scalars.
+        self.assertEqual(3.1, old["metrics"]["avg_speed_mps"]["value"])
+        self.assertTrue(old["activity_validation"]["available"])
         self.assertEqual([date(2025, 9, 21), date(2025, 9, 21), None], rows.starts)
         # The full-history lookup shares the read snapshot of the windowed read.
         self.assertIs(rows.units[1], rows.units[2])
         with self.assertRaises(AppError) as missing:
             service.detail("missing", garmin_snapshot={}, profile={}, today=today)
         self.assertEqual("activity_details_not_found", missing.exception.reason)
-        self.assertEqual([date(2025, 9, 21), None], rows.starts[3:])
+        # An unknown session is rejected before any summary row is read.
+        self.assertEqual(3, len(rows.starts))
 
     def test_detail_rejects_invalid_or_missing_activity(self):
-        service = self.service()
+        service = self.detail_service(self.service()._snapshot())
         with self.assertRaises(AppError) as invalid:
             service.detail("", garmin_snapshot={}, profile={}, today=date(2026, 9, 20))
         self.assertEqual("invalid_activity_request", invalid.exception.reason)
-        with self.assertRaises(AppError) as missing:
-            service.detail(
-                "missing", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
+        self.assertEqual(400, invalid.exception.status)
+        for missing_id in ("missing", "act_missing"):
+            with self.assertRaises(AppError) as missing:
+                service.detail(
+                    missing_id, garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
+                )
+            self.assertEqual("activity_details_not_found", missing.exception.reason)
+            self.assertEqual(404, missing.exception.status)
+            self.assertEqual(
+                "Diese Aktivität ist lokal nicht vorhanden.", str(missing.exception)
             )
-        self.assertEqual("activity_details_not_found", missing.exception.reason)
 
     def test_snapshot_reader_preserves_provider_provenance_and_freshness(self):
         snapshot = {

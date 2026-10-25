@@ -53,25 +53,22 @@
     return { label: "Pace", unit: kind === "swim" ? "min/100 m" : "min/km", convert: (v) => (v >= 0.3 ? meters / v : null), format: clock, invert: true, color: "speed" };
   }
 
-  function cadenceChannel(activity) {
+  function cadenceChannel(activity, metrics) {
     const { label, unit, factor } = ActivityDetails.cadenceDisplay(activity);
     const convert = (value) => value * factor;
-    return { key: "cadence", label, unit, convert, color: "cadence", format: (v) => numberText(v), floorAtZero: true, average: finite(activity.average_cadence) ? convert(activity.average_cadence) : null, max: finite(activity.max_cadence) ? convert(activity.max_cadence) : null };
+    return { key: "cadence_rpm", label, unit, convert, color: "cadence", format: (v) => numberText(v), floorAtZero: true, average: finite(metrics.avg_cadence) ? convert(metrics.avg_cadence) : null, max: finite(metrics.max_cadence) ? convert(metrics.max_cadence) : null };
   }
 
-  function channels(activity) {
-    const streams = activity.streams || {};
-    const speedKey = ["velocity_smooth", "velocity", "speed"].find((key) => Array.isArray(streams[key]));
-    const powerKey = ["watts", "power"].find((key) => Array.isArray(streams[key]));
+  function channels(activity, metrics, streams) {
     const speed = speedChannel(activity);
     return [
-      { key: "heartrate", label: "Herzfrequenz", unit: "bpm", color: "heart", format: (v) => numberText(v), floorAtZero: true, average: activity.average_heartrate, max: activity.max_heartrate },
-      speedKey && { ...speed, key: speedKey, average: finite(activity.average_speed) ? speed.convert(activity.average_speed) : null, max: finite(activity.max_speed) ? speed.convert(activity.max_speed) : null },
-      powerKey && { key: powerKey, label: "Leistung", unit: "W", color: "power", format: (v) => numberText(v), floorAtZero: true, average: activity.average_watts, max: activity.max_watts },
-      cadenceChannel(activity),
-      { key: "altitude", label: "Höhe", unit: "m", color: "elevation", format: (v) => numberText(v), elevation: true },
-      { key: "temperature", label: "Temperatur", unit: "°C", color: "temperature", format: (v) => numberText(v, 1), average: activity.average_temp, max: activity.max_temp },
-    ].filter((channel) => channel && Array.isArray(streams[channel.key]));
+      { key: "heart_rate_bpm", label: "Herzfrequenz", unit: "bpm", color: "heart", format: (v) => numberText(v), floorAtZero: true, average: metrics.avg_hr, max: metrics.max_hr },
+      { ...speed, key: "speed_mps", average: finite(metrics.avg_speed_mps) ? speed.convert(metrics.avg_speed_mps) : null, max: finite(metrics.max_speed_mps) ? speed.convert(metrics.max_speed_mps) : null },
+      { key: "power_w", label: "Leistung", unit: "W", color: "power", format: (v) => numberText(v), floorAtZero: true, average: metrics.avg_power, max: metrics.max_power_w },
+      cadenceChannel(activity, metrics),
+      { key: "altitude_m", label: "Höhe", unit: "m", color: "elevation", format: (v) => numberText(v), elevation: true },
+      { key: "temperature_c", label: "Temperatur", unit: "°C", color: "temperature", format: (v) => numberText(v, 1), average: metrics.avg_temp_c, max: metrics.max_temp_c },
+    ].filter((channel) => Array.isArray(streams.channels?.[channel.key]?.values));
   }
 
   function percentile(sorted, share) {
@@ -166,9 +163,9 @@
     });
   }
 
-  function chart(activity, channel) {
-    const times = activity.streams.time;
-    const raw = activity.streams[channel.key];
+  function chart(streams, channel) {
+    const times = streams.time_s;
+    const raw = streams.channels[channel.key].values;
     if (!Array.isArray(times) || times.length !== raw.length) return null;
     const points = times.map((time, index) => [time, channelValue(channel, raw[index])]).filter(([time]) => finite(time));
     const valid = points.filter(([, value]) => finite(value));
@@ -217,26 +214,34 @@
     return converted == null ? null : speed.format(converted);
   }
 
-  function overview(activity) {
+  // Before the document loads, the list row's summary values stand in under the document's metric keys.
+  function rowMetrics(row) {
+    const keys = { distance: "distance_m", moving_time: "moving_duration_s", elapsed_time: "elapsed_duration_s", average_speed: "avg_speed_mps", max_speed: "max_speed_mps", average_heartrate: "avg_hr", max_heartrate: "max_hr", average_watts: "avg_power", normalized_power: "normalized_power", total_elevation_gain: "elevation_gain_m", training_load: "load", intensity: "intensity" };
+    const metrics = {};
+    for (const [rowKey, key] of Object.entries(keys)) if (row?.[rowKey] != null) metrics[key] = row[rowKey];
+    return metrics;
+  }
+
+  function overview(activity, metrics) {
     const speed = speedChannel(activity);
-    const averageSpeed = speedText(speed, activity.average_speed);
-    const cadence = cadenceChannel(activity);
+    const averageSpeed = speedText(speed, metrics.avg_speed_mps);
+    const cadence = cadenceChannel(activity, metrics);
     const values = [
-      ["Distanz", AppFormat.distance(activity.distance)],
-      ["Bewegungszeit", duration(activity.moving_time)],
-      ["Gesamtzeit", duration(activity.elapsed_time)],
+      ["Distanz", AppFormat.distance(metrics.distance_m)],
+      ["Bewegungszeit", duration(metrics.moving_duration_s ?? metrics.duration_s)],
+      ["Gesamtzeit", duration(metrics.elapsed_duration_s)],
       [speed.invert ? "Ø Pace" : "Ø Geschwindigkeit", averageSpeed && `${averageSpeed} ${speed.unit}`],
-      ["Ø Herzfrequenz", measure(activity.average_heartrate, "bpm")],
-      ["Max. Herzfrequenz", measure(activity.max_heartrate, "bpm")],
-      ["Ø Leistung", measure(activity.average_watts, "W")],
-      ["Normalized Power", [activity.weighted_average_watts, activity.normalized_power].map((value) => measure(value, "W")).find(Boolean)],
-      ["Max. Leistung", measure(activity.max_watts, "W")],
+      ["Ø Herzfrequenz", measure(metrics.avg_hr, "bpm")],
+      ["Max. Herzfrequenz", measure(metrics.max_hr, "bpm")],
+      ["Ø Leistung", measure(metrics.avg_power, "W")],
+      ["Normalized Power", measure(metrics.normalized_power, "W")],
+      ["Max. Leistung", measure(metrics.max_power_w, "W")],
       [`Ø ${cadence.label}`, measure(cadence.average, cadence.unit)],
-      ["Anstieg", measure(activity.total_elevation_gain, "m")],
-      ["Kalorien", measure(activity.calories, "kcal")],
-      ["Trainingsbelastung", measure(activity.training_load)],
-      // Intervals.icu reports intensity as a fraction or in percent; the calendar helper normalizes both.
-      ["Intensität", calendarIntensityLabel(activity.intensity)],
+      ["Anstieg", measure(metrics.elevation_gain_m, "m")],
+      ["Kalorien", measure(metrics.calories_kcal, "kcal")],
+      ["Trainingsbelastung", measure(metrics.load)],
+      // Intensity arrives as a fraction or in percent; the calendar helper normalizes both.
+      ["Intensität", calendarIntensityLabel(metrics.intensity)],
     ].filter(([, value]) => value);
     if (!values.length) return null;
     const grid = node("dl", null, "activity-analysis-stats");
@@ -248,14 +253,9 @@
     return grid;
   }
 
-  function zoneSeconds(values) {
-    if (!Array.isArray(values)) return [];
-    return values.map((value, index) => (finite(value) ? { id: `Z${index + 1}`, secs: value } : value))
-      .filter((value) => value && finite(value.secs) && value.secs >= 0 && String(value.id || "").startsWith("Z"));
-  }
-
-  function zones(title, values) {
-    const items = zoneSeconds(values);
+  function zones(title, zone) {
+    const items = (zone?.buckets || []).filter((bucket) => finite(bucket.seconds) && bucket.seconds >= 0)
+      .map((bucket) => ({ id: String(bucket.label || `Z${bucket.index}`), secs: bucket.seconds }));
     const total = items.reduce((sum, item) => sum + item.secs, 0);
     if (!total) return null;
     const section = node("section", null, "activity-analysis-zones");
@@ -264,27 +264,29 @@
     for (const item of [...items].reverse()) {
       const share = item.secs / total;
       const row = node("li");
-      row.dataset.zone = String(item.id).slice(0, 3);
+      row.dataset.zone = item.id.slice(0, 3);
       const bar = node("span", null, "activity-analysis-zone-bar");
       bar.style.setProperty("--zone-share", `${Math.round(share * 1000) / 10}%`);
-      row.append(node("span", String(item.id).slice(0, 20), "activity-analysis-zone-label"), bar, node("span", `${clock(item.secs)} · ${Math.round(share * 100)} %`, "activity-analysis-zone-value"));
+      row.append(node("span", item.id.slice(0, 20), "activity-analysis-zone-label"), bar, node("span", `${clock(item.secs)} · ${Math.round(share * 100)} %`, "activity-analysis-zone-value"));
       rows.append(row);
     }
-    section.append(rows, node("p", "Zonen laut Intervals.icu zum Zeitpunkt der Aufzeichnung.", "muted"));
+    section.append(rows, node("p", `Zonen laut ${zone.source?.label || "Anbieter"} zum Zeitpunkt der Aufzeichnung.`, "muted"));
     return section;
   }
 
-  function laps(activity) {
-    if (!activity.laps?.length) return null;
+  function laps(activity, lapSet) {
+    const items = lapSet?.laps || [];
+    if (!items.length) return null;
     const speed = speedChannel(activity);
+    const seconds = (lap) => lap.moving_duration_s ?? lap.end_offset_s - lap.start_offset_s;
     const columns = [
-      ["Zeit", (lap) => (finite(lap.moving_time) ? clock(lap.moving_time) : null)],
-      ["Distanz", (lap) => AppFormat.distance(lap.distance)],
-      [speed.invert ? "Pace" : "km/h", (lap) => (finite(lap.average_speed) && speed.convert(lap.average_speed) != null ? speed.format(speed.convert(lap.average_speed)) : null)],
-      ["Ø W", (lap) => (finite(lap.average_watts) ? numberText(lap.average_watts) : null)],
-      ["Ø HF", (lap) => (finite(lap.average_heartrate) ? numberText(lap.average_heartrate) : null)],
-      ["Anstieg", (lap) => (finite(lap.total_elevation_gain) ? `${numberText(lap.total_elevation_gain)} m` : null)],
-    ].filter(([, read]) => activity.laps.some((lap) => read(lap) != null));
+      ["Zeit", (lap) => (finite(seconds(lap)) ? clock(seconds(lap)) : null)],
+      ["Distanz", (lap) => AppFormat.distance(lap.distance_m)],
+      [speed.invert ? "Pace" : "km/h", (lap) => (finite(lap.avg_speed_mps) && speed.convert(lap.avg_speed_mps) != null ? speed.format(speed.convert(lap.avg_speed_mps)) : null)],
+      ["Ø W", (lap) => (finite(lap.avg_power) ? numberText(lap.avg_power) : null)],
+      ["Ø HF", (lap) => (finite(lap.avg_hr) ? numberText(lap.avg_hr) : null)],
+      ["Anstieg", (lap) => (finite(lap.elevation_gain_m) ? `${numberText(lap.elevation_gain_m)} m` : null)],
+    ].filter(([, read]) => items.some((lap) => read(lap) != null));
     if (!columns.length) return null;
     const section = node("section", null, "activity-analysis-laps");
     section.append(node("h4", "Runden"));
@@ -294,7 +296,7 @@
     ["#", ...columns.map(([label]) => label)].forEach((label) => { const cell = node("th", label); cell.scope = "col"; head.append(cell); });
     const thead = node("thead"); thead.append(head);
     const body = node("tbody");
-    activity.laps.forEach((lap, index) => {
+    items.forEach((lap, index) => {
       const row = node("tr");
       const label = node("th", String(index + 1)); label.scope = "row";
       row.append(label, ...columns.map(([, read]) => node("td", read(lap) ?? "—")));
@@ -304,68 +306,39 @@
     return section;
   }
 
-  function sourceText(metadata, hasCharts) {
-    if (!metadata.observed_at) return "Intervals.icu · Zusammenfassung aus dem lokalen Snapshot. Verlaufsdiagramme brauchen die Detaildaten.";
-    const parts = [metadata.source, `Detaildaten geladen: ${formatTime(metadata.observed_at)}`];
-    if (metadata.display_sampled) parts.push("Diagramme vereinfacht dargestellt");
-    if (!hasCharts) parts.push("keine darstellbaren Messreihen");
-    return parts.join(" · ");
-  }
-
-  function appendSourceNotes(panel, metadata, hasCharts) {
-    panel.append(node("p", sourceText(metadata, hasCharts), "muted"));
-    const coverage = Object.entries(metadata.coverage || {}).map(([name, value]) => `${name}: ${value?.valid_points}/${value?.points} Messwerte`);
-    if (coverage.length) panel.append(node("p", `Datenabdeckung · ${coverage.join(" · ")}`, "muted"));
-    if (metadata.stale) panel.append(node("p", "Die Zusammenfassung hat sich seit dem Laden geändert. Aktualisiere die Detaildaten.", "muted"));
-    if (metadata.load_error?.message) panel.append(node("p", `${metadata.load_error.message} Automatischer Ladeversuch: ${formatTime(metadata.load_error.observed_at)}`, "activity-analysis-error"));
-  }
-
   function renderPanel(panel, summary, payload, epoch) {
     panel.replaceChildren();
-    const activity = { ...summary, ...payload?.activity };
-    const metadata = payload?.detail_data || {};
-    const stats = overview(activity);
+    // The document's sport wins; the list row's type stands in until it loads.
+    const activity = { type: payload?.session?.sport ?? summary.type };
+    const metrics = payload ? ActivityDetails.metricValues(payload) : rowMetrics(summary);
+    const stats = overview(activity, metrics);
     if (stats) panel.append(stats);
-    const charts = activity.streams ? channels(activity).map((channel) => chart(activity, channel)).filter(Boolean) : [];
+    const streams = payload?.streams;
+    const charts = streams ? channels(activity, metrics, streams).map((channel) => chart(streams, channel)).filter(Boolean) : [];
     if (charts.length) {
       const grid = node("div", null, "activity-analysis-charts");
       grid.append(...charts);
       panel.append(grid);
     }
-    for (const section of [zones("Zeit in HF-Zonen", activity.heart_rate_zone_times), zones("Zeit in Leistungszonen", activity.power_zone_times), laps(activity)]) {
+    for (const section of [zones("Zeit in HF-Zonen", payload?.zones?.heart_rate), zones("Zeit in Leistungszonen", payload?.zones?.power), laps(activity, payload?.laps)]) {
       if (section) panel.append(section);
     }
-    appendSourceNotes(panel, metadata, charts.length > 0);
+    if (!payload) return;
+    if (streams && !charts.length) panel.append(node("p", "Keine darstellbaren Messreihen", "muted"));
+    panel.append(...ActivityDetails.providerNotes(payload));
     // A successful reload clears the list marker without reloading the list.
-    if (payload) panel.parentElement?.querySelector("summary > .activity-analysis-error")?.toggleAttribute("hidden", !metadata.load_error);
-    if (ActivityDetails.isIntervalsActivity(summary)) appendRefresh(panel, summary, metadata, epoch);
+    const failed = (payload.detail_data?.providers || []).some((entry) => entry.load_error);
+    panel.parentElement?.querySelector("summary > .activity-analysis-error")?.toggleAttribute("hidden", !failed);
+    appendRefresh(panel, summary, payload, epoch);
   }
 
-  // The newest activities are preloaded after each Intervals.icu refresh; older ones load through this action.
-  function appendRefresh(panel, summary, metadata, epoch) {
+  // The newest activities are preloaded after each provider refresh; older ones load through these actions.
+  function appendRefresh(panel, summary, payload, epoch) {
     const status = node("p", "", "muted"); status.setAttribute("role", "status");
-    const refresh = node("button", metadata.observed_at ? "Detaildaten aktualisieren" : "Detaildaten laden", "secondary-button");
-    refresh.type = "button";
-    refresh.disabled = !state.data?.configured?.intervals;
-    if (refresh.disabled) status.textContent = "Intervals.icu ist nicht konfiguriert.";
-    refresh.addEventListener("click", async () => {
-      refresh.disabled = true;
-      status.textContent = "Ladejob wird gestartet …";
-      const isCurrent = () => epoch === list.epoch && panel.isConnected;
-      try {
-        if (await ActivityDetails.requestDetails(String(summary.id), { api, isCurrent, onStatus: (text) => { status.textContent = text; } })) {
-          await loadPanel(panel, summary);
-          return;
-        }
-        status.textContent = "Der Ladejob läuft im Hintergrund weiter.";
-      } catch (error) {
-        status.textContent = error.message;
-      }
-      refresh.disabled = false;
-    });
-    const actions = node("div", null, "dialog-actions");
-    actions.append(refresh);
-    panel.append(actions, status);
+    const isCurrent = () => epoch === list.epoch && panel.isConnected;
+    panel.append(ActivityDetails.refreshActions(payload, {
+      api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => loadPanel(panel, summary),
+    }), status);
   }
 
   async function loadPanel(panel, summary) {
@@ -376,7 +349,7 @@
       payload = await api(`/api/activities/${encodeURIComponent(String(summary.id))}`);
     } catch (error) {
       if (epoch !== list.epoch || !panel.isConnected) return;
-      // The summary still renders when the local detail record is missing.
+      // The list row's summary still renders when the detail document cannot be read.
       renderPanel(panel, summary, null, epoch);
       panel.prepend(node("p", error.message, "muted"));
       return;

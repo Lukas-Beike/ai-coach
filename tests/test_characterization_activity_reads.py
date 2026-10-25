@@ -19,22 +19,24 @@ from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from activity_row_support import SnapshotActivityRows
-from canonical_detail_support import seed_intervals_activity
+from canonical_detail_support import NOW, seed_intervals_activity
 
+from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.read_service import PAGE_DEFAULT, PAGE_MAX, ActivityReadService
+from backend.activities.workout_profile import recorded_profile
 from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
-from backend.performance.activity_read_service import (
-    ActivityAnalysisReadService,
-    _activity_equipment,
-)
+from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.detail_envelope import activity_equipment
 from backend.performance.report_service import TrainingRecordsService
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
 from backend.planning.compact_activities import ActivityRowSource
+from backend.sync.activity_detail_canonical import CanonicalDetailWriter
+from backend.sync.canonical_table_reader import CanonicalTableReader
 
 TODAY = date(2026, 5, 4)
 DAY = "2026-05-04T08:00:00"
@@ -103,6 +105,37 @@ class _StorageCase(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.database = _Database(Path(directory.name) / "fixture.sqlite")
+
+
+def _save_canonical(database: Any, record: dict[str, Any]) -> None:
+    """Store a detail record in the canonical tables, the only source analyses are read from."""
+    manager = cast(DatabaseManager, database)
+    seed_intervals_activity(manager, record["activity_id"])
+    record = {**record, "calendar_profile": recorded_profile(record["activity"])}
+    with manager.unit_of_work() as db:
+        CanonicalDetailWriter().write_legacy(db, record=record, now=NOW)
+
+
+def _detail_service(
+    database: Any, snapshots: _Snapshots, **kwargs: Any
+) -> ActivityAnalysisReadService:
+    """Serve ``activity_detail.v1`` documents from the canonical tables."""
+    return ActivityAnalysisReadService(
+        database,
+        snapshots,
+        CompactActivityRows(SnapshotActivityRows(snapshots)),
+        _Feedback(),
+        ActivityDetailStore(database),
+        references=ActivityReferences(database),
+        session_records=CanonicalTableReader().session_activities,
+        **kwargs,
+    )
+
+
+def _intervals_entry(detail: dict[str, Any]) -> dict[str, Any]:
+    (entry,) = detail["detail_data"]["providers"]
+    assert entry["provider"] == "intervals", entry
+    return entry
 
 
 def _activity(activity_id: Any, start: str = DAY, **fields: Any) -> dict[str, Any]:
@@ -510,16 +543,21 @@ class ActivitySummaryFingerprintTests(unittest.TestCase):
 class ActivityDetailStalenessCharacterizationTests(_StorageCase):
     RAW = _activity("ride-1", DAY, name="Threshold", moving_time=3600)
 
+    def setUp(self) -> None:
+        super().setUp()
+        self._ingest(self.RAW)
+
+    def _ingest(self, raw: dict[str, Any]) -> None:
+        """Ingest the summary row the way the snapshot sync of ``raw`` does."""
+        fields = {key: value for key, value in raw.items() if key != "id"}
+        seed_intervals_activity(cast(DatabaseManager, self.database), "ride-1", **fields)
+
     def _detail(
         self, raw: list[dict[str, Any]], read_equipment: Any = None
     ) -> dict[str, Any]:
-        snapshots = _Snapshots(_snapshot([], raw))
-        service = ActivityAnalysisReadService(
+        service = _detail_service(
             self.database,
-            snapshots,
-            CompactActivityRows(SnapshotActivityRows(snapshots)),
-            _Feedback(),
-            ActivityDetailStore(self.database),
+            _Snapshots(_snapshot([], raw)),
             **({} if read_equipment is None else {"read_equipment": read_equipment}),
         )
         return service.detail("ride-1", garmin_snapshot={}, profile={}, today=TODAY)
@@ -544,71 +582,79 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
     def _save_analysis(self, **overrides: Any) -> None:
         record: dict[str, Any] = {
             "activity_id": "ride-1",
-            "activity": {"name": "Threshold", "moving_time": 3600},
+            "activity": {
+                "name": "Threshold",
+                "moving_time": 3600,
+                "streams": {"time": [0, 1], "watts": [200, 210]},
+            },
             "source": "Intervals.icu",
             "observed_at": "2026-05-04T06:00:00Z",
             "summary_sha256": summary_fingerprint(self.RAW),
-            "full_resolution": True,
-            "content_sha256": "0" * 64,
-            "available_streams": ["time", "watts"],
-            "coverage": {"watts": {"points": 2, "valid_points": 2}},
             "session_analysis": {"aerobic": {"status": "ok"}},
-            "target_snapshot": None,
             **overrides,
         }
-        ActivityDetailStore(self.database).save("ride-1", record)
+        with cast(DatabaseManager, self.database).unit_of_work() as db:
+            CanonicalDetailWriter().write_legacy(db, record=record, now=NOW)
 
-    def test_fresh_record_returns_cached_analysis_with_provenance(self) -> None:
+    def test_fresh_record_returns_analysis_with_provenance(self) -> None:
         self._save_analysis()
         result = self._detail([self.RAW])
-        self.assertEqual({"aerobic": {"status": "ok"}}, result["session_analysis"])
-        metadata = result["detail_data"]
-        self.assertFalse(metadata["stale"])
-        self.assertTrue(metadata["full_resolution"])
-        self.assertEqual("2026-05-04T06:00:00Z", metadata["observed_at"])
-        self.assertEqual(["time", "watts"], metadata["available_streams"])
-        self.assertEqual("Intervals.icu", metadata["source"])
+        # The analysis is recomputed from the canonical streams, not the cached one.
+        self.assertEqual(
+            {"interval_quality", "aerobic", "power_profile", "running_profile"},
+            set(result["analysis"]),
+        )
+        entry = _intervals_entry(result)
+        self.assertFalse(entry["stale"])
+        self.assertEqual("2026-05-04T06:00:00+00:00", entry["fetched_at"])
+        self.assertEqual(["streams"], entry["kinds"])
+        self.assertEqual("Intervals.icu", entry["label"])
+        self.assertEqual({"power_w"}, set(result["streams"]["channels"]))
 
     def test_changed_provider_summary_marks_record_stale_and_hides_analysis(
         self,
     ) -> None:
         self._save_analysis()
         changed = {**self.RAW, "moving_time": 3700}
+        self._ingest(changed)
         result = self._detail([changed])
-        self.assertTrue(result["detail_data"]["stale"])
-        self.assertEqual({}, result["session_analysis"])
-        # Quirk pinned: the cached activity overlays the fresh provider row, so the
-        # stale cached value (3600) is still shown.
-        self.assertEqual(3600, result["activity"]["moving_time"])
-        self.assertTrue(result["detail_data"]["full_resolution"])
+        self.assertTrue(_intervals_entry(result)["stale"])
+        self.assertIsNone(result["analysis"])
+        # Intended change: scalars come from the current record, so the cached
+        # detail value (3600) no longer overlays the changed summary.
+        self.assertEqual(3700, result["metrics"]["duration_s"]["value"])
+        self.assertEqual(["streams"], _intervals_entry(result)["kinds"])
 
     def test_live_zone_times_override_cached_zone_times(self) -> None:
         # Zone times are outside the fingerprint, so recalculated provider zones
-        # must win over the cached detail projection without marking it stale.
+        # must win over the stored zone set without marking it stale.
         self._save_analysis(
             activity={"name": "Threshold", "icu_hr_zone_times": [100, 200]}
         )
         live = {**self.RAW, "icu_hr_zone_times": [300, 400]}
         result = self._detail([live])
-        self.assertFalse(result["detail_data"]["stale"])
-        self.assertEqual([300, 400], result["activity"]["icu_hr_zone_times"])
+        self.assertFalse(_intervals_entry(result)["stale"])
+        self.assertEqual(
+            [300, 400],
+            [bucket["seconds"] for bucket in result["zones"]["heart_rate"]["buckets"]],
+        )
 
     def test_record_without_fingerprint_is_never_stale(self) -> None:
         # Quirk pinned: a falsy summary_sha256 disables the staleness check.
         self._save_analysis(summary_sha256=None)
         result = self._detail([{**self.RAW, "moving_time": 9999}])
-        self.assertFalse(result["detail_data"]["stale"])
-        self.assertEqual({"aerobic": {"status": "ok"}}, result["session_analysis"])
+        self.assertFalse(_intervals_entry(result)["stale"])
+        self.assertIsNotNone(result["analysis"])
 
-    def test_missing_record_reports_no_provenance(self) -> None:
+    def test_missing_record_reports_no_detail_sets(self) -> None:
         result = self._detail([self.RAW])
-        self.assertFalse(result["detail_data"]["stale"])
-        self.assertFalse(result["detail_data"]["full_resolution"])
-        self.assertIsNone(result["detail_data"]["observed_at"])
-        self.assertIsNone(result["detail_data"]["content_sha256"])
-        self.assertEqual([], result["detail_data"]["available_streams"])
-        self.assertEqual({}, result["session_analysis"])
-        self.assertIsNone(result["detail_data"]["load_error"])
+        entry = _intervals_entry(result)
+        self.assertFalse(entry["stale"])
+        self.assertEqual([], entry["kinds"])
+        self.assertIsNone(entry["fetched_at"])
+        self.assertEqual({}, entry["coverage"])
+        self.assertIsNone(entry["load_error"])
+        self.assertIsNotNone(result["analysis"])
 
     def test_recorded_load_failure_is_reported_until_details_are_saved(self) -> None:
         store = ActivityDetailStore(self.database)
@@ -623,18 +669,20 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
                 "message": "Detaildaten fehlerhaft.",
                 "observed_at": "2026-05-04T06:00:00Z",
             },
-            self._detail([self.RAW])["detail_data"]["load_error"],
+            _intervals_entry(self._detail([self.RAW]))["load_error"],
         )
+        # A successful load stores the details and clears the note.
         self._save_analysis()
-        self.assertIsNone(self._detail([self.RAW])["detail_data"]["load_error"])
+        store.clear_failure("ride-1")
+        self.assertIsNone(_intervals_entry(self._detail([self.RAW]))["load_error"])
 
     def test_failure_note_for_another_summary_version_is_ignored(self) -> None:
         ActivityDetailStore(self.database).save_failure(
             "ride-1", "1" * 64, "Detaildaten fehlerhaft.", "2026-05-05T06:00:00Z"
         )
-        self.assertIsNone(self._detail([self.RAW])["detail_data"]["load_error"])
+        self.assertIsNone(_intervals_entry(self._detail([self.RAW]))["load_error"])
         self._save_analysis()
-        self.assertIsNone(self._detail([self.RAW])["detail_data"]["load_error"])
+        self.assertIsNone(_intervals_entry(self._detail([self.RAW]))["load_error"])
 
 
 class ActivityEquipmentTests(unittest.TestCase):
@@ -655,9 +703,9 @@ class ActivityEquipmentTests(unittest.TestCase):
         }
         self.assertEqual(
             ["bike", "chain", "meter"],
-            [row["id"] for row in _activity_equipment(equipment, "a1")],
+            [row["id"] for row in activity_equipment(equipment, "a1")],
         )
-        self.assertEqual([], _activity_equipment(equipment, "a3"))
+        self.assertEqual([], activity_equipment(equipment, "a3"))
 
 
 class TrainingRecordObservationCharacterizationTests(_StorageCase):
@@ -683,9 +731,8 @@ class TrainingRecordObservationCharacterizationTests(_StorageCase):
         self, activity_id: str, fingerprint: str | None, aerobic: Any = None
     ) -> None:
         # Analyses are read for linked activities only.
-        seed_intervals_activity(cast(DatabaseManager, self.database), activity_id)
-        ActivityDetailStore(self.database).save(
-            activity_id,
+        _save_canonical(
+            self.database,
             {
                 "activity_id": activity_id,
                 "activity": {},
@@ -755,9 +802,8 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
     COMPACT_LEAN = _activity("ride-1", DAY, name="Threshold")
 
     def _save_profile(self) -> None:
-        seed_intervals_activity(cast(DatabaseManager, self.database), "ride-1")
-        ActivityDetailStore(self.database).save(
-            "ride-1",
+        _save_canonical(
+            self.database,
             {
                 "activity_id": "ride-1",
                 "activity": {
@@ -843,14 +889,10 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
         (row,) = self._planning_activities([self.COMPACT_LEAN])
         self.assertNotIn("workout_profile", row)
         snapshots = _Snapshots(_snapshot([self.COMPACT_LEAN], [self.RAW]))
-        detail = ActivityAnalysisReadService(
-            self.database,
-            snapshots,
-            CompactActivityRows(SnapshotActivityRows(snapshots)),
-            _Feedback(),
-            ActivityDetailStore(self.database),
-        ).detail("ride-1", garmin_snapshot={}, profile={}, today=TODAY)
-        self.assertFalse(detail["detail_data"]["stale"])
+        detail = _detail_service(self.database, snapshots).detail(
+            "ride-1", garmin_snapshot={}, profile={}, today=TODAY
+        )
+        self.assertFalse(_intervals_entry(detail)["stale"])
 
 
 if __name__ == "__main__":

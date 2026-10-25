@@ -256,7 +256,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "get_activity_details",
-            "Read a bounded, sanitized detailed analysis projection for exactly one completed Intervals.icu activity from the local snapshot. Use only after an explicit request to analyse or deeply review that one activity; resolve its exact activity ID with list_recent_activities first when needed; activity_id accepts the local ID (act_...) or the provider activity ID. Never use this for generic activity summaries or all past activities.",
+            "Read the bounded, sanitized activity_detail.v1 document of exactly one completed local session from any connected provider, with per-value source labels. Use only after an explicit request to analyse or deeply review that one activity; resolve its exact activity ID with list_recent_activities first when needed; activity_id accepts the local ID (act_...) or the provider activity ID. Never use this for generic activity summaries or all past activities.",
             {"activity_id": {"type": "string", "minLength": 1, "maxLength": 200}},
             strict=True,
         ),

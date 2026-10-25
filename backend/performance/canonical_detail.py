@@ -2,8 +2,10 @@
 
 The document combines the session's stored detail sets, its active activity
 records and the stored target and decoupling values of the session analysis. The
-analysis is recomputed from the merged streams at read time. The caller owns the
-transaction: ``db`` is an open connection and this module only reads from it.
+analysis is recomputed from the merged streams at read time and withheld while
+any merged provider's stored detail is stale. Intervals.icu zone times come from
+the current summary row when it carries them. The caller owns the transaction:
+``db`` is an open connection and this module only reads from it.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
+from datetime import UTC, tzinfo
 from typing import Any, Final, Protocol
 
 from backend.activities.detail_contract import (
@@ -18,9 +21,14 @@ from backend.activities.detail_contract import (
     activity_detail_contract,
     measured_order,
 )
-from backend.activities.detail_merge import DetailCandidate, merge_details
+from backend.activities.detail_merge import (
+    DetailCandidate,
+    MergedDetail,
+    merge_details,
+)
 from backend.activities.detail_store import summary_fingerprint
 from backend.activities.detail_summary_metrics import intervals_summary_metrics
+from backend.canonical.activity_detail import ZoneDistribution
 from backend.canonical.records import ActivityRecord
 from backend.canonical.vocabulary import ActivitySessionState, ProviderId
 from backend.db import activity_detail_store, canonical_store
@@ -29,6 +37,10 @@ from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
+from backend.providers.intervals_activity_detail_mapping import (
+    MAPPER_VERSION,
+    map_intervals_summary_zones,
+)
 
 _MAX_MERGE_DEPTH: Final = 64
 
@@ -43,7 +55,7 @@ class SummaryRowReader(Protocol):
     """Return the current Intervals.icu summary row of a provider activity id."""
 
     def __call__(
-        self, db: Any, provider_activity_id: str
+        self, db: Any, provider_activity_id: str, /
     ) -> Mapping[str, Any] | None: ...
 
 
@@ -63,6 +75,7 @@ class EnvelopeReader(Protocol):
 
 
 FailureReader = Callable[[Iterable[str]], Mapping[str, Mapping[str, Any]]]
+RefreshableProviders = Callable[[], frozenset[ProviderId]]
 
 
 def read_reference(db: Any, any_id: str) -> str | None:
@@ -99,12 +112,14 @@ class CanonicalDetailReader:
         self,
         session_records: SessionRecordReader,
         *,
-        refreshable: frozenset[ProviderId],
+        refreshable: RefreshableProviders,
         summary_row: SummaryRowReader | None = None,
         failures: FailureReader | None = None,
         envelope: EnvelopeReader | None = None,
+        zone: tzinfo = UTC,
     ) -> None:
         self._session_records = session_records
+        self._zone = zone
         self._refreshable = refreshable
         self._summary_row = summary_row
         self._failures = failures
@@ -136,12 +151,62 @@ class CanonicalDetailReader:
                         device_type=record.device_type,
                     )
                 )
-        merged = merge_details(candidates)
+        sets = [candidate.stored for candidate in candidates]
         ordered = measured_order(records)
         analysis_record = next(
             (r for r in ordered if r.provenance.provider is ProviderId.INTERVALS),
             ordered[0],
         )
+        intervals_id = (
+            analysis_record.activity_id
+            if analysis_record.provenance.provider is ProviderId.INTERVALS
+            else None
+        )
+        summary = (
+            self._summary_row(db, intervals_id)
+            if self._summary_row is not None and intervals_id is not None
+            else None
+        )
+        if summary is not None:
+            candidates = _with_live_zones(
+                candidates, activity_id, analysis_record, summary
+            )
+        merged = merge_details(candidates)
+        status = self._status(db, sets, intervals_id, summary)
+        stale = any(state.stale for state in status.values())
+        analysis = (
+            None if stale else self._analysis(db, activity_id, analysis_record, merged)
+        )
+        envelope = (
+            None
+            if self._envelope is None
+            else self._envelope(db, activity_id, intervals_id, summary)
+        )
+        return activity_detail_contract(
+            activity_id,
+            records,
+            merged,
+            sets,
+            analysis=analysis,
+            refreshable=self._refreshable(),
+            status=status,
+            envelope=envelope,
+            summary_metrics=None
+            if summary is None
+            else intervals_summary_metrics(
+                summary, recorded_by=analysis_record.provenance.recorded_by
+            ),
+            zone=self._zone,
+        )
+
+    def _analysis(
+        self,
+        db: Any,
+        activity_id: str,
+        analysis_record: ActivityRecord,
+        merged: MergedDetail,
+    ) -> dict[str, Any]:
+        """Recompute the session analysis from the merged streams and laps."""
         payload = _stored_payload(db, activity_id, analysis_record)
         adapted = analysis_input(
             analysis_record,
@@ -151,7 +216,7 @@ class CanonicalDetailReader:
         )
         targets = payload.get("target_snapshot")
         # Each analysis credits only the providers of the channels it reads.
-        analysis = {
+        return {
             "interval_quality": interval_quality(
                 adapted.activity,
                 targets if isinstance(targets, dict) else None,
@@ -173,35 +238,6 @@ class CanonicalDetailReader:
                 source_label=adapted.label_for("velocity_smooth", "distance", "moving"),
             ),
         }
-        sets = [candidate.stored for candidate in candidates]
-        intervals_id = (
-            analysis_record.activity_id
-            if analysis_record.provenance.provider is ProviderId.INTERVALS
-            else None
-        )
-        summary = (
-            self._summary_row(db, intervals_id)
-            if self._summary_row is not None and intervals_id is not None
-            else None
-        )
-        envelope = (
-            None
-            if self._envelope is None
-            else self._envelope(db, activity_id, intervals_id, summary)
-        )
-        return activity_detail_contract(
-            activity_id,
-            records,
-            merged,
-            sets,
-            analysis=analysis,
-            refreshable=self._refreshable,
-            status=self._status(db, sets, intervals_id, summary),
-            envelope=envelope,
-            summary_metrics=None
-            if summary is None
-            else intervals_summary_metrics(summary),
-        )
 
     def _status(
         self,
@@ -250,6 +286,57 @@ class CanonicalDetailReader:
 def _provider_text(record: ActivityRecord) -> str | None:
     provider = record.provenance.provider
     return None if provider is None else provider.value
+
+
+def _with_live_zones(
+    candidates: Sequence[DetailCandidate],
+    activity_id: str,
+    record: ActivityRecord,
+    summary: Mapping[str, Any],
+) -> list[DetailCandidate]:
+    """Replace the record's stored zone sets by the summary row's zone times.
+
+    A replaced set keeps its stored bookkeeping; a zone metric without a stored
+    set is added with the record's retrieval time.
+    """
+    live = {
+        zone.metric: zone
+        for zone in map_intervals_summary_zones(
+            summary,
+            provider_activity_id=record.activity_id,
+            provenance=record.provenance,
+        ).records
+    }
+    result: list[DetailCandidate] = []
+    for candidate in candidates:
+        item = candidate.stored
+        detail = item.detail
+        own = (
+            item.provider == ProviderId.INTERVALS.value
+            and item.provider_activity_id == record.activity_id
+        )
+        if own and isinstance(detail, ZoneDistribution) and detail.metric in live:
+            stored = replace(item, detail=live.pop(detail.metric))
+            candidate = replace(candidate, stored=stored)
+        result.append(candidate)
+    retrieved = record.provenance.retrieved_at
+    for zone in live.values():
+        result.append(
+            DetailCandidate(
+                stored=StoredDetailSet(
+                    provider=ProviderId.INTERVALS.value,
+                    provider_activity_id=record.activity_id,
+                    activity_id=activity_id,
+                    mapper_version=MAPPER_VERSION,
+                    summary_sha256=None,
+                    fetched_at="" if retrieved is None else retrieved.isoformat(),
+                    detail=zone,
+                ),
+                started_at=record.started_at,
+                device_type=record.device_type,
+            )
+        )
+    return result
 
 
 def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:

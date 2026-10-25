@@ -1,4 +1,8 @@
-"""Compact activity analyses read canonically equal the legacy kv reads."""
+"""Compact activity analyses come from canonical rows and equal the legacy kv reads.
+
+The kv records an earlier release wrote alongside each load are the oracle; they
+are never read as a fallback.
+"""
 
 import json
 import tempfile
@@ -6,6 +10,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 
+import legacy_detail_kv
 from activity_row_support import FixedActivityRows
 from canonical_detail_support import INTERVALS, NOW, ZONE, open_manager
 
@@ -38,6 +43,17 @@ def _observed(index: int) -> str:
     return (BASE + timedelta(minutes=(index * 37) % COUNT)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
+
+
+class RecordingWriter(CanonicalDetailWriter):
+    """Keep each loaded record, so the test can store it as an earlier release did."""
+
+    def __init__(self):
+        self.records = {}
+
+    def write_fetch(self, db, **kwargs):
+        self.records[kwargs["activity_id"]] = kwargs["record"]
+        return super().write_fetch(db, **kwargs)
 
 
 def _streams(index: int) -> list[dict]:
@@ -102,6 +118,7 @@ class AnalysisReadsTestCase(unittest.TestCase):
         api = Mock()
         api.get.side_effect = lambda path, params=None: by_path[path]
         clock = {"now": "", "index": 0}
+        writer = RecordingWriter()
         service = ActivityDetailRefreshService(
             api_client=api,
             database_manager=self.manager,
@@ -109,7 +126,7 @@ class AnalysisReadsTestCase(unittest.TestCase):
             store=self.store,
             utc_now=lambda: clock["now"],
             configured=True,
-            canonical=CanonicalDetailWriter(),
+            canonical=writer,
         )
         real = activity_details.aerobic_analysis
 
@@ -120,9 +137,16 @@ class AnalysisReadsTestCase(unittest.TestCase):
             for index, activity_id in enumerate(self.ids):
                 clock.update(now=_observed(index), index=index)
                 service.refresh(activity_id)
+        self.records = writer.records
+        # The legacy kv records, as an earlier release stored them with each load.
+        for activity_id, record in self.records.items():
+            legacy_detail_kv.save(self.manager, activity_id, record)
 
     def old_reads(self):
-        return self.store.calendar_profiles(), self.store.analysis_summaries()
+        return (
+            legacy_detail_kv.calendar_profiles(self.manager),
+            legacy_detail_kv.analysis_summaries(self.manager),
+        )
 
     def new_reads(self):
         return calendar_profiles(self.manager), analysis_summaries(self.manager)
@@ -167,11 +191,11 @@ class CanonicalAnalysisReadTests(AnalysisReadsTestCase):
         self.assertEqual(ACTIVITY_DETAIL_ANALYSIS_VERSION, row["analysis_version"])
         self.assertEqual(_observed(5), payload["observed_at"])
         self.assertEqual(
-            self.store.get(self.ids[5])["summary_sha256"], payload["summary_sha256"]
+            self.records[self.ids[5]]["summary_sha256"], payload["summary_sha256"]
         )
 
     def test_legacy_copy_stores_the_same_metadata(self):
-        record = self.store.get(self.ids[7])
+        record = self.records[self.ids[7]]
         with self.manager.unit_of_work() as db:
             db.execute(
                 "DELETE FROM activity_detail_analysis WHERE activity_id = "
@@ -232,42 +256,55 @@ class CanonicalAnalysisReadTests(AnalysisReadsTestCase):
 
     def test_unlinked_kv_records_no_longer_use_limit_slots(self):
         expected_ids = [row["activity_id"] for row in self.old_reads()[1]]
-        ghost = json.loads(json.dumps(self.store.get(self.ids[0])))
+        ghost = json.loads(json.dumps(legacy_detail_kv.get(self.manager, self.ids[0])))
         ghost["activity_id"] = "ghost"
         ghost["observed_at"] = "2026-10-03T00:00:00Z"
-        self.store.save("ghost", ghost)
-        old_ids = [row["activity_id"] for row in self.store.analysis_summaries()]
+        legacy_detail_kv.save(self.manager, "ghost", ghost)
+        old_ids = [row["activity_id"] for row in legacy_detail_kv.analysis_summaries(self.manager)]
         self.assertIn("ghost", old_ids)
         new_ids = [row["activity_id"] for row in analysis_summaries(self.manager)]
         self.assertNotIn("ghost", new_ids)
         self.assertEqual(expected_ids, new_ids)
 
 
-class KvFallbackReadTests(AnalysisReadsTestCase):
-    def test_activities_without_a_canonical_analysis_come_from_kv(self):
-        expected = self.old_reads()
-        missing = {self.ids[3], self.ids[40], self.ids[118]}
+class KvRecordsAreNotReadTests(AnalysisReadsTestCase):
+    def delete_analysis(self, activity_ids):
         with self.manager.unit_of_work() as db:
-            for activity_id in missing:
+            for activity_id in activity_ids:
                 db.execute(
                     "DELETE FROM activity_detail_analysis WHERE activity_id = "
                     "(SELECT activity_id FROM activity_records "
                     "WHERE provider_activity_id = ?)",
                     (activity_id,),
                 )
-        self.assert_matches_kv(expected)
 
-    def test_every_analysis_missing_equals_the_kv_reads(self):
-        expected = self.old_reads()
+    def test_activities_without_a_canonical_analysis_are_not_served_from_kv(self):
+        missing = {self.ids[3], self.ids[40], self.ids[118]}
+        self.assertTrue(
+            missing & {row["activity_id"] for row in self.old_reads()[1]}
+        )
+        self.delete_analysis(missing)
+        self.assertIsNotNone(legacy_detail_kv.get(self.manager, self.ids[3]))
+        profiles, summaries = self.new_reads()
+        self.assertTrue(missing.isdisjoint(profiles))
+        self.assertTrue(missing.isdisjoint(row["activity_id"] for row in summaries))
+        # Without their kv records the legacy reads agree: kv was never consulted.
         with self.manager.unit_of_work() as db:
-            db.execute("DELETE FROM activity_detail_analysis")
-        self.assert_matches_kv(expected)
+            for activity_id in missing:
+                db.execute(
+                    "DELETE FROM kv WHERE key = ?", (legacy_detail_kv.key(activity_id),)
+                )
+        self.assert_matches_kv()
+
+    def test_kv_only_analyses_are_not_returned(self):
+        self.delete_analysis(self.ids)
+        self.assertEqual(({}, []), self.new_reads())
 
     def test_canonical_rows_alone_equal_the_kv_reads(self):
         expected = self.old_reads()
         with self.manager.unit_of_work() as db:
             db.execute("DELETE FROM kv WHERE key LIKE 'activity_detail:%'")
-        self.assertIsNone(self.store.get(self.ids[0]))
+        self.assertIsNone(legacy_detail_kv.get(self.manager, self.ids[0]))
         self.assert_matches_kv(expected)
 
 

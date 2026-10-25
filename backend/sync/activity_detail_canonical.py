@@ -85,7 +85,7 @@ class CanonicalDetailWriter:
         result = map_intervals_activity_detail(
             detail,
             streams,
-            recorded_by=_recorded_by(link["recorded_by"]),
+            recorded_by=recording_origin(link["recorded_by"]),
             retrieved_at=_aware_time(record.get("observed_at")),
         )
         if not result.records and not _has_analysis_payload(record):
@@ -121,7 +121,7 @@ class CanonicalDetailWriter:
         ):
             return DetailWriteResult(DetailWriteOutcome.UNCHANGED)
         result = map_legacy_activity_detail(
-            record, recorded_by=_recorded_by(link["recorded_by"])
+            record, recorded_by=recording_origin(link["recorded_by"])
         )
         if not result.records and not _has_analysis_payload(record):
             return DetailWriteResult(DetailWriteOutcome.INVALID, len(result.issues))
@@ -134,7 +134,8 @@ class CanonicalDetailWriter:
         return _result(outcomes, len(result.issues))
 
 
-def _recorded_by(value: object) -> RecordingOrigin:
+def recording_origin(value: object) -> RecordingOrigin:
+    """Return the stored ``recorded_by`` text as an origin; anything else is UNKNOWN."""
     if not isinstance(value, str):
         return RecordingOrigin.UNKNOWN
     try:

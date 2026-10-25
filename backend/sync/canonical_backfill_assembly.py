@@ -11,6 +11,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.activity_detail_backfill import ActivityDetailBackfill
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
+from backend.sync.activity_detail_retirement import ActivityDetailRetirement
 from backend.sync.canonical_backfill import DEFAULT_BATCH_SIZE, CanonicalBackfill
 from backend.sync.canonical_backfill_worker import CanonicalBackfillWorker
 
@@ -20,6 +21,7 @@ class CanonicalBackfillAssembly:
     worker: CanonicalBackfillWorker
     status_reader: CanonicalBackfill
     detail_backfill: ActivityDetailBackfill
+    detail_retirement: ActivityDetailRetirement
 
 
 def build_canonical_backfill(
@@ -43,12 +45,17 @@ def build_canonical_backfill(
         writer=CanonicalDetailWriter(),
         clock=clock,
     )
+    # Runs after the detail backfill: deletes the kv records canonical proves.
+    detail_retirement = ActivityDetailRetirement(key_values=key_values, clock=clock)
     worker = CanonicalBackfillWorker(
         backfill=backfill,
         database=database,
         maintenance_gate=maintenance_gate,
-        followups=(detail_backfill,),
+        followups=(detail_backfill, detail_retirement),
     )
     return CanonicalBackfillAssembly(
-        worker=worker, status_reader=backfill, detail_backfill=detail_backfill
+        worker=worker,
+        status_reader=backfill,
+        detail_backfill=detail_backfill,
+        detail_retirement=detail_retirement,
     )

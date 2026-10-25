@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from canonical_detail_support import seed_intervals_activity
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
@@ -252,6 +253,12 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                     ]
                 },
             }
+        )
+        # A snapshot sync also ingests the activity, so canonical reads find it.
+        seed_intervals_activity(
+            server.database_manager(),
+            activity["id"],
+            **{key: value for key, value in activity.items() if key != "id"},
         )
         return activity
 

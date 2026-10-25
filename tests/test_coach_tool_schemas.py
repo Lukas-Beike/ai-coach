@@ -46,6 +46,12 @@ def _nested_objects(node, path=""):
 
 
 class CoachToolSchemaTests(unittest.TestCase):
+    def test_activity_detail_description_is_not_limited_to_one_provider(self):
+        description = _tools()["get_activity_details"]["description"]
+        self.assertNotIn("Intervals.icu", description)
+        self.assertIn("any connected provider", description)
+        self.assertIn("act_", description)
+
     def test_nested_object_schemas_reject_unknown_keys(self):
         open_objects = [
             f"{name}.{path}"
