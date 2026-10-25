@@ -132,6 +132,12 @@ class LookupChainTests(unittest.TestCase):
         self.assertEqual(self.ids(query="Haferflocken"), [f"yazio:{YAZIO_ID}"])
         self.assertEqual((self.yazio.calls, self.off.calls), ([], []))
 
+    def test_fresh_mirror_entry_of_any_source_answers_before_the_chain(self):
+        self.mirror.store([off_food()])
+        self.yazio.error = UNAVAILABLE
+        self.assertEqual(self.ids(query="Haferflocken"), [f"off:{BARCODE}"])
+        self.assertEqual(self.yazio.calls, [])
+
     def test_empty_or_unsuitable_yazio_falls_through_to_open_food_facts(self):
         self.off.hits = [off_food()]
         for hits in ([], [yazio_food("Kokosmilch")], [yazio_food(kcal=None)]):

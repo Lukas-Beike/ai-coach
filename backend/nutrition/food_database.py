@@ -481,8 +481,21 @@ class FoodDatabaseService:
             suitable = [food for food in found if _suitable(query, food)]
         return suitable, origin
 
+    def _fresh_local_hits(self, query: str) -> list[dict[str, Any]]:
+        """Suitable, fresh mirrored foods of any source, Yazio first."""
+        if self._mirror is None:
+            return []
+        hits = [
+            food
+            for food in self._mirror.search(query)
+            if self._mirror.is_fresh(food) and _suitable(query, food)
+        ]
+        return sorted(hits, key=lambda food: not food["id"].startswith("yazio:"))
+
     def _chain_search(self, query: str) -> tuple[list[dict[str, Any]], str]:
         """Yazio, then Open Food Facts, then BLS; the first suitable match wins."""
+        if local := self._fresh_local_hits(query):
+            return self._labelled(local, LOCAL_DATABASE), ""
         skipped = False
         auth_failed = False
         for search in (self._yazio_search, self._off_search):
