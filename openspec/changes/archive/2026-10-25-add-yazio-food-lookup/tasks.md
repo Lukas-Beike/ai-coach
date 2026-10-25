@@ -19,7 +19,7 @@
 ## 4. Documentation and integration
 
 - [x] 4.1 Document setup, lookup priority, privacy and the unofficial-API limits in README; verify consistency with the lookup behavior.
-- [ ] 4.2 Run full validation: unit suite, compileall, repo-wide mypy ratchet and the Docker build (browser e2e runs in CI).
+- [x] 4.2 Run full validation: unit suite, compileall, repo-wide mypy ratchet and the Docker build (browser e2e runs in CI).
 
 ## Workflow follow-up
 

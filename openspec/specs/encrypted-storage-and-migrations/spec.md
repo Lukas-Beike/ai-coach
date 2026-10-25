@@ -4,14 +4,13 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v13; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v14; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
 ### Requirement: Encrypted application database
 
 A configured application database SHALL be opened/created through SQLCipher with APP_PASSWORD and cipher compatibility 4; encrypted startup SHALL not fall back to an unencrypted database when SQLCipher is unavailable.
-
 
 #### Scenario: New encrypted database
 - **WHEN** a valid secure configuration opens new temporary application storage
@@ -29,23 +28,19 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from schema v9 through the current v13 and execute the required versioned steps within one rollback-capable migration transaction.
-
+The database SHALL recognize supported version-and-shape pairs from schema v9 through the current v14 and execute the required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Skipped-release upgrade
 - **WHEN** a populated released v9 database is opened by this build
 - **THEN** all intermediate migrations run to the exact current schema while preserving existing rows
 
 #### Scenario: Later supported release
-- **WHEN** a populated v10, v11 or v12 database is opened
+- **WHEN** a populated v10, v11, v12 or v13 database is opened
 - **THEN** only remaining upgrade steps run and existing data remains intact
-
-Evidence: `backend/db/migrations.py::migrate_schema`; `backend/db/migrations.py::UPGRADE_STEPS`; `backend/db/schema_history.py::ACCEPTED_SHAPES_BY_VERSION`. Tests: `tests/test_db_migrations.py::test_oldest_supported_release_schema_upgrades_to_current`; `tests/test_db_migrations.py::test_populated_v9_upgrade_keeps_every_row_and_adds_empty_detail_tables`; `tests/test_db_migrations.py::test_populated_v10_upgrade_keeps_every_row_and_adds_the_empty_mirror`.
 
 ### Requirement: Unknown schema preservation
 
 The database SHALL reject unsupported versions, unknown shapes and mismatched version/shape pairs before modifying the database; a current exact schema SHALL be restart-idempotent.
-
 
 #### Scenario: Newer or unsupported schema
 - **WHEN** a database version is outside the supported released set
@@ -65,7 +60,6 @@ Evidence: `backend/db/migrations.py::migrate_schema`; `backend/db/schema.py::dat
 
 The implemented migrations SHALL add canonical detail and food-mirror structures, split the legacy Garmin snapshot into dated records, and add nullable lap maximum speed without inventing values for previously stored laps.
 
-
 #### Scenario: Garmin snapshot migration
 - **WHEN** a supported v11 database contains a populated legacy Garmin snapshot
 - **THEN** the migration stores its items as canonical provider records with observed days without dropping elements
@@ -84,7 +78,6 @@ Evidence: `backend/db/migrations.py::_upgrade_v9_to_v10`; `backend/db/migrations
 
 A failing migration SHALL roll back its schema and data changes, preserve the original upgrade error even when a savepoint was lost, and leave the released database available for a later valid attempt.
 
-
 #### Scenario: Upgrade step fails
 - **WHEN** a schema/data upgrade raises before current-schema validation succeeds
 - **THEN** the enclosing migration changes are rolled back rather than committed partially
@@ -98,7 +91,6 @@ Evidence: `backend/db/migrations.py::migrate_schema`; `backend/db/migrations.py:
 ### Requirement: Owned atomic transactions and consistent reads
 
 The database manager SHALL serialize writers, commit/roll back an owned unit of work atomically, bound reader leases, and offer query-only read snapshots whose reads share one committed WAL state.
-
 
 #### Scenario: Write fails inside a unit of work
 - **WHEN** a domain operation raises before leaving its owned transaction
@@ -118,7 +110,6 @@ Evidence: `backend/db/manager.py::DatabaseManager.unit_of_work`; `backend/db/man
 
 The database manager SHALL block new leases, wait for active operations and close existing connections while a restore swaps the database; later leases SHALL use the resulting active database.
 
-
 #### Scenario: Restore begins with leased work
 - **WHEN** a validated restore requests a drain while database work remains active
 - **THEN** the swap waits for active leases and no new lease enters the drained manager
@@ -128,3 +119,14 @@ The database manager SHALL block new leases, wait for active operations and clos
 - **THEN** lease admission resumes without retaining a connection to the replaced file
 
 Evidence: `backend/db/manager.py::DatabaseManager.restore_drain`; `backend/db/manager.py::DatabaseManagerCache`. Tests: `tests/test_db_manager.py`; `tests/test_database_restore_service.py::test_restores_after_checkpoint_and_drain_then_resumes_both_job_owners`.
+
+### Requirement: Yazio source constraints migrate without data loss
+The v13 to v14 upgrade SHALL allow `yazio:` ids in the food mirror and the `yazio` source in saved products by rebuilding their constraints in the same migration transaction, preserving every row, identifier, timestamp and index, and failing atomically.
+
+#### Scenario: Populated upgrade
+- **WHEN** a populated v9 through v13 database is opened
+- **THEN** all mirror entries and products are unchanged afterwards, and a `yazio:` mirror entry and a `yazio` product can be stored.
+
+#### Scenario: Failed upgrade
+- **WHEN** the rebuild fails partway
+- **THEN** the database remains at its prior version with unchanged rows.
