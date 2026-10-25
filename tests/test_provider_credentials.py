@@ -235,6 +235,11 @@ class ProviderCredentialTests(unittest.TestCase):
         status = self.service.update({"yazio_client_secret": None})
         self.assertFalse(status["yazio_configured"])
 
+    def test_environment_password_is_stripped_like_the_stored_one(self):
+        root = Path(self._temporary.name)
+        config = load_config(root, root / "data", {**ENV, "YAZIO_PASSWORD": " pw "})
+        self.assertEqual(config.yazio_password, "pw")
+
     def test_status_reports_none_when_neither_db_nor_env_is_set(self):
         config = dataclasses.replace(self.env_config, wahoo_client_secret="")
         status = credential_status(config, {})

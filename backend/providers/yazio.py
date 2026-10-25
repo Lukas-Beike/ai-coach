@@ -151,6 +151,7 @@ class YazioClient:
         self._opener = opener
         self._clock = clock
         self._lock = threading.Lock()
+        self._network = threading.Lock()
         self._cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
         self._requests: deque[float] = deque()
         self._blocked_until = 0.0
@@ -166,7 +167,12 @@ class YazioClient:
 
     def search(self, query: str) -> list[dict[str, Any]]:
         params = urlencode(
-            {"query": query, "sex": "male", "countries": "DE", "locales": "de_DE"}
+            {
+                "query": query,
+                "sex": "male",
+                "countries": self._country(),
+                "locales": "de_" + self._country(),
+            }
         )
         payload = self._get("/products/search?" + params)
         if not isinstance(payload, list):
@@ -176,6 +182,10 @@ class YazioClient:
             for raw in payload[:_SEARCH_LIMIT]
             if (food := project_product(raw)) is not None
         ]
+
+    def _country(self) -> str:
+        country = self._config().yazio_country.strip().upper()
+        return country if re.fullmatch(r"[A-Z]{2}", country) else "DE"
 
     def product(self, product_id: str) -> dict[str, Any]:
         if not _PRODUCT_ID.fullmatch(product_id):
@@ -191,15 +201,22 @@ class YazioClient:
     def barcode(self, barcode: str) -> dict[str, Any] | None:
         """Return the product whose EAN equals the barcode, if Yazio has one."""
         for hit in self.search(barcode)[:_BARCODE_DETAILS]:
-            detail = self._get("/products/" + quote(hit["id"][6:], safe=""))
+            try:
+                detail = self._get("/products/" + quote(hit["id"][6:], safe=""))
+            except AppError as exc:
+                # A deleted or hidden candidate must not hide the next one.
+                if exc.reason == "food_not_found":
+                    continue
+                raise
             eans = detail.get("eans") if isinstance(detail, dict) else None
             if isinstance(eans, list) and barcode in {str(ean) for ean in eans}:
                 return project_product(detail, hit["id"][6:])
         return None
 
     def _get(self, path: str) -> Any:
-        # Reservation, login and request share one lock so concurrent Coach jobs
-        # cannot exceed the limit or log in twice.
+        # Cached reads only take the short state lock. Requests are serialized by
+        # the network lock so concurrent Coach jobs cannot exceed the limit or log
+        # in twice, and a slow Yazio call never blocks a cache hit.
         with self._lock:
             self._follow_credentials()
             if not self._config().yazio_configured:
@@ -208,18 +225,27 @@ class YazioClient:
                     "Yazio ist nicht konfiguriert.",
                     reason="food_database_not_configured",
                 )
-            now = self._clock()
-            cached = self._cache.get(path)
-            if cached and now - cached[0] < _CACHE_SECONDS:
-                self._cache.move_to_end(path)
-                return copy.deepcopy(cached[1])
-            self._reserve(now)
+            if (cached := self._cached(path)) is not None:
+                return cached
+        with self._network:
+            with self._lock:
+                if (cached := self._cached(path)) is not None:
+                    return cached
+                self._reserve(self._clock())
             payload = self._authorized_get(path)
-            self._cache[path] = (self._clock(), payload)
-            self._cache.move_to_end(path)
-            while len(self._cache) > _CACHE_ENTRIES:
-                self._cache.popitem(last=False)
+            with self._lock:
+                self._cache[path] = (self._clock(), payload)
+                self._cache.move_to_end(path)
+                while len(self._cache) > _CACHE_ENTRIES:
+                    self._cache.popitem(last=False)
             return copy.deepcopy(payload)
+
+    def _cached(self, path: str) -> Any:
+        cached = self._cache.get(path)
+        if cached and self._clock() - cached[0] < _CACHE_SECONDS:
+            self._cache.move_to_end(path)
+            return copy.deepcopy(cached[1])
+        return None
 
     def _reserve(self, now: float) -> None:
         while self._requests and now - self._requests[0] >= 60:

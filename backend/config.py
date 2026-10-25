@@ -172,6 +172,7 @@ class Config:
     yazio_client_id: str = ""
     yazio_client_secret: str = ""
     yazio_user_agent: str = ""
+    yazio_country: str = ""
     sync_history_earliest_date: date = DEFAULT_SYNC_HISTORY_EARLIEST_DATE
     trusted_proxies: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
     invalid_trusted_proxies: int = 0
@@ -264,10 +265,11 @@ def load_config(
         wahoo_client_secret=value("WAHOO_CLIENT_SECRET", "").strip(),
         wahoo_redirect_uri=value("WAHOO_REDIRECT_URI", "").strip(),
         yazio_email=value("YAZIO_EMAIL", "").strip(),
-        yazio_password=value("YAZIO_PASSWORD", ""),
+        yazio_password=value("YAZIO_PASSWORD", "").strip(),
         yazio_client_id=value("YAZIO_CLIENT_ID", "").strip(),
         yazio_client_secret=value("YAZIO_CLIENT_SECRET", "").strip(),
         yazio_user_agent=value("YAZIO_USER_AGENT", "").strip(),
+        yazio_country=value("YAZIO_COUNTRY", "").strip(),
         sync_history_earliest_date=_env_date(
             target, "SYNC_HISTORY_EARLIEST_DATE", DEFAULT_SYNC_HISTORY_EARLIEST_DATE
         ),

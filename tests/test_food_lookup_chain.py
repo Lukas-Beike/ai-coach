@@ -168,6 +168,17 @@ class LookupChainTests(unittest.TestCase):
         self.yazio.hits = [yazio_food("Haferflocken zart", food_id=OTHER)]
         self.assertEqual(self.ids(query="Haferflocken"), [f"yazio:{OTHER}"])
 
+    def test_text_chain_names_rejected_yazio_credentials(self):
+        self.yazio.error = AppError(503, "x", reason="food_database_auth_failed")
+        self.off.hits = [off_food()]
+        result = self.service.lookup({"query": "Haferflocken"})
+        self.assertIn("Zugangsdaten", result["notice"])
+
+    def test_internal_chain_name_is_not_a_public_source(self):
+        with self.assertRaises(AppError) as raised:
+            self.service.lookup({"query": "Haferflocken", "source": "chain"})
+        self.assertEqual(raised.exception.status, 400)
+
     def test_failing_providers_end_at_bls(self):
         self.yazio.error = UNAVAILABLE
         self.off.error = UNAVAILABLE

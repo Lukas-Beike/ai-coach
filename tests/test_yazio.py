@@ -302,6 +302,49 @@ class YazioClientTests(unittest.TestCase):
             self.assertEqual(raised.exception.status, 429)
         self.assertEqual(len(script.requests), 1)
 
+    def test_a_missing_candidate_does_not_hide_the_next_one(self):
+        detail = hit(eans=["4000000000001"])
+        script = Script(
+            tokens=[token()],
+            api=[[hit(), hit(product_id=OTHER_ID)], failure(404), detail],
+        )
+        found = self.client(script).barcode("4000000000001")
+        self.assertEqual(found["id"], "yazio:" + OTHER_ID)
+
+    def test_country_is_configurable_and_validated(self):
+        script = Script(tokens=[token()], api=[[], []])
+        client = self.client(script, yazio_country="at")
+        client.search("a")
+        self.assertIn("countries=AT", script.requests[1].full_url)
+        client = self.client(Script(tokens=[token()], api=[[]]), yazio_country="bad!")
+        script = client._opener
+        client.search("a")
+        self.assertIn("countries=DE", script.requests[1].full_url)
+
+    def test_a_cache_hit_is_not_blocked_by_a_slow_request(self):
+        import threading
+
+        release, started = threading.Event(), threading.Event()
+        script = Script(tokens=[token()], api=[[hit()], [hit()]])
+        original = script.__call__
+
+        def slow(request, timeout):
+            if "Skyr+zwei" in request.full_url:
+                started.set()
+                release.wait(5)
+            return original(request, timeout)
+
+        client = YazioClient(
+            lambda: config(), opener=slow, clock=Mock(return_value=0.0)
+        )
+        client.search("Skyr")
+        worker = threading.Thread(target=client.search, args=("Skyr zwei",))
+        worker.start()
+        self.assertTrue(started.wait(5))
+        self.assertEqual(len(client.search("Skyr")), 1)
+        release.set()
+        worker.join(5)
+
     def test_user_agent_can_be_overridden(self):
         script = Script(tokens=[token()], api=[[]])
         self.client(script, yazio_user_agent="Custom/1").search("Skyr")

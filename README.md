@@ -281,6 +281,7 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 | `WAHOO_REDIRECT_URI` | *None* | No | Full HTTPS callback URL, `https://<app-host>/api/wahoo/callback`. Never derived from the request Host header. |
 | `YAZIO_EMAIL`, `YAZIO_PASSWORD` | *None* | No | Yazio account used for the optional read-only product lookup. Stored server-side only and redacted from logs; also editable under **Mehr > Anbindungen > Zugangsdaten**, where a stored value wins. |
 | `YAZIO_CLIENT_ID`, `YAZIO_CLIENT_SECRET` | *None* | No | Identifiers of the Yazio mobile app that the unofficial API requires. Yazio counts as configured only when all four `YAZIO_*` values are set. |
+| `YAZIO_COUNTRY` | `DE` | No | Two-letter country code sent as the Yazio search region (`DE` also selects German-language ranking). |
 | `YAZIO_USER_AGENT` | built-in iOS client string | No | User-Agent sent to Yazio, which blocks unrecognized client versions (`version_blocked`). Set a current value when lookups fail with that error. |
 | `CALENDAR_ICAL_URL` | *None* | No | Private read-only iCalendar (ICS) feed URL from Google Calendar, iCloud, or Outlook. |
 | `COOKIE_SECURE` | `false` | No | Set to `true` when running behind an HTTPS reverse proxy to add the `Secure` flag to cookies. |
