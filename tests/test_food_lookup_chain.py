@@ -272,6 +272,10 @@ class LookupChainTests(unittest.TestCase):
         with self.assertRaises(AppError):
             self.service.lookup({"barcode": BARCODE})
 
+    def test_unusable_live_yazio_barcode_hit_falls_through_to_open_food_facts(self):
+        self.yazio.barcode_food = {**yazio_food(kcal=None), "barcode": BARCODE}
+        self.assertEqual(self.ids(barcode=BARCODE), [f"off:{BARCODE}"])
+
     def test_yazio_failure_does_not_block_barcode_lookup(self):
         self.yazio.error = UNAVAILABLE
         self.assertEqual(self.ids(barcode=BARCODE), [f"off:{BARCODE}"])

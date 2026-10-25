@@ -376,7 +376,7 @@ class FoodDatabaseService:
                 food = self._require_yazio().barcode(barcode)
             except AppError as exc:
                 food, failed = None, exc.reason or True
-            if food is not None:
+            if food is not None and _usable(food):
                 food = {**food, "barcode": barcode}
                 if self._mirror:
                     self._mirror.store([food])
