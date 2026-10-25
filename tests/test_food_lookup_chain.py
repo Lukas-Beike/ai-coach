@@ -246,6 +246,21 @@ class LookupChainTests(unittest.TestCase):
         result = self.service.lookup({"barcode": BARCODE})
         self.assertIn("Zugangsdaten", result["notice"])
 
+    def test_search_hit_keeps_the_barcode_of_a_stored_detail(self):
+        self.mirror.store([{**yazio_food(), "barcode": BARCODE}])
+        self.mirror.store([yazio_food(name="Synthetic Haferflocken neu")])
+        self.assertEqual(
+            self.mirror.by_barcode(BARCODE)[0]["name"], "Synthetic Haferflocken neu"
+        )
+
+    def test_unusable_stored_entry_is_not_a_stale_barcode_answer(self):
+        self.mirror.store([{**yazio_food(kcal=None), "barcode": BARCODE}])
+        self.now = datetime(2027, 6, 1, tzinfo=UTC)
+        self.yazio.error = UNAVAILABLE
+        self.off.error = UNAVAILABLE
+        with self.assertRaises(AppError):
+            self.service.lookup({"barcode": BARCODE})
+
     def test_yazio_failure_does_not_block_barcode_lookup(self):
         self.yazio.error = UNAVAILABLE
         self.assertEqual(self.ids(barcode=BARCODE), [f"off:{BARCODE}"])

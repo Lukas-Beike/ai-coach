@@ -385,9 +385,10 @@ class FoodDatabaseService:
         try:
             food, origin = self._off_product(barcode)
         except AppError:
-            if not stored:
+            usable = next((entry for entry in stored if _usable(entry)), None)
+            if usable is None:
                 raise
-            return stored[0], LOCAL_DATABASE_STALE, failed
+            return usable, LOCAL_DATABASE_STALE, failed
         return food, origin, failed
 
     @staticmethod

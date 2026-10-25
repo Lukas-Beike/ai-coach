@@ -253,7 +253,8 @@ class FoodDatabaseEntryRepository:
             "INSERT INTO food_database_entries("
             "food_id, barcode, name, brand, payload, fetched_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(food_id) DO UPDATE SET "
-            "barcode=excluded.barcode, name=excluded.name, brand=excluded.brand, "
+            "barcode=CASE WHEN excluded.barcode = '' THEN barcode ELSE excluded.barcode END, "
+            "name=excluded.name, brand=excluded.brand, "
             "payload=excluded.payload, fetched_at=excluded.fetched_at, "
             "updated_at=excluded.updated_at",
             (
