@@ -214,6 +214,27 @@ class ProviderCredentialTests(unittest.TestCase):
         self.assertEqual(status["fields"]["intervals_api_key"]["source"], "env")
         self.assertEqual(status["fields"]["intervals_athlete_id"]["value"], "i42")
 
+    def test_yazio_needs_all_four_values_and_never_appears_in_status(self):
+        values = {
+            "yazio_email": "athlete@yazio.example",
+            "yazio_password": "secret-yazio-password",
+            "yazio_client_id": "secret-yazio-client-id",
+            "yazio_client_secret": "secret-yazio-client-secret",
+        }
+        self.assertFalse(self.service.status()["yazio_configured"])
+        self.service.update({k: v for k, v in values.items() if k != "yazio_password"})
+        self.assertFalse(self.holder["config"].yazio_configured)
+        status = self.service.update({"yazio_password": values["yazio_password"]})
+        self.assertTrue(status["yazio_configured"])
+        self.assertTrue(self.holder["config"].yazio_configured)
+        payload = json.dumps(status)
+        for secret in values.values():
+            self.assertNotIn(secret, payload)
+        self.assertEqual(status["fields"]["yazio_email"]["source"], "db")
+        self.assertNotIn("value", status["fields"]["yazio_email"])
+        status = self.service.update({"yazio_client_secret": None})
+        self.assertFalse(status["yazio_configured"])
+
     def test_status_reports_none_when_neither_db_nor_env_is_set(self):
         config = dataclasses.replace(self.env_config, wahoo_client_secret="")
         status = credential_status(config, {})

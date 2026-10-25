@@ -45,14 +45,21 @@ CREDENTIAL_KV_KEYS = frozenset(
 
 # Secret values: never returned, only their source and presence.
 SECRET_FIELDS = frozenset(
-    {"openai_api_key", "intervals_api_key", "wahoo_client_secret"}
+    {
+        "openai_api_key",
+        "intervals_api_key",
+        "wahoo_client_secret",
+        "yazio_password",
+        "yazio_client_id",
+        "yazio_client_secret",
+    }
 )
 # Non-secret values that the PWA may display.
 VISIBLE_FIELDS = frozenset(
     {"openai_base_url", "intervals_athlete_id", "wahoo_client_id"}
 )
 # Reported as configured only; the address itself is not echoed back.
-MASKED_FIELDS = frozenset({"garmin_email"})
+MASKED_FIELDS = frozenset({"garmin_email", "yazio_email"})
 CREDENTIAL_FIELDS = SECRET_FIELDS | VISIBLE_FIELDS | MASKED_FIELDS
 
 MAX_VALUE_LENGTH = 4096
@@ -150,6 +157,7 @@ def credential_status(
             and str(effective.intervals_athlete_id).strip()
         ),
         "wahoo_configured": effective.wahoo_configured,
+        "yazio_configured": effective.yazio_configured,
     }
 
 
