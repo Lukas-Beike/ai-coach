@@ -18,6 +18,7 @@ from backend.db.schema import (
     ACTIVITY_DETAIL_DDL,
     CURRENT_SCHEMA_VERSION,
     FOOD_DATABASE_DDL,
+    NUTRITION_PRODUCTS_DDL,
     database_schema_is_current,
     database_schema_signature,
     execute_ddl,
@@ -29,6 +30,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V10,
     SHAPE_SCHEMA_V11,
     SHAPE_SCHEMA_V12,
+    SHAPE_SCHEMA_V13,
     released_shape,
 )
 
@@ -120,9 +122,50 @@ def _upgrade_v12_to_v13(db: Any) -> None:
         db.execute("ALTER TABLE activity_laps ADD COLUMN max_speed_mps REAL")
 
 
+def _rebuild_table_allowing_yazio(db: Any, table: str, ddl: str) -> None:
+    """Recreate a table from its current DDL when its constraints predate Yazio.
+
+    SQLite cannot change a CHECK, so the rows move through a renamed copy. Older
+    steps that create the table from the current DDL already have the new
+    constraint and are left alone.
+    """
+    row = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+    ).fetchone()
+    if row is None or "yazio" in row["sql"]:
+        return
+    statements = [statement for statement in ddl.split(";") if statement.strip()]
+    columns = ", ".join(
+        column["name"] for column in db.execute(f"PRAGMA table_info({table})")
+    )
+    indexes = [
+        index["name"]
+        for index in db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL",
+            (table,),
+        )
+    ]
+    db.execute(f"ALTER TABLE {table} RENAME TO {table}_v13")
+    for index in indexes:
+        db.execute(f"DROP INDEX {index}")
+    db.execute(statements[0])
+    db.execute(f"INSERT INTO {table}({columns}) SELECT {columns} FROM {table}_v13")
+    db.execute(f"DROP TABLE {table}_v13")
+    for statement in statements[1:]:
+        db.execute(statement)
+
+
+def _upgrade_v13_to_v14(db: Any) -> None:
+    # Allows Yazio foods in the mirror and saved products; rows are unchanged.
+    _rebuild_table_allowing_yazio(db, "food_database_entries", FOOD_DATABASE_DDL)
+    _rebuild_table_allowing_yazio(db, "nutrition_products", NUTRITION_PRODUCTS_DDL)
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V9: (SHAPE_SCHEMA_V10, _upgrade_v9_to_v10),
     SHAPE_SCHEMA_V10: (SHAPE_SCHEMA_V11, _upgrade_v10_to_v11),
     SHAPE_SCHEMA_V11: (SHAPE_SCHEMA_V12, _upgrade_v11_to_v12),
-    SHAPE_SCHEMA_V12: (SHAPE_CURRENT, _upgrade_v12_to_v13),
+    SHAPE_SCHEMA_V12: (SHAPE_SCHEMA_V13, _upgrade_v12_to_v13),
+    SHAPE_SCHEMA_V13: (SHAPE_CURRENT, _upgrade_v13_to_v14),
 }
