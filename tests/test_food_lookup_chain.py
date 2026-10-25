@@ -213,7 +213,7 @@ class LookupChainTests(unittest.TestCase):
         self.yazio.configured = False
         with self.assertRaises(AppError) as raised:
             self.service.lookup({"query": "Haferflocken", "source": "yazio"})
-        self.assertEqual(raised.exception.reason, "food_database_not_configured")
+        self.assertEqual(raised.exception.reason, "not_configured")
 
     def test_mirror_reads_do_not_mix_sources(self):
         self.mirror.store([yazio_food("Haferflocken Yazio")])

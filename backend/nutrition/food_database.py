@@ -341,9 +341,7 @@ class FoodDatabaseService:
 
     def _require_yazio(self) -> YazioClient:
         if self._yazio is None or not self._yazio.configured:
-            raise AppError(
-                409, YAZIO_NOT_CONFIGURED, reason="food_database_not_configured"
-            )
+            raise AppError(409, YAZIO_NOT_CONFIGURED, reason="not_configured")
         return self._yazio
 
     def _yazio_product(self, food_id: str) -> tuple[dict[str, Any], str]:

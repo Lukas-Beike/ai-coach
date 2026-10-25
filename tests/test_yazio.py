@@ -291,7 +291,7 @@ class YazioClientTests(unittest.TestCase):
         holder["config"] = config(yazio_password="")
         with self.assertRaises(AppError) as raised:
             client.search("Skyr")
-        self.assertEqual(raised.exception.reason, "food_database_not_configured")
+        self.assertEqual(raised.exception.reason, "not_configured")
         self.assertEqual(len(script.requests), 2)
 
     def test_throttled_login_reports_the_rate_limit_and_waits(self):

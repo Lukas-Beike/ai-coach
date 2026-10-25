@@ -225,7 +225,7 @@ class YazioClient:
                 raise AppError(
                     409,
                     "Yazio ist nicht konfiguriert.",
-                    reason="food_database_not_configured",
+                    reason="not_configured",
                 )
             if (cached := self._cached(path)) is not None:
                 return cached
