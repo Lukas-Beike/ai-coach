@@ -4,6 +4,7 @@ import json
 import unittest
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from backend.activities.detail_contract import (
     ACTIVITY_DETAIL_CONTRACT,
@@ -214,11 +215,33 @@ def build(
     )
 
 
+def _sources(value: Any) -> Any:
+    """Yield every ``source`` object of a document, at any depth."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "source" and isinstance(item, dict):
+                yield item
+            else:
+                yield from _sources(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _sources(item)
+
+
 def heart_rate_values(offset: int = 0) -> tuple[float, ...]:
     return tuple(float(100 + (index + offset) % 50) for index in range(len(TIME)))
 
 
 class DocumentShapeTests(unittest.TestCase):
+    def test_session_local_start_is_the_athlete_wall_time(self) -> None:
+        doc = build(
+            [record(INTERVALS, "i-ride-99", label="Intervals.icu")],
+            zone=ZoneInfo("Europe/Berlin"),
+        )
+
+        self.assertEqual("2026-10-19T07:00:00+00:00", doc["session"]["started_at"])
+        self.assertEqual("2026-10-19T09:00:00", doc["session"]["started_at_local"])
+
     def test_document_has_the_contract_sections(self) -> None:
         doc = build([record(INTERVALS, "i-ride-99", label="Intervals.icu")])
 
@@ -243,6 +266,7 @@ class DocumentShapeTests(unittest.TestCase):
                 "sport": "ride",
                 "environment": "outdoor",
                 "started_at": STARTED.isoformat(),
+                "started_at_local": "2026-10-19T07:00:00",
                 "name": "Synthetic ride",
                 "device_type": None,
             },
@@ -308,7 +332,12 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(130.0, metric["value"])
         self.assertEqual("bpm", metric["unit"])
         self.assertEqual(
-            {"provider": "wahoo", "label": "Wahoo", "kind": "measured"},
+            {
+                "provider": "wahoo",
+                "label": "Wahoo",
+                "kind": "measured",
+                "recorded_by": "wahoo",
+            },
             metric["source"],
         )
         self.assertEqual(
@@ -319,6 +348,7 @@ class MetricTests(unittest.TestCase):
                         "provider": "intervals",
                         "label": "Intervals.icu",
                         "kind": "measured",
+                        "recorded_by": "wahoo",
                     },
                 }
             ],
@@ -333,6 +363,66 @@ class MetricTests(unittest.TestCase):
             ["w-ride-99", "i-ride-99"],
             [item.activity_id for item in measured_order([intervals, wahoo])],
         )
+
+    def test_every_source_names_the_recorder_and_unknown_is_explicit(self) -> None:
+        intervals = record(
+            INTERVALS,
+            "i-ride-99",
+            recorded_by=RecordingOrigin.UNKNOWN,
+            label="Intervals.icu",
+            avg_hr=120.0,
+            load=85.0,
+            load_model=LoadModel.INTERVALS_TRAINING_LOAD,
+        )
+        garmin = record(
+            GARMIN,
+            "g-ride-99",
+            recorded_by=RecordingOrigin.GARMIN,
+            label="Garmin",
+            avg_hr=130.0,
+        )
+        doc = build(
+            [intervals, garmin],
+            [
+                candidate(
+                    stream_set(
+                        INTERVALS,
+                        "i-ride-99",
+                        {HR: heart_rate_values()},
+                        recorded_by=RecordingOrigin.UNKNOWN,
+                        label="Intervals.icu",
+                    )
+                ),
+                candidate(
+                    zone_set(
+                        GARMIN,
+                        "g-ride-99",
+                        bounded=True,
+                        recorded_by=RecordingOrigin.GARMIN,
+                        label="Garmin",
+                    )
+                ),
+            ],
+            summary_metrics=intervals_summary_metrics(
+                {"average_speed": 8.5}, recorded_by=RecordingOrigin.UNKNOWN
+            ),
+        )
+
+        sources = list(_sources(doc))
+        self.assertGreater(len(sources), 5)
+        for source in sources:
+            self.assertEqual({"provider", "label", "kind", "recorded_by"}, set(source))
+        self.assertEqual("garmin", doc["metrics"]["avg_hr"]["source"]["recorded_by"])
+        self.assertEqual(
+            "unknown",
+            doc["metrics"]["avg_hr"]["alternatives"][0]["source"]["recorded_by"],
+        )
+        self.assertEqual("unknown", doc["metrics"]["load"]["source"]["recorded_by"])
+        self.assertEqual(
+            "unknown", doc["metrics"]["avg_speed_mps"]["source"]["recorded_by"]
+        )
+        self.assertEqual("unknown", doc["streams"]["source"]["recorded_by"])
+        self.assertEqual("garmin", doc["zones"]["heart_rate"]["source"]["recorded_by"])
 
     def test_absent_measured_values_are_omitted(self) -> None:
         metrics = build([record(INTERVALS, "i-ride-99")])["metrics"]
@@ -362,7 +452,12 @@ class MetricTests(unittest.TestCase):
         self.assertAlmostEqual(sum(values) / len(values), metric["value"])
         self.assertEqual("bpm", metric["unit"])
         self.assertEqual(
-            {"provider": "intervals", "label": "Intervals.icu", "kind": "derived"},
+            {
+                "provider": "intervals",
+                "label": "Intervals.icu",
+                "kind": "derived",
+                "recorded_by": "wahoo",
+            },
             metric["source"],
         )
         self.assertEqual([], metric["alternatives"])
@@ -389,6 +484,7 @@ class MetricTests(unittest.TestCase):
                     "provider": "intervals",
                     "label": "Intervals.icu",
                     "kind": "derived",
+                    "recorded_by": "wahoo",
                 },
                 "alternatives": [],
                 "model": "intervals_training_load",
@@ -535,6 +631,7 @@ class LapAndZoneTests(unittest.TestCase):
                         "provider": "garmin",
                         "label": "Garmin",
                         "kind": "measured",
+                        "recorded_by": "garmin",
                     },
                     "count": 5,
                 }
@@ -585,7 +682,14 @@ class LapAndZoneTests(unittest.TestCase):
             zone["buckets"][0],
         )
         self.assertEqual(
-            [{"provider": "garmin", "label": "Garmin", "kind": "measured"}],
+            [
+                {
+                    "provider": "garmin",
+                    "label": "Garmin",
+                    "kind": "measured",
+                    "recorded_by": "garmin",
+                }
+            ],
             zone["alternatives"],
         )
 
@@ -756,11 +860,25 @@ class SummaryMetricTests(unittest.TestCase):
                 "decoupling": float("nan"),
                 "feel": True,
                 "icu_intensity": 0.8,
+                "icu_weighted_avg_watts": 205,
+                "average_cadence": 88,
+                "total_elevation_gain": 310,
                 "average_temp": "warm",
-            }
+            },
+            recorded_by=RecordingOrigin.GARMIN,
         )
 
-        self.assertEqual({"avg_speed_mps", "calories_kcal", "intensity"}, set(metrics))
+        self.assertEqual(
+            {
+                "avg_speed_mps",
+                "calories_kcal",
+                "intensity",
+                "normalized_power",
+                "avg_cadence",
+                "elevation_gain_m",
+            },
+            set(metrics),
+        )
         self.assertEqual(
             {
                 "value": 8.5,
@@ -769,15 +887,26 @@ class SummaryMetricTests(unittest.TestCase):
                     "provider": "intervals",
                     "label": "Intervals.icu",
                     "kind": "measured",
+                    "recorded_by": "garmin",
                 },
                 "alternatives": [],
             },
             metrics["avg_speed_mps"],
         )
         self.assertEqual("derived", metrics["intensity"]["source"]["kind"])
+        self.assertEqual(
+            (205, "W", "derived"),
+            (
+                metrics["normalized_power"]["value"],
+                metrics["normalized_power"]["unit"],
+                metrics["normalized_power"]["source"]["kind"],
+            ),
+        )
 
     def test_summary_metrics_never_override_measured_values(self) -> None:
-        extra = intervals_summary_metrics({"average_speed": 8.5})
+        extra = intervals_summary_metrics(
+            {"average_speed": 8.5}, recorded_by=RecordingOrigin.UNKNOWN
+        )
         extra["avg_hr"] = {"value": 1, "unit": "bpm", "source": {}, "alternatives": []}
 
         doc = build(

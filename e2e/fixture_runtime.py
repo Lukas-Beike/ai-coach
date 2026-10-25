@@ -579,8 +579,25 @@ def ensure_training_features():
         seed_training_features()
 
 
+def _save_activity_detail(activity_id, record):
+    """Store one synthetic activity detail in the canonical tables."""
+    from backend.activities.workout_profile import recorded_profile
+    from backend.sync.activity_detail_canonical import (
+        CanonicalDetailWriter,
+        DetailWriteOutcome,
+    )
+
+    record = {**record, "calendar_profile": recorded_profile(record["activity"])}
+    with server.database_manager().unit_of_work() as db:
+        result = CanonicalDetailWriter().write_legacy(
+            db, record=record, now=server.runtime_clock.utc_now()
+        )
+    if result.outcome not in (DetailWriteOutcome.WRITTEN, DetailWriteOutcome.UNCHANGED):
+        raise RuntimeError(f"Fixture detail for {activity_id} not stored: {result.outcome}")
+
+
 def seed_training_features():
-    from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+    from backend.activities.detail_store import summary_fingerprint
     from backend.performance.power_profile import power_profile
     from backend.performance.session_analysis import aerobic_analysis, interval_quality
 
@@ -730,7 +747,7 @@ def seed_training_features():
             },
             "laps": [{"start_time": 0, "end_time": 3600}],
         }
-        ActivityDetailStore(server.database_manager()).save(
+        _save_activity_detail(
             activity["id"],
             {
                 "activity_id": activity["id"],
@@ -1588,11 +1605,10 @@ def _fixture_wave2_feedback(by_id):
 
 
 def _fixture_wave2_details(by_id):
-    from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
+    from backend.activities.detail_store import summary_fingerprint
     from backend.performance.power_profile import power_profile, running_profile
     from backend.performance.session_analysis import aerobic_analysis, interval_quality
 
-    store = ActivityDetailStore(server.database_manager())
     targets = {
         "steps": [{"duration": 300, "target": "200W", "kind": "power"}],
         "basis": {},
@@ -1640,7 +1656,7 @@ def _fixture_wave2_details(by_id):
             "streams": streams,
             "laps": [{"start_time": 0, "end_time": n - 1}],
         }
-        store.save(
+        _save_activity_detail(
             activity["id"],
             {
                 "activity_id": activity["id"],
@@ -2081,10 +2097,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
             return
         if self.path == "/api/fixture/activity":
             self.auth_service.require_auth(self)
-            from backend.activities.detail_store import (
-                ActivityDetailStore,
-                summary_fingerprint,
-            )
+            from backend.activities.detail_store import summary_fingerprint
             from backend.performance.session_analysis import (
                 aerobic_analysis,
                 interval_quality,
@@ -2116,7 +2129,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                     "temperature": [-5 + index % 4 for index in range(3601)],
                 },
             }
-            ActivityDetailStore(server.database_manager()).save(
+            _save_activity_detail(
                 activity["id"],
                 {
                     "activity_id": activity["id"],

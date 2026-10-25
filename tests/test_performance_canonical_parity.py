@@ -9,6 +9,7 @@ comparison. The only intended value difference is a comma-decimal CTL such as
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -17,6 +18,7 @@ from datetime import date
 from typing import Any
 from unittest.mock import Mock, patch
 
+from canonical_detail_support import add_session_record, open_manager
 from canonical_read_support import (
     CLOCK_AT,
     ZONE,
@@ -56,6 +58,7 @@ from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.load_context import performance_load_context
 from backend.providers.snapshot_projection import project_intervals_snapshot
 from backend.runtime.ports import ObservationReader
+from backend.sync.canonical_table_reader import CanonicalTableReader
 
 PARITY_TODAY = date(2026, 9, 20)
 PARITY_DAY = "2026-09-20"
@@ -649,6 +652,11 @@ class CanonicalWiringTests(unittest.TestCase):
             **_snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}]),
             "raw_provider_data": {"activities": [activity]},
         }
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        sessions = open_manager(directory.name)
+        self.addCleanup(sessions.close)
+        add_session_record(sessions, ProviderId.INTERVALS, "a1", "act_a1")
         manager = RecordingManager()
         reader = StubObservationReader(_observations(snapshot))
         snapshot_reader = Mock()
@@ -656,7 +664,7 @@ class CanonicalWiringTests(unittest.TestCase):
         feedback = Mock()
         feedback.list.return_value = []
         service = ActivityAnalysisReadService(
-            manager,
+            sessions,
             snapshot_reader,
             Mock(),
             feedback,
@@ -664,6 +672,7 @@ class CanonicalWiringTests(unittest.TestCase):
                 database_manager=lambda: manager,
                 observation_reader=lambda: reader,
             ),
+            session_records=CanonicalTableReader().session_activities,
         )
         with patch(
             "backend.performance.activity_read_service.current_performance_context",

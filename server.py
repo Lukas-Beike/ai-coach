@@ -464,7 +464,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.24"
+APP_VERSION = "1.13.25"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -706,6 +706,9 @@ ACTIVITY_READS = ActivityReadAssembly(
     ),
     ATHLETE_DATA.activity_feedback,
     lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
+    refreshable_providers=lambda: provider_runtime().configured_for_job(
+        "activity_details"
+    ),
 )
 ATHLETE_CLOCK = AthleteLocalClock(ATHLETE_PROFILE_SERVICE)
 

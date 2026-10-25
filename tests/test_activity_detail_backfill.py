@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 
+import legacy_detail_kv
 from canonical_detail_support import (
     INTERVALS,
     NOW,
@@ -66,7 +67,7 @@ class ActivityDetailBackfillTests(unittest.TestCase):
     def seed(self, ids=IDS):
         for activity_id in ids:
             seed_intervals_activity(self.manager, activity_id)
-            self.store.save(activity_id, legacy_record(activity_id))
+            legacy_detail_kv.save(self.manager, activity_id, legacy_record(activity_id))
 
     def make(self, batch_size=2, writer=None):
         return ActivityDetailBackfill(
@@ -254,7 +255,7 @@ class ActivityDetailBackfillTests(unittest.TestCase):
 
     def test_orphan_detail_is_counted_as_no_record_and_kept(self):
         self.seed(IDS[:1])
-        self.store.save("9999", legacy_record("9999"))
+        legacy_detail_kv.save(self.manager, "9999", legacy_record("9999"))
         before = self.detail_rows()
         backfill = self.make()
         self.run_to_completion(backfill)
@@ -268,7 +269,7 @@ class ActivityDetailBackfillTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-                (ActivityDetailStore._key("9998"), "{not json", NOW),
+                (legacy_detail_kv.key("9998"), "{not json", NOW),
             )
         before = self.detail_rows()
         backfill = self.make()

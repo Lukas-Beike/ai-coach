@@ -160,3 +160,51 @@ The system SHALL separate observed competition preparation from calendar phase, 
 - **THEN** the simulation reports insufficient data and missing units instead of filling necessary evidence with zero; applying a changed plan remains a separate preview/approval flow.
 
 Evidence: `backend/performance/report_service.py:TrainingSeasonReadService.season`, `backend/planning/season_preparation.py:season_preparation`, `backend/planning/season_preparation.py:load_scenarios`; `tests/test_season_preparation.py:test_past_competition_window_is_anchored_at_event_date`, `tests/test_season_preparation.py:test_scenarios_are_deterministic_nonmutating_and_taper_changes_load`, `tests/test_season_preparation.py:test_missing_basis_or_planned_load_is_not_zero_filled`, `tests/test_season_preparation.py:test_completed_today_load_is_fixed_and_not_double_counted_or_scaled`.
+
+### Requirement: Versioned method evidence cards
+Every local performance or recovery method with a planned or offered physiological interpretation SHALL have a versioned evidence card in `docs/performance-methods/`. Each card SHALL record construct, formula, sources, population, protocol, exclusion and stop rules, deviations, classification, claim list and review state. Every numeric rule SHALL be tagged `source` or `product assumption` with a rationale. No numeric evidence confidence SHALL be invented.
+
+#### Scenario: Card is incomplete
+- **WHEN** a card lacks a required section, has a numeric rule without a valid tag or rationale, or cites an evidence ID missing from the register
+- **THEN** the repository card check fails.
+
+#### Scenario: Deferred method
+- **WHEN** a method family is recorded as deferred in the register (M5)
+- **THEN** it has no card and produces no output until its own work package adds one.
+
+Evidence: `docs/performance-methods/README.md` and the four method cards; `tests/test_performance_method_cards.py`.
+
+### Requirement: Claim lists bound physiological statements
+API, UI and Coach output SHALL NOT make statements that the method's card forbids. A physiological interpretation SHALL stay blocked until the independent review recorded on its card releases it; descriptive statements that the card allows MAY be shown before that review.
+
+#### Scenario: Interpretation not yet reviewed
+- **WHEN** a card records the interpretation as `blocked`
+- **THEN** the method is limited to the card's descriptive statements, and no training clearance, diagnosis or model-based recommendation is derived from it.
+
+#### Scenario: Reviewed interpretation
+- **WHEN** the card records `released` with date and reviewer for an interpretation
+- **THEN** implementations may present exactly the allowed statements for it, with the card's limits and status.
+
+Evidence: claim lists in `docs/performance-methods/m1-session-rpe-load.md`, `m2-hrv-resting-hr.md`, `m3-sleep-duration-timing.md`, `m4-critical-power-speed.md`. Runtime enforcement is added by the implementing work packages (#1426–#1431); this change does not alter current runtime output.
+
+### Requirement: Method input fixtures
+Every method with an evidence card SHALL have synthetic input fixtures for one complete, one incomplete and one contradictory input set, each with a defined outcome: a value, no value with a status or reason, or an exclusion. The fixtures SHALL keep transport provider, recording origin and local method apart and SHALL count an activity imported from several providers once.
+
+#### Scenario: Incomplete input
+- **WHEN** a required input is missing for a method (for example no session RPE, too few earlier nights, or only a downsampled stream)
+- **THEN** the fixture asserts that no value is produced or that the input is excluded, with the status or reason the current code gives; where current code still produces a value from that input, the fixture pins it as a known gap naming the owning issue.
+
+#### Scenario: Contradictory providers
+- **WHEN** two providers report different values for the same input
+- **THEN** the fixture asserts that the values stay separate per provider and method and are not averaged.
+
+Evidence: `tests/test_performance_method_inputs.py`.
+
+### Requirement: Method input trace and gaps
+A document SHALL trace each method's inputs from canonical storage to its HTTP, UI and Coach consumers and SHALL map each data gap to an owning issue. A reader that bypasses an available canonical input SHALL be pinned by a fixture assertion naming that issue.
+
+#### Scenario: Gap closed by later work
+- **WHEN** a later change makes a reader use a canonical input that it bypasses today
+- **THEN** the pinned gap assertion fails with a message naming the owning issue, and the fixture and trace are updated in that change.
+
+Evidence: `docs/performance-methods/inputs.md`, `tests/test_performance_method_inputs.py`.

@@ -1,11 +1,12 @@
 """Composition of completed-activity reads and performance analysis."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_store import ActivityDetailStore
+from backend.canonical.vocabulary import ProviderId
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
@@ -14,6 +15,9 @@ from backend.runtime.ports import (
     ObservationReader,
     ProviderSnapshotReader,
 )
+from backend.sync.canonical_table_reader import CanonicalTableReader
+
+_PROVIDER_IDS = frozenset(provider.value for provider in ProviderId)
 
 
 @dataclass(frozen=True)
@@ -32,13 +36,17 @@ class ActivityReadAssembly:
         sources: ActivityReadSources,
         feedback_service: Callable[[], Any],
         read_equipment: Callable[[str], dict[str, Any]],
+        *,
+        refreshable_providers: Callable[[], Iterable[str]] = tuple,
     ) -> None:
+        """``refreshable_providers`` names the providers that can load details now."""
         self._database_manager = database_manager
         self._snapshot_reader = sources.snapshot_reader
         self._row_reader = sources.row_reader
         self._observation_reader = sources.observation_reader
         self._feedback_service = feedback_service
         self._read_equipment = read_equipment
+        self._refreshable_providers = refreshable_providers
 
     def activity_read(self) -> ActivityAnalysisReadService:
         manager = self._database_manager()
@@ -52,6 +60,15 @@ class ActivityReadAssembly:
             references=ActivityReferences(manager),
             canonical=self._canonical_source(),
             summary_rows=self._row_reader(),
+            session_records=CanonicalTableReader().session_activities,
+            refreshable=self._refreshable,
+        )
+
+    def _refreshable(self) -> frozenset[ProviderId]:
+        return frozenset(
+            ProviderId(provider)
+            for provider in self._refreshable_providers()
+            if provider in _PROVIDER_IDS
         )
 
     def _canonical_source(self) -> CanonicalPerformanceSource | None:

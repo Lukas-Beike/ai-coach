@@ -19,8 +19,10 @@ from server_test_support import server
 
 from backend.calendar.ical_mapping import calendar_event_constraints
 from backend.canonical.section_items import split_section
+from backend.canonical.vocabulary import StreamChannel
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.db import garmin_store
+from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.http_api import auth as http_auth
@@ -54,6 +56,35 @@ V6_UNIT_NAMES = {
     "Fixture hard intervals",
     "Fixture short-only ride",
 }
+
+
+_LEGACY_STREAM_NAMES = {
+    StreamChannel.TIME_S: "time",
+    StreamChannel.DISTANCE_M: "distance",
+    StreamChannel.SPEED_MPS: "velocity_smooth",
+}
+
+
+def _canonical_details(db, snapshot):
+    """Read every seeded activity detail from the canonical tables."""
+    activities = {row["id"]: row for row in snapshot["recent_activities"]}
+    details = []
+    for activity_id, activity in activities.items():
+        sets = detail_sets_for(db, "intervals", activity_id)
+        analysis = analysis_row_for_record(db, "intervals", activity_id)
+        streams = {
+            _LEGACY_STREAM_NAMES.get(channel, channel.value): list(values)
+            for item in sets
+            for channel, values in getattr(item.detail, "channels", {}).items()
+        }
+        if streams and analysis:
+            details.append(
+                {
+                    "activity": {**activity, "streams": streams},
+                    "session_analysis": analysis["payload"].get("session_analysis"),
+                }
+            )
+    return details
 
 
 class FixtureImportIsolationTests(unittest.TestCase):
@@ -442,10 +473,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                     old_snapshot = json.loads(
                         server.SNAPSHOT_REPOSITORY.latest_payload(db)
                     )
-                    detail_rows = db.execute(
-                        "SELECT value FROM kv WHERE key LIKE 'activity_detail:%'"
-                    ).fetchall()
-                    detail_values = [json.loads(row["value"]) for row in detail_rows]
+                    detail_values = _canonical_details(db, old_snapshot)
                     for row in old_snapshot["recent_wellness"]:
                         row.pop("weight", None)
                         row.pop("bodyFat", None)

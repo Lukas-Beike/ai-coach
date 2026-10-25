@@ -11,9 +11,11 @@ A duplicate session whose own primary is not Intervals.icu is an alias created b
 session linking. It resolves through ``merged_into`` (following the chain, guarded
 against cycles) to the first Intervals.icu-primary session that is not deleted.
 
-Other Garmin- or Wahoo-primary sessions, deleted sessions and unknown ids pass
-through unchanged so each caller keeps its existing not-found or validation
-response.
+A Garmin- or Wahoo-primary session that holds an active Intervals.icu record,
+merged in or as its own record, resolves to that record for detail, feedback and
+refresh reads (``resolve_reference``). Duplicate deletion keeps the strict
+``resolve``. Other sessions, deleted sessions and unknown ids pass through unchanged
+so each caller keeps its existing not-found or validation response.
 """
 
 from __future__ import annotations
@@ -54,10 +56,18 @@ class ActivityReferences(ActivityReferenceResolver):
 
     def resolve(self, reference: Any) -> Any:
         """Return the Intervals.icu provider id for a local id, or the input unchanged."""
-        return self.resolve_reference(reference).activity_id
+        return self._resolve(reference, merged_copies=False).activity_id
 
     def resolve_reference(self, reference: Any) -> ActivityReference:
         """Return the reference with its owning provider when a local session confirms it.
+
+        Also resolves a Garmin- or Wahoo-primary session that holds an active
+        Intervals.icu record, so its detail, feedback and refresh share one key.
+        """
+        return self._resolve(reference, merged_copies=True)
+
+    def _resolve(self, reference: Any, *, merged_copies: bool) -> ActivityReference:
+        """Resolve one reference; ``merged_copies`` also accepts a merged record.
 
         Only local ``act_`` ids carry a provider. Raw provider ids (for example
         the Intervals.icu id posted by the activity detail view) pass through
@@ -73,6 +83,12 @@ class ActivityReferences(ActivityReferenceResolver):
             return ActivityReference(reference)
         with self._database_manager.reader() as db:
             provider_activity_id = _intervals_provider_activity_id(db, candidate)
+            if provider_activity_id is None and merged_copies:
+                record = canonical_store.activity_record_for_session(
+                    db, ProviderId.INTERVALS.value, candidate
+                )
+                if record is not None:
+                    provider_activity_id = str(record["provider_activity_id"])
         if provider_activity_id is None:
             return ActivityReference(reference)
         return ActivityReference(provider_activity_id, ProviderId.INTERVALS.value)

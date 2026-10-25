@@ -590,7 +590,7 @@ When a database restore is initiated:
 - **Server Log Management**: In **Betrieb & Diagnose**, authenticated users can download the sanitized current server log and its available rotations as JSON Lines, or delete the log files.
 - **Diagnostics Management**: In **Betrieb & Diagnose**, authenticated users can download the sanitized technical diagnostic report as JSON, or clear the stored technical diagnostic entries.
 - **Canonical Coverage Summary**: The diagnostic report includes a `canonical_coverage` section with per-provider counts only: activities, observations, issue counts per reason, and whether a sync time is stored. It contains no dates or record content. If the summary cannot be computed, the section reports `unavailable` without details.
-- **Canonical Backfill Status**: The diagnostic report includes a `canonical_backfill` section next to `canonical_coverage`. It copies stored legacy snapshots into the canonical tables in newest-first batches. Each run is insert-only: existing rows, live or deleted, are never updated or revived, and the backfill never deletes data. The newest Intervals snapshot is the only one that inserts activities, because it already shows every activity that still exists upstream. Each activity in an older snapshot is skipped and counted as `superseded`, so older data cannot revive activities that were deleted or fall outside the synced range. Older snapshots still insert their wellness and athlete records and observations when absent, and their `snapshots` rows are never modified or deleted. Active provider records whose mapper version is behind the current version are re-projected from their stored raw data. Re-projection never revives a deleted activity, and leaves an activity whose session is deleted untouched. When the new projection no longer emits an activity that an active raw record owns, that activity becomes `invalid` (its session keeps its state) and is counted as `retired`; a later mapper version that emits it again makes it `active` with the same id, counted as `reprojected`. Observations are not retired: an observation that an upgraded mapper no longer emits keeps its old `mapper_version`. While a re-projection is pending, the table reader serves each observation at the newest version stored for it, so nothing disappears; once the backfill completes it serves only observations at the current version. A mapper-version change during a partial re-projection restarts the re-projection scan, including records already passed by the interrupted run. Temporary writer contention waits and retries the same batch. The section reports `status` (`pending`, `running`, `complete`, or `failed`), the number of `batches`, `unresolved_feedback` (feedback entries that match no activity), and per-provider counters: `inserted`, `already_present`, `superseded`, `skipped_invalid`, `sessions_created`, `duplicates`, `reprojected`, and `retired`. It contains counts only, never activity ids, names, or dates. A `failed` run resumes from its saved cursor at the next startup. If the status cannot be read, the section reports `unavailable`.
+- **Canonical Backfill Status**: The diagnostic report includes a `canonical_backfill` section next to `canonical_coverage`. It copies stored legacy snapshots into the canonical tables in newest-first batches. Each run is insert-only: existing rows, live or deleted, are never updated or revived, and the backfill never deletes data. The newest Intervals snapshot is the only one that inserts activities, because it already shows every activity that still exists upstream. Each activity in an older snapshot is skipped and counted as `superseded`, so older data cannot revive activities that were deleted or fall outside the synced range. Older snapshots still insert their wellness and athlete records and observations when absent, and their `snapshots` rows are never modified or deleted. Active provider records whose mapper version is behind the current version are re-projected from their stored raw data. Re-projection never revives a deleted activity, and leaves an activity whose session is deleted untouched. When the new projection no longer emits an activity that an active raw record owns, that activity becomes `invalid` (its session keeps its state) and is counted as `retired`; a later mapper version that emits it again makes it `active` with the same id, counted as `reprojected`. Observations are not retired: an observation that an upgraded mapper no longer emits keeps its old `mapper_version`. While a re-projection is pending, the table reader serves each observation at the newest version stored for it, so nothing disappears; once the backfill completes it serves only observations at the current version. A mapper-version change during a partial re-projection restarts the re-projection scan, including records already passed by the interrupted run. Temporary writer contention waits and retries the same batch. The section reports `status` (`pending`, `running`, `complete`, or `failed`), the number of `batches`, `unresolved_feedback` (feedback entries that match no activity), and per-provider counters: `inserted`, `already_present`, `superseded`, `skipped_invalid`, `sessions_created`, `duplicates`, `reprojected`, and `retired`. It contains counts only, never activity ids, names, or dates. A `failed` run resumes from its saved cursor at the next startup. If the status cannot be read, the section reports `unavailable`. Activity details are served only from the canonical tables as `activity_detail.v1` for every provider. Once the detail backfill has finished, a follow-up stage retires the older per-activity `activity_detail:` records in the key-value store: a record is deleted only when its streams, laps, zone times and analysis are proven equal to the canonical rows in the same transaction, missing lap maximum speeds are filled in from it first, and a record that cannot be proven stays stored and is counted by reason in the stage state without being read. The stage resumes from its cursor after an interruption, and loading details again never writes those records.
 - **Garmin Snapshot Size**: The diagnostic report includes `database.garmin_snapshot_bytes`, the UTF-8 byte size of the stored `garmin_snapshot` value (`0` when absent). SQL measures this without loading or parsing the payload in Python; the report adds only the byte count. This is a stored-payload measurement, not the process's RAM usage.
 - **Runtime Memory Diagnostics**: The diagnostic export adds `runtime.process_memory`: available Linux RSS, peak RSS, locked/anonymous/file memory and virtual bytes, thread count, mapping count and kernel mapping limit. Only numeric counters are exported; process memory, mapping addresses and file paths are never captured. Unavailable OS counters are omitted. Sync start, completion and failure log events include the same counters for before/after comparisons; the snapshot byte count is measured only for the diagnostic report.
 - **Stalled Server Stack Dump**: `docker kill -s USR1 AI-Coach` writes the stack of every Python thread to the container log (`docker logs`) without stopping the process. The dump contains file names, line numbers and function names only, no variable values. Capture it before restarting a container whose health check times out.
@@ -661,16 +661,20 @@ precedence over remembered paths or stale operating assumptions.
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 1.14.3 is pinned as a local
 development dependency. It manages behavior specifications and change plans;
 the application does not load it. Node.js >=20.19.0 is required. Install and
-check it from the task worktree:
+check it from the task worktree. The preparation entry point also sets up
+Graphify and generates its first graph; configure worktree creation to invoke it
+after the script reaches develop:
 
 ```powershell
-npm.cmd ci --ignore-scripts
+python scripts/prepare_worktree.py
 npm.cmd run openspec -- --version
 npm.cmd run openspec -- list --specs
 npm.cmd run openspec -- validate --all --strict --no-interactive
 ```
 
-Use `npm` instead of `npm.cmd` outside Windows. The repository script disables
+If only Node dependencies need preparing, `npm.cmd ci --ignore-scripts` remains
+the manual fallback. Use `npm` instead of `npm.cmd` outside Windows and in Git
+Bash, where `npm.cmd` breaks arguments that contain spaces. The repository script disables
 OpenSpec telemetry on every invocation; no global CLI, skills, profile changes,
 store, hosted service, or model credentials are required. Its config/data homes
 are isolated under ignored `.openspec-local/` in the working directory, including
@@ -741,21 +745,32 @@ application satisfies the spec. Later behavior changes update the affected
 spec and tests in the same change. Keep small fixes proportional; a repository-wide
 backfill is not a prerequisite for normal maintenance.
 
-#### Optional local code graph
+#### Local code graph
 
-The repository can use graphifyy 0.9.93 as a local structural navigation aid.
-Its separate per-worktree environment and generated graph live under
-`.graphify-local/`; setup is explicit and missing tools are never installed by
-session hooks. Codex and Claude Code are configured to run the same local `update
+Worktree preparation uses `python scripts/prepare_worktree.py` to install Node
+development dependencies, set up Graphify and generate the first graph.
+Graphify's version comes from the hash-locked `requirements-graphify.txt`.
+One shared virtual environment per version and lock hash lives under
+`%LOCALAPPDATA%/ai-coach/graphify` on Windows, or
+`$XDG_DATA_HOME/ai-coach/graphify` (default `~/.local/share/ai-coach/graphify`)
+on POSIX. Graphs, update locks, isolated home and exports stay per worktree
+under `.graphify-local/`. Session hooks never install missing tools.
+Preparation uses `update --preparation` with a 600-second budget; hooks and
+plain `update` keep 180 seconds. A local content-hash cache skips secret scans
+only for content already reported clean by the same scanner and corpus rules.
+Codex and Claude Code are configured to run the same local `update
 --session-start` command synchronously at session start and resume. This keeps
 the graph fresh before use; after edits during a session, run
 `python scripts/graphify_local.py update` before querying it. Check `status`
 first if an update could not complete.
 
-Run `python scripts/graphify_local.py setup` once to prepare the isolated
-environment, then run `python scripts/graphify_local.py update` to generate the
-structural graph. Setup downloads the pinned packages when needed; subsequent
-graph operations run locally and do not call external models or services. Use
+As a manual fallback, run `python scripts/graphify_local.py setup`, then
+`python scripts/graphify_local.py update`. Setup serializes creation, verifies
+every package hash and reuses a ready environment without installing again.
+`python scripts/graphify_local.py prune` explicitly removes other unlocked shared
+environments that no running Graphify command uses; nothing prunes automatically. Old `.graphify-local/venv` directories
+are unused and may be removed manually. Only setup and worktree preparation may
+download packages; subsequent graph operations stay offline. Use
 `status`, `query <terms>`, `path <source> <target>`, and `explain <symbol>` to
 inspect availability and navigate; queries select the active graph
 automatically. Run `python scripts/graphify_local.py export html --output .graphify-local/exports/graph.html` or
@@ -795,9 +810,11 @@ Both launchers resolve the repository root, including when the session starts
 in a nested directory. If the worker or Python is unavailable, they print a
 short status message, do not install anything, and let the session continue.
 
-T3 Code's managed runtime may not dispatch either host's native repository
-hooks. Hook activation inside T3 Code itself is not verified; run the update
-manually there when needed.
+On 2026-10-24, T3 Code delivered the Claude SessionStart hook in a task worktree.
+This observation does not establish delivery by every host/provider; run the
+update manually if the hook is skipped. After merge, the T3 worktree-creation
+script can invoke `python scripts/prepare_worktree.py`; host configuration is
+separate from this repository.
 
 AI documentation is checked by the existing
 `Validate repository AI documentation` workflow. Locally, after secrets scans,
@@ -1067,9 +1084,10 @@ or replace fixture/browser verification.
 
 ### Dependency lock maintenance
 
-`requirements.in` and `requirements-dev.in` contain direct pins. The matching
-`requirements.txt` and `requirements-dev.txt` files are pip-tools outputs with
-hashes; Docker and CI install those locked files with `--require-hashes`.
+`requirements.in`, `requirements-dev.in` and `requirements-graphify.in` contain
+direct requirements. Their matching `.txt` files are pip-tools outputs with
+hashes. Docker and CI install only the app/development locks with `--require-hashes`;
+the Graphify lock is used only by its separate shared development environment.
 Dependabot recognizes this `.in`/`.txt` pairing and updates both files. When
 regenerating locally, use Python 3.14 on Linux (the SQLCipher wheel is not
 available on native Windows):
@@ -1077,7 +1095,14 @@ available on native Windows):
 ```text
 pip-compile --allow-unsafe --generate-hashes --output-file=requirements.txt requirements.in
 pip-compile --allow-unsafe --generate-hashes --output-file=requirements-dev.txt requirements-dev.in
+pip-compile --allow-unsafe --generate-hashes --strip-extras --output-file=requirements-graphify.txt requirements-graphify.in
 ```
+
+Compile the Graphify pair on Windows/Python 3.14 instead: a Linux resolution
+drops the Windows-only `pywin32` pin that `mcp` needs, and a hash-only Windows
+setup then fails. Dependabot regenerates on Linux, so its Graphify PRs fail the
+lock contract test until someone runs the Graphify command above on Windows and
+pushes the regenerated lock to the PR.
 
 The incremental quality check also records the `ruff` and `mypy` versions in
 `tests/fixtures/quality_baseline.json`. After changing either pin, record the new
@@ -1133,7 +1158,7 @@ Garmins Tagesverbrauch (für heute vorläufig) mit Aktivkalorien und Grundumsatz
 
 ### Analysis history
 
-The **Analyse** tab has four sections: Belastung, Leistung, Erholung and Einheiten. Belastung shows one Garmin Connect acute-load chart, with the latest 14 daily readings or twelve calendar weeks (last valid reading per week, including the current week). Garmin training status is imported for the configured sync window; missing or ambiguous device readings stay unknown. Coach context also keeps Garmin's current daily acute and chronic load and the reported acute-to-chronic ratio separate from its four-week aerobic-low, aerobic-high and anaerobic balance values and target ranges. These values retain Garmin provenance and freshness; ambiguous device values and missing fields stay unknown, and they are not combined with Intervals.icu load. Training focus follows the period selection (14 days or 12 weeks) placed above it, then permanently visible HF and power zone diagrams. Focus groups recorded Garmin activity loads by primary Training Effect, rather than deriving categories from zones. Zones sum recorded sport-specific durations across all sports over the selected training-focus period; missing measurements are not zero. The Woche section and its cumulative Intervals.icu load charts are removed. Leistung starts with one maximum-heart-rate row above compact current performance tables for running and cycling, showing metric names and values without source or measurement-date labels. Cycling includes the latest Garmin FTP power-to-weight value, or the latest Intervals.icu eFTP value when no Garmin value exists. The endurance score follows the current values as a Garmin weekly history, including groupMap/groupAverage range responses. Below it are separate running and cycling charts for threshold pace, FTP/eFTP and VO2max over twelve calendar weeks. FTP keeps every dated Garmin daily measurement, including multiple measurements in a week. Threshold pace uses the last valid weekly measurement; eFTP and VO2max use weekly medians. Every measured week has a point, including unchanged values; missing weeks remain gaps. A chart without any valid value is not drawn; each section names such charts in one line "Keine Daten: …", sport groups without history are omitted, and current-value rows without a value are hidden (a single measured value keeps its note that no trend exists yet). Race predictions appear only in a compact distance/time table within the running section. A compact cycling power profile shows the best measured average watts over 5 seconds, 1 minute, 5 minutes, 20 minutes and 1 hour from the last 90 days, combining outdoor and indoor rides in one value per duration. Normal Intervals.icu activity and performance syncs import measured activity power curves, so the table does not depend on manually opening activity details; locally cached original streams also contribute. Provider failures preserve dated cached values and are reported as failed. These are observations, not forecasts; missing durations stay unknown. Cycling power-to-weight appears only in the current cycling table; running tolerance belongs to running development. Current values, both sport-development groups and other performance sections can be collapsed independently; race predictions collapse with running and the power profile with cycling. Endurance-efficiency cards, best activity windows and race-prediction history charts are removed. Weekly axes display DD.MM dates. Acute load and training time use bars with connected points at their tops. Every measured point has a value label, including repeated values; labels move vertically to avoid collisions. Erholung shows daily sleep, HRV and resting heart rate over the last fourteen days, with an optional twelve-week weekly-average view. Einheiten lists completed sessions newest first (20 per page, with a load-more button) without a calendar date grid. Expanding a session shows its key figures, Garmin Connect-style area charts for heart rate, pace or speed, power, cadence, elevation and temperature with a dashed average line and tap/drag readout (elevation instead shows its full minimum–maximum range without an average line), recorded Intervals.icu HF and power zone times, and laps. Walking and hiking use pace like running. Pace sports invert the pace axis; other ranges ignore the outer one percent of samples so single spikes do not flatten a curve, only non-negative channels start at zero, and stops or missing samples stay gaps. Simplified charts and per-channel data coverage are disclosed below the charts. Running, walking and hiking show step frequency (both legs, spm), twice the per-leg cadence Intervals.icu stores; other sports keep per-leg cadence in rpm. Charts need locally stored activity details. After each Intervals.icu refresh the details of the ten newest activities are loaded read-only when missing or outdated; an activity with invalid or missing data is skipped but stays listed, marked "Details nicht geladen" with a fixed reason that its expanded panel repeats with the attempt time; it is not retried automatically until its summary changes, and loading it explicitly clears the marker. A rate limit, outage or authentication failure stops that run until the next refresh. Older details stay stored and are never evicted. For other sessions the summary is shown and, when Intervals.icu is configured, the athlete can start the explicit detail-loading job from the session.
+The **Analyse** tab has four sections: Belastung, Leistung, Erholung and Einheiten. Belastung shows one Garmin Connect acute-load chart, with the latest 14 daily readings or twelve calendar weeks (last valid reading per week, including the current week). Garmin training status is imported for the configured sync window; missing or ambiguous device readings stay unknown. Coach context also keeps Garmin's current daily acute and chronic load and the reported acute-to-chronic ratio separate from its four-week aerobic-low, aerobic-high and anaerobic balance values and target ranges. These values retain Garmin provenance and freshness; ambiguous device values and missing fields stay unknown, and they are not combined with Intervals.icu load. Training focus follows the period selection (14 days or 12 weeks) placed above it, then permanently visible HF and power zone diagrams. Focus groups recorded Garmin activity loads by primary Training Effect, rather than deriving categories from zones. Zones sum recorded sport-specific durations across all sports over the selected training-focus period; missing measurements are not zero. The Woche section and its cumulative Intervals.icu load charts are removed. Leistung starts with one maximum-heart-rate row above compact current performance tables for running and cycling, showing metric names and values without source or measurement-date labels. Cycling includes the latest Garmin FTP power-to-weight value, or the latest Intervals.icu eFTP value when no Garmin value exists. The endurance score follows the current values as a Garmin weekly history, including groupMap/groupAverage range responses. Below it are separate running and cycling charts for threshold pace, FTP/eFTP and VO2max over twelve calendar weeks. FTP keeps every dated Garmin daily measurement, including multiple measurements in a week. Threshold pace uses the last valid weekly measurement; eFTP and VO2max use weekly medians. Every measured week has a point, including unchanged values; missing weeks remain gaps. A chart without any valid value is not drawn; each section names such charts in one line "Keine Daten: …", sport groups without history are omitted, and current-value rows without a value are hidden (a single measured value keeps its note that no trend exists yet). Race predictions appear only in a compact distance/time table within the running section. A compact cycling power profile shows the best measured average watts over 5 seconds, 1 minute, 5 minutes, 20 minutes and 1 hour from the last 90 days, combining outdoor and indoor rides in one value per duration. Normal Intervals.icu activity and performance syncs import measured activity power curves, so the table does not depend on manually opening activity details; locally cached original streams also contribute. Provider failures preserve dated cached values and are reported as failed. These are observations, not forecasts; missing durations stay unknown. Cycling power-to-weight appears only in the current cycling table; running tolerance belongs to running development. Current values, both sport-development groups and other performance sections can be collapsed independently; race predictions collapse with running and the power profile with cycling. Endurance-efficiency cards, best activity windows and race-prediction history charts are removed. Weekly axes display DD.MM dates. Acute load and training time use bars with connected points at their tops. Every measured point has a value label, including repeated values; labels move vertically to avoid collisions. Erholung shows daily sleep, HRV and resting heart rate over the last fourteen days, with an optional twelve-week weekly-average view. Einheiten lists completed sessions newest first (20 per page, with a load-more button) without a calendar date grid. Expanding a session shows its key figures, Garmin Connect-style area charts for heart rate, pace or speed, power, cadence, elevation and temperature with a dashed average line and tap/drag readout (elevation instead shows its full minimum–maximum range without an average line), recorded HF and power zone times labelled with their provider, and laps. Walking and hiking use pace like running. Pace sports invert the pace axis; other ranges ignore the outer one percent of samples so single spikes do not flatten a curve, only non-negative channels start at zero, and stops or missing samples stay gaps. Simplified charts and per-channel data coverage are disclosed below the charts. Running, walking and hiking show step frequency (both legs, spm), twice the per-leg cadence Intervals.icu stores; other sports keep per-leg cadence in rpm. Charts need locally stored activity details. After each Intervals.icu refresh the details of the ten newest activities are loaded read-only when missing or outdated; an activity with invalid or missing data is skipped but stays listed, marked "Details nicht geladen" with a fixed reason that its expanded panel repeats with the attempt time; it is not retried automatically until its summary changes, and loading it explicitly clears the marker. A rate limit, outage or authentication failure stops that run until the next refresh. Older details stay stored and are never evicted. For other sessions the summary is shown, and each configured provider of the session that can load details (Intervals.icu, Garmin Connect) offers its own explicit detail-loading action. Load time, a changed summary, a failed load and data coverage are noted per provider; while any provider's details are outdated, the session analysis is withheld.
 
 The **Body** section under **Nutrition** starts with a two-row table labelled "Zuletzt gemessene Körperwerte" of the latest measured weight and body fat, including measurement dates. The table and history charts use Garmin Connect observations only and omit source labels. Cycling power-to-weight appears as one value in the current cycling table in **Performance**, using Garmin FTP or Intervals.icu eFTP divided by a measured weight from the preceding seven days. Body offers the latest 14 days or twelve rolling weeks. Independently of that selection, the power-to-weight value in Performance shows the latest Garmin FTP quotient from twelve rolling weeks, even when a newer Intervals.icu eFTP quotient exists, and uses the latest eFTP quotient only when no Garmin quotient is available. There is no power-to-weight chart. Weekly points use the median of dated readings. Observation dates remain available, and W/kg values keep FTP/eFTP and weight provenance separate. Unmeasured dates and weeks remain gaps; profile values do not fill missing observations.
 
@@ -1156,9 +1181,13 @@ die neuesten zuerst; übrige folgen bei der nächsten Aktualisierung. Bleiben di
 Daten einer Einheit dabei aus, steht sie
 trotzdem in der Liste und nennt den Grund, ohne bis zur nächsten Änderung
 ihrer Zusammenfassung erneut automatisch geladen zu werden; für ältere Einheiten startet „Detaildaten
-laden“ ausdrücklich einen Hintergrundjob mit ausschließlich lesenden
-Intervals.icu-Abfragen; die Aktion ist nur für Intervals.icu-Aktivitäten
-verfügbar und bleibt ohne eingerichtete Intervals.icu-Anbindung deaktiviert.
+laden“ ausdrücklich einen Hintergrundjob mit ausschließlich lesenden Abfragen
+beim jeweiligen Anbieter. Die Aktion erscheint je Anbieter der Einheit, der
+Details laden kann (Intervals.icu, Garmin Connect) und eingerichtet ist; ohne
+eingerichtete Intervals.icu-Anbindung verweist stattdessen ein Hinweis auf
+Mehr › Anbindungen. Ladezeit, geänderte Zusammenfassung, Ladefehler und
+Datenabdeckung werden je Anbieter genannt; solange Details eines Anbieters
+veraltet sind, entfällt die Sitzungsanalyse.
 Solange Zugangsdaten fehlen, zeigt ein Einrichtungshinweis auf allen Tabs
 einen Link zu Mehr › Anbindungen; er lässt sich für die Browsersitzung
 ausblenden. Der vorherige Detailstand bleibt bei Fehlern erhalten;

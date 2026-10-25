@@ -1,9 +1,7 @@
 """Bounded reads of compact Intervals activity analyses, newest first.
 
-Canonical rows come from ``activity_detail_analysis``; the temporary kv rows
-cover activities whose analysis has not been copied to the canonical tables
-yet. Both return the same columns and are ordered by the observation instant,
-so rows in "Z" and "+00:00" notation compare correctly.
+Rows come from ``activity_detail_analysis`` and are ordered by the observation
+instant, so rows in "Z" and "+00:00" notation compare correctly.
 """
 
 from __future__ import annotations
@@ -46,28 +44,6 @@ _CANONICAL_SQL: Final = """
         AND r.provider = ? AND r.state = ?
 """
 
-# Temporary fallback: kv records of linked activities without a canonical analysis.
-_KV_SQL: Final = """
-    SELECT r.provider_activity_id AS id,
-        json_extract(k.value, '$.summary_sha256') AS fingerprint,
-        json_extract(k.value, '$.observed_at') AS observed_at,
-        json_extract(k.value, '$.calendar_profile') AS profile,
-        json_extract(k.value, '$.session_analysis.aerobic') AS aerobic,
-        json_extract(k.value, '$.session_analysis.power_profile') AS power_profile,
-        json_extract(k.value, '$.session_analysis.running_profile') AS running_profile,
-        json_extract(k.value, '$.target_snapshot') AS targets,
-        json_extract(k.value, '$.session_analysis.interval_quality') AS interval_quality
-    FROM kv AS k
-    JOIN activity_records AS r ON r.provider = ?
-        AND r.provider_activity_id = json_extract(k.value, '$.activity_id')
-        AND r.state = ?
-    JOIN activity_sessions AS s ON s.activity_id = r.activity_id AND s.state <> ?
-    WHERE substr(k.key, 1, 16) = 'activity_detail:'
-      AND NOT EXISTS (
-        SELECT 1 FROM activity_detail_analysis AS a WHERE a.activity_id = r.activity_id)
-"""
-
-
 def _wrap(inner: str) -> str:
     return (
         f"SELECT *, julianday(observed_at) AS instant FROM ({inner}) "
@@ -83,20 +59,6 @@ def recent_intervals_analyses(db: Any, limit: int = 100) -> list[dict[str, Any]]
             ActivitySessionState.DELETED.value,
             _INTERVALS,
             ActivityRecordState.ACTIVE.value,
-            limit,
-        ),
-    ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def recent_kv_analyses(db: Any, limit: int = 100) -> list[dict[str, Any]]:
-    """Newest legacy kv analyses that have no canonical analysis row yet."""
-    rows = db.execute(
-        _wrap(_KV_SQL),
-        (
-            _INTERVALS,
-            ActivityRecordState.ACTIVE.value,
-            ActivitySessionState.DELETED.value,
             limit,
         ),
     ).fetchall()

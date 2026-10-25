@@ -39,6 +39,7 @@ from backend.db.activity_detail_store import (
     detail_sets_for,
     detail_sets_for_session,
     encode_series,
+    refill_lap_metrics,
     remove_detail_sets,
     replace_detail_set,
     save_analysis,
@@ -424,6 +425,60 @@ class ActivityDetailStoreTests(unittest.TestCase):
         self.assertEqual(
             detail_origins(self.db, "intervals", "i1"), {"fetch", "legacy_backfill"}
         )
+
+    def lap_set_row(self):
+        return dict(
+            self.db.execute(
+                "SELECT mapper_version, origin, summary_sha256, content_sha256, "
+                "fetched_at, created_at, updated_at FROM activity_detail_sets "
+                "WHERE detail_kind = 'laps'"
+            ).fetchone()
+        )
+
+    def test_refill_fills_only_missing_lap_metrics_and_rehashes(self):
+        self.store(lap_set())
+        before = self.lap_set_row()
+        filled = refill_lap_metrics(
+            self.db,
+            "intervals",
+            "i1",
+            {
+                0: {"max_speed_mps": 9.0, "avg_hr": 999.0},
+                1: {"max_speed_mps": 99.0},
+                7: {"max_speed_mps": 5.0},
+            },
+            now=LATER,
+        )
+        self.assertEqual(1, filled)
+        (stored,) = detail_sets_for(self.db, "intervals", "i1")
+        warmup, work = stored.detail.laps
+        self.assertEqual((9.0, 120.0), (warmup.max_speed_mps, warmup.avg_hr))
+        self.assertEqual(11.5, work.max_speed_mps)
+        after = self.lap_set_row()
+        self.assertNotEqual(before["content_sha256"], after["content_sha256"])
+        self.assertEqual(LATER, after["updated_at"])
+        for column in ("mapper_version", "origin", "summary_sha256", "fetched_at"):
+            self.assertEqual(before[column], after[column])
+        # The new hash equals the hash of storing the refilled set directly.
+        refilled = dataclasses.replace(
+            lap_set(),
+            laps=(dataclasses.replace(lap_set().laps[0], max_speed_mps=9.0), work),
+        )
+        self.assertIs(self.store(refilled, now=LATER), WriteOutcome.UNCHANGED)
+
+    def test_refill_without_missing_metrics_changes_nothing(self):
+        self.store(lap_set())
+        before = self.lap_set_row()
+        self.assertEqual(
+            0,
+            refill_lap_metrics(
+                self.db, "intervals", "i1", {1: {"max_speed_mps": 1.0}}, now=LATER
+            ),
+        )
+        self.assertEqual(0, refill_lap_metrics(self.db, "intervals", "i2", {0: {}}, now=LATER))
+        self.assertEqual(before, self.lap_set_row())
+        with self.assertRaises(ValueError):
+            refill_lap_metrics(self.db, "intervals", "i1", {0: {"name": 1.0}}, now=LATER)
 
     def test_set_columns_must_match_their_detail_kind(self):
         insert = (

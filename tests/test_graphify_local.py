@@ -74,23 +74,33 @@ class GraphifyLocalPureTests(TestCase):
                 )
             )
 
-    def test_scanner_failure_in_state_never_reads_source(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            source = root / "source.py"
-            source.write_text("pass\n")
-            with (
-                patch.object(
-                    graph, "corpus_paths", return_value=[("backend/x.py", source)]
-                ),
-                patch.object(graph, "scan", side_effect=graph.Unavailable("failed")),
-                patch.object(
-                    Path, "read_bytes", side_effect=AssertionError("source read")
-                ) as read,
-                self.assertRaises(graph.Unavailable),
-            ):
-                graph.state(root)
-            read.assert_not_called()
+    def test_scanner_failure_in_state_never_records_clean_hashes(self):
+        binding = {"scanner": "synthetic", "engine": [["engine", [1]]]}
+        for prior in (None, {"binding": binding, "clean_hashes": []}):
+            with self.subTest(prior=prior), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                source = root / "source.py"
+                source.write_text("pass\n")
+                cache = graph.runtime(root) / "scan-cache.json"
+                if prior is not None:
+                    cache.parent.mkdir(parents=True)
+                    cache.write_text(json.dumps(prior))
+                before = cache.read_bytes() if prior is not None else None
+                with (
+                    patch.object(
+                        graph, "corpus_paths", return_value=[("backend/x.py", source)]
+                    ),
+                    patch.object(
+                        graph, "scan", side_effect=graph.Unavailable("failed")
+                    ),
+                    patch.object(graph, "_scan_binding", return_value=binding),
+                    self.assertRaises(graph.Unavailable),
+                ):
+                    graph.state(root)
+                if prior is None:
+                    self.assertFalse(cache.exists())
+                else:
+                    self.assertEqual(cache.read_bytes(), before)
 
     def test_local_environment_excludes_secrets_and_disables_backends(self):
         with (
@@ -119,6 +129,21 @@ class GraphifyLocalTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        scanner = self.root / "synthetic-sonar"
+        scanner.touch()
+        scanner_path = patch.object(graph.shutil, "which", return_value=str(scanner))
+        scanner_path.start()
+        self.addCleanup(scanner_path.stop)
+        # Environment leases must never touch the real shared directory.
+        shared = patch.object(graph, "shared_base", return_value=self.root / "shared")
+        shared.start()
+        self.addCleanup(shared.stop)
+        # CI hosts have no Sonar secrets engine; without one no cache is reused.
+        engine = patch.object(
+            graph, "_scan_engine", return_value=[["sonar-secrets-1", [1, 2, 3]]]
+        )
+        engine.start()
+        self.addCleanup(engine.stop)
         (self.root / ".gitignore").write_text(".graphify-local/\ngraphify-out/\n")
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         (self.root / "backend").mkdir()
@@ -429,6 +454,9 @@ class GraphifyLocalTests(unittest.TestCase):
             "graph_sha256": hashlib.sha256(graph_file.read_bytes()).hexdigest(),
         }
         (rt / "current.json").write_text(json.dumps(pointer))
+        (rt / "scan-cache.json").write_text(
+            json.dumps({"binding": graph._scan_binding(), "clean_hashes": []})
+        )
         source_read_bytes = Path.read_bytes
 
         def guarded_read_bytes(path):
@@ -479,7 +507,7 @@ class GraphifyLocalTests(unittest.TestCase):
             patch.object(graph, "verify_version", return_value=True),
         ):
             self.assertEqual(graph.update(self.root), 0)
-            scanner.assert_called_once()
+            scanner.assert_not_called()
             current = json.loads((rt / "current.json").read_text())
             self.assertEqual(current["generation"], generation)
             self.assertEqual(current["metadata"], graph._metadata(self.root))
@@ -490,7 +518,7 @@ class GraphifyLocalTests(unittest.TestCase):
             self.assertFalse(current["stale"])
             self.assertEqual(graph.active_graph(self.root)[1], graph_file)
             self.assertEqual(graph.update(self.root), 0)
-            scanner.assert_called_once()
+            scanner.assert_not_called()
 
     def test_corrupt_graph_is_not_reused_or_blessed_by_metadata_refresh(self):
         rt = graph.runtime(self.root)
@@ -641,7 +669,7 @@ class GraphifyLocalTests(unittest.TestCase):
         self.assertTrue(all(command[-2] == "--graph" for command in launched))
         self.assertEqual(launched[1][1:3], ["query", "find:thing (v2)"])
 
-    def test_metadata_invalidation_causes_scan_before_source_read(self):
+    def test_metadata_invalidation_causes_content_scan(self):
         with patch.object(graph, "scan") as scanner:
             before = graph._metadata(self.root)
             (self.root / "backend" / "one.py").write_text("def one(): return 22\n")
@@ -669,9 +697,11 @@ class GraphifyLocalTests(unittest.TestCase):
             "graph_sha256": hashlib.sha256(graph_file.read_bytes()).hexdigest(),
         }
         (rt / "current.json").write_text(json.dumps(pointer))
+        # Reads must not need the Sonar scanner; only updates scan.
         with (
             patch.object(graph, "scan", side_effect=AssertionError("scan")),
             patch.object(graph, "verify_version", return_value=True),
+            patch.object(graph.shutil, "which", return_value=None),
         ):
             self.assertEqual(graph.active_graph(self.root)[1], graph_file)
             with (

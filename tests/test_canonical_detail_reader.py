@@ -10,6 +10,8 @@ from backend.canonical.activity_detail import (
     ActivityLap,
     ActivityLapSet,
     ActivityStreamSet,
+    ZoneBucket,
+    ZoneDistribution,
 )
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import (
@@ -21,6 +23,8 @@ from backend.canonical.vocabulary import (
     SourceKind,
     StreamChannel,
     StreamResolution,
+    ZoneBoundarySource,
+    ZoneMetric,
 )
 from backend.db import row_factory
 from backend.db.activity_detail_store import replace_detail_set, save_analysis
@@ -64,7 +68,7 @@ class CanonicalDetailReaderTests(unittest.TestCase):
         initialize_schema(self.db)
         self.reader = CanonicalDetailReader(
             CanonicalTableReader().session_activities,
-            refreshable=frozenset({INTERVALS}),
+            refreshable=lambda: frozenset({INTERVALS}),
         )
 
     def add_session(self, activity_id, state="active", merged_into=None) -> None:
@@ -296,7 +300,7 @@ class CanonicalDetailReaderTests(unittest.TestCase):
                 for record in CanonicalTableReader().session_activities(db, activity_id)
                 if record.provenance.provider is INTERVALS
             ],
-            refreshable=frozenset({INTERVALS}),
+            refreshable=lambda: frozenset({INTERVALS}),
         )
 
         doc = intervals_only.read(self.db, "act_1")
@@ -330,7 +334,7 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
         self.failures: dict[str, dict] = {}
         self.reader = CanonicalDetailReader(
             CanonicalTableReader().session_activities,
-            refreshable=frozenset({INTERVALS}),
+            refreshable=lambda: frozenset({INTERVALS}),
             summary_row=lambda db, activity_id: (
                 self.summary if activity_id == "i-ride-99" else None
             ),
@@ -458,6 +462,119 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
 
         self.assertEqual(
             {HR.value: {"points": 2701, "valid_points": 2699}}, provider["coverage"]
+        )
+
+    def store_zones(self, fingerprint: str | None, seconds) -> None:
+        detail = ZoneDistribution(
+            provider_activity_id="i-ride-99",
+            provenance=self.provenance(INTERVALS),
+            origin=ActivityDetailOrigin.FETCH,
+            metric=ZoneMetric.HEART_RATE,
+            boundary_source=ZoneBoundarySource.UNKNOWN,
+            buckets=tuple(
+                ZoneBucket(index=index, seconds=value)
+                for index, value in enumerate(seconds, start=1)
+            ),
+        )
+        replace_detail_set(
+            self.db, detail, mapper_version=1, summary_sha256=fingerprint, now=STAMP
+        )
+
+    def test_live_zone_times_replace_stored_zones_without_marking_stale(self) -> None:
+        self.summary["icu_hr_zone_times"] = [600, 900]
+        fingerprint = summary_fingerprint(self.summary)
+        self.store(fingerprint)
+        self.store_zones(fingerprint, (600.0, 900.0))
+
+        self.summary["icu_hr_zone_times"] = [300, 1200, 60]
+        doc = self.reader.read(self.db, "act_1")
+        assert doc is not None
+
+        self.assertEqual(
+            [300, 1200, 60],
+            [bucket["seconds"] for bucket in doc["zones"]["heart_rate"]["buckets"]],
+        )
+        self.assertEqual("intervals", doc["zones"]["heart_rate"]["source"]["provider"])
+        intervals = self.provider(doc, "intervals")
+        self.assertFalse(intervals["stale"])
+        self.assertEqual(["heart_rate_zones", "streams"], intervals["kinds"])
+        self.assertIsNotNone(doc["analysis"])
+
+    def test_live_zone_times_are_served_without_a_stored_zone_set(self) -> None:
+        self.store(summary_fingerprint(self.summary))
+        self.summary["icu_zone_times"] = [{"id": "Z1", "secs": 120}]
+
+        doc = self.reader.read(self.db, "act_1")
+        assert doc is not None
+
+        self.assertEqual(
+            [{"index": 1, "seconds": 120, "lower": None, "upper": None, "label": "Z1"}],
+            doc["zones"]["power"]["buckets"],
+        )
+        self.assertEqual("garmin", doc["zones"]["power"]["source"]["recorded_by"])
+        self.assertEqual(["streams"], self.provider(doc, "intervals")["kinds"])
+
+    def test_stale_provider_withholds_analysis_and_shows_current_scalars(self) -> None:
+        self.store(summary_fingerprint(self.summary))
+        fresh = self.reader.read(self.db, "act_1")
+        assert fresh is not None
+        self.assertIsNotNone(fresh["analysis"])
+
+        self.summary["average_speed"] = 9.5
+        doc = self.reader.read(self.db, "act_1")
+        assert doc is not None
+
+        self.assertTrue(self.provider(doc, "intervals")["stale"])
+        self.assertIsNone(doc["analysis"])
+        self.assertEqual(9.5, doc["metrics"]["avg_speed_mps"]["value"])
+        self.assertIsNotNone(doc["streams"])
+
+    def test_any_stale_merged_provider_withholds_analysis(self) -> None:
+        self.ride_session()
+        self.db.execute(
+            "UPDATE activity_detail_sets SET summary_sha256 = ? WHERE provider = ?",
+            ("a" * 64, "garmin"),
+        )
+        self.db.execute(
+            "INSERT INTO provider_records (provider, record_kind, source_record_id, "
+            "payload, payload_hash, fetched_at, mapped_version, state, created_at, "
+            "updated_at) VALUES ('garmin', 'activity', 'g-ride-99', '{}', ?, ?, 1, "
+            "'active', ?, ?)",
+            ("b" * 64, STAMP, STAMP, STAMP),
+        )
+
+        doc = self.reader.read(self.db, "act_1")
+        assert doc is not None
+
+        self.assertTrue(self.provider(doc, "garmin")["stale"])
+        self.assertFalse(self.provider(doc, "intervals")["stale"])
+        self.assertIsNone(doc["analysis"])
+
+    def test_set_without_a_fingerprint_is_never_stale(self) -> None:
+        self.store(None)
+
+        self.summary["moving_time"] = 2800
+        doc = self.reader.read(self.db, "act_1")
+        assert doc is not None
+
+        self.assertFalse(self.provider(doc, "intervals")["stale"])
+        self.assertEqual(ANALYSIS_KEYS, set(doc["analysis"]))
+
+    def test_refreshable_providers_are_read_per_document(self) -> None:
+        self.store(None)
+        configured = {INTERVALS}
+        reader = CanonicalDetailReader(
+            CanonicalTableReader().session_activities,
+            refreshable=lambda: frozenset(configured),
+        )
+        self.assertTrue(
+            self.provider(reader.read(self.db, "act_1"), "intervals")["refreshable"]
+        )
+
+        configured.clear()
+
+        self.assertFalse(
+            self.provider(reader.read(self.db, "act_1"), "intervals")["refreshable"]
         )
 
     def test_long_streams_are_reported_as_display_sampled(self) -> None:

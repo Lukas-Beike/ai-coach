@@ -14,7 +14,7 @@ import unittest
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
-import run_tests
+from tests import run_tests
 
 SPEC = importlib.util.spec_from_file_location(
     "release_source",
@@ -149,13 +149,14 @@ class WorkflowSourceTests(unittest.TestCase):
             return {
                 match.group(1).lower().replace("_", "-"): match.group(2)
                 for match in re.finditer(
-                    r"(?m)^([A-Za-z0-9_.-]+)==([^\\\s;]+)", content
+                    r"(?m)^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==([^\\\s;]+)", content
                 )
             }
 
         for manifest, lock in (
             ("requirements.in", "requirements.txt"),
             ("requirements-dev.in", "requirements-dev.txt"),
+            ("requirements-graphify.in", "requirements-graphify.txt"),
         ):
             lock_content = (root / lock).read_text(encoding="utf-8")
             header = "\n".join(lock_content.splitlines()[:8])
@@ -175,6 +176,16 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("--require-hashes -r requirements.txt", workflow)
         self.assertIn("--require-hashes -r requirements-dev.txt", workflow)
         self.assertNotIn("requirements.lock", dockerfile + workflow)
+        self.assertNotIn("requirements-graphify", dockerfile)
+        for path in (root / ".github/workflows").glob("*.yml"):
+            self.assertNotIn("requirements-graphify", path.read_text(encoding="utf-8"))
+        graphify = (root / "requirements-graphify.txt").read_text(encoding="utf-8")
+        # pywin32 has no Linux wheels; keep its transitive pin Windows-only.
+        windows_pins = re.findall(r"(?m)^pywin32==.*$", graphify)
+        self.assertEqual(len(windows_pins), 1)
+        self.assertRegex(
+            windows_pins[0], r'^pywin32==[^;\s]+\s*; sys_platform == "win32" '
+        )
 
     def test_daily_release_limits_default_token_permissions(self):
         workflow = (

@@ -16,9 +16,26 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "0.9.93"
-WRAPPER_SCHEMA = 4
+LOCK_FILE = Path(__file__).resolve().parents[1] / "requirements-graphify.txt"
+
+
+def lock_version(path: Path) -> str:
+    try:
+        pins = re.findall(
+            r"(?m)^graphifyy(?:\[mcp\])?==(\d+(?:\.\d+)+)\s*(?:\\)?$",
+            path.read_text(encoding="utf-8"),
+        )
+        return pins[0] if len(pins) == 1 else ""
+    except OSError:
+        return ""
+
+
+VERSION = lock_version(LOCK_FILE)
+WRAPPER_SCHEMA = 5
 TIMEOUT = 180
+PREPARATION_TIMEOUT = 600
+READY_FILE = "ready.json"
+LEASE_WAIT = 15
 EXTENSIONS = {
     ".py",
     ".js",
@@ -92,6 +109,10 @@ class Unavailable(RuntimeError):
     pass
 
 
+class EnvironmentInUse(Unavailable):
+    pass
+
+
 def repo_root(start: Path | None = None) -> Path:
     result = subprocess.run(
         [
@@ -114,17 +135,53 @@ def runtime(root: Path) -> Path:
     return root / ".graphify-local"
 
 
-def executable(root: Path) -> Path:
+def shared_base() -> Path:
+    if os.name == "nt":
+        data = os.environ.get("LOCALAPPDATA")
+        if not data:
+            raise Unavailable(
+                "LOCALAPPDATA unavailable; Graphify shared environment unavailable"
+            )
+        return Path(data) / "ai-coach" / "graphify"
+    data = os.environ.get("XDG_DATA_HOME")
+    return (Path(data) if data else Path.home() / ".local/share") / "ai-coach/graphify"
+
+
+def lock_identity() -> dict[str, str]:
+    version = lock_version(LOCK_FILE)
+    if not version or version != VERSION:
+        raise Unavailable("missing or ambiguous Graphify lock pin")
+    return {
+        "version": version,
+        # Line endings depend on checkout settings, not on the pinned content.
+        "lock_sha256": hashlib.sha256(
+            LOCK_FILE.read_bytes().replace(b"\r\n", b"\n")
+        ).hexdigest(),
+    }
+
+
+def environment_name(identity: dict[str, str]) -> str:
+    return f"{identity['version']}-{identity['lock_sha256'][:16]}"
+
+
+def _environment_lock(venv: Path) -> Path:
+    return venv.with_name(venv.name + ".lock")
+
+
+def shared_environment() -> Path:
+    return shared_base() / environment_name(lock_identity())
+
+
+def executable() -> Path:
     return (
-        runtime(root)
-        / "venv"
+        shared_environment()
         / ("Scripts" if os.name == "nt" else "bin")
         / ("graphify.exe" if os.name == "nt" else "graphify")
     )
 
 
-def python_executable(root: Path) -> Path:
-    return executable(root).with_name("python.exe" if os.name == "nt" else "python")
+def python_executable() -> Path:
+    return executable().with_name("python.exe" if os.name == "nt" else "python")
 
 
 def local_env(root: Path, graph_out: Path | None = None) -> dict[str, str]:
@@ -248,11 +305,16 @@ def corpus_paths(root: Path) -> list[tuple[str, Path]]:
     return sorted(found.items())
 
 
-def scan(paths: list[tuple[str, Path]], deadline: float | None = None) -> None:
+def scan(
+    paths: list[tuple[str, Path]],
+    deadline: float | None = None,
+    *,
+    scanner: str | None = None,
+) -> None:
     deadline = deadline or time.monotonic() + TIMEOUT
     if not paths:
         raise Unavailable("no approved source files to scan")
-    scanner = shutil.which("sonar")
+    scanner = scanner or shutil.which("sonar")
     if not scanner:
         raise Unavailable("Sonar secrets scanner unavailable; graph update refused")
     # One bounded argument list per batch avoids Windows' per-process startup
@@ -325,13 +387,84 @@ def process_lock(path: Path, deadline: float | None = None):
         handle.close()
 
 
+def _scan_engine() -> list | None:
+    """Signatures of the detection engines the Sonar CLI runs, if resolvable."""
+    engines = Path.home() / ".sonar" / "sonarqube-cli" / "bin"
+    try:
+        found = [
+            [path.name, list(_signature(path))]
+            for path in sorted(engines.glob("sonar-secrets-*"))
+            if path.is_file()
+        ]
+    except OSError:
+        return None
+    return found or None
+
+
+def _scan_binding() -> dict:
+    scanner = shutil.which("sonar")
+    if not scanner:
+        raise Unavailable("Sonar secrets scanner unavailable; graph update refused")
+    try:
+        path = Path(scanner).resolve(strict=True)
+        signature = _signature(path)
+    except OSError as exc:
+        raise Unavailable("secret scan failed; graph update refused") from exc
+    return {
+        "schema": WRAPPER_SCHEMA,
+        "scanner": str(path),
+        "signature": list(signature),
+        "engine": _scan_engine(),
+        "rules": [
+            sorted(SOURCE_DIRS),
+            sorted(ROOT_FILES),
+            sorted(DENIED),
+            sorted(EXTENSIONS),
+        ],
+    }
+
+
+def _write_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pending = path.with_name(path.name + ".tmp")
+    pending.write_text(json.dumps(value), encoding="utf-8")
+    os.replace(pending, path)
+
+
 def state(
     root: Path, deadline: float | None = None
 ) -> tuple[list[tuple[str, Path]], str, dict[str, str]]:
     deadline = deadline or time.monotonic() + TIMEOUT
     paths = corpus_paths(root)
     before = {rel: _signature(path) for rel, path in paths}
-    scan(paths, deadline)
+    if not paths:
+        raise Unavailable("no approved source files to scan")
+    binding = _scan_binding()
+    cache_path = runtime(root) / "scan-cache.json"
+    cache = read_json(cache_path)
+    clean = cache.get("clean_hashes")
+    if (
+        cache.get("binding") != binding
+        or binding["engine"] is None
+        or not isinstance(clean, list)
+        or any(
+            not isinstance(h, str) or not re.fullmatch(r"[0-9a-f]{64}", h)
+            for h in clean
+        )
+    ):
+        clean = []
+    clean_hashes = set(clean)
+
+    def clean_key(rel: str) -> str:
+        # Bind each verdict to its path; the scanner may treat paths differently.
+        return hashlib.sha256(f"{rel}\0{hashes[rel]}".encode()).hexdigest()
+
+    def unchanged(rel: str, path: Path) -> bool:
+        try:
+            return _signature(path) == before[rel]
+        except OSError:
+            return False
+
     rows, hashes = [], {}
     for rel, path in paths:
         before_sig = _signature(path)
@@ -340,6 +473,19 @@ def state(
             raise Unavailable(SOURCE_CHANGED)
         rows.append((rel, digest))
         hashes[rel] = digest
+    pending = [(rel, path) for rel, path in paths if clean_key(rel) not in clean_hashes]
+    if pending:
+        scan(pending, deadline, scanner=binding["scanner"])
+    changed = {rel for rel, path in paths if not unchanged(rel, path)}
+    if _scan_binding() != binding:
+        raise Unavailable("secret scanner changed during scan; graph update refused")
+    # No hashes from a failed scan or a file changed during the scan are
+    # recorded. Only the current corpus is kept, so the cache stays bounded;
+    # stable files stay recorded so a retry rescans only the changed ones.
+    stable = {clean_key(rel) for rel, _ in paths if rel not in changed}
+    _write_json(cache_path, {"binding": binding, "clean_hashes": sorted(stable)})
+    if changed:
+        raise Unavailable(SOURCE_CHANGED)
     branch = (
         subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -479,9 +625,17 @@ def generation_dir(root: Path, pointer: dict) -> Path:
 
 
 def verify_version(root: Path) -> bool:
-    py = python_executable(root)
-    exe = executable(root)
-    if not py.is_file() or not exe.is_file():
+    try:
+        if read_json(shared_environment() / READY_FILE) != lock_identity():
+            return False
+        return _installed_version(root)
+    except OSError, Unavailable:
+        return False
+
+
+def _installed_version(root: Path, timeout: float = 10) -> bool:
+    py = python_executable()
+    if not py.is_file() or not executable().is_file():
         return False
     try:
         result = subprocess.run(
@@ -493,7 +647,7 @@ def verify_version(root: Path) -> bool:
             capture_output=True,
             check=False,
             text=True,
-            timeout=10,
+            timeout=timeout,
             env=local_env(root),
         )
         return result.returncode == 0 and result.stdout.strip() == VERSION
@@ -574,7 +728,7 @@ def _copy_inputs(
 
 def _run_graphify(root: Path, base: Path, inputs: Path, deadline: float) -> Path:
     out = base / "cache"
-    command = [str(executable(root)), "update", str(inputs), "--no-cluster"]
+    command = [str(executable()), "update", str(inputs), "--no-cluster"]
     result = subprocess.run(
         command,
         cwd=base,
@@ -653,9 +807,22 @@ def _prune_generations(base: Path, current_id: str, previous_id: str | None) -> 
             shutil.rmtree(old, ignore_errors=True)
 
 
+def _scanned_with(root: Path) -> bool:
+    """Whether the recorded scan used the current scanner; reads skip this."""
+    try:
+        binding = _scan_binding()
+    except Unavailable:
+        return False
+    return read_json(runtime(root) / "scan-cache.json").get("binding") == binding
+
+
 def _update_locked(root: Path, base: Path, deadline: float) -> None:
     current = read_json(base / CURRENT_FILE)
-    if _metadata_current(root, current) and verify_version(root):
+    if (
+        _metadata_current(root, current)
+        and verify_version(root)
+        and _scanned_with(root)
+    ):
         print("Graphify local: current")
         return
     metadata = _metadata(root)
@@ -679,19 +846,27 @@ def _update_locked(root: Path, base: Path, deadline: float) -> None:
     print("Graphify local: current (updated)")
 
 
-def update(root: Path) -> int:
-    deadline = time.monotonic() + TIMEOUT
+def update(root: Path, *, preparation: bool = False) -> int:
+    deadline = time.monotonic() + (PREPARATION_TIMEOUT if preparation else TIMEOUT)
     base = runtime(root)
-    # Avoid a long source scan when an explicit per-worktree setup is needed.
-    if not verify_version(root):
-        print(
-            f"Graphify local: unavailable (Graphify {VERSION} unavailable; run setup)"
-        )
-        return 2
     try:
-        with process_lock(base / "update.lock", deadline):
-            _update_locked(root, base, deadline)
-            return 0
+        with environment_lease(shared_environment(), deadline):
+            # Avoid a long source scan when the shared environment needs preparation.
+            if not verify_version(root):
+                print(
+                    f"Graphify local: unavailable (Graphify {VERSION} unavailable; run setup)"
+                )
+                return 2
+            with process_lock(base / "update.lock", deadline):
+                try:
+                    _update_locked(root, base, deadline)
+                except Unavailable as exc:
+                    # A branch rename or save during the scan; unchanged content
+                    # is not rescanned, so one retry is cheap.
+                    if str(exc) != SOURCE_CHANGED:
+                        raise
+                    _update_locked(root, base, deadline)
+                return 0
     except (OSError, subprocess.SubprocessError, Unavailable) as exc:
         # Do not mutate current.json outside the updater lock. Freshness is
         # derived from the source fingerprint and graph pointer at read time.
@@ -726,7 +901,7 @@ def helper(
     script = Path(__file__).with_name("graphify_views.py").resolve()
     if not script.is_file():
         raise Unavailable("local graph view helper unavailable")
-    args = [str(python_executable(root)), str(script), command, str(graph)]
+    args = [str(python_executable()), str(script), command, str(graph)]
     if command == "export":
         if output is None:
             raise Unavailable("local graph export destination missing")
@@ -741,29 +916,151 @@ def helper(
     ).returncode
 
 
+def _leases(venv: Path) -> Path:
+    return venv.with_name(venv.name + ".leases")
+
+
+@contextlib.contextmanager
+def environment_lease(venv: Path, deadline: float):
+    """Mark the shared environment in use while this process runs from it.
+
+    Leases are registered under the environment lock, which setup and prune
+    hold while they check leases and delete, so no lease appears mid-delete.
+    """
+    lease = _leases(venv) / f"{os.getpid()}-{uuid.uuid4().hex}"
+    with contextlib.ExitStack() as stack:
+        with contextlib.ExitStack() as registration:
+            try:
+                # Setup may hold the lock for a whole install; fail fast instead.
+                registration.enter_context(
+                    process_lock(
+                        _environment_lock(venv),
+                        min(deadline, time.monotonic() + LEASE_WAIT),
+                    )
+                )
+            except Unavailable:
+                raise Unavailable("shared environment busy (setup or prune)") from None
+            lease.parent.mkdir(parents=True, exist_ok=True)
+            # Runs after the lease handle closes; Windows cannot unlink it open.
+            stack.callback(_remove_lease, lease)
+            stack.enter_context(process_lock(lease))
+        yield
+
+
+def _remove_lease(lease: Path) -> None:
+    # A concurrent _in_use check may still have it open; it removes leftovers.
+    with contextlib.suppress(OSError):
+        lease.unlink(missing_ok=True)
+
+
+def _in_use(venv: Path) -> bool:
+    """Report held leases and remove those left behind by exited processes."""
+    if not _leases(venv).is_dir():
+        return False
+    held = False
+    for lease in sorted(_leases(venv).iterdir()):
+        if _held(lease):
+            held = True
+        else:
+            lease.unlink(missing_ok=True)
+    return held
+
+
+def _held(lease: Path) -> bool:
+    try:
+        with process_lock(lease, time.monotonic() + 0.2):
+            return False
+    except Unavailable:
+        return True
+
+
+def _discard(path: Path) -> None:
+    """Delete a shared environment that no process holds a lease on.
+
+    Callers hold the environment lock. Moving the directory first means a
+    partial deletion never leaves a directory that still looks ready.
+    """
+    if _in_use(path):
+        raise EnvironmentInUse(f"shared environment {path.name} is in use")
+    doomed = path.with_name(f".deleting-{uuid.uuid4().hex}")
+    path.rename(doomed)
+    shutil.rmtree(doomed, ignore_errors=True)
+
+
 def _setup(root: Path) -> int:
-    venv = runtime(root) / "venv"
-    venv.mkdir(parents=True, exist_ok=True)
-    py = python_executable(root)
-    if not py.is_file():
+    identity = lock_identity()
+    venv = shared_environment()
+    with process_lock(_environment_lock(venv), time.monotonic() + 900):
+        # A slow probe under load must not discard an environment in use.
+        if verify_version(root) or (
+            read_json(venv / READY_FILE) == identity
+            and _installed_version(root, timeout=120)
+        ):
+            print(f"Graphify {VERSION} shared environment ready (reused); run update")
+            return 0
+        if venv.is_symlink() or (
+            venv.exists() and venv.resolve().parent != shared_base().resolve()
+        ):
+            raise Unavailable("unsafe shared environment path")
+        if venv.exists():
+            _discard(venv)
         subprocess.run(
             [sys.executable, "-m", "venv", str(venv)],
             check=True,
             timeout=120,
             env=local_env(root),
         )
-    if not verify_version(root):
-        pip = venv / ("Scripts/pip.exe" if os.name == "nt" else "bin/pip")
         subprocess.run(
-            [str(pip), "install", f"graphifyy[mcp]=={VERSION}"],
+            [
+                str(python_executable()),
+                "-m",
+                "pip",
+                "install",
+                "--require-hashes",
+                "--only-binary=:all:",
+                "--disable-pip-version-check",
+                "--no-input",
+                "-r",
+                str(LOCK_FILE),
+            ],
             check=True,
             timeout=600,
             env=local_env(root),
         )
-    if not verify_version(root):
-        raise Unavailable("installed Graphify version mismatch")
-    print(f"Graphify {VERSION} installed locally; run update")
+        if lock_identity() != identity or not _installed_version(root):
+            raise Unavailable("installed Graphify version or lock mismatch")
+        _write_json(venv / READY_FILE, identity)
+    print(f"Graphify {VERSION} installed in shared environment; run update")
     return 0
+
+
+def _prune() -> None:
+    base = shared_base()
+    current = environment_name(lock_identity())
+    if not base.is_dir():
+        return
+    for candidate in sorted(base.iterdir()):
+        if (
+            candidate.name == current
+            or not re.fullmatch(r"\d+(?:\.\d+)+-[0-9a-f]{16}", candidate.name)
+            or candidate.is_symlink()
+            or not candidate.is_dir()
+            or candidate.resolve().parent != base.resolve()
+        ):
+            continue
+        try:
+            with process_lock(_environment_lock(candidate), time.monotonic() + 0.01):
+                _discard(candidate)
+                print(f"Graphify removed: {candidate.name}")
+        except EnvironmentInUse:
+            print(f"Graphify retained (in use): {candidate.name}")
+        except Unavailable:
+            print(f"Graphify retained (locked): {candidate.name}")
+        except OSError:
+            print(f"Graphify retained (in use): {candidate.name}")
+    for leftover in sorted(base.glob(".deleting-*")):
+        if leftover.is_dir() and not leftover.is_symlink():
+            shutil.rmtree(leftover, ignore_errors=True)
 
 
 def _status(root: Path) -> int:
@@ -816,7 +1113,7 @@ def _graph_command(
     if args.command in {"mcp", "export"}:
         return _export_or_mcp(root, args, graph)
     positional, flags = _query_arguments(args.command, args.terms)
-    command = [str(executable(root))]
+    command = [str(executable())]
     if args.command == "query":
         command.extend(["query", *positional, "--graph", str(graph)])
     elif args.command == "path":
@@ -856,22 +1153,29 @@ def _export_or_mcp(root: Path, args: argparse.Namespace, graph: Path) -> int:
 def _dispatch(root: Path, args: argparse.Namespace) -> int:
     if args.command == "setup":
         return _setup(root)
+    if args.command == "prune":
+        _prune()
+        return 0
     if args.command == "update":
-        return update(root)
-    if args.command == "status":
-        return _status(root)
-    if not verify_version(root):
-        raise Unavailable("pinned Graphify unavailable; run setup")
-    generation, graph = active_graph(root)
-    return _graph_command(root, args, generation, graph)
+        return update(root, preparation=args.preparation)
+    with environment_lease(shared_environment(), time.monotonic() + TIMEOUT):
+        if args.command == "status":
+            return _status(root)
+        if not verify_version(root):
+            raise Unavailable("pinned Graphify unavailable; run setup")
+        generation, graph = active_graph(root)
+        return _graph_command(root, args, generation, graph)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("setup")
+    sub.add_parser("prune")
     up = sub.add_parser("update")
-    up.add_argument("--session-start", action="store_true")
+    budget = up.add_mutually_exclusive_group()
+    budget.add_argument("--session-start", action="store_true")
+    budget.add_argument("--preparation", action="store_true")
     sub.add_parser("status")
     for name in ("query", "path", "explain"):
         p = sub.add_parser(name)
