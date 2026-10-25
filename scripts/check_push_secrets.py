@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,11 @@ def outgoing_objects(updates: str) -> set[str]:
     objects = set()
     for line in updates.splitlines():
         _, local, _, remote = line.split()
+        if not all(
+            re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", oid)
+            for oid in (local, remote)
+        ):
+            raise ValueError("Invalid Git object ID; push refused")
         if set(local) == {"0"}:
             continue
         # A remote ref can have advanced without its new tip being fetched.

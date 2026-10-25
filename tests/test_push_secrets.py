@@ -79,6 +79,25 @@ class PushSecretTests(unittest.TestCase):
             scan.git("rev-parse", tip + ":fixture.py").decode().strip(), objects
         )
 
+    def test_malformed_object_ids_are_rejected_before_any_git_call(self):
+        valid = "a" * 40
+        for local, remote in (
+            ("--synthetic-option", valid),
+            (valid, "--synthetic-option"),
+            ("a" * 39, valid),
+            (valid, "g" * 40),
+            ("0" * 40, "invalid"),
+        ):
+            with (
+                self.subTest(local=local, remote=remote),
+                patch.object(scan, "git", side_effect=AssertionError("Git called")),
+                patch.object(
+                    scan.subprocess, "run", side_effect=AssertionError("Git called")
+                ),
+                self.assertRaises(ValueError),
+            ):
+                scan.outgoing_objects(self.update(local, remote))
+
     def test_deleted_ref_and_noop_do_not_require_scanner(self):
         tip = self.commit("clean")
         with patch.object(scan.shutil, "which", side_effect=AssertionError("scanner")):
