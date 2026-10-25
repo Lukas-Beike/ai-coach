@@ -279,6 +279,19 @@ class YazioClientTests(unittest.TestCase):
             self.assertEqual(raised.exception.status, 429)
         self.assertEqual(len(script.bodies()), 2)
 
+    def test_replaced_or_removed_credentials_drop_cached_results(self):
+        holder = {"config": config()}
+        script = Script(tokens=[token()], api=[[hit()]])
+        client = YazioClient(
+            lambda: holder["config"], opener=script, clock=Mock(return_value=0.0)
+        )
+        self.assertEqual(len(client.search("Skyr")), 1)
+        holder["config"] = config(yazio_password="")
+        with self.assertRaises(AppError) as raised:
+            client.search("Skyr")
+        self.assertEqual(raised.exception.reason, "food_database_not_configured")
+        self.assertEqual(len(script.requests), 2)
+
     def test_user_agent_can_be_overridden(self):
         script = Script(tokens=[token()], api=[[]])
         self.client(script, yazio_user_agent="Custom/1").search("Skyr")

@@ -201,6 +201,13 @@ class YazioClient:
         # Reservation, login and request share one lock so concurrent Coach jobs
         # cannot exceed the limit or log in twice.
         with self._lock:
+            self._follow_credentials()
+            if not self._config().yazio_configured:
+                raise AppError(
+                    409,
+                    "Yazio ist nicht konfiguriert.",
+                    reason="food_database_not_configured",
+                )
             now = self._clock()
             cached = self._cache.get(path)
             if cached and now - cached[0] < _CACHE_SECONDS:
@@ -283,7 +290,8 @@ class YazioClient:
             ) from None
         raise AppError(502, UNAVAILABLE, reason="food_database_unavailable") from None
 
-    def _token(self) -> str:
+    def _follow_credentials(self) -> None:
+        """Forget tokens, pauses and cached results of a replaced account."""
         config = self._config()
         identity = (
             config.yazio_email,
@@ -295,6 +303,11 @@ class YazioClient:
             self._identity = identity
             self._access_token = self._refresh_token = ""
             self._login_blocked_until = 0.0
+            self._cache.clear()
+
+    def _token(self) -> str:
+        self._follow_credentials()
+        config = self._config()
         now = self._clock()
         if self._access_token and now < self._expires_at - _TOKEN_MARGIN_SECONDS:
             return self._access_token
