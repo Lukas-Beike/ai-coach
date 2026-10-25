@@ -64,7 +64,7 @@ class GarminObservationTests(unittest.TestCase):
         self.assertIsNone(
             garmin_source_observed_at({"date": None, "nested": ["invalid"]})
         )
-        self.assertIsNone(garmin_sleep_observation_date(None))  # type: ignore[arg-type]
+        self.assertIsNone(garmin_sleep_observation_date(None, "2026-09-04"))  # type: ignore[arg-type]
 
     def test_freshness_date_has_priority_over_raw_sleep(self):
         snapshot = {
@@ -73,15 +73,21 @@ class GarminObservationTests(unittest.TestCase):
                 "sleep": {"observed_at": "2026-09-04T07:00:00Z", "freshness": "current"}
             },
         }
-        self.assertEqual(garmin_sleep_observation_date(snapshot), "2026-09-04")
+        self.assertEqual(
+            garmin_sleep_observation_date(snapshot, "2026-09-06"), "2026-09-04"
+        )
 
     def test_malformed_freshness_value_is_authoritative_without_raw_fallback(self):
         snapshot = {
             "sleep": {"dailySleepDTO": {"calendarDate": "2026-09-04"}},
             "source_freshness": {"sleep": {"observed_at": "malformed-value"}},
         }
-        self.assertEqual(garmin_sleep_observation_date(snapshot), "malformed-")
-        self.assertFalse(garmin_sleep_ready_for_checkin(date(2026, 9, 4), snapshot))
+        self.assertEqual(
+            garmin_sleep_observation_date(snapshot, "2026-09-04"), "malformed-"
+        )
+        self.assertFalse(
+            garmin_sleep_ready_for_checkin(date(2026, 9, 4), snapshot, "2026-09-04")
+        )
 
     def test_sleep_readiness_accepts_current_and_partial_only_for_matching_day(self):
         for freshness in ("current", "partial"):
@@ -92,7 +98,7 @@ class GarminObservationTests(unittest.TestCase):
                     }
                 }
                 self.assertTrue(
-                    garmin_sleep_ready_for_checkin(date(2026, 9, 4), snapshot)
+                    garmin_sleep_ready_for_checkin(date(2026, 9, 4), snapshot, None)
                 )
         stale = {
             "source_freshness": {
@@ -105,13 +111,31 @@ class GarminObservationTests(unittest.TestCase):
             }
         }
         missing = {"source_freshness": {"sleep": {"freshness": "current"}}}
-        self.assertFalse(garmin_sleep_ready_for_checkin(date(2026, 9, 4), stale))
-        self.assertFalse(garmin_sleep_ready_for_checkin(date(2026, 9, 4), wrong_day))
-        self.assertFalse(garmin_sleep_ready_for_checkin(date(2026, 9, 4), missing))
+        self.assertFalse(garmin_sleep_ready_for_checkin(date(2026, 9, 4), stale, None))
+        self.assertFalse(
+            garmin_sleep_ready_for_checkin(date(2026, 9, 4), wrong_day, "2026-09-04")
+        )
+        self.assertFalse(
+            garmin_sleep_ready_for_checkin(date(2026, 9, 4), missing, None)
+        )
+
+    def test_sleep_day_comes_from_the_observation_never_from_raw_sleep(self):
+        raw_today = {"sleep": {"dailySleepDTO": {"calendarDate": "2026-09-04"}}}
+        self.assertFalse(
+            garmin_sleep_ready_for_checkin(date(2026, 9, 4), raw_today, None)
+        )
+        self.assertFalse(
+            garmin_sleep_ready_for_checkin(date(2026, 9, 4), raw_today, "2026-09-03")
+        )
+        self.assertTrue(
+            garmin_sleep_ready_for_checkin(date(2026, 9, 4), {}, "2026-09-04")
+        )
 
     def test_sleep_readiness_rejects_invalid_snapshot_and_checkin_date(self):
-        self.assertFalse(garmin_sleep_ready_for_checkin(date(2026, 9, 4), None))  # type: ignore[arg-type]
-        self.assertFalse(garmin_sleep_ready_for_checkin("2026-09-04", {}))  # type: ignore[arg-type]
+        self.assertFalse(
+            garmin_sleep_ready_for_checkin(date(2026, 9, 4), None, "2026-09-04")
+        )  # type: ignore[arg-type]
+        self.assertFalse(garmin_sleep_ready_for_checkin("2026-09-04", {}, "2026-09-04"))  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

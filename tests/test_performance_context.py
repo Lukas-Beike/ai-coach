@@ -2,6 +2,14 @@ import copy
 import unittest
 from datetime import date, timedelta
 
+from canonical_recovery_support import (
+    recovery_inputs,
+    recovery_observation,
+    recovery_only_inputs,
+)
+
+from backend.canonical.vocabulary import MetricKind
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.context import current_performance_context
 
 
@@ -136,7 +144,9 @@ class PerformanceContextTests(unittest.TestCase):
             },
         }
 
-        result = current_performance_context(snapshot, garmin, {}, today)
+        result = current_performance_context(
+            snapshot, garmin, {}, today, canonical=recovery_only_inputs(garmin)
+        )
 
         self.assertEqual(result["metrics"]["steps_7d"]["value"], 100)
         self.assertEqual(result["metrics"]["steps_7d"]["freshness"], "partial")
@@ -197,6 +207,37 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertTrue(result["available"])
         self.assertIn("metrics", result)
         self.assertIn("activity_validation", result)
+
+    def test_missing_snapshot_keeps_garmin_baselines_from_observations(self):
+        today = date(2026, 9, 20)
+        nights = [
+            recovery_observation(
+                MetricKind.RESTING_HR,
+                48 + day % 3,
+                (today - timedelta(days=day)).isoformat(),
+                record_id=f"rhr-{day}",
+            )
+            for day in range(20)
+        ]
+        canonical = CanonicalPerformanceInputs(
+            wellness_day=None, ctl=None, atl=None, recovery=recovery_inputs(nights)
+        )
+
+        result = current_performance_context(None, {}, {}, today, canonical=canonical)
+        raw_only = current_performance_context(
+            None,
+            {"resting_hr": [{"calendarDate": "2026-09-20", "restingHR": 50}]},
+            {},
+            today,
+        )
+
+        self.assertFalse(result["available"])
+        baseline = result["personal_recovery"]["baselines"][0]
+        self.assertEqual(baseline["source"], "Garmin Connect")
+        self.assertEqual(baseline["metric"], "resting_hr")
+        self.assertEqual(baseline["status"], "provisional")
+        # The raw Garmin view alone no longer produces a baseline.
+        self.assertEqual(raw_only["personal_recovery"]["baselines"], [])
 
 
 if __name__ == "__main__":

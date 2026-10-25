@@ -3,11 +3,12 @@
 import unittest
 from datetime import date
 
+from canonical_recovery_support import mapped_personal_recovery
+
 from backend.coach.context import coach_performance_projection
 from backend.performance.body import body_history
 from backend.performance.chart_history import analysis_history
 from backend.performance.current_metrics import current_performance_metrics
-from backend.performance.personal_recovery import personal_recovery
 
 TODAY = date(2026, 10, 12)
 CURRENT_KEYS = (
@@ -131,7 +132,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
         self.assertIsNone(result["weight_kg"]["source_provider"])
 
     def test_recovery_baselines_carry_provider_ids_and_policy(self):
-        result = personal_recovery(
+        result = mapped_personal_recovery(
             [{"id": "2026-10-10", "restingHR": 50, "hrv": 60, "sleepSecs": 25200}],
             {},
             {"sleep_target_hours": 8},
@@ -148,7 +149,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
         # backend/coach/context.py is unchanged (owned by U10); the projection
         # passes the additive provider-id keys through without altering the
         # existing baseline contract.
-        recovery = personal_recovery(
+        recovery = mapped_personal_recovery(
             [{"id": "2026-10-10", "restingHR": 50}], {}, {}, TODAY
         )
 

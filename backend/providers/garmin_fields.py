@@ -18,6 +18,7 @@ GARMIN_SLEEP_DATE_KEYS = ("calendarDate", "summaryDate")
 GARMIN_SLEEP_DURATION_ALIASES = ("sleepTimeSeconds", "sleepDuration")
 GARMIN_SLEEP_SCORE_ALIASES = ("sleepScore", "overallSleepScore")
 GARMIN_HRV_LAST_NIGHT_ALIASES = ("hrvLastNight", "lastNightAvg")
+GARMIN_HRV_WEEKLY_ALIASES = ("hrvWeeklyAvg", "weeklyAvg")
 GARMIN_RESTING_HR_ALIASES = ("restingHeartRate", "restingHR", "resting_heart_rate")
 GARMIN_READINESS_ALIASES = (
     "score",

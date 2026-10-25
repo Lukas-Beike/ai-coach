@@ -28,6 +28,7 @@ class CoachLocalAssemblyTests(unittest.TestCase):
             "garmin_payload": Mock(name="garmin_payload"),
             "morning_body_battery": Mock(name="morning_body_battery"),
             "logger": Mock(name="logger"),
+            "observations": Mock(name="observations"),
         }
         assembly = CoachLocalAssembly(
             dependencies=CoachLocalAssembly.Inputs(
@@ -47,6 +48,7 @@ class CoachLocalAssemblyTests(unittest.TestCase):
                     dependencies["garmin_payload"],
                     dependencies["morning_body_battery"],
                     dependencies["logger"],
+                    dependencies["observations"],
                 ),
             )
         )
@@ -72,6 +74,9 @@ class CoachLocalAssemblyTests(unittest.TestCase):
         self.assertIs(
             morning.call_args.args[2], deps["morning_body_battery"].return_value
         )
+        sleep_observations = morning.call_args.kwargs["observations"]
+        self.assertIs(sleep_observations.database_manager, manager)
+        self.assertIs(sleep_observations.reader, deps["observations"])
 
     def test_quick_action_factory_uses_existing_preview_owner(self):
         assembly, deps, manager = self.make_assembly()

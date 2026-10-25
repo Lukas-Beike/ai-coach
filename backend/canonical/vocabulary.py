@@ -85,6 +85,7 @@ class MetricKind(StrEnum):
     RESTING_HR = "resting_hr"
     HRV_RMSSD = "hrv_rmssd"
     HRV_SDNN = "hrv_sdnn"
+    HRV_WEEKLY_AVERAGE = "hrv_weekly_average"
     SLEEP_DURATION = "sleep_duration"
     SLEEP_SCORE = "sleep_score"
     VO2MAX = "vo2max"
@@ -122,6 +123,7 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.RESTING_HR: "bpm",
     MetricKind.HRV_RMSSD: "ms",
     MetricKind.HRV_SDNN: "ms",
+    MetricKind.HRV_WEEKLY_AVERAGE: "ms",
     MetricKind.SLEEP_DURATION: "s",
     MetricKind.SLEEP_SCORE: "score",
     MetricKind.VO2MAX: "ml/kg/min",

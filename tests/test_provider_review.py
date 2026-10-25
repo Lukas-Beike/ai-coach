@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import server_test_support as fixtures
+from canonical_recovery_support import recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
 
 from backend.db.manager import DATABASE_MANAGER_CACHE
@@ -537,11 +538,14 @@ class ProviderReviewTests(unittest.TestCase):
                     "recent_activities": [],
                 }
             )
+            garmin = read_garmin()
             public = performance_context.current_performance_context(
                 server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
-                read_garmin(),
+                garmin,
                 server.ATHLETE_DATA.profile().get(),
                 server.ATHLETE_CLOCK.now().date(),
+                # Recovery values come only from observations (#1411).
+                canonical=recovery_only_inputs(garmin),
             )
             for key in ("cycling_ftp_watts", "weight_kg"):
                 data = public["metrics"][key]

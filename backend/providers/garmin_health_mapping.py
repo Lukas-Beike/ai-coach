@@ -9,8 +9,9 @@ raw value.
 Mapped sections and their canonical kinds:
 
 * ``sleep``: SLEEP_DURATION (seconds) and SLEEP_SCORE.
-* ``hrv``: HRV_RMSSD from the last-night average. The weekly average covers a
-  different window, so it is not used as a stand-in.
+* ``hrv``: HRV_RMSSD from the last-night average and HRV_WEEKLY_AVERAGE from the
+  weekly average. The weekly average covers a different window, so it is its own
+  kind and never a stand-in for the last-night value.
 * ``resting_hr``: RESTING_HR.
 * ``readiness``: READINESS.
 * ``max_metrics``: VO2MAX from the generic, cycling and running objects.
@@ -137,6 +138,7 @@ from backend.providers.garmin_fields import (
     GARMIN_FLOORS_ALIASES,
     GARMIN_FTP_ALIASES,
     GARMIN_HRV_LAST_NIGHT_ALIASES,
+    GARMIN_HRV_WEEKLY_ALIASES,
     GARMIN_RACE_DISTANCE_ALIASES,
     GARMIN_RACE_TIME_ALIASES,
     GARMIN_READINESS_ALIASES,
@@ -159,7 +161,7 @@ from backend.providers.garmin_weight_walk import (
     weight_payload,
 )
 
-MAPPER_VERSION: Final = 10
+MAPPER_VERSION: Final = 11
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -299,7 +301,14 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
     "hrv": (
         _Group(
             None,
-            (_Field(GARMIN_HRV_LAST_NIGHT_ALIASES, MetricKind.HRV_RMSSD, _DEVICE),),
+            (
+                _Field(GARMIN_HRV_LAST_NIGHT_ALIASES, MetricKind.HRV_RMSSD, _DEVICE),
+                _Field(
+                    GARMIN_HRV_WEEKLY_ALIASES,
+                    MetricKind.HRV_WEEKLY_AVERAGE,
+                    _PROVIDER,
+                ),
+            ),
         ),
     ),
     "resting_hr": (

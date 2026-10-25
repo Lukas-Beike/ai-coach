@@ -59,6 +59,7 @@ EXPECTED_FIXTURE_ROWS: list[tuple[str, float, str, str]] = [
     ("sleep_duration", 27900.0, "2026-10-10", "-"),
     ("sleep_score", 86.0, "2026-10-10", "-"),
     ("hrv_rmssd", 61.0, "2026-10-10", "-"),
+    ("hrv_weekly_average", 58.0, "2026-10-10", "-"),
     ("resting_hr", 49.0, "2026-10-10", "-"),
     ("readiness", 75.0, "2026-10-10", "-"),
     ("vo2max", 57.4, "2026-10-10", "-"),
@@ -484,10 +485,20 @@ class AliasAndUnitTests(unittest.TestCase):
         )
         fallback = _map({"hrv": {"calendarDate": DAY, "lastNightAvg": 61}})
         weekly_only = _map({"hrv": {"calendarDate": DAY, "weeklyAvg": 58}})
+        both = _map(
+            {"hrv": {"calendarDate": DAY, "lastNightAvg": 61, "hrvWeeklyAvg": 57}}
+        )
 
         self.assertEqual(_rows(last_night), [("hrv_rmssd", 70.0, DAY, "-")])
         self.assertEqual(_rows(fallback), [("hrv_rmssd", 61.0, DAY, "-")])
-        self.assertEqual(_rows(weekly_only), [])
+        # The weekly average is its own kind, never a last-night reading.
+        self.assertEqual(
+            _rows(weekly_only), [("hrv_weekly_average", 58.0, DAY, "-")]
+        )
+        self.assertEqual(
+            _rows(both),
+            [("hrv_rmssd", 61.0, DAY, "-"), ("hrv_weekly_average", 57.0, DAY, "-")],
+        )
 
     def test_resting_heart_rate_accepts_every_alias(self) -> None:
         for alias in ("restingHeartRate", "restingHR", "resting_heart_rate"):
@@ -1442,7 +1453,7 @@ class EnduranceScoreTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 10)
+        self.assertEqual(MAPPER_VERSION, 11)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):

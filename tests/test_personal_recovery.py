@@ -1,9 +1,10 @@
 import unittest
 from datetime import UTC, date, datetime, timedelta
 
+from canonical_recovery_support import mapped_personal_recovery
+
 from backend.athlete.profile import normalize_profile
 from backend.errors import AppError
-from backend.performance.personal_recovery import personal_recovery
 
 
 class PersonalRecoveryTests(unittest.TestCase):
@@ -28,7 +29,7 @@ class PersonalRecoveryTests(unittest.TestCase):
         ):
             rows = self.rows(nights)
             rows[0]["restingHR"] = 100
-            result = personal_recovery(rows, {}, {}, self.today)
+            result = mapped_personal_recovery(rows, {}, {}, self.today)
             pulse = next(
                 row for row in result["baselines"] if row["metric"] == "resting_hr"
             )
@@ -52,7 +53,7 @@ class PersonalRecoveryTests(unittest.TestCase):
                 "hrvSDNN": 200,
             }
         )
-        result = personal_recovery(rows, {}, {}, self.today)
+        result = mapped_personal_recovery(rows, {}, {}, self.today)
         self.assertEqual(
             {"RMSSD", "SDNN"},
             {
@@ -68,7 +69,7 @@ class PersonalRecoveryTests(unittest.TestCase):
                 for point in row["history"]
             )
         )
-        stale = personal_recovery(self.rows(30)[3:], {}, {}, self.today)
+        stale = mapped_personal_recovery(self.rows(30)[3:], {}, {}, self.today)
         self.assertTrue(
             all(row["status"] == "insufficient_data" for row in stale["baselines"])
         )
@@ -77,7 +78,7 @@ class PersonalRecoveryTests(unittest.TestCase):
         rows = self.rows(14)
         for row in rows:
             row["hrv_method"] = "SDNN"
-        result = personal_recovery(rows, {}, {}, self.today)
+        result = mapped_personal_recovery(rows, {}, {}, self.today)
         self.assertEqual(
             ["RMSSD"],
             [
@@ -90,14 +91,14 @@ class PersonalRecoveryTests(unittest.TestCase):
     def test_deficit_uses_known_nights_and_never_offsets_with_long_sleep(self):
         rows = self.rows(5)
         rows[0]["sleepSecs"] = 10 * 3600
-        result = personal_recovery(rows, {}, {"sleep_target_hours": "8"}, self.today)
+        result = mapped_personal_recovery(rows, {}, {"sleep_target_hours": "8"}, self.today)
         deficit = result["sleep_deficits"][0]
         self.assertEqual(
             (5, 6, "partial"),
             (deficit["deficit_hours"], deficit["known_nights"], deficit["status"]),
         )
         self.assertEqual(
-            [], personal_recovery(rows, {}, {}, self.today)["sleep_deficits"]
+            [], mapped_personal_recovery(rows, {}, {}, self.today)["sleep_deficits"]
         )
 
     def test_profile_target_requires_valid_explicit_value(self):
@@ -113,7 +114,7 @@ class PersonalRecoveryTests(unittest.TestCase):
         for row in rows:
             if row["id"] < "2026-08-21":
                 row["restingHR"] = 100
-        result = personal_recovery(rows, {}, {}, self.today)
+        result = mapped_personal_recovery(rows, {}, {}, self.today)
         pulse = next(
             row for row in result["baselines"] if row["metric"] == "resting_hr"
         )
@@ -166,7 +167,7 @@ class PersonalRecoveryTests(unittest.TestCase):
             (28, "ok"),
         ):
             with self.subTest(nights=nights):
-                result = personal_recovery(
+                result = mapped_personal_recovery(
                     [],
                     {"sleep": self.sleep_rows(nights)},
                     {"timezone": "UTC"},
@@ -190,7 +191,7 @@ class PersonalRecoveryTests(unittest.TestCase):
         rows[1]["sleepEndTimestampGMT"] = int(
             datetime(2026, 9, 2, 6, 10, tzinfo=UTC).timestamp() * 1000
         )
-        result = personal_recovery(
+        result = mapped_personal_recovery(
             [], {"sleep": rows}, {"timezone": "UTC"}, self.today
         )["regularity"]
         self.assertEqual(
@@ -226,7 +227,7 @@ class PersonalRecoveryTests(unittest.TestCase):
             },
             *malformed,
         ]
-        item = personal_recovery(
+        item = mapped_personal_recovery(
             [], {"sleep": sleep}, {"timezone": "Europe/Berlin"}, self.today
         )["regularity"]["series"][0]
         observed = next(

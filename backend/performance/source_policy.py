@@ -130,6 +130,12 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
                 (ProviderBounds(_GARMIN, 1.0, 300.0),),
                 latest_intervals_row=True,
             ),
+            # Garmin's weekly HRV average: only a labelled fallback for RMSSD.
+            SourceRule(
+                MetricKind.HRV_WEEKLY_AVERAGE,
+                (_GARMIN,),
+                (ProviderBounds(_GARMIN, 1.0, 300.0),),
+            ),
             # Sleep duration and score: Garmin before Intervals. Readiness: the reverse.
             SourceRule(
                 MetricKind.SLEEP_DURATION,
@@ -236,6 +242,16 @@ def _current_rank(index: int, observation: Observation, kind: MetricKind) -> _Ra
     )
     tie = index if observation.provenance.provider is _GARMIN else -index
     return (day, moment, tie)
+
+
+def within_current_bounds(observation: Observation) -> bool:
+    """Return True when the observation passes its kind's current-rule bounds.
+
+    Averages of the current values use this so they skip the same implausible
+    days the current selection skips. Kinds without a rule have no bounds.
+    """
+    rule = CURRENT_RULES.get(observation.kind)
+    return rule is None or _within_bounds(observation, rule)
 
 
 def _within_bounds(observation: Observation, rule: SourceRule) -> bool:

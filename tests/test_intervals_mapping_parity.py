@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from canonical_recovery_support import mapped_recovery_inputs
+
 from backend.activities.identity import activity_kind
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.mapping import IssueReason, MappingResult
@@ -210,10 +212,6 @@ def expect_value(
 
 def records_by_id(result: MappingResult[ActivityRecord]) -> dict[str, ActivityRecord]:
     return {record.activity_id: record for record in result.records}
-
-
-def latest_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    return max(rows, key=lambda row: str(row.get("id") or ""))
 
 
 def wall_clock(record: ActivityRecord) -> datetime:
@@ -418,10 +416,12 @@ class WellnessParityTests(unittest.TestCase):
                     expect_value(result, MetricKind.ATL, day=row["id"]), load["atl"]
                 )
 
-    def test_recovery_values_match_the_legacy_recovery_context(self) -> None:
+    def test_recovery_values_match_the_recovery_context(self) -> None:
+        # Since #1411 the recovery context reads these observations directly.
         result = map_wellness(self.rows)
-        latest = latest_row(self.rows)
-        legacy = performance_recovery_context({}, latest, self.rows, TODAY)
+        legacy = performance_recovery_context(
+            mapped_recovery_inputs(None, self.rows), TODAY
+        )
         sleep_seconds = expect_value(result, MetricKind.SLEEP_DURATION, day=LATEST_DAY)
         self.assertEqual(legacy["sleep_hours"], round(sleep_seconds / 3600, 1))
         self.assertEqual(
@@ -466,9 +466,11 @@ class WellnessParityTests(unittest.TestCase):
             ),
         )
 
-    def test_compact_loss_of_resting_hr_is_seen_by_the_legacy_reader_too(self) -> None:
-        # The compact wellness fields do not carry ``resting_hr``. The legacy
-        # recovery reader uses the same snapshot, so it loses the value as well.
+    def test_compact_loss_of_resting_hr_is_seen_by_the_recovery_reader_too(
+        self,
+    ) -> None:
+        # The compact wellness fields do not carry ``resting_hr``. Observations
+        # mapped from the compact row lose it, so the recovery context does too.
         row = {"id": LATEST_DAY, "resting_hr": 47}
         compact_row = compact_form({}, [], [row])["recent_wellness"][0]
         self.assertEqual(
@@ -479,12 +481,15 @@ class WellnessParityTests(unittest.TestCase):
             first_value(map_wellness([compact_row]), MetricKind.RESTING_HR)
         )
         self.assertEqual(
-            performance_recovery_context({}, row, [row], TODAY)["resting_hr"], 47
+            performance_recovery_context(mapped_recovery_inputs(None, [row]), TODAY)[
+                "resting_hr"
+            ],
+            47,
         )
         self.assertIsNone(
-            performance_recovery_context({}, compact_row, [compact_row], TODAY)[
-                "resting_hr"
-            ]
+            performance_recovery_context(
+                mapped_recovery_inputs(None, [compact_row]), TODAY
+            )["resting_hr"]
         )
 
     def test_comma_decimal_weight_is_accepted_by_mapper_and_legacy(self) -> None:

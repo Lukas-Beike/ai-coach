@@ -14,6 +14,8 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import Mock
 
+from canonical_recovery_support import recovery_only_inputs
+
 from backend.coach.context import (
     COACH_CONTEXT_SECTION_LIMITS,
     CoachIntervalsContextService,
@@ -108,6 +110,30 @@ def _intervals_snapshot(**overrides: Any) -> dict[str, Any]:
     return snapshot
 
 
+def _context(
+    snapshot: dict[str, Any] | None,
+    garmin: dict[str, Any],
+    profile: dict[str, Any],
+    today: date,
+) -> dict[str, Any]:
+    """Current performance with recovery observations mapped from the fixtures."""
+    return current_performance_context(
+        snapshot,
+        garmin,
+        profile,
+        today,
+        canonical=_recovery(garmin, snapshot),
+    )
+
+
+def _recovery(garmin: dict[str, Any], snapshot: dict[str, Any] | None) -> Any:
+    """Recovery values come only from observations (#1411); map the fixtures."""
+    wellness = (snapshot or {}).get("recent_wellness")
+    return recovery_only_inputs(
+        garmin, wellness if isinstance(wellness, list) else None
+    )
+
+
 def _performance_reader(
     garmin_payload: dict[str, Any],
 ) -> tuple[CoachPerformanceContextReader, Mock]:
@@ -194,7 +220,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
     def test_unavailable_projection_garmin_balance_follows_freshness_and_presence(
         self,
     ) -> None:
-        result = current_performance_context(None, _garmin_payload(), {}, TODAY)
+        result = _context(None, _garmin_payload(), {}, TODAY)
 
         self.assertFalse(result["available"])
         self.assertEqual(result["source"], INTERVALS_SOURCE)
@@ -206,7 +232,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
 
         stale = _garmin_payload()
         stale["source_freshness"]["training_load_balance"]["freshness"] = "stale"
-        stale_result = current_performance_context(None, stale, {}, TODAY)
+        stale_result = _context(None, stale, {}, TODAY)
         # Quirk: a stale balance keeps its source and date but drops every metric.
         stale_balance = stale_result["garmin_training_load"]["four_week_balance"]
         self.assertEqual(stale_balance["source"], GARMIN_SOURCE)
@@ -217,17 +243,17 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         del without_balance["training_load_balance"]
         self.assertNotIn(
             "garmin_training_load",
-            current_performance_context(None, without_balance, {}, TODAY),
+            _context(None, without_balance, {}, TODAY),
         )
 
     def test_available_projection_always_has_garmin_training_load_key(self) -> None:
         # Quirk: unlike the unavailable projection, the key is always present here.
-        result = current_performance_context(_intervals_snapshot(), {}, {}, TODAY)
+        result = _context(_intervals_snapshot(), {}, {}, TODAY)
 
         self.assertEqual(result["garmin_training_load"], {})
 
     def test_available_projection_top_level_keys_are_pinned(self) -> None:
-        result = current_performance_context(_intervals_snapshot(), {}, {}, TODAY)
+        result = _context(_intervals_snapshot(), {}, {}, TODAY)
 
         self.assertEqual(
             set(result),
@@ -255,7 +281,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         )
 
     def test_athlete_icu_ftp_is_the_labelled_intervals_fallback(self) -> None:
-        result = current_performance_context(_intervals_snapshot(), {}, {}, TODAY)
+        result = _context(_intervals_snapshot(), {}, {}, TODAY)
 
         self.assertEqual(result["metrics"]["cycling_ftp_watts"]["value"], 250)
         self.assertEqual(
@@ -264,7 +290,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         self.assertEqual(result["thresholds"]["icu_ftp"], 250)
 
     def test_generic_lthr_is_labelled_as_allgemein_not_as_intervals(self) -> None:
-        result = current_performance_context(_intervals_snapshot(), {}, {}, TODAY)
+        result = _context(_intervals_snapshot(), {}, {}, TODAY)
 
         self.assertEqual(result["metrics"]["bike_threshold_hr_bpm"]["value"], 171)
         self.assertEqual(
@@ -275,9 +301,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
     def test_garmin_cycling_ftp_wins_and_thresholds_drop_the_source_label(
         self,
     ) -> None:
-        result = current_performance_context(
-            _intervals_snapshot(), _garmin_payload(), {}, TODAY
-        )
+        result = _context(_intervals_snapshot(), _garmin_payload(), {}, TODAY)
 
         ftp = result["metrics"]["cycling_ftp_watts"]
         self.assertEqual(ftp["value"], 265)
@@ -288,49 +312,48 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         self.assertEqual(result["thresholds"]["icu_ftp"], 265)
         self.assertNotIsInstance(result["thresholds"]["icu_ftp"], dict)
 
-    def test_recovery_id_follows_resting_hr_then_hrv_then_wellness(self) -> None:
-        # Quirk: the dated sleepTimeSeconds record (2026-05-04) supplies
-        # recovery.sleep_hours, but its date never becomes recovery.id, which
-        # follows the resting HR date.
+    def test_recovery_id_follows_sleep_then_resting_hr_then_hrv_then_wellness(
+        self,
+    ) -> None:
+        # Intended (#1411): the Garmin sleep night now carries its date, so it
+        # becomes recovery.id first; legacy left the seconds-derived date empty.
         sleep_only = [{"calendarDate": "2026-05-04", "sleepTimeSeconds": 27000}]
         resting_hr = [{"calendarDate": "2026-05-03", "restingHeartRate": 49}]
         hrv = [{"calendarDate": "2026-05-02", "lastNightAvg": 58}]
-        wellness = [{"id": "2026-05-04", "ctl": 60}]
+        wellness = [{"id": "2026-05-01", "ctl": 60}]
 
-        full = current_performance_context(
+        full = _context(
             _intervals_snapshot(recent_wellness=wellness),
             {"sleep": sleep_only, "resting_hr": resting_hr, "hrv": hrv},
             {},
             TODAY,
         )
         self.assertEqual(full["recovery"]["sleep_hours"], 7.5)
-        self.assertEqual(full["recovery"]["id"], "2026-05-03")
+        self.assertEqual(full["recovery"]["id"], "2026-05-04")
 
-        no_resting = current_performance_context(
+        no_sleep = _context(
             _intervals_snapshot(recent_wellness=wellness),
-            {"sleep": sleep_only, "hrv": hrv},
+            {"resting_hr": resting_hr, "hrv": hrv},
             {},
             TODAY,
         )
-        self.assertEqual(no_resting["recovery"]["id"], "2026-05-02")
+        self.assertEqual(no_sleep["recovery"]["id"], "2026-05-03")
 
-        wellness_only = current_performance_context(
-            _intervals_snapshot(recent_wellness=wellness),
-            {"sleep": sleep_only},
-            {},
-            TODAY,
+        hrv_only = _context(
+            _intervals_snapshot(recent_wellness=wellness), {"hrv": hrv}, {}, TODAY
         )
-        self.assertEqual(wellness_only["recovery"]["id"], "2026-05-04")
+        self.assertEqual(hrv_only["recovery"]["id"], "2026-05-02")
 
-        no_rows = current_performance_context(
-            _intervals_snapshot(recent_wellness=[]), {"sleep": sleep_only}, {}, TODAY
+        wellness_only = _context(
+            _intervals_snapshot(recent_wellness=wellness), {}, {}, TODAY
         )
+        self.assertEqual(wellness_only["recovery"]["id"], "2026-05-01")
+
+        no_rows = _context(_intervals_snapshot(recent_wellness=[]), {}, {}, TODAY)
         self.assertIsNone(no_rows["recovery"]["id"])
 
     def test_recovery_source_freshness_lists_only_garmin_sourced_values(self) -> None:
-        result = current_performance_context(
-            _intervals_snapshot(), _garmin_payload(), {}, TODAY
-        )
+        result = _context(_intervals_snapshot(), _garmin_payload(), {}, TODAY)
 
         recovery = result["recovery"]
         self.assertEqual(recovery["restingHR_source"], GARMIN_SOURCE)
@@ -361,9 +384,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
             }
         ]
 
-        result = current_performance_context(
-            _intervals_snapshot(recent_wellness=wellness), {}, {}, TODAY
-        )
+        result = _context(_intervals_snapshot(recent_wellness=wellness), {}, {}, TODAY)
 
         recovery = result["recovery"]
         self.assertEqual(recovery["restingHR"], 52)
@@ -378,9 +399,11 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
     def test_realistic_garmin_payload_keeps_source_labels_in_current_performance(
         self,
     ) -> None:
-        reader, _ = _performance_reader(_garmin_payload())
+        garmin = _garmin_payload()
+        reader, _ = _performance_reader(garmin)
+        snapshot = _intervals_snapshot()
 
-        result = reader.current_performance(_intervals_snapshot())
+        result = reader.current_performance(snapshot, _recovery(garmin, snapshot))
 
         self.assertEqual(
             result["metrics"]["cycling_ftp_watts"]["source"], GARMIN_SOURCE
@@ -398,9 +421,11 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
         )
 
     def test_garmin_vendor_fields_do_not_reach_current_performance(self) -> None:
-        reader, _ = _performance_reader(_garmin_payload())
+        garmin = _garmin_payload()
+        reader, _ = _performance_reader(garmin)
+        snapshot = _intervals_snapshot()
 
-        result = reader.current_performance(_intervals_snapshot())
+        result = reader.current_performance(snapshot, _recovery(garmin, snapshot))
 
         self.assertNotIn(VENDOR_SENTINEL, json.dumps(result, ensure_ascii=False))
 
@@ -717,9 +742,10 @@ class CoachPerformanceBudgetTests(unittest.TestCase):
             all_sync_days=-1,
             synced_at="2026-05-04T08:00:00+00:00",
         )
-        reader, _ = _performance_reader(_eighty_four_day_garmin_payload())
+        garmin = _eighty_four_day_garmin_payload()
+        reader, _ = _performance_reader(garmin)
 
-        performance = reader.current_performance(snapshot)
+        performance = reader.current_performance(snapshot, _recovery(garmin, snapshot))
         limit = COACH_CONTEXT_SECTION_LIMITS["current_performance"]
         bounded, truncations = bounded_coach_context_sections(
             {"current_performance": performance},
@@ -749,8 +775,8 @@ class CoachPerformanceBudgetTests(unittest.TestCase):
         garmin = _eighty_four_day_garmin_payload()
         reader, _ = _performance_reader(garmin)
 
-        coach = reader.current_performance(snapshot)
-        ui = current_performance_context(snapshot, garmin, {"timezone": "UTC"}, TODAY)
+        coach = reader.current_performance(snapshot, _recovery(garmin, snapshot))
+        ui = _context(snapshot, garmin, {"timezone": "UTC"}, TODAY)
 
         for row in coach["personal_recovery"]["baselines"]:
             self.assertNotIn("history", row)
