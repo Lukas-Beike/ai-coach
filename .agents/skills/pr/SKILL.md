@@ -31,7 +31,7 @@ meaningful state changes.
 4. Identify the current branch, its upstream remote, and the `develop` branch. The current
    branch must be a feature/topic branch; never rebase or push `develop`, `main`, or another
    protected branch.
-5. Scan and read the repository-local [code-review skill](../code-review/SKILL.md). It supports
+5. Read the repository-local [code-review skill](../code-review/SKILL.md). It supports
    direct Markdown invocation by any agent; no host slash command is required. If the file is
    missing or unreadable, report that exact blocker.
 6. Inspect staged, unstaged, and untracked changes against this session's task. The `pr` command
@@ -70,9 +70,15 @@ meaningful state changes.
    fix), and rerun the affected checks. Do not weaken security, remove tests, skip required
    checks, or mask an environmental/provider failure as a code fix.
 
+## Outgoing secret check
+
+Use `git -c core.hooksPath=.githooks push` for every push, including force-with-lease.
+The repository pre-push hook scans outgoing committed blobs and blocks on missing
+Sonar, findings or scan errors. Never bypass it with `--no-verify`.
+
 ## Code review gate
 
-1. Before pushing or creating the pull request, scan and read the repository-local [code-review
+1. Before pushing or creating the pull request, read the repository-local [code-review
    skill](../code-review/SKILL.md) and execute it from the session worktree on the rebased
    branch's complete diff. Name the base and range explicitly as `<remote>/develop...HEAD`, with
    the same freshly fetched remote-qualified `develop` used for the rebase. Request `depth=max`,

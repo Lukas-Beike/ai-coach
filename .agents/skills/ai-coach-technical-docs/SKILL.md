@@ -12,7 +12,7 @@ No upstream text, scripts, or templates are vendored here.
 1. Infer audience, task, desired decision, and document owner from the request and
    current code. Ask only for missing information that changes the result; do not
    require an interview or a separate workflow opt-in for an authorized draft.
-2. Scan relevant sources before reading. Trace the actual behavior and record
+2. Read relevant sources directly. Trace the actual behavior and record
    the reviewed revision. Separate implemented behavior, proposals, alternatives,
    and unverified assumptions. For a decision, explain the concrete problem,
    chosen option, meaningful tradeoffs, and observable acceptance evidence.

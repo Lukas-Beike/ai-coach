@@ -74,34 +74,6 @@ class GraphifyLocalPureTests(TestCase):
                 )
             )
 
-    def test_scanner_failure_in_state_never_records_clean_hashes(self):
-        binding = {"scanner": "synthetic", "engine": [["engine", [1]]]}
-        for prior in (None, {"binding": binding, "clean_hashes": []}):
-            with self.subTest(prior=prior), tempfile.TemporaryDirectory() as temp:
-                root = Path(temp)
-                source = root / "source.py"
-                source.write_text("pass\n")
-                cache = graph.runtime(root) / "scan-cache.json"
-                if prior is not None:
-                    cache.parent.mkdir(parents=True)
-                    cache.write_text(json.dumps(prior))
-                before = cache.read_bytes() if prior is not None else None
-                with (
-                    patch.object(
-                        graph, "corpus_paths", return_value=[("backend/x.py", source)]
-                    ),
-                    patch.object(
-                        graph, "scan", side_effect=graph.Unavailable("failed")
-                    ),
-                    patch.object(graph, "_scan_binding", return_value=binding),
-                    self.assertRaises(graph.Unavailable),
-                ):
-                    graph.state(root)
-                if prior is None:
-                    self.assertFalse(cache.exists())
-                else:
-                    self.assertEqual(cache.read_bytes(), before)
-
     def test_local_environment_excludes_secrets_and_disables_backends(self):
         with (
             tempfile.TemporaryDirectory() as temp,
@@ -129,21 +101,10 @@ class GraphifyLocalTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        scanner = self.root / "synthetic-sonar"
-        scanner.touch()
-        scanner_path = patch.object(graph.shutil, "which", return_value=str(scanner))
-        scanner_path.start()
-        self.addCleanup(scanner_path.stop)
         # Environment leases must never touch the real shared directory.
         shared = patch.object(graph, "shared_base", return_value=self.root / "shared")
         shared.start()
         self.addCleanup(shared.stop)
-        # CI hosts have no Sonar secrets engine; without one no cache is reused.
-        engine = patch.object(
-            graph, "_scan_engine", return_value=[["sonar-secrets-1", [1, 2, 3]]]
-        )
-        engine.start()
-        self.addCleanup(engine.stop)
         (self.root / ".gitignore").write_text(".graphify-local/\ngraphify-out/\n")
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         (self.root / "backend").mkdir()
@@ -174,11 +135,8 @@ class GraphifyLocalTests(unittest.TestCase):
         (self.root / "backend" / ".env").write_text("not inspected")
         (self.root / ".graphify-local").mkdir()
         (self.root / ".graphify-local" / "bad.py").write_text("ignored")
-        with patch.object(graph, "scan") as scanner:
-            paths = graph.corpus_paths(self.root)
-            self.assertEqual([name for name, _ in paths], ["backend/one.py"])
-            graph.scan(paths)
-            scanner.assert_called_once()
+        paths = graph.corpus_paths(self.root)
+        self.assertEqual([name for name, _ in paths], ["backend/one.py"])
 
     def test_sonar_secrets_worktree_is_excluded_at_any_depth(self):
         nested = self.root / "tests" / ".sonar-secrets-cli-workdir" / "fixture.py"
@@ -199,77 +157,52 @@ class GraphifyLocalTests(unittest.TestCase):
             paths = graph.corpus_paths(self.root)
             self.assertEqual([name for name, _ in paths], ["backend/one.py"])
 
-    def test_scanner_failure_fails_closed_without_forwarding_output(self):
-        with (
-            patch.object(graph.shutil, "which", return_value="sonar"),
-            patch.object(
-                graph.subprocess,
-                "run",
-                return_value=subprocess.CompletedProcess(
-                    [], 2, b"secret finding", b"raw"
-                ),
-            ),
-            self.assertRaises(graph.Unavailable),
-        ):
-            graph.scan(
-                [("backend/one.py", self.root / "backend/one.py")],
-                time.monotonic() + 5,
-            )
-
-    def test_scanner_missing_fails_closed(self):
-        with (
-            patch.object(graph.shutil, "which", return_value=None),
-            self.assertRaises(graph.Unavailable),
-        ):
-            graph.scan(
-                [("backend/one.py", self.root / "backend/one.py")],
-                time.monotonic() + 5,
-            )
-
-    def test_scanner_batches_paths(self):
-        paths = [
-            (f"backend/file-{i}.py", self.root / "backend" / "one.py")
-            for i in range(71)
-        ]
-        with (
-            patch.object(graph.shutil, "which", return_value="sonar"),
-            patch.object(
-                graph.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
-            ) as run,
-        ):
-            graph.scan(paths, time.monotonic() + 5)
-        self.assertEqual(run.call_count, 3)
-        self.assertLessEqual(
-            max(len(call.args[0]) - 3 for call in run.call_args_list), 35
-        )
-
     def test_generation_pointer_rejects_traversal(self):
         with self.assertRaises(graph.Unavailable):
             graph.generation_dir(self.root, {"generation": "../outside"})
 
+    def test_snapshot_needs_no_scanner(self):
+        with patch.object(graph.shutil, "which", side_effect=AssertionError("scanner")):
+            paths, fingerprint, hashes = graph.state(self.root)
+        self.assertEqual([name for name, _ in paths], ["backend/one.py"])
+        self.assertTrue(fingerprint)
+        self.assertIn("backend/one.py", hashes)
+
+    def test_snapshot_rejects_concurrent_source_change(self):
+        read = Path.read_bytes
+        source = self.root / "backend/one.py"
+
+        def edit(path):
+            content = read(path)
+            if path == source:
+                source.write_text("def one(): return 222\n")
+            return content
+
+        with (
+            patch.object(Path, "read_bytes", edit),
+            self.assertRaisesRegex(graph.Unavailable, graph.SOURCE_CHANGED),
+        ):
+            graph.state(self.root)
+
     def test_fingerprint_changes_for_content_branch_and_dirty_state(self):
-        with patch.object(graph, "scan"):
-            _, original, _ = graph.state(self.root, time.monotonic() + 5)
-            (self.root / "backend" / "one.py").write_text("def one(): return 2\n")
-            _, changed, _ = graph.state(self.root, time.monotonic() + 5)
-            self.assertNotEqual(original, changed)
-            (self.root / "backend" / "one.py").write_text("def one(): return 1\n")
-            subprocess.run(
-                ["git", "-C", str(self.root), "checkout", "-qb", "other"], check=True
-            )
-            _, branch, _ = graph.state(self.root, time.monotonic() + 5)
-            self.assertNotEqual(original, branch)
+        _, original, _ = graph.state(self.root, time.monotonic() + 5)
+        (self.root / "backend" / "one.py").write_text("def one(): return 2\n")
+        _, changed, _ = graph.state(self.root, time.monotonic() + 5)
+        self.assertNotEqual(original, changed)
+        (self.root / "backend" / "one.py").write_text("def one(): return 1\n")
+        subprocess.run(
+            ["git", "-C", str(self.root), "checkout", "-qb", "other"], check=True
+        )
+        _, branch, _ = graph.state(self.root, time.monotonic() + 5)
+        self.assertNotEqual(original, branch)
 
     def test_deleted_and_renamed_files_change_corpus(self):
-        with patch.object(graph, "scan"):
-            initial, old, _ = graph.state(self.root, time.monotonic() + 5)
-            (self.root / "backend" / "one.py").rename(
-                self.root / "backend" / "renamed.py"
-            )
-            renamed, new, _ = graph.state(self.root, time.monotonic() + 5)
-            self.assertNotEqual(old, new)
-            self.assertEqual([p for p, _ in initial], ["backend/one.py"])
-            self.assertEqual([p for p, _ in renamed], ["backend/renamed.py"])
+        initial, old, _ = graph.state(self.root, time.monotonic() + 5)
+        (self.root / "backend" / "one.py").rename(self.root / "backend" / "renamed.py")
+        renamed, new, _ = graph.state(self.root, time.monotonic() + 5)
+        self.assertNotEqual(old, new)
+        self.assertEqual([p for p, _ in initial], ["backend/one.py"])
+        self.assertEqual([p for p, _ in renamed], ["backend/renamed.py"])
 
     def test_unchanged_generation_reused_and_failure_keeps_previous(self):
         rt = graph.runtime(self.root)
@@ -300,7 +233,6 @@ class GraphifyLocalTests(unittest.TestCase):
             return real_run(command, **kwargs)
 
         with (
-            patch.object(graph, "scan"),
             patch.object(graph, "executable", return_value=tool),
             patch.object(graph, "verify_version", return_value=True),
             patch.object(graph.subprocess, "run", side_effect=fake_run),
@@ -340,7 +272,6 @@ class GraphifyLocalTests(unittest.TestCase):
             return real_run(command, **kwargs)
 
         with (
-            patch.object(graph, "scan"),
             patch.object(graph, "executable", return_value=tool),
             patch.object(graph, "verify_version", return_value=True),
             patch.object(graph.subprocess, "run", side_effect=fake_run),
@@ -386,7 +317,6 @@ class GraphifyLocalTests(unittest.TestCase):
             return real_run(command, **kwargs)
 
         with (
-            patch.object(graph, "scan"),
             patch.object(graph, "executable", return_value=tool),
             patch.object(graph, "verify_version", return_value=True),
             patch.object(graph.subprocess, "run", side_effect=fake_run),
@@ -425,7 +355,6 @@ class GraphifyLocalTests(unittest.TestCase):
             return real_copy(source, destination)
 
         with (
-            patch.object(graph, "scan"),
             patch.object(graph, "executable", return_value=tool),
             patch.object(graph, "verify_version", return_value=True),
             patch.object(graph.subprocess, "run", side_effect=fake_run),
@@ -454,9 +383,6 @@ class GraphifyLocalTests(unittest.TestCase):
             "graph_sha256": hashlib.sha256(graph_file.read_bytes()).hexdigest(),
         }
         (rt / "current.json").write_text(json.dumps(pointer))
-        (rt / "scan-cache.json").write_text(
-            json.dumps({"binding": graph._scan_binding(), "clean_hashes": []})
-        )
         source_read_bytes = Path.read_bytes
 
         def guarded_read_bytes(path):
@@ -465,7 +391,6 @@ class GraphifyLocalTests(unittest.TestCase):
             return source_read_bytes(path)
 
         with (
-            patch.object(graph, "scan", side_effect=AssertionError("scan")),
             patch.object(Path, "read_bytes", guarded_read_bytes),
             patch.object(graph, "verify_version", return_value=True),
         ):
@@ -478,8 +403,7 @@ class GraphifyLocalTests(unittest.TestCase):
         graph_file.parent.mkdir(parents=True)
         graph_file.write_text('{"nodes":[{"id":"n"}],"edges":[]}')
         old_metadata = graph._metadata(self.root)
-        with patch.object(graph, "scan"):
-            fingerprint = graph.state(self.root)[1]
+        fingerprint = graph.state(self.root)[1]
         pointer = {
             "generation": generation,
             "fingerprint": fingerprint,
@@ -502,12 +426,10 @@ class GraphifyLocalTests(unittest.TestCase):
         tool.parent.mkdir(parents=True, exist_ok=True)
         tool.touch()
         with (
-            patch.object(graph, "scan") as scanner,
             patch.object(graph, "executable", return_value=tool),
             patch.object(graph, "verify_version", return_value=True),
         ):
             self.assertEqual(graph.update(self.root), 0)
-            scanner.assert_not_called()
             current = json.loads((rt / "current.json").read_text())
             self.assertEqual(current["generation"], generation)
             self.assertEqual(current["metadata"], graph._metadata(self.root))
@@ -518,7 +440,6 @@ class GraphifyLocalTests(unittest.TestCase):
             self.assertFalse(current["stale"])
             self.assertEqual(graph.active_graph(self.root)[1], graph_file)
             self.assertEqual(graph.update(self.root), 0)
-            scanner.assert_not_called()
 
     def test_corrupt_graph_is_not_reused_or_blessed_by_metadata_refresh(self):
         rt = graph.runtime(self.root)
@@ -526,8 +447,7 @@ class GraphifyLocalTests(unittest.TestCase):
         graph_file = rt / "generations" / generation / "graphify-out" / "graph.json"
         graph_file.parent.mkdir(parents=True)
         graph_file.write_text('{"nodes":[{"id":"original"}],"edges":[]}')
-        with patch.object(graph, "scan"):
-            fingerprint = graph.state(self.root)[1]
+        fingerprint = graph.state(self.root)[1]
         pointer = {
             "generation": generation,
             "fingerprint": fingerprint,
@@ -553,7 +473,6 @@ class GraphifyLocalTests(unittest.TestCase):
             return real_run(command, **kwargs)
 
         with (
-            patch.object(graph, "scan"),
             patch.object(graph, "executable", return_value=tool),
             patch.object(graph, "verify_version", return_value=True),
             patch.object(graph.subprocess, "run", side_effect=fake_run) as run,
@@ -574,8 +493,7 @@ class GraphifyLocalTests(unittest.TestCase):
         graph_file = rt / "generations" / generation / "graphify-out" / "graph.json"
         graph_file.parent.mkdir(parents=True)
         graph_file.write_text('{"nodes":[],"edges":[]}')
-        with patch.object(graph, "scan"):
-            fingerprint = graph.state(self.root)[1]
+        fingerprint = graph.state(self.root)[1]
         pointer = {
             "generation": generation,
             "fingerprint": fingerprint,
@@ -598,7 +516,6 @@ class GraphifyLocalTests(unittest.TestCase):
             return real_run(command, **kwargs)
 
         with (
-            patch.object(graph, "scan"),
             patch.object(graph, "executable", return_value=tool),
             patch.object(graph, "verify_version", return_value=True),
             patch.object(graph.subprocess, "run", side_effect=fake_run),
@@ -669,18 +586,6 @@ class GraphifyLocalTests(unittest.TestCase):
         self.assertTrue(all(command[-2] == "--graph" for command in launched))
         self.assertEqual(launched[1][1:3], ["query", "find:thing (v2)"])
 
-    def test_metadata_invalidation_causes_content_scan(self):
-        with patch.object(graph, "scan") as scanner:
-            before = graph._metadata(self.root)
-            (self.root / "backend" / "one.py").write_text("def one(): return 22\n")
-            after = graph._metadata(self.root)
-            self.assertNotEqual(before, after)
-            paths = graph.corpus_paths(self.root)
-            graph.scan(paths)
-            scanner.assert_called_once_with(paths)
-            graph.state(self.root, time.monotonic() + 5)
-            self.assertEqual(scanner.call_count, 2)
-
     def test_active_graph_and_status_validate_metadata_without_scan(self):
         rt = graph.runtime(self.root)
         generation = "b" * 32
@@ -697,9 +602,8 @@ class GraphifyLocalTests(unittest.TestCase):
             "graph_sha256": hashlib.sha256(graph_file.read_bytes()).hexdigest(),
         }
         (rt / "current.json").write_text(json.dumps(pointer))
-        # Reads must not need the Sonar scanner; only updates scan.
+        # Graph operations do not require a Sonar scanner.
         with (
-            patch.object(graph, "scan", side_effect=AssertionError("scan")),
             patch.object(graph, "verify_version", return_value=True),
             patch.object(graph.shutil, "which", return_value=None),
         ):
@@ -731,7 +635,6 @@ class GraphifyLocalTests(unittest.TestCase):
 
     def test_missing_tool_does_not_install(self):
         with (
-            patch.object(graph, "scan"),
             patch.object(graph, "executable", return_value=self.root / "absent"),
             patch.object(graph, "verify_version", return_value=False),
         ):

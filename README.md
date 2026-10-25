@@ -644,7 +644,7 @@ one is completed on resumption before final handoff.
 
 Coding tasks default to the repository's [Ponytail workflow](.agents/skills/ai-coach-ponytail/SKILL.md)
 in `full` mode: the smallest complete change, reusing existing code before adding
-dependencies or abstractions. Any agent can scan and read its Markdown directly;
+dependencies or abstractions. Any agent can read its Markdown directly;
 the external Ponytail plugin is optional. Say `ponytail lite`, `ponytail full`,
 `ponytail ultra`, or `stop ponytail` to change the session mode. Repository safety
 rules and required checks still apply. This is instruction routing, not a CI gate.
@@ -680,7 +680,7 @@ store, hosted service, or model credentials are required. Its config/data homes
 are isolated under ignored `.openspec-local/` in the working directory, including
 profile migrations triggered by `init` or `update`. The universal
 `agents` adapter installs six skills directly into `.agents/skills/`, shared
-by agents that support that directory. Other agents scan and read the linked
+by agents that support that directory. Other agents read the linked
 skills in the index. Restart a session if its skill catalog was already loaded.
 Host-specific slash commands are not installed; plain-language requests such
 as "use openspec-propose to plan a backfill of Coach write authorization" work
@@ -756,8 +756,8 @@ One shared virtual environment per version and lock hash lives under
 on POSIX. Graphs, update locks, isolated home and exports stay per worktree
 under `.graphify-local/`. Session hooks never install missing tools.
 Preparation uses `update --preparation` with a 600-second budget; hooks and
-plain `update` keep 180 seconds. A local content-hash cache skips secret scans
-only for content already reported clean by the same scanner and corpus rules.
+plain `update` keep 180 seconds. Graphify does not require Sonar; source allowlists
+and credential/runtime exclusions remain enforced.
 Codex and Claude Code are configured to run the same local `update
 --session-start` command synchronously at session start and resume. This keeps
 the graph fresh before use; after edits during a session, run
@@ -789,8 +789,8 @@ model and is outside this integration. Always check current source, callers,
 tests, and applicable instructions before acting on graph findings. Broad or
 stale matches can be incomplete; use ordinary source search when needed.
 
-The Codex hook is configured in `.codex/hooks.json` and preserves the existing
-Sonar prompt scanner. Codex requires accepting the repository hook in its
+The Codex hook is configured in `.codex/hooks.json` and refreshes Graphify without
+scanning incoming prompts. Codex requires accepting the repository hook in its
 `/hooks` trust UI. Claude Code uses `.claude/settings.json` and requires its
 normal repository trust. Do not bypass either trust prompt. The checked-in
 Claude hook uses the documented PowerShell shell on Windows. For POSIX Claude
@@ -844,6 +844,24 @@ These files do not activate hosted reviews or prove session configuration.
 
 References: [Claude best practices](https://code.claude.com/docs/en/best-practices)
 and [AGENTS loading](https://code.claude.com/docs/en/memory#agents-md).
+
+### Secret checks before Git pushes
+
+Source reads, incoming prompts/provider data, and Graphify do not require a secret
+scan. Outgoing Git objects are checked by `.githooks/pre-push`, which invokes
+`python scripts/check_push_secrets.py`. It scans new committed blobs and
+commit/tag messages, including intermediate commits, in temporary storage and suppresses scanner payload output.
+A finding, missing Sonar CLI, or scanner error blocks the push. Deleted refs need
+no scan. Do not use `--no-verify`.
+
+Enable the hook in each clone (the relative path also works in its worktrees):
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+For a one-off push without changing clone configuration, use
+`git -c core.hooksPath=.githooks push <remote> <branch>`.
 
 ### Local Development on Windows
 

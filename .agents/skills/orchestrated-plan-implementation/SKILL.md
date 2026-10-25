@@ -127,7 +127,7 @@ Distinguish running, waiting, result-ready, integrated, verified, and blocked.
 Every worker gets a separate disposable source worktree and a self-contained
 brief: objective/plan excerpt, mode/owning workflow, model/options, workspace and
 base identity, allowed paths/interfaces, accepted dependencies, applicable
-instructions including scan-before-read, acceptance checks, and handoff contract.
+instructions including outgoing Git secret checks, acceptance checks, and handoff contract.
 Do not assume it sees parent conversation. Never copy secrets, athlete data,
 runtime state, or unrelated untracked files.
 
@@ -153,7 +153,7 @@ Do not busy-poll, spawn watchers, or treat a wait timeout as cancellation.
 
 ## Runtime binding
 
-When dispatching workers, scan and read [runtime binding adapters](references/runtime-binding.md)
+When dispatching workers, read [runtime binding adapters](references/runtime-binding.md)
 before selecting or calling a host adapter. Inspect the live schemas and preserve
 exact model/options, isolated worktrees, inherited permissions, and task handles.
 Sequential parent-only work does not need this reference. A missing adapter must
@@ -170,7 +170,7 @@ without source changes.
 For source changes, confirm all writers have stopped and freeze the complete
 candidate with base identity, artifact/manifest, and content hash such as SHA-256.
 Include untracked additions, deletions, renames, modes, and binary assets;
-tracked `git diff` alone is insufficient. Scan before reading; later edits
+tracked `git diff` alone is insufficient. Read source directly; later edits
 invalidate review. Keep reports/patches free of secrets and athlete content.
 
 The parent personally inspects every changed file/asset and relevant surrounding

@@ -1,4 +1,4 @@
-"""Explicit, isolated, secret-scanned local Graphify integration."""
+"""Explicit, isolated, fully local Graphify integration."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def lock_version(path: Path) -> str:
 
 
 VERSION = lock_version(LOCK_FILE)
-WRAPPER_SCHEMA = 5
+WRAPPER_SCHEMA = 6
 TIMEOUT = 180
 PREPARATION_TIMEOUT = 600
 READY_FILE = "ready.json"
@@ -98,7 +98,7 @@ DENIED = {
     ".codex",
     ".pytest_cache",
 }
-SOURCE_CHANGED = "source changed during scan; retry update"
+SOURCE_CHANGED = "source changed during snapshot; retry update"
 GRAPH_FILENAME = "graph.json"
 BUILDING_PREFIX = ".building-"
 GRAPH_FILE = Path("graphify-out") / GRAPH_FILENAME
@@ -305,46 +305,6 @@ def corpus_paths(root: Path) -> list[tuple[str, Path]]:
     return sorted(found.items())
 
 
-def scan(
-    paths: list[tuple[str, Path]],
-    deadline: float | None = None,
-    *,
-    scanner: str | None = None,
-) -> None:
-    deadline = deadline or time.monotonic() + TIMEOUT
-    if not paths:
-        raise Unavailable("no approved source files to scan")
-    scanner = scanner or shutil.which("sonar")
-    if not scanner:
-        raise Unavailable("Sonar secrets scanner unavailable; graph update refused")
-    # One bounded argument list per batch avoids Windows' per-process startup
-    # cost and command-line limit while retaining fail-closed scan behavior.
-    batch_size = 35
-    for start in range(0, len(paths), batch_size):
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise Unavailable("secret scan timed out; graph update refused")
-        try:
-            result = subprocess.run(
-                [
-                    scanner,
-                    "analyze",
-                    "secrets",
-                    *[str(p) for _, p in paths[start : start + batch_size]],
-                ],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=remaining,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise Unavailable("secret scan failed; graph update refused") from exc
-        if result.returncode:
-            raise Unavailable(
-                "secret scan failed or reported a finding; graph update refused"
-            )
-
-
 @contextlib.contextmanager
 def process_lock(path: Path, deadline: float | None = None):
     deadline = deadline or time.monotonic() + TIMEOUT
@@ -387,43 +347,6 @@ def process_lock(path: Path, deadline: float | None = None):
         handle.close()
 
 
-def _scan_engine() -> list | None:
-    """Signatures of the detection engines the Sonar CLI runs, if resolvable."""
-    engines = Path.home() / ".sonar" / "sonarqube-cli" / "bin"
-    try:
-        found = [
-            [path.name, list(_signature(path))]
-            for path in sorted(engines.glob("sonar-secrets-*"))
-            if path.is_file()
-        ]
-    except OSError:
-        return None
-    return found or None
-
-
-def _scan_binding() -> dict:
-    scanner = shutil.which("sonar")
-    if not scanner:
-        raise Unavailable("Sonar secrets scanner unavailable; graph update refused")
-    try:
-        path = Path(scanner).resolve(strict=True)
-        signature = _signature(path)
-    except OSError as exc:
-        raise Unavailable("secret scan failed; graph update refused") from exc
-    return {
-        "schema": WRAPPER_SCHEMA,
-        "scanner": str(path),
-        "signature": list(signature),
-        "engine": _scan_engine(),
-        "rules": [
-            sorted(SOURCE_DIRS),
-            sorted(ROOT_FILES),
-            sorted(DENIED),
-            sorted(EXTENSIONS),
-        ],
-    }
-
-
 def _write_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pending = path.with_name(path.name + ".tmp")
@@ -438,26 +361,7 @@ def state(
     paths = corpus_paths(root)
     before = {rel: _signature(path) for rel, path in paths}
     if not paths:
-        raise Unavailable("no approved source files to scan")
-    binding = _scan_binding()
-    cache_path = runtime(root) / "scan-cache.json"
-    cache = read_json(cache_path)
-    clean = cache.get("clean_hashes")
-    if (
-        cache.get("binding") != binding
-        or binding["engine"] is None
-        or not isinstance(clean, list)
-        or any(
-            not isinstance(h, str) or not re.fullmatch(r"[0-9a-f]{64}", h)
-            for h in clean
-        )
-    ):
-        clean = []
-    clean_hashes = set(clean)
-
-    def clean_key(rel: str) -> str:
-        # Bind each verdict to its path; the scanner may treat paths differently.
-        return hashlib.sha256(f"{rel}\0{hashes[rel]}".encode()).hexdigest()
+        raise Unavailable("no approved source files to snapshot")
 
     def unchanged(rel: str, path: Path) -> bool:
         try:
@@ -467,24 +371,15 @@ def state(
 
     rows, hashes = [], {}
     for rel, path in paths:
+        if time.monotonic() >= deadline:
+            raise Unavailable("source snapshot timed out; graph update refused")
         before_sig = _signature(path)
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         if before_sig != _signature(path) or before_sig != before[rel]:
             raise Unavailable(SOURCE_CHANGED)
         rows.append((rel, digest))
         hashes[rel] = digest
-    pending = [(rel, path) for rel, path in paths if clean_key(rel) not in clean_hashes]
-    if pending:
-        scan(pending, deadline, scanner=binding["scanner"])
-    changed = {rel for rel, path in paths if not unchanged(rel, path)}
-    if _scan_binding() != binding:
-        raise Unavailable("secret scanner changed during scan; graph update refused")
-    # No hashes from a failed scan or a file changed during the scan are
-    # recorded. Only the current corpus is kept, so the cache stays bounded;
-    # stable files stay recorded so a retry rescans only the changed ones.
-    stable = {clean_key(rel) for rel, _ in paths if rel not in changed}
-    _write_json(cache_path, {"binding": binding, "clean_hashes": sorted(stable)})
-    if changed:
+    if any(not unchanged(rel, path) for rel, path in paths):
         raise Unavailable(SOURCE_CHANGED)
     branch = (
         subprocess.run(
@@ -718,7 +613,7 @@ def _copy_inputs(
         dest.parent.mkdir(parents=True, exist_ok=True)
         data = source.read_bytes()
         if hashlib.sha256(data).hexdigest() != hashes[rel]:
-            raise Unavailable("source changed after scan; graph update refused")
+            raise Unavailable("source changed after snapshot; graph update refused")
         dest.write_bytes(data)
     for file in inputs.rglob("*"):
         if file.is_file() and file.relative_to(inputs).as_posix() not in wanted:
@@ -807,22 +702,9 @@ def _prune_generations(base: Path, current_id: str, previous_id: str | None) -> 
             shutil.rmtree(old, ignore_errors=True)
 
 
-def _scanned_with(root: Path) -> bool:
-    """Whether the recorded scan used the current scanner; reads skip this."""
-    try:
-        binding = _scan_binding()
-    except Unavailable:
-        return False
-    return read_json(runtime(root) / "scan-cache.json").get("binding") == binding
-
-
 def _update_locked(root: Path, base: Path, deadline: float) -> None:
     current = read_json(base / CURRENT_FILE)
-    if (
-        _metadata_current(root, current)
-        and verify_version(root)
-        and _scanned_with(root)
-    ):
+    if _metadata_current(root, current) and verify_version(root):
         print("Graphify local: current")
         return
     metadata = _metadata(root)
@@ -851,7 +733,7 @@ def update(root: Path, *, preparation: bool = False) -> int:
     base = runtime(root)
     try:
         with environment_lease(shared_environment(), deadline):
-            # Avoid a long source scan when the shared environment needs preparation.
+            # Avoid source processing when the shared environment needs preparation.
             if not verify_version(root):
                 print(
                     f"Graphify local: unavailable (Graphify {VERSION} unavailable; run setup)"
@@ -861,8 +743,7 @@ def update(root: Path, *, preparation: bool = False) -> int:
                 try:
                     _update_locked(root, base, deadline)
                 except Unavailable as exc:
-                    # A branch rename or save during the scan; unchanged content
-                    # is not rescanned, so one retry is cheap.
+                    # Retry once if a branch rename or save changed the source snapshot.
                     if str(exc) != SOURCE_CHANGED:
                         raise
                     _update_locked(root, base, deadline)

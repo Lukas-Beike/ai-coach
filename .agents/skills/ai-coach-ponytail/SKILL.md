@@ -12,7 +12,7 @@ validation. No external plugin, host-specific command, or runtime hook is needed
 
 ## Use and modes
 
-Use for coding tasks by default in `full` mode. Scan and read this file directly
+Use for coding tasks by default in `full` mode. Read this file directly
 if the agent cannot discover repository skills. Combine it with the relevant
 workflow in [the skill index](../README.md); it does not replace that workflow.
 
