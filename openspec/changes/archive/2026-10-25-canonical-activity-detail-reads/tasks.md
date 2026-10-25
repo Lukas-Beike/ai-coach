@@ -59,11 +59,11 @@
 
 ## 4. Validation (slice D)
 
-- [ ] 4.1 Run `python -m unittest discover -s tests -v` and `python -m compileall -q server.py backend tests` on the final tree. Both must pass.
-- [ ] 4.2 Run repository-wide mypy and ruff exactly as CI does. Single-file mypy is insufficient. Both must pass.
-- [ ] 4.3 Run `node --test tests/*.cjs` and the affected Playwright projects from 2.9 on the final tree. All must pass.
-- [ ] 4.4 Manually check, if a browser is available: login, fresh PWA install/offline assets after the cache bump, detail open for Intervals and Garmin-only sessions, stale/load-error notes, and the refresh offer.
-- [ ] 4.5 Review scoped evidence. Map each #1410 acceptance criterion to the tasks and spec scenarios below, inspect the complete diff, and confirm that no production module reads `activity_detail:` kv keys.
+- [x] 4.1 Run `python -m unittest discover -s tests -v` and `python -m compileall -q server.py backend tests` on the final tree. Both must pass.
+- [x] 4.2 Run repository-wide mypy and ruff exactly as CI does. Single-file mypy is insufficient. Both must pass.
+- [x] 4.3 Run `node --test tests/*.cjs` and the affected Playwright projects from 2.9 on the final tree. All must pass.
+- [x] 4.4 Manually check, if a browser is available: login, fresh PWA install/offline assets after the cache bump, detail open for Intervals and Garmin-only sessions, stale/load-error notes, and the refresh offer.
+- [x] 4.5 Review scoped evidence. Map each #1410 acceptance criterion to the tasks and spec scenarios below, inspect the complete diff, and confirm that no production module reads `activity_detail:` kv keys.
   - Canonical reads for all providers: 2.3–2.5 and 2.7 ("Garmin-only or Wahoo-only session").
   - Envelope: 2.3 ("One served contract").
   - Recording device and `data_scope`: 2.1, 2.4 and 2.7 ("Recording device provenance").
@@ -73,7 +73,7 @@
   - Verified retirement with lap refill: 1.1–1.3 ("Verified record retired", "Missing lap metric refilled", "Unverifiable record kept", "Interrupted batch", "Same-build restart").
   - Upgrade/backup/export: 1.6–1.7 ("Upgrade from supported released schemas", "Backup, restore and privacy export").
   - Fallback/store reduction and guard: 1.5, 3.1 and 3.2 ("Guarded kv detail access").
-- [ ] 4.6 Run `npm run -s openspec -- validate canonical-activity-detail-reads --strict`. It must pass.
+- [x] 4.6 Run `npm run -s openspec -- validate canonical-activity-detail-reads --strict`. It must pass.
 
 ## Workflow follow-up
 
