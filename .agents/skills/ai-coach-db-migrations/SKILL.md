@@ -5,7 +5,7 @@ description: Plan, implement, or review SQLCipher schema migrations and released
 
 # Data-preserving schema changes
 
-1. Scan and read root and `backend/AGENTS.md`, then locate the schema owner in
+1. Read root and `backend/AGENTS.md`, then locate the schema owner in
    `backend/db/schema.py`, `schema_history.py`, and `migrations.py`. Trace changed
    readers, writers, restore validation, and startup before choosing a migration.
    Record the current version and every supported released fixture from code;

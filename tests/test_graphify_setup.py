@@ -1,9 +1,9 @@
 """Shared Graphify setup uses only locked packages and isolated synthetic state."""
 
 import contextlib
-import hashlib
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,8 +26,6 @@ class GraphifySetupTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.scanner = self.root / "synthetic-sonar"
-        self.scanner.touch()
         (self.root / "backend").mkdir()
         (self.root / "backend/fixture.py").write_text("def fixture(): pass\n")
         self.lock = self.root / "requirements-graphify.txt"
@@ -361,7 +359,6 @@ class GraphifySetupTests(unittest.TestCase):
                 with (
                     self.subTest(available=available, command=command),
                     patch.object(graph, "repo_root", return_value=self.root),
-                    patch.object(graph.shutil, "which", return_value=str(self.scanner)),
                     patch.object(
                         graph.subprocess, "run", side_effect=self.fake_run
                     ) as run,
@@ -381,166 +378,10 @@ class GraphifySetupTests(unittest.TestCase):
                         self.assertNotIn("venv", args)
 
 
-class GraphifyScanCacheTests(unittest.TestCase):
-    def setUp(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
-        source = self.root / "backend/fixture.py"
-        source.parent.mkdir()
-        source.write_text("pass\n")
-        self.paths = [("backend/fixture.py", source)]
-        self.scanner = self.root / "synthetic-sonar"
-        self.scanner.touch()
-        self.cache = graph.runtime(self.root) / "scan-cache.json"
-        self.scans = []
-        self.scan_result = 0
-        self.engine = [["sonar-secrets-1", [1, 2, 3]]]
-        for patcher in (
-            patch.object(graph, "_scan_engine", side_effect=lambda: self.engine),
-            # Environment leases must never touch the real shared directory.
-            patch.object(graph, "shared_base", return_value=self.root / "shared"),
-            patch.object(graph, "corpus_paths", side_effect=lambda root: self.paths),
-            patch.object(graph.shutil, "which", return_value=str(self.scanner)),
-            patch.object(graph.subprocess, "run", side_effect=self.fake_run),
-        ):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
-    def fake_run(self, command, **kwargs):
-        if command[1:3] == ["analyze", "secrets"]:
-            self.scans.append(command[3:])
-            if isinstance(self.scan_result, Exception):
-                raise self.scan_result
-            return subprocess.CompletedProcess(command, self.scan_result)
-        return subprocess.CompletedProcess(command, 0, stdout=b"fixture\n")
-
-    def state(self):
-        with graph.process_lock(graph.runtime(self.root) / "update.lock"):
-            return graph.state(self.root)
-
-    def test_unchanged_content_is_hashed_but_not_rescanned(self):
-        initial = self.state()
-        self.scans.clear()
-        with patch.object(
-            Path, "read_bytes", autospec=True, side_effect=Path.read_bytes
-        ) as read:
-            self.assertEqual(self.state(), initial)
-        self.assertIn(self.paths[0][1], [call.args[0] for call in read.call_args_list])
-        self.assertEqual(self.scans, [])
-
-    def test_changed_and_new_content_are_scanned_and_cache_keeps_current_only(self):
-        initial = self.state()
-        source = self.paths[0][1]
-        source.write_text("pass # changed\n")
-        new = source.with_name("new.py")
-        new.write_text("pass # new\n")
-        self.paths.append(("backend/new.py", new))
-        self.scans.clear()
-        self.state()
-        self.assertEqual(self.scans, [[str(source), str(new)]])
-        cached = json.loads(self.cache.read_text())["clean_hashes"]
-        self.assertNotIn(initial[2]["backend/fixture.py"], cached)
-        source.write_text("pass\n")
-        self.scans.clear()
-        self.assertEqual(
-            self.state()[2]["backend/fixture.py"], initial[2]["backend/fixture.py"]
-        )
-        self.assertEqual(self.scans, [[str(source)]])
-
-    def test_finding_and_scanner_failure_refuse_update_and_record_nothing(self):
-        self.state()
-        prior = self.cache.read_bytes()
-        self.paths[0][1].write_text("pass # edited\n")
-        for result in (1, OSError("synthetic"), subprocess.TimeoutExpired("sonar", 1)):
-            with (
-                self.subTest(result=type(result).__name__),
-                patch.object(graph, "verify_version", return_value=True),
-                patch.object(graph, "_run_graphify") as build,
-            ):
-                self.scan_result = result
-                self.assertEqual(graph.update(self.root), 2)
-                self.assertEqual(self.cache.read_bytes(), prior)
-                self.assertFalse((graph.runtime(self.root) / "current.json").exists())
-                build.assert_not_called()
-
-    def test_failed_later_batch_records_no_hashes_from_clean_first_batch(self):
-        for index in range(36):
-            source = self.root / f"backend/batch-{index}.py"
-            source.write_text(f"value = {index}\n")
-            self.paths.append((f"backend/batch-{index}.py", source))
-        real_run = self.fake_run
-
-        def fail_second(command, **kwargs):
-            result = real_run(command, **kwargs)
-            if len(self.scans) == 2:
-                result.returncode = 1
-            return result
-
-        with (
-            patch.object(graph.subprocess, "run", side_effect=fail_second),
-            self.assertRaises(graph.Unavailable),
-        ):
-            self.state()
-        self.assertEqual(len(self.scans), 2)
-        self.assertFalse(self.cache.exists())
-
-    def test_scanner_schema_and_rules_changes_force_full_scan(self):
-        for change in ("signature", "path", "engine", "schema", "rules"):
-            with self.subTest(change=change):
-                self.state()
-                self.scans.clear()
-                if change == "signature":
-                    self.scanner.write_text("changed scanner")
-                    self.state()
-                elif change == "path":
-                    other_scanner = self.root / "other-sonar"
-                    other_scanner.touch()
-                    with patch.object(
-                        graph.shutil, "which", return_value=str(other_scanner)
-                    ):
-                        self.state()
-                elif change == "engine":
-                    self.engine = [["sonar-secrets-2", [4, 5, 6]]]
-                    self.state()
-                elif change == "schema":
-                    with patch.object(
-                        graph, "WRAPPER_SCHEMA", graph.WRAPPER_SCHEMA + 1
-                    ):
-                        self.state()
-                else:
-                    with patch.object(
-                        graph, "ROOT_FILES", graph.ROOT_FILES | {"new.py"}
-                    ):
-                        self.state()
-                self.assertEqual(self.scans, [[str(self.paths[0][1])]])
-
-    def test_identical_content_at_a_new_path_is_scanned(self):
-        self.state()
-        copy = self.root / "backend/copy.py"
-        copy.write_bytes(self.paths[0][1].read_bytes())
-        self.paths.append(("backend/copy.py", copy))
-        self.scans.clear()
-        self.state()
-        self.assertEqual(self.scans, [[str(copy)]])
-
-    def test_file_deleted_during_scan_is_a_source_change(self):
-        stable = self.root / "backend/stable.py"
-        stable.write_text("value = 1\n")
-        self.paths.append(("backend/stable.py", stable))
-
-        def delete(paths, deadline, **kwargs):
-            stable.unlink()
-
-        with (
-            patch.object(graph, "scan", side_effect=delete),
-            self.assertRaises(graph.Unavailable) as raised,
-        ):
-            self.state()
-        self.assertEqual(str(raised.exception), graph.SOURCE_CHANGED)
-        self.assertEqual(len(json.loads(self.cache.read_text())["clean_hashes"]), 1)
-
+class GraphifySnapshotTests(unittest.TestCase):
     def test_update_retries_once_after_source_change(self):
+        temp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, temp)
         changed = graph.Unavailable(graph.SOURCE_CHANGED)
         for effects, code, calls in (
             ([changed, None], 0, 2),
@@ -549,101 +390,13 @@ class GraphifyScanCacheTests(unittest.TestCase):
         ):
             with (
                 self.subTest(code=code, calls=calls),
+                patch.object(graph, "shared_base", return_value=Path(temp) / "shared"),
                 patch.object(graph, "verify_version", return_value=True),
                 patch.object(graph, "_update_locked", side_effect=effects) as locked,
                 contextlib.redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(graph.update(self.root), code)
+                self.assertEqual(graph.update(Path(temp)), code)
                 self.assertEqual(locked.call_count, calls)
-
-    def test_unresolved_engine_never_reuses_cache(self):
-        self.engine = None
-        self.state()
-        self.scans.clear()
-        self.state()
-        self.assertEqual(self.scans, [[str(self.paths[0][1])]])
-
-    def test_scanner_change_invalidates_current_graph_without_source_edits(self):
-        output = graph.runtime(self.root) / "cache/graph.json"
-        output.parent.mkdir(parents=True)
-        output.write_text('{"nodes":[{"id":"n"}],"edges":[]}')
-        with (
-            patch.object(graph, "verify_version", return_value=True),
-            patch.object(graph, "_run_graphify", return_value=output) as build,
-        ):
-            self.assertEqual(graph.update(self.root), 0)
-            pointer = (graph.runtime(self.root) / "current.json").read_bytes()
-            self.scans.clear()
-            self.scanner.write_text("updated scanner")
-            self.scan_result = 1
-            self.assertEqual(graph.update(self.root), 2)
-            self.assertEqual(self.scans, [[str(self.paths[0][1])]])
-            self.assertEqual(
-                (graph.runtime(self.root) / "current.json").read_bytes(), pointer
-            )
-            self.assertEqual(build.call_count, 1)
-
-    def test_corrupt_or_unreadable_cache_forces_full_scan(self):
-        for content in ("broken JSON", "[]", '{"clean_hashes": [42]}'):
-            with self.subTest(content=content):
-                self.state()
-                self.cache.write_text(content)
-                self.scans.clear()
-                self.state()
-                self.assertEqual(self.scans, [[str(self.paths[0][1])]])
-        read_text = Path.read_text
-
-        def unreadable(path, *args, **kwargs):
-            if path == self.cache:
-                raise OSError("synthetic")
-            return read_text(path, *args, **kwargs)
-
-        self.scans.clear()
-        with patch.object(Path, "read_text", unreadable):
-            self.state()
-        self.assertEqual(self.scans, [[str(self.paths[0][1])]])
-
-    def test_file_or_scanner_changed_during_scan_is_not_recorded(self):
-        stable = self.root / "backend/stable.py"
-        stable.write_text("value = 1\n")
-        self.paths.append(("backend/stable.py", stable))
-        for changed in (self.paths[0][1], self.scanner):
-            with self.subTest(changed=changed.name):
-                self.cache.unlink(missing_ok=True)
-                content = hashlib.sha256(stable.read_bytes()).hexdigest()
-                key = hashlib.sha256(
-                    f"backend/stable.py\0{content}".encode()
-                ).hexdigest()
-
-                def edit(paths, deadline, target=changed, **kwargs):
-                    target.write_text("pass # concurrent edit\n")
-
-                with (
-                    patch.object(graph, "scan", side_effect=edit),
-                    self.assertRaises(graph.Unavailable),
-                ):
-                    self.state()
-                if changed == self.scanner:
-                    self.assertFalse(self.cache.exists())
-                else:
-                    # Only the file scanned unchanged is recorded for a retry.
-                    self.assertEqual(
-                        json.loads(self.cache.read_text())["clean_hashes"],
-                        [key],
-                    )
-
-    def test_cache_is_published_atomically(self):
-        replace = graph.os.replace
-
-        def publish(pending, destination):
-            self.assertEqual(destination, self.cache)
-            self.assertFalse(self.cache.exists())
-            self.assertEqual(len(graph.read_json(pending)["clean_hashes"]), 1)
-            replace(pending, destination)
-
-        with patch.object(graph.os, "replace", side_effect=publish) as move:
-            self.state()
-        move.assert_called_once()
 
 
 class WorktreePreparationTests(unittest.TestCase):

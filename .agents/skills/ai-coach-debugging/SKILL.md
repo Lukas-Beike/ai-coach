@@ -15,8 +15,8 @@ SQLCipher, fixture, and authorization contracts; see [provenance](../THIRD_PARTY
 - State the expected behavior, observed behavior, smallest triggering input or
   state, and affected revision/environment. Separate an application failure from
   missing tools, a cancelled CI wrapper, or an outdated test assumption.
-- Capture the exact failing assertion or safe error metadata. Scan files before
-  reading them; never collect real credentials, athlete records, request payloads,
+- Capture the exact failing assertion or safe error metadata. Read source files directly;
+  never collect real credentials, athlete records, request payloads,
   database contents, browser storage state, or unfiltered provider logs.
 - Reproduce with temporary storage, mocked providers, or the disposable browser
   fixture. Use [navigation](../ai-coach-navigator/SKILL.md) to locate the owner and

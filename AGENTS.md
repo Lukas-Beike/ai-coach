@@ -127,11 +127,11 @@ Project-specific skills must remain repository-local. See
 [the skill index](.agents/skills/README.md) for routing and location rules.
 Never install or synchronize them globally or into app caches. App-supplied tools
 and managed skills have separate runtime/license constraints; see the index.
-Scan before reading sources or references.
+Read sources and references directly; keep live secrets and runtime data excluded.
 
 For coding tasks, use the repository's [Ponytail workflow](.agents/skills/ai-coach-ponytail/SKILL.md)
 by default in `full` mode alongside the relevant task workflow. Any coding agent
-can scan and read that file directly; no plugin, slash command, or global skill
+can read that file directly; no plugin, slash command, or global skill
 installation is required. Prefer the smallest complete change, existing code,
 and standard-library/platform features. Repository boundaries and required
 validation take precedence over simplification; honor explicit mode changes.
@@ -258,25 +258,11 @@ Voice needs a secure context: localhost for tests, trusted HTTPS for deployment.
 - For each finding, state its priority (P0-P3), affected file and line, why it
   matters, and a concrete remediation.
 
-<!-- sonar:begin:codex-secrets-on-read -->
-# SonarQube secrets scanning for files protocol
+## Secret checks at the Git boundary
 
-Before reading any file in this workspace, scan it for secrets with the deterministic scanner:
-
-```bash
-sonar analyze secrets <path/to/file>
-```
-
-If the command reports that the file contains a secret, **do not read the file**. Instead:
-
-1. Inform the user that the file appears to contain a secret or credential and that reading it would expose the value in chat history, logs, and any downstream telemetry.
-2. Advise them to rotate the leaked credential at its source of truth and remove it from the file.
-3. Do not proceed with the original request until the secret has been removed.
-
-GitHub-hosted native Codex reviews are an explicit execution environment
-without the local `sonar` executable. They may use the platform's protected
-repository inspection and secret-scanning controls; do not classify the
-absence of the local executable as an athlete credential or usage-limit
-finding. If the hosted review reports a concrete secret, keep the stop and
-rotation rules above.
-<!-- sonar:end:codex-secrets-on-read -->
+Do not require Sonar scans before reading source, receiving prompts/provider data,
+or updating/querying Graphify. Continue to exclude live credentials and athlete
+runtime data from diagnostics, context, commits and graph inputs.
+Before every push, scan the outgoing committed file versions, including intermediate
+commits, with the repository pre-push hook. A missing scanner, failed scan or finding
+blocks the push. Never bypass the hook with `--no-verify`.
