@@ -89,6 +89,23 @@ def provider_streams(points):
     ]
 
 
+def detail_keys(manager):
+    with manager.reader() as db:
+        rows = db.execute("SELECT key FROM kv").fetchall()
+    return [row["key"] for row in rows if row["key"].startswith("activity_detail:")]
+
+
+def canonical_snapshot(manager):
+    with manager.reader() as db:
+        return [
+            [
+                tuple(row.values())
+                for row in db.execute(f"SELECT * FROM {table} ORDER BY 1, 2, 3")
+            ]
+            for table in CANONICAL_TABLES
+        ]
+
+
 class RetirementTestCase(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -159,23 +176,10 @@ class RetirementTestCase(unittest.TestCase):
             ).fetchall()
         return [(row["key"], row["value"]) for row in rows]
 
-    def detail_keys(self):
-        return [key for key, _ in self.kv_rows() if key.startswith("activity_detail:")]
-
     def kv_record(self, activity_id):
         with self.manager.reader() as db:
             raw = self.key_values.get(db, legacy_detail_kv.key(activity_id))
         return None if raw is None else json.loads(raw)
-
-    def canonical_snapshot(self):
-        with self.manager.reader() as db:
-            return [
-                [
-                    tuple(row.values())
-                    for row in db.execute(f"SELECT * FROM {table} ORDER BY 1, 2, 3")
-                ]
-                for table in CANONICAL_TABLES
-            ]
 
     def laps(self, activity_id):
         with self.manager.reader() as db:
@@ -200,7 +204,7 @@ class RetiredRecordTests(RetirementTestCase):
         record = self.load("9201")
         self.store.save_failure("9299", "0" * 64, "Synthetic note", NOW)
         self.store.save_prefetch_floor("2026-10-01T00:00:00", NOW)
-        canonical = self.canonical_snapshot()
+        canonical = canonical_snapshot(self.manager)
         kept = [row for row in self.kv_rows() if not row[0].startswith("activity_detail:")]
         calls = self.api.get.call_count
         self.assertTrue(record["activity"]["laps"])
@@ -209,7 +213,7 @@ class RetiredRecordTests(RetirementTestCase):
         self.assertEqual(0, counters["laps_refilled"])
         self.assertIsNone(self.kv_record("9201"))
         self.assertEqual(kept, self.kv_rows())
-        self.assertEqual(canonical, self.canonical_snapshot())
+        self.assertEqual(canonical, canonical_snapshot(self.manager))
         # The retirement reads local rows only; no provider is called.
         self.assertEqual(calls, self.api.get.call_count)
 
@@ -265,7 +269,7 @@ class KeptRecordTests(RetirementTestCase):
 
     def assert_kept(self, reason, activity_id):
         before_kv = self.kv_rows()
-        before = self.canonical_snapshot()
+        before = canonical_snapshot(self.manager)
         self.assertIn(
             legacy_detail_kv.key(activity_id), [key for key, _ in before_kv]
         )
@@ -277,7 +281,7 @@ class KeptRecordTests(RetirementTestCase):
             sum(value for name, value in counters.items() if name != "laps_refilled"),
         )
         self.assertEqual(before_kv, self.kv_rows())
-        self.assertEqual(before, self.canonical_snapshot())
+        self.assertEqual(before, canonical_snapshot(self.manager))
 
     def changed(self, activity_id, change):
         record = self.load(activity_id)
@@ -430,13 +434,13 @@ class RetirementWorkerTests(RetirementTestCase):
         # Run before the copy, every record would have counted ``no_canonical``.
         self.assertEqual(len(ids), summary["counters"]["retired"])
         self.assertEqual({"legacy_backfill"}, origins)
-        self.assertEqual([], self.detail_keys())
+        self.assertEqual([], detail_keys(self.manager))
 
     def test_failed_batch_rolls_back_refills_and_deletions(self):
         for activity_id in ("9411", "9412"):
             self.load(activity_id)
         self.drop_lap_speeds()
-        canonical = self.canonical_snapshot()
+        canonical = canonical_snapshot(self.manager)
         records = self.kv_rows()
         real = activity_detail_retirement._retire
         calls = []
@@ -462,7 +466,7 @@ class RetirementWorkerTests(RetirementTestCase):
         self.assertEqual(2, len(calls))
         # The first record was refilled and deleted in the batch that rolled back.
         self.assertEqual(records, self.kv_rows())
-        self.assertEqual(canonical, self.canonical_snapshot())
+        self.assertEqual(canonical, canonical_snapshot(self.manager))
         state = self.state()
         self.assertEqual(("failed", "", 0), (state["status"], state["cursor"], state["batches"]))
         counters = self.run_to_completion()
@@ -481,9 +485,9 @@ class RetirementWorkerTests(RetirementTestCase):
         counters = self.run_to_completion(self.make(batch_size=1))
         self.assertEqual(len(ids), counters["retired"])
         self.assertEqual(4, self.state()["batches"])
-        canonical = self.canonical_snapshot()
+        canonical = canonical_snapshot(self.manager)
         self.assertEqual(counters, self.run_to_completion(self.make(batch_size=1)))
-        self.assertEqual(canonical, self.canonical_snapshot())
+        self.assertEqual(canonical, canonical_snapshot(self.manager))
         self.assertEqual([], self.kv_rows())
 
 

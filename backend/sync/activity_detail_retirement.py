@@ -15,7 +15,7 @@ touched. A change of the retirement or mapper version starts the pass again.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Final
 
 from backend.activities.detail_projection import _downsample_series
@@ -211,20 +211,47 @@ def _retire(db: Any, record: object, now: str) -> tuple[str, int]:
         return "mapping_issues", 0
     if not _streams_mappable(record):
         return "unmapped_stream", 0
+    outcome, pairs = _paired_sets(db, record, activity_id, mapped.records)
+    if outcome is not None:
+        return outcome, 0
+    outcome, refilled = _check_laps(db, activity_id, pairs, now)
+    if outcome is not None:
+        return outcome, refilled
+    if any(
+        isinstance(legacy, ZoneDistribution) and not _zones_equal(legacy, canonical)
+        for legacy, canonical in pairs
+    ):
+        return "zones_mismatch", refilled
+    if not _analysis_proven(db, activity_id, record, compared=bool(pairs)):
+        return "analysis_mismatch", refilled
+    return RETIRED, refilled
+
+
+def _paired_sets(
+    db: Any, record: dict[str, Any], activity_id: str, legacy_sets: Sequence[Any]
+) -> tuple[str | None, list[tuple[Any, Any]]]:
+    """Pair each legacy set with its canonical set, or name why they cannot pair."""
     stored = {item.detail.kind: item for item in detail_sets_for(db, _INTERVALS, activity_id)}
-    pairs: list[tuple[ActivityDetailSet, ActivityDetailSet]] = []
-    for legacy in mapped.records:
+    pairs: list[tuple[Any, Any]] = []
+    for legacy in legacy_sets:
         current = stored.get(legacy.kind)
         if current is None:
-            return "no_canonical", 0
+            return "no_canonical", []
         if current.summary_sha256 != record.get("summary_sha256"):
-            return "fingerprint_mismatch", 0
+            return "fingerprint_mismatch", []
         pairs.append((legacy, current.detail))
     for legacy, canonical in pairs:
         if isinstance(legacy, ActivityStreamSet) and not _streams_proven(
             legacy, canonical
         ):
-            return "streams_unproven", 0
+            return "streams_unproven", []
+    return None, pairs
+
+
+def _check_laps(
+    db: Any, activity_id: str, pairs: list[tuple[Any, Any]], now: str
+) -> tuple[str | None, int]:
+    """Refill missing lap metrics, then compare the laps; return the outcome and refills."""
     refilled = 0
     for legacy, canonical in pairs:
         if not isinstance(legacy, ActivityLapSet):
@@ -240,14 +267,7 @@ def _retire(db: Any, record: object, now: str) -> tuple[str, int]:
             refilled = 1
         if not _laps_equal(legacy.laps, canonical.laps):
             return "laps_mismatch", refilled
-    for legacy, canonical in pairs:
-        if isinstance(legacy, ZoneDistribution) and not _zones_equal(
-            legacy, canonical
-        ):
-            return "zones_mismatch", refilled
-    if not _analysis_proven(db, activity_id, record, compared=bool(pairs)):
-        return "analysis_mismatch", refilled
-    return RETIRED, refilled
+    return None, refilled
 
 
 def _streams_mappable(record: Mapping[str, Any]) -> bool:
