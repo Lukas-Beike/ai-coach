@@ -239,7 +239,7 @@ class YazioClient:
             with self._lock:
                 if identity != self._identity:
                     # The account changed meanwhile; do not cache its answer.
-                    return payload
+                    return copy.deepcopy(payload)
                 self._cache[path] = (self._clock(), payload)
                 self._cache.move_to_end(path)
                 while len(self._cache) > _CACHE_ENTRIES:
