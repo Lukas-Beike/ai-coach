@@ -68,6 +68,17 @@ class PushSecretTests(unittest.TestCase):
         ):
             scan.check(self.update(tip))
 
+    def test_unknown_remote_tip_still_scans_outgoing_history(self):
+        base = self.commit("old")
+        tip = self.commit("new")
+        objects = scan.outgoing_objects(self.update(tip, "f" * 40))
+        self.assertIn(
+            scan.git("rev-parse", base + ":fixture.py").decode().strip(), objects
+        )
+        self.assertIn(
+            scan.git("rev-parse", tip + ":fixture.py").decode().strip(), objects
+        )
+
     def test_deleted_ref_and_noop_do_not_require_scanner(self):
         tip = self.commit("clean")
         with patch.object(scan.shutil, "which", side_effect=AssertionError("scanner")):

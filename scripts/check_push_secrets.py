@@ -21,8 +21,15 @@ def outgoing_objects(updates: str) -> set[str]:
         _, local, _, remote = line.split()
         if set(local) == {"0"}:
             continue
-        # New branches exclude objects already reachable from known remotes.
-        exclusions = ["^" + remote] if set(remote) != {"0"} else ["--not", "--remotes"]
+        # A remote ref can have advanced without its new tip being fetched.
+        known_remote = (
+            set(remote) != {"0"}
+            and subprocess.run(
+                ["git", "cat-file", "-e", remote], capture_output=True, check=False
+            ).returncode
+            == 0
+        )
+        exclusions = ["^" + remote] if known_remote else ["--not", "--remotes"]
         objects.update(
             git("rev-list", "--objects", "--no-object-names", local, *exclusions)
             .decode("ascii")
@@ -68,8 +75,8 @@ def check(updates: str) -> int:
                 raise RuntimeError(
                     "Secret scan failed or reported a finding; push refused"
                 )
-            for path in paths:
-                Path(path).unlink()
+            for filename in paths:
+                Path(filename).unlink()
     print("Outgoing Git secret scan passed")
     return 0
 
