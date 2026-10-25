@@ -208,6 +208,21 @@ def _parts_score(
     return 2 * weighted / (len(term) + head), found
 
 
+def _chain_notice(
+    *,
+    stale: bool = False,
+    skipped: bool = False,
+    auth_failed: bool = False,
+    partial: bool = False,
+) -> str:
+    return (
+        (STALE_NOTICE if stale else "")
+        + (FALLBACK_NOTICE if skipped else "")
+        + (YAZIO_LOGIN_NOTICE if auth_failed else "")
+        + (PARTIAL_NOTICE if partial else "")
+    )
+
+
 def _usable(food: dict[str, Any]) -> bool:
     """A stored food needs a known energy value and basis unit to be served."""
     return food.get("basis_unit") is not None and food["per_100"]["kcal"] is not None
@@ -496,8 +511,7 @@ class FoodDatabaseService:
         """Yazio, then Open Food Facts, then BLS; the first suitable match wins."""
         if local := self._fresh_local_hits(query):
             return self._labelled(local, LOCAL_DATABASE), ""
-        skipped = False
-        auth_failed = False
+        skipped = auth_failed = False
         for search in (self._yazio_search, self._off_search):
             try:
                 suitable, origin = self._chain_hit(search, query)
@@ -506,18 +520,14 @@ class FoodDatabaseService:
                 auth_failed = auth_failed or exc.reason == "food_database_auth_failed"
                 continue
             if suitable:
-                notice = (STALE_NOTICE if origin == LOCAL_DATABASE_STALE else "") + (
-                    YAZIO_LOGIN_NOTICE if auth_failed else ""
+                return self._labelled(suitable, origin), _chain_notice(
+                    stale=origin == LOCAL_DATABASE_STALE, auth_failed=auth_failed
                 )
-                return self._labelled(suitable, origin), notice
             skipped = True
         foods, partial = _bls_search(query)
-        notice = (
-            (FALLBACK_NOTICE if skipped else "")
-            + (YAZIO_LOGIN_NOTICE if auth_failed else "")
-            + (PARTIAL_NOTICE if partial else "")
+        return foods, _chain_notice(
+            skipped=skipped, auth_failed=auth_failed, partial=partial
         )
-        return foods, notice
 
     def resolve(self, food_id: Any) -> dict[str, Any]:
         if not isinstance(food_id, str):
