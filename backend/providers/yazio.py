@@ -36,6 +36,7 @@ DEFAULT_USER_AGENT = (
     "YAZIO/26.30.1 (com.yazio.ios.YAZIO; build:2607271240; iOS 27.0.0) Ktor"
 )
 UNAVAILABLE = "Yazio ist momentan nicht verfügbar. Nächste Datenquelle verwenden."
+THROTTLED = "Yazio begrenzt die Anfragen. Bitte später erneut versuchen."
 SOURCE = "Yazio"
 _PRODUCT_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.IGNORECASE)
 _SEARCH_LIMIT = 8
@@ -81,6 +82,30 @@ def _servings(raw: Any) -> list[dict[str, Any]]:
     return servings
 
 
+def _nutrition(raw: dict[str, Any]) -> dict[str, Any] | None:
+    """Per-100 values, or None when the record has none or looks mis-scaled."""
+    nutrients = raw.get("nutrients")
+    nutrients = nutrients if isinstance(nutrients, dict) else {}
+    kcal = _per_100(nutrients, "energy.energy", 1000)
+    macros = {
+        "carbs_g": _per_100(nutrients, "nutrient.carb", 100),
+        "protein_g": _per_100(nutrients, "nutrient.protein", 100),
+        "fat_g": _per_100(nutrients, "nutrient.fat", 100),
+    }
+    known = [value for value in macros.values() if value is not None]
+    # A scale error shows as macros above 100 g per 100 g; never guess a value.
+    if sum(known) > 110 or (kcal is None and not known):
+        return None
+    return {"kcal": kcal, **macros}
+
+
+def _barcode(raw: dict[str, Any]) -> str | None:
+    eans = raw.get("eans")
+    if not isinstance(eans, list):
+        return None
+    return next((str(e) for e in eans if re.fullmatch(r"\d{8,14}", str(e))), None)
+
+
 def project_product(raw: Any, product_id: Any = None) -> dict[str, Any] | None:
     """Project a search hit or product detail to the shared food record."""
     if not isinstance(raw, dict):
@@ -91,18 +116,8 @@ def project_product(raw: Any, product_id: Any = None) -> dict[str, Any] | None:
         return None
     if raw.get("is_deleted") or raw.get("is_private"):
         return None
-    nutrients = raw.get("nutrients")
-    nutrients = nutrients if isinstance(nutrients, dict) else {}
-    kcal = _per_100(nutrients, "energy.energy", 1000)
-    macros = {
-        "carbs_g": _per_100(nutrients, "nutrient.carb", 100),
-        "protein_g": _per_100(nutrients, "nutrient.protein", 100),
-        "fat_g": _per_100(nutrients, "nutrient.fat", 100),
-    }
-    # A scale error shows as macros above 100 g per 100 g; never guess a value.
-    if sum(value or 0 for value in macros.values()) > 110:
-        return None
-    if kcal is None and not any(value is not None for value in macros.values()):
+    per_100 = _nutrition(raw)
+    if per_100 is None:
         return None
     unit = {"g": "g", "ml": "ml"}.get(str(raw.get("base_unit") or "").lower())
     food: dict[str, Any] = {
@@ -114,7 +129,7 @@ def project_product(raw: Any, product_id: Any = None) -> dict[str, Any] | None:
         "license": "Yazio, inoffizielle Schnittstelle, nur zur privaten Nutzung",
         "basis_amount": 100,
         "basis_unit": unit,
-        "per_100": {"kcal": kcal, **macros},
+        "per_100": per_100,
         "quality": "verified_product"
         if raw.get("is_verified")
         else "community_label_data",
@@ -122,16 +137,15 @@ def project_product(raw: Any, product_id: Any = None) -> dict[str, Any] | None:
         "preparation": "unknown",
         "last_modified": None,
     }
-    eans = raw.get("eans")
-    if isinstance(eans, list):
-        barcode = next(
-            (str(e) for e in eans if re.fullmatch(r"\d{8,14}", str(e))), None
-        )
-        if barcode:
-            food["barcode"] = barcode
+    if barcode := _barcode(raw):
+        food["barcode"] = barcode
     if servings := _servings(raw.get("servings")):
         food["servings"] = servings
     return food
+
+
+def _throttled() -> AppError:
+    return AppError(429, THROTTLED, reason="food_database_rate_limited")
 
 
 def _retry_after(headers: Any) -> float:
@@ -317,11 +331,7 @@ class YazioClient:
             ) from None
         if exc.code == 429:
             self._blocked_until = self._clock() + _retry_after(exc.headers)
-            raise AppError(
-                429,
-                "Yazio begrenzt die Anfragen. Bitte später erneut versuchen.",
-                reason="food_database_rate_limited",
-            ) from None
+            raise _throttled() from None
         raise AppError(502, UNAVAILABLE, reason="food_database_unavailable") from None
 
     def _follow_credentials(self) -> None:
@@ -352,11 +362,7 @@ class YazioClient:
         ):
             return self._access_token
         if now < self._blocked_until:
-            raise AppError(
-                429,
-                "Yazio begrenzt die Anfragen. Bitte später erneut versuchen.",
-                reason="food_database_rate_limited",
-            )
+            raise _throttled()
         if self._refresh_token:
             # The refresh failed without a rejection: an outage, not a bad login.
             raise AppError(502, UNAVAILABLE, reason="food_database_unavailable")
@@ -379,6 +385,7 @@ class YazioClient:
 
     def _grant(self, fields: dict[str, str], now: float, *, sign_in: bool) -> bool:
         config = self._config()
+        identity = self._identity
         body = json.dumps(
             {
                 **fields,
@@ -396,42 +403,45 @@ class YazioClient:
         try:
             payload = self._call(request)
         except HTTPError as exc:
-            self._access_token = ""
-            if exc.code == 429:
-                self._blocked_until = self._clock() + _retry_after(exc.headers)
-            if not sign_in:
-                if exc.code in {400, 401, 403}:
-                    self._refresh_token = ""
-                return False
-            if exc.code == 429:
-                raise AppError(
-                    429,
-                    "Yazio begrenzt die Anfragen. Bitte später erneut versuchen.",
-                    reason="food_database_rate_limited",
-                ) from None
-            if exc.code in {400, 401, 403}:
-                self._login_blocked_until = now + _LOGIN_BACKOFF_SECONDS
-                raise AppError(
-                    503,
-                    "Yazio hat die Anmeldung abgelehnt. Zugangsdaten prüfen.",
-                    reason="food_database_auth_failed",
-                ) from None
-            raise AppError(
-                502, UNAVAILABLE, reason="food_database_unavailable"
-            ) from None
+            return self._grant_rejected(exc, now, sign_in=sign_in)
+        with self._lock:
+            if identity != self._identity:
+                # The account changed during the login; its token is not wanted.
+                return self._grant_unusable(sign_in, "food_database_unavailable")
         token = payload.get("access_token") if isinstance(payload, dict) else None
         lifetime = _number(
             payload.get("expires_in") if isinstance(payload, dict) else None, 31_536_000
         )
         if not isinstance(token, str) or not token or not lifetime:
-            self._access_token = ""
-            if sign_in:
-                raise AppError(
-                    502, UNAVAILABLE, reason="food_database_invalid_response"
-                )
-            return False
+            return self._grant_unusable(sign_in, "food_database_invalid_response")
         self._access_token = token
         self._expires_at = now + lifetime
         refresh = payload.get("refresh_token")
         self._refresh_token = refresh if isinstance(refresh, str) else ""
         return True
+
+    def _grant_unusable(self, sign_in: bool, reason: str) -> bool:
+        self._access_token = ""
+        if sign_in:
+            raise AppError(502, UNAVAILABLE, reason=reason)
+        return False
+
+    def _grant_rejected(self, exc: HTTPError, now: float, *, sign_in: bool) -> bool:
+        self._access_token = ""
+        if exc.code == 429:
+            self._blocked_until = self._clock() + _retry_after(exc.headers)
+        rejected = exc.code in {400, 401, 403}
+        if not sign_in:
+            if rejected:
+                self._refresh_token = ""
+            return False
+        if exc.code == 429:
+            raise _throttled() from None
+        if rejected:
+            self._login_blocked_until = now + _LOGIN_BACKOFF_SECONDS
+            raise AppError(
+                503,
+                "Yazio hat die Anmeldung abgelehnt. Zugangsdaten prüfen.",
+                reason="food_database_auth_failed",
+            ) from None
+        raise AppError(502, UNAVAILABLE, reason="food_database_unavailable") from None

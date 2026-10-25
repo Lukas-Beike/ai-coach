@@ -356,6 +356,21 @@ class FoodDatabaseService:
             "yazio:", lambda text: self._require_yazio().search(text), query, live=live
         )
 
+    def _yazio_barcode(self, barcode: str) -> tuple[dict[str, Any] | None, str | bool]:
+        """Return a usable live Yazio hit, or why none was found."""
+        if not (self.yazio_configured and re.fullmatch(r"\d{8,14}", barcode)):
+            return None, False
+        try:
+            food = self._require_yazio().barcode(barcode)
+        except AppError as exc:
+            return None, exc.reason or True
+        if food is None or not _usable(food):
+            return None, False
+        food = {**food, "barcode": barcode}
+        if self._mirror:
+            self._mirror.store([food])
+        return food, False
+
     def _barcode_product(self, barcode: str) -> tuple[dict[str, Any], str, str | bool]:
         """Mirror, then Yazio when configured, then Open Food Facts.
 
@@ -368,17 +383,9 @@ class FoodDatabaseService:
             )
         ):
             return fresh, LOCAL_DATABASE, False
-        failed: str | bool = False
-        if self.yazio_configured and re.fullmatch(r"\d{8,14}", barcode):
-            try:
-                food = self._require_yazio().barcode(barcode)
-            except AppError as exc:
-                food, failed = None, exc.reason or True
-            if food is not None and _usable(food):
-                food = {**food, "barcode": barcode}
-                if self._mirror:
-                    self._mirror.store([food])
-                return food, LIVE, False
+        food, failed = self._yazio_barcode(barcode)
+        if food is not None:
+            return food, LIVE, False
         try:
             food, origin = self._off_product(barcode)
         except AppError:
@@ -418,6 +425,17 @@ class FoodDatabaseService:
             )
         self._mirror.delete(food_id)
 
+    def _barcode_lookup(self, barcode: str) -> tuple[list[dict[str, Any]], str]:
+        food, origin, yazio_failed = self._barcode_product(barcode)
+        notice = ""
+        if yazio_failed:
+            notice += FALLBACK_NOTICE
+            if yazio_failed == "food_database_auth_failed":
+                notice += YAZIO_LOGIN_NOTICE
+        if origin == LOCAL_DATABASE_STALE:
+            notice += STALE_NOTICE
+        return self._labelled([food], origin), notice
+
     def lookup(self, arguments: dict[str, Any]) -> dict[str, Any]:
         query = arguments.get("query")
         barcode = arguments.get("barcode")
@@ -426,14 +444,8 @@ class FoodDatabaseService:
         if barcode:
             if not isinstance(barcode, str) or query:
                 raise AppError(400, "Entweder Suchbegriff oder Barcode angeben.")
-            food, origin, yazio_failed = self._barcode_product(barcode)
-            foods = self._labelled([food], origin)
-            if yazio_failed:
-                notice += FALLBACK_NOTICE
-                if yazio_failed == "food_database_auth_failed":
-                    notice += YAZIO_LOGIN_NOTICE
-            if origin == LOCAL_DATABASE_STALE:
-                notice += STALE_NOTICE
+            foods, barcode_notice = self._barcode_lookup(barcode)
+            notice += barcode_notice
         else:
             if not isinstance(query, str) or not 2 <= len(query.strip()) <= 120:
                 raise AppError(400, "Suchbegriff muss 2 bis 120 Zeichen enthalten.")
@@ -457,18 +469,25 @@ class FoodDatabaseService:
             return self._labelled(found, origin), notice
         raise AppError(400, "Ungültige Lebensmitteldatenbank.")
 
+    def _chain_hit(
+        self, search: Callable[..., tuple[list[dict[str, Any]], str]], query: str
+    ) -> tuple[list[dict[str, Any]], str]:
+        """Return the suitable foods one source offers, and where they came from."""
+        found, origin = search(query)
+        suitable = [food for food in found if _suitable(query, food)]
+        if not suitable and origin == LOCAL_DATABASE:
+            # Unsuitable stored hits must not hide the live results.
+            found, origin = search(query, live=True)
+            suitable = [food for food in found if _suitable(query, food)]
+        return suitable, origin
+
     def _chain_search(self, query: str) -> tuple[list[dict[str, Any]], str]:
         """Yazio, then Open Food Facts, then BLS; the first suitable match wins."""
         skipped = False
         auth_failed = False
         for search in (self._yazio_search, self._off_search):
             try:
-                found, origin = search(query)
-                suitable = [food for food in found if _suitable(query, food)]
-                if not suitable and origin == LOCAL_DATABASE:
-                    # Unsuitable stored hits must not hide the live results.
-                    found, origin = search(query, live=True)
-                    suitable = [food for food in found if _suitable(query, food)]
+                suitable, origin = self._chain_hit(search, query)
             except AppError as exc:
                 skipped = True
                 auth_failed = auth_failed or exc.reason == "food_database_auth_failed"
