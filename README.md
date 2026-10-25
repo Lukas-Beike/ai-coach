@@ -1272,7 +1272,7 @@ dokumentiert ([Spezifikation der Community](https://yazio-community.github.io/ya
 sich ohne Ankündigung ändern oder die Nutzung blockieren. Sie benötigt die
 Client-ID und das Client-Secret der Yazio-App sowie eine bekannte App-Version im
 User-Agent, die du selbst bereitstellst. Die Nährwerte werden als Werte pro
-Gramm beziehungsweise Milliliter gelesen und mit 100 multipliziert; unplausible
+Gramm beziehungsweise Milliliter (Suchparameter: Region aus `YAZIO_COUNTRY`, fest `sex=male`, ohne Einfluss auf die Nährwerte) gelesen und mit 100 multipliziert; unplausible
 Werte bleiben unbekannt. Diese Annahme ist nur mit synthetischen Fixtures
 getestet, nicht mit einem echten Konto. Prüfe Treffer vor dem Speichern.
 

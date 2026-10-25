@@ -101,7 +101,9 @@ def project_product(raw: Any, product_id: Any = None) -> dict[str, Any] | None:
     }
     # A scale error shows as macros above 100 g per 100 g; never guess a value.
     if sum(value or 0 for value in macros.values()) > 110:
-        kcal, macros = None, dict.fromkeys(macros)
+        return None
+    if kcal is None and not any(value is not None for value in macros.values()):
+        return None
     unit = {"g": "g", "ml": "ml"}.get(str(raw.get("base_unit") or "").lower())
     food: dict[str, Any] = {
         "id": "yazio:" + identifier.lower(),
@@ -232,8 +234,12 @@ class YazioClient:
                 if (cached := self._cached(path)) is not None:
                     return cached
                 self._reserve(self._clock())
+            identity = self._identity
             payload = self._authorized_get(path)
             with self._lock:
+                if identity != self._identity:
+                    # The account changed meanwhile; do not cache its answer.
+                    return payload
                 self._cache[path] = (self._clock(), payload)
                 self._cache.move_to_end(path)
                 while len(self._cache) > _CACHE_ENTRIES:

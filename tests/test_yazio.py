@@ -101,9 +101,11 @@ class YazioProjectionTests(unittest.TestCase):
         )
 
     def test_unknown_unit_and_missing_values_stay_unknown(self):
-        food = project_product(hit(base_unit="piece", nutrients={}))
+        food = project_product(hit(base_unit="piece", nutrients={"energy.energy": 0.5}))
         self.assertIsNone(food["basis_unit"])
-        self.assertEqual(set(food["per_100"].values()), {None})
+        self.assertEqual(food["per_100"]["kcal"], 50.0)
+        self.assertIsNone(food["per_100"]["protein_g"])
+        self.assertIsNone(project_product(hit(nutrients={})))
 
     def test_implausible_scale_is_dropped_instead_of_guessed(self):
         food = project_product(
@@ -116,7 +118,7 @@ class YazioProjectionTests(unittest.TestCase):
                 }
             )
         )
-        self.assertEqual(set(food["per_100"].values()), {None})
+        self.assertIsNone(food)
 
     def test_unusable_records_are_dropped(self):
         for raw in (
