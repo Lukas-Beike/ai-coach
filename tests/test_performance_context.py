@@ -239,6 +239,23 @@ class PerformanceContextTests(unittest.TestCase):
         # The raw Garmin view alone no longer produces a baseline.
         self.assertEqual(raw_only["personal_recovery"]["baselines"], [])
 
+    def test_weekly_hrv_fallback_keeps_its_garmin_freshness(self):
+        today = date(2026, 9, 7)
+        garmin = {
+            "hrv": [{"calendarDate": "2026-09-07", "weeklyAvg": 58}],
+            "source_freshness": {
+                "hrv": {"freshness": "stale", "observed_at": "2026-09-07"}
+            },
+        }
+        snapshot = {"recent_wellness": [{"id": "2026-09-07"}], "recent_activities": []}
+
+        recovery = current_performance_context(
+            snapshot, garmin, {}, today, canonical=recovery_only_inputs(garmin)
+        )["recovery"]
+
+        self.assertEqual(recovery["hrv_source"], "Garmin Connect (Wochenmittel)")
+        self.assertEqual(recovery["source_freshness"]["hrv"]["freshness"], "stale")
+
 
 if __name__ == "__main__":
     unittest.main()

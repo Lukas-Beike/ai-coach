@@ -19,6 +19,15 @@ from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
 from backend.providers import intervals_performance_fields as intervals_perf_fields
 
+# Recovery sources whose freshness comes from the Garmin view, including the
+# labelled weekly HRV fallback.
+_GARMIN_RECOVERY_SOURCES = frozenset(
+    {
+        performance_garmin_metrics.GARMIN_PERFORMANCE_SOURCE,
+        performance_recovery_context.GARMIN_WEEKLY_HRV_SOURCE,
+    }
+)
+
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
     if not isinstance(item, dict):
@@ -232,7 +241,7 @@ def current_performance_context(
                     ("restingHR", "resting_hr", resting_hr, resting_hr_source),
                     ("hrv", "hrv", hrv, hrv_source),
                 )
-                if source == performance_garmin_metrics.GARMIN_PERFORMANCE_SOURCE
+                if source in _GARMIN_RECOVERY_SOURCES
             },
         },
         "rolling_training": {
