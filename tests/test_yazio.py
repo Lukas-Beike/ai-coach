@@ -222,7 +222,7 @@ class YazioClientTests(unittest.TestCase):
     def test_per_minute_request_limit(self):
         script = Script(tokens=[token()], api=[[]] * 25)
         client = self.client(script)
-        for index in range(20):
+        for index in range(19):
             client.search(f"Synthetic {index}")
         with self.assertRaises(AppError) as raised:
             client.search("Synthetic tenth")
@@ -291,6 +291,16 @@ class YazioClientTests(unittest.TestCase):
             client.search("Skyr")
         self.assertEqual(raised.exception.reason, "food_database_not_configured")
         self.assertEqual(len(script.requests), 2)
+
+    def test_throttled_login_reports_the_rate_limit_and_waits(self):
+        clock = Mock(return_value=0.0)
+        script = Script(tokens=[failure(429, {"Retry-After": "90"})])
+        client = self.client(script, clock=clock)
+        for _ in range(2):
+            with self.assertRaises(AppError) as raised:
+                client.search("Skyr")
+            self.assertEqual(raised.exception.status, 429)
+        self.assertEqual(len(script.requests), 1)
 
     def test_user_agent_can_be_overridden(self):
         script = Script(tokens=[token()], api=[[]])

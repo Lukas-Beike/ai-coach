@@ -234,6 +234,8 @@ class YazioClient:
 
     def _authorized_get(self, path: str) -> Any:
         for attempt in (1, 2):
+            if attempt == 2:
+                self._reserve(self._clock())
             token = self._token()
             request = Request(
                 BASE_URL + path,
@@ -358,6 +360,7 @@ class YazioClient:
             method="POST",
             headers={**self._headers(), "Content-Type": "application/json"},
         )
+        self._reserve(now)
         try:
             payload = self._call(request)
         except HTTPError as exc:
@@ -368,6 +371,12 @@ class YazioClient:
                 if exc.code in {400, 401, 403}:
                     self._refresh_token = ""
                 return False
+            if exc.code == 429:
+                raise AppError(
+                    429,
+                    "Yazio begrenzt die Anfragen. Bitte später erneut versuchen.",
+                    reason="food_database_rate_limited",
+                ) from None
             if exc.code in {400, 401, 403}:
                 self._login_blocked_until = now + _LOGIN_BACKOFF_SECONDS
                 raise AppError(

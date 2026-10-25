@@ -207,6 +207,11 @@ def _parts_score(
     return 2 * weighted / (len(term) + head), found
 
 
+def _usable(food: dict[str, Any]) -> bool:
+    """A stored food needs a known energy value and basis unit to be served."""
+    return food.get("basis_unit") is not None and food["per_100"]["kcal"] is not None
+
+
 def _suitable(query: str, food: dict[str, Any]) -> bool:
     """A chain hit needs a known energy value and every query word in its name."""
     return (
@@ -354,23 +359,26 @@ class FoodDatabaseService:
             "yazio:", lambda text: self._require_yazio().search(text), query, live=live
         )
 
-    def _barcode_product(self, barcode: str) -> tuple[dict[str, Any], str, bool]:
+    def _barcode_product(self, barcode: str) -> tuple[dict[str, Any], str, str | bool]:
         """Mirror, then Yazio when configured, then Open Food Facts.
 
         The last value tells whether Yazio was asked and failed.
         """
         stored = self._mirror.by_barcode(barcode) if self._mirror else []
         if self._mirror and (
-            fresh := next((e for e in stored if self._mirror.is_fresh(e)), None)
+            fresh := next(
+                (e for e in stored if self._mirror.is_fresh(e) and _usable(e)), None
+            )
         ):
             return fresh, LOCAL_DATABASE, False
-        failed = False
+        failed: str | bool = False
         if self.yazio_configured and re.fullmatch(r"\d{8,14}", barcode):
             try:
                 food = self._require_yazio().barcode(barcode)
-            except AppError:
-                food, failed = None, True
+            except AppError as exc:
+                food, failed = None, exc.reason or True
             if food is not None:
+                food = {**food, "barcode": barcode}
                 if self._mirror:
                     self._mirror.store([food])
                 return food, LIVE, False
@@ -424,6 +432,8 @@ class FoodDatabaseService:
             foods = self._labelled([food], origin)
             if yazio_failed:
                 notice += FALLBACK_NOTICE
+                if yazio_failed == "food_database_auth_failed":
+                    notice += " Yazio-Zugangsdaten prüfen."
             if origin == LOCAL_DATABASE_STALE:
                 notice += STALE_NOTICE
         else:

@@ -892,7 +892,7 @@ async function lookupNutritionProduct(barcode) {
     if (lookup) lookup.hidden = false;
     renderNutritionProducts(product ? [{ ...product, local: isLocal }] : [], { local: isLocal, targetId: "#nutritionLookupResult" });
     document.querySelector("#nutritionProductStatus").textContent = isLocal ? "Lokales Produkt gefunden." : "Online-Treffer gefunden. Prüfe ihn und speichere ihn lokal.";
-    if (product && !isLocal) await saveNutritionProduct(normalizeNutritionProduct({ ...product, source: result.source || product.source || "open_food_facts" }));
+    if (product && !isLocal) await saveNutritionProduct(normalizeNutritionProduct({ ...product, barcode: product.barcode || clean, source: result.source || product.source || "open_food_facts" }));
   } catch (error) { if (generation === state.sessionGeneration) document.querySelector("#nutritionBarcodeStatus").textContent = `Produktsuche fehlgeschlagen: ${error.message}`; }
 }
 

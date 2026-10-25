@@ -229,6 +229,23 @@ class LookupChainTests(unittest.TestCase):
         self.yazio.barcode_food = None
         self.assertEqual(self.ids(barcode=other), [f"off:{other}"])
 
+    def test_scanned_barcode_is_stored_and_found_again(self):
+        self.yazio.barcode_food = {**yazio_food(), "barcode": "4000000000017"}
+        self.ids(barcode=BARCODE)
+        self.assertEqual(self.mirror.by_barcode(BARCODE)[0]["id"], f"yazio:{YAZIO_ID}")
+        self.assertEqual(self.ids(barcode=BARCODE), [f"yazio:{YAZIO_ID}"])
+        self.assertEqual(len(self.yazio.calls), 1)
+
+    def test_unusable_stored_barcode_entry_does_not_shadow_open_food_facts(self):
+        self.mirror.store([{**yazio_food(kcal=None), "barcode": BARCODE}])
+        self.yazio.error = UNAVAILABLE
+        self.assertEqual(self.ids(barcode=BARCODE), [f"off:{BARCODE}"])
+
+    def test_rejected_yazio_login_is_named_in_the_barcode_notice(self):
+        self.yazio.error = AppError(503, "x", reason="food_database_auth_failed")
+        result = self.service.lookup({"barcode": BARCODE})
+        self.assertIn("Zugangsdaten", result["notice"])
+
     def test_yazio_failure_does_not_block_barcode_lookup(self):
         self.yazio.error = UNAVAILABLE
         self.assertEqual(self.ids(barcode=BARCODE), [f"off:{BARCODE}"])
