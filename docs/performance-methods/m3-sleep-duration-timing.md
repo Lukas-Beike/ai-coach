@@ -79,8 +79,9 @@ declares lighting-industry funding.
 - Current `sleep-regularity-v1` still computes medians and per-night
   deviations from any number of earlier intervals and only marks the status
   `insufficient_data` (`personal_recovery.py:384-403`).
-- Today the path walks raw provider payloads for start/end fields; canonical
-  sleep periods are pending (#1411, #1419).
+- Sleep duration comes from canonical observations (#1411); timing still walks
+  raw provider payloads for start/end fields until canonical sleep periods
+  exist (#1419).
 
 ## Minimum data and stop rules
 
@@ -132,7 +133,7 @@ declares lighting-industry funding.
 ## Open points
 
 - Rename "sleep deficit" and the regularity label in UI and Coach (#1426).
-- Move inputs to canonical sleep periods with parity tests (#1411, #1419).
+- Move timing inputs to canonical sleep periods with parity tests (#1419).
 - Decide whether naps are recorded compatibly enough to be added to duration.
 - SRI stays out of scope until a full sleep/wake series exists; then name the
   calculator and settings.

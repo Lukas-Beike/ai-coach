@@ -50,7 +50,7 @@ None.
   - `backend/providers/garmin_fields.py`, `backend/providers/garmin_performance_fields.py`, `backend/providers/garmin_health_mapping.py`
   - `backend/performance/source_policy.py`, `backend/performance/canonical_recovery.py`, `backend/performance/canonical_recovery_averages.py` (removed or reduced), `backend/performance/canonical_personal_recovery.py`, `backend/performance/canonical_inputs.py`
   - `backend/performance/recovery_context.py`, `backend/performance/personal_recovery.py`, `backend/performance/recovery.py`, `backend/performance/context.py`
-  - `backend/coach/morning.py`, `backend/coach/local_assembly.py`, `backend/diagnostics/canonical_counts.py`
+  - `backend/coach/morning.py`, `backend/coach/local_assembly.py`, `backend/performance/garmin_observations.py`
 - Tests: the recovery context, characterization, personal recovery, canonical recovery, canonical parity, morning and Garmin mapping modules. Recovery tests move from raw Garmin/wellness dicts to observations produced by the real mappers.
 - Data: no schema change (the `observations.metric` column is free text). Bumping the Garmin health mapper reprojects stored Garmin health records through the existing canonical backfill. No provider refetch and no remote writes.
 - API/Coach/PWA: same keys. Values differ only where the legacy path disagreed with canonical data (weekly HRV, raw-only Garmin values, carrier-only wellness values).

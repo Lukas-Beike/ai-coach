@@ -48,12 +48,13 @@ For each metric the current observation is `select_current(observations[kind], k
 - Sleep score: selected independently. A Garmin sleep duration with an Intervals score keeps the Intervals label, as today.
 - Resting HR and readiness: the value as stored. A whole number is returned as an int, so the JSON shape is unchanged. The Garmin date is set as for sleep.
 - HRV: the RMSSD observation. When none is selected, the newest in-bounds Garmin `HRV_WEEKLY_AVERAGE` is used with the source `"<Garmin label> (Wochenmittel)"`, its date, and `hrv_average = None`. SDNN is not a current-context value (unchanged).
-- Averages: the observations of the selected provider (Intervals when nothing is selected), one per day (first input record, as `select_daily`), in `[today - 6, today]`, averaged by `recovery.rounded_average`. Sleep averages use exact hours per day.
+- Averages: the observations of the selected provider (Intervals when nothing is selected), one per day (first input record, as `select_daily`), in `[today - 6, today]`, averaged by `recovery.rounded_average`. Values outside the kind's current-rule bounds are skipped, as the legacy Garmin averages skipped them (`source_policy.within_current_bounds`). Sleep averages use exact hours per day.
 
 Intended differences to the legacy output:
 - The Garmin sleep average no longer rounds each night to 0.1 h before averaging.
 - The readiness average uses the selected provider instead of always Intervals.
-- Garmin sleep from seconds now carries its date.
+- Garmin sleep from seconds now carries its date, so the recovery `id` follows the Garmin sleep night before the resting HR day.
+- A Garmin sleep score without a Garmin duration is selected on its own; a zero-second Garmin night is not stored by the mapper, so Intervals sleep is used.
 - Values that exist only in the raw view or only in wellness carrier fields disappear.
 - Weekly HRV is labelled.
 
@@ -88,7 +89,7 @@ The values go through the existing `_add_record`, which keeps the window, the no
 - `MetricKind.HRV_WEEKLY_AVERAGE = "hrv_weekly_average"`: unit `ms`, validation bounds `(0, 500)` like RMSSD, current rule Garmin only with bounds 1–300.
 - `garmin_fields.GARMIN_HRV_WEEKLY_ALIASES = ("hrvWeeklyAvg", "weeklyAvg")`. `garmin_performance_fields` reuses it.
 - The Garmin health mapper adds the field to the `hrv` group as `PROVIDER_REPORTED` (a Garmin-computed aggregate). `MAPPER_VERSION` goes from 10 to 11, and the existing canonical backfill reprojects stored Garmin health records.
-- `diagnostics/canonical_counts.py` lists the new kind. Other kind inventories are adjusted where tests require them.
+- `diagnostics/canonical_counts.py` stays unchanged: it counts only Intervals wellness kinds, and the weekly average is Garmin-only. The kind inventories pinned by tests (units, current rules, fixture counts) are updated.
 
 ### D6 Removals
 
