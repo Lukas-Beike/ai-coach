@@ -254,6 +254,31 @@ class YazioClientTests(unittest.TestCase):
                 for secret in (*SECRETS, "Skyr", "access-1"):
                     self.assertNotIn(secret, raised.exception.message)
 
+    def test_failed_refresh_during_an_outage_keeps_the_token_and_does_not_log_in(self):
+        clock = Mock(return_value=0.0)
+        script = Script(tokens=[token(), failure(500)], api=[[hit()]])
+        client = self.client(script, clock=clock)
+        client.search("a")
+        clock.return_value = 4000.0
+        with self.assertRaises(AppError):
+            client.search("b")
+        self.assertEqual(
+            [body["grant_type"] for body in script.bodies()],
+            ["password", "refresh_token"],
+        )
+
+    def test_throttled_refresh_blocks_a_fallback_login(self):
+        clock = Mock(return_value=0.0)
+        script = Script(tokens=[token(), failure(429)], api=[[hit()]])
+        client = self.client(script, clock=clock)
+        client.search("a")
+        clock.return_value = 4000.0
+        for _ in range(2):
+            with self.assertRaises(AppError) as raised:
+                client.search("b")
+            self.assertEqual(raised.exception.status, 429)
+        self.assertEqual(len(script.bodies()), 2)
+
     def test_user_agent_can_be_overridden(self):
         script = Script(tokens=[token()], api=[[]])
         self.client(script, yazio_user_agent="Custom/1").search("Skyr")

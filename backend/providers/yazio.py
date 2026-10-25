@@ -303,6 +303,15 @@ class YazioClient:
             sign_in=False,
         ):
             return self._access_token
+        if now < self._blocked_until:
+            raise AppError(
+                429,
+                "Yazio begrenzt die Anfragen. Bitte später erneut versuchen.",
+                reason="food_database_rate_limited",
+            )
+        if self._refresh_token:
+            # The refresh failed without a rejection: an outage, not a bad login.
+            raise AppError(502, UNAVAILABLE, reason="food_database_unavailable")
         if now < self._login_blocked_until:
             raise AppError(
                 503,
@@ -342,7 +351,8 @@ class YazioClient:
             if exc.code == 429:
                 self._blocked_until = self._clock() + _retry_after(exc.headers)
             if not sign_in:
-                self._refresh_token = ""
+                if exc.code in {400, 401, 403}:
+                    self._refresh_token = ""
                 return False
             if exc.code in {400, 401, 403}:
                 self._login_blocked_until = now + _LOGIN_BACKOFF_SECONDS

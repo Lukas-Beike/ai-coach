@@ -209,8 +209,10 @@ def _parts_score(
 
 def _suitable(query: str, food: dict[str, Any]) -> bool:
     """A chain hit needs a known energy value and every query word in its name."""
-    return food["per_100"]["kcal"] is not None and matches_all_terms(
-        query, f"{food['name']} {food.get('brands', '')}"
+    return (
+        food["basis_unit"] is not None
+        and food["per_100"]["kcal"] is not None
+        and matches_all_terms(query, f"{food['name']} {food.get('brands', '')}")
     )
 
 

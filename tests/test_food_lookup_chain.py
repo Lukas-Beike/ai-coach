@@ -138,6 +138,11 @@ class LookupChainTests(unittest.TestCase):
                 self.yazio.hits = hits
                 self.assertEqual(self.ids(query="Haferflocken"), [f"off:{BARCODE}"])
 
+    def test_yazio_hit_without_a_usable_unit_falls_through(self):
+        self.yazio.hits = [{**yazio_food(), "basis_unit": None}]
+        self.off.hits = [off_food()]
+        self.assertEqual(self.ids(query="Haferflocken"), [f"off:{BARCODE}"])
+
     def test_failing_providers_end_at_bls(self):
         self.yazio.error = UNAVAILABLE
         self.off.error = UNAVAILABLE
