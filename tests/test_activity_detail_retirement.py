@@ -166,10 +166,9 @@ class RetirementTestCase(unittest.TestCase):
         for _ in range(100):
             with self.manager.unit_of_work() as db:
                 if retirement.run_batch(db).done:
-                    return self.counters()
-        self.fail("the retirement did not finish")
-
-    def counters(self):
+                    break
+        else:
+            self.fail("the retirement did not finish")
         with self.manager.reader() as db:
             return json.loads(self.key_values.get(db, STATE_KEY))["counters"]
 
