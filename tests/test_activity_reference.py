@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, Mock, patch
 from activity_row_support import FixedActivityRows, SnapshotActivityRows
 
 from backend.activities.activity_reference import (
+    ActivityReference,
     ActivityReferences,
     NoActivityReferences,
     resolve_duplicate_ids,
@@ -44,6 +45,7 @@ from backend.errors import AppError
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.detail_envelope import DetailEnvelopeReader
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -134,6 +136,34 @@ class ActivityReferenceResolverTests(_Fixture):
         primary = self.seed("ride-b")
         self.merge(duplicate, primary)
         self.assertEqual("ride-a", ActivityReferences(self.manager).resolve(duplicate))
+
+    def test_garmin_survivor_resolves_its_merged_intervals_record(self) -> None:
+        intervals = self.seed("ride-merged")
+        garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
+        self.merge(intervals, garmin)
+        references = ActivityReferences(self.manager)
+        self.assertEqual(
+            ActivityReference("ride-merged", ProviderId.INTERVALS.value),
+            references.resolve_reference(garmin),
+        )
+        # Duplicate deletion keeps the strict resolution of the survivor.
+        self.assertEqual(garmin, references.resolve(garmin))
+
+    def test_envelope_reads_feedback_keyed_by_the_merged_intervals_id(self) -> None:
+        intervals = self.seed("ride-merged")
+        garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
+        self.merge(intervals, garmin)
+        feedback = Mock()
+        feedback.list.return_value = [{"activity_id": "ride-merged", "session_rpe": 6}]
+        envelope = DetailEnvelopeReader(
+            feedback_service=feedback,
+            read_equipment=lambda reference: {},
+            references=ActivityReferences(self.manager),
+            performance=dict,
+        )
+        with self.manager.reader() as db:
+            block = envelope(db, garmin, "ride-merged", None)
+        self.assertEqual(6, block["activity_feedback"]["session_rpe"])
 
     def test_garmin_primary_session_passes_through_unchanged(self) -> None:
         local = self.seed("garmin-1", provider=ProviderId.GARMIN)

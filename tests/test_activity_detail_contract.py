@@ -4,6 +4,7 @@ import json
 import unittest
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from backend.activities.detail_contract import (
     ACTIVITY_DETAIL_CONTRACT,
@@ -232,6 +233,15 @@ def heart_rate_values(offset: int = 0) -> tuple[float, ...]:
 
 
 class DocumentShapeTests(unittest.TestCase):
+    def test_session_local_start_is_the_athlete_wall_time(self) -> None:
+        doc = build(
+            [record(INTERVALS, "i-ride-99", label="Intervals.icu")],
+            zone=ZoneInfo("Europe/Berlin"),
+        )
+
+        self.assertEqual("2026-10-19T07:00:00+00:00", doc["session"]["started_at"])
+        self.assertEqual("2026-10-19T09:00:00", doc["session"]["started_at_local"])
+
     def test_document_has_the_contract_sections(self) -> None:
         doc = build([record(INTERVALS, "i-ride-99", label="Intervals.icu")])
 
@@ -256,6 +266,7 @@ class DocumentShapeTests(unittest.TestCase):
                 "sport": "ride",
                 "environment": "outdoor",
                 "started_at": STARTED.isoformat(),
+                "started_at_local": "2026-10-19T07:00:00",
                 "name": "Synthetic ride",
                 "device_type": None,
             },

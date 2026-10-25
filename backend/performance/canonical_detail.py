@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
+from datetime import UTC, tzinfo
 from typing import Any, Final, Protocol
 
 from backend.activities.detail_contract import (
@@ -115,8 +116,10 @@ class CanonicalDetailReader:
         summary_row: SummaryRowReader | None = None,
         failures: FailureReader | None = None,
         envelope: EnvelopeReader | None = None,
+        zone: tzinfo = UTC,
     ) -> None:
         self._session_records = session_records
+        self._zone = zone
         self._refreshable = refreshable
         self._summary_row = summary_row
         self._failures = failures
@@ -193,6 +196,7 @@ class CanonicalDetailReader:
             else intervals_summary_metrics(
                 summary, recorded_by=analysis_record.provenance.recorded_by
             ),
+            zone=self._zone,
         )
 
     def _analysis(

@@ -38,13 +38,14 @@ class DetailEnvelopeReader:
         provider_activity_id: str | None,
         summary: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
-        reference = str(self._references.resolve(activity_id))
+        reference = str(self._references.resolve_reference(activity_id).activity_id)
+        items = self._feedback_service.list(500)
+        # Feedback saved under the requested id before the merged record resolved.
         feedback = next(
-            (
-                item
-                for item in self._feedback_service.list(500)
-                if item.get("activity_id") == reference
-            ),
+            (item for item in items if item.get("activity_id") == reference),
+            None,
+        ) or next(
+            (item for item in items if item.get("activity_id") == str(activity_id)),
             None,
         )
         if summary is None:

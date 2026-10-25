@@ -114,7 +114,9 @@ class ActivityDetailRefreshService:
 
     def refresh(self, activity_id: str) -> dict[str, Any]:
         activity_id = normalize_activity_id(
-            self._references.resolve(normalize_activity_id(activity_id))
+            self._references.resolve_reference(
+                normalize_activity_id(activity_id)
+            ).activity_id
         )
         with self._database_manager.unit_of_work() as db:
             rows = self._row_reader.activity_rows(db)

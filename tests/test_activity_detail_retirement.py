@@ -95,6 +95,14 @@ def detail_keys(manager):
     return [row["key"] for row in rows if row["key"].startswith("activity_detail:")]
 
 
+def kv_rows(manager):
+    with manager.reader() as db:
+        rows = db.execute(
+            "SELECT key, value FROM kv WHERE key <> ? ORDER BY key", (STATE_KEY,)
+        ).fetchall()
+    return [(row["key"], row["value"]) for row in rows]
+
+
 def canonical_snapshot(manager):
     with manager.reader() as db:
         return [
@@ -169,13 +177,6 @@ class RetirementTestCase(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             db.execute(sql, parameters)
 
-    def kv_rows(self):
-        with self.manager.reader() as db:
-            rows = db.execute(
-                "SELECT key, value FROM kv WHERE key <> ? ORDER BY key", (STATE_KEY,)
-            ).fetchall()
-        return [(row["key"], row["value"]) for row in rows]
-
     def kv_record(self, activity_id):
         with self.manager.reader() as db:
             raw = self.key_values.get(db, legacy_detail_kv.key(activity_id))
@@ -205,14 +206,14 @@ class RetiredRecordTests(RetirementTestCase):
         self.store.save_failure("9299", "0" * 64, "Synthetic note", NOW)
         self.store.save_prefetch_floor("2026-10-01T00:00:00", NOW)
         canonical = canonical_snapshot(self.manager)
-        kept = [row for row in self.kv_rows() if not row[0].startswith("activity_detail:")]
+        kept = [row for row in kv_rows(self.manager) if not row[0].startswith("activity_detail:")]
         calls = self.api.get.call_count
         self.assertTrue(record["activity"]["laps"])
         counters = self.run_to_completion()
         self.assertEqual(1, counters["retired"])
         self.assertEqual(0, counters["laps_refilled"])
         self.assertIsNone(self.kv_record("9201"))
-        self.assertEqual(kept, self.kv_rows())
+        self.assertEqual(kept, kv_rows(self.manager))
         self.assertEqual(canonical, canonical_snapshot(self.manager))
         # The retirement reads local rows only; no provider is called.
         self.assertEqual(calls, self.api.get.call_count)
@@ -268,7 +269,7 @@ class KeptRecordTests(RetirementTestCase):
     """Every unproven record stays with canonical rows unchanged, counting its reason."""
 
     def assert_kept(self, reason, activity_id):
-        before_kv = self.kv_rows()
+        before_kv = kv_rows(self.manager)
         before = canonical_snapshot(self.manager)
         self.assertIn(
             legacy_detail_kv.key(activity_id), [key for key, _ in before_kv]
@@ -280,7 +281,7 @@ class KeptRecordTests(RetirementTestCase):
             1,
             sum(value for name, value in counters.items() if name != "laps_refilled"),
         )
-        self.assertEqual(before_kv, self.kv_rows())
+        self.assertEqual(before_kv, kv_rows(self.manager))
         self.assertEqual(before, canonical_snapshot(self.manager))
 
     def changed(self, activity_id, change):
@@ -441,7 +442,7 @@ class RetirementWorkerTests(RetirementTestCase):
             self.load(activity_id)
         self.drop_lap_speeds()
         canonical = canonical_snapshot(self.manager)
-        records = self.kv_rows()
+        records = kv_rows(self.manager)
         real = activity_detail_retirement._retire
         calls = []
 
@@ -465,7 +466,7 @@ class RetirementWorkerTests(RetirementTestCase):
             worker.run_loop()
         self.assertEqual(2, len(calls))
         # The first record was refilled and deleted in the batch that rolled back.
-        self.assertEqual(records, self.kv_rows())
+        self.assertEqual(records, kv_rows(self.manager))
         self.assertEqual(canonical, canonical_snapshot(self.manager))
         state = self.state()
         self.assertEqual(("failed", "", 0), (state["status"], state["cursor"], state["batches"]))
@@ -476,11 +477,11 @@ class RetirementWorkerTests(RetirementTestCase):
         ids = ("9421", "9422", "9423")
         for activity_id in ids:
             self.load(activity_id)
-        keys = [key for key, _ in self.kv_rows()]
+        keys = [key for key, _ in kv_rows(self.manager)]
         with self.manager.unit_of_work() as db:
             self.assertFalse(self.make(batch_size=1).run_batch(db).done)
         self.assertEqual(keys[0], self.state()["cursor"])
-        self.assertEqual(keys[1:], [key for key, _ in self.kv_rows()])
+        self.assertEqual(keys[1:], [key for key, _ in kv_rows(self.manager)])
         # A new stage instance stands in for a restart of the application.
         counters = self.run_to_completion(self.make(batch_size=1))
         self.assertEqual(len(ids), counters["retired"])
@@ -488,7 +489,7 @@ class RetirementWorkerTests(RetirementTestCase):
         canonical = canonical_snapshot(self.manager)
         self.assertEqual(counters, self.run_to_completion(self.make(batch_size=1)))
         self.assertEqual(canonical, canonical_snapshot(self.manager))
-        self.assertEqual([], self.kv_rows())
+        self.assertEqual([], kv_rows(self.manager))
 
 
 if __name__ == "__main__":

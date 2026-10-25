@@ -3,11 +3,13 @@
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from backend.activities.activity_reference import ActivityReferenceResolver
 from backend.activities.detail_contract import measured_order
 from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.read_service import ActivityReadService, _first_present
+from backend.athlete.profile import timezone_name
 from backend.canonical.records import ActivityRecord
 from backend.errors import AppError
 from backend.performance.canonical_detail import (
@@ -140,6 +142,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 references=self._references,
                 performance=performance,
             ),
+            zone=ZoneInfo(timezone_name(profile.get("timezone"))),
         )
         with self._database_manager.read_snapshot() as db:
             document = reader.read(db, normalized_id)

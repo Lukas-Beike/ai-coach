@@ -40,6 +40,7 @@ test("@responsive activity details preserve calendar without Coach shortcuts", a
   expect(payload.contract).toBe("activity_detail.v1");
   expect(payload.detail_data.display_sampled).toBe(true);
   expect(payload.streams.time_s.length).toBe(2000);
+  expect(payload.session.started_at_local).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
   expect(payload.activity_feedback.session_rpe).toBe(6.5);
   expect(payload.activity_feedback.notes).toBe("Synthetic feedback");
 });

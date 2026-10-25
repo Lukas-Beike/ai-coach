@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, tzinfo
 from typing import Any, Final
 
 from backend.activities.detail_merge import (
@@ -111,12 +111,14 @@ def activity_detail_contract(
     status: Mapping[ProviderId, ProviderStatus] | None = None,
     envelope: Mapping[str, Any] | None = None,
     summary_metrics: Mapping[str, Mapping[str, Any]] | None = None,
+    zone: tzinfo = UTC,
 ) -> dict[str, Any]:
     """Assemble the ``activity_detail.v1`` document of one canonical session.
 
     ``status`` adds stale, load error and coverage to each provider entry.
     ``envelope`` adds the feedback, equipment and activity validation blocks.
     ``summary_metrics`` fill metrics that no measured or derived value provides.
+    ``zone`` is the athlete's zone for ``session.started_at_local``.
     """
     if not records:
         raise ValueError("records must not be empty")
@@ -126,7 +128,7 @@ def activity_detail_contract(
         metrics.setdefault(key, dict(entry))
     document = {
         "contract": ACTIVITY_DETAIL_CONTRACT,
-        "session": _session(session_id, measured[0]),
+        "session": _session(session_id, measured[0], zone),
         "metrics": metrics,
         "streams": _streams(merged.streams),
         "laps": _laps(merged.laps, merged.streams),
@@ -142,12 +144,14 @@ def activity_detail_contract(
     return document
 
 
-def _session(session_id: str, primary: ActivityRecord) -> dict[str, Any]:
+def _session(session_id: str, primary: ActivityRecord, zone: tzinfo) -> dict[str, Any]:
+    local_start = primary.started_at.astimezone(zone).replace(tzinfo=None)
     return {
         "activity_id": session_id,
         "sport": primary.sport.value,
         "environment": primary.environment.value,
         "started_at": primary.started_at.isoformat(),
+        "started_at_local": local_start.isoformat(timespec="seconds"),
         "name": primary.name,
         "device_type": None
         if primary.device_type is None
