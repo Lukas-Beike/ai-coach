@@ -39,11 +39,12 @@ container, and do not replace or reset the data directory to resolve a
 rejected schema. A fresh database is only required when the athlete explicitly
 chooses to start over. Future schema changes add explicit, versioned and
 transactional migrations from version 9 with upgrade regression tests.
-The current schema is version 13. Version 10 adds canonical activity detail
+The current schema is version 14. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
-`garmin_snapshot` value, and version 13 adds the maximum speed of each lap. A
-version 9, 10, 11 or 12 database or backup is upgraded to it in place within
+`garmin_snapshot` value, version 13 adds the maximum speed of each lap, and
+version 14 lets Yazio foods into the food-database mirror and saved products. A
+version 9, 10, 11, 12 or 13 database or backup is upgraded to it in place within
 one transaction, and a failed upgrade leaves it unchanged. The version 12 step
 splits the stored Garmin value into rows, reads every element back to verify
 it, and keeps the original value unread as `garmin_snapshot_legacy`.
@@ -278,6 +279,10 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 | `WAHOO_CLIENT_ID` | *None* | No | Wahoo Cloud API application client ID. Wahoo counts as configured only when all three `WAHOO_*` values are set. |
 | `WAHOO_CLIENT_SECRET` | *None* | No | Wahoo Cloud API application client secret. Stored server-side only and redacted from logs. |
 | `WAHOO_REDIRECT_URI` | *None* | No | Full HTTPS callback URL, `https://<app-host>/api/wahoo/callback`. Never derived from the request Host header. |
+| `YAZIO_EMAIL`, `YAZIO_PASSWORD` | *None* | No | Yazio account used for the optional read-only product lookup. Stored server-side only and redacted from logs; also editable under **Mehr > Anbindungen > Zugangsdaten**, where a stored value wins. |
+| `YAZIO_CLIENT_ID`, `YAZIO_CLIENT_SECRET` | *None* | No | Identifiers of the Yazio mobile app that the unofficial API requires. Yazio counts as configured only when all four `YAZIO_*` values are set. |
+| `YAZIO_COUNTRY` | `DE` | No | Two-letter country code sent as the Yazio search region (`DE` also selects German-language ranking). |
+| `YAZIO_USER_AGENT` | built-in iOS client string | No | User-Agent sent to Yazio, which blocks unrecognized client versions (`version_blocked`). Set a current value when lookups fail with that error. |
 | `CALENDAR_ICAL_URL` | *None* | No | Private read-only iCalendar (ICS) feed URL from Google Calendar, iCloud, or Outlook. |
 | `COOKIE_SECURE` | `false` | No | Set to `true` when running behind an HTTPS reverse proxy to add the `Secure` flag to cookies. |
 | `TRUSTED_PROXY_IPS` | *None* | No | Comma- or space-separated reverse-proxy addresses or CIDR networks (e.g. `192.168.1.6`). Only requests whose direct peer is in this list have `X-Forwarded-For` honored; the rightmost untrusted hop then becomes the client IP for login and API rate limits. The proxy must append the address it sees (nginx: `$proxy_add_x_forwarded_for`). List only the proxies themselves: a network that also contains clients, such as the whole LAN, lets those clients choose their rate-limit address through the header. Invalid entries, including a host address with a mask such as `192.168.1.6/24`, are ignored with a startup warning. |
@@ -577,7 +582,7 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`. The restore is refused with HTTP 507 when `/data` lacks the free space for this copy, and a partial copy is deleted.
-5. The replacement database must have the current schema (version 13) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must have the current schema (version 14) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Privacy Export & Data Purge
@@ -644,7 +649,7 @@ one is completed on resumption before final handoff.
 
 Coding tasks default to the repository's [Ponytail workflow](.agents/skills/ai-coach-ponytail/SKILL.md)
 in `full` mode: the smallest complete change, reusing existing code before adding
-dependencies or abstractions. Any agent can scan and read its Markdown directly;
+dependencies or abstractions. Any agent can read its Markdown directly;
 the external Ponytail plugin is optional. Say `ponytail lite`, `ponytail full`,
 `ponytail ultra`, or `stop ponytail` to change the session mode. Repository safety
 rules and required checks still apply. This is instruction routing, not a CI gate.
@@ -680,7 +685,7 @@ store, hosted service, or model credentials are required. Its config/data homes
 are isolated under ignored `.openspec-local/` in the working directory, including
 profile migrations triggered by `init` or `update`. The universal
 `agents` adapter installs six skills directly into `.agents/skills/`, shared
-by agents that support that directory. Other agents scan and read the linked
+by agents that support that directory. Other agents read the linked
 skills in the index. Restart a session if its skill catalog was already loaded.
 Host-specific slash commands are not installed; plain-language requests such
 as "use openspec-propose to plan a backfill of Coach write authorization" work
@@ -756,8 +761,8 @@ One shared virtual environment per version and lock hash lives under
 on POSIX. Graphs, update locks, isolated home and exports stay per worktree
 under `.graphify-local/`. Session hooks never install missing tools.
 Preparation uses `update --preparation` with a 600-second budget; hooks and
-plain `update` keep 180 seconds. A local content-hash cache skips secret scans
-only for content already reported clean by the same scanner and corpus rules.
+plain `update` keep 180 seconds. Graphify does not require Sonar; source allowlists
+and credential/runtime exclusions remain enforced.
 Codex and Claude Code are configured to run the same local `update
 --session-start` command synchronously at session start and resume. This keeps
 the graph fresh before use; after edits during a session, run
@@ -789,8 +794,8 @@ model and is outside this integration. Always check current source, callers,
 tests, and applicable instructions before acting on graph findings. Broad or
 stale matches can be incomplete; use ordinary source search when needed.
 
-The Codex hook is configured in `.codex/hooks.json` and preserves the existing
-Sonar prompt scanner. Codex requires accepting the repository hook in its
+The Codex hook is configured in `.codex/hooks.json` and refreshes Graphify without
+scanning incoming prompts. Codex requires accepting the repository hook in its
 `/hooks` trust UI. Claude Code uses `.claude/settings.json` and requires its
 normal repository trust. Do not bypass either trust prompt. The checked-in
 Claude hook uses the documented PowerShell shell on Windows. For POSIX Claude
@@ -844,6 +849,24 @@ These files do not activate hosted reviews or prove session configuration.
 
 References: [Claude best practices](https://code.claude.com/docs/en/best-practices)
 and [AGENTS loading](https://code.claude.com/docs/en/memory#agents-md).
+
+### Secret checks before Git pushes
+
+Source reads, incoming prompts/provider data, and Graphify do not require a secret
+scan. Outgoing Git objects are checked by `.githooks/pre-push`, which invokes
+`python scripts/check_push_secrets.py`. It scans new committed blobs and
+commit/tag messages, including intermediate commits, in temporary storage and suppresses scanner payload output.
+A finding, missing Sonar CLI, or scanner error blocks the push. Deleted refs need
+no scan. Do not use `--no-verify`.
+
+Enable the hook in each clone (the relative path also works in its worktrees):
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+For a one-off push without changing clone configuration, use
+`git -c core.hooksPath=.githooks push <remote> <branch>`.
 
 ### Local Development on Windows
 
@@ -1146,7 +1169,7 @@ Der Tab **Ernährung** zeigt **Tagebuch**, **Verlauf**, **Body** und **Produkte*
 
 Mit "Definiere mein Standardfrühstück" lassen sich wiederverwendbare Mahlzeiten mit Zutaten, Mengen und Nährwerten für eine Portion anlegen. Der Coach zeigt die Vorlage zur Bestätigung, bevor er sie speichert. Eine Vorlage zählt noch nicht als gegessen. "Ich habe eine halbe Portion meines Standardfrühstücks gegessen" erfasst den Verzehr mit entsprechend skalierten Nährwerten. Einmalige Abweichungen verändern nur den Tagebucheintrag; dauerhafte Änderungen verändern die Vorlage und niemals frühere Einträge.
 
-Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts** für Markenprodukte und Barcodes. Der Backend-Code berechnet Kalorien und Makros aus den ausgewählten Lebensmittel-IDs und Mengen; Datenbankquelle, Bezugsmenge und Zutatenmengen bleiben im Eintrag und in Mahlzeitvorlagen erhalten und werden im Ernährungstab angezeigt. Die aktuelle OFF-Produkt-API wird über ihre strukturierte Nährwertdarstellung gelesen; automatisch ergänzte OFF-Schätzwerte und Angaben wie „kleiner als“ werden nicht als exakte Etikettwerte übernommen. Rohes und gegartes Gewicht sind nicht austauschbar; Gramm und Milliliter werden nicht ohne Dichte umgerechnet. Mehrdeutige Produkte oder unbekannte Mengen müssen geklärt werden. Ohne passenden Treffer bleiben Verpackungswerte oder ausdrücklich gekennzeichnete KI-Schätzungen möglich. Fehlende Makros und nicht erfasste Tage werden nicht als vollständige Nullwerte dargestellt. Fehlen einzelnen Einträgen Makros, zeigt das Tagebuch die Summe der bekannten Werte als „unvollständig“ und nennt die Zahl der betroffenen Einträge; Freigabevorschau und Coach-Kontext verwenden weiterhin nur vollständige Tagessummen. Die Synchronisierung sendet Kalorien und die bekannten Makros, markiert den Tag als synchronisiert und löscht unbekannte Makros auf Intervals.icu (Wert -1), damit dort kein früherer Wert stehen bleibt; ergänzt eine spätere Änderung die fehlenden Makros, wird der Tag erneut synchronisiert.
+Der Coach bevorzugt **BLS 4.0** für Grundnahrungsmittel und **Open Food Facts** für Markenprodukte und Barcodes; ist **Yazio** eingerichtet, sucht er ohne ausdrückliche Quelle zuerst dort (siehe „Yazio-Produktsuche“). Der Backend-Code berechnet Kalorien und Makros aus den ausgewählten Lebensmittel-IDs und Mengen; Datenbankquelle, Bezugsmenge und Zutatenmengen bleiben im Eintrag und in Mahlzeitvorlagen erhalten und werden im Ernährungstab angezeigt. Die aktuelle OFF-Produkt-API wird über ihre strukturierte Nährwertdarstellung gelesen; automatisch ergänzte OFF-Schätzwerte und Angaben wie „kleiner als“ werden nicht als exakte Etikettwerte übernommen. Rohes und gegartes Gewicht sind nicht austauschbar; Gramm und Milliliter werden nicht ohne Dichte umgerechnet. Mehrdeutige Produkte oder unbekannte Mengen müssen geklärt werden. Ohne passenden Treffer bleiben Verpackungswerte oder ausdrücklich gekennzeichnete KI-Schätzungen möglich. Fehlende Makros und nicht erfasste Tage werden nicht als vollständige Nullwerte dargestellt. Fehlen einzelnen Einträgen Makros, zeigt das Tagebuch die Summe der bekannten Werte als „unvollständig“ und nennt die Zahl der betroffenen Einträge; Freigabevorschau und Coach-Kontext verwenden weiterhin nur vollständige Tagessummen. Die Synchronisierung sendet Kalorien und die bekannten Makros, markiert den Tag als synchronisiert und löscht unbekannte Makros auf Intervals.icu (Wert -1), damit dort kein früherer Wert stehen bleibt; ergänzt eine spätere Änderung die fehlenden Makros, wird der Tag erneut synchronisiert.
 
 **Zugang und Limits:** BLS ist als lokaler Datensatz eingebunden und funktioniert ohne API-Key, Konto oder laufende API-Abfragen. Open Food Facts benötigt für Lesezugriffe keinen API-Key; die Anwendung identifiziert sich mit einem User-Agent. Die aktuell dokumentierten IP-Limits sind 15 Produktabfragen und 10 Suchabfragen pro Minute. Die Anwendung begrenzt sich auf 14 bzw. 9 Abfragen pro Minute, speichert Antworten maximal 24 Stunden im begrenzten Arbeitsspeicher-Cache und pausiert bei 429/503. Andere Anwendungen hinter derselben öffentlichen IP teilen sich die Anbieterlimits. Keine Suche bei jedem Tastendruck. An Open Food Facts gehen nur Suchbegriffe/Barcodes für Lebensmittel, keine Mahlzeitmengen, Fotos, Profile oder Chatverläufe; der Anbieter sieht die Server-IP. Bei Ausfall oder Limit wird kein erfundener Datenbankwert verwendet.
 
@@ -1162,7 +1185,7 @@ The **Analyse** tab has four sections: Belastung, Leistung, Erholung and Einheit
 
 The **Body** section under **Nutrition** starts with a two-row table labelled "Zuletzt gemessene Körperwerte" of the latest measured weight and body fat, including measurement dates. The table and history charts use Garmin Connect observations only and omit source labels. Cycling power-to-weight appears as one value in the current cycling table in **Performance**, using Garmin FTP or Intervals.icu eFTP divided by a measured weight from the preceding seven days. Body offers the latest 14 days or twelve rolling weeks. Independently of that selection, the power-to-weight value in Performance shows the latest Garmin FTP quotient from twelve rolling weeks, even when a newer Intervals.icu eFTP quotient exists, and uses the latest eFTP quotient only when no Garmin quotient is available. There is no power-to-weight chart. Weekly points use the median of dated readings. Observation dates remain available, and W/kg values keep FTP/eFTP and weight provenance separate. Unmeasured dates and weeks remain gaps; profile values do not fill missing observations.
 
-Erholung shows the latest fourteen days including today without a period selector, using three aligned charts with independent scales for sleep duration, nightly HRV and resting heart rate. Daily sleep is shown as bars starting at zero, with an average line; hours are formatted as hours and minutes. HRV and resting heart rate show the existing source-specific 42-day personal quartiles only when at least 14 comparable earlier measurements support them; provisional ranges and insufficient or stale baselines remain explicit. Every day retains its original observation; missing days remain gaps, and no missing measurement counts as zero. Each metric uses one source and measurement method: the freshest series wins, with Intervals.icu preferred on equal dates and Garmin used when fresher or unavailable from Intervals.icu. Sources, measurement dates and coverage remain available in tooltips; tap or keyboard-activate a day for details, or open the original-value table. Chart legends show only metric names. Values, dates, sources, coverage, changes and explanatory notes are available in legend and point tooltips; expandable tables retain the original values. Personal reference ranges use a green background band. Recovery bands update with new observations; load and performance charts do not show personal reference bands. Mixed-unit secondary axes have been removed. Personal deviations and positive TSB do not constitute a medical or training clearance.
+Erholung shows the latest fourteen days including today without a period selector, using three aligned charts with independent scales for sleep duration, nightly HRV and resting heart rate. Daily sleep is shown as bars starting at zero, with an average line; hours are formatted as hours and minutes. HRV and resting heart rate show the existing source-specific 42-day personal quartiles only when at least 14 comparable earlier measurements support them; provisional ranges and insufficient or stale baselines remain explicit. Every day retains its original observation; missing days remain gaps, and no missing measurement counts as zero. Each metric uses one source and measurement method: the freshest series wins, with Intervals.icu preferred on equal dates and Garmin used when fresher or unavailable from Intervals.icu. Current recovery values and personal ranges are read from stored canonical observations only; a value that exists only in a raw provider payload is not shown. Garmin's weekly HRV average is shown as the current HRV only when no last-night HRV exists, labelled "Garmin Connect (Wochenmittel)" and without a 7-day average. Sources, measurement dates and coverage remain available in tooltips; tap or keyboard-activate a day for details, or open the original-value table. Chart legends show only metric names. Values, dates, sources, coverage, changes and explanatory notes are available in legend and point tooltips; expandable tables retain the original values. Personal reference ranges use a green background band. Recovery bands update with new observations; load and performance charts do not show personal reference bands. Mixed-unit secondary axes have been removed. Personal deviations and positive TSB do not constitute a medical or training clearance.
 
 Charts preserve provider provenance and observation dates. Garmin performance metrics have no Intervals.icu fallback; eFTP uses Intervals.icu estimates and never manually configured FTP. Numeric labels are reduced when they would overlap, without removing data points. Tap a day or open Werte ansehen for complete values. Sleep shows minimum and maximum below the plot and its average beside the dashed line. HRV and resting-heart-rate personal reference bands use earlier 42-day matching measurements, with at least fourteen observations (provisional below 28). These are personal quartiles, not medical or sport-wide targets. Where Garmin provides them, the Erholung tab also shows dated training readiness as its first chart; weekly training load is the acute-load chart in the Belastung tab. Missing values remain gaps. Historical availability depends on the sync window. Charts are read-only and never trigger provider requests.
 
@@ -1209,7 +1232,7 @@ Trainingsverpflegung hat keine eigene Anzeige, API oder Coach-Aktion mehr. Die l
 
 Jedes Open-Food-Facts-Produkt, das die App online abruft, wird automatisch und
 dauerhaft in der lokalen Datenbank gespeichert (Tabelle `food_database_entries`,
-Schema v11, getrennt von den eigenen Produkten). Abfragen lesen erst die
+Schema v11, seit v14 auch Yazio, getrennt von den eigenen Produkten). Abfragen lesen erst die
 eigenen Produkte, dann diesen Spiegel und fragen Open Food Facts nur ab, wenn
 ein Treffer fehlt oder älter als 90 Tage ist. Ist der Online-Abruf nicht
 möglich, wird der gespeicherte Stand mit Datum („Stand vom …“) verwendet.
@@ -1219,6 +1242,39 @@ Treffer tragen für den Coach die Herkunft `data_origin` (`live`,
 Eintrag nach Prüfung als eigenes Produkt, „Aus Datenbank entfernen“ löscht nur
 den Spiegeleintrag. Der Spiegel gehört zu Backup, Export und Datenlöschung. Das
 Upgrade von Schema v9 oder v10 legt die leere Tabelle an und erhält alle Daten.
+
+#### Yazio-Produktsuche (optional)
+
+Mit eingerichteten Yazio-Zugangsdaten (`YAZIO_*` oder **Mehr > Anbindungen >
+Zugangsdaten**) gilt für Produktsuchen ohne ausdrückliche Quelle diese
+Reihenfolge: eigene gespeicherte Produkte, lokale Datenbank (Spiegel), Yazio,
+Open Food Facts, BLS. Die nächste Quelle wird gefragt, wenn die vorherige
+keinen passenden Treffer hat (jedes Suchwort im Namen, bekannter Kalorienwert),
+nicht erreichbar ist oder ihr Limit erreicht hat; ein Treffer in einer früheren
+Quelle verhindert alle externen Anfragen. Barcodes laufen über Spiegel, Yazio
+und Open Food Facts. Ohne Yazio-Zugangsdaten bleibt es bei eigenen Produkten und
+BLS, Open Food Facts nur auf ausdrückliche Anfrage; mit Yazio werden Suchbegriffe ohne Quellenangabe also auch an Yazio und Open Food Facts gesendet. Der Coach kann `yazio` auch
+als ausdrückliche Quelle nennen.
+
+Yazio-Treffer tragen die Quelle „Yazio“, Werte pro 100 g oder 100 ml und, wo
+Yazio sie liefert, Portionsangaben. Sie werden wie Open-Food-Facts-Treffer im
+lokalen Spiegel gespeichert (Schema v14) und können nach Prüfung als eigenes
+Produkt gespeichert werden. Es gibt keine Tagebuch-Synchronisierung und keine
+Schreibzugriffe auf Yazio. An Yazio gehen nur das Konto (Anmeldung), Suchbegriffe
+und Barcodes; Zugangsdaten und Tokens erscheinen nicht in Logs, Diagnose, Export
+oder Coach-Kontext, Tokens bleiben im Arbeitsspeicher. Anfragen sind begrenzt
+(10 s Zeitlimit, 20 Anfragen pro Minute, 24 h Zwischenspeicher, Pause bei 429;
+nach abgelehnter Anmeldung 15 Minuten keine weiteren Anmeldeversuche).
+
+**Bekannte Einschränkungen:** Die Schnittstelle ist inoffiziell und nicht
+dokumentiert ([Spezifikation der Community](https://yazio-community.github.io/yazio-api-specification/),
+[öffentliche Beschreibung](https://saganos.github.io/yazio_public_api/)); sie kann
+sich ohne Ankündigung ändern oder die Nutzung blockieren. Sie benötigt die
+Client-ID und das Client-Secret der Yazio-App sowie eine bekannte App-Version im
+User-Agent, die du selbst bereitstellst. Die Nährwerte werden als Werte pro
+Gramm beziehungsweise Milliliter (Suchparameter: Region aus `YAZIO_COUNTRY`, fest `sex=male`, ohne Einfluss auf die Nährwerte) gelesen und mit 100 multipliziert; unplausible
+Werte bleiben unbekannt. Diese Annahme ist nur mit synthetischen Fixtures
+getestet, nicht mit einem echten Konto. Prüfe Treffer vor dem Speichern.
 
 #### Lokale Produkte und Verpackungsfotos
 

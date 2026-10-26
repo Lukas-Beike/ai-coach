@@ -1,302 +1,175 @@
-"""Current sleep score, resting HR and readiness read from canonical observations.
+"""Canonical recovery inputs: the only source of the recovery reads (#1411).
 
-The canonical value replaces the legacy value only when it is the record the legacy
-reader picked and carries the same number, so the serialized recovery output stays
-byte-identical. A populated temporary database is the end-to-end check. Every
-provider is mocked by fixtures and all storage is temporary.
+The inputs carry every recovery kind of all providers, read once per unit of work.
+A populated temporary database is the end-to-end check: the recovery context and
+the personal baselines served from the tables equal those built from the same
+fixtures mapped in memory, and need no raw Garmin view. Every provider is mocked
+by fixtures and all storage is temporary.
 """
 
 from __future__ import annotations
 
 import json
 import unittest
-from datetime import UTC, date, datetime
+from datetime import date, timedelta
 from typing import Any
 from unittest.mock import patch
 
 from canonical_consumer_cases import TODAY
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
-
-from backend.canonical.records import MetricValue, Observation, Provenance
-from backend.canonical.vocabulary import (
-    MetricKind,
-    ProviderId,
-    RecordingOrigin,
-    SourceKind,
-    Sport,
+from canonical_recovery_support import (
+    RecordingReader,
+    mapped_recovery_inputs,
+    recovery_inputs,
+    recovery_observation,
 )
-from backend.performance import recovery_context
+
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.canonical_inputs import read_performance_inputs
 from backend.performance.canonical_recovery import (
-    CanonicalRecoveryInputs,
-    prefer_canonical,
+    RECOVERY_KINDS,
     read_recovery_inputs,
 )
 from backend.performance.context import current_performance_context
+from backend.performance.personal_recovery import personal_recovery
+from backend.providers.source_labels import SourceView, provider_label
 
-DAY = "2026-09-20"
-EARLIER = "2026-09-19"
-RETRIEVED = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
-UNITS = {
-    MetricKind.SLEEP_SCORE: "score",
-    MetricKind.RESTING_HR: "bpm",
-    MetricKind.READINESS: "score",
-}
-
-
-def _observation(
-    kind: MetricKind,
-    value: float,
-    day: str = DAY,
-    provider: ProviderId = ProviderId.GARMIN,
-) -> Observation:
-    recorded_by = (
-        RecordingOrigin.GARMIN
-        if provider is ProviderId.GARMIN
-        else RecordingOrigin.MANUAL
-    )
-    return Observation(
-        kind=kind,
-        value=MetricValue(value, UNITS[kind]),
-        observed_on=date.fromisoformat(day),
-        observed_at=None,
-        provenance=Provenance(
-            provider=provider,
-            source_kind=SourceKind.PROVIDER_REPORTED,
-            source_record_id=f"{kind.value}-{day}",
-            recorded_by=recorded_by,
-            retrieved_at=RETRIEVED,
-            label=None,
-        ),
-    )
-
-
-class _FakeReader:
-    """Serves fixed observations per kind and records each read."""
-
-    def __init__(self, by_kind: dict[MetricKind, list[Observation]]) -> None:
-        self._by_kind = by_kind
-        self.calls: list[tuple[MetricKind, date | None, date | None]] = []
-
-    def observations(
-        self,
-        db: Any,
-        kind: MetricKind,
-        *,
-        start: date | None = None,
-        end: date | None = None,
-        sport: Sport | None = None,
-    ) -> tuple[Observation, ...]:
-        self.calls.append((kind, start, end))
-        return tuple(self._by_kind.get(kind, []))
-
-
-def _garmin(sleep_score: int = 84, resting: int = 45) -> dict[str, Any]:
-    return {
-        "sleep": [
-            {"calendarDate": DAY, "sleepTimeSeconds": 26400, "sleepScore": sleep_score}
-        ],
-        "resting_hr": [{"calendarDate": DAY, "restingHeartRate": resting}],
-    }
-
-
-def _latest(**extra: Any) -> dict[str, Any]:
-    return {"id": DAY, "sleepSecs": 27000, "sleepScore": 81, "readiness": 74, **extra}
-
-
-def _recovery(
-    garmin: dict[str, Any],
-    latest: dict[str, Any],
-    canonical: CanonicalRecoveryInputs | None,
-) -> dict[str, Any]:
-    return recovery_context.performance_recovery_context(
-        garmin, latest, [latest], TODAY, canonical=canonical
-    )
+DAY = date(2026, 9, 20)
 
 
 def _dump(value: Any) -> str:
-    return json.dumps(value, default=str)
-
-
-class PreferCanonicalTests(unittest.TestCase):
-    def test_missing_observation_keeps_the_legacy_value(self) -> None:
-        self.assertEqual(prefer_canonical(None, 81, ProviderId.GARMIN), 81)
-
-    def test_non_numeric_legacy_values_are_always_kept(self) -> None:
-        observation = _observation(MetricKind.SLEEP_SCORE, 1.0)
-        for legacy in ("81", True, None):
-            with self.subTest(legacy=legacy):
-                kept = prefer_canonical(observation, legacy, ProviderId.GARMIN)
-                self.assertIs(kept, legacy)
-
-    def test_other_provider_keeps_the_legacy_value(self) -> None:
-        observation = _observation(
-            MetricKind.SLEEP_SCORE, 81, provider=ProviderId.INTERVALS
-        )
-        self.assertEqual(prefer_canonical(observation, 81, ProviderId.GARMIN), 81)
-
-    def test_other_day_keeps_the_legacy_value(self) -> None:
-        observation = _observation(MetricKind.RESTING_HR, 45, day=EARLIER)
-        kept = prefer_canonical(observation, 45, ProviderId.GARMIN, DAY)
-        self.assertEqual(kept, 45)
-
-    def test_different_number_keeps_the_legacy_value(self) -> None:
-        observation = _observation(MetricKind.READINESS, 80.0)
-        self.assertEqual(prefer_canonical(observation, 74, ProviderId.GARMIN), 74)
-
-    def test_matching_record_keeps_the_legacy_type(self) -> None:
-        integer = _observation(MetricKind.SLEEP_SCORE, 81.0)
-        fraction = _observation(MetricKind.READINESS, 81.5)
-        served_int = prefer_canonical(integer, 81, ProviderId.GARMIN, DAY)
-        served_float = prefer_canonical(fraction, 81.5, ProviderId.GARMIN, DAY)
-        self.assertIs(type(served_int), int)
-        self.assertEqual(served_int, 81)
-        self.assertIs(type(served_float), float)
-        self.assertEqual(served_float, 81.5)
-
-    def test_absent_day_skips_the_day_check(self) -> None:
-        observation = _observation(MetricKind.RESTING_HR, 45, day=EARLIER)
-        self.assertEqual(prefer_canonical(observation, 45, ProviderId.GARMIN), 45)
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
 
 
 class ReadRecoveryInputsTests(unittest.TestCase):
-    def test_each_kind_is_read_from_the_window_start_without_an_end_bound(
+    def test_each_kind_is_read_once_from_the_history_start_without_an_end(
         self,
     ) -> None:
-        reader = _FakeReader({})
-        start = date.fromisoformat(EARLIER)
-        inputs = read_recovery_inputs(
-            reader, None, latest_wellness_day=date.fromisoformat(DAY), start=start
+        reader = RecordingReader({})
+
+        inputs = read_recovery_inputs(reader, None, as_of=DAY, latest_wellness_day=DAY)
+
+        start = DAY - timedelta(days=83)
+        self.assertEqual(reader.calls, [(kind, start, None) for kind in RECOVERY_KINDS])
+        self.assertEqual(inputs.latest_wellness_day, DAY)
+        self.assertEqual(set(inputs.observations), set(RECOVERY_KINDS))
+
+    def test_kinds_include_both_hrv_methods_and_the_weekly_average(self) -> None:
+        self.assertTrue(
+            {
+                MetricKind.HRV_RMSSD,
+                MetricKind.HRV_SDNN,
+                MetricKind.HRV_WEEKLY_AVERAGE,
+            }
+            <= set(RECOVERY_KINDS)
+        )
+
+
+class RecoveryInputsTests(unittest.TestCase):
+    def test_current_pins_intervals_values_to_the_latest_wellness_day(self) -> None:
+        # Wellness observations carry their row day as the record id.
+        older = recovery_observation(
+            MetricKind.RESTING_HR,
+            50,
+            "2026-09-19",
+            ProviderId.INTERVALS,
+            record_id="2026-09-19",
+        )
+        pinned = recovery_inputs([older], latest_wellness_day=DAY)
+        unpinned = recovery_inputs([older])
+
+        self.assertIsNone(pinned.current(MetricKind.RESTING_HR))
+        self.assertIs(unpinned.current(MetricKind.RESTING_HR), older)
+
+    def test_daily_keeps_the_first_record_of_each_day_and_provider(self) -> None:
+        inputs = recovery_inputs(
+            [
+                recovery_observation(MetricKind.RESTING_HR, 50, "2026-09-20"),
+                recovery_observation(
+                    MetricKind.RESTING_HR, 51, "2026-09-20", record_id="second"
+                ),
+                recovery_observation(
+                    MetricKind.RESTING_HR, 60, "2026-09-20", ProviderId.INTERVALS
+                ),
+            ]
+        )
+
+        self.assertEqual(
+            inputs.daily(MetricKind.RESTING_HR, ProviderId.GARMIN), {DAY: 50.0}
         )
         self.assertEqual(
-            reader.calls,
-            [
-                (MetricKind.SLEEP_SCORE, start, None),
-                (MetricKind.RESTING_HR, start, None),
-                (MetricKind.READINESS, start, None),
-            ],
+            inputs.daily(MetricKind.RESTING_HR, ProviderId.INTERVALS), {DAY: 60.0}
         )
-        self.assertEqual(inputs, CanonicalRecoveryInputs(None, None, None))
 
-    def test_each_field_selects_the_observation_of_the_latest_day(self) -> None:
-        older = _observation(MetricKind.SLEEP_SCORE, 70.0, day=EARLIER)
-        latest = _observation(MetricKind.SLEEP_SCORE, 84.0)
-        reader = _FakeReader(
-            {
-                MetricKind.SLEEP_SCORE: [older, latest],
-                MetricKind.RESTING_HR: [_observation(MetricKind.RESTING_HR, 45.0)],
-            }
+    def test_bounded_daily_skips_values_outside_the_current_rule(self) -> None:
+        inputs = recovery_inputs(
+            [recovery_observation(MetricKind.RESTING_HR, 25, "2026-09-20")]
         )
-        inputs = read_recovery_inputs(
-            reader,
-            None,
-            latest_wellness_day=date.fromisoformat(DAY),
-            start=date.fromisoformat(EARLIER),
+
+        self.assertEqual(
+            inputs.daily(MetricKind.RESTING_HR, ProviderId.GARMIN), {DAY: 25.0}
         )
-        self.assertEqual(inputs.sleep_score, latest)
-        assert inputs.resting_hr is not None
-        self.assertEqual(inputs.resting_hr.value.value, 45.0)
-        self.assertIsNone(inputs.readiness)
+        self.assertEqual(
+            inputs.daily(MetricKind.RESTING_HR, ProviderId.GARMIN, bounded=True), {}
+        )
+
+    def test_unread_kind_has_no_observations(self) -> None:
+        self.assertEqual(recovery_inputs().of(MetricKind.CTL), ())
 
 
-class RecoveryContextTests(unittest.TestCase):
-    def test_garmin_values_with_matching_canonical_records_match_legacy(self) -> None:
-        garmin, latest = _garmin(), _latest()
-        canonical = CanonicalRecoveryInputs(
-            sleep_score=_observation(MetricKind.SLEEP_SCORE, 84.0),
-            resting_hr=_observation(MetricKind.RESTING_HR, 45.0),
-            readiness=None,
+class SourceLabelTests(unittest.TestCase):
+    def test_personal_recovery_labels_are_the_legacy_strings(self) -> None:
+        self.assertEqual(
+            provider_label(ProviderId.INTERVALS, SourceView.DAILY_HEALTH),
+            "Intervals.icu",
         )
-        legacy = _recovery(garmin, latest, None)
-        served = _recovery(garmin, latest, canonical)
-        self.assertEqual(_dump(served), _dump(legacy))
-        self.assertEqual(served["sleep_score"], 84)
-        self.assertIs(type(served["sleep_score"]), int)
-
-    def test_mismatched_canonical_records_fall_back_to_legacy(self) -> None:
-        garmin, latest = _garmin(), _latest()
-        canonical = CanonicalRecoveryInputs(
-            sleep_score=_observation(MetricKind.SLEEP_SCORE, 70.0),
-            resting_hr=_observation(
-                MetricKind.RESTING_HR, 45.0, provider=ProviderId.INTERVALS
-            ),
-            readiness=_observation(MetricKind.READINESS, 74.0, day=EARLIER),
+        self.assertEqual(
+            provider_label(ProviderId.GARMIN, SourceView.DAILY_HEALTH),
+            "Garmin Connect",
         )
-        legacy = _recovery(garmin, latest, None)
-        self.assertEqual(_dump(_recovery(garmin, latest, canonical)), _dump(legacy))
-
-    def test_intervals_fallback_uses_the_matching_canonical_records(self) -> None:
-        latest = _latest()
-        canonical = CanonicalRecoveryInputs(
-            sleep_score=_observation(
-                MetricKind.SLEEP_SCORE, 81.0, provider=ProviderId.INTERVALS
-            ),
-            resting_hr=None,
-            readiness=_observation(
-                MetricKind.READINESS, 74.0, provider=ProviderId.INTERVALS
-            ),
-        )
-        legacy = _recovery({}, latest, None)
-        served = _recovery({}, latest, canonical)
-        self.assertEqual(_dump(served), _dump(legacy))
-        self.assertEqual(served["sleep_score_source"], "Intervals.icu Wellness")
-        self.assertEqual(served["readiness"], 74)
-
-    def test_garmin_readiness_uses_the_matching_canonical_record(self) -> None:
-        garmin = {"readiness": 70}
-        latest = {"id": DAY}
-        canonical = CanonicalRecoveryInputs(
-            sleep_score=None,
-            resting_hr=None,
-            readiness=_observation(MetricKind.READINESS, 70.0),
-        )
-        legacy = _recovery(garmin, latest, None)
-        served = _recovery(garmin, latest, canonical)
-        self.assertEqual(_dump(served), _dump(legacy))
-        self.assertEqual(served["readiness"], 70)
-
-    def test_canonical_offer_is_made_for_the_matching_garmin_sleep_score(self) -> None:
-        canonical = CanonicalRecoveryInputs(
-            sleep_score=_observation(MetricKind.SLEEP_SCORE, 84.0),
-            resting_hr=None,
-            readiness=None,
-        )
-        with patch.object(
-            recovery_context,
-            "prefer_canonical",
-            wraps=recovery_context.prefer_canonical,
-        ) as spy:
-            _recovery(_garmin(), _latest(), canonical)
-        offered = [call.args[0] for call in spy.call_args_list]
-        self.assertIn(canonical.sleep_score, offered)
 
 
 class PopulatedRecoveryTests(CanonicalReadFixture):
-    def test_populated_tables_reproduce_the_legacy_recovery_bytes(self) -> None:
+    def _inputs(self) -> Any:
         populate(self)
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
             inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
-        self.assertIsNotNone(inputs)
-        assert inputs is not None
-        assert inputs.recovery is not None
-        self.assertIsNotNone(inputs.recovery.sleep_score)
-        legacy = current_performance_context(self.intervals, self.garmin, {}, TODAY)
-        with patch.object(
-            recovery_context,
-            "prefer_canonical",
-            wraps=recovery_context.prefer_canonical,
-        ) as spy:
-            canonical = current_performance_context(
-                self.intervals, self.garmin, {}, TODAY, canonical=inputs
-            )
-        self.assertEqual(_dump(canonical["recovery"]), _dump(legacy["recovery"]))
-        self.assertEqual(_dump(canonical), _dump(legacy))
-        served = [
-            call.args[0] for call in spy.call_args_list if call.args[0] is not None
-        ]
-        self.assertTrue(served, "no canonical recovery observation was offered")
+        assert inputs is not None and inputs.recovery is not None
+        return inputs
+
+    def test_tables_serve_the_mapped_fixture_values_without_a_garmin_view(
+        self,
+    ) -> None:
+        inputs = self._inputs()
+        mapped = mapped_recovery_inputs(
+            self.garmin,
+            self.intervals["raw_provider_data"]["wellness"],
+            latest_wellness_day=inputs.recovery.latest_wellness_day,
+        )
+
+        served = current_performance_context(
+            self.intervals, {}, {}, TODAY, canonical=inputs
+        )
+        expected = personal_recovery([], {}, {}, TODAY, canonical=mapped)
+
+        recovery = served["recovery"]
+        self.assertIsNotNone(recovery["sleep_hours"])
+        self.assertIsNotNone(recovery["restingHR"])
+        self.assertIsNotNone(recovery["hrv"])
+        self.assertEqual(
+            _dump(served["personal_recovery"]["baselines"]),
+            _dump(expected["baselines"]),
+        )
+
+    def test_without_canonical_inputs_no_recovery_value_is_shown(self) -> None:
+        result = current_performance_context(self.intervals, self.garmin, {}, TODAY)
+
+        recovery = result["recovery"]
+        for key in ("restingHR", "hrv", "sleepScore", "readiness", "sleep_hours"):
+            self.assertIsNone(recovery[key], key)
+        self.assertEqual(result["personal_recovery"]["baselines"], [])
 
     def test_selector_resolves_its_source_once_for_the_recovery_read(self) -> None:
         populate(self)
@@ -308,3 +181,7 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
             inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
         resolved.assert_called_once()
         self.assertIsNotNone(inputs)
+
+
+if __name__ == "__main__":
+    unittest.main()

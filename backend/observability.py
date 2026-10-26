@@ -167,6 +167,10 @@ def config_secret_values(config: Any) -> tuple[str, ...]:
             "garmin_fixture_path",
             "app_password",
             "wahoo_client_secret",
+            "yazio_email",
+            "yazio_password",
+            "yazio_client_id",
+            "yazio_client_secret",
         )
     )
 
@@ -497,6 +501,10 @@ def _encoded_diagnostic_secrets(config: Config) -> tuple[str, ...]:
         "garmin_password",
         "app_password",
         "wahoo_client_secret",
+        "yazio_email",
+        "yazio_password",
+        "yazio_client_id",
+        "yazio_client_secret",
         "calendar_ical_url",
     )
     secrets: set[str] = set()

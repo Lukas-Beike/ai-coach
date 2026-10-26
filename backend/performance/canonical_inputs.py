@@ -13,16 +13,15 @@ the wellness rows and never extends past the latest day, so older or newer
 canonical history cannot change the current load.
 
 Current sport thresholds and VO2max come from the latest Intervals sync, see
-``backend.performance.canonical_current``. The current sleep score, resting HR and
-readiness come from ``backend.performance.canonical_recovery``. The 7-day resting HR
-and readiness averages come from ``backend.performance.canonical_recovery_averages``
-and replace the legacy average only when both cover the same days with equal values.
-The Garmin performance values come from ``backend.performance.garmin_canonical`` and
+``backend.performance.canonical_current``. The recovery observations (sleep, resting
+HR, HRV, readiness) come from ``backend.performance.canonical_recovery`` and are read
+with and without a usable wellness day. The Garmin performance values come from ``backend.performance.garmin_canonical`` and
 the daily totals (steps, floors, energy) of the recent days from
 ``backend.performance.daily_health``.
 
-Without a usable wellness day the inputs still carry the activities and the
-wellness rows, and no load, Intervals threshold or recovery value; a stored Wahoo
+Without a usable wellness day the inputs still carry the activities, the
+wellness rows and the recovery observations, and no load or Intervals threshold; a
+stored Wahoo
 cycling FTP or weight fallback still applies. Without a canonical
 activity reader and without wellness rows there are no inputs, and the caller keeps
 the legacy values.
@@ -47,17 +46,9 @@ from backend.performance.canonical_current import (
     read_current_inputs,
     read_wahoo_fallbacks,
 )
-from backend.performance.canonical_personal_recovery import (
-    CanonicalPersonalRecoveryInputs,
-    read_personal_recovery_inputs,
-)
 from backend.performance.canonical_recovery import (
     CanonicalRecoveryInputs,
     read_recovery_inputs,
-)
-from backend.performance.canonical_recovery_averages import (
-    CanonicalRecoveryAverageInputs,
-    read_recovery_average_inputs,
 )
 from backend.performance.daily_health import read_daily_health_by_date
 from backend.performance.garmin_canonical import (
@@ -79,8 +70,8 @@ class CanonicalPerformanceInputs:
 
     ``wellness_day`` is None when there is no usable wellness day. ``current`` holds
     the sport thresholds and VO2max of the latest sync, or None when they were not
-    read. ``personal_recovery`` holds the daily resting HR of the personal recovery
-    baselines, or None when it was not read.
+    read. ``recovery`` holds the recovery observations of the current context and
+    the personal baselines, or None when they were not read.
 
     ``activity_rows`` are the raw activity rows (newest first, before
     de-duplication) and ``activities`` their compact projection, or None when no
@@ -99,8 +90,6 @@ class CanonicalPerformanceInputs:
     atl: float | None
     current: CanonicalCurrentInputs | None = None
     recovery: CanonicalRecoveryInputs | None = None
-    personal_recovery: CanonicalPersonalRecoveryInputs | None = None
-    recovery_averages: CanonicalRecoveryAverageInputs | None = None
     activity_rows: tuple[dict[str, Any], ...] | None = None
     activities: tuple[dict[str, Any], ...] | None = None
     wellness_rows: tuple[dict[str, Any], ...] | None = None
@@ -264,8 +253,8 @@ def performance_options(
 class ReadOnceObservationReader:
     """Serve the reads of one snapshot unit from one unbounded read per kind.
 
-    The wellness rows, the current metrics, the recovery inputs and the recovery
-    averages all ask for overlapping observations, so each kind reaches the
+    The wellness rows, the current metrics and the recovery inputs all ask for
+    overlapping observations, so each kind reaches the
     database once per call and the bounds are applied in memory.
     """
 
@@ -303,6 +292,7 @@ class _CarriedRows:
     history_wellness_rows: tuple[dict[str, Any], ...]
     garmin: GarminCanonicalMetrics
     daily_health: Mapping[str, Mapping[str, Any]]
+    recovery: CanonicalRecoveryInputs
 
     def inputs(
         self,
@@ -311,18 +301,13 @@ class _CarriedRows:
         ctl: float | None,
         atl: float | None,
         current: CanonicalCurrentInputs | None = None,
-        recovery: CanonicalRecoveryInputs | None = None,
-        personal_recovery: CanonicalPersonalRecoveryInputs | None = None,
-        recovery_averages: CanonicalRecoveryAverageInputs | None = None,
     ) -> CanonicalPerformanceInputs:
         return CanonicalPerformanceInputs(
             wellness_day=wellness_day,
             ctl=ctl,
             atl=atl,
             current=current,
-            recovery=recovery,
-            personal_recovery=personal_recovery,
-            recovery_averages=recovery_averages,
+            recovery=self.recovery,
             activity_rows=self.activity_rows,
             activities=self.activities,
             wellness_rows=self.wellness_rows,
@@ -373,6 +358,9 @@ def read_performance_inputs(
         if activity_rows is None
         else tuple(canonical_sections.compact_activity_rows(activity_rows))
     )
+    latest_day = (
+        canonical_sections.row_day(max(rows, key=_row_id_text)) if rows else None
+    )
     carried = _CarriedRows(
         activity_rows=activity_rows,
         activities=activities,
@@ -382,9 +370,9 @@ def read_performance_inputs(
         daily_health=read_daily_health_by_date(
             reader, db, start=as_of - timedelta(days=DAILY_HEALTH_DAYS), end=as_of
         ),
-    )
-    latest_day = (
-        canonical_sections.row_day(max(rows, key=_row_id_text)) if rows else None
+        recovery=read_recovery_inputs(
+            reader, db, as_of=as_of, latest_wellness_day=latest_day
+        ),
     )
     if latest_day is None:
         return carried.inputs(
@@ -404,13 +392,6 @@ def read_performance_inputs(
         current=read_current_inputs(
             reader, db, latest_wellness_day=latest_day, as_of=as_of
         ),
-        recovery=read_recovery_inputs(
-            reader, db, latest_wellness_day=latest_day, start=start
-        ),
-        personal_recovery=read_personal_recovery_inputs(
-            reader, db, start=latest_day - timedelta(days=83)
-        ),
-        recovery_averages=read_recovery_average_inputs(reader, db, start=start),
     )
 
 

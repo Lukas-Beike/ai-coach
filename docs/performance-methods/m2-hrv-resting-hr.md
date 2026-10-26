@@ -80,8 +80,8 @@ and no competing interests.
   and is not used to prescribe training.
 - Series are separated by provider and field only; device model, measurement
   window and firmware changes are not yet available (#1418, #1420).
-- Today the path reads Intervals rows and raw Garmin payloads; only resting HR
-  has a canonical override (#1411).
+- HRV and resting HR come from canonical observations per provider and
+  measurement (#1411); Garmin's weekly HRV average is not a baseline series.
 
 ## Minimum data and stop rules
 
@@ -130,6 +130,5 @@ and no competing interests.
 - Segment rule for device, firmware and window changes (needs #1420).
 - Whether to add `ln(RMSSD)` and a 7-day rolling mean as the R7/R9 protocol
   family, with its own minimum coverage.
-- Canonical reads for HRV and sleep inputs (#1411) and method/aggregation
-  fields (#1418).
+- Method/aggregation fields on observations (#1418).
 - Garmin resting HR has no validation data in R10.

@@ -47,12 +47,9 @@ from backend.performance.canonical_inputs import (
     performance_options,
     read_performance_inputs,
 )
-from backend.performance.canonical_personal_recovery import (
-    CanonicalPersonalRecoveryInputs,
-)
-from backend.performance.canonical_recovery import CanonicalRecoveryInputs
-from backend.performance.canonical_recovery_averages import (
-    CanonicalRecoveryAverageInputs,
+from backend.performance.canonical_recovery import (
+    RECOVERY_KINDS,
+    CanonicalRecoveryInputs,
 )
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.load_context import performance_load_context
@@ -65,15 +62,13 @@ PARITY_DAY = "2026-09-20"
 EARLIER_DAY = "2026-09-19"
 PARITY_PROFILE = {"timezone": "Europe/Berlin"}
 _NO_RECOVERY = CanonicalRecoveryInputs(
-    sleep_score=None, resting_hr=None, readiness=None
+    observations={kind: () for kind in RECOVERY_KINDS},
+    latest_wellness_day=PARITY_TODAY,
 )
-_NO_PERSONAL_RECOVERY = CanonicalPersonalRecoveryInputs(
-    resting_hr={ProviderId.INTERVALS: {}, ProviderId.GARMIN: {}}
-)
-_NO_RECOVERY_AVERAGES = CanonicalRecoveryAverageInputs(resting_hr=(), readiness=())
 # One unbounded read per kind: the wellness and current-metric kinds, then the
-# Garmin performance kinds and the daily totals not read before.
-_UNIT_READS = 24
+# Garmin performance kinds, the daily totals and the recovery kinds not read
+# before (the weekly HRV average).
+_UNIT_READS = 25
 
 
 class StubObservationReader(ObservationReader):
@@ -192,8 +187,6 @@ def _assert_load_inputs(
             ctl=50.0,
             atl=60.0,
             recovery=_NO_RECOVERY,
-            personal_recovery=_NO_PERSONAL_RECOVERY,
-            recovery_averages=_NO_RECOVERY_AVERAGES,
             garmin=GarminCanonicalMetrics(),
             daily_health={},
         ),
@@ -258,7 +251,15 @@ def _service(
 
 
 def _normalized_state(state: dict[str, Any]) -> dict[str, Any]:
-    performance = state["performance"]
+    """Normalise the load numbers and leave out the recovery section.
+
+    Since #1411 recovery values come only from canonical observations, so the
+    path without a canonical source has none; ``_assert_recovery_split`` checks
+    that difference explicitly.
+    """
+    performance = {
+        key: value for key, value in state["performance"].items() if key != "recovery"
+    }
     return {
         **state,
         "performance": {
@@ -266,6 +267,17 @@ def _normalized_state(state: dict[str, Any]) -> dict[str, Any]:
             "current_load": _normalized_load(performance["current_load"]),
         },
     }
+
+
+def _assert_recovery_split(
+    case: unittest.TestCase, canonical: dict[str, Any], legacy: dict[str, Any]
+) -> None:
+    """Canonical state shows recovery values; the no-source state shows none."""
+    served = canonical["performance"]["recovery"]
+    absent = legacy["performance"]["recovery"]
+    for key in ("restingHR", "hrv", "sleepScore", "readiness", "sleep_hours"):
+        case.assertIsNotNone(served[key], key)
+        case.assertIsNone(absent[key], key)
 
 
 class CanonicalLoadParityTests(unittest.TestCase):
@@ -399,7 +411,9 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                     (inputs.wellness_day, inputs.ctl, inputs.atl, inputs.current),
                     (None, None, None, None),
                 )
-                self.assertIsNone(inputs.recovery)
+                # Recovery observations are read without a wellness day (#1411).
+                assert inputs.recovery is not None
+                self.assertIsNone(inputs.recovery.latest_wellness_day)
                 self.assertEqual(
                     performance_load_context(
                         [], rows, _latest(rows), PARITY_TODAY, canonical=inputs
@@ -869,6 +883,7 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         canonical = _service(self.intervals, source, self.garmin).performance_state()
         self.assertEqual(counting.calls, _UNIT_READS)
         self.assertEqual(_normalized_state(canonical), _normalized_state(legacy))
+        _assert_recovery_split(self, canonical, legacy)
 
     def test_selector_chooses_its_source_once_for_both_load_reads(self) -> None:
         populate(self)

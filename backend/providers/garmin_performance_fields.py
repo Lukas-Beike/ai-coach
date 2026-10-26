@@ -9,14 +9,14 @@ from typing import Final
 from backend.providers.garmin_fields import (
     GARMIN_DATE_ALIASES,
     GARMIN_HRV_LAST_NIGHT_ALIASES,
+    GARMIN_HRV_WEEKLY_ALIASES,
     GARMIN_SLEEP_DURATION_ALIASES,
 )
 
 CALENDAR_DATE: Final = "calendarDate"
 SUMMARY_DATE: Final = "summaryDate"
 ACTIVITY_START_LOCAL: Final = "startTimeLocal"
-WEEKLY_HRV_AVERAGE: Final = "hrvWeeklyAvg"
-WEEKLY_AVERAGE: Final = "weeklyAvg"
+WEEKLY_HRV_AVERAGE, WEEKLY_AVERAGE = GARMIN_HRV_WEEKLY_ALIASES
 RESTING_HEART_RATE: Final = "restingHeartRate"
 READINESS_SCORE: Final = "trainingReadinessScore"
 VO2_MAX_VALUE: Final = "vO2MaxValue"
@@ -58,8 +58,7 @@ WEIGHT_TIMESTAMP_ALIASES: Final = (
 )
 HRV_WITH_WEEKLY_ALIASES: Final = (
     *GARMIN_HRV_LAST_NIGHT_ALIASES,
-    WEEKLY_HRV_AVERAGE,
-    WEEKLY_AVERAGE,
+    *GARMIN_HRV_WEEKLY_ALIASES,
 )
 PLANNING_READINESS_ALIASES: Final = (
     READINESS_SCORE,

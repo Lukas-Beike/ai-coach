@@ -27,6 +27,8 @@ SHAPE_SCHEMA_V10: Final = "schema-v10"
 SHAPE_SCHEMA_V11: Final = "schema-v11"
 # Schema version 12: Garmin payload elements in the raw layer.
 SHAPE_SCHEMA_V12: Final = "schema-v12"
+# Schema version 13: the maximum speed of a lap.
+SHAPE_SCHEMA_V13: Final = "schema-v13"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
@@ -35,6 +37,7 @@ RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
     SHAPE_SCHEMA_V10: "42782c891c389a2a65d20fa9b984cf10a054ea258a77a44ee3d817ced86cbaa4",
     SHAPE_SCHEMA_V11: "98d365e334aac2fd771ec625cf61a7925e61fed39c249335a18eaff69d15bd60",
     SHAPE_SCHEMA_V12: "7c953ad5b939077d4c4bcaef85bbce9600ec5d698ea503ee82af2848b99287d7",
+    SHAPE_SCHEMA_V13: "f1fc5172dc01f2dec8a0f1a73387a7b1916652355e684d9b7d5d0ff277fef5c1",
 }
 
 # Stored PRAGMA user_version -> schema shapes that version is allowed to hold.
@@ -46,6 +49,7 @@ ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
     10: frozenset({SHAPE_SCHEMA_V10}),
     11: frozenset({SHAPE_SCHEMA_V11}),
     12: frozenset({SHAPE_SCHEMA_V12}),
+    13: frozenset({SHAPE_SCHEMA_V13}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

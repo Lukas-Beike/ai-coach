@@ -191,10 +191,28 @@ class FoodDatabaseEntryRepository:
         row = db.execute(self._SELECT + " WHERE food_id=?", (food_id,)).fetchone()
         return self._entry(row) if row else None
 
+    def by_barcode(self, db: Any, barcode: str) -> list[dict[str, Any]]:
+        """Return the entries of any source with this barcode, newest first."""
+        if not barcode:
+            return []
+        rows = db.execute(
+            self._SELECT + " WHERE barcode=? ORDER BY fetched_at DESC LIMIT 5",
+            (barcode,),
+        ).fetchall()
+        return [self._entry(row) for row in rows]
+
     def search(
-        self, db: Any, query: str, *, limit: int = 8, offset: int = 0
+        self,
+        db: Any,
+        query: str,
+        *,
+        limit: int = 8,
+        offset: int = 0,
+        prefix: str = "",
     ) -> list[dict[str, Any]]:
         """Return entries whose name or brand contains every word of the query.
+
+        A prefix such as "yazio:" restricts the entries to one source.
 
         An empty query lists everything, newest first. A query without any
         usable word matches nothing rather than a broader set.
@@ -208,6 +226,11 @@ class FoodDatabaseEntryRepository:
             return []
         clauses = []
         params: list[Any] = []
+        if prefix:
+            clauses.append("food_id GLOB ?")
+            params.append(
+                prefix.replace("[", "[[]").replace("*", "[*]").replace("?", "[?]") + "*"
+            )
         for term in terms:
             escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             clauses.append(
@@ -230,12 +253,15 @@ class FoodDatabaseEntryRepository:
             "INSERT INTO food_database_entries("
             "food_id, barcode, name, brand, payload, fetched_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(food_id) DO UPDATE SET "
-            "barcode=excluded.barcode, name=excluded.name, brand=excluded.brand, "
+            "barcode=CASE WHEN excluded.barcode = '' THEN barcode ELSE excluded.barcode END, "
+            "name=excluded.name, brand=excluded.brand, "
             "payload=excluded.payload, fetched_at=excluded.fetched_at, "
             "updated_at=excluded.updated_at",
             (
                 payload["id"],
-                str(payload["id"]).removeprefix("off:"),
+                str(payload.get("barcode") or "")
+                if str(payload["id"]).startswith("yazio:")
+                else str(payload["id"]).removeprefix("off:"),
                 payload["name"],
                 payload.get("brands") or "",
                 json.dumps(payload, ensure_ascii=False),

@@ -15,6 +15,8 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from canonical_recovery_support import recovery_inputs
+
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
     MetricKind,
@@ -57,6 +59,7 @@ CURRENT_KINDS = frozenset(
         MetricKind.BODY_FAT,
         MetricKind.RESTING_HR,
         MetricKind.HRV_RMSSD,
+        MetricKind.HRV_WEEKLY_AVERAGE,
         MetricKind.SLEEP_DURATION,
         MetricKind.SLEEP_SCORE,
         MetricKind.READINESS,
@@ -806,6 +809,15 @@ def _mapped(
     return observations
 
 
+def _recovery_context(
+    observations: list[Observation], latest_day: date | None
+) -> dict[str, Any]:
+    """The recovery context over the same observations the policy ranks (#1411)."""
+    return performance_recovery_context(
+        recovery_inputs(observations, latest_wellness_day=latest_day), TODAY
+    )
+
+
 def _latest_row(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return max(rows, key=lambda row: str(row["id"]))
 
@@ -848,9 +860,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         }
         observations = _mapped(WELLNESS_ROWS, None, garmin)
 
-        legacy = performance_recovery_context(
-            garmin, _latest_row(WELLNESS_ROWS), WELLNESS_ROWS, TODAY
-        )
+        legacy = _recovery_context(observations, LATEST_DAY)
         self.assertEqual(legacy["sleep_score"], 0)
         self.assertEqual(
             _values(
@@ -966,9 +976,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
             ]
         }
 
-        legacy = performance_recovery_context(
-            garmin, _latest_row(WELLNESS_ROWS), WELLNESS_ROWS, TODAY
-        )
+        legacy = _recovery_context(_mapped(WELLNESS_ROWS, None, garmin), LATEST_DAY)
         self.assertEqual(legacy["resting_hr"], 46)
         self.assertEqual(
             _values(
@@ -988,7 +996,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         rows = [_wellness("2026-05-03", restingHR=47), _wellness("2026-05-04", hrv=60)]
         observations = _mapped(rows, None, {})
 
-        legacy = performance_recovery_context({}, _latest_row(rows), rows, TODAY)
+        legacy = _recovery_context(observations, _latest_day(rows))
         self.assertIsNone(legacy["resting_hr"])
         self.assertIsNone(
             select_current(
@@ -1042,9 +1050,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         self.assertEqual(self.pick(MetricKind.ATL), 55.0)
 
     def test_recovery_context_matches_the_policy_for_each_metric(self) -> None:
-        recovery = performance_recovery_context(
-            GARMIN_SECTIONS, _latest_row(WELLNESS_ROWS), WELLNESS_ROWS, TODAY
-        )
+        recovery = _recovery_context(self.observations, LATEST_DAY)
 
         self.assertEqual(recovery["sleep_hours"], 8.0)
         sleep_seconds = self.pick(MetricKind.SLEEP_DURATION)
@@ -1106,16 +1112,14 @@ class IntentionalDeviationTests(unittest.TestCase):
     """Named cases where the canonical policy differs from a legacy reader."""
 
     def test_sleep_score_is_chosen_independently_of_sleep_duration(self) -> None:
-        # Deviation: the legacy reader drops the whole Garmin sleep block when the
-        # Garmin record has no duration, so Intervals' score is used. The policy
-        # ranks sleep score on its own and keeps the Garmin score.
+        # Resolved by #1411: the legacy reader dropped the whole Garmin sleep block
+        # when the Garmin record had no duration, so Intervals' score (78) was
+        # used. The recovery context now follows the policy and keeps Garmin's.
         garmin = {"sleep": [_garmin_record("2026-05-04", sleepScore=85)]}
         observations = _mapped(WELLNESS_ROWS, None, garmin)
 
-        legacy = performance_recovery_context(
-            garmin, _latest_row(WELLNESS_ROWS), WELLNESS_ROWS, TODAY
-        )
-        self.assertEqual(legacy["sleep_score"], 78)
+        legacy = _recovery_context(observations, LATEST_DAY)
+        self.assertEqual(legacy["sleep_score"], 85)
         self.assertEqual(
             _values(
                 select_current(

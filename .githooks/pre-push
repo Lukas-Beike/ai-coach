@@ -1,0 +1,2 @@
+#!/bin/sh
+exec python "$(git rev-parse --show-toplevel)/scripts/check_push_secrets.py"

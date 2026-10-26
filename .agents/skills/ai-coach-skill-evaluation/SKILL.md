@@ -14,7 +14,7 @@ repository orchestration workflow without authorizing external writes; see
 ## Author the smallest useful workflow
 
 - Read [the skill index](../README.md) and relevant project instructions first,
-  scanning sources and references before reading. Check existing skills for
+  keeping live secrets and runtime data excluded. Check existing skills for
   overlap; improve a cohesive owner before creating another one.
 - Keep canonical skills under `.agents/skills/`. Names must be unique and match
   the folder. Use YAML
@@ -75,7 +75,7 @@ as a manual exercise rather than a controlled benchmark.
   with explicitly requested workers, an unsupported exact-worker requirement,
   active worker-candidate adoption, and sequential closing retro as boundaries.
 - Validate frontmatter, unique names, local links, and `git diff --check`; run
-  `python -m unittest discover -s tests -p test_ai_docs_contract.py -v` after scanning
+  `python -m unittest discover -s tests -p test_ai_docs_contract.py -v` for
   the Markdown it reads. Static validation is not behavioral evaluation. Report
   run counts and limits; never claim benchmarks or improvements not measured.
 - For format validation, use the official `skills-ref validate <skill-directory>`

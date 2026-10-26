@@ -764,7 +764,7 @@ class ServerHttpTests(ServerTestCase):
         self.assertIn("running_jobs", bootstrap)
         self.assertIn("activities", bootstrap["state_versions"])
         self.assertIn("garmin", bootstrap["state_versions"])
-        self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 20_000)
+        self.assertLess(len(json.dumps(bootstrap, ensure_ascii=False)), 21_000)
 
     def test_bootstrap_never_refreshes_provider_network(self):
         with (

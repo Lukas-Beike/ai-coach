@@ -5,13 +5,12 @@ exclusion. M1 and M4 have no method yet, so they assert input-level facts. Gaps 
 pinned: the assertion states today's behaviour and names the owning issue, so closing
 the gap fails the test and forces an update. All data is synthetic, in temporary
 storage, with no provider call. Detailed behaviour lives in test_personal_recovery,
-test_performance_canonical_personal_recovery, test_power_profile,
+test_performance_canonical_recovery, test_power_profile,
 test_activity_detail_merge, test_activity_detail_store and test_session_linking.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import math
 import unittest
@@ -19,7 +18,13 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 
 import test_session_linking as linking
-from canonical_recovery_support import RecordingReader, recovery_observation
+from canonical_recovery_support import (
+    RecordingReader,
+    mapped_personal_recovery,
+    mapped_recovery_inputs,
+    recovery_inputs,
+    recovery_observation,
+)
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_merge import DetailCandidate, merge_details
@@ -46,9 +51,9 @@ from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import CURRENT_DATABASE_SCHEMA
 from backend.errors import AppError
 from backend.performance.analysis_input import analysis_input
-from backend.performance.canonical_personal_recovery import (
-    CanonicalPersonalRecoveryInputs,
-    read_personal_recovery_inputs,
+from backend.performance.canonical_recovery import (
+    RECOVERY_KINDS,
+    read_recovery_inputs,
 )
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.power_profile import power_profile
@@ -262,7 +267,9 @@ class M2HrvRestingHrInputs(unittest.TestCase):
     """Personal quartiles of Intervals.icu and Garmin HRV and resting HR."""
 
     def test_complete(self) -> None:
-        result = personal_recovery(_wellness(28, hrv=60, restingHR=40), {}, {}, TODAY)
+        result = mapped_personal_recovery(
+            _wellness(28, hrv=60, restingHR=40), {}, {}, TODAY
+        )
         hrv = _baseline(result, "hrv", INTERVALS, "RMSSD")
         resting = _baseline(result, "resting_hr", INTERVALS)
         self.assertEqual(
@@ -275,8 +282,8 @@ class M2HrvRestingHrInputs(unittest.TestCase):
         self.assertNotIn("reason", hrv)
 
     def test_incomplete(self) -> None:
-        short = personal_recovery(_wellness(13), {}, {}, TODAY)
-        stale = personal_recovery(_wellness(30, shift=3), {}, {}, TODAY)
+        short = mapped_personal_recovery(_wellness(13), {}, {}, TODAY)
+        stale = mapped_personal_recovery(_wellness(30, shift=3), {}, {}, TODAY)
         for result, reason in (
             (short, "Mindestens 14 frühere passende Nächte erforderlich."),
             (stale, "Messung veraltet."),
@@ -289,7 +296,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
                     self.assertNotIn("position", baseline)
         self.assertEqual(_baseline(short, "hrv", INTERVALS)["nights"], 13)
 
-        implausible = personal_recovery(
+        implausible = mapped_personal_recovery(
             [{"id": TODAY.isoformat(), "hrv": 0, "restingHR": 19}], {}, {}, TODAY
         )
         self.assertEqual(implausible["baselines"], [])
@@ -302,7 +309,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
                 for index, row in enumerate(wellness)
             ]
         }
-        result = personal_recovery(wellness, garmin, {}, TODAY)
+        result = mapped_personal_recovery(wellness, garmin, {}, TODAY)
         rmssd = _baseline(result, "hrv", INTERVALS, "RMSSD")
         sdnn = _baseline(result, "hrv", INTERVALS, "SDNN")
         garmin_hrv = _baseline(result, "hrv", GARMIN)
@@ -315,42 +322,44 @@ class M2HrvRestingHrInputs(unittest.TestCase):
             len([item for item in result["baselines"] if item["metric"] == "hrv"]), 3
         )
 
-    def test_canonical_resting_hr_override_needs_an_exact_match(self) -> None:
+    def test_canonical_resting_hr_is_the_primary_input(self) -> None:
         wellness = _wellness(28, restingHR=45)
-        differing = recovery_observation(
-            MetricKind.RESTING_HR, 47.0, TODAY.isoformat(), ProviderId.INTERVALS
+        mapped = mapped_recovery_inputs(None, wellness)
+        observations = [
+            observation
+            for kind in RECOVERY_KINDS
+            for observation in mapped.of(kind)
+            if not (
+                observation.kind is MetricKind.RESTING_HR
+                and observation.observed_on == TODAY
+            )
+        ]
+        observations.append(
+            recovery_observation(
+                MetricKind.RESTING_HR, 47.0, TODAY.isoformat(), ProviderId.INTERVALS
+            )
         )
-        canonical = CanonicalPersonalRecoveryInputs(
-            resting_hr={
-                ProviderId.INTERVALS: {TODAY.isoformat(): differing},
-                ProviderId.GARMIN: {},
-            }
-        )
-        legacy = personal_recovery(wellness, {}, {}, TODAY)
-        served = personal_recovery(wellness, {}, {}, TODAY, canonical=canonical)
-        self.assertEqual(
-            _baseline(served, "resting_hr", INTERVALS)["value"],
-            45.0,
-            msg="#1415: a canonical resting HR that differs from the legacy value is "
-            "ignored; expected the canonical value once it is the primary input",
-        )
-        self.assertEqual(served, legacy)
+        canonical = recovery_inputs(observations, latest_wellness_day=TODAY)
 
-    def test_canonical_hrv_is_not_consulted(self) -> None:
+        served = personal_recovery(wellness, {}, {}, TODAY, canonical=canonical)
+
+        # The raw row says 45; the canonical observation (47) is the input (#1411).
+        self.assertEqual(_baseline(served, "resting_hr", INTERVALS)["value"], 47.0)
+
+    def test_canonical_hrv_is_read_per_provider(self) -> None:
         observation = recovery_observation(
             MetricKind.HRV_RMSSD, 99.0, TODAY.isoformat(), ProviderId.GARMIN
         )
         reader = RecordingReader({MetricKind.HRV_RMSSD: [observation]})
-        inputs = read_personal_recovery_inputs(reader, None, start=TODAY)
-        self.assertEqual(
-            [call[0] for call in reader.calls],
-            [MetricKind.RESTING_HR],
-            msg="#1411: personal_recovery ignores canonical HRV; update when the "
-            "reader moves to canonical",
+
+        inputs = read_recovery_inputs(
+            reader, None, as_of=TODAY, latest_wellness_day=None
         )
-        self.assertEqual(
-            [field.name for field in dataclasses.fields(inputs)], ["resting_hr"]
-        )
+        served = personal_recovery([], {}, {}, TODAY, canonical=inputs)
+
+        self.assertIn(MetricKind.HRV_RMSSD, [call[0] for call in reader.calls])
+        self.assertIn(MetricKind.HRV_SDNN, [call[0] for call in reader.calls])
+        self.assertEqual(_baseline(served, "hrv", GARMIN)["value"], 99.0)
 
 
 def _night(
@@ -387,7 +396,7 @@ class M3SleepInputs(unittest.TestCase):
             for index, hour in enumerate(hours)
         ]
         garmin = {"sleep": [_night(offset) for offset in range(29)]}
-        result = personal_recovery(wellness, garmin, self.profile, TODAY)
+        result = mapped_personal_recovery(wellness, garmin, self.profile, TODAY)
         deficit = next(
             item
             for item in result["sleep_deficits"]
@@ -409,23 +418,25 @@ class M3SleepInputs(unittest.TestCase):
             {"id": (TODAY - timedelta(days=index)).isoformat(), "sleepSecs": 7 * 3600}
             for index in range(5)
         ]
-        no_goal = personal_recovery(wellness, {}, {}, TODAY)
+        no_goal = mapped_personal_recovery(wellness, {}, {}, TODAY)
         self.assertEqual(
             (no_goal["sleep_deficits"], no_goal["sleep_target_hours"]), ([], None)
         )
-        partial = personal_recovery(wellness, {}, self.profile, TODAY)[
+        partial = mapped_personal_recovery(wellness, {}, self.profile, TODAY)[
             "sleep_deficits"
         ][0]
         self.assertEqual(
             (partial["known_nights"], partial["deficit_hours"], partial["status"]),
             (5, 5.0, "partial"),
         )
-        empty = personal_recovery([], {}, self.profile, TODAY)["regularity"]
+        empty = mapped_personal_recovery([], {}, self.profile, TODAY)["regularity"]
         self.assertEqual((empty["status"], empty["series"]), ("insufficient_data", []))
 
         garmin = {"sleep": [_night(offset) for offset in range(13, 0, -1)]}
         garmin["sleep"].append(_night(0, onset=(22, 45)))
-        regularity = personal_recovery([], garmin, self.profile, TODAY)["regularity"]
+        regularity = mapped_personal_recovery([], garmin, self.profile, TODAY)[
+            "regularity"
+        ]
         series = regularity["series"][0]
         self.assertEqual(
             (series["status"], series["coverage"]["baseline_nights"]),
@@ -448,7 +459,7 @@ class M3SleepInputs(unittest.TestCase):
             {"id": (TODAY - timedelta(days=1)).isoformat(), "sleepSecs": 25 * 3600},
         ]
         garmin = {"sleep": [_night(0, hours=6.0)]}
-        deficits = personal_recovery(wellness, garmin, self.profile, TODAY)[
+        deficits = mapped_personal_recovery(wellness, garmin, self.profile, TODAY)[
             "sleep_deficits"
         ]
         by_source = {item["source"]: item for item in deficits}
@@ -464,21 +475,23 @@ class M3SleepInputs(unittest.TestCase):
 
         too_long = _night(0)
         too_long["sleepStartTimestampGMT"] -= 20 * 3600 * 1000
-        regularity = personal_recovery([], {"sleep": [too_long]}, self.profile, TODAY)
+        regularity = mapped_personal_recovery(
+            [], {"sleep": [too_long]}, self.profile, TODAY
+        )
         self.assertEqual(regularity["regularity"]["series"], [])
 
-    def test_canonical_sleep_inputs_are_not_available(self) -> None:
+    def test_canonical_sleep_duration_is_read_but_timing_is_not(self) -> None:
         observation = recovery_observation(
             MetricKind.SLEEP_DURATION, 28_800.0, TODAY.isoformat(), ProviderId.GARMIN
         )
         reader = RecordingReader({MetricKind.SLEEP_DURATION: [observation]})
-        read_personal_recovery_inputs(reader, None, start=TODAY)
-        self.assertEqual(
-            [call[0] for call in reader.calls],
-            [MetricKind.RESTING_HR],
-            msg="#1411: canonical SLEEP_DURATION exists but is never read; update when "
-            "sleep moves to canonical",
+        inputs = read_recovery_inputs(
+            reader, None, as_of=TODAY, latest_wellness_day=None
         )
+        # Since #1411 sleep duration is a canonical input of the baselines.
+        self.assertIn(MetricKind.SLEEP_DURATION, [call[0] for call in reader.calls])
+        served = personal_recovery([], {}, {}, TODAY, canonical=inputs)
+        self.assertEqual(_baseline(served, "sleep", GARMIN)["value"], 8.0)
         timing = [
             kind.name
             for kind in MetricKind
@@ -503,9 +516,9 @@ class M3SleepInputs(unittest.TestCase):
             msg="#1419: no sleep-period table or column; expected one once sleep "
             "periods are stored",
         )
-        series = personal_recovery([], {"sleep": [_night(0)]}, self.profile, TODAY)[
-            "regularity"
-        ]["series"][0]
+        series = mapped_personal_recovery(
+            [], {"sleep": [_night(0)]}, self.profile, TODAY
+        )["regularity"]["series"][0]
         self.assertTrue(series["method"].startswith("sleepStartTimestampGMT/"))
 
 

@@ -19,11 +19,10 @@ on Windows and `$XDG_DATA_HOME/ai-coach/graphify` (default
 `~/.local/share/ai-coach/graphify`) on POSIX. Graph state and isolated home stay
 under each worktree's `.graphify-local/`; app dependencies are separate.
 Preparation uses `update --preparation` with a 600-second budget; hooks and
-plain `update` retain 180 seconds. `scan-cache.json` keeps path-bound clean content
-hashes of the current corpus and reuses them only while the wrapper schema,
-scanner launcher, Sonar secrets engine and corpus rules match; without a
-resolvable engine every update scans everything. An update retries once when
-sources or the branch change during its scan.
+plain `update` retain 180 seconds. Graphify does not require Sonar or scan
+prompts/source for secrets. Source allowlists,
+credential/runtime exclusions and offline operation remain enforced. An update
+retries once when sources or the branch change during its snapshot.
 Manual `setup` followed by `update` remains the fallback. Only setup and
 preparation may download packages; hooks, updates, queries and exports stay
 offline and never install packages or call external/paid models. Do not bypass

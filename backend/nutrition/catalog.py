@@ -132,7 +132,9 @@ class ProductCatalogService:
                 **result,
                 "product": remote,
                 "local": False,
-                "source": "open_food_facts",
+                "source": "yazio"
+                if str((remote or {}).get("id", "")).startswith("yazio:")
+                else "open_food_facts",
             }
         if len(query) < 2:
             raise AppError(400, "Suchbegriff muss mindestens 2 Zeichen enthalten.")
@@ -226,6 +228,7 @@ class ProductCatalogService:
             "packaging_label",
             "manual",
             "open_food_facts",
+            "yazio",
             "bls",
             "fddb_export",
         }:

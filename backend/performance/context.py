@@ -19,6 +19,15 @@ from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
 from backend.providers import intervals_performance_fields as intervals_perf_fields
 
+# Recovery sources whose freshness comes from the Garmin view, including the
+# labelled weekly HRV fallback.
+_GARMIN_RECOVERY_SOURCES = frozenset(
+    {
+        performance_garmin_metrics.GARMIN_PERFORMANCE_SOURCE,
+        performance_recovery_context.GARMIN_WEEKLY_HRV_SOURCE,
+    }
+)
+
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
     if not isinstance(item, dict):
@@ -55,7 +64,10 @@ def _activities_and_wellness(
 
 
 def _unavailable_context(
-    garmin: dict[str, Any], profile: dict[str, Any], today: date
+    garmin: dict[str, Any],
+    profile: dict[str, Any],
+    today: date,
+    canonical: CanonicalPerformanceInputs | None,
 ) -> dict[str, Any]:
     """Projection without an Intervals.icu snapshot: Garmin-only recovery and load."""
     unavailable = {
@@ -63,7 +75,13 @@ def _unavailable_context(
         "source": performance_current_metrics.PROVIDER_INTERVALS_NAME,
         "as_of": None,
         "metrics": {},
-        "personal_recovery": personal_recovery([], garmin, profile, today),
+        "personal_recovery": personal_recovery(
+            [],
+            garmin,
+            profile,
+            today,
+            canonical=None if canonical is None else canonical.recovery,
+        ),
         "training_focus": training_focus(
             None, garmin, today, str(profile.get("timezone") or "UTC")
         ),
@@ -85,11 +103,12 @@ def current_performance_context(
     """Compose the current performance projection from explicit inputs.
 
     ``canonical`` replaces CTL and ATL in the load context, the sport thresholds and
-    VO2max, the Garmin performance values, the daily totals and the matching
-    recovery values, when given.
+    VO2max, the Garmin performance values and the daily totals, when given. The
+    recovery values and personal baselines come only from its recovery
+    observations; without them they are absent.
     """
     if not snapshot:
-        return _unavailable_context(garmin, profile, today)
+        return _unavailable_context(garmin, profile, today, canonical)
 
     athlete_value = snapshot.get("athlete")
     athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
@@ -101,12 +120,7 @@ def current_performance_context(
     )
 
     recovery = performance_recovery_context.performance_recovery_context(
-        garmin,
-        latest_wellness,
-        wellness_rows,
-        today,
-        canonical=None if canonical is None else canonical.recovery,
-        averages=None if canonical is None else canonical.recovery_averages,
+        None if canonical is None else canonical.recovery, today
     )
     sleep_hours = recovery["sleep_hours"]
     sleep_source = recovery["sleep_source"]
@@ -169,7 +183,7 @@ def current_performance_context(
             garmin,
             profile,
             today,
-            canonical=None if canonical is None else canonical.personal_recovery,
+            canonical=None if canonical is None else canonical.recovery,
         ),
         "garmin_training_load": garmin_projection.garmin_training_load_projection(
             garmin, today
@@ -227,7 +241,7 @@ def current_performance_context(
                     ("restingHR", "resting_hr", resting_hr, resting_hr_source),
                     ("hrv", "hrv", hrv, hrv_source),
                 )
-                if source == performance_garmin_metrics.GARMIN_PERFORMANCE_SOURCE
+                if source in _GARMIN_RECOVERY_SOURCES
             },
         },
         "rolling_training": {

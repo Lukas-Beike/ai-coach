@@ -111,8 +111,8 @@ class FixtureProjectionTests(unittest.TestCase):
         )
         # The fixture athlete's weight is one more Intervals observation (mapper v2).
         # Intervals wellness v6 adds FORM and eFTP per row plus the athlete eFTP;
-        # Garmin health v5 adds the running threshold power.
-        self.assertEqual(len(observations), 58)
+        # Garmin health v5 adds the running threshold power, v11 the weekly HRV.
+        self.assertEqual(len(observations), 59)
         for record in activities:
             self.assertEqual(record.provenance.retrieved_at, SYNCED_AT)
 
@@ -130,8 +130,9 @@ class FixtureProjectionTests(unittest.TestCase):
         self.assertEqual(intervals.observation_count, 39)
         self.assertEqual(intervals.retrieved_at, SYNCED_AT)
         self.assertEqual(garmin.activity_count, 2)
-        # Includes the running threshold power (mapper v5).
-        self.assertEqual(garmin.observation_count, 19)
+        # Includes the running threshold power (mapper v5) and the weekly HRV
+        # average (mapper v11).
+        self.assertEqual(garmin.observation_count, 20)
         self.assertEqual(garmin.retrieved_at, SYNCED_AT)
         self.assertEqual(garmin.issue_counts[IssueReason.UNSUPPORTED], 2)
         self.assertEqual(intervals.issue_counts[IssueReason.UNSUPPORTED], 0)

@@ -2,6 +2,8 @@ import unittest
 from datetime import date, timedelta
 from typing import Any
 
+from canonical_recovery_support import recovery_only_inputs
+
 from backend.performance.context import current_performance_context
 from backend.planning.context import compact_snapshot
 
@@ -48,7 +50,9 @@ class IntervalsHrvPathTests(unittest.TestCase):
             all_sync_days=-1,
             synced_at=SYNCED_AT,
         )
-        context = current_performance_context(snapshot, {}, {}, TODAY)
+        context = current_performance_context(
+            snapshot, {}, {}, TODAY, canonical=recovery_only_inputs(None, rows)
+        )
         return snapshot, context
 
     def test_rmssd_and_sdnn_form_separate_intervals_baselines(self) -> None:

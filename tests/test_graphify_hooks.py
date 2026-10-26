@@ -26,12 +26,7 @@ class GraphifyHookTests(unittest.TestCase):
             (ROOT / ".claude/settings.json").read_text(encoding="utf-8-sig")
         )
 
-        sonar = codex["hooks"]["UserPromptSubmit"]
-        self.assertEqual(len(sonar), 1)
-        self.assertIn(
-            "sonar-secrets/build-scripts/prompt-secrets.ps1",
-            sonar[0]["hooks"][0]["command"],
-        )
+        self.assertNotIn("UserPromptSubmit", codex["hooks"])
         for config, key in ((codex, "SessionStart"), (claude, "SessionStart")):
             entries = config["hooks"][key]
             self.assertEqual(len(entries), 1)

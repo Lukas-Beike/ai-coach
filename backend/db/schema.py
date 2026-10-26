@@ -510,7 +510,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -644,7 +644,7 @@ NUTRITION_PRODUCTS_DDL = """
         sugar_g REAL,
         fiber_g REAL,
         salt_g REAL,
-        source TEXT NOT NULL CHECK (source IN ('packaging_label', 'manual', 'open_food_facts', 'bls', 'fddb_export')),
+        source TEXT NOT NULL CHECK (source IN ('packaging_label', 'manual', 'open_food_facts', 'yazio', 'bls', 'fddb_export')),
         source_url TEXT NOT NULL DEFAULT '',
         external_id TEXT NOT NULL DEFAULT '',
         provenance TEXT NOT NULL DEFAULT 'manual',
@@ -845,11 +845,12 @@ ACTIVITY_DETAIL_DDL = f"""
 """
 
 
-# Local mirror of external food database hits (schema version 11). The payload
-# is the projected, validated food record; name and brand are searchable copies.
+# Local mirror of external food database hits (schema version 11, Yazio ids
+# since 14). The payload is the projected, validated food record; name and
+# brand are searchable copies.
 FOOD_DATABASE_DDL = """
     CREATE TABLE food_database_entries (
-        food_id TEXT PRIMARY KEY CHECK (food_id GLOB 'off:*'),
+        food_id TEXT PRIMARY KEY CHECK (food_id GLOB 'off:*' OR food_id GLOB 'yazio:*'),
         barcode TEXT NOT NULL,
         name TEXT NOT NULL,
         brand TEXT NOT NULL DEFAULT '',

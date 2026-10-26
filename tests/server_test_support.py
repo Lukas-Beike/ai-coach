@@ -97,13 +97,20 @@ def _current_performance_context(snapshot=None):
         if snapshot is not None
         else server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
     )
+    from canonical_recovery_support import recovery_only_inputs
     from garmin_support import read_garmin
 
+    garmin = read_garmin()
+    wellness = (effective_snapshot or {}).get("recent_wellness")
+    # Recovery values come only from observations (#1411); map the raw fixtures.
     return performance_context.current_performance_context(
         effective_snapshot,
-        read_garmin(),
+        garmin,
         server.ATHLETE_DATA.profile().get(),
         server.ATHLETE_CLOCK.now().date(),
+        canonical=recovery_only_inputs(
+            garmin, wellness if isinstance(wellness, list) else None
+        ),
     )
 
 

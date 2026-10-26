@@ -1,13 +1,7 @@
 import copy
 import unittest
-from datetime import date
 
-from backend.performance.recovery import (
-    dated_garmin_recovery_records,
-    garmin_recovery_average,
-    garmin_recovery_metric,
-    garmin_recovery_window_values,
-)
+from backend.performance.recovery import dated_garmin_recovery_records, rounded_average
 
 
 class GarminRecoveryTests(unittest.TestCase):
@@ -43,137 +37,15 @@ class GarminRecoveryTests(unittest.TestCase):
             chain = {"id": "2026-01-01", "next": chain}
         self.assertEqual(len(dated_garmin_recovery_records(chain)), 2000)
 
-    def test_metric_chooses_newest_valid_record_and_normalizes_nested_keys(self):
-        snapshot = {
-            "recovery": [
-                {"date": "2026-08-30", "nested": {"last-night-avg": 60}},
-                {"date": "2026-08-31", "nested": {"lastNightAvg": None}},
-                {"date": "2026-09-01", "nested": {"lastNightAvg": 70}},
-            ]
-        }
-        self.assertEqual(
-            garmin_recovery_metric(snapshot, "recovery", ("lastNightAvg",)),
-            (70, "2026-09-01"),
-        )
-        self.assertEqual(
-            garmin_recovery_metric(
-                snapshot, "recovery", ("lastNightAvg", "last-night-avg")
-            ),
-            (70, "2026-09-01"),
-        )
-
-    def test_metric_last_numeric_excludes_bool_and_supports_transform_none(self):
-        snapshot = {
-            "recovery": [
-                {
-                    "date": "2026-08-30",
-                    "score": {"value": True, "nested": {"score": 55}},
-                },
-                {"date": "2026-08-31", "score": {"value": False}},
-            ]
-        }
-        self.assertEqual(
-            garmin_recovery_metric(snapshot, "recovery", ("score",)),
-            (55, "2026-08-30"),
-        )
-        self.assertEqual(
-            garmin_recovery_metric(
-                snapshot,
-                "recovery",
-                ("score",),
-                transform=lambda value: None if value == 55 else value,
-            ),
-            (None, None),
-        )
-
-    def test_average_is_inclusive_and_rounded(self):
-        snapshot = {
-            "recovery": [
-                {"date": "2026-08-29", "score": 100},
-                {"date": "2026-08-30", "score": 1},
-                {"date": "2026-08-31", "score": 2},
-                {"date": "2026-09-01", "score": 2},
-                {"date": "not-a-date", "score": 99},
-            ]
-        }
-        self.assertEqual(
-            garmin_recovery_average(
-                snapshot, "recovery", ("score",), 2, date(2026, 8, 31)
-            ),
-            1.5,
-        )
-        self.assertEqual(
-            garmin_recovery_average(
-                snapshot,
-                "recovery",
-                ("score",),
-                2,
-                date(2026, 8, 31),
-                transform=lambda value: float(value) / 3,
-            ),
-            0.5,
-        )
-
-    def test_average_counts_each_day_once_for_a_wrapped_same_day_record(self):
-        # A day whose record wraps a dated record of the same day (an injected
-        # calendarDate around dailySleepDTO) holds one reading, not two.
-        snapshot = {
-            "sleep": [
-                {
-                    "calendarDate": "2026-08-30",
-                    "dailySleepDTO": {
-                        "calendarDate": "2026-08-30",
-                        "sleepTimeSeconds": 36000,
-                    },
-                },
-                {"calendarDate": "2026-08-31", "sleepTimeSeconds": 18000},
-            ]
-        }
-        keys = ("sleepTimeSeconds",)
-        self.assertEqual(
-            sorted(
-                garmin_recovery_window_values(
-                    snapshot, "sleep", keys, 7, date(2026, 8, 31)
-                )
-            ),
-            [(date(2026, 8, 30), 36000.0), (date(2026, 8, 31), 18000.0)],
-        )
-        self.assertEqual(
-            garmin_recovery_average(snapshot, "sleep", keys, 7, date(2026, 8, 31)),
-            27000.0,
-        )
-
-    def test_average_takes_the_value_the_metric_reads_for_a_repeated_day(self):
-        snapshot = {
-            "recovery": [
-                {"date": "2026-08-30", "score": 10},
-                {"date": "2026-08-31", "score": 50},
-                {"id": "second", "date": "2026-08-31", "score": 70},
-                {"id": "empty", "date": "2026-08-31", "score": None},
-            ]
-        }
-        current, observed = garmin_recovery_metric(snapshot, "recovery", ("score",))
-        self.assertEqual((current, observed), (70, "2026-08-31"))
-        self.assertEqual(
-            garmin_recovery_window_values(
-                snapshot, "recovery", ("score",), 7, date(2026, 8, 31)
-            ),
-            [(date(2026, 8, 31), 70.0), (date(2026, 8, 30), 10.0)],
-        )
-        self.assertEqual(
-            garmin_recovery_average(
-                snapshot, "recovery", ("score",), 7, date(2026, 8, 31)
-            ),
-            40.0,
-        )
-
     def test_inputs_are_not_mutated(self):
         snapshot = {"recovery": [{"date": "2026-08-31", "score": 70}]}
         before = copy.deepcopy(snapshot)
         dated_garmin_recovery_records(snapshot["recovery"])
-        garmin_recovery_metric(snapshot, "recovery", ("score",))
-        garmin_recovery_average(snapshot, "recovery", ("score",), 2, date(2026, 8, 31))
         self.assertEqual(snapshot, before)
+
+    def test_rounded_average_uses_two_decimals_and_none_for_no_values(self):
+        self.assertEqual(rounded_average([7.0, 7.1, 7.15]), 7.08)
+        self.assertIsNone(rounded_average([]))
 
 
 if __name__ == "__main__":

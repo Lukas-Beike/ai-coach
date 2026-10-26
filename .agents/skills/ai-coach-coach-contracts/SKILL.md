@@ -12,4 +12,4 @@ Use for Coach tools, prompts, dialogue, planning actions, or durable mutations.
 - Preserve freshness/source labels for Intervals.icu, Garmin, local feedback, derived values, and AI estimates.
 - Cover retries, repeated calls, cancellation, stale state, partial failures, and truthful receipts using temporary storage and mocked providers.
 - Scripted model responses prove execution mechanics, not natural-language model quality. Live evaluation needs separate authorization and synthetic scenarios.
-- Never expose prompts, credentials, or athlete payloads. Apply the root secret-scan protocol before source reads.
+- Never expose prompts, credentials, or athlete payloads. Apply the root outgoing Git secret-check policy.

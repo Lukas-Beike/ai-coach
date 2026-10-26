@@ -53,12 +53,12 @@ Consumer trace (no M1 method exists yet):
 
 Consumer trace:
 
-- Canonical read: `read_personal_recovery_inputs` reads **resting HR only**
-  (`backend/performance/canonical_personal_recovery.py:42-60`).
-- Method: `personal_recovery` (`backend/performance/personal_recovery.py:32`)
-  reads HRV from raw Intervals wellness rows and the raw Garmin payload
-  (`:202`); a canonical resting HR replaces the legacy value only when provider,
-  day and number match (`:105`, `backend/performance/canonical_recovery.py:72`).
+- Canonical read: `read_recovery_inputs` reads sleep duration and score, resting
+  HR, RMSSD, SDNN, the Garmin weekly HRV average and readiness of all providers
+  (`backend/performance/canonical_recovery.py`) since #1411.
+- Method: `personal_recovery` (`backend/performance/personal_recovery.py`)
+  builds one series per provider and measurement from the daily canonical
+  observations; raw rows and payloads feed only sleep regularity (#1419).
 - Report/context: `current_performance_context` (`backend/performance/context.py:167`).
 - HTTP: `GET /api/performance` (`backend/http_api/athlete_get.py:51`) and the
   report services (`backend/http_api/assembly.py:430`).
@@ -117,8 +117,8 @@ Consumer trace (no M4 method exists yet):
 | `icu_rpe` has no canonical field | M1 | mapping, maybe persistence | D3 on #1406; no #1408 sub-issue yet |
 | Two duplicate rules (session state and `deduplicated_rows`) | M1 | read path | #1427 |
 | Planning context omits feedback `session_rpe` | M1 | read path | #1427 |
-| HRV and sleep duration read from raw rows | M2, M3 | read path | #1411 |
-| Canonical resting HR only replaces an equal legacy value | M2 | read path | #1415 |
+| HRV and sleep duration read from raw rows | M2, M3 | read path | resolved by #1411 |
+| Canonical resting HR only replaces an equal legacy value | M2 | read path | resolved by #1411 |
 | No method, aggregation or measurement window on observations | M2, M3 | persistence | #1418 (#1408) |
 | No device model or firmware | M2, M3, M4 | persistence | #1420 (#1408) |
 | No sleep periods (start, end, night or nap) | M3 | persistence | #1419 (#1408) |
@@ -141,6 +141,6 @@ Classes in `tests/test_performance_method_inputs.py`; each has `test_complete`,
 | Method | Class | Extra tests | Pinned gaps |
 | --- | --- | --- | --- |
 | M1 | `M1SessionRpeInputs` | — | #1427, #1423, D3 on #1406 |
-| M2 | `M2HrvRestingHrInputs` | `test_canonical_resting_hr_override_needs_an_exact_match`, `test_canonical_hrv_is_not_consulted` | #1415, #1411 |
-| M3 | `M3SleepInputs` | `test_canonical_sleep_inputs_are_not_available` | #1429, #1411, #1419 |
+| M2 | `M2HrvRestingHrInputs` | `test_canonical_resting_hr_is_the_primary_input`, `test_canonical_hrv_is_read_per_provider` | — |
+| M3 | `M3SleepInputs` | `test_canonical_sleep_duration_is_read_but_timing_is_not` | #1429, #1419 |
 | M4 | `M4BestEffortInputs` | — | #1430 |

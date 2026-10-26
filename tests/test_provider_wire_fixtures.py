@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from canonical_recovery_support import mapped_recovery_inputs
+
 from backend.athlete.local_date import iso_date_prefix
 from backend.performance.garmin_weight import garmin_weight_metric
 from backend.performance.recovery_context import performance_recovery_context
@@ -369,7 +371,9 @@ class GarminWireFixtureTests(unittest.TestCase):
     def test_recovery_context_reads_fixture_sleep_and_resting_hr(self) -> None:
         payload = self.collect()
 
-        context = performance_recovery_context(payload, {}, [], SYNTHETIC_TODAY)
+        context = performance_recovery_context(
+            mapped_recovery_inputs(payload), SYNTHETIC_TODAY
+        )
 
         # 27900 seconds of sleep from the latest dated Garmin sleep record.
         self.assertEqual(context["sleep_hours"], 7.8)

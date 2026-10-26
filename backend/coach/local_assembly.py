@@ -39,7 +39,7 @@ class CoachLocalGarmin:
     payload_service: Callable[[], Any]
     morning_body_battery: Callable[[], Any]
     logger: Any
-    observations: Callable[[], Any] | None = None
+    observations: Callable[[], Any]
 
 
 class CoachLocalAssembly:
@@ -106,12 +106,8 @@ class CoachLocalAssembly:
             self._morning_body_battery(),
             self._local_date,
             self._logger,
-            observations=(
-                None
-                if self._observations is None
-                else GarminSleepObservations(
-                    self._database_manager(), self._observations
-                )
+            observations=GarminSleepObservations(
+                self._database_manager(), self._observations
             ),
         )
 
