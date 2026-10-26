@@ -34,6 +34,17 @@ authorization failures and multi-turn recovery. Its catalog check fails when a
 new tool lacks a corresponding success scenario. This execution coverage remains
 separate from the language-understanding rubric below.
 
+## Recovery wording cases
+
+`tests/test_personal_recovery_coach_cases.py` checks the recovery context the Coach
+receives for four situations: a small data amount, a fresh device change, stale
+values, and a heavy-legs check-in beside an unremarkable HRV. It asserts coverage,
+status, the absence of a position where none is supported, and that the supplied
+note states the limits (no diagnosis, clearance or training change from an
+isolated deviation). These are deterministic context and instruction checks, not
+measured model accuracy; `tests/test_performance_claim_wording.py` scans the
+runtime wording for the forbidden recovery terms.
+
 ## Dialogue catalogue and acceptance rubric
 
 Use 7 September 2026, Europe/Berlin, as the reference date. Synthetic local data:

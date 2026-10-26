@@ -454,7 +454,7 @@ class M3SleepInputs(unittest.TestCase):
         self.assertEqual(
             series["points"][-1]["onset_deviation_minutes"],
             75.0,
-            msg="#1429: sleep-regularity-v1 still computes deviations below 14 earlier "
+            msg="#1429: sleep-timing-variability-v1 still computes deviations below 14 earlier "
             "intervals; expected None until 14",
         )
 
@@ -506,7 +506,7 @@ class M3SleepInputs(unittest.TestCase):
         self.assertEqual(
             timing,
             [],
-            msg="#1419: no canonical sleep start/end kind; sleep-regularity-v1 reads "
+            msg="#1419: no canonical sleep start/end kind; sleep-timing-variability-v1 reads "
             "raw provider fields",
         )
         sleep_storage = [

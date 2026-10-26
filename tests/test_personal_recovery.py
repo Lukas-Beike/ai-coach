@@ -101,6 +101,20 @@ class PersonalRecoveryTests(unittest.TestCase):
             [], mapped_personal_recovery(rows, {}, {}, self.today)["sleep_deficits"]
         )
 
+    def test_note_states_the_limits_of_the_comparison(self):
+        result = mapped_personal_recovery(self.rows(30), {}, {}, self.today)
+        note = result["note"]
+        for sentence in (
+            "mit deinen eigenen früheren Werten",
+            "etwa die Hälfte der Werte",
+            "Keine Diagnose, keine Trainingsfreigabe und keine Trainingsänderung",
+            "summiert nur bekannte Nächte",
+            "kein Sleep Regularity Index",
+        ):
+            self.assertIn(sentence, note)
+        self.assertEqual("personal-quartiles-v1", result["method"])
+        self.assertEqual("sleep-timing-variability-v1", result["regularity"]["method"])
+
     def test_profile_target_requires_valid_explicit_value(self):
         self.assertEqual(
             "8", normalize_profile({"sleep_target_hours": 8})["sleep_target_hours"]
@@ -159,7 +173,7 @@ class PersonalRecoveryTests(unittest.TestCase):
         )
         return result
 
-    def test_sleep_regularity_coverage_thresholds_and_display_contract(self):
+    def test_sleep_timing_variability_coverage_thresholds_and_display_contract(self):
         for nights, expected in (
             (13, "insufficient_data"),
             (14, "provisional"),
@@ -181,7 +195,7 @@ class PersonalRecoveryTests(unittest.TestCase):
                 self.assertEqual("Garmin Connect", item["source"])
                 self.assertTrue(item["method"].startswith("sleepStartTimestampGMT/"))
 
-    def test_sleep_regularity_circular_midnight_median_and_source_separation(self):
+    def test_sleep_timing_variability_circular_midnight_median_and_sources(self):
         rows = self.sleep_rows(
             14, start="2026-09-01T21:50:00Z", end="2026-09-02T05:50:00Z"
         )

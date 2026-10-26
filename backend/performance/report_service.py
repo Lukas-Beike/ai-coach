@@ -396,7 +396,7 @@ class TrainingDerivedReadService:
         body = history.get("body") if isinstance(history, dict) else None
         return body if isinstance(body, dict) else {"status": "insufficient_data"}
 
-    def sleep_regularity(self) -> dict[str, Any]:
+    def sleep_timing_variability(self) -> dict[str, Any]:
         regularity = self._read_recovery().get("regularity")
         if isinstance(regularity, dict):
             return regularity

@@ -1,7 +1,7 @@
 # M2 — Personal HRV and resting HR description
 
 - **Card:** M2
-- **Card version:** 1
+- **Card version:** 2
 - **Method ID:** personal-quartiles-v1
 - **Status:** implemented for provider rows; canonical inputs planned (#1428)
 - **Classification:** descriptive statistic
@@ -111,7 +111,7 @@ and no competing interests.
 
 - "Resting HR today is above your previous comparison distribution (42 days,
   26 earlier values, provisional)."
-- "HRV (RMSSD, Garmin) is within your usual range of the last 42 days."
+- "HRV (RMSSD, Garmin) is within the range of your earlier values (42 days)."
 - "Not enough earlier values for a comparison: 9 of 14."
 - "The latest HRV value is from three days ago."
 

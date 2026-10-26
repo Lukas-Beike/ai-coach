@@ -1,8 +1,8 @@
 # M3 — Sleep duration, goal shortfall and timing
 
 - **Card:** M3
-- **Card version:** 1
-- **Method ID:** personal-quartiles-v1 (duration and goal shortfall), sleep-regularity-v1 (timing)
+- **Card version:** 2
+- **Method ID:** personal-quartiles-v1 (duration and goal shortfall), sleep-timing-variability-v1 (timing)
 - **Status:** implemented for provider rows; canonical sleep periods planned (#1429)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-10-24
@@ -12,7 +12,7 @@
 
 Device-estimated sleep duration, the known shortfall against the athlete's own
 explicit sleep goal, and how far sleep onset and wake times deviate from the
-athlete's usual clock times. It is not measured sleep need, physiological sleep
+athlete's own earlier clock times. It is not measured sleep need, physiological sleep
 debt, sleep quality or a sleep diagnosis.
 
 ## Formula and units
@@ -21,7 +21,7 @@ debt, sleep quality or a sleep diagnosis.
 - Goal shortfall (`backend/performance/personal_recovery.py:170-199`): with a
   goal of 4 to 12 h, `sum(max(0, goal_h − duration_h))` over known nights from
   today − 6 to today, in hours, rounded to 0.01 h after summing.
-- Timing (`sleep-regularity-v1`, `personal_recovery.py:296-470`): local onset
+- Timing (`sleep-timing-variability-v1`, `personal_recovery.py:296-470`): local onset
   and wake clock times in minutes after midnight. Circular median over 1,440
   minutes of the earlier intervals in the 42-day window; per night the absolute
   circular deviation from that median, rounded to 0.1 min.
@@ -76,7 +76,7 @@ declares lighting-industry funding.
 - Timing deviation uses one main interval per night, not a sleep/wake series
   with naps, so it cannot be an SRI.
 - The goal is entered by the athlete, not derived from measured need.
-- Current `sleep-regularity-v1` still computes medians and per-night
+- Current `sleep-timing-variability-v1` still computes medians and per-night
   deviations from any number of earlier intervals and only marks the status
   `insufficient_data` (`personal_recovery.py:384-403`).
 - Sleep duration comes from canonical observations (#1411). Once the canonical
@@ -125,8 +125,8 @@ declares lighting-industry funding.
 
 - "Garmin estimates 6.4 h of sleep last night."
 - "Below your 8 h goal by 3.5 h in total over 6 known nights this week."
-- "You fell asleep 75 minutes later than your usual time (42 days,
-  31 earlier nights)."
+- "You fell asleep 75 minutes later than the median of your earlier nights
+  (42 days, 31 earlier nights)."
 - "No sleep goal set, so no shortfall is shown."
 
 ## Forbidden statements
@@ -140,7 +140,6 @@ declares lighting-industry funding.
 
 ## Open points
 
-- Rename "sleep deficit" and the regularity label in UI and Coach (#1426).
 - Naps are out of scope for the canonical model (athlete decision 2026-10-25).
 - SRI stays out of scope until a full sleep/wake series exists; then name the
   calculator and settings.

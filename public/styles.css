@@ -66,7 +66,6 @@
   --danger-soft-ink: #ffd1cd;
   --action-error-border: rgba(255, 69, 58, .4);
   --action-error-surface: rgba(255, 69, 58, .08);
-  --chart-baseline: #22c55e;
   --chart-series-2: #a78bfa;
   --tooltip-shadow: #0003;
   --chart-series-1: #cc7c00;
@@ -181,7 +180,6 @@
   --chart-series-2: #7c3aed;
   --chart-series-3: #0369a1;
   --chart-series-4: #be123c;
-  --chart-baseline: #16a34a;
   --planning-danger-ink: #b42318;
   --coach-planning-danger-ink: #b42318;
   --planning-danger-hover-surface: #9f1d15;
@@ -391,7 +389,7 @@ h2 {
 .analysis-metric-meta, .analysis-metric-context, .analysis-metric-change { display: block; margin-top: 4px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .analysis-metric-context { color: var(--ink); }
 .analysis-sparse-note, .analysis-reference-note { margin: 8px 0; color: var(--muted); font-size: .75rem; line-height: 1.5; }
-.analysis-baseline-band { fill: var(--chart-baseline); opacity: .17; }
+.analysis-baseline-band { fill: var(--muted); opacity: .17; }
 .analysis-target-line { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
 .analysis-day-marker.is-selected rect { fill: var(--ink); fill-opacity: .08; }
 .analysis-chart-card svg .analysis-axis-unit { font-size: 11px; }
@@ -430,7 +428,7 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 :root[data-theme="light"] .analysis-chart-legend [data-color="2"]::before { background: var(--chart-series-2); }
 :root[data-theme="light"] .analysis-chart-legend [data-color="3"]::before { background: var(--chart-series-3); }
 :root[data-theme="light"] .analysis-chart-card svg [data-color="4"] { stroke: var(--chart-series-4); }
-:root[data-theme="light"] .analysis-baseline-band { fill: var(--chart-baseline); opacity: .14; }
+:root[data-theme="light"] .analysis-baseline-band { fill: var(--muted); opacity: .14; }
 :root[data-theme="light"] .analysis-chart-legend [data-color="4"]::before { background: var(--chart-series-4); }
 .analysis-grid-line { stroke: var(--line); }
 .analysis-zero-line { stroke: var(--muted); stroke-dasharray: 3 3; }

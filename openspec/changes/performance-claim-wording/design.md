@@ -73,7 +73,7 @@ The limits live in the `note` and the tool description (D3), both data/schema te
 
 `.analysis-baseline-band` fills with `--chart-baseline`, which is defined only for this class (`#22c55e` dark in `:root`, `#16a34a` in `:root[data-theme="light"]`). Replace the fill with the existing neutral `var(--muted)` (`#a1a1a7` dark, `#5d5d5d` light) and remove the two `--chart-baseline` declarations. The opacities (.17 dark, .14 light) stay.
 
-Contrast evidence (WCAG 1.4.11, series stroke against the band composited on the page background; computed for this design, recheck against the real card surface at apply time):
+Contrast evidence (WCAG 1.4.11, series stroke against the band composited on the real card surface). The first column pair was computed at design time on the page background; the measured values from the disposable fixture (`vsBand`, `vsSurface`) at apply time are dark band `#323235` with 3.91, 4.67, 5.93, 4.72 against the band and 5.24, 6.27, 7.97, 6.34 against the surface; light band `#e8e8e8` with 4.11, 4.66, 4.86, 5.14 and 5.02, 5.70, 5.93, 6.29.
 
 | Theme | Band colour | Series 1-4 against band | Series 1-4 against background |
 |---|---|---|---|

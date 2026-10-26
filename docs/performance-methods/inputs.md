@@ -61,7 +61,7 @@ Consumer trace:
   the canonical sleep periods when the tables serve reads (#1419).
 - Method: `personal_recovery` (`backend/performance/personal_recovery.py`)
   builds one series per provider and measurement from the daily canonical
-  observations; raw rows and payloads feed sleep regularity only before the
+  observations; raw rows and payloads feed sleep timing variability only before the
   canonical tables serve reads.
 - Report/context: `current_performance_context` (`backend/performance/context.py:167`).
 - HTTP: `GET /api/performance` (`backend/http_api/athlete_get.py:51`) and the
@@ -81,12 +81,12 @@ Consumer trace:
 Consumer trace:
 
 - Method: `personal_recovery` → `_sleep_deficits` on raw rows, and
-  `sleep_regularity` on canonical sleep periods once the tables serve (raw rows
-  before that), with pinned parity.
+  `sleep_timing_variability` on canonical sleep periods once the tables serve (raw
+  rows before that), with pinned parity.
 - Report/context, HTTP, UI and Coach as for M2; in addition the Coach tool
-  `get_training_report(sections=["sleep_regularity"])`
+  `get_training_report(sections=["sleep_timing_variability"])`
   (`backend/coach/activity_read_tools.py:83`) via
-  `TrainingDerivedReadService.sleep_regularity`
+  `TrainingDerivedReadService.sleep_timing_variability`
   (`backend/performance/report_service.py:399`).
 
 ## M4 — Critical Power and Critical Speed
@@ -125,7 +125,7 @@ Consumer trace (no M4 method exists yet):
 | Method, aggregation and window stored; only Garmin HRV populates them | M2, M3 | mapping | #1418 (#1408) |
 | Device model and firmware unknown for Garmin HRV (no measurement-associated evidence) | M2, M3, M4 | mapping | #1420 (#1408) |
 | Timing deviations computed below 14 earlier intervals | M3 | method | #1429 |
-| Labels "sleep deficit" and regularity | M3 | wording | #1426 |
+| Labels "sleep deficit" and regularity | M3 | wording | resolved by #1426 |
 | No full-resolution filter and no 180/420/720 s windows | M4 | method | #1430 |
 | Reports read stored analyses with kv fallback | M4 | read path | #1410 |
 | No CP/CS fit | M4 | method | #1431 |

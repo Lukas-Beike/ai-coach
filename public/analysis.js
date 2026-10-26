@@ -172,7 +172,7 @@ function appendAnalysisReferenceNotes(section, series, unit) {
   series.forEach((item, index) => {
     const info = section.querySelector(`.analysis-legend-info + .analysis-info-tooltip[data-series="${index}"]`);
     if (item.points.some((point) => point.lower != null)) info?.append(reportNode("p", "Wochenmedian mit Streuung (25.–75. Perzentil) · nur vorhandene Messungen", "analysis-reference-note"));
-    if (item.range) info?.append(reportNode("p", "Grüner Bereich: persönliche Quartile · 42 Tage vor der letzten Messung" + (item.range.status === "provisional" ? " · vorläufig" : ""), "analysis-reference-note"));
+    if (item.range) info?.append(reportNode("p", "Mittlere Hälfte deiner früheren Werte (Quartile) · 42 Tage vor der letzten Messung" + (item.range.status === "provisional" ? " · vorläufig" : ""), "analysis-reference-note"));
     if (item.target != null) info?.append(reportNode("p", `Ziellinie: ${analysisValue(item.target, item.unit || unit)} · persönliches Schlafziel`, "analysis-reference-note"));
     if (item.average && item.bars) {
       info?.append(reportNode("p", "Gestrichelte Linie: Durchschnitt der angezeigten Werte.", "analysis-reference-note"));
@@ -1126,13 +1126,12 @@ function selectedRecoveryBaselines(report) {
 }
 
 function recoveryReferenceLabel(item, range, target, unit, position) {
-  const status = `Status: ${providerMetricStatus(item.status || "unknown")}`;
   if (range) {
     const provisional = item.status === "provisional" ? " · vorläufig" : "";
-    return `${position || "Persönlicher Bereich"} · Basis ${analysisValue(range.lower, unit)}–${analysisValue(range.upper, unit)}${provisional} · ${status}`;
+    return `${position || "Bereich deiner früheren Werte"} · ${analysisValue(range.lower, unit)}–${analysisValue(range.upper, unit)}${provisional}`;
   }
-  if (target != null) return `Persönliches Schlafziel: ${analysisValue(target, unit)} · ${status}`;
-  return `Persönliche Basis: ${item.reason || "noch nicht verfügbar"} · ${status}`;
+  if (target != null) return `Persönliches Schlafziel: ${analysisValue(target, unit)}`;
+  return item.reason || "Noch kein Vergleich verfügbar";
 }
 
 function renderRecoveryCharts(report, root) {
@@ -1158,17 +1157,16 @@ function renderRecoveryCharts(report, root) {
     const expectedDays = Math.max(0, Math.round((Date.parse(today) - Date.parse(start)) / 86400000) + 1);
     const range = metric !== "sleep" && ["ok", "provisional"].includes(item.status) && Number.isFinite(item.lower) && Number.isFinite(item.upper) ? { lower: item.lower, upper: item.upper, status: item.status } : null;
     const target = null;
-    const position = { below: "Unter deinem üblichen Bereich", within: "Innerhalb deines üblichen Bereichs", above: "Über deinem üblichen Bereich" }[item.position];
+    const position = { below: "Unter dem Bereich deiner früheren Werte", within: "Im Bereich deiner früheren Werte", above: "Über dem Bereich deiner früheren Werte" }[item.position];
     const measurement = metric === "hrv" ? " · " + item.measurement : "";
-    const rangeDescription = range ? " Persönlicher Bereich aus " + item.nights + " früheren Nächten." : "";
+    const rangeDescription = range ? " Vergleich mit " + item.nights + " früheren Nächten." : "";
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
       bars: metric === "sleep", average: true, averageInHeading: true, cadenceDays: recoveryHistoryPeriod === "twelveWeeks" ? 7 : 1, range, target,
       currentPoint: points.some(analysisValidPoint) ? null : item.history.findLast((point) => point.date <= today && analysisValidPoint(point)),
-      referenceLabel: metric === "sleep" ? `Durchschnitt der angezeigten Werte · Status: ${providerMetricStatus(item.status || "unknown")}` : recoveryReferenceLabel(item, range, target, unit, position),
+      referenceLabel: metric === "sleep" ? "Durchschnitt der angezeigten Werte" : recoveryReferenceLabel(item, range, target, unit, position),
       coverageShort: analysisCoverageText(readings.length, expectedDays, "Tagen"),
       coverage: `${analysisCoverageText(readings.length, expectedDays, "Tagen")}${rangeDescription}`, points };
   });
-  const note = "Schlaf zeigt den Durchschnitt der angezeigten Messungen. Persönliche Normalbereiche werden nur für HRV und Ruhepuls angezeigt.";
   const missing = [];
   const charts = series.map((item) => {
     const values = item.points.filter(analysisValidPoint).map((point) => Number(point.value));
@@ -1183,7 +1181,7 @@ function renderRecoveryCharts(report, root) {
     charts.unshift(...readinessCharts.children);
   }
   root.append(analysisPeriodControls("Zeitraum für Erholung", recoveryHistoryPeriod, (period) => { recoveryHistoryPeriod = period; renderPersonalRecovery(report); }));
-  const group = analysisChartGroup(`Erholung · ${recoveryHistoryPeriod === "twelveWeeks" ? "Letzte 12 Wochen" : "Letzte 14 Tage"}`, charts, series, note);
+  const group = analysisChartGroup(`Erholung · ${recoveryHistoryPeriod === "twelveWeeks" ? "Letzte 12 Wochen" : "Letzte 14 Tage"}`, charts, series);
   const missingNote = analysisMissingDataNote(missing);
   if (missingNote) group.append(missingNote);
   root.append(group);

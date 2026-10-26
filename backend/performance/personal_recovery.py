@@ -1,9 +1,9 @@
 """Personal recovery distributions, separated by provider and measurement field.
 
-The baselines and sleep deficits read the daily canonical observations of each
-provider. Sleep regularity reads the canonical sleep periods when the serving
-source stores them (#1419) and otherwise the stored provider sleep and wellness
-records, through the same interval reader.
+The comparisons and sleep goal shortfalls read the daily canonical observations of
+each provider. Sleep timing variability reads the canonical sleep periods when the
+serving source stores them (#1419) and otherwise the stored provider sleep and
+wellness records, through the same interval reader.
 """
 
 import math
@@ -48,6 +48,18 @@ _SERIES: Final = {
 }
 
 
+_NOTE: Final = (
+    "Quartile vergleichen den letzten Wert mit deinen eigenen früheren Werten. "
+    "Die mittleren zwei Quartile enthalten per Definition etwa die Hälfte der "
+    "Werte; ein Wert außerhalb ist weder selten noch ein Warnsignal. Keine "
+    "Diagnose, keine Trainingsfreigabe und keine Trainingsänderung allein aus "
+    "einer Abweichung. Krankheit und Schmerzen separat berücksichtigen. Quellen "
+    "und Messfelder werden nicht gemischt. Der Fehlbetrag zum Schlafziel "
+    "summiert nur bekannte Nächte und wird nicht mit längeren Nächten "
+    "verrechnet. Die Schlafzeit-Streuung ist kein Sleep Regularity Index."
+)
+
+
 def _number(value: Any) -> float | None:
     return (
         float(value) if type(value) in {int, float} and math.isfinite(value) else None
@@ -62,9 +74,9 @@ def personal_recovery(
     *,
     canonical: CanonicalRecoveryInputs | None = None,
 ) -> dict[str, Any]:
-    """Return baselines, deficits and regularity; no baselines without ``canonical``.
+    """Return comparisons, shortfalls and timing variability from ``canonical``.
 
-    ``wellness`` and ``garmin`` feed only the sleep regularity (#1419).
+    ``wellness`` and ``garmin`` feed only the sleep timing variability (#1419).
     """
     cutoff = (today - timedelta(days=42)).isoformat()
     history_start = (today - timedelta(days=83)).isoformat()
@@ -86,7 +98,7 @@ def personal_recovery(
     except ValueError, TypeError:
         target = float("nan")
     deficits = _sleep_deficits(groups, target, today)
-    regularity = sleep_regularity(
+    regularity = sleep_timing_variability(
         wellness,
         garmin,
         str(profile.get("timezone") or "UTC"),
@@ -101,7 +113,7 @@ def personal_recovery(
         "sleep_target_hours": target if math.isfinite(target) else None,
         "regularity": regularity,
         "preferred_providers": preferred_providers(),
-        "note": "Persönliche Quartile beschreiben Abweichungen, keine medizinische Trainingsfreigabe. Krankheit und Schmerzen separat berücksichtigen. Quellen und Messfelder werden nicht gemischt; lange Nächte gleichen Defizite nicht rechnerisch aus.",
+        "note": _NOTE,
     }
 
 
@@ -136,7 +148,7 @@ def _baseline(
 ) -> dict[str, Any]:
     provider, metric, field = key
     observed = max(records)
-    # Today's value never influences its own normal range.
+    # Today's value never influences its own comparison distribution.
     prior = [value for day, value in records.items() if cutoff <= day < observed]
     latest = records[observed]
     current = observed >= (today - timedelta(days=1)).isoformat()
@@ -210,7 +222,7 @@ def _sleep_deficits(
     return deficits
 
 
-def sleep_regularity(
+def sleep_timing_variability(
     wellness: list[dict[str, Any]],
     garmin: dict[str, Any],
     timezone_name: str,
@@ -218,7 +230,10 @@ def sleep_regularity(
     *,
     periods: Sequence[SleepPeriod] | None = None,
 ) -> dict[str, Any]:
-    """Summarize actual sleep intervals without turning them into a score.
+    """Summarize clock-time deviations of actual sleep intervals, without a score.
+
+    Compares onset and wake with the athlete's own earlier nights; this is not the
+    Sleep Regularity Index.
 
     ``periods`` are the canonical sleep periods when the serving source stores
     them; they replace the walk over the legacy rows. Both read the same
@@ -250,7 +265,7 @@ def sleep_regularity(
     if not series:
         reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
         return {
-            "method": "sleep-regularity-v1",
+            "method": "sleep-timing-variability-v1",
             "timezone": timezone_name,
             "status": "insufficient_data",
             "reason": reason,
@@ -263,7 +278,7 @@ def sleep_regularity(
         }
     rank = {"insufficient_data": 0, "provisional": 1, "ok": 2}
     return {
-        "method": "sleep-regularity-v1",
+        "method": "sleep-timing-variability-v1",
         "timezone": timezone_name,
         "status": max(
             (item["status"] for item in series), key=lambda status: rank[status]

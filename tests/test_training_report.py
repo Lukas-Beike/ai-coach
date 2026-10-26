@@ -535,7 +535,9 @@ class TrainingReportTests(unittest.TestCase):
             today=lambda: date(2026, 10, 2),
         )
         self.assertEqual({"status": "insufficient_data"}, derived.body_history())
-        self.assertEqual({"status": "insufficient_data"}, derived.sleep_regularity())
+        self.assertEqual(
+            {"status": "insufficient_data"}, derived.sleep_timing_variability()
+        )
         season = TrainingSeasonReadService(
             read_snapshot=dict,
             read_competitions=list,
