@@ -20,7 +20,6 @@ from zoneinfo import ZoneInfo
 from support import garmin_payload_fixture, load_provider_fixture
 
 from backend.activities.duplicate_service import DuplicateActivityService
-from backend.activities.duplicates import remove_activity_from_snapshot
 from backend.canonical.garmin_payload import STATE_KEY as GARMIN_STATE_KEY
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
@@ -30,7 +29,6 @@ from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND, HEALTH_RECOR
 from backend.providers.snapshot_projection import (
     CANONICAL_SECTIONS_KEY,
     CANONICAL_SECTIONS_TABLES,
-    strip_intervals_activity_sections,
 )
 from backend.sync.canonical_backfill import STATE_KEY
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
@@ -40,7 +38,6 @@ from backend.sync.garmin_snapshot_writer import (
 )
 from backend.sync.intervals import IntervalsSnapshotReader, IntervalsSnapshotService
 from backend.sync.performance import PerformanceRefreshService
-from backend.sync.snapshot_reader import SnapshotRepositoryReader
 from backend.sync.snapshot_storage import SnapshotStorage
 from backend.sync.state import SyncStateRepository
 
@@ -536,35 +533,19 @@ class PerformanceRefreshTests(StorageCase):
 
 
 class DuplicateDeleteTests(StorageCase):
-    def test_removing_an_activity_never_adds_sections_to_a_stripped_snapshot(
-        self,
-    ) -> None:
-        stripped = strip_intervals_activity_sections(
-            {"synced_at": "old", RECENT: [{"id": KEPT_ID}], RAW: {"activities": []}}
-        )
-
-        updated = remove_activity_from_snapshot(
-            stripped, KEPT_ID, synced_at="2026-11-12T00:00:00+00:00"
-        )
-
-        assert updated is not None
-        self.assert_stripped(updated)
-        self.assertEqual(updated["synced_at"], "2026-11-12T00:00:00+00:00")
-
-    def test_delete_keeps_the_snapshot_stripped_and_counts_live_rows(self) -> None:
+    def test_delete_leaves_the_stripped_snapshot_untouched(self) -> None:
         env = self.environment(tables=True)
         env.sync(_activities(), days=ALL_DAYS, day=FIRST_DAY)
+        stored = env.stored()
+        snapshots = env.rows("SELECT id, synced_at FROM snapshots")
         service = DuplicateActivityService(
             env.manager,
-            env.snapshot_rows,
-            SnapshotRepositoryReader(env.snapshot_rows),
-            env.selector,
+            Mock(latest=Mock(return_value={})),
             lambda: "2026-11-12T00:00:00+00:00",
             Mock(),
         )
 
         with (
-            patch.object(service, "_inspector", Mock(latest=Mock(return_value={}))),
             patch(
                 "backend.activities.duplicate_service.resolve_duplicate_ids",
                 side_effect=lambda payload, references: payload,
@@ -577,8 +558,9 @@ class DuplicateDeleteTests(StorageCase):
             result = service.delete({}, Mock())
 
         self.assertEqual(result["status"], "deleted")
-        self.assert_stripped(env.stored())
-        self.assertEqual(env.activity_count_column(), 4)
+        self.assertEqual(env.stored(), stored)
+        self.assertEqual(env.rows("SELECT id, synced_at FROM snapshots"), snapshots)
+        self.assertEqual(env.activity_count_column(), 5)
         self.assertEqual(KEPT_ID not in env.table_activity_ids(), True)
         self.assertEqual(len(env.table_activity_ids()), 4)
 

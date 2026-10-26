@@ -73,6 +73,9 @@ COACH_CONTEXT_SECTION_LIMITS = {
 }
 LOGGER = logging.getLogger("intervals_coach")
 
+# Compact recent activities with the sync time of the activities.
+type RecentActivities = tuple[list[dict[str, Any]], str | None]
+
 
 def _source_label(provider: ProviderId) -> str:
     """Return the provider's display label from the source label table."""
@@ -263,18 +266,18 @@ def future_coach_planned_workouts(
 class CoachIntervalsContextService:
     """Build a read-only bounded projection of compact recent activities.
 
-    The activities come from the canonical activity row port; the snapshot only
-    supplies the sync time.
+    The activities come from the canonical activity row port and their sync time
+    from the canonical provider coverage.
     """
 
     def project(
         self,
-        snapshot: dict[str, Any] | None,
         planned_units: list[dict[str, Any]] | None,
         today: date,
         activities: list[dict[str, Any]] | None = None,
+        *,
+        synced_at: str | None = None,
     ) -> dict[str, Any]:
-        snapshot = snapshot if isinstance(snapshot, dict) else {}
         activities = [item for item in activities or [] if isinstance(item, dict)]
         grouped: dict[str, list[dict[str, Any]]] = {}
         for activity in activities:
@@ -309,13 +312,13 @@ class CoachIntervalsContextService:
         planned = future_coach_planned_workouts(source_planned, today)
         return {
             "source": {
-                **_section_source(ProviderId.INTERVALS, snapshot.get("synced_at")),
+                **_section_source(ProviderId.INTERVALS, synced_at),
                 "applies_to": [
                     "recent_activities_by_sport",
                     "activity_rollups_by_sport",
                 ],
             },
-            "synced_at": snapshot.get("synced_at"),
+            "synced_at": synced_at,
             "recent_activities_by_sport": recent_by_sport,
             "activity_rollups_by_sport": rollups_by_sport,
             "planned_workouts": [
@@ -481,16 +484,14 @@ class CoachPerformanceContextReader:
         return self._profile_service.get()
 
     def activities(
-        self,
-        snapshot: Any,
-        planned: Any,
-        rows: list[dict[str, Any]] | None = None,
+        self, planned: Any, recent: RecentActivities | None = None
     ) -> dict[str, Any]:
         """Project compact activities, read now unless ``read_sources`` captured them."""
-        if rows is None:
-            rows = self._activity_rows.compact() if self._activity_rows else []
+        if recent is None:
+            recent = self._activity_rows.read() if self._activity_rows else ([], None)
+        rows, synced_at = recent
         return CoachIntervalsContextService().project(
-            snapshot, planned, self._today(), rows
+            planned, self._today(), rows, synced_at=synced_at
         )
 
     def read_snapshot(
@@ -501,18 +502,18 @@ class CoachPerformanceContextReader:
 
     def read_sources(
         self, read_snapshot: Callable[[], Any]
-    ) -> tuple[Any, CanonicalPerformanceInputs | None, list[dict[str, Any]] | None]:
+    ) -> tuple[Any, CanonicalPerformanceInputs | None, RecentActivities | None]:
         """Read the snapshot, its load inputs and compact activities in one read snapshot.
 
-        A sync that commits in between can then not pair newer activities with the
-        older snapshot's sync time. Without an activity source the rows stay None.
+        A sync that commits in between can then not pair newer activities with an
+        older sync time. Without an activity source the rows stay None.
         The reads never wait for the writer.
         """
         if self._activity_rows is None:
             return (*self.read_snapshot(read_snapshot), None)
         with self._activity_rows.database_manager().read_snapshot() as db:
             snapshot, inputs = self.read_snapshot(read_snapshot)
-            return snapshot, inputs, self._activity_rows.compact(db)
+            return snapshot, inputs, self._activity_rows.read(db)
 
     def current_performance(
         self, snapshot: Any, canonical: CanonicalPerformanceInputs | None = None
@@ -616,7 +617,7 @@ class CoachStructuredContextService:
         call reads the snapshot itself, so all come from one transaction.
         """
         performance_inputs: CanonicalPerformanceInputs | None = None
-        activity_rows: list[dict[str, Any]] | None = None
+        activity_rows: RecentActivities | None = None
         if snapshot is None:
             snapshot, performance_inputs, activity_rows = (
                 self._performance_reader.read_sources(
@@ -685,7 +686,7 @@ class CoachStructuredContextService:
         daily_context: Any,
         *,
         performance_inputs: CanonicalPerformanceInputs | None = None,
-        activity_rows: list[dict[str, Any]] | None = None,
+        activity_rows: RecentActivities | None = None,
     ) -> dict[str, Any]:
         intervals_label = _source_label(ProviderId.INTERVALS)
         garmin_label = _source_label(ProviderId.GARMIN)
@@ -714,7 +715,7 @@ class CoachStructuredContextService:
             if "external_calendar" in included
             else None,
             "activities": self._performance_reader.activities(
-                snapshot, local_planned_workouts, activity_rows
+                local_planned_workouts, activity_rows
             )
             if "activities" in included
             else None,

@@ -32,7 +32,6 @@ from backend.activities.duplicates import (
     filter_garmin_activities,
     garmin_activity_duplicates_intervals,
     intervals_cycling_activities_match,
-    latest_wahoo_garmin_duplicate,
 )
 from backend.http_api import server as http_server_module
 from backend.http_api.static_assets import StaticAssetService
@@ -2607,71 +2606,6 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(kept, [])
         self.assertEqual(skipped, 1)
 
-    def test_latest_intervals_duplicate_keeps_wahoo_and_selects_garmin_for_deletion(
-        self,
-    ):
-        activities = [
-            {
-                "id": "i-wahoo",
-                "type": "Ride",
-                "source": "Wahoo",
-                "device_name": "ELEMNT BOLT",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 7200,
-                "distance": 60200,
-            },
-            {
-                "id": "i-garmin",
-                "type": "Ride",
-                "source": "Garmin Connect",
-                "device_name": "Edge 1040",
-                "start_date_local": "2026-08-29T07:04:00",
-                "moving_time": 7160,
-                "distance": 59800,
-            },
-        ]
-        pair = latest_wahoo_garmin_duplicate(
-            {
-                "synced_at": "2026-08-29T10:00:00+00:00",
-                "raw_provider_data": {"activities": activities},
-            }
-        )
-        self.assertEqual(pair["canonical_id"], "i-wahoo")
-        self.assertEqual(pair["duplicate_id"], "i-garmin")
-
-    def test_latest_intervals_duplicate_is_ignored_when_a_newer_activity_is_unrelated(
-        self,
-    ):
-        pair = [
-            {
-                "id": "i-wahoo",
-                "type": "Ride",
-                "source": "Wahoo",
-                "start_date_local": "2026-08-29T07:00:00",
-                "moving_time": 7200,
-                "distance": 60200,
-            },
-            {
-                "id": "i-garmin",
-                "type": "Ride",
-                "source": "Garmin",
-                "start_date_local": "2026-08-29T07:04:00",
-                "moving_time": 7160,
-                "distance": 59800,
-            },
-            {
-                "id": "i-run",
-                "type": "Run",
-                "source": "Garmin",
-                "start_date_local": "2026-08-30T07:00:00",
-                "moving_time": 3600,
-                "distance": 10000,
-            },
-        ]
-        self.assertIsNone(
-            latest_wahoo_garmin_duplicate({"raw_provider_data": {"activities": pair}})
-        )
-
     def test_intervals_duplicate_requires_matching_start_duration_and_distance(self):
         wahoo = {
             "id": "wahoo",
@@ -2690,11 +2624,6 @@ class ServerSyncTests(ServerTestCase):
             "distance": 80000,
         }
         self.assertFalse(intervals_cycling_activities_match(wahoo, garmin))
-        self.assertIsNone(
-            latest_wahoo_garmin_duplicate(
-                {"raw_provider_data": {"activities": [wahoo, garmin]}}
-            )
-        )
 
     def test_sync_intervals_waits_for_active_sync_and_uses_its_new_snapshot(self):
         server.key_value_service().set("last_sync_at", "old-sync")

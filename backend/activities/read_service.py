@@ -14,7 +14,12 @@ from backend.activities.activity_reference import (
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.matching import record_date
-from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
+from backend.activities.sync_time import activities_synced_at
+from backend.runtime.ports import (
+    ActivityRowReader,
+    ProviderCoverageReader,
+    ProviderSnapshotReader,
+)
 
 ALL_DAYS = -1
 PAGE_DEFAULT = 100
@@ -95,6 +100,7 @@ class ActivityReadService:
         read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
         summary_rows: ActivityRowReader | None = None,
+        coverage: Callable[[], ProviderCoverageReader] | None = None,
     ):
         self._database_manager = database_manager
         self._snapshot_reader = snapshot_reader
@@ -105,6 +111,8 @@ class ActivityReadService:
         self._references = NoActivityReferences() if references is None else references
         # Full rows, as fingerprinted by detail prefetch; the listed rows may be compact.
         self._summary_rows = summary_rows
+        # Where the activities' sync time comes from; without it the time is unknown.
+        self._coverage = coverage
 
     def _snapshot(self) -> dict[str, Any]:
         with self._database_manager.reader() as db:
@@ -114,13 +122,10 @@ class ActivityReadService:
     def _read(self) -> tuple[Any, list[dict[str, Any]]]:
         """Read the sync time and the activity rows in one read snapshot."""
         with self._database_manager.read_snapshot() as db:
-            snapshot = self._snapshot_reader.latest_snapshot(db)
             rows = self._row_reader.activity_rows(db)
-        synced_at = (
-            snapshot.get("activities_synced_at", snapshot.get("synced_at"))
-            if isinstance(snapshot, dict)
-            else None
-        )
+            synced_at = activities_synced_at(
+                None if self._coverage is None else self._coverage(), db
+            )
         return synced_at, list(rows)
 
     def _with_local_ids(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:

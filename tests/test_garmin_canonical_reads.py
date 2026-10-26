@@ -123,7 +123,7 @@ class GarminReadFixture(CanonicalReadFixture):
             activity_rows=(lambda: selector) if canonical else None,
         )
 
-    def _projection_service(self, *, canonical: bool) -> GarminProjectionService:
+    def _projection_service(self) -> GarminProjectionService:
         selector = make_selector(self)
         config = make_config(
             openai_base_url="",
@@ -137,22 +137,17 @@ class GarminReadFixture(CanonicalReadFixture):
         )
         return GarminProjectionService(
             config=config,
-            garmin_payload_service=self._payload_service(canonical=canonical),
+            garmin_payload_service=self._payload_service(canonical=True),
             garmin_sync_service=_Flag(True),  # type: ignore[arg-type]
             garmin_sync_state_service=_CoreErrors(),  # type: ignore[arg-type]
-            sync_state_repository=_LegacyActivities(self),  # type: ignore[arg-type]
             morning_body_battery_service=_Battery(),  # type: ignore[arg-type]
             garmin_client_factory=_Flag(False),  # type: ignore[arg-type]
             database_manager=self.manager,
             key_value_repository=self.key_values,
             redactor=Redactor(lambda: config),
             local_now=lambda: LOCAL_NOW,
-            canonical=(
-                GarminCanonicalSources(
-                    activity_rows=lambda: selector, observations=lambda: selector
-                )
-                if canonical
-                else None
+            canonical=GarminCanonicalSources(
+                activity_rows=lambda: selector, observations=lambda: selector
             ),
         )
 
@@ -227,44 +222,37 @@ class GarminStateEqualityTests(GarminReadFixture):
 
 
 class GarminServiceEqualityTests(GarminReadFixture):
-    def test_services_match_legacy_while_the_selector_serves_legacy(self) -> None:
+    def test_services_are_unchanged_when_the_tables_take_over(self) -> None:
         self._store_snapshot()
-        legacy = self._projection_service(canonical=False)
-        migrated = self._projection_service(canonical=True)
+        service = self._projection_service()
+        legacy_state = service.public_state()
+        legacy_context = service.coach_context(include_performance=True)
 
-        self.assertEqual(migrated.public_state(), legacy.public_state())
-        self.assertEqual(
-            migrated.coach_context(include_performance=True),
-            legacy.coach_context(include_performance=True),
-        )
+        populate(self)
+        state = self._projection_service().public_state()
+        context = self._projection_service().coach_context(include_performance=True)
+
+        self.assertEqual(state, legacy_state)
+        self.assertEqual(context["performance"], legacy_context["performance"])
 
     def test_services_are_unchanged_once_tables_serve_without_the_sections(
         self,
     ) -> None:
         populate(self)
-        legacy_state = self._projection_service(canonical=False).public_state()
-        legacy_context = self._projection_service(canonical=False).coach_context(
-            include_performance=True
-        )
+        with_sections = self._projection_service()
+        expected_state = with_sections.public_state()
+        expected_context = with_sections.coach_context(include_performance=True)
 
         self._strip_canonical_sections()
-        migrated = self._projection_service(canonical=True)
+        migrated = self._projection_service()
         state = migrated.public_state()
         context = migrated.coach_context(include_performance=True)
 
-        self.assertEqual(state, legacy_state)
-        self.assertEqual(context["performance"], legacy_context["performance"])
+        self.assertEqual(state, expected_state)
+        self.assertEqual(context["performance"], expected_context["performance"])
         for key in ("has_sleep", "has_hrv", "has_resting_hr", "has_readiness"):
             self.assertTrue(state[key], key)
         self.assertTrue(state["has_weight"])
-
-    def test_the_legacy_reader_loses_the_values_without_the_sections(self) -> None:
-        populate(self)
-        self._strip_canonical_sections()
-        legacy = self._projection_service(canonical=False).public_state()
-
-        self.assertFalse(legacy["has_sleep"])
-        self.assertFalse(legacy["has_weight"])
 
     def test_sections_without_observations_are_reported_missing(self) -> None:
         self.garmin = {
@@ -273,7 +261,7 @@ class GarminServiceEqualityTests(GarminReadFixture):
             if key not in CANONICAL_SECTIONS
         }
         populate(self)
-        state = self._projection_service(canonical=True).public_state()
+        state = self._projection_service().public_state()
 
         for key in (
             "has_sleep",
@@ -296,7 +284,7 @@ class GarminServiceEqualityTests(GarminReadFixture):
         self.garmin["hrv"] = {"weeklyAvg": 48}
         populate(self)
 
-        state = self._projection_service(canonical=True).public_state()
+        state = self._projection_service().public_state()
 
         self.assertTrue(state["has_hrv"])
 

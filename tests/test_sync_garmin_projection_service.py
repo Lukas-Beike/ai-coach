@@ -11,7 +11,14 @@ from support import make_config
 
 from backend.observability import Redactor
 from backend.performance import garmin_metrics as performance_garmin_metrics
-from backend.sync.garmin_projection_service import GarminProjectionService
+from backend.performance.garmin_canonical import (
+    GarminCanonicalMetrics,
+    GarminCanonicalState,
+)
+from backend.sync.garmin_projection_service import (
+    GarminCanonicalSources,
+    GarminProjectionService,
+)
 
 
 class _DatabaseManager:
@@ -57,12 +64,14 @@ class _SyncStateService:
         return self.value
 
 
-class _SyncStateRepository:
-    def __init__(self, snapshot):
-        self.value = snapshot
+class _Rows:
+    """The canonical Intervals.icu activity rows."""
 
-    def latest_snapshot(self):
-        return self.value
+    def __init__(self, rows):
+        self.rows = tuple(rows)
+
+    def activity_rows(self, _db, **_bounds):
+        return self.rows
 
 
 class _MorningBodyBatteryService:
@@ -123,7 +132,8 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self,
         *,
         snapshot=None,
-        canonical=None,
+        rows=(),
+        state=None,
         config=None,
         core_errors=None,
         body_battery=None,
@@ -136,12 +146,18 @@ class GarminProjectionServiceTests(unittest.TestCase):
         config = config or _config()
         redactor = Redactor(lambda: config)
         battery = _MorningBodyBatteryService(body_battery)
+        patcher = patch(
+            "backend.sync.garmin_projection_service.read_garmin_state",
+            return_value=state
+            or GarminCanonicalState(metrics=GarminCanonicalMetrics()),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         service = GarminProjectionService(
             config=config,
             garmin_payload_service=payload or _PayloadService(snapshot or {}),
             garmin_sync_service=_SyncService(available),
             garmin_sync_state_service=_SyncStateService(core_errors or []),
-            sync_state_repository=_SyncStateRepository(canonical),
             morning_body_battery_service=battery,
             garmin_client_factory=_GarminClientFactory(client_available),
             database_manager=_DatabaseManager(),
@@ -153,6 +169,9 @@ class GarminProjectionServiceTests(unittest.TestCase):
             ),
             redactor=redactor,
             local_now=lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
+            canonical=GarminCanonicalSources(
+                activity_rows=lambda: _Rows(rows), observations=lambda: object()
+            ),
         )
         return service, battery
 
@@ -206,17 +225,22 @@ class GarminProjectionServiceTests(unittest.TestCase):
             "readiness": {"score": 72},
             "race_predictions": {"5k": 1200},
         }
-        canonical = {
-            "recent_activities": [
-                {
-                    "id": "intervals-1",
-                    "start_date_local": "2026-09-19T08:00:00",
-                    "type": "Ride",
-                    "moving_time": 3600,
-                    "distance": 30000,
-                }
-            ]
-        }
+        rows = [
+            {
+                "id": "intervals-1",
+                "start_date_local": "2026-09-19T08:00:00",
+                "type": "Ride",
+                "moving_time": 3600,
+                "distance": 30000,
+            }
+        ]
+        state = GarminCanonicalState(
+            metrics=GarminCanonicalMetrics(race_predictions={"run_5k_seconds": 1200}),
+            has_sleep=True,
+            has_hrv=True,
+            has_resting_hr=True,
+            has_readiness=True,
+        )
         metrics = _metrics()
         for key in (
             "cycling_ftp_watts",
@@ -232,7 +256,8 @@ class GarminProjectionServiceTests(unittest.TestCase):
             service, battery = self._service(
                 config=_config(tokenstore=str(Path(directory) / "tokens")),
                 snapshot=snapshot,
-                canonical=canonical,
+                rows=rows,
+                state=state,
                 core_errors=[
                     {"source": "activities", "message": "synthetic-garmin-password"}
                 ],
@@ -296,6 +321,52 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self.assertFalse(result["has_max_hr"])
         self.assertFalse(result["has_vo2max"])
         self.assertFalse(result["has_estimated_run_times"])
+
+    def test_duplicates_are_counted_against_the_canonical_rows_only(self):
+        garmin = {
+            "activityId": 1,
+            "startTimeLocal": "2026-09-19 08:00:00",
+            "activityType": {"typeKey": "cycling"},
+            "duration": 3600,
+            "distance": 30000,
+        }
+        match = {
+            "id": "intervals-1",
+            "start_date_local": "2026-09-19T08:00:00",
+            "type": "Ride",
+            "moving_time": 3600,
+            "distance": 30000,
+        }
+        # A snapshot that still lists the activity must not influence the count.
+        snapshot = {"activities": [garmin], "recent_activities": [match]}
+        for rows, expected in (([], (1, 0)), ([match], (0, 1))):
+            with self.subTest(rows=len(rows)):
+                service, _ = self._service(snapshot=snapshot, rows=rows)
+                with patch.object(
+                    performance_garmin_metrics,
+                    "garmin_performance_metrics",
+                    return_value=_metrics(),
+                ):
+                    result = service.public_state()
+                self.assertEqual(
+                    (result["activities"], result["duplicate_activities_skipped"]),
+                    expected,
+                )
+
+    def test_the_projection_requires_the_canonical_sources(self):
+        with self.assertRaises(TypeError):
+            GarminProjectionService(  # type: ignore[call-arg]
+                config=_config(),
+                garmin_payload_service=_PayloadService({}),
+                garmin_sync_service=_SyncService(True),
+                garmin_sync_state_service=_SyncStateService([]),
+                morning_body_battery_service=_MorningBodyBatteryService(None),
+                garmin_client_factory=_GarminClientFactory(),
+                database_manager=_DatabaseManager(),
+                key_value_repository=_KeyValueRepository({}),
+                redactor=Redactor(lambda: _config()),
+                local_now=lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
+            )
 
     def test_public_state_reuses_a_snapshot_the_caller_already_read(self):
         snapshot = {

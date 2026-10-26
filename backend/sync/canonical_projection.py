@@ -132,7 +132,7 @@ class CanonicalSnapshotProjection(
     ) -> tuple[dict[str, Any], ...]:
         """Return the stored raw Intervals.icu activity rows, in snapshot order.
 
-        These are the rows ``canonical_rows`` starts from, before de-duplication.
+        These are the rows the report readers start from, before de-duplication.
         Without bounds every row is returned. With a bound, a row is kept when the
         activity mapper gives it an athlete-local date inside the bounds; a row the
         mapper rejects has no date and is then left out. ``limit`` keeps the

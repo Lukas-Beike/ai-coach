@@ -50,8 +50,8 @@ class GarminCanonicalEncryptedEndToEndTests(garmin_reads.GarminReadFixture):
         self,
     ) -> None:
         populate(self)
-        legacy_state = self._projection_service(canonical=False).public_state()
-        legacy_context = self._projection_service(canonical=False).coach_context(
+        legacy_state = self._projection_service().public_state()
+        legacy_context = self._projection_service().coach_context(
             include_performance=True
         )
         legacy_matches = self._payload_service(canonical=False).prepare_fixture(
@@ -59,7 +59,7 @@ class GarminCanonicalEncryptedEndToEndTests(garmin_reads.GarminReadFixture):
         )["activity_matches"]
 
         self._strip_canonical_sections()
-        migrated = self._projection_service(canonical=True)
+        migrated = self._projection_service()
         migrated_matches = self._payload_service(canonical=True).prepare_fixture(
             {"activities": self.garmin["activities"], "synced_at": "2026-10-11T07:00Z"}
         )["activity_matches"]

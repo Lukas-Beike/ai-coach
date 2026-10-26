@@ -18,7 +18,11 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
-from activity_row_support import SnapshotActivityRows
+from activity_row_support import (
+    FixedActivityRows,
+    SnapshotActivityRows,
+    canonical_source,
+)
 from canonical_detail_support import NOW, seed_intervals_activity
 
 from backend.activities.activity_reference import ActivityReferences
@@ -120,13 +124,15 @@ def _detail_service(
     database: Any, snapshots: _Snapshots, **kwargs: Any
 ) -> ActivityAnalysisReadService:
     """Serve ``activity_detail.v1`` documents from the canonical tables."""
+    rows = SnapshotActivityRows(snapshots)
     return ActivityAnalysisReadService(
         database,
         snapshots,
-        CompactActivityRows(SnapshotActivityRows(snapshots)),
+        CompactActivityRows(rows),
         _Feedback(),
         ActivityDetailStore(database),
         references=ActivityReferences(database),
+        canonical=canonical_source(rows, lambda: database),
         session_records=CanonicalTableReader().session_activities,
         **kwargs,
     )
@@ -721,9 +727,9 @@ class TrainingRecordObservationCharacterizationTests(_StorageCase):
     def _observations(self, raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
         service = TrainingRecordsService(
             database_manager=self.database,
-            read_snapshot=lambda: _snapshot(raw, raw),
             read_equipment=dict,
             read_record=None,
+            canonical=canonical_source(FixedActivityRows(raw), lambda: self.database),
         )
         return service.observations()
 

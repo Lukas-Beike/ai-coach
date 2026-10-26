@@ -25,9 +25,10 @@ class AthleteDataAssemblyTests(unittest.TestCase):
     def test_factories_use_active_manager_and_keep_shared_dependencies(self) -> None:
         manager = Mock(name="manager")
         event_buffer = Mock(name="event_buffer")
-        repositories = [Mock(name=f"repository_{index}") for index in range(5)]
+        repositories = [Mock(name=f"repository_{index}") for index in range(4)]
         snapshot_reader = Mock(name="snapshot_reader")
         row_reader = Mock(name="row_reader")
+        activity_reader = Mock(name="activity_reader")
         now = Mock(name="utc_now")
         today = Mock(name="local_date")
         assembly = AthleteDataAssembly(
@@ -38,9 +39,9 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                     checkin=repositories[1],
                     profile=repositories[3],
                     key_values=Mock(name="key_values"),
-                    snapshot=repositories[4],
                     snapshot_reader=snapshot_reader,
                     activity_rows=lambda: row_reader,
+                    activities=lambda: activity_reader,
                     competition=repositories[2],
                 ),
                 runtime=AthleteRuntime(
@@ -70,7 +71,8 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         self.assertIs(duplicate._event_buffer, event_buffer)
         self.assertIs(feedback._row_reader, row_reader)
         self.assertFalse(hasattr(assembly, "activity_read"))
-        self.assertIs(duplicate._snapshot_reader, snapshot_reader)
+        self.assertIs(duplicate._inspector._activities, activity_reader)
+        self.assertIs(assembly.duplicate_inspector()._activities, activity_reader)
 
     def test_training_snapshot_uses_injected_reader_without_changing_provenance(self):
         manager = MagicMock()
@@ -89,9 +91,9 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                     checkin=Mock(),
                     profile=Mock(),
                     key_values=Mock(),
-                    snapshot=Mock(),
                     snapshot_reader=reader,
                     activity_rows=Mock(),
+                    activities=Mock(),
                     competition=Mock(),
                 ),
                 runtime=AthleteRuntime(

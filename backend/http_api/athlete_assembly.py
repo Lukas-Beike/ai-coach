@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, tzinfo
 from typing import Any
 
 from backend.activities.activity_reference import ActivityReferences
@@ -11,12 +12,17 @@ from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.athlete.checkins import CheckinService
+from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
 from backend.performance.training_report import deduplicated_rows
-from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
+from backend.runtime.ports import (
+    ActivityReader,
+    ActivityRowReader,
+    ProviderSnapshotReader,
+)
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.weather.cache import invalidate_for_location_change
 
@@ -27,9 +33,9 @@ class AthleteRepositories:
     checkin: Any
     profile: Any
     key_values: Any
-    snapshot: Any
     snapshot_reader: ProviderSnapshotReader
     activity_rows: Callable[[], ActivityRowReader]
+    activities: Callable[[], ActivityReader]
     competition: Any
 
 
@@ -65,9 +71,9 @@ class AthleteDataAssembly:
         self._checkin_repository = repositories.checkin
         self._profile_repository = repositories.profile
         self._key_value_repository = repositories.key_values
-        self._snapshot_repository = repositories.snapshot
         self._snapshot_reader = repositories.snapshot_reader
         self._activity_rows = repositories.activity_rows
+        self._activities = repositories.activities
         self._utc_now = runtime.utc_now
         self._local_date = runtime.local_date
         self._event_buffer = runtime.event_buffer
@@ -109,17 +115,19 @@ class AthleteDataAssembly:
             references=ActivityReferences(self._database_manager()),
         )
 
+    def _athlete_zone(self) -> tzinfo:
+        """The athlete's wall-clock zone from the saved profile."""
+        return AthleteLocalClock(self.profile()).now().tzinfo or UTC
+
     def duplicate_inspector(self) -> DuplicateInspector:
         return DuplicateInspector(
-            self._database_manager(), self._snapshot_reader, self._activity_rows()
+            self._database_manager(), self._activities(), self._athlete_zone
         )
 
     def duplicate_activity(self) -> DuplicateActivityService:
         return DuplicateActivityService(
             self._database_manager(),
-            self._snapshot_repository,
-            self._snapshot_reader,
-            self._activity_rows(),
+            self.duplicate_inspector(),
             self._utc_now,
             self._event_buffer,
             references=ActivityReferences(self._database_manager()),

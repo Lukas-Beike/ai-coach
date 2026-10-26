@@ -39,7 +39,7 @@ class ActivityAnalysisReadService(ActivityReadService):
         *,
         read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
-        canonical: CanonicalPerformanceSource | None = None,
+        canonical: CanonicalPerformanceSource,
         summary_rows: ActivityRowReader | None = None,
         session_records: SessionRecordReader | None = None,
         refreshable: RefreshableProviders = frozenset,
@@ -53,6 +53,7 @@ class ActivityAnalysisReadService(ActivityReadService):
             read_equipment=read_equipment,
             references=references,
             summary_rows=summary_rows,
+            coverage=canonical.coverage,
         )
         self._canonical = canonical
         self._session_records = session_records
@@ -67,8 +68,6 @@ class ActivityAnalysisReadService(ActivityReadService):
         is looked up in the full history of the same read snapshot.
         """
         source = self._canonical
-        if source is None:
-            return self._snapshot(), None, None
         with source.database_manager().read_snapshot() as db:
             snapshot = self._snapshot()
             reader = source.activity_row_reader()
@@ -80,11 +79,12 @@ class ActivityAnalysisReadService(ActivityReadService):
                 as_of=as_of,
             )
             rows = None if canonical is None else canonical.activity_rows
-            if (
-                rows is not None
-                and reader is not None
-                and activity_id is not None
-                and _find_activity(rows, activity_id) is None
+            if reader is not None and (
+                rows is None
+                or (
+                    activity_id is not None
+                    and _find_activity(rows, activity_id) is None
+                )
             ):
                 rows = tuple(reader.activity_rows(db))
         return snapshot, canonical, rows
@@ -109,15 +109,12 @@ class ActivityAnalysisReadService(ActivityReadService):
         inputs: dict[str, Any] = {}
 
         def summary_row(_db: Any, provider_activity_id: str) -> dict | None:
-            # Snapshot first, then the full local history, like the summary read.
+            # Recent canonical rows first, then the full local history.
             snapshot, canonical, rows = self._performance_inputs(
                 today, provider_activity_id
             )
             inputs.update(snapshot=snapshot, canonical=canonical)
-            return _find_activity(
-                _snapshot_activities(snapshot) if rows is None else rows,
-                provider_activity_id,
-            )
+            return _find_activity(rows, provider_activity_id)
 
         def performance() -> Mapping[str, Any]:
             if not inputs:
@@ -171,13 +168,6 @@ def _find_activity(raw_activities: Any, normalized_id: str) -> dict | None:
         ),
         None,
     )
-
-
-def _snapshot_activities(snapshot: dict) -> Any:
-    raw_provider_data = snapshot.get("raw_provider_data")
-    if isinstance(raw_provider_data, dict):
-        return raw_provider_data.get("activities")
-    return None
 
 
 def _data_scope(document: Mapping[str, Any], records: Sequence[ActivityRecord]) -> str:

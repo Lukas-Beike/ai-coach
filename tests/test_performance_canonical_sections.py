@@ -289,17 +289,17 @@ class SectionReadTests(CanonicalReadFixture):
         self.assertEqual(actual, expected)
 
     def test_tables_serve_the_same_training_report_without_the_sections(self) -> None:
-        legacy_snapshot, legacy = self._legacy()
+        _legacy_snapshot, legacy = self._legacy()
+        assert legacy.activity_rows is not None
         expected = training_report(
-            legacy_snapshot,
             start=REPORT_START,
             days=42,
             today=TODAY,
             activity_rows=legacy.activity_rows,
         )
-        snapshot, inputs = self._tables()
+        _snapshot, inputs = self._tables()
+        assert inputs.activity_rows is not None
         actual = training_report(
-            snapshot,
             start=REPORT_START,
             days=42,
             today=TODAY,

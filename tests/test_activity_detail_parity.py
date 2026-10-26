@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from datetime import UTC, date, datetime
 
-from activity_row_support import SnapshotActivityRows
+from activity_row_support import NoObservations, SnapshotActivityRows, StoredCoverage
 from canonical_detail_support import (
     NOW,
     add_session_record,
@@ -134,7 +134,12 @@ class ActivityDetailParityTests(unittest.TestCase):
         snapshots = _Snapshots([{"id": "i1", **SUMMARY}])
         self.assembly = ActivityReadAssembly(
             lambda: self.manager,
-            ActivityReadSources(snapshots, lambda: SnapshotActivityRows(snapshots)),
+            ActivityReadSources(
+                snapshots,
+                lambda: SnapshotActivityRows(snapshots),
+                observation_reader=NoObservations,
+                coverage=lambda: StoredCoverage(None),
+            ),
             _Feedback,
             lambda _activity_id: {"items": [], "assignments": []},
             refreshable_providers=lambda: ("intervals", "garmin"),

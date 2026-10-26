@@ -46,10 +46,10 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
             ],
             "activity_feedback": {"note": "x" * 200},
             "activities": CoachIntervalsContextService().project(
-                self.snapshot,
                 [],
                 date(2026, 9, 23),
                 self.snapshot["recent_activities"],
+                synced_at=self.snapshot["synced_at"],
             ),
         }
         self.library = Mock()

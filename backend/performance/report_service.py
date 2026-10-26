@@ -16,6 +16,7 @@ from backend.errors import AppError
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
     activity_rows_for,
+    activity_rows_with_sync_time,
 )
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.season_inputs import (
@@ -24,11 +25,7 @@ from backend.performance.season_inputs import (
     read_season_load_inputs,
 )
 from backend.performance.tag_impact import tag_impact
-from backend.performance.training_report import (
-    canonical_rows,
-    deduplicated_rows,
-    training_report,
-)
+from backend.performance.training_report import deduplicated_rows, training_report
 from backend.providers.intervals_activity_fields import intervals_activity_device_source
 
 
@@ -37,14 +34,12 @@ class TrainingRecordsService:
         self,
         *,
         database_manager: Any,
-        read_snapshot: Callable[[], Any],
         read_equipment: Callable[[], dict[str, Any]],
         read_record: Callable[[str, str], dict[str, Any]] | None,
-        canonical: CanonicalPerformanceSource | None = None,
+        canonical: CanonicalPerformanceSource,
     ) -> None:
         self._canonical = canonical
         self._database_manager = database_manager
-        self._read_snapshot = read_snapshot
         self._read_equipment = read_equipment
         self._read_record = read_record
 
@@ -72,12 +67,7 @@ class TrainingRecordsService:
         return recurring_training_comparisons(self.observations())
 
     def observations(self) -> list[dict[str, Any]]:
-        activity_rows = activity_rows_for(self._canonical)
-        rows, _ = (
-            canonical_rows(self._read_snapshot() or {})
-            if activity_rows is None
-            else deduplicated_rows(activity_rows)
-        )
+        rows, _ = deduplicated_rows(activity_rows_for(self._canonical))
         known = {str(row.get("id")): row for row in rows}
         records = []
         for stored in analysis_summaries(self._database_manager):
@@ -300,7 +290,7 @@ class TrainingReportReadService:
         today: Callable[[], date],
         load_scenarios: Callable[..., dict[str, Any]],
         season_source: SeasonSource,
-        canonical: CanonicalPerformanceSource | None = None,
+        canonical: CanonicalPerformanceSource,
     ) -> None:
         self._read_snapshot = read_snapshot
         self._read_plan = read_plan
@@ -349,8 +339,8 @@ class TrainingReportReadService:
             or not re.fullmatch(r"[A-Za-z]{1,40}", sport)
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
+        rows, observed_at = activity_rows_with_sync_time(self._canonical)
         return training_report(
-            self._read_snapshot(),
             start=start,
             days=days,
             today=today,
@@ -359,7 +349,8 @@ class TrainingReportReadService:
             checkins=self._read_checkins(),
             activity_feedback=self._read_feedback(),
             timezone=timezone,
-            activity_rows=activity_rows_for(self._canonical),
+            activity_rows=rows,
+            observed_at=observed_at,
         )
 
 
@@ -367,14 +358,12 @@ class TrainingDerivedReadService:
     def __init__(
         self,
         *,
-        read_snapshot: Callable[[], Any],
         read_checkins: Callable[[], Any],
         read_recovery: Callable[[], dict[str, Any]],
         read_performance: Callable[[], dict[str, Any]],
         today: Callable[[], date],
-        canonical: CanonicalPerformanceSource | None = None,
+        canonical: CanonicalPerformanceSource,
     ) -> None:
-        self._read_snapshot = read_snapshot
         self._read_checkins = read_checkins
         self._read_recovery = read_recovery
         self._read_performance = read_performance
@@ -385,7 +374,6 @@ class TrainingDerivedReadService:
         return tag_impact(
             self._read_checkins(),
             self._read_recovery(),
-            self._read_snapshot() or {},
             self._today(),
             timezone,
             activity_rows=activity_rows_for(self._canonical),

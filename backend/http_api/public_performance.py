@@ -115,12 +115,11 @@ class PublicPerformanceStateService:
             # UI-only: the load tab's period selection picks the matching window.
             "training_focus_periods": {
                 period: training_focus(
-                    snapshot,
                     garmin,
                     today,
                     timezone,
-                    activity_rows=None
-                    if canonical is None
+                    activity_rows=()
+                    if canonical is None or canonical.activity_rows is None
                     else canonical.activity_rows,
                     days=days,
                 )

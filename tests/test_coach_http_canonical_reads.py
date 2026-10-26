@@ -16,6 +16,7 @@ from unittest.mock import Mock
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
+from backend.canonical.vocabulary import ProviderId
 from backend.coach.context import CoachPerformanceContextReader
 from backend.diagnostics.canonical_counts import activity_count, wellness_day_count
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
@@ -24,6 +25,10 @@ from backend.planning.compact_activities import (
     RECENT_ACTIVITY_LIMIT,
     ActivityRowSource,
     compact_activity_rows,
+)
+from backend.sync.canonical_coverage_store import (
+    CanonicalCoverageStore,
+    intervals_snapshot_coverage,
 )
 
 TODAY = date(2026, 10, 13)
@@ -151,7 +156,7 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
         reader = CoachPerformanceContextReader(
             Mock(), Mock(), Mock(), lambda: TODAY, None, self._source(selector)
         )
-        return reader.activities(snapshot, [])
+        return reader.activities([])
 
     def test_activities_section_is_equal_from_legacy_and_from_tables(self) -> None:
         legacy, tables = self._both(self._activities)
@@ -165,6 +170,39 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
         self.assertTrue(tables["recent_activities_by_sport"])
         self.assertEqual(tables, legacy)
         self.assertNotIn("recent_activities", self.intervals)
+
+    def test_activities_freshness_comes_from_the_stored_coverage(self) -> None:
+        populate(self)
+        # An ingest persists the coverage summary next to the records.
+        with self.manager.unit_of_work() as db:
+            CanonicalCoverageStore(self.key_values).persist(
+                db,
+                intervals_snapshot_coverage(self.intervals, zone=self.zone),
+                zone=self.zone,
+            )
+        selector = make_selector(self)
+        source = ActivityRowSource(
+            lambda: _Manager(self),  # type: ignore[arg-type,return-value]
+            lambda: selector,
+            coverage=lambda: selector,
+        )
+        with self.manager.reader() as db:
+            (intervals,) = [
+                item
+                for item in selector.coverage(db)
+                if item.provider is ProviderId.INTERVALS
+            ]
+        # The snapshot's own sync marker is irrelevant once the coverage is stored.
+        self.intervals = {**self.intervals, "synced_at": "2030-01-01T00:00:00Z"}
+        reader = CoachPerformanceContextReader(
+            Mock(), Mock(), Mock(), lambda: TODAY, None, source
+        )
+
+        section = reader.activities([])
+
+        expected = intervals.activities_retrieved_at.isoformat()
+        self.assertEqual(section["synced_at"], expected)
+        self.assertEqual(section["source"]["synced_at"], expected)
 
     def test_read_sources_reads_activities_inside_the_snapshot_unit_of_work(
         self,
@@ -181,14 +219,13 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
             seen.append(manager.open)
             return self.intervals
 
-        snapshot, _inputs, rows = reader.read_sources(read_snapshot)
+        snapshot, _inputs, recent = reader.read_sources(read_snapshot)
 
         self.assertEqual(seen, [True])
         self.assertIs(snapshot, self.intervals)
-        self.assertTrue(rows)
-        self.assertEqual(
-            reader.activities(snapshot, [], rows), reader.activities(snapshot, [])
-        )
+        assert recent is not None
+        self.assertTrue(recent[0])
+        self.assertEqual(reader.activities([], recent), reader.activities([]))
 
     def test_read_sources_without_a_row_source_leaves_rows_unread(self) -> None:
         reader = CoachPerformanceContextReader(
@@ -205,7 +242,7 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
             Mock(), Mock(), Mock(), lambda: TODAY, None, None
         )
 
-        section = reader.activities(self.intervals, [])
+        section = reader.activities([])
 
         self.assertEqual(section["recent_activities_by_sport"], {})
         self.assertEqual(section["activity_rollups_by_sport"], {})

@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import date
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from datetime import date, datetime
 from typing import Any
 
+from backend.canonical.coverage import MetricWindow, ProviderCoverage
+from backend.canonical.records import Observation
+from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.providers.snapshot_projection import intervals_activity_rows
 
 
@@ -41,3 +47,69 @@ class FixedActivityRows:
         limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
         return self.rows if limit is None else self.rows[:limit]
+
+
+class NoObservations:
+    """An observation reader that holds no observations."""
+
+    def observations(
+        self,
+        db: Any,
+        kind: MetricKind,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        sport: Sport | None = None,
+    ) -> tuple[Observation, ...]:
+        return ()
+
+
+class StoredCoverage:
+    """Canonical provider coverage with one Intervals.icu activity fetch time."""
+
+    def __init__(self, fetched_at: str | None) -> None:
+        self._fetched_at = (
+            None if fetched_at is None else datetime.fromisoformat(fetched_at)
+        )
+
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+        return ()
+
+    def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
+        return (
+            ProviderCoverage(
+                provider=ProviderId.INTERVALS,
+                retrieved_at=self._fetched_at,
+                activity_count=0,
+                observation_count=0,
+                issue_counts={},
+                first_observed_on=None,
+                last_observed_on=None,
+                activities_retrieved_at=self._fetched_at,
+            ),
+        )
+
+
+def canonical_source(
+    rows: Any,
+    database_manager: Callable[[], Any],
+    *,
+    fetched_at: str | None = None,
+) -> CanonicalPerformanceSource:
+    """A canonical performance source over the given raw activity rows."""
+    return CanonicalPerformanceSource(
+        database_manager,
+        NoObservations,
+        activity_rows=lambda: rows,
+        coverage=None if fetched_at is None else lambda: StoredCoverage(fetched_at),
+    )
+
+
+class ReadOnlyManager:
+    """A database manager stand-in that only opens reads on an inert connection."""
+
+    @contextmanager
+    def reader(self) -> Iterator[object]:
+        yield object()
+
+    read_snapshot = reader

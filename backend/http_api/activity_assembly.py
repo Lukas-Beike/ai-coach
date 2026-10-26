@@ -13,6 +13,7 @@ from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.runtime.ports import (
     ActivityRowReader,
     ObservationReader,
+    ProviderCoverageReader,
     ProviderSnapshotReader,
 )
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -26,7 +27,8 @@ class ActivityReadSources:
 
     snapshot_reader: ProviderSnapshotReader
     row_reader: Callable[[], ActivityRowReader]
-    observation_reader: Callable[[], ObservationReader] | None = None
+    observation_reader: Callable[[], ObservationReader]
+    coverage: Callable[[], ProviderCoverageReader]
 
 
 class ActivityReadAssembly:
@@ -44,6 +46,7 @@ class ActivityReadAssembly:
         self._snapshot_reader = sources.snapshot_reader
         self._row_reader = sources.row_reader
         self._observation_reader = sources.observation_reader
+        self._coverage = sources.coverage
         self._feedback_service = feedback_service
         self._read_equipment = read_equipment
         self._refreshable_providers = refreshable_providers
@@ -71,11 +74,10 @@ class ActivityReadAssembly:
             if provider in _PROVIDER_IDS
         )
 
-    def _canonical_source(self) -> CanonicalPerformanceSource | None:
-        if self._observation_reader is None:
-            return None
+    def _canonical_source(self) -> CanonicalPerformanceSource:
         return CanonicalPerformanceSource(
             self._database_manager,
             self._observation_reader,
             activity_rows=self._row_reader,
+            coverage=self._coverage,
         )

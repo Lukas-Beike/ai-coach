@@ -41,7 +41,7 @@ Alternative considered: implement athlete-confirmed merge with undo receipts as 
 - Candidates: `provider == intervals`, `sport == ride`, active, `recorded_by` Wahoo (kept) or Garmin (duplicate).
 - Rule: `canonical_sessions` exposes its Wahoo/Garmin copy predicate publicly and the inspector uses it, so the all-pairs semantics of the legacy search are kept (the bundling assigns each copy to its first Wahoo match, which is not the same selection).
 - "Newest" gate: as before, only a pair that contains the newest Intervals activity is reported. Garmin- and Wahoo-provider records are not part of this gate, as the legacy rows were Intervals rows only. Of several pairs the newest start wins.
-- View: `canonical_id` and `duplicate_id` are the Intervals provider activity ids; names are truncated as today; `start_date_local` is the start on the athlete's wall clock in the existing `YYYY-MM-DDTHH:MM:SS` form; `moving_time` is the Wahoo record's `moving_duration_s` else `duration_s`; `distance` is `distance_m`.
+- View: `canonical_id` and `duplicate_id` are the Intervals provider activity ids; names are truncated as today; `start_date_local` is the start on the athlete's wall clock in the existing `YYYY-MM-DDTHH:MM:SS` form; `moving_time` is the Wahoo record's `duration_s` (the Intervals.icu moving time, else elapsed time); `distance` is `distance_m`.
 - Persisted `merged_into` links are not consulted: they are survivor-by-age, not by recorder.
 
 Known parity differences, pinned by characterization tests: virtual rides and other cycling kinds follow the canonical sport mapping instead of `activity_kind`; the duration compared is the canonical `duration_s` (Intervals moving time, else elapsed) instead of `moving_time or elapsed_time` of the raw row.

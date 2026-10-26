@@ -1122,10 +1122,11 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "distance": 30000,
         }
         snapshot = {
+            "synced_at": "2026-09-06T12:00:00+00:00",
             "recent_activities": [
                 {**common, "id": "synthetic-wahoo", "source": "Wahoo"},
                 {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"},
-            ]
+            ],
         }
         server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
         with patch.object(

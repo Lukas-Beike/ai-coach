@@ -8,7 +8,6 @@ from backend.activities.duplicates import (
     filter_garmin_activities,
     garmin_activity_duplicates_intervals,
     intervals_cycling_activities_match,
-    latest_wahoo_garmin_duplicate,
 )
 
 
@@ -298,84 +297,6 @@ class IntervalsCyclingMatchTests(unittest.TestCase):
                 _intervals(), _intervals(distance=40_000)
             )
         )
-
-
-class WahooGarminDuplicateTests(unittest.TestCase):
-    def test_wahoo_is_canonical_and_view_limits_fields(self):
-        snapshot = {
-            "synced_at": "2026-08-29T10:00:00+00:00",
-            "raw_provider_data": {
-                "activities": [
-                    _intervals(
-                        id="wahoo",
-                        source="Wahoo",
-                        name="W" * 300,
-                        distance=60_000,
-                        moving_time=7200,
-                    ),
-                    _intervals(
-                        id=None,
-                        activityId="garmin",
-                        source="Garmin",
-                        name="G" * 300,
-                        distance=59_800,
-                        moving_time=7160,
-                    ),
-                ]
-            },
-        }
-        original = deepcopy(snapshot)
-        pair = latest_wahoo_garmin_duplicate(snapshot)
-        self.assertEqual(pair["canonical_id"], "wahoo")
-        self.assertEqual(pair["duplicate_id"], "garmin")
-        self.assertEqual(len(pair["canonical_name"]), 200)
-        self.assertEqual(len(pair["duplicate_name"]), 200)
-        self.assertLessEqual(len(pair["start_date_local"]), 40)
-        self.assertEqual(pair["snapshot_synced_at"], snapshot["synced_at"])
-        self.assertEqual(snapshot, original)
-
-    def test_newer_unrelated_activity_blocks_pair(self):
-        activities = [
-            _intervals(id="wahoo", source="Wahoo"),
-            _intervals(activityId="garmin", source="Garmin"),
-            _intervals(
-                id="new-run",
-                source="Garmin",
-                type="Run",
-                start_date_local="2026-08-30T07:00:00",
-            ),
-        ]
-        self.assertIsNone(
-            latest_wahoo_garmin_duplicate(
-                {"raw_provider_data": {"activities": activities}}
-            )
-        )
-
-    def test_missing_or_same_ids_are_rejected(self):
-        base = [
-            _intervals(id=None, activityId=None, source="Wahoo"),
-            _intervals(id=None, activityId=None, source="Garmin"),
-        ]
-        self.assertIsNone(
-            latest_wahoo_garmin_duplicate({"raw_provider_data": {"activities": base}})
-        )
-        same = [
-            _intervals(id="same", source="Wahoo"),
-            _intervals(id=None, activityId="same", source="Garmin"),
-        ]
-        self.assertIsNone(
-            latest_wahoo_garmin_duplicate({"raw_provider_data": {"activities": same}})
-        )
-
-    def test_snapshot_is_required_and_recent_activities_is_fallback(self):
-        with self.assertRaises(TypeError):
-            latest_wahoo_garmin_duplicate()  # type: ignore[call-arg]
-        activities = [
-            _intervals(id="wahoo", source="Wahoo"),
-            _intervals(activityId="garmin", source="Garmin"),
-        ]
-        pair = latest_wahoo_garmin_duplicate({"recent_activities": activities})
-        self.assertEqual(pair["canonical_id"], "wahoo")
 
 
 if __name__ == "__main__":

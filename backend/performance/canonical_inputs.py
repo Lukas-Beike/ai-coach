@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final, cast
 
+from backend.activities.sync_time import activities_synced_at
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance import canonical_sections
@@ -68,6 +69,7 @@ from backend.runtime.ports import (
     CanonicalTableServing,
     ObservationReader,
     ObservationSourceSelector,
+    ProviderCoverageReader,
     SleepPeriodReader,
 )
 
@@ -121,13 +123,15 @@ class CanonicalPerformanceSource:
     Both callables are resolved at read time, as the other assemblies do, so the
     composition root can pass ``lambda: ...`` accessors. ``serving`` is optional;
     when it is None, consumers that gate table-only reads keep the legacy values.
-    ``activity_rows`` is optional; without it the activities stay on the snapshot.
+    ``activity_rows`` is optional; without it a consumer reads no activity rows.
+    ``coverage`` is optional; without it the activities' sync time is unknown.
     """
 
     database_manager: Callable[[], Any]
     observation_reader: Callable[[], ObservationReader]
     serving: Callable[[], CanonicalTableServing] | None = None
     activity_rows: Callable[[], ActivityRowReader] | None = None
+    coverage: Callable[[], ProviderCoverageReader] | None = None
 
     def activity_row_reader(self) -> ActivityRowReader | None:
         """Return the configured raw activity row reader, if any."""
@@ -166,19 +170,25 @@ def snapshot_with_inputs(
         )
 
 
-def activity_rows_for(
-    source: CanonicalPerformanceSource | None,
-) -> tuple[dict[str, Any], ...] | None:
-    """Read the raw activity rows in a read of their own, without the writer.
+def activity_rows_with_sync_time(
+    source: CanonicalPerformanceSource,
+) -> tuple[tuple[dict[str, Any], ...], str | None]:
+    """Read the raw activity rows and their sync time in a read of their own.
 
-    None without a source or an activity row reader, so the caller keeps reading
-    the activities from its snapshot.
+    The sync time is the canonical coverage fetch time of the Intervals.icu
+    activities, None when none is stored. The read never waits for the writer.
     """
-    reader = None if source is None else source.activity_row_reader()
-    if source is None or reader is None:
-        return None
+    reader = source.activity_row_reader()
+    if reader is None:
+        raise RuntimeError("activity reads need the canonical activity row reader")
     with source.database_manager().reader() as db:
-        return tuple(reader.activity_rows(db))
+        coverage = None if source.coverage is None else source.coverage()
+        return tuple(reader.activity_rows(db)), activities_synced_at(coverage, db)
+
+
+def activity_rows_for(source: CanonicalPerformanceSource) -> tuple[dict[str, Any], ...]:
+    """Read the raw activity rows in a read of their own, without the writer."""
+    return activity_rows_with_sync_time(source)[0]
 
 
 def inputs_for_snapshot(

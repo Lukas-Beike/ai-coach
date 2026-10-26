@@ -5,6 +5,8 @@ from datetime import UTC, date
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
+from activity_row_support import StoredCoverage
+
 from backend.activities.read_service import ActivityReadService
 from backend.db.schema import initialize_schema
 from backend.sync.analysis_sessions import AnalysisSessionsRefreshService
@@ -212,7 +214,11 @@ class AnalysisSessionsRefreshTests(unittest.TestCase):
 
         saved_reader = Mock(latest_snapshot=Mock(return_value=saved))
         read_service = ActivityReadService(
-            Database(), saved_reader, CanonicalTableReader(), Feedback()
+            Database(),
+            saved_reader,
+            CanonicalTableReader(),
+            Feedback(),
+            coverage=lambda: StoredCoverage(saved["activities_synced_at"]),
         )
         listed = read_service.page(today=date(2026, 10, 20), days=42)
         self.assertEqual(

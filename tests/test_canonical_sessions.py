@@ -28,12 +28,13 @@ from backend.activities.canonical_sessions import (
     _wahoo_and_garmin_copy_match,
     _wall_clock,
     bundle_sessions,
+    wahoo_garmin_copy_match,
 )
+from backend.activities.duplicate_inspection import latest_wahoo_garmin_duplicate
 from backend.activities.duplicates import (
     filter_garmin_activities,
     garmin_activity_duplicates_intervals,
     intervals_cycling_activities_match,
-    latest_wahoo_garmin_duplicate,
 )
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.sports import legacy_activity_family
@@ -517,22 +518,28 @@ class LatestWahooDifferenceTests(unittest.TestCase):
         self,
     ) -> None:
         # The Wahoo ride and its Garmin copy are older than a newer run. The
-        # legacy latest-pair view only considers pairs containing the newest
+        # latest-pair view only considers pairs containing the newest
         # activity, so it reports nothing. Session bundling reports the pair.
         wahoo = _wahoo()
         copy = _garmin_copy()
         newest_run = intervals_ride(
             id="i-run", type="Run", start_date_local="2026-06-02T07:00:00"
         )
-        snapshot: dict[str, Any] = {
-            "synced_at": "2026-06-02T08:00:00",
-            "raw_provider_data": {"activities": [wahoo, copy, newest_run]},
-        }
-        self.assertIsNone(latest_wahoo_garmin_duplicate(snapshot))
+        records = _map_intervals([wahoo, copy, newest_run])
+        self.assertIsNone(latest_wahoo_garmin_duplicate(records, zone=BERLIN))
         sessions = _bundle(_map_intervals([wahoo, copy, newest_run]))
         paired = [session for session in sessions if session.duplicates]
         self.assertEqual(1, len(paired))
         self.assertEqual("wahoo-1", paired[0].primary.activity_id)
+
+
+class PublicCopyMatchTests(unittest.TestCase):
+    def test_public_predicate_applies_the_pair_rule_on_the_wall_clock(self) -> None:
+        wahoo, copy = _map_intervals([_wahoo(), _garmin_copy()])
+        late = _map_intervals([_garmin_copy(start_date_local="2026-06-01T07:31:00")])[0]
+
+        self.assertTrue(wahoo_garmin_copy_match(wahoo, copy, zone=BERLIN))
+        self.assertFalse(wahoo_garmin_copy_match(wahoo, late, zone=BERLIN))
 
 
 class SessionStructureTests(unittest.TestCase):

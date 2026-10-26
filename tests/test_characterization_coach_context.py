@@ -12,8 +12,9 @@ import json
 import unittest
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
 
+from activity_row_support import FixedActivityRows, NoObservations
 from canonical_recovery_support import recovery_only_inputs
 
 from backend.coach.context import (
@@ -27,8 +28,15 @@ from backend.coach.context import (
 )
 from backend.coach.context_selection import CoachContextSelection
 from backend.performance.context import current_performance_context
+from backend.performance.garmin_canonical import (
+    GarminCanonicalMetrics,
+    GarminCanonicalState,
+)
 from backend.planning.context import compact_snapshot
-from backend.sync.garmin_projection_service import GarminProjectionService
+from backend.sync.garmin_projection_service import (
+    GarminCanonicalSources,
+    GarminProjectionService,
+)
 
 TODAY = date(2026, 5, 4)
 GARMIN_SOURCE = "Garmin Connect"
@@ -206,13 +214,16 @@ def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionServ
         garmin_payload_service=payload_service,
         garmin_sync_service=Mock(),
         garmin_sync_state_service=Mock(),
-        sync_state_repository=Mock(),
         morning_body_battery_service=battery_service,
         garmin_client_factory=Mock(),
-        database_manager=Mock(),
+        database_manager=MagicMock(),
         key_value_repository=Mock(),
         redactor=redactor,
         local_now=lambda: datetime(2026, 5, 4, 8, tzinfo=UTC),
+        canonical=GarminCanonicalSources(
+            activity_rows=lambda: FixedActivityRows(),
+            observations=lambda: NoObservations(),
+        ),
     )
 
 
@@ -475,7 +486,7 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
             "icu_rpe": 6,
         }
 
-        result = CoachIntervalsContextService().project({}, [], TODAY, [activity])
+        result = CoachIntervalsContextService().project([], TODAY, [activity])
 
         row = result["recent_activities_by_sport"]["Radfahren"][0]
         # Fields outside COACH_ACTIVITY_FIELDS (icu_eftp, max_speed, description)
@@ -507,7 +518,7 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
             "start_date_local": "2026-05-03T07:00:00",
         }
 
-        result = CoachIntervalsContextService().project({}, [], TODAY, [activity])
+        result = CoachIntervalsContextService().project([], TODAY, [activity])
 
         rows = result["recent_activities_by_sport"]["Laufen"]
         self.assertEqual(len(rows), 1)
@@ -537,7 +548,7 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
             },
         ]
 
-        planned = CoachIntervalsContextService().project({}, events, TODAY)[
+        planned = CoachIntervalsContextService().project(events, TODAY)[
             "planned_workouts"
         ]
 
@@ -550,10 +561,11 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
         self,
     ) -> None:
         result = CoachIntervalsContextService().project(
-            _intervals_snapshot(), None, TODAY
+            None, TODAY, synced_at="2026-05-04T05:00:00Z"
         )
 
         self.assertEqual(result["synced_at"], "2026-05-04T05:00:00Z")
+        self.assertEqual(result["source"]["synced_at"], "2026-05-04T05:00:00Z")
         self.assertEqual(result["planned_workouts"], [])
 
 
@@ -669,9 +681,16 @@ class GarminCoachContextFallbackProvenanceTests(unittest.TestCase):
             },
         }
 
-        result = _garmin_projection_service(snapshot).coach_context(
-            include_performance=True
+        state = GarminCanonicalState(
+            metrics=GarminCanonicalMetrics(cycling_ftp_watts=265.0)
         )
+        with patch(
+            "backend.sync.garmin_projection_service.read_garmin_state",
+            return_value=state,
+        ):
+            result = _garmin_projection_service(snapshot).coach_context(
+                include_performance=True
+            )
 
         self.assertEqual(result["performance"]["source"], GARMIN_SOURCE)
         ftp = result["performance"]["thresholds"]["cycling_ftp_watts"]
