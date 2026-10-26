@@ -1,2 +1,2 @@
-graphifyy[mcp]==0.9.93
+graphifyy[mcp]==0.9.94
 pywin32>=311; sys_platform == "win32"
