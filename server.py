@@ -320,6 +320,7 @@ from backend.sync.canonical_projection_assembly import (
 )
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_read_selector import CanonicalReadSelector
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.command_assembly import (
     IllnessPauseDependencies,
     SyncCommandAssembly,
@@ -641,6 +642,7 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
             GarminSnapshotWriter(
                 KEY_VALUE_REPOSITORY, lambda: ATHLETE_CLOCK.now().tzinfo
             ),
+            CanonicalTableReader(),
         ),
         MorningBatterySource(
             GARMIN_ASSEMBLY.fixture_loader(),
@@ -790,6 +792,8 @@ HISTORY = HistoryAssembly(
         athlete=HistoryAthleteServices(
             profile_service=ATHLETE_DATA.profile,
             competition_service=PLANNING_DATA.competition,
+            zone_service=ATHLETE_DATA.zones,
+            feedback_service=ATHLETE_DATA.activity_feedback,
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,
@@ -1432,6 +1436,7 @@ COACH_CONTEXT = CoachContextAssembly(
                 database_manager=lambda: database_manager(),
                 reader=lambda: CANONICAL_READ,
             ),
+            zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
         ),
         planning=CoachContextPlanningSources(
             checkin_service=ATHLETE_DATA.checkin,
@@ -2114,6 +2119,7 @@ HTTP_API = HttpApiAssembly(
                 activity_read=ACTIVITY_READS.activity_read,
                 equipment=ATHLETE_DATA.equipment,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
+                zones=ATHLETE_DATA.zones,
                 checkin=ATHLETE_DATA.checkin,
                 context_service=ATHLETE_DATA.context,
                 clock=ATHLETE_CLOCK,

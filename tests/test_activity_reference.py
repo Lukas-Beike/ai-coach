@@ -349,8 +349,7 @@ class ActivityCallerResolutionTests(_Fixture):
     def test_feedback_is_stored_under_the_provider_id(self) -> None:
         local = self.seed("ride-1")
         repository = Mock()
-        repository.get.return_value = None
-        repository.list.return_value = []
+        repository.all.return_value = []
         service = ActivityFeedbackService(
             self.manager,
             repository,
@@ -358,15 +357,14 @@ class ActivityCallerResolutionTests(_Fixture):
             references=ActivityReferences(self.manager),
         )
         service.save(local, {"session_rpe": 6})
-        self.assertEqual("ride-1", repository.get.call_args.args[1])
         self.assertEqual("ride-1", repository.upsert.call_args.args[1]["activity_id"])
+        self.assertEqual(local, repository.upsert.call_args.kwargs["session_id"])
 
     def test_coach_feedback_route_accepts_local_id(self) -> None:
         local = self.seed("ride-1")
         rows = FixedActivityRows([{"id": "ride-1"}])
         repository = Mock()
-        repository.get.return_value = None
-        repository.list.return_value = [{"activity_id": "ride-1", "session_rpe": 6}]
+        repository.all.return_value = []
         service = ActivityFeedbackService(
             self.manager,
             repository,

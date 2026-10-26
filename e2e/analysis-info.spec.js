@@ -5,7 +5,7 @@ async function performanceFixture(page, changes, route = "performance") {
   await page.route("**/api/performance", async (request) => {
     const response = await request.fetch();
     const data = await response.json();
-    Object.assign(data.performance, { metrics: {} }, changes);
+    Object.assign(data.performance, { metrics: {} }, typeof changes === "function" ? changes(data.performance) : changes);
     await request.fulfill({ response, json: data });
   });
   await page.goto(`/#analysis/${route}`);
@@ -143,7 +143,8 @@ test("@responsive current performance groups real values by sport before the cha
 });
 
 test("@responsive recovery uses independent scales, honest coverage over exactly fourteen days", async ({ page }) => {
-  await performanceFixture(page, { personal_recovery: {
+  // Only the injected baselines: the fixture's own Garmin readiness chart is left out.
+  await performanceFixture(page, (performance) => ({ history: { ...performance.history, provider_metrics: { ...performance.history.provider_metrics, training_readiness_history: undefined } }, personal_recovery: {
     as_of: "2026-10-02", sleep_target_hours: 8,
     baselines: [
       { metric: "sleep", source: "Garmin Connect", measurement: "sleepTimeSeconds", observed_at: "2026-10-01", nights: 1,
@@ -153,7 +154,7 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
       { metric: "resting_hr", source: "Intervals.icu", measurement: "restingHR", observed_at: "2026-10-01", nights: 1,
         status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", history: [{ date: "2026-10-01", value: 48 }] },
     ],
-  } }, "recovery");
+  } }), "recovery");
   const root = page.locator("#personalRecovery");
   await expect(root.locator(".analysis-chart-card")).toHaveCount(1);
   await expect(root.locator(".analysis-subchart")).toHaveCount(3);

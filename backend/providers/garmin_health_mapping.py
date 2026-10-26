@@ -9,9 +9,11 @@ raw value.
 Mapped sections and their canonical kinds:
 
 * ``sleep``: SLEEP_DURATION (seconds) and SLEEP_SCORE.
-* ``hrv``: HRV_RMSSD from the last-night average and HRV_WEEKLY_AVERAGE from the
-  weekly average. The weekly average covers a different window, so it is its own
-  kind and never a stand-in for the last-night value.
+* ``hrv``: HRV_RMSSD from the last-night average, with method ``rmssd``,
+  aggregation MEAN and the ``overnight`` window. Garmin reports no device,
+  firmware or sensor with it, so those stay unknown. HRV_WEEKLY_AVERAGE comes
+  from the weekly average; it covers a different window, so it is its own kind
+  and never a stand-in for the last-night value.
 * ``resting_hr``: RESTING_HR.
 * ``readiness``: READINESS.
 * ``max_metrics``: VO2MAX from the generic, cycling and running objects.
@@ -23,6 +25,12 @@ Mapped sections and their canonical kinds:
   watts. Garmin may derive that power from cycling data; consumers keep their own
   plausibility window.
 * ``cycling_ftp`` and ``cycling_ftp_history``: FTP for cycling.
+* ``performance_history``: the app's accumulated Garmin values, each row on the
+  day its value was measured (athlete decision 2026-10-26). Weight, FTP, VO2MAX,
+  thresholds, readiness and race predictions keep their kinds and units (the
+  threshold pace in seconds per kilometre becomes m/s), so a day a dedicated
+  section also reports shares that observation. The max heart rate keys include
+  an activity-derived fallback rather than a Garmin value and are not mapped.
 * ``heart_rate_zones``: MAX_HR for each sport category (cycling, running or
   generic). Every object under a record is read for ``maxHeartRateUsed``,
   ``maxHeartRate`` or ``maxHR``, with the legacy category terms and the legacy
@@ -31,8 +39,14 @@ Mapped sections and their canonical kinds:
 * ``weight``, ``weigh_ins`` or ``weighIns`` (the first truthy one wins, as in the
   legacy ``or`` chain): WEIGHT in kilograms and BODY_FAT in percent. Nested records
   are searched with the legacy reader's depth, visit and list limits.
-* ``daily_stats``: STEPS, FLOORS, DAILY_ENERGY_TOTAL and DAILY_ENERGY_ACTIVE (kcal),
-  with the aliases ``performance.daily_health`` reads.
+* ``daily_stats``: STEPS, FLOORS, DAILY_ENERGY_TOTAL, DAILY_ENERGY_ACTIVE and
+  DAILY_ENERGY_RESTING (kcal, a provider total, never estimated when absent), with
+  the aliases ``performance.daily_health`` reads, and STRESS, Garmin's daily mean
+  physiological stress on its 0 to 100 scale from ``averageStressLevel`` (the range
+  endpoint's ``stress.avgLevel`` when no flat value is present).
+* ``body_battery``: BODY_BATTERY_CHARGED and BODY_BATTERY_DRAINED as daily totals,
+  and each ``[timestamp, level]`` of ``bodyBatteryValuesArray`` as a BODY_BATTERY
+  sample dated by its own instant in the athlete's zone.
 * ``race_predictions``: RACE_PREDICTION_5K, _10K, _HALF and _FULL in seconds for
   running. A top-level key names the slot (``5k``, ``time10K``, ``halfMarathon``,
   ``marathon``; "half" before "marathon" and 10k before 5k), or a record pairs a
@@ -79,10 +93,13 @@ the legacy reader: ``fraction`` and ``ratio`` are multiplied by 100, ``percent``
 ``%`` or no unit are used as they are, and any other unit is UNKNOWN_VALUE.
 Kilograms and percent are rounded to two decimals, as the legacy reader rounds.
 
-Ignored without an issue: sections with no canonical kind in this wave (``activities``,
-``gear``, ``training_status``, ``running_tolerance``) and unknown keys. Body battery
-(charged and drained only, no level) and the device-keyed ``daily_training_status``
-and ``training_load_balance`` each yield one UNSUPPORTED issue per section.
+* ``daily_training_status``, ``training_load_balance``, ``training_status``,
+  ``weekly_training_status``, ``running_tolerance``, ``training_readiness_history``
+  and the endurance ``groupMap``: Garmin's training load, load balance, tolerance,
+  readiness history and endurance group values (see ``garmin_training_mapping``).
+
+Ignored without an issue: sections with no canonical kind in this wave
+(``activities``, ``gear``) and unknown keys.
 
 Source kinds: sensor values (sleep duration, HRV, resting heart rate, scale weight
 and body fat, steps and floors) are DEVICE_MEASURED. Garmin's calculations (sleep
@@ -97,7 +114,8 @@ with the record index omitted for a single object. Race predictions use
 ``race_predictions:<day>:<kind>``, for example ``race_predictions:2026-10-10:race_prediction_5k``.
 
 Plausibility: a value must lie inside ``METRIC_BOUNDS``. Zero is rejected for every
-metric except the sleep score, steps, floors and active energy, where Garmin's 0 is
+metric except the sleep score, steps, floors, active energy, stress and Body
+Battery, where Garmin's 0 is
 a measured value kept as reported, as the legacy readers keep it. Other zero
 measurements, such as a zero
 sleep duration, are still rejected; the parity tests name the remaining
@@ -120,10 +138,18 @@ from backend.canonical.mapping import (
     coerce_comma_decimal_number,
     coerce_number,
 )
-from backend.canonical.records import MetricValue, Observation, Provenance
+from backend.canonical.records import (
+    UNKNOWN_CONTEXT,
+    MeasurementContext,
+    MetricValue,
+    Observation,
+    Provenance,
+)
+from backend.canonical.sleep_bounds import utc_timestamp
 from backend.canonical.validation import METRIC_BOUNDS
 from backend.canonical.vocabulary import (
     MetricKind,
+    ObservationAggregation,
     ProviderId,
     RecordingOrigin,
     SourceKind,
@@ -143,6 +169,7 @@ from backend.providers.garmin_fields import (
     GARMIN_RACE_TIME_ALIASES,
     GARMIN_READINESS_ALIASES,
     GARMIN_RESTING_HR_ALIASES,
+    GARMIN_RESTING_KCAL_ALIASES,
     GARMIN_SLEEP_DURATION_ALIASES,
     GARMIN_SLEEP_SCORE_ALIASES,
     GARMIN_STEPS_ALIASES,
@@ -151,6 +178,13 @@ from backend.providers.garmin_fields import (
     GARMIN_WEIGHT_UNIT_ALIASES,
     colon_time_parts,
     flatten_daily_summary,
+)
+from backend.providers.garmin_training_mapping import (
+    TRAINING_SECTIONS,
+    TrainingValue,
+    endurance_group_values,
+    training_values,
+    unresolved_device_record,
 )
 from backend.providers.garmin_weight_walk import (
     BODY_FAT_SKIP_KEYS,
@@ -161,7 +195,10 @@ from backend.providers.garmin_weight_walk import (
     weight_payload,
 )
 
-MAPPER_VERSION: Final = 11
+# Version 12: HRV method, aggregation and window; stress, resting energy, Body
+# Battery and the training sections; sleep sections project canonical sleep periods.
+# Version 13: the stored performance history projects its dated values.
+MAPPER_VERSION: Final = 13
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -200,12 +237,75 @@ _HEART_RATE_LIST_LIMIT: Final = 100
 _DAILY_STATS_VISIT_LIMIT: Final = 2000
 _DAILY_STATS_LIST_LIMIT: Final = 500
 _LATEST_WEIGHT_KEYS: Final = frozenset({"latestWeight"})
-_UNSUPPORTED_SECTIONS: Final = frozenset(
-    {"body_battery", "daily_training_status", "training_load_balance"}
+_BODY_BATTERY: Final = "body_battery"
+_BODY_BATTERY_SAMPLE_KEYS: Final = (
+    "bodyBatteryValuesArray",
+    "body_battery_values_array",
 )
+_STRESS_ALIASES: Final = ("averageStressLevel",)
+# Garmin's last-night HRV is the mean RMSSD of the overnight recording; the
+# device, firmware and sensor are not reported with it, so they stay unknown.
+_HRV_CONTEXT: Final = MeasurementContext(window="overnight")
 _DAILY_STATS: Final = "daily_stats"
 _ENDURANCE_SCORE: Final = "endurance_score"
 _RACE_PREDICTIONS: Final = "race_predictions"
+_PERFORMANCE_HISTORY: Final = "performance_history"
+_HISTORY_DATE: Final = "date"
+_HISTORY_METRICS: Final = "metrics"
+_HISTORY_PACE: Final = "run_threshold_pace_seconds_per_km"
+_METRES_PER_KM: Final = 1000.0
+# Legacy performance-history keys and the kind, sport and source kind each holds.
+_HISTORY_KINDS: Final[Mapping[str, tuple[MetricKind, Sport | None, SourceKind]]] = {
+    "weight_kg": (MetricKind.WEIGHT, None, SourceKind.DEVICE_MEASURED),
+    "cycling_ftp_watts": (MetricKind.FTP, Sport.RIDE, SourceKind.PROVIDER_REPORTED),
+    "cycling_vo2max_ml_kg_min": (
+        MetricKind.VO2MAX,
+        Sport.RIDE,
+        SourceKind.PROVIDER_REPORTED,
+    ),
+    "running_vo2max_ml_kg_min": (
+        MetricKind.VO2MAX,
+        Sport.RUN,
+        SourceKind.PROVIDER_REPORTED,
+    ),
+    "run_threshold_watts": (
+        MetricKind.RUN_THRESHOLD_POWER,
+        Sport.RUN,
+        SourceKind.PROVIDER_REPORTED,
+    ),
+    _HISTORY_PACE: (MetricKind.THRESHOLD_PACE, Sport.RUN, SourceKind.PROVIDER_REPORTED),
+    "run_threshold_hr_bpm": (
+        MetricKind.THRESHOLD_HR,
+        Sport.RUN,
+        SourceKind.PROVIDER_REPORTED,
+    ),
+    "bike_threshold_hr_bpm": (
+        MetricKind.THRESHOLD_HR,
+        Sport.RIDE,
+        SourceKind.PROVIDER_REPORTED,
+    ),
+    "readiness": (MetricKind.READINESS, None, SourceKind.PROVIDER_REPORTED),
+    "run_5k_seconds": (
+        MetricKind.RACE_PREDICTION_5K,
+        Sport.RUN,
+        SourceKind.PROVIDER_REPORTED,
+    ),
+    "run_10k_seconds": (
+        MetricKind.RACE_PREDICTION_10K,
+        Sport.RUN,
+        SourceKind.PROVIDER_REPORTED,
+    ),
+    "run_half_marathon_seconds": (
+        MetricKind.RACE_PREDICTION_HALF,
+        Sport.RUN,
+        SourceKind.PROVIDER_REPORTED,
+    ),
+    "run_marathon_seconds": (
+        MetricKind.RACE_PREDICTION_FULL,
+        Sport.RUN,
+        SourceKind.PROVIDER_REPORTED,
+    ),
+}
 # Sections dated by the collector's own fallback chain rather than calendarDate only.
 _SECTION_DATE_KEYS: Final[Mapping[str, tuple[str, ...]]] = {
     _DAILY_STATS: GARMIN_DATE_ALIASES
@@ -217,6 +317,24 @@ _ZERO_ALLOWED: Final = frozenset(
         MetricKind.STEPS,
         MetricKind.FLOORS,
         MetricKind.DAILY_ENERGY_ACTIVE,
+        MetricKind.STRESS,
+        MetricKind.BODY_BATTERY,
+        MetricKind.BODY_BATTERY_CHARGED,
+        MetricKind.BODY_BATTERY_DRAINED,
+        # Training loads, balance targets and tolerance: today's readers keep 0.
+        MetricKind.ACUTE_LOAD,
+        MetricKind.CHRONIC_LOAD,
+        MetricKind.ACUTE_CHRONIC_RATIO,
+        MetricKind.LOAD_BALANCE_AEROBIC_LOW,
+        MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MIN,
+        MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MAX,
+        MetricKind.LOAD_BALANCE_AEROBIC_HIGH,
+        MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MIN,
+        MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MAX,
+        MetricKind.LOAD_BALANCE_ANAEROBIC,
+        MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MIN,
+        MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MAX,
+        MetricKind.RUNNING_TOLERANCE,
     }
 )
 # Race slots in the legacy reader's precedence: "half" before "marathon", 10k before 5k.
@@ -258,6 +376,9 @@ class _Field:
     source_kind: SourceKind
     sport: Sport | None = None
     whole: bool = False
+    method: str | None = None
+    aggregation: ObservationAggregation | None = None
+    context: MeasurementContext = UNKNOWN_CONTEXT
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,7 +423,14 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
         _Group(
             None,
             (
-                _Field(GARMIN_HRV_LAST_NIGHT_ALIASES, MetricKind.HRV_RMSSD, _DEVICE),
+                _Field(
+                    GARMIN_HRV_LAST_NIGHT_ALIASES,
+                    MetricKind.HRV_RMSSD,
+                    _DEVICE,
+                    method="rmssd",
+                    aggregation=ObservationAggregation.MEAN,
+                    context=_HRV_CONTEXT,
+                ),
                 _Field(
                     GARMIN_HRV_WEEKLY_ALIASES,
                     MetricKind.HRV_WEEKLY_AVERAGE,
@@ -382,6 +510,37 @@ _GROUPED_SECTIONS: Final[Mapping[str, tuple[_Group, ...]]] = {
                     MetricKind.DAILY_ENERGY_ACTIVE,
                     _PROVIDER,
                 ),
+                _Field(
+                    GARMIN_RESTING_KCAL_ALIASES,
+                    MetricKind.DAILY_ENERGY_RESTING,
+                    _PROVIDER,
+                    aggregation=ObservationAggregation.TOTAL,
+                ),
+                _Field(
+                    _STRESS_ALIASES,
+                    MetricKind.STRESS,
+                    _PROVIDER,
+                    aggregation=ObservationAggregation.MEAN,
+                ),
+            ),
+        ),
+    ),
+    _BODY_BATTERY: (
+        _Group(
+            None,
+            (
+                _Field(
+                    ("charged",),
+                    MetricKind.BODY_BATTERY_CHARGED,
+                    _PROVIDER,
+                    aggregation=ObservationAggregation.TOTAL,
+                ),
+                _Field(
+                    ("drained",),
+                    MetricKind.BODY_BATTERY_DRAINED,
+                    _PROVIDER,
+                    aggregation=ObservationAggregation.TOTAL,
+                ),
             ),
         ),
     ),
@@ -438,11 +597,15 @@ _SECTION_ORDER: Final = (
     _RACE_PREDICTIONS,
     _ENDURANCE_SCORE,
     "body_battery",
-    "daily_training_status",
-    "training_load_balance",
+    *TRAINING_SECTIONS,
+    # Last: ingest keeps the first value of a natural key, so a dedicated
+    # section's value of the same day wins over the accumulated history.
+    _PERFORMANCE_HISTORY,
 )
 # Public name for the canonical plan, which keeps one raw record per section.
 GARMIN_HEALTH_SECTION_NAMES: Final = _SECTION_ORDER
+# Its values only fill keys no dedicated section has written (canonical_plans).
+GARMIN_PERFORMANCE_HISTORY_SECTION: Final = _PERFORMANCE_HISTORY
 
 
 def _named_value(
@@ -947,6 +1110,7 @@ class _HealthMapping:
     """Collects the observations and issues of one ``map_garmin_health`` call."""
 
     def __init__(self, zone: tzinfo, retrieved_at: datetime) -> None:
+        self._zone = zone
         self._retrieved_at = retrieved_at
         self._sync_day = local_date(retrieved_at, zone)
         self.observations: list[Observation] = []
@@ -965,20 +1129,28 @@ class _HealthMapping:
     def _map_section(self, name: str, payload: object) -> None:
         if payload is None:
             return
-        if name in _UNSUPPORTED_SECTIONS:
-            self.issue(None, name, IssueReason.UNSUPPORTED)
+        if name in TRAINING_SECTIONS:
+            if unresolved_device_record(name, payload):
+                self.issue(None, name, IssueReason.UNKNOWN_VALUE)
+            self._emit_training(name, training_values(name, payload))
         elif name == _RUNNING_THRESHOLD:
             self._map_running_threshold(payload)
         elif name == _HEART_RATE_ZONES:
             self._map_heart_rate_zones(payload)
         elif name == _RACE_PREDICTIONS:
             self._map_race_predictions(payload)
+        elif name == _PERFORMANCE_HISTORY:
+            self._map_performance_history(payload)
         elif name == _ENDURANCE_SCORE:
             groups = _GROUPED_SECTIONS[name]
             self._map_grouped(name, _endurance_records(payload), groups)
+            self._emit_training(name, endurance_group_values(payload))
         elif name == _DAILY_STATS:
             groups = _GROUPED_SECTIONS[name]
             self._map_grouped(name, _daily_stats_records(payload), groups)
+        elif name == _BODY_BATTERY:
+            self._map_grouped(name, payload, _GROUPED_SECTIONS[name])
+            self._map_body_battery_levels(payload)
         else:
             self._map_grouped(name, payload, _GROUPED_SECTIONS[name])
 
@@ -1020,6 +1192,65 @@ class _HealthMapping:
             return None
         return payload
 
+    def _emit_training(self, name: str, values: list[TrainingValue]) -> None:
+        """Emit provider training values, one record id per section, day and kind."""
+        for value in values:
+            number = coerce_number(value.raw)
+            if number is None:
+                self.issue(name, value.field, IssueReason.INVALID_NUMBER)
+                continue
+            entry = _entry(name, name, value.day, value.key)
+            self.emit(entry, value.kind, number, value.field, _PROVIDER, value.sport)
+
+    def _map_body_battery_levels(self, payload: object) -> None:
+        """Map each timed level of ``bodyBatteryValuesArray`` as one sample.
+
+        A sample is ``[timestamp, level]`` and is dated by its own instant in the
+        athlete's zone. Unreadable samples are skipped with one issue per record.
+        """
+        # The grouped Body Battery mapping already reported malformed elements.
+        for ref, record, index in self._records(_BODY_BATTERY, payload, report=False):
+            samples = _first_value(record, _BODY_BATTERY_SAMPLE_KEYS)
+            if not isinstance(samples, list):
+                if samples is not None:
+                    self.issue(
+                        ref, _BODY_BATTERY_SAMPLE_KEYS[0], IssueReason.INVALID_TYPE
+                    )
+                continue
+            invalid = False
+            for sample in samples:
+                if not self._emit_body_battery_sample(sample, ref, index):
+                    invalid = True
+            if invalid:
+                self.issue(
+                    ref, _BODY_BATTERY_SAMPLE_KEYS[0], IssueReason.INVALID_NUMBER
+                )
+
+    def _emit_body_battery_sample(
+        self, sample: object, ref: str, index: int | None
+    ) -> bool:
+        """Emit one ``[timestamp, level]`` sample; False when it is unreadable."""
+        if not isinstance(sample, list | tuple) or len(sample) < 2:
+            return False
+        observed_at = utc_timestamp(sample[0])
+        level = None if observed_at is None else coerce_number(sample[1])
+        if observed_at is None or level is None:
+            return False
+        try:
+            day = local_date(observed_at, self._zone)
+        except OverflowError:
+            return False
+        entry = _entry(_BODY_BATTERY, ref, day, "level", observed_at, index=index)
+        self.emit(
+            entry,
+            MetricKind.BODY_BATTERY,
+            float(round(level)),
+            _BODY_BATTERY_SAMPLE_KEYS[0],
+            _PROVIDER,
+            aggregation=ObservationAggregation.SAMPLE,
+        )
+        return True
+
     def _map_running_threshold(self, payload: object) -> None:
         for ref, record, index in self._records(_RUNNING_THRESHOLD, payload):
             day = self._record_day(record, ref, fallback=self._sync_day)
@@ -1028,6 +1259,34 @@ class _HealthMapping:
                     self._map_group(
                         _RUNNING_THRESHOLD, record, group, ref, day, index=index
                     )
+
+    def _map_performance_history(self, payload: object) -> None:
+        for ref, record, index in self._records(_PERFORMANCE_HISTORY, payload):
+            try:
+                day = date.fromisoformat(str(record.get(_HISTORY_DATE)))
+            except ValueError:
+                self.issue(ref, _HISTORY_DATE, IssueReason.INVALID_TYPE)
+                continue
+            metrics = record.get(_HISTORY_METRICS)
+            if not isinstance(metrics, Mapping):
+                self.issue(ref, _HISTORY_METRICS, IssueReason.INVALID_TYPE)
+                continue
+            for key in _HISTORY_KINDS:
+                if (value := metrics.get(key)) is not None:
+                    self._emit_history_value(key, value, ref, day, index)
+
+    def _emit_history_value(
+        self, key: str, value: object, ref: str, day: date, index: int | None
+    ) -> None:
+        kind, sport, source_kind = _HISTORY_KINDS[key]
+        number = coerce_number(value)
+        if number is None or number <= 0:
+            self.issue(ref, key, IssueReason.INVALID_NUMBER)
+            return
+        if key == _HISTORY_PACE:
+            number = _METRES_PER_KM / number
+        entry = _entry(_PERFORMANCE_HISTORY, ref, day, key, index=index)
+        self.emit(entry, kind, number, key, source_kind, sport)
 
     def _map_race_predictions(self, payload: object) -> None:
         for ref, record, index in self._records(
@@ -1127,6 +1386,9 @@ class _HealthMapping:
                     field.names[0],
                     field.source_kind,
                     field.sport,
+                    method=field.method,
+                    aggregation=field.aggregation,
+                    context=field.context,
                 )
 
     def _group_number(
@@ -1156,18 +1418,24 @@ class _HealthMapping:
         )
 
     def _records(
-        self, name: str, payload: object
+        self, name: str, payload: object, *, report: bool = True
     ) -> list[tuple[str, Mapping[str, object], int | None]]:
+        """Return the mapping records of a section; ``report`` adds type issues.
+
+        A second pass over a section already walked passes ``report=False``, so
+        one malformed element counts once.
+        """
         items: object = [payload] if isinstance(payload, Mapping) else payload
         if not isinstance(items, list):
-            self.issue(None, name, IssueReason.INVALID_TYPE)
+            if report:
+                self.issue(None, name, IssueReason.INVALID_TYPE)
             return []
         rows: list[tuple[str, Mapping[str, object], int | None]] = []
         for index, item in enumerate(items):
             ref = f"{name}[{index}]"
             if isinstance(item, Mapping):
                 rows.append((ref, item, index if isinstance(payload, list) else None))
-            else:
+            elif report:
                 self.issue(ref, name, IssueReason.INVALID_TYPE)
         return rows
 
@@ -1217,6 +1485,10 @@ class _HealthMapping:
         field: str,
         source_kind: SourceKind,
         sport: Sport | None = None,
+        *,
+        method: str | None = None,
+        aggregation: ObservationAggregation | None = None,
+        context: MeasurementContext = UNKNOWN_CONTEXT,
     ) -> None:
         if not _within_bounds(kind, number):
             self.issue(entry.ref, field, IssueReason.OUT_OF_RANGE)
@@ -1228,6 +1500,7 @@ class _HealthMapping:
             recorded_by=RecordingOrigin.GARMIN,
             retrieved_at=self._retrieved_at,
             label=GARMIN_LABEL,
+            context=context,
         )
         self.observations.append(
             Observation(
@@ -1237,6 +1510,8 @@ class _HealthMapping:
                 observed_at=entry.observed_at,
                 provenance=provenance,
                 sport=sport,
+                method=method,
+                aggregation=aggregation,
             )
         )
 

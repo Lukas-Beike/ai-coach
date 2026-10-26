@@ -10,6 +10,12 @@ Garmin records may be newer than the latest wellness row. The latest wellness da
 pins the Intervals values of ``select_current`` to the newest wellness row, as
 the legacy readers did; it is None when there is no usable wellness day, and
 Garmin values are still selected then.
+
+Sleep periods for the sleep regularity are read when the serving source stores
+them (``SleepPeriodReader``), one day before the window so a period dated in
+another zone is not missed; the regularity applies its own window. A source
+without them leaves ``sleep_periods`` None, and the regularity reads the legacy
+rows.
 """
 
 from __future__ import annotations
@@ -19,10 +25,11 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final
 
+from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.source_policy import select_current, within_current_bounds
-from backend.runtime.ports import ObservationReader
+from backend.runtime.ports import ObservationReader, SleepPeriodReader
 
 # The personal baselines keep 84 days of history; the current context needs 7.
 RECOVERY_HISTORY_DAYS: Final = 84
@@ -40,10 +47,14 @@ RECOVERY_KINDS: Final = (
 
 @dataclass(frozen=True, slots=True)
 class CanonicalRecoveryInputs:
-    """Recovery observations of all providers by kind, and the latest wellness day."""
+    """Recovery observations of all providers by kind, and the latest wellness day.
+
+    ``sleep_periods`` is None when the serving source stores no sleep periods.
+    """
 
     observations: Mapping[MetricKind, tuple[Observation, ...]]
     latest_wellness_day: date | None
+    sleep_periods: tuple[SleepPeriod, ...] | None = None
 
     def of(self, kind: MetricKind) -> tuple[Observation, ...]:
         """Return the observations of ``kind``; empty when it was not read."""
@@ -85,6 +96,11 @@ def read_recovery_inputs(
             for kind in RECOVERY_KINDS
         },
         latest_wellness_day=latest_wellness_day,
+        sleep_periods=(
+            reader.sleep_periods(db, start=start - timedelta(days=1))
+            if isinstance(reader, SleepPeriodReader)
+            else None
+        ),
     )
 
 

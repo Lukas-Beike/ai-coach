@@ -195,6 +195,7 @@ class HttpAthleteServices:
     state_event_buffer: Any
     equipment: Callable[[], Any] | None = None
     activity_feedback: Callable[[], Any] | None = None
+    zones: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -403,6 +404,7 @@ class HttpApiAssembly:
             public_feedback_state_service,
             coach_context_preview_service,
             settings,
+            athlete.zones,
         )
         self.diagnostics_get_routes = DiagnosticsGetRoutes(
             session_auth_service,
@@ -548,7 +550,10 @@ class HttpApiAssembly:
             CredentialsPutRoutes(provider_credentials) if provider_credentials else None
         )
         self.athlete_put_routes = AthletePutRoutes(
-            athlete_context_service, profile_service, database_lock()
+            athlete_context_service,
+            profile_service,
+            database_lock(),
+            athlete.zones,
         )
         self.planning_commands_post_routes = PlanningCommandsPostRoutes(
             coach_planning_command_service,

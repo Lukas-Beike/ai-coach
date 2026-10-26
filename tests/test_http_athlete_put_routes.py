@@ -67,6 +67,35 @@ class AthletePutRoutesTests(unittest.TestCase):
         self.handler.read_json.assert_called_once_with()
         self.handler.send_json.assert_called_once_with(200, result)
 
+    def test_zone_routes_save_and_remove_through_the_zone_service(self) -> None:
+        zones = Mock()
+        zones.save.return_value = {"change": "saved"}
+        zones.remove.return_value = {"change": "removed"}
+        routes = AthletePutRoutes(
+            self.context_factory,
+            self.profile_factory,
+            self.database_lock,
+            Mock(return_value=zones),
+        )
+        self.handler.read_json.return_value = {
+            "key": "|power|ride||",
+            "confirmed": True,
+        }
+
+        self.assertTrue(routes.handle(self.handler, "/api/zones"))
+        self.assertTrue(routes.handle(self.handler, "/api/zones/remove"))
+
+        zones.remove.assert_called_once_with(
+            {"key": "|power|ride||", "confirmed": True}
+        )
+        self.handler.send_json.assert_has_calls(
+            [call(200, {"change": "saved"}), call(200, {"change": "removed"})]
+        )
+
+    def test_zone_routes_are_absent_without_the_zone_service(self) -> None:
+        self.assertFalse(self.routes.handle(self.handler, "/api/zones"))
+        self.handler.read_json.assert_not_called()
+
     def test_unknown_path_has_no_side_effects(self) -> None:
         self.assertFalse(self.routes.handle(self.handler, "/api/other"))
 

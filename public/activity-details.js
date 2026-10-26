@@ -89,15 +89,32 @@
     const notesLabel = node("label", "Notizen"); const notes = document.createElement("textarea"); notes.name = "notes"; notes.rows = 3; notes.maxLength = 4000; notes.value = feedback?.notes || ""; notesLabel.append(notes);
     const status = node("p", "", "muted"); status.setAttribute("role", "status"); const save = node("button", "Feedback speichern"); save.type = "submit";
     form.append(rpeLabel, reasonLabel, notesLabel, save); section.append(form, status); content.append(section);
+    let shown = feedback;
+    const fill = (value) => { rpe.value = value?.session_rpe ?? ""; reason.value = value?.deviation_reason || ""; notes.value = value?.notes || ""; };
     form.addEventListener("submit", async (event) => {
       event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
       try {
         const raw = rpe.value.trim(); const value = { activity_name: session?.name || "", activity_date: session?.started_at_local || "", notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
         if (raw !== "" && (!Number.isFinite(value.session_rpe) || value.session_rpe < 0 || value.session_rpe > 10)) throw new Error("RPE muss zwischen 0 und 10 liegen.");
         const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });
-        status.textContent = result.activity_feedback ? "Feedback gespeichert." : "Feedback entfernt.";
+        const previous = shown; shown = result.activity_feedback;
+        status.textContent = result.activity_feedback ? "Feedback gespeichert. " : "Feedback entfernt. ";
+        if (result.change?.id) status.append(feedbackUndoButton(api, result.change, status, () => { shown = previous; fill(previous); }));
       } catch (error) { status.textContent = error.message; } finally { save.disabled = false; }
     });
+  }
+
+  // Undo restores the feedback rows as they were before this save or removal.
+  function feedbackUndoButton(api, change, status, restored) {
+    const undo = node("button", "Rückgängig", "message-undo"); undo.type = "button";
+    undo.addEventListener("click", async () => {
+      undo.disabled = true;
+      try {
+        await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
+        restored(); status.textContent = "Zurückgenommen.";
+      } catch (error) { undo.disabled = false; status.textContent = error.message; }
+    });
+    return undo;
   }
 
 

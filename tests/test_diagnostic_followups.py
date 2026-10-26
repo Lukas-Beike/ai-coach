@@ -116,10 +116,18 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 "morning": {"value": 78},
                 "before_sleep": {"value": 30},
             }
-            with patch.object(
-                performance_morning_battery,
-                "morning_body_battery_record",
-                return_value=ready,
+            # The service derives the stored record from canonical data.
+            with (
+                patch.object(
+                    performance_morning_battery,
+                    "morning_body_battery_record",
+                    return_value=ready,
+                ),
+                patch.object(
+                    performance_morning_battery,
+                    "canonical_morning_record",
+                    return_value=dict(ready),
+                ),
             ):
                 self.assertEqual(service.sync(day)["status"], "ready")
             self.assertEqual(

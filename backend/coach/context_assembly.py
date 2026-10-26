@@ -35,6 +35,8 @@ class CoachContextPerformanceSources:
     canonical: CanonicalPerformanceSource | None = None
     # When set, recent activities come from the canonical activity row port.
     activity_rows: ActivityRowSource | None = None
+    # When set, current performance lists the zones in effect (local first).
+    zone_configurations: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,7 @@ class CoachContextAssembly:
         self._utc_now = performance.utc_now
         self._canonical = performance.canonical
         self._activity_rows = performance.activity_rows
+        self._zone_configurations = performance.zone_configurations
         self._checkin_service = planning.checkin_service
         self._planned_unit_service = planning.planned_unit_service
         self._daily_context_service = planning.daily_context_service
@@ -121,6 +124,8 @@ class CoachContextAssembly:
                 self._activity_rows,
             ),
             nutrition_meal_library=self._nutrition_meal_library,
+            zone_configurations=self._zone_configurations,
+            today=self._local_date,
         )
 
     def training_context_service(self) -> CoachTrainingContextService:

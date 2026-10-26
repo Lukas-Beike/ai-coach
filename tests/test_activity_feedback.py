@@ -15,6 +15,7 @@ from backend.activities.feedback import (
 )
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import ActivityFeedbackRepository, SnapshotRepository
+from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
 
@@ -151,19 +152,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.addCleanup(self.temp_dir.cleanup)
         self.addCleanup(self.manager.close)
         with self.manager.unit_of_work() as db:
-            db.execute(
-                "CREATE TABLE activity_feedback ("
-                "activity_id TEXT PRIMARY KEY, activity_name TEXT NOT NULL, "
-                "activity_date TEXT NOT NULL, notes TEXT NOT NULL, "
-                "session_rpe REAL, deviation_reason TEXT NOT NULL DEFAULT '', "
-                "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, provider TEXT)"
-            )
-            db.execute(
-                "CREATE TABLE snapshots ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL, "
-                "created_at TEXT NOT NULL, synced_at TEXT NOT NULL DEFAULT '', "
-                "recent_activity_count INTEGER NOT NULL DEFAULT 0)"
-            )
+            initialize_schema(db)
         self.feedback_repository = ActivityFeedbackRepository(
             lambda: "2026-09-20T12:00:00+00:00"
         )
@@ -213,10 +202,12 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
     def test_empty_notes_delete_and_exact_response(self) -> None:
         self.service.save("activity-1", {"notes": "remove me"})
 
+        result = self.service.save("activity-1", {"notes": "   "})
         self.assertEqual(
-            self.service.save("activity-1", {"notes": "   "}),
+            {key: value for key, value in result.items() if key != "change"},
             {"status": "ok", "activity_feedback": None},
         )
+        self.assertEqual(result["change"]["action"], "delete")
         self.assertEqual(self.service.list(), [])
 
     def test_coach_save_requires_known_snapshot_activity_and_accepts_aliases(
@@ -329,11 +320,14 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
             def __init__(self) -> None:
                 super().__init__(lambda: "2026-09-20T12:00:00+00:00")
                 self.fail = True
+                self.reads = 0
 
-            def list(self, db, limit=100):
-                if self.fail:
+            def all(self, db):
+                # Two reads prepare and record the save; the third follows its commit.
+                self.reads += 1
+                if self.fail and self.reads > 2:
                     raise RuntimeError("read failure")
-                return super().list(db, limit)
+                return super().all(db)
 
         repository = FailingListRepository()
         service = ActivityFeedbackService(self.manager, repository, self.rows)
@@ -344,8 +338,8 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
 
     def test_write_failure_after_sql_rolls_back(self) -> None:
         class FailingUpsertRepository(ActivityFeedbackRepository):
-            def upsert(self, db, feedback, *, provider=None):
-                super().upsert(db, feedback, provider=provider)
+            def upsert(self, db, feedback, **values):
+                super().upsert(db, feedback, **values)
                 raise RuntimeError("write failure")
 
         service = ActivityFeedbackService(

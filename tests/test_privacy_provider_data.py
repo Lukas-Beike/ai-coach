@@ -12,6 +12,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from canonical_domain_support import (
+    GEAR_SOURCE,
+    SETTINGS_SOURCE,
+    WATCH_CONTEXT,
+    WELLNESS_SOURCE,
+    gear_item,
+    gear_link,
+    sleep_period,
+    status,
+    zone_configuration,
+)
+from canonical_domain_support import provenance as domain_provenance
+
 from backend.backup.export import (
     PRIVACY_EXPORT_FORMAT_VERSION,
     PRIVACY_EXPORT_JSONL_FILES,
@@ -39,6 +52,13 @@ from backend.canonical.vocabulary import (
     ZoneMetric,
 )
 from backend.db.activity_detail_store import replace_detail_set, save_analysis
+from backend.db.canonical_domain_store import (
+    replace_categorical_observations,
+    replace_gear_activity_links,
+    replace_gear_items,
+    replace_sleep_periods,
+    replace_zone_configurations,
+)
 from backend.db.schema import initialize_schema
 from backend.observability import REDACTED_VALUE, sanitized_provider_payload
 from backend.privacy import (
@@ -63,6 +83,14 @@ DETAIL_FILES = (
     "activity_detail_analysis.jsonl",
 )
 DETAIL_TABLES = tuple(name.removesuffix(".jsonl") for name in DETAIL_FILES)
+DOMAIN_FILES = (
+    "sleep_periods.jsonl",
+    "zone_configurations.jsonl",
+    "categorical_observations.jsonl",
+    "gear_items.jsonl",
+    "gear_activity_links.jsonl",
+)
+DOMAIN_TABLES = tuple(name.removesuffix(".jsonl") for name in DOMAIN_FILES)
 SECRET_PAYLOAD = {
     "name": "Synthetic ride",
     "access_token": "synthetic-secret-value",
@@ -226,9 +254,7 @@ def seed_detail_rows(db):
         ),
     )
     for detail in details:
-        replace_detail_set(
-            db, detail, mapper_version=1, summary_sha256=None, now=STAMP
-        )
+        replace_detail_set(db, detail, mapper_version=1, summary_sha256=None, now=STAMP)
     save_analysis(
         db,
         "act_1",
@@ -256,6 +282,35 @@ def seed_remote_link_rows(db):
         "created_at, provider) VALUES ('event-9', 'external-9', ?, 'intervals')",
         (STAMP,),
     )
+    db.commit()
+
+
+def seed_domain_rows(db):
+    """Add one row to every v15 domain table and retire one gear link."""
+    garmin = {"provider": ProviderId.GARMIN, "mapper_version": 1, "now": STAMP}
+    intervals = {**garmin, "provider": ProviderId.INTERVALS}
+    replace_sleep_periods(
+        db,
+        source_record_id=WELLNESS_SOURCE,
+        periods=[sleep_period(provenance=domain_provenance(context=WATCH_CONTEXT))],
+        **garmin,
+    )
+    replace_categorical_observations(
+        db, source_record_id=WELLNESS_SOURCE, observations=[status()], **garmin
+    )
+    replace_zone_configurations(
+        db,
+        source_record_id=SETTINGS_SOURCE,
+        configurations=[zone_configuration()],
+        **intervals,
+    )
+    replace_gear_items(
+        db, source_record_id=GEAR_SOURCE, items=[gear_item()], **intervals
+    )
+    for links in ([gear_link("i1001"), gear_link("i1002")], [gear_link("i1002")]):
+        replace_gear_activity_links(
+            db, source_record_id=GEAR_SOURCE, links=links, **intervals
+        )
     db.commit()
 
 
@@ -305,13 +360,18 @@ class PrivacyExportProviderTests(ProviderDataFixture):
     def lines(archive, name):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
-    def test_format_version_six_lists_the_provider_detail_and_remote_link_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 6)
-        expected = {*PROVIDER_FILES, *DETAIL_FILES, "remote_links.jsonl"}
+    def test_format_version_seven_lists_provider_detail_domain_and_link_files(self):
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 7)
+        expected = {
+            *PROVIDER_FILES,
+            *DETAIL_FILES,
+            *DOMAIN_FILES,
+            "remote_links.jsonl",
+        }
         self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 6)
+            self.assertEqual(manifest["format_version"], 7)
             self.assertLessEqual(expected, set(manifest["jsonl_files"]))
             self.assertLessEqual(expected, set(archive.namelist()))
 
@@ -407,6 +467,55 @@ class PrivacyExportProviderTests(ProviderDataFixture):
             self.assertEqual(observation[0]["value"], 72.5)
             self.assertEqual(observation[0]["mapper_version"], 1)
 
+    def test_domain_rows_are_exported_with_decoded_details_and_limits(self):
+        seed_domain_rows(self.db)
+        with self.export() as archive:
+            sleep = self.lines(archive, "sleep_periods.jsonl")
+            zones = self.lines(archive, "zone_configurations.jsonl")
+            statuses = self.lines(archive, "categorical_observations.jsonl")
+            gear = self.lines(archive, "gear_items.jsonl")
+            links = self.lines(archive, "gear_activity_links.jsonl")
+        self.assertEqual(sleep[0]["started_at"], "2026-10-19T22:30:00+00:00")
+        self.assertEqual(sleep[0]["details"], {"context": WATCH_CONTEXT.as_details()})
+        self.assertEqual(zones[0]["limits"], [130.0, 145.0, 160.0, 172.0, 192.0])
+        self.assertIsNone(zones[0]["percent_limits"])
+        self.assertEqual(zones[0]["details"], {})
+        self.assertEqual(
+            (statuses[0]["domain"], statuses[0]["code"]),
+            ("training_status", "PRODUCTIVE"),
+        )
+        self.assertEqual(gear[0]["total_activities"], 321)
+        self.assertEqual(
+            [(row["provider_activity_id"], row["state"]) for row in links],
+            [("i1001", "retired"), ("i1002", "active")],
+        )
+
+    def test_merge_retention_and_feedback_sessions_are_exported(self):
+        seed_provider_rows(self.db)
+        self.db.execute(
+            "INSERT INTO activity_sessions(activity_id, primary_provider, "
+            "primary_provider_activity_id, state, merged_into_retained, started_at, "
+            "created_at, updated_at) VALUES ('act_2', ?, 'act-2', 'deleted', 'act_1', "
+            "?, ?, ?)",
+            (PROVIDER, STAMP, STAMP, STAMP),
+        )
+        self.db.execute(
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, "
+            "notes, session_rpe, deviation_reason, created_at, updated_at, provider, "
+            "session_id) VALUES ('act-2', 'Synthetic ride', '2026-10-01', '', 5, '', "
+            "?, ?, ?, 'act_2')",
+            (STAMP, STAMP, PROVIDER),
+        )
+        self.db.commit()
+        with self.export() as archive:
+            sessions = self.lines(archive, "activity_sessions.jsonl")
+            feedback = self.lines(archive, "activity_feedback.jsonl")
+        self.assertEqual(
+            {row["activity_id"]: row["merged_into_retained"] for row in sessions},
+            {"act_1": None, "act_2": "act_1"},
+        )
+        self.assertEqual(feedback[0]["session_id"], "act_2")
+
     def test_empty_provider_tables_export_empty_files(self):
         with self.export() as archive:
             for name in PROVIDER_FILES:
@@ -437,10 +546,12 @@ class PrivacyExportProviderTests(ProviderDataFixture):
                 "created_at",
                 "updated_at",
                 "provider",
+                "session_id",
             },
         )
         self.assertEqual(rows[0]["notes"], "felt good")
         self.assertEqual(rows[0]["provider"], "intervals")
+        self.assertIsNone(rows[0]["session_id"])
 
 
 class SanitizedProviderPayloadTests(unittest.TestCase):
@@ -512,6 +623,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
             set(scope["provider_data"]),
             {
                 "observations",
+                *DOMAIN_TABLES,
                 *DETAIL_TABLES,
                 "activity_records",
                 "activity_sessions",

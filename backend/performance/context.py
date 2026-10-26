@@ -172,6 +172,9 @@ def current_performance_context(
         wellness_rows,
         activities,
         today,
+        garmin_history=None
+        if canonical is None or canonical.garmin is None
+        else canonical.garmin.performance_history,
     )
     activity_performance = activity_validation.activity_performance_validation(
         activities, metrics, comparisons
@@ -186,7 +189,7 @@ def current_performance_context(
             canonical=None if canonical is None else canonical.recovery,
         ),
         "garmin_training_load": garmin_projection.garmin_training_load_projection(
-            garmin, today
+            garmin, today, None if canonical is None else canonical.garmin
         ),
         "training_focus": training_focus(
             snapshot,

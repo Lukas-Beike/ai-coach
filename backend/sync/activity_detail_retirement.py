@@ -231,7 +231,9 @@ def _paired_sets(
     db: Any, record: dict[str, Any], activity_id: str, legacy_sets: Sequence[Any]
 ) -> tuple[str | None, list[tuple[Any, Any]]]:
     """Pair each legacy set with its canonical set, or name why they cannot pair."""
-    stored = {item.detail.kind: item for item in detail_sets_for(db, _INTERVALS, activity_id)}
+    stored = {
+        item.detail.kind: item for item in detail_sets_for(db, _INTERVALS, activity_id)
+    }
     pairs: list[tuple[Any, Any]] = []
     for legacy in legacy_sets:
         current = stored.get(legacy.kind)

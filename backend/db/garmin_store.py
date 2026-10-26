@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Final
 
 from backend.canonical.garmin_payload import (
@@ -36,7 +37,8 @@ from backend.canonical.section_items import (
     unwrapped,
     wrapped,
 )
-from backend.db import canonical_store
+from backend.canonical.vocabulary import ProviderId
+from backend.db import canonical_domain_store, canonical_store
 from backend.db.canonical_store import WriteOutcome
 from backend.observability import sanitized_provider_payload
 
@@ -116,7 +118,9 @@ def prune_section(
     """Delete the stored elements of a section whose record id is not in ``keep``.
 
     With ``start`` and ``end`` (inclusive ISO days) only elements of that window go;
-    an element without a day is then kept. Returns how many rows were deleted.
+    an element without a day is then kept. The canonical domain rows (sleep periods,
+    statuses, zones, gear) projected from a deleted element are retired with it.
+    Returns how many rows were deleted.
     """
     prefix = f"{section}/"
     rows = db.execute(
@@ -138,6 +142,15 @@ def prune_section(
             )
         )
     ]
+    now = datetime.now(UTC).isoformat()
+    for row in rows:
+        if row["id"] in stale:
+            canonical_domain_store.retire_source_rows(
+                db,
+                provider=ProviderId(GARMIN_PROVIDER),
+                source_record_id=str(row["source_record_id"]),
+                now=now,
+            )
     for row_id in stale:
         db.execute("DELETE FROM provider_records WHERE id = ?", (row_id,))
     return len(stale)

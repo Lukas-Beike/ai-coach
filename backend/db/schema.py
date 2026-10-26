@@ -16,6 +16,7 @@ from backend.canonical.vocabulary import (
     ActivityLinkKind,
     ActivityRecordState,
     ActivitySessionState,
+    ProjectionState,
     ProviderRecordState,
 )
 
@@ -198,6 +199,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "created_at",
         "updated_at",
         "provider",
+        "session_id",
     },
     "plan_adjustments": {"id", "payload", "status", "created_at", "applied_at"},
     "coach_action_proposals": {
@@ -346,6 +348,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "local_date",
         "created_at",
         "updated_at",
+        "merged_into_retained",
     },
     "activity_records": {
         "provider",
@@ -480,18 +483,122 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "fetched_at",
         "updated_at",
     },
+    "sleep_periods": {
+        "provider",
+        "started_at",
+        "ended_at",
+        "wake_date",
+        "timezone",
+        "kind",
+        "reported_duration_s",
+        "bounds_method",
+        "source_kind",
+        "recorded_by",
+        "source_record_id",
+        "retrieved_at",
+        "label",
+        "details",
+        "mapper_version",
+        "state",
+        "created_at",
+        "updated_at",
+    },
+    "zone_configurations": {
+        "config_key",
+        "provider",
+        "sport",
+        "metric",
+        "environment",
+        "valid_from",
+        "valid_until",
+        "threshold",
+        "maximum",
+        "resting",
+        "limits",
+        "percent_limits",
+        "percent_basis",
+        "source_kind",
+        "recorded_by",
+        "source_record_id",
+        "retrieved_at",
+        "label",
+        "details",
+        "mapper_version",
+        "state",
+        "created_at",
+        "updated_at",
+    },
+    "categorical_observations": {
+        "natural_key",
+        "domain",
+        "code",
+        "provider",
+        "sport",
+        "observed_on",
+        "observed_at",
+        "source_kind",
+        "recorded_by",
+        "source_record_id",
+        "retrieved_at",
+        "label",
+        "details",
+        "mapper_version",
+        "state",
+        "created_at",
+        "updated_at",
+    },
+    "gear_items": {
+        "provider",
+        "gear_id",
+        "name",
+        "type_label",
+        "activity_type_label",
+        "status_label",
+        "maximum_distance_m",
+        "total_distance_m",
+        "total_activities",
+        "source_kind",
+        "recorded_by",
+        "source_record_id",
+        "retrieved_at",
+        "label",
+        "details",
+        "mapper_version",
+        "state",
+        "created_at",
+        "updated_at",
+    },
+    "gear_activity_links": {
+        "provider",
+        "gear_id",
+        "provider_activity_id",
+        "source_kind",
+        "recorded_by",
+        "source_record_id",
+        "retrieved_at",
+        "label",
+        "mapper_version",
+        "state",
+        "created_at",
+        "updated_at",
+    },
 }
 
 CURRENT_DATABASE_INDEXES = {
+    "idx_activity_feedback_session",
     "idx_activity_records_activity",
     "idx_activity_records_local_date",
     "idx_activity_records_started",
     "idx_activity_sessions_local_date",
     "idx_activity_sessions_merged_into",
+    "idx_categorical_observations_domain_date",
+    "idx_categorical_observations_source",
     "idx_change_history_created_at",
     "idx_change_history_entity",
     "idx_coach_plan_artifacts_conversation",
     "idx_food_database_entries_name",
+    "idx_gear_activity_links_activity",
+    "idx_gear_activity_links_source",
     "idx_nutrition_logs_date",
     "idx_nutrition_products_name",
     "idx_nutrition_products_status",
@@ -504,13 +611,15 @@ CURRENT_DATABASE_INDEXES = {
     "idx_provider_refresh_area",
     "idx_provider_refresh_created_at",
     "idx_remote_links_remote_id",
+    "idx_sleep_periods_source",
+    "idx_sleep_periods_wake_date",
     "idx_sync_job_items_status",
     "idx_sync_jobs_status_available",
     "idx_workout_library_external_id",
 }
 
 
-CURRENT_SCHEMA_VERSION = 14
+CURRENT_SCHEMA_VERSION = 15
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -862,6 +971,135 @@ FOOD_DATABASE_DDL = """
 """
 
 
+# Canonical model extensions (schema version 15). initialize_schema and the
+# schema-version-15 migration execute this same text, ALTER statements included,
+# so new and upgraded databases store identical definitions. Rows keep their
+# provider, source record and mapper version; a reprojection that no longer
+# emits a row retires it (state) instead of deleting it. Zone limits are JSON
+# arrays of ascending upper zone limits, absolute in the metric's canonical unit
+# or as percentages of percent_basis; a local zone configuration has no
+# provider. Open vocabularies and value ranges are validated by
+# backend.canonical before a row is written.
+# activity_feedback.session_id is the session the feedback was written for; a
+# merge never re-points it. merged_into_retained keeps the survivor of a merged
+# session whose deletion had to clear merged_into.
+_PROJECTION_STATES = _sql_in_list(ProjectionState)
+
+CANONICAL_EXTENSIONS_DDL = f"""
+    CREATE TABLE sleep_periods (
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        started_at TEXT NOT NULL,
+        ended_at TEXT NOT NULL,
+        wake_date TEXT NOT NULL CHECK (length(wake_date) = 10),
+        timezone TEXT CHECK (timezone IS NULL OR length(timezone) BETWEEN 1 AND 64),
+        kind TEXT NOT NULL CHECK (length(kind) BETWEEN 1 AND 32),
+        reported_duration_s REAL,
+        bounds_method TEXT CHECK (bounds_method IS NULL OR length(bounds_method) BETWEEN 1 AND 64),
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        source_record_id TEXT NOT NULL CHECK (length(source_record_id) BETWEEN 1 AND 256),
+        retrieved_at TEXT,
+        label TEXT,
+        details TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        mapper_version INTEGER NOT NULL CHECK (mapper_version >= 1),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_PROJECTION_STATES})),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, started_at)
+    );
+    CREATE INDEX idx_sleep_periods_wake_date ON sleep_periods(wake_date);
+    CREATE INDEX idx_sleep_periods_source ON sleep_periods(provider, source_record_id);
+    CREATE TABLE zone_configurations (
+        config_key TEXT PRIMARY KEY CHECK (length(config_key) BETWEEN 1 AND 512),
+        provider TEXT CHECK (provider IS NULL OR length(provider) BETWEEN 1 AND 64),
+        sport TEXT CHECK (sport IS NULL OR length(sport) BETWEEN 1 AND 32),
+        metric TEXT NOT NULL CHECK (length(metric) BETWEEN 1 AND 32),
+        environment TEXT CHECK (environment IS NULL OR length(environment) BETWEEN 1 AND 32),
+        valid_from TEXT,
+        valid_until TEXT,
+        threshold REAL,
+        maximum REAL,
+        resting REAL,
+        limits TEXT CHECK (limits IS NULL OR (json_valid(limits) AND json_type(limits) = 'array')),
+        percent_limits TEXT CHECK (percent_limits IS NULL OR (json_valid(percent_limits) AND json_type(percent_limits) = 'array')),
+        percent_basis TEXT CHECK (percent_basis IS NULL OR length(percent_basis) BETWEEN 1 AND 32),
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        source_record_id TEXT CHECK (source_record_id IS NULL OR length(source_record_id) BETWEEN 1 AND 256),
+        retrieved_at TEXT,
+        label TEXT,
+        details TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        mapper_version INTEGER CHECK (mapper_version IS NULL OR mapper_version >= 1),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_PROJECTION_STATES})),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE categorical_observations (
+        natural_key TEXT PRIMARY KEY CHECK (length(natural_key) BETWEEN 1 AND 512),
+        domain TEXT NOT NULL CHECK (length(domain) BETWEEN 1 AND 64),
+        code TEXT NOT NULL CHECK (length(code) BETWEEN 1 AND 64),
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        sport TEXT CHECK (sport IS NULL OR length(sport) BETWEEN 1 AND 32),
+        observed_on TEXT NOT NULL CHECK (length(observed_on) = 10),
+        observed_at TEXT,
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        source_record_id TEXT NOT NULL CHECK (length(source_record_id) BETWEEN 1 AND 256),
+        retrieved_at TEXT,
+        label TEXT,
+        details TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        mapper_version INTEGER NOT NULL CHECK (mapper_version >= 1),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_PROJECTION_STATES})),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_categorical_observations_domain_date ON categorical_observations(domain, observed_on);
+    CREATE INDEX idx_categorical_observations_source ON categorical_observations(provider, source_record_id);
+    CREATE TABLE gear_items (
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        gear_id TEXT NOT NULL CHECK (length(gear_id) BETWEEN 1 AND 256),
+        name TEXT CHECK (name IS NULL OR length(name) BETWEEN 1 AND 200),
+        type_label TEXT CHECK (type_label IS NULL OR length(type_label) BETWEEN 1 AND 100),
+        activity_type_label TEXT CHECK (activity_type_label IS NULL OR length(activity_type_label) BETWEEN 1 AND 100),
+        status_label TEXT CHECK (status_label IS NULL OR length(status_label) BETWEEN 1 AND 100),
+        maximum_distance_m REAL,
+        total_distance_m REAL,
+        total_activities INTEGER,
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        source_record_id TEXT NOT NULL CHECK (length(source_record_id) BETWEEN 1 AND 256),
+        retrieved_at TEXT,
+        label TEXT,
+        details TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        mapper_version INTEGER NOT NULL CHECK (mapper_version >= 1),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_PROJECTION_STATES})),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, gear_id)
+    );
+    CREATE TABLE gear_activity_links (
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        gear_id TEXT NOT NULL CHECK (length(gear_id) BETWEEN 1 AND 256),
+        provider_activity_id TEXT NOT NULL CHECK (length(provider_activity_id) BETWEEN 1 AND 256),
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        source_record_id TEXT NOT NULL CHECK (length(source_record_id) BETWEEN 1 AND 256),
+        retrieved_at TEXT,
+        label TEXT,
+        mapper_version INTEGER NOT NULL CHECK (mapper_version >= 1),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_PROJECTION_STATES})),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, gear_id, provider_activity_id)
+    );
+    CREATE INDEX idx_gear_activity_links_activity ON gear_activity_links(provider, provider_activity_id);
+    CREATE INDEX idx_gear_activity_links_source ON gear_activity_links(provider, source_record_id);
+    ALTER TABLE activity_feedback ADD COLUMN session_id TEXT REFERENCES activity_sessions(activity_id);
+    CREATE INDEX idx_activity_feedback_session ON activity_feedback(session_id);
+    ALTER TABLE activity_sessions ADD COLUMN merged_into_retained TEXT REFERENCES activity_sessions(activity_id) CHECK (merged_into_retained IS NULL OR state = 'deleted')
+"""
+
+
 def execute_ddl(db: Any, ddl: str) -> None:
     """Run DDL statement by statement inside the caller's transaction.
 
@@ -1199,6 +1437,7 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, REMOTE_LINKS_DDL)
     execute_ddl(db, ACTIVITY_DETAIL_DDL)
     execute_ddl(db, FOOD_DATABASE_DDL)
+    execute_ddl(db, CANONICAL_EXTENSIONS_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

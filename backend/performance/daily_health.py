@@ -1,10 +1,9 @@
 """Daily-health normalization and aggregate projections.
 
-Steps, floors and the total and active energy come from the canonical
-observations when a reader is given (``read_daily_health_by_date``). Resting energy
-has no metric kind, so the resting calories and the projection reference stay on
-the Garmin snapshot; freshness and the read window are sync status and stay there
-too.
+Steps, floors and the total, active and resting energy come from the canonical
+observations when a reader is given (``read_daily_health_by_date``); without one
+they are read from the Garmin snapshot. Freshness and the read windows are sync
+status and stay on the snapshot.
 """
 
 from collections.abc import Iterable, Mapping
@@ -48,6 +47,7 @@ DAILY_HEALTH_KINDS: Mapping[MetricKind, str] = {
     MetricKind.FLOORS: "floors",
     MetricKind.DAILY_ENERGY_TOTAL: "calories",
     MetricKind.DAILY_ENERGY_ACTIVE: "active_kcal",
+    MetricKind.DAILY_ENERGY_RESTING: "resting_kcal",
 }
 
 
@@ -119,13 +119,15 @@ def daily_energy_expenditure(
     current_date: date,
     *,
     measured: Mapping[str, Any] | None = None,
+    measured_history: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return the measured daily calorie components for one local date.
 
     ``measured`` is the day's entry of ``read_daily_health_by_date`` (an empty
-    mapping when the day has none); when given, the total and active energy come
-    from it, otherwise from the Garmin snapshot. The resting calories have no
-    metric kind and stay on the snapshot.
+    mapping when the day has none); when given, the total, active and resting
+    energy come from it, otherwise from the Garmin snapshot. ``measured_history``
+    holds ``read_daily_health_by_date`` for the week before ``current_date``; when
+    given, the projection reads its resting reference from it.
 
     Total expenditure is only reported when the provider supplied a total
     directly; active and resting components are not summed to manufacture a
@@ -146,13 +148,13 @@ def daily_energy_expenditure(
     source = GARMIN_PERFORMANCE_SOURCE
     if measured is not None:
         _measured_values(measured, is_future, values)
-        if values["total_kcal"] is not None or values["active_kcal"] is not None:
+        if any(values[field] is not None for field in values):
             source = str(measured.get("source") or source)
     has_measurement = any(value is not None for value in values.values())
     freshness = _requested_day_freshness(snapshot, requested_date)
     result = {
         **values,
-        **_projected_expenditure(snapshot, values, day, current_date),
+        **_projected_expenditure(snapshot, values, day, current_date, measured_history),
         "source": source if has_measurement else None,
         "measured_date": requested_date if has_measurement else None,
         "freshness": freshness.get("freshness", "unknown"),
@@ -290,29 +292,48 @@ def _complete_read_windows(snapshot: dict[str, Any]) -> list[tuple[date, date]]:
     return windows
 
 
+def _resting_by_date(
+    snapshot: dict[str, Any],
+    measured_history: Mapping[str, Mapping[str, Any]] | None,
+) -> list[tuple[str, Any]]:
+    if measured_history is not None:
+        return [
+            (day, values.get("resting_kcal"))
+            for day, values in measured_history.items()
+        ]
+    return [
+        (
+            record_date,
+            _first_present(record, GARMIN_DAILY_EXPENDITURE_FIELDS["resting_kcal"]),
+        )
+        for record_date, record in performance_recovery.dated_garmin_recovery_records(
+            snapshot.get("daily_stats")
+        )
+    ]
+
+
 def _projection_reference(
-    snapshot: dict[str, Any], current_date: date
+    snapshot: dict[str, Any],
+    current_date: date,
+    measured_history: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[date, float | int] | None:
     """Return the resting calories of the latest complete day within a week.
 
     Records retained from an earlier sync may still hold a day's running value
     (a partial or failed refresh, or a shorter manual window), so a reference
-    must lie inside the window of a fully current daily-stats read.
+    must lie inside the window of a fully current daily-stats read. The values
+    come from ``measured_history`` when given, else from the snapshot.
     """
     read_windows = _complete_read_windows(snapshot)
     if not read_windows:
         return None
     reference: tuple[date, float | int] | None = None
-    for record_date, record in performance_recovery.dated_garmin_recovery_records(
-        snapshot.get("daily_stats")
-    ):
+    for record_date, raw in _resting_by_date(snapshot, measured_history):
         try:
             record_day = date.fromisoformat(record_date)
         except ValueError:
             continue
-        resting = _as_number(
-            _first_present(record, GARMIN_DAILY_EXPENDITURE_FIELDS["resting_kcal"])
-        )
+        resting = _as_number(raw)
         if (
             0 < (current_date - record_day).days <= 7
             and any(start <= record_day <= end for start, end in read_windows)
@@ -329,6 +350,7 @@ def _projected_expenditure(
     values: dict[str, Any],
     day: date | None,
     current_date: date,
+    measured_history: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Derive the full-day total for the running day, never presented as Garmin's.
 
@@ -344,7 +366,7 @@ def _projected_expenditure(
     active = values["active_kcal"]
     if day != current_date or active is None:
         return projection
-    reference = _projection_reference(snapshot, current_date)
+    reference = _projection_reference(snapshot, current_date, measured_history)
     if reference is None:
         return projection
     projected = reference[1] + active
@@ -381,8 +403,12 @@ def _expenditure_values(
 def _measured_values(
     measured: Mapping[str, Any], is_future: bool, values: dict[str, Any]
 ) -> None:
-    """Replace the snapshot's total and active energy by the canonical values."""
-    for field, name in (("total_kcal", "calories"), ("active_kcal", "active_kcal")):
+    """Replace the snapshot's energy components by the canonical values."""
+    for field, name in (
+        ("total_kcal", "calories"),
+        ("active_kcal", "active_kcal"),
+        ("resting_kcal", "resting_kcal"),
+    ):
         value = None if is_future else _as_number(measured.get(name))
         values[field] = value if value is not None and value >= 0 else None
 

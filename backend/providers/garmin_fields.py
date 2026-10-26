@@ -93,6 +93,7 @@ _NESTED_DAILY_FIELDS = (
     (("calories", "burnedResting"), "bmrKilocalories"),
     (("movement", "steps", "value"), "totalSteps"),
     (("movement", "floorsAscended", "value"), "floorsAscended"),
+    (("stress", "avgLevel"), "averageStressLevel"),
 )
 
 

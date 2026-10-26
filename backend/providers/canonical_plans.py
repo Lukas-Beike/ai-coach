@@ -19,14 +19,23 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
 
+from backend.canonical.domain_records import (
+    CategoricalObservation,
+    GearActivityLink,
+    GearItem,
+    SleepPeriod,
+    ZoneConfiguration,
+)
 from backend.canonical.garmin_payload import ITEM_SECTIONS as GARMIN_ITEM_SECTIONS
 from backend.canonical.local_time import local_date, parse_provider_datetime
 from backend.canonical.mapping import MappingResult
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.section_items import (
+    key_of,
     record_id,
     section_of,
     split_section,
+    unwrapped,
     wrapped,
 )
 from backend.canonical.vocabulary import ProviderId
@@ -34,13 +43,19 @@ from backend.providers.garmin_activity_mapping import (
     MAPPER_VERSION as GARMIN_ACTIVITY_VERSION,
 )
 from backend.providers.garmin_activity_mapping import map_garmin_activities
+from backend.providers.garmin_gear_mapping import map_garmin_gear
 from backend.providers.garmin_health_mapping import (
     GARMIN_HEALTH_SECTION_NAMES,
+    GARMIN_PERFORMANCE_HISTORY_SECTION,
     map_garmin_health,
 )
 from backend.providers.garmin_health_mapping import (
     MAPPER_VERSION as GARMIN_HEALTH_VERSION,
 )
+from backend.providers.garmin_status_mapping import (
+    STATUS_SECTIONS as GARMIN_STATUS_SECTIONS,
+)
+from backend.providers.garmin_status_mapping import map_garmin_status_codes
 from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
 from backend.providers.intervals_activity_mapping import (
     MAPPER_VERSION as INTERVALS_ACTIVITY_VERSION,
@@ -53,6 +68,10 @@ from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
+from backend.providers.intervals_zone_mapping import (
+    map_intervals_zone_configurations,
+)
+from backend.providers.sleep_period_mapping import map_sleep_periods
 from backend.providers.snapshot_projection import (
     intervals_snapshot_is_stripped,
     stored_retrieved_at,
@@ -104,6 +123,8 @@ GARMIN_BODY_BATTERY_SECTION: Final = "body_battery"
 GARMIN_MORNING_BATTERY_KEY: Final = "morning_body_battery"
 GARMIN_MORNING_ATTEMPTED_AT_KEY: Final = "attempted_at"
 GARMIN_MORNING_ERROR_KEY: Final = "error"
+GARMIN_SLEEP_SECTION: Final = "sleep"
+GARMIN_GEAR_SECTION: Final = "gear"
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,11 +156,47 @@ class ActivityItem:
 class ObservationItem:
     observation: Observation
     mapper_version: int
+    # A fill-only value never replaces a stored value of another source record:
+    # the accumulated Garmin performance history yields to dedicated sections.
+    fill_only: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DomainBatch:
+    """The sleep, status, zone and gear rows one raw provider record projects to.
+
+    Writing a batch replaces every row of ``source_record_id``: rows it no longer
+    holds are retired. The records' provenance names the same source record id.
+    A producer emits a batch, empty when nothing maps, for every raw record of a
+    kind that projects domain rows, so a corrected record retires its old rows.
+    """
+
+    source_record_id: str
+    mapper_version: int
+    sleep_periods: tuple[SleepPeriod, ...] = ()
+    categorical: tuple[CategoricalObservation, ...] = ()
+    zones: tuple[ZoneConfiguration, ...] = ()
+    gear_items: tuple[GearItem, ...] = ()
+    gear_links: tuple[GearActivityLink, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not (
+            self.sleep_periods
+            or self.categorical
+            or self.zones
+            or self.gear_items
+            or self.gear_links
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class IngestPlan:
-    """Everything one fetched payload contributes to the canonical tables."""
+    """Everything one fetched payload contributes to the canonical tables.
+
+    ``domain_batches`` hold one batch per raw record that projects to domain rows;
+    each batch's source record is among ``raw_records`` of an ingest plan.
+    """
 
     provider: ProviderId
     raw_records: tuple[RawRecord, ...] = ()
@@ -147,6 +204,7 @@ class IngestPlan:
     observations: tuple[ObservationItem, ...] = ()
     present_activity_ids: frozenset[str] = field(default_factory=frozenset)
     skipped_invalid: int = 0
+    domain_batches: tuple[DomainBatch, ...] = ()
 
 
 def intervals_ingest_plan(
@@ -165,6 +223,7 @@ def intervals_ingest_plan(
         zone=zone,
     )
     observations: list[ObservationItem] = []
+    batches: list[DomainBatch] = []
     wellness_rows = raw.get("wellness")
     if isinstance(wellness_rows, list):
         valid_rows: list[Any] = []
@@ -176,6 +235,9 @@ def intervals_ingest_plan(
             valid_rows.append(row)
             raw_records.append(
                 RawRecord(WELLNESS_RECORD_KIND, row_id, row, INTERVALS_WELLNESS_VERSION)
+            )
+            batches.append(
+                _wellness_batch(row, row_id, zone=zone, retrieved_at=retrieved_at)
             )
         wellness = map_intervals_wellness(valid_rows, retrieved_at=retrieved_at)
         observations.extend(
@@ -201,6 +263,7 @@ def intervals_ingest_plan(
             ObservationItem(observation, INTERVALS_WELLNESS_VERSION)
             for observation in thresholds.records
         )
+        batches.append(_athlete_batch(athlete, retrieved_at=retrieved_at))
     elif athlete is not None:
         skipped += 1
     return IngestPlan(
@@ -210,6 +273,76 @@ def intervals_ingest_plan(
         observations=tuple(observations),
         present_activity_ids=frozenset(present),
         skipped_invalid=skipped,
+        domain_batches=tuple(batches),
+    )
+
+
+def _wellness_batch(
+    row: Mapping[str, Any], row_id: str, *, zone: tzinfo, retrieved_at: datetime
+) -> DomainBatch:
+    """Return the domain rows of one Intervals.icu wellness row."""
+    return DomainBatch(
+        row_id,
+        INTERVALS_WELLNESS_VERSION,
+        sleep_periods=map_sleep_periods(
+            row,
+            provider=ProviderId.INTERVALS,
+            source_record_id=row_id,
+            retrieved_at=retrieved_at,
+            zone=zone,
+        ),
+    )
+
+
+def _athlete_batch(
+    athlete: Mapping[str, Any], *, retrieved_at: datetime
+) -> DomainBatch:
+    """Return the zone configurations of the Intervals.icu athlete record."""
+    return DomainBatch(
+        ATHLETE_RECORD_ID,
+        INTERVALS_WELLNESS_VERSION,
+        zones=map_intervals_zone_configurations(
+            athlete, source_record_id=ATHLETE_RECORD_ID, retrieved_at=retrieved_at
+        ),
+    )
+
+
+def _garmin_batch(
+    section: str,
+    source_id: str,
+    element: object,
+    *,
+    zone: tzinfo,
+    retrieved_at: datetime,
+) -> DomainBatch | None:
+    """Return the domain rows of one Garmin section element, or None for a section without any."""
+    if section in GARMIN_STATUS_SECTIONS:
+        return DomainBatch(
+            source_id,
+            GARMIN_HEALTH_VERSION,
+            categorical=map_garmin_status_codes(
+                section, element, source_record_id=source_id, retrieved_at=retrieved_at
+            ),
+        )
+    if section == GARMIN_GEAR_SECTION:
+        items, links = map_garmin_gear(
+            element, source_record_id=source_id, retrieved_at=retrieved_at
+        )
+        return DomainBatch(
+            source_id, GARMIN_HEALTH_VERSION, gear_items=items, gear_links=links
+        )
+    if section != GARMIN_SLEEP_SECTION:
+        return None
+    return DomainBatch(
+        source_id,
+        GARMIN_HEALTH_VERSION,
+        sleep_periods=map_sleep_periods(
+            element,
+            provider=ProviderId.GARMIN,
+            source_record_id=source_id,
+            retrieved_at=retrieved_at,
+            zone=zone,
+        ),
     )
 
 
@@ -286,6 +419,17 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
             retrieved_at=activities_at,
         )
     raw_records.extend(_garmin_section_records(payload, zone=zone))
+    batches = tuple(
+        batch
+        for raw in raw_records
+        if raw.record_kind == HEALTH_RECORD_KIND
+        and (
+            batch := _stored_garmin_batch(
+                raw.source_record_id, raw.payload, zone=zone, fetched=raw.retrieved_at
+            )
+        )
+        is not None
+    )
     observations: list[ObservationItem] = []
     for name in GARMIN_HEALTH_SECTION_NAMES:
         section_at = garmin_section_retrieved_at(payload, name, zone=zone)
@@ -304,6 +448,24 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         observations=tuple(observations),
         present_activity_ids=frozenset(present),
         skipped_invalid=skipped,
+        domain_batches=batches,
+    )
+
+
+def _stored_garmin_batch(
+    source_id: str,
+    payload: Mapping[str, Any],
+    *,
+    zone: tzinfo,
+    fetched: datetime | None,
+) -> DomainBatch | None:
+    """Return the domain rows of one stored Garmin health element, as its raw record holds it."""
+    section = section_of(source_id)
+    item = unwrapped(section, key_of(source_id), payload)
+    if fetched is None or item is None:
+        return None
+    return _garmin_batch(
+        section, source_id, item.value, zone=zone, retrieved_at=fetched
     )
 
 
@@ -318,7 +480,11 @@ def _garmin_section_observations(
             wrapped(section, item), zone=zone, retrieved_at=retrieved_at
         )
         for observation in health.records:
-            yield ObservationItem(observation, GARMIN_HEALTH_VERSION)
+            yield ObservationItem(
+                observation,
+                GARMIN_HEALTH_VERSION,
+                fill_only=section == GARMIN_PERFORMANCE_HISTORY_SECTION,
+            )
 
 
 def _garmin_section_records(
@@ -546,6 +712,14 @@ def reprojection_plan(raw_row: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan
                 ObservationItem(observation, INTERVALS_WELLNESS_VERSION)
                 for observation in wellness.records
             ),
+            domain_batches=(
+                _wellness_batch(
+                    payload,
+                    str(raw_row["source_record_id"]),
+                    zone=zone,
+                    retrieved_at=fetched,
+                ),
+            ),
         )
     if kind == ATHLETE_RECORD_KIND:
         thresholds = map_intervals_athlete_thresholds(
@@ -557,6 +731,7 @@ def reprojection_plan(raw_row: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan
                 ObservationItem(observation, INTERVALS_WELLNESS_VERSION)
                 for observation in thresholds.records
             ),
+            domain_batches=(_athlete_batch(payload, retrieved_at=fetched),),
         )
     if kind == WAHOO_POWER_ZONES_RECORD_KIND:
         zones = map_wahoo_power_zones([payload], zone=zone, retrieved_at=fetched)
@@ -636,22 +811,30 @@ def _reprojected_health(
 ) -> IngestPlan:
     """Re-map one stored health element, which holds the exact mapper input.
 
-    A section no health mapper reads (such as ``activity_matches``) projects to nothing.
+    A section neither the health mapper nor a domain mapper reads (such as
+    ``activity_matches``) projects to nothing; ``gear`` projects domain rows only.
     """
     section = section_of(section_name)
     mapped = GARMIN_HEALTH_SECTION_NAMES + WEIGHT_SECTIONS
     sections = {key: value for key, value in payload.items() if key in mapped}
+    batch = _stored_garmin_batch(section_name, payload, zone=zone, fetched=fetched)
+    batches = () if batch is None else (batch,)
     if section not in mapped:
-        return IngestPlan(provider=provider)
+        return IngestPlan(provider=provider, domain_batches=batches)
     if not sections:
         return IngestPlan(provider=provider, skipped_invalid=1)
     health = map_garmin_health(sections, zone=zone, retrieved_at=fetched)
     return IngestPlan(
         provider=provider,
         observations=tuple(
-            ObservationItem(observation, GARMIN_HEALTH_VERSION)
+            ObservationItem(
+                observation,
+                GARMIN_HEALTH_VERSION,
+                fill_only=section == GARMIN_PERFORMANCE_HISTORY_SECTION,
+            )
             for observation in health.records
         ),
+        domain_batches=batches,
     )
 
 
