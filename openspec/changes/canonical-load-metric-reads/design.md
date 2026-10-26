@@ -1,8 +1,8 @@
 ## Context
 
-Epic A (#1407) moves every application read onto the canonical model. #1410 (activity detail) and #1411 (recovery) are merged; #1412 covers the load-side metrics that still read snapshot carrier rows. The wellness mapper (`backend/providers/intervals_wellness_mapping.py`, version 6) already produces `MetricKind.EFTP` (sport-scoped, from wellness `sportInfo` and from athlete sport settings) and `MetricKind.FORM` (reported `tsb`/`form`/`freshness`, else a DERIVED `ctl - atl`). Canonical wellness rows (`canonical_sections.wellness_rows`) only overlay observations onto the carrier rows, which therefore keep serving `tsb`, `rampRate` and `sportInfo`. #1411 set the precedent used here: values come from observations only and are absent when no canonical inputs exist.
+Epic A (#1407) moves every application read onto the canonical model. #1410 (activity detail) and #1411 (recovery) are merged; #1412 covers the load-side metrics that still read snapshot carrier rows. The wellness mapper (`backend/providers/intervals_wellness_mapping.py`, version 7) already produces `MetricKind.EFTP` (sport-scoped, from wellness `sportInfo` and from athlete sport settings) and `MetricKind.FORM` (reported `tsb`/`form`/`freshness`, else a DERIVED `ctl - atl` that, since Epic B, also names its method `ctl_minus_atl`, method version 1 and an input fingerprint). Canonical wellness rows (`canonical_sections.wellness_rows`) only overlay observations onto the carrier rows, which therefore keep serving `tsb`, `rampRate` and `sportInfo`. #1411 set the precedent used here: values come from observations only and are absent when no canonical inputs exist.
 
-Inspected revision: origin/develop `6eab8617d`. Epic B (PR #1464) is unmerged and owns the wellness mapper version 7.
+Inspected revision: origin/develop `cec8e9d2` (Epic B, PR #1464, merged; wellness mapper version 7). Epic B changed the stored FORM metadata only (method, method version, input fingerprint on the derived value; value and DERIVED source kind unchanged) and added the subjective ratings, sleep periods and zone configurations; it did not change the EFTP mapping, sport classification, first-versus-last setting handling or athlete-record keys.
 
 ## Goals / Non-Goals
 
@@ -68,7 +68,7 @@ The canonical series spans all stored wellness days, while the compact snapshot 
 
 ### D6 Known deviations (documented, not fixed here)
 
-The wellness mapper is out of scope (Epic B owns version 7). The unchanged mapper therefore differs from the legacy readers in these cases. They are recorded in the spec's detailed contract as limits, tracked by a follow-up issue after #1464, and pinned by tests that name them:
+The wellness mapper is out of scope (this change keeps Epic B's version 7). The mapper therefore differs from the legacy readers in these cases. They are recorded in the spec's detailed contract as limits, tracked by a follow-up issue, and pinned by tests that name them:
 
 - Two athlete sport settings that classify as ride: their observations share one natural key (`provider|eftp|ride|athlete|day`), so the store keeps the last one written. The legacy reader took the first matching setting. Wellness `sportInfo` is unaffected (`_map_sport_info` keeps the first entry per sport).
 - Classification uses `types[0]` (or `type` for `sportInfo`). A ride setting whose first `types` entry is not ride-like, and `sportInfo` entries identified only by `sport` or `sport_type`, yield no observation. Legacy matched any `types` entry and all three alias keys. The real Intervals.icu shape (`tests/fixtures/providers/intervals/wellness.json`) carries `types` and `type`, so the aliases occur only in unit-test fixtures (`tests/test_performance_eftp.py`).
@@ -77,7 +77,7 @@ The wellness mapper is out of scope (Epic B owns version 7). The unchanged mappe
 
 ### D7 Removals
 
-Removed when no caller remains: `wellness.wellness_form_value` (with its `tsb`/`form`/`freshness` and `ctl - atl` logic), the wellness-row branch of `eftp.py`, the `rampRate` and form reads in `load_context.py`, and the snapshot eFTP reads in `current_metrics.py` (`_intervals_eftp_value` stays only if another caller needs it). `tests/architecture_registry.py` is updated for the changed `backend.performance.eftp` functions. The `canonical_sections.py` docstring is corrected once PR #1464 settles the surrounding text.
+Removed when no caller remains: `wellness.wellness_form_value` (with its `tsb`/`form`/`freshness` and `ctl - atl` logic), the wellness-row branch of `eftp.py`, the `rampRate` and form reads in `load_context.py`, and the snapshot eFTP reads in `current_metrics.py` (`_intervals_eftp_value` stays only if another caller needs it). `tests/architecture_registry.py` is updated for the changed `backend.performance.eftp` functions. The `canonical_sections.py` docstring keeps Epic B's subjective-ratings text and adds the sentence that form, ramp rate and eFTP no longer read the carrier fields.
 
 ### D8 Tests
 
@@ -91,15 +91,15 @@ Parity tests compare the legacy readers (golden values from the existing charact
 
 - [Values only present in carrier fields disappear] -> Intended by the cutover (strict canonical, as #1411). The compact-snapshot refetch story is #1416.
 - [Ramp rate differs from Intervals.icu's] -> Athlete decision; labelled `Intervals.icu CTL (berechnet)` and documented in the spec.
-- [Two ride settings show the last setting's eFTP] -> Known deviation (D6); follow-up issue after #1464, not fixed here to avoid a second wellness mapper bump.
-- [Merge conflicts with Epic B] -> Both touch `canonical_sections.py`, `comparisons.py`, `body.py` and `chart_history.py`. This change adds no mapper version, so only textual rebasing is needed. The docstring correction waits for #1464.
+- [Two ride settings show the last setting's eFTP] -> Known deviation (D6); follow-up issue, not fixed here because it needs a wellness mapper bump (next version 8).
+- [Merge conflicts with Epic B] -> Resolved by rebasing onto the merged PR #1464; `canonical_sections.py` keeps Epic B's subjective-ratings text with this change's sentence added. This change adds no mapper version.
 - [Read count in unit-of-work tests changes] -> Two additional kinds are read once each; the parity tests assert the new count.
 
 ## Migration Plan
 
-- No schema change, no mapper bump, no reprojection. Stored version 6 (or 7 after #1464) observations are read as they are.
+- No schema change, no mapper bump, no reprojection. Stored version 7 observations are read as they are.
 - Rollback: reverting the change restores the snapshot readers; no data is written or removed.
 
 ## Open Questions
 
-None. The duplicate-ride-setting and unclassified `sportInfo` follow-up is tracked as an issue after #1464.
+None. The duplicate-ride-setting and unclassified `sportInfo` follow-up is tracked as an issue (it needs the next wellness mapper version).

@@ -212,20 +212,14 @@ def _normalized_load(load: dict[str, Any]) -> dict[str, Any]:
 
 
 # Form, ramp rate and eFTP come from canonical observations only (#1412), so the
-# path without canonical inputs has none of them. The tests below check the
-# canonical values; the legacy-versus-canonical comparisons leave them out.
+# path without canonical inputs has none of them. ``_assert_load_metric_split`` and
+# the load tests check the canonical values; the legacy-versus-canonical
+# comparisons leave them out.
 _LOAD_ONLY_KEYS = ("tsb", "rampRate", "rampRate_source")
 
 
 def _without(load: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
     return {key: value for key, value in load.items() if key not in keys}
-
-
-# Form, ramp rate and eFTP come from canonical observations only (#1412), so the
-# path without canonical inputs has none of them; ``_assert_load_metric_split``
-# and ``test_form_and_ramp_rate_come_from_canonical_observations`` check them.
-_LOAD_ONLY_KEYS = ("tsb", "rampRate", "rampRate_source")
-_LOAD_ONLY_COMPARISONS = ("form_tsb", "cycling_eftp_30d")
 
 
 def _load_pair(

@@ -15,8 +15,8 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
 
-from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, Sport
+from backend.canonical.records import FORM_METHOD, FORM_METHOD_VERSION, Observation
+from backend.canonical.vocabulary import MetricKind, SourceKind, Sport
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     read_performance_inputs,
@@ -133,6 +133,21 @@ class FormTests(unittest.TestCase):
             with self.subTest(name):
                 load = _context(_snapshot([row]))["current_load"]
                 self.assertEqual(load["tsb"], expected)
+
+    def test_a_derived_form_keeps_its_value_and_kind_with_its_method_metadata(
+        self,
+    ) -> None:
+        snapshot = _snapshot([_row(_day(), ctl=52.1, atl=60.43)])
+        (form,) = [
+            record
+            for record in _observations(snapshot)
+            if record.kind is MetricKind.FORM
+        ]
+        self.assertIs(form.provenance.source_kind, SourceKind.DERIVED)
+        self.assertEqual(form.method, FORM_METHOD)
+        self.assertEqual(form.method_version, FORM_METHOD_VERSION)
+        self.assertIsNotNone(form.input_fingerprint)
+        self.assertEqual(_context(snapshot)["current_load"]["tsb"], form.value.value)
 
     def test_the_carrier_form_is_never_read(self) -> None:
         mapped = _snapshot([_row(_day(), ctl=50, atl=60)])

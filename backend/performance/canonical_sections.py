@@ -14,16 +14,15 @@ where the values come from:
   canonical field (``restingHR``, ``hrv``, ``sleepSecs``, ``ctl`` ...).
 
 The athlete's Intervals.icu ratings ``fatigue``/``soreness``/``stress``/``mood``
-are rebuilt from their SUBJECTIVE_* observations. Wellness fields without a
-canonical observation (``tsb``, ``rampRate`` and the ``sportInfo`` eFTP) are not
-rebuilt. They still come from the snapshot's wellness rows when the
-snapshot holds them, and are absent when it does not. Form, ramp rate and the
-cycling eFTP no longer read those carrier fields: they come from the form and
-eFTP day series (``wellness_day_values``) and the derived ramp rate of
-``backend.performance.canonical_inputs``. The snapshot rows act only as
-the carrier of these fields: a canonical observation always wins over a snapshot
-value of the same field, and a snapshot without wellness rows yields rows from
-observations alone.
+are rebuilt from their SUBJECTIVE_* observations. The snapshot's wellness rows act
+only as a carrier of the fields that have no row observation (``tsb``,
+``rampRate`` and ``sportInfo``): the rows pass them through, and they are absent
+when the snapshot holds none. Form, ramp rate and the cycling eFTP do not read
+them; they come from the form and eFTP day series (``wellness_day_values``) and
+the derived ramp rate of ``backend.performance.canonical_inputs``. Only the other
+``sportInfo`` readers (FTP, LTHR and VO2max fallbacks, trends) use the carrier.
+A canonical observation always wins over a snapshot value of the same field, and
+a snapshot without wellness rows yields rows from observations alone.
 
 The day window is anchored on observation data, never on a snapshot section: the
 latest wellness day is the latest day of any wellness row or observation, and
