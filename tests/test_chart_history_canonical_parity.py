@@ -120,7 +120,7 @@ class ChartParityTests(unittest.TestCase):
         for item in canonical.values():
             self.assertEqual(item["fetched_at"], GARMIN["synced_at"])
 
-    def test_a_cached_stale_chart_keeps_its_status_and_fetch_time(self) -> None:
+    def test_a_cached_chart_keeps_its_status_and_takes_the_sync_time(self) -> None:
         cached = {
             "running_tolerance": {
                 "status": "stale",
@@ -128,16 +128,17 @@ class ChartParityTests(unittest.TestCase):
                 "points": [],
             }
         }
+        sections = {"synced_at": GARMIN["synced_at"], "provider_metrics": cached}
         canonical = chart_history._provider_metrics(
-            {"synced_at": GARMIN["synced_at"], "provider_metrics": cached},
-            START,
-            TODAY,
-            self.canonical(),
+            sections, START, TODAY, self.canonical()
         )
-        item = canonical["running_tolerance"]
-        self.assertEqual(
-            (item["status"], item["fetched_at"]), ("stale", "2026-10-05T06:00:00Z")
+        legacy = chart_history._provider_metrics(
+            {**GARMIN, "provider_metrics": cached}, START, TODAY
         )
+        for metrics in (canonical, legacy):
+            item = metrics["running_tolerance"]
+            self.assertEqual(item["status"], "stale")
+            self.assertEqual(item["fetched_at"], GARMIN["synced_at"])
         self.assertEqual(
             shown(canonical)["running_tolerance"], [(day(3), 72), (day(1), 0)]
         )
