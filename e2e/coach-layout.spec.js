@@ -12,6 +12,8 @@ async function openCoachWithScrollableChat(page) {
     spacer.style.height = "2400px";
     document.querySelector("#messages").append(spacer);
   });
+  // Let scroll anchoring settle before the test measures and changes the page position.
+  await nextFrames(page);
 }
 
 async function nextFrames(page) {
