@@ -221,8 +221,9 @@ class SurvivorDeletedAliasTests(DuplicateCase):
     def test_no_session_is_left_merged_into_a_deleted_session(self) -> None:
         # Known defect, not accepted behavior: canonical_store._delete_activity
         # tombstones the survivor without re-pointing the aliases merged into it.
-        # Its fix edits backend/db/canonical_store.py and waits for the Epic B
-        # change (PR #1464, schema v15); see the follow-up in the #1414 report.
+        # Epic B (PR #1464) keeps a deleted alias's survivor in merged_into_retained,
+        # but still does not re-point aliases of a deleted survivor. The fix edits
+        # backend/db/canonical_store.py and is a separate follow-up to #1414.
         dangling = self.query(
             "SELECT alias.activity_id FROM activity_sessions AS alias "
             "JOIN activity_sessions AS target ON target.activity_id = alias.merged_into "
