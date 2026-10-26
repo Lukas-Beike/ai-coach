@@ -15,7 +15,13 @@ _WAITING_STATUSES = frozenset({"approval_required", "cancelled"})
 # Others may also write untracked state (plan constraints, tombstones, sync
 # flags), so their turns are listed without a turn undo.
 _FULLY_TRACKED_TOOLS = frozenset(
-    {"update_profile", "save_competition", "manage_training_templates"}
+    {
+        "update_profile",
+        "save_competition",
+        "manage_training_templates",
+        "save_activity_feedback",
+        "delete_activity_feedback",
+    }
 )
 
 

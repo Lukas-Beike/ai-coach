@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any
 
@@ -21,18 +22,32 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 
 def garmin_history_average(
-    snapshot: dict[str, Any], key: str, days: int, end_date: date
+    snapshot: dict[str, Any],
+    key: str,
+    days: int,
+    end_date: date,
+    history: Mapping[str, Mapping[date, float]] | None = None,
 ) -> float | None:
-    # Remaining snapshot read: the accumulated Garmin performance history has no
-    # observation series with equal history.
+    """Average a Garmin metric over ``days``.
+
+    ``history`` is the canonical per-day history of each metric key; without it
+    the snapshot's accumulated performance history is read.
+    """
     cutoff = end_date - timedelta(days=days - 1)
+    if history is not None:
+        numbers = [
+            float(value)
+            for day, value in history.get(key, {}).items()
+            if cutoff <= day <= end_date
+        ]
+        return round(sum(numbers) / len(numbers), 2) if numbers else None
     values: list[float] = []
-    history = (
+    rows = (
         snapshot.get("performance_history")
         if isinstance(snapshot.get("performance_history"), list)
         else []
     )
-    for item in history:
+    for item in rows:
         if not isinstance(item, dict):
             continue
         try:

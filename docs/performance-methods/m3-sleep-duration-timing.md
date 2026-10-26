@@ -79,9 +79,17 @@ declares lighting-industry funding.
 - Current `sleep-regularity-v1` still computes medians and per-night
   deviations from any number of earlier intervals and only marks the status
   `insufficient_data` (`personal_recovery.py:384-403`).
-- Sleep duration comes from canonical observations (#1411); timing still walks
-  raw provider payloads for start/end fields until canonical sleep periods
-  exist (#1419).
+- Sleep duration comes from canonical observations (#1411). Once the canonical
+  tables serve reads, timing reads canonical sleep periods (#1419); before that
+  it walks the raw provider rows. Both read the same intervals
+  (`backend/canonical/sleep_bounds.py`) with the same field precedence, keep
+  providers and field pairs apart, date each interval by its end in the profile
+  zone and keep the latest interval of a day; parity is pinned in
+  `tests/test_sleep_regularity_canonical_parity.py`.
+- Coverage limits: only intervals with both a start and an end field are read;
+  Garmin's main daily sleep is stored as NIGHT and every other interval as
+  UNKNOWN, but both count, as in v1. Naps are not collected. A night whose
+  provider row was never stored is missing, never estimated.
 
 ## Minimum data and stop rules
 
@@ -133,7 +141,6 @@ declares lighting-industry funding.
 ## Open points
 
 - Rename "sleep deficit" and the regularity label in UI and Coach (#1426).
-- Move timing inputs to canonical sleep periods with parity tests (#1419).
-- Decide whether naps are recorded compatibly enough to be added to duration.
+- Naps are out of scope for the canonical model (athlete decision 2026-10-25).
 - SRI stays out of scope until a full sleep/wake series exists; then name the
   calculator and settings.

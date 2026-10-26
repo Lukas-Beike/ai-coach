@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from statistics import median
 from typing import Any
@@ -164,13 +164,21 @@ def _garmin_measurements(
 
 
 def _garmin_ftp(
-    garmin: dict[str, Any], today: date
+    garmin: dict[str, Any],
+    today: date,
+    canonical: Mapping[date, float] | None = None,
 ) -> dict[date, tuple[float, str, Any]]:
-    # Remaining snapshot read: the Garmin FTP history and performance history are
-    # accumulated across syncs and have no observation series with equal history.
+    """Garmin's cycling FTP per day: the canonical history when given, else the
+    snapshot's FTP history, accumulated performance history and current FTP."""
     result: dict[date, tuple[float, str, Any]] = {}
     synced_at = _sync_timestamp(garmin, "cycling_ftp")
     history_synced_at = _sync_timestamp(garmin, "cycling_ftp_history")
+    if canonical is not None:
+        return {
+            day: (float(value), day.isoformat(), history_synced_at)
+            for day, value in canonical.items()
+            if day <= today
+        }
     for row in garmin_metric_history.ftp_points(
         garmin.get("cycling_ftp_history"),
         start=today - timedelta(days=89),
@@ -436,6 +444,7 @@ def body_history(
     canonical: CanonicalBodyInputs | None = None,
     wellness_rows: Sequence[dict[str, Any]] | None = None,
     activity_rows: Sequence[dict[str, Any]] | None = None,
+    garmin_ftp: Mapping[date, float] | None = None,
 ) -> dict[str, Any]:
     """Return API-ready 14d/12w charts under performance.history.body.
 
@@ -493,7 +502,7 @@ def body_history(
                 snapshot.get("synced_at"),
             )
     ftp: dict[ProviderId, dict[date, tuple[float, str, Any]]] = {
-        ProviderId.GARMIN: _garmin_ftp(garmin, today),
+        ProviderId.GARMIN: _garmin_ftp(garmin, today, garmin_ftp),
         ProviderId.INTERVALS: intervals_ftp,
     }
     windows: dict[str, Any] = {}

@@ -15,10 +15,13 @@ as ``"1,200"`` are rejected, as the readers read them.
 
 Wellness rows
     ``id`` is the ISO calendar date (``YYYY-MM-DD``) and is required. Each
-    field listed in ``_WELLNESS_FIELDS`` yields one observation. Every other
-    key, including ``rampRate``, ``fatigue`` and the unlisted wellness keys, is
-    ignored without an issue: most wellness keys are deliberately unmapped, so
-    reporting each one would only add noise.
+    field listed in ``_WELLNESS_FIELDS`` yields one observation. The athlete's
+    own ratings ``fatigue``, ``soreness``, ``stress`` and ``mood`` (1 to 4) become
+    SUBJECTIVE_* observations recorded MANUAL: provider-reported, separate from
+    local check-ins and from Garmin's physiological STRESS. Every other key,
+    including ``rampRate`` and the unlisted wellness keys, is ignored without an
+    issue: most wellness keys are deliberately unmapped, so reporting each one
+    would only add noise.
 
     FORM is the reported ``tsb``, ``form`` or ``freshness``. A row without one
     stores its mapped CTL minus its mapped ATL, rounded to two decimals, as a
@@ -90,7 +93,14 @@ from backend.canonical.mapping import (
     MappingResult,
     coerce_comma_decimal_number,
 )
-from backend.canonical.records import MetricValue, Observation, Provenance
+from backend.canonical.records import (
+    FORM_METHOD,
+    FORM_METHOD_VERSION,
+    MetricValue,
+    Observation,
+    Provenance,
+    fingerprint_inputs,
+)
 from backend.canonical.sports import classify_sport_text
 from backend.canonical.validation import METRIC_BOUNDS, require_aware_datetime
 from backend.canonical.vocabulary import (
@@ -103,9 +113,11 @@ from backend.canonical.vocabulary import (
 
 # Version 4: the athlete-profile weight has its own observation key, so it no
 # longer overwrites the wellness weight of the same day. Version 6: wellness rows
-# add FORM and the sportInfo EFTP; sport settings add EFTP. Re-projection
+# add FORM and the sportInfo EFTP; sport settings add EFTP. Version 7: wellness
+# rows also project canonical sleep periods and the subjective ratings, and the
+# athlete record its zone configurations. Re-projection
 # rewrites rows written at older versions.
-MAPPER_VERSION: Final = 6
+MAPPER_VERSION: Final = 7
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
@@ -149,6 +161,13 @@ _WELLNESS_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
     (MetricKind.ATL, ("atl", "atlLoad")),
 )
 
+# Ratings the athlete entered in Intervals.icu.
+_SUBJECTIVE_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
+    (MetricKind.SUBJECTIVE_FATIGUE, ("fatigue",)),
+    (MetricKind.SUBJECTIVE_SORENESS, ("soreness",)),
+    (MetricKind.SUBJECTIVE_STRESS, ("stress",)),
+    (MetricKind.SUBJECTIVE_MOOD, ("mood",)),
+)
 _FORM_ALIASES: Final = ("tsb", "form", "freshness")
 _SPORT_INFO_KEYS: Final = ("sport_info", "sportInfo")
 _MMP_MODEL_KEY: Final = "mmp_model"
@@ -263,6 +282,12 @@ def _map_wellness_row(
     first = len(collector.records)
     for kind, aliases in _WELLNESS_FIELDS:
         _add_field(collector, scope, row, kind, aliases)
+    manual = replace(
+        scope,
+        provenance=replace(scope.provenance, recorded_by=RecordingOrigin.MANUAL),
+    )
+    for kind, aliases in _SUBJECTIVE_FIELDS:
+        _add_field(collector, manual, row, kind, aliases)
     _add_form(collector, scope, row, collector.records[first:])
     _map_sport_info(row, scope, collector)
 
@@ -293,6 +318,11 @@ def _add_form(
             observed_on=scope.observed_on,
             observed_at=None,
             provenance=replace(scope.provenance, source_kind=SourceKind.DERIVED),
+            method=FORM_METHOD,
+            method_version=FORM_METHOD_VERSION,
+            input_fingerprint=fingerprint_inputs(
+                {"ctl": loads[MetricKind.CTL], "atl": loads[MetricKind.ATL]}
+            ),
         )
     )
 

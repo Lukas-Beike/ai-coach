@@ -50,6 +50,7 @@ provider-keyed.
 | --- | --- | --- | --- |
 | GET | `/api/plan`, `/api/library`, `/api/weather` | Planning, library and weather projections | Auth |
 | GET | `/api/performance`, `/api/profile`, `/api/feedback`, `/api/context-preview` | Athlete and performance projections | Auth |
+| GET | `/api/zones` | Local and provider zone configurations | Auth |
 | GET | `/api/settings/activity-detail-floor` | Activity detail prefetch floor | Auth |
 | GET | `/api/activities`, `/api/activities/{id}` | Activity list and detail | Auth |
 | GET | `/api/sync/status`, `/api/sync/jobs/{id}` | Synchronization status and job result | Auth |
@@ -68,7 +69,7 @@ provider-keyed.
 | POST | `/api/chat`, `/api/chat/stream`, `/api/chat/reset`, `/api/chat/cancel` | Submit, stream, reset or cancel Coach work | CSRF |
 | POST | `/api/coach/actions/confirm`, `/api/coach/actions/cancel`, `/api/coach/actions/execute` | Confirm, cancel or execute a Coach proposal | CSRF |
 | POST | `/api/planning/commands` | Apply an approved local planning command | CSRF |
-| POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback | CSRF |
+| POST | `/api/feedback`, `/api/activities/{id}/feedback` | Save athlete feedback; activity feedback returns a `change` undo reference | CSRF |
 | POST | `/api/sync/jobs`, `/api/sync/jobs/{id}/resolve` | Queue or resolve a sync job | CSRF |
 | POST | `/api/sync`, `/api/garmin/sync`, `/api/wahoo/sync`, `/api/intervals/full-resync`, `/api/garmin/full-resync`, `/api/wahoo/full-resync` | Queue provider synchronization | CSRF |
 | POST | `/api/performance/refresh`, `/api/external-calendar/sync`, `/api/weather/sync`, `/api/analysis/refresh`, `/api/nutrition/refresh` | Queue or run a targeted refresh | CSRF |
@@ -91,6 +92,8 @@ provider-keyed.
 | --- | --- | --- | --- |
 | PUT | `/api/settings/model`, `/api/settings/service-tier`, `/api/settings/thinking-level`, `/api/settings/calendar-display`, `/api/settings/activity-detail-floor` | Update settings | CSRF |
 | PUT | `/api/profile` | Patch only the submitted profile fields onto the current stored profile | CSRF |
+| PUT | `/api/zones` | Save one local zone configuration; returns a receipt with an undo reference | CSRF |
+| PUT | `/api/zones/remove` | Remove one local zone configuration; needs `confirmed: true` | CSRF |
 | PUT | `/api/athlete-context` | Replace profile and competitions | CSRF |
 | PUT | `/api/nutrition/entry` | Update a nutrition entry | CSRF |
 | PUT | `/api/nutrition/products` | Update a confirmed saved product | CSRF |

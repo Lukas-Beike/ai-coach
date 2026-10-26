@@ -86,6 +86,7 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
                         "date": "2026-09-24",
                         "totalKilocalories": 2100,
                         "activeKilocalories": 600,
+                        "bmrKilocalories": 1500,
                     },
                 ]
             }
@@ -97,10 +98,10 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
             lambda: datetime(2026, 9, 24, 12, 0, tzinfo=UTC),
             observation_reader=lambda: reader,
         )
-        # The stored rows keep only the resting calories and the sync status.
+        # The stored rows keep only the sync status; every value is canonical.
         self.store_garmin(
             {
-                "daily_stats": [{"date": "2026-09-24", "bmrKilocalories": 1500}],
+                "daily_stats": [{"date": "2026-09-24"}],
                 "source_freshness": {"daily_stats": {"freshness": "current"}},
             }
         )
@@ -146,7 +147,14 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
                         },
                     }
                 )
-                reader = MappedDailyReader({"daily_stats": [today]})
+                reader = MappedDailyReader(
+                    {
+                        "daily_stats": [
+                            today,
+                            {"date": "2026-09-23", "bmrKilocalories": 2200},
+                        ]
+                    }
+                )
                 service, _ = build_nutrition_services(
                     self.manager,
                     threading.Lock(),

@@ -251,6 +251,24 @@
 
           <button type="submit">Athletenkontext speichern</button>
         </form>
+        <details id="zoneSettings" class="profile-section collapsible-section">
+          <summary class="collapsible-summary"><span class="collapsible-summary-title">Zonen &amp; Schwellen</span></summary>
+          <form id="zoneForm" class="profile-form">
+            <div class="form-grid">
+              <label>Sportart<select id="zoneSport"><option value="ride">Radfahren</option><option value="run">Laufen</option><option value="swim">Schwimmen</option></select></label>
+              <label>Messgröße<select id="zoneMetric"><option value="power">Leistung</option><option value="heart_rate">Herzfrequenz</option><option value="pace">Pace</option></select></label>
+              <label>Umgebung<select id="zoneEnvironment"><option value="">Alle</option><option value="indoor">Indoor</option></select></label>
+            </div>
+            <ul id="zoneSources" class="fine-print"></ul>
+            <div class="form-grid">
+              <label id="zoneThresholdField"><span id="zoneThresholdLabel">FTP (W)</span><input id="zoneThreshold" type="number" min="1" step="any"></label>
+              <label id="zoneMaximumField" hidden>Maximale Herzfrequenz (bpm)<input id="zoneMaximum" type="number" min="1" step="any"></label>
+            </div>
+            <label><span id="zoneLimitsLabel">Zonenobergrenzen (% der FTP)</span><input id="zoneLimits" inputmode="decimal" autocomplete="off" required></label>
+            <div class="settings-inline-action"><button id="zoneSaveButton" type="submit" class="secondary-button">Lokal speichern</button><button id="zoneRemoveButton" type="button" class="secondary-button danger-button" hidden>Lokale Zonen entfernen</button></div>
+            <p id="zoneReceipt" class="fine-print settings-message" aria-live="polite" hidden></p>
+          </form>
+        </details>
         <section class="context-preview" aria-labelledby="contextPreviewTitle" hidden>
           <div class="context-preview-heading">
             <div><span class="eyebrow">TRANSPARENZ</span><h3 id="contextPreviewTitle">Coach-Kontext prüfen</h3></div>
@@ -589,7 +607,7 @@
   <script src="/notifications.js?v=5" defer></script>
   <script src="/nutrition.js?v=44" defer></script>
   <script src="/analysis.js?v=136" defer></script>
-  <script src="/activity-details.js?v=19" defer></script>
+  <script src="/activity-details.js?v=20" defer></script>
   <script src="/activity-analysis.js?v=5" defer></script>
   <script src="/performance-view.js?v=27" defer></script>
   <script src="/diagnostics.js?v=4" defer></script>
@@ -597,7 +615,7 @@
   <script src="/sync-actions.js?v=5" defer></script>
   <script src="/wahoo-connection.js?v=4" defer></script>
   <script src="/provider-connections.js?v=4" defer></script>
-  <script src="/settings.js?v=11" defer></script>
-  <script src="/app.js?v=295" defer></script>
+  <script src="/settings.js?v=13" defer></script>
+  <script src="/app.js?v=296" defer></script>
 </body>
 </html>

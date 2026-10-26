@@ -34,6 +34,24 @@ class AthleteGetRoutesTests(unittest.TestCase):
             self.settings,
         )
 
+    def test_zones_need_authentication_and_the_zone_service(self) -> None:
+        self.assertFalse(self.routes.handle(self.handler, "/api/zones"))
+        zones = Mock()
+        zones.read.return_value = {"configurations": []}
+        routes = AthleteGetRoutes(
+            self.factories["auth"],
+            self.factories["performance"],
+            self.factories["profile"],
+            self.factories["competitions"],
+            self.factories["feedback"],
+            self.factories["preview"],
+            self.settings,
+            Mock(return_value=zones),
+        )
+        self.assertTrue(routes.handle(self.handler, "/api/zones"))
+        self.auth.require_auth.assert_called_once_with(self.handler)
+        self.handler.send_json.assert_called_once_with(200, {"configurations": []})
+
     def test_each_route_preserves_its_response_payload(self) -> None:
         self.performance.performance_state.return_value = {"metrics": {"ftp": 250}}
         self.profile.get.return_value = {"name": "Test Athlete"}

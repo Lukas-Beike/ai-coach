@@ -28,6 +28,7 @@ class AthleteGetRoutes:
         public_feedback_state_service: Callable[[], PublicFeedbackStateService],
         coach_context_preview_service: Callable[[], CoachContextPreviewService],
         settings_service: SettingsService,
+        zone_service: Callable[[], Any] | None = None,
     ) -> None:
         self._session_auth_service = session_auth_service
         self._public_performance_state_service = public_performance_state_service
@@ -36,6 +37,7 @@ class AthleteGetRoutes:
         self._public_feedback_state_service = public_feedback_state_service
         self._coach_context_preview_service = coach_context_preview_service
         self._settings_service = settings_service
+        self._zone_service = zone_service
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {
@@ -44,7 +46,10 @@ class AthleteGetRoutes:
             "/api/feedback",
             "/api/context-preview",
             "/api/settings/activity-detail-floor",
+            "/api/zones",
         }:
+            return False
+        if path == "/api/zones" and self._zone_service is None:
             return False
 
         self._session_auth_service().require_auth(handler)
@@ -57,6 +62,8 @@ class AthleteGetRoutes:
             }
         elif path == "/api/feedback":
             payload = self._public_feedback_state_service().feedback_state()
+        elif path == "/api/zones" and self._zone_service is not None:
+            payload = self._zone_service().read()
         elif path == "/api/settings/activity-detail-floor":
             payload = {"date": self._settings_service.activity_detail_prefetch_floor()}
         else:

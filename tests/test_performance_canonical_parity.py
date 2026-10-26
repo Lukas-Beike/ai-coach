@@ -65,10 +65,12 @@ _NO_RECOVERY = CanonicalRecoveryInputs(
     observations={kind: () for kind in RECOVERY_KINDS},
     latest_wellness_day=PARITY_TODAY,
 )
-# One unbounded read per kind: the wellness and current-metric kinds, then the
-# Garmin performance kinds, the daily totals and the recovery kinds not read
-# before (the weekly HRV average).
-_UNIT_READS = 25
+# One unbounded read per kind: the wellness and current-metric kinds (with the four
+# subjective ratings), then the Garmin performance kinds (with the twelve training
+# load and load balance kinds and the four history-chart kinds), the daily totals
+# (with resting energy) and the recovery kinds not read before (the weekly HRV
+# average).
+_UNIT_READS = 46
 
 
 class StubObservationReader(ObservationReader):

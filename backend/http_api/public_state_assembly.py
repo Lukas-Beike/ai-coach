@@ -339,6 +339,7 @@ class PublicStateAssembly:
                 external_calendar_window_days=self._external_calendar_window_days(),
                 default_workout_name=self._planned_workout_label(),
                 activity_rows=self.activity_row_source(),
+                zone_configurations=athlete.zones().configurations,
             )
         )
 
@@ -377,6 +378,7 @@ class PublicStateAssembly:
             external_calendar_window_days=self._external_calendar_window_days(),
             default_workout_name=self._planned_workout_label(),
             today=self._local_date,
+            zone_configurations=athlete.zones().configurations,
         )
 
     def state_service(self) -> PublicStateService:

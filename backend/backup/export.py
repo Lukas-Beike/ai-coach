@@ -19,6 +19,7 @@ from backend import change_history
 from backend.canonical import garmin_payload
 from backend.db import garmin_store
 from backend.db.activity_detail_store import analysis_export_rows, stream_export_rows
+from backend.db.canonical_domain_store import zone_configuration_export_rows
 from backend.errors import AppError
 from backend.observability import sanitized_provider_payload
 from backend.planning import season as planning_season
@@ -45,7 +46,11 @@ TimeoutErrorFactory = Callable[[], Exception]
 # environment and sport_detail instead of type (schema v9).
 # Version 6 adds the canonical activity detail files (schema v10); stream
 # channels carry decoded point lists with null for gaps.
-PRIVACY_EXPORT_FORMAT_VERSION = 6
+# Version 7 adds sleep_periods, zone_configurations with decoded limit lists,
+# categorical_observations, gear_items and gear_activity_links, including
+# retired rows, plus activity_sessions.merged_into_retained and
+# activity_feedback.session_id (schema v15).
+PRIVACY_EXPORT_FORMAT_VERSION = 7
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -56,6 +61,11 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "activity_laps.jsonl",
     "activity_zone_times.jsonl",
     "activity_detail_analysis.jsonl",
+    "sleep_periods.jsonl",
+    "zone_configurations.jsonl",
+    "categorical_observations.jsonl",
+    "gear_items.jsonl",
+    "gear_activity_links.jsonl",
     "athlete_checkins.jsonl",
     "activity_feedback.jsonl",
     "external_calendar_events.jsonl",
@@ -393,7 +403,8 @@ class PrivacyArchiveExportService:
                         dict(row)
                         for row in db.execute(
                             "SELECT activity_id, primary_provider, primary_provider_activity_id, link_kind, "
-                            "athlete_confirmed, state, merged_into, started_at, local_date, created_at, updated_at "
+                            "athlete_confirmed, state, merged_into, merged_into_retained, started_at, local_date, "
+                            "created_at, updated_at "
                             "FROM activity_sessions ORDER BY started_at, activity_id"
                         )
                     ),
@@ -457,6 +468,43 @@ class PrivacyArchiveExportService:
                     archive,
                     "activity_detail_analysis.jsonl",
                     analysis_export_rows(db),
+                    deadline,
+                )
+                for table, order in (
+                    ("sleep_periods", "started_at, provider"),
+                    ("categorical_observations", "observed_on, domain, natural_key"),
+                    ("gear_items", "provider, gear_id"),
+                ):
+                    self._write_jsonl(
+                        archive,
+                        table + ".jsonl",
+                        (
+                            sanitized_provider_row(row, "details")
+                            for row in db.execute(
+                                f"SELECT * FROM {table} ORDER BY {order}"
+                            )
+                        ),
+                        deadline,
+                    )
+                self._write_jsonl(
+                    archive,
+                    "zone_configurations.jsonl",
+                    (
+                        sanitized_provider_row(row, "details")
+                        for row in zone_configuration_export_rows(db)
+                    ),
+                    deadline,
+                )
+                self._write_jsonl(
+                    archive,
+                    "gear_activity_links.jsonl",
+                    (
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT * FROM gear_activity_links "
+                            "ORDER BY provider, gear_id, provider_activity_id"
+                        )
+                    ),
                     deadline,
                 )
                 archive.writestr(

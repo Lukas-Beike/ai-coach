@@ -65,7 +65,12 @@ class Environment(StrEnum):
 
 
 class LoadModel(StrEnum):
-    """Model that produced an activity's training load."""
+    """Provider model that produced an activity's reported training load.
+
+    Every member is a provider's own calculation, never a local method: a local
+    session-RPE load is not a LoadModel (see #1427). ``UNKNOWN`` marks a load whose
+    model the provider does not name.
+    """
 
     INTERVALS_TRAINING_LOAD = "intervals_training_load"
     GARMIN_TRAINING_LOAD = "garmin_training_load"
@@ -108,6 +113,35 @@ class MetricKind(StrEnum):
     RACE_PREDICTION_HALF = "race_prediction_half"
     RACE_PREDICTION_FULL = "race_prediction_full"
     ENDURANCE_SCORE = "endurance_score"
+    # Provider-reported domains retained since schema version 15. Each kind holds
+    # one statistic per source series, so related provider values (targets, group
+    # values, charged and drained totals) are separate kinds, never one kind with a
+    # varying aggregation.
+    DAILY_ENERGY_RESTING = "daily_energy_resting"
+    BODY_BATTERY_CHARGED = "body_battery_charged"
+    BODY_BATTERY_DRAINED = "body_battery_drained"
+    # Garmin's acute and chronic training load, distinct from Intervals.icu ATL/CTL.
+    ACUTE_LOAD = "acute_load"
+    CHRONIC_LOAD = "chronic_load"
+    ACUTE_CHRONIC_RATIO = "acute_chronic_ratio"
+    LOAD_BALANCE_AEROBIC_LOW = "load_balance_aerobic_low"
+    LOAD_BALANCE_AEROBIC_LOW_TARGET_MIN = "load_balance_aerobic_low_target_min"
+    LOAD_BALANCE_AEROBIC_LOW_TARGET_MAX = "load_balance_aerobic_low_target_max"
+    LOAD_BALANCE_AEROBIC_HIGH = "load_balance_aerobic_high"
+    LOAD_BALANCE_AEROBIC_HIGH_TARGET_MIN = "load_balance_aerobic_high_target_min"
+    LOAD_BALANCE_AEROBIC_HIGH_TARGET_MAX = "load_balance_aerobic_high_target_max"
+    LOAD_BALANCE_ANAEROBIC = "load_balance_anaerobic"
+    LOAD_BALANCE_ANAEROBIC_TARGET_MIN = "load_balance_anaerobic_target_min"
+    LOAD_BALANCE_ANAEROBIC_TARGET_MAX = "load_balance_anaerobic_target_max"
+    # A provider-defined score without a known physical unit.
+    RUNNING_TOLERANCE = "running_tolerance"
+    ENDURANCE_SCORE_GROUP_AVERAGE = "endurance_score_group_average"
+    ENDURANCE_SCORE_GROUP_MAX = "endurance_score_group_max"
+    # Subjective ratings imported from a provider; physiological stress is STRESS.
+    SUBJECTIVE_FATIGUE = "subjective_fatigue"
+    SUBJECTIVE_SORENESS = "subjective_soreness"
+    SUBJECTIVE_STRESS = "subjective_stress"
+    SUBJECTIVE_MOOD = "subjective_mood"
 
     @property
     def unit(self) -> str:
@@ -146,7 +180,121 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.RACE_PREDICTION_HALF: "s",
     MetricKind.RACE_PREDICTION_FULL: "s",
     MetricKind.ENDURANCE_SCORE: "score",
+    MetricKind.DAILY_ENERGY_RESTING: "kcal",
+    MetricKind.BODY_BATTERY_CHARGED: "score",
+    MetricKind.BODY_BATTERY_DRAINED: "score",
+    MetricKind.ACUTE_LOAD: "load",
+    MetricKind.CHRONIC_LOAD: "load",
+    MetricKind.ACUTE_CHRONIC_RATIO: "ratio",
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW: "load",
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MIN: "load",
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MAX: "load",
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH: "load",
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MIN: "load",
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MAX: "load",
+    MetricKind.LOAD_BALANCE_ANAEROBIC: "load",
+    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MIN: "load",
+    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MAX: "load",
+    MetricKind.RUNNING_TOLERANCE: "unknown",
+    MetricKind.ENDURANCE_SCORE_GROUP_AVERAGE: "score",
+    MetricKind.ENDURANCE_SCORE_GROUP_MAX: "score",
+    MetricKind.SUBJECTIVE_FATIGUE: "rating",
+    MetricKind.SUBJECTIVE_SORENESS: "rating",
+    MetricKind.SUBJECTIVE_STRESS: "rating",
+    MetricKind.SUBJECTIVE_MOOD: "rating",
 }
+
+
+# Members that no provider mapper produces. Stored text values must stay readable,
+# so a member leaves the vocabulary only through a retirement mapping (see
+# tests/test_canonical_enum_retirement.py), never by deletion.
+UNPRODUCED_LOAD_MODELS: Final[Mapping[LoadModel, str]] = {
+    LoadModel.TRIMP: "no provider reports TRIMP; retained so a stored value stays readable",
+}
+UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
+    MetricKind.TRAINING_LOAD: (
+        "never produced: activity loads carry LoadModel and Garmin's daily load is "
+        "ACUTE_LOAD; retained so a stored value stays readable"
+    ),
+}
+# Kinds stored for export, backup and history that no reader uses yet. A kind
+# leaves this list when a consumer reads it; the vocabulary accountability test
+# fails while the list and the code disagree.
+EXPORT_ONLY_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
+    MetricKind.TRAINING_LOAD: "never produced (see UNPRODUCED_METRIC_KINDS)",
+    MetricKind.EFTP: (
+        "stored for export; readers still use the sportInfo eFTP (#1412)"
+    ),
+    MetricKind.STRESS: (
+        "Garmin daily physiological stress, stored for export and history; no "
+        "reader showed it before the canonical model"
+    ),
+    MetricKind.BODY_BATTERY_CHARGED: (
+        "Garmin daily charged total, stored for export and history; no reader "
+        "showed it before the canonical model"
+    ),
+    MetricKind.BODY_BATTERY_DRAINED: (
+        "Garmin daily drained total, stored for export and history; no reader "
+        "showed it before the canonical model"
+    ),
+}
+
+
+class ObservationAggregation(StrEnum):
+    """How an observation's value summarizes its instant or period (optional)."""
+
+    # One value at one instant, such as a timed Body Battery level.
+    SAMPLE = "sample"
+    # The sum over the period, such as charged Body Battery or daily energy.
+    TOTAL = "total"
+    MEAN = "mean"
+    MINIMUM = "minimum"
+    MAXIMUM = "maximum"
+
+
+class CategoricalDomain(StrEnum):
+    """Provider status vocabularies kept as codes, never as numeric measurements.
+
+    Stored as text without a SQL CHECK, so a mapper can add a domain without a
+    schema change.
+    """
+
+    TRAINING_STATUS = "training_status"
+    READINESS_LEVEL = "readiness_level"
+    HRV_STATUS = "hrv_status"
+
+
+class SleepKind(StrEnum):
+    NIGHT = "night"
+    UNKNOWN = "unknown"
+
+
+class ZoneConfigurationMetric(StrEnum):
+    """Metric of a zone configuration. Separate from ZoneMetric, whose members are
+    CHECKed by the released activity detail tables."""
+
+    HEART_RATE = "heart_rate"
+    POWER = "power"
+    PACE = "pace"
+
+
+class ZonePercentBasis(StrEnum):
+    """The reference value that percent zone limits are relative to."""
+
+    THRESHOLD = "threshold"
+    MAXIMUM = "maximum"
+    # Heart-rate reserve: maximum minus resting heart rate.
+    RESERVE = "reserve"
+
+
+class ProjectionState(StrEnum):
+    """Lifecycle of a row projected from one source record (schema version 15).
+
+    A reprojection that no longer emits a row retires it instead of deleting it.
+    """
+
+    ACTIVE = "active"
+    RETIRED = "retired"
 
 
 class ProviderRecordState(StrEnum):

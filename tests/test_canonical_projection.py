@@ -111,8 +111,10 @@ class FixtureProjectionTests(unittest.TestCase):
         )
         # The fixture athlete's weight is one more Intervals observation (mapper v2).
         # Intervals wellness v6 adds FORM and eFTP per row plus the athlete eFTP;
-        # Garmin health v5 adds the running threshold power, v11 the weekly HRV.
-        self.assertEqual(len(observations), 59)
+        # Garmin health v5 adds the running threshold power, v11 the weekly HRV,
+        # v12 Body Battery, training load and load balance; Intervals wellness v7
+        # the subjective ratings.
+        self.assertEqual(len(observations), 83)
         for record in activities:
             self.assertEqual(record.provenance.retrieved_at, SYNCED_AT)
 
@@ -126,15 +128,17 @@ class FixtureProjectionTests(unittest.TestCase):
         garmin = coverage[ProviderId.GARMIN]
         self.assertEqual(intervals.activity_count, 5)
         # Includes the fixture athlete's weight (mapper v2), and per wellness row
-        # FORM and eFTP plus the athlete eFTP (mapper v6).
-        self.assertEqual(intervals.observation_count, 39)
+        # FORM and eFTP plus the athlete eFTP (mapper v6) and four subjective
+        # ratings per row (mapper v7).
+        self.assertEqual(intervals.observation_count, 51)
         self.assertEqual(intervals.retrieved_at, SYNCED_AT)
         self.assertEqual(garmin.activity_count, 2)
-        # Includes the running threshold power (mapper v5) and the weekly HRV
-        # average (mapper v11).
-        self.assertEqual(garmin.observation_count, 20)
+        # Includes the running threshold power (mapper v5), the weekly HRV average
+        # (mapper v11) and, since mapper v12, Body Battery, training load and load
+        # balance, so no section is unsupported.
+        self.assertEqual(garmin.observation_count, 32)
         self.assertEqual(garmin.retrieved_at, SYNCED_AT)
-        self.assertEqual(garmin.issue_counts[IssueReason.UNSUPPORTED], 2)
+        self.assertEqual(garmin.issue_counts.get(IssueReason.UNSUPPORTED, 0), 0)
         self.assertEqual(intervals.issue_counts[IssueReason.UNSUPPORTED], 0)
 
     def test_observed_range_matches_the_provider_observations(self) -> None:
@@ -421,7 +425,7 @@ class CoverageTests(unittest.TestCase):
         garmin = coverage[ProviderId.GARMIN]
         self.assertEqual(garmin.activity_count, 0)
         self.assertEqual(garmin.issue_counts[IssueReason.INVALID_TYPE], 1)
-        self.assertEqual(garmin.issue_counts[IssueReason.UNSUPPORTED], 2)
+        self.assertEqual(garmin.issue_counts.get(IssueReason.UNSUPPORTED, 0), 0)
         intervals = coverage[ProviderId.INTERVALS]
         self.assertEqual(intervals.issue_counts[IssueReason.INVALID_TYPE], 1)
         self.assertEqual(intervals.activity_count, 5)

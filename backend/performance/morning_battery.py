@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.canonical.decimal_text import comma_decimal_float
+from backend.canonical.domain_records import SleepPeriod
+from backend.canonical.records import Observation
+from backend.canonical.section_items import record_id
+from backend.canonical.sleep_bounds import utc_timestamp as timestamp
+from backend.canonical.vocabulary import ProviderId, SleepKind
+
+SLEEP_SECTION: Final = "sleep"
 
 _GARMIN_SOURCE = "Garmin Connect"
 _TIMESTAMP_FIELDS = (
@@ -19,27 +27,6 @@ _END_TIMESTAMP_FIELDS = (
     "sleepEndTimestamp",
     "endTimestampGMT",
 )
-
-
-def timestamp(value: Any) -> datetime | None:
-    """Normalize Garmin epoch seconds/milliseconds and ISO timestamps to UTC."""
-    try:
-        number = comma_decimal_float(value)
-    except TypeError, ValueError:
-        number = None
-    if number is not None and math.isfinite(number):
-        try:
-            seconds = number / 1000 if number > 10_000_000_000 else number
-            return datetime.fromtimestamp(seconds, UTC)
-        except OSError, OverflowError, ValueError:
-            return None
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone(UTC)
 
 
 def _first_present(record: dict[str, Any], fields: tuple[str, ...]) -> Any:
@@ -125,6 +112,65 @@ def morning_body_battery_record(
 ) -> dict[str, Any]:
     """Derive the last pre-sleep and first post-sleep Body Battery readings."""
     sleep_start, sleep_end = sleep_bounds(sleep_payload)
+    return morning_record(
+        checkin_date,
+        sleep_start,
+        sleep_end,
+        body_battery_samples(body_battery_payload),
+        attempted_at=attempted_at,
+    )
+
+
+def canonical_morning_record(
+    checkin_date: date,
+    periods: Iterable[SleepPeriod],
+    levels: Iterable[Observation],
+    *,
+    attempted_at: str,
+) -> dict[str, Any]:
+    """Derive the morning record from canonical Garmin data.
+
+    The night is the Garmin NIGHT period of the ``checkin_date`` sleep record (the
+    record the morning refresh reads), the samples are the Garmin BODY_BATTERY
+    levels; the windows are those of ``morning_body_battery_record``.
+    """
+    source_record = record_id(SLEEP_SECTION, checkin_date.isoformat())
+    nights = [
+        period
+        for period in periods
+        if period.kind is SleepKind.NIGHT
+        and period.provenance.provider is ProviderId.GARMIN
+        and period.provenance.source_record_id == source_record
+    ]
+    night = max(nights, key=lambda period: period.end, default=None)
+    samples: list[dict[str, Any]] = [
+        {
+            "observed_at": level.observed_at.isoformat(),
+            "value": round(level.value.value),
+        }
+        for level in levels
+        if level.provenance.provider is ProviderId.GARMIN
+        and level.observed_at is not None
+    ]
+    samples.sort(key=lambda sample: str(sample["observed_at"]))
+    return morning_record(
+        checkin_date,
+        None if night is None else night.start,
+        None if night is None else night.end,
+        samples,
+        attempted_at=attempted_at,
+    )
+
+
+def morning_record(
+    checkin_date: date,
+    sleep_start: datetime | None,
+    sleep_end: datetime | None,
+    samples: list[dict[str, Any]],
+    *,
+    attempted_at: str,
+) -> dict[str, Any]:
+    """Pick the last level up to four hours before sleep and the first after waking."""
     record: dict[str, Any] = {
         "sleep_date": checkin_date.isoformat(),
         "attempted_at": attempted_at,
@@ -138,7 +184,6 @@ def morning_body_battery_record(
     record["sleep_start_at"] = sleep_start.isoformat()
     record["sleep_end_at"] = sleep_end.isoformat()
     attempted = timestamp(attempted_at)
-    samples = body_battery_samples(body_battery_payload)
     before_lower_bound = sleep_start - timedelta(hours=4)
     before = [
         sample

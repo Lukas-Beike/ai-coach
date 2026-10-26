@@ -1,14 +1,15 @@
 """Bounded, content-free historical series for the public analysis view."""
 
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.athlete.local_date import LocalDate
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
 from backend.performance.canonical_body import CanonicalBodyInputs
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.display_sources import preferred_providers
+from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.garmin_load import acute_load_value
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 
@@ -79,8 +80,16 @@ def _wellness_history(
     }
 
 
-def _load_history(dates: list[str], garmin: dict[str, Any]) -> list[dict[str, Any]]:
-    # Remaining snapshot read: Garmin training status (acute load) has no metric kind.
+def _load_history(
+    dates: list[str],
+    garmin: dict[str, Any],
+    canonical: GarminCanonicalMetrics | None = None,
+) -> list[dict[str, Any]]:
+    """Garmin's acute load per day: canonical ACUTE_LOAD, else the snapshot rows."""
+    if canonical is not None:
+        acute = canonical.daily_history.get(MetricKind.ACUTE_LOAD, {})
+        values = {day.isoformat(): _number(value) for day, value in acute.items()}
+        return [{"date": day, "value": values.get(day)} for day in dates]
     observations = {
         day.isoformat(): acute_load_value(row)
         for row in _rows(garmin.get("training_status"))
@@ -120,10 +129,21 @@ def _training_time_history(
 
 
 def _garmin_values(
-    key: str, garmin: dict[str, Any], start: date, today: date
+    key: str,
+    garmin: dict[str, Any],
+    start: date,
+    today: date,
+    canonical: GarminCanonicalMetrics | None = None,
 ) -> dict[str, float]:
-    # Remaining snapshot read: the performance history and the FTP history are
-    # accumulated across syncs and have no observation series with equal history.
+    """Garmin's daily values of one metric: canonical history, else the snapshot's
+    accumulated performance history and FTP history."""
+    if canonical is not None:
+        return {
+            day.isoformat(): value
+            for day, value in canonical.performance_history.get(key, {}).items()
+            if start <= day <= today
+            and activity_validation.bounded_performance_metric(key, value) is not None
+        }
     observations = {}
     for row in _rows(garmin.get("performance_history")):
         day = _day(row.get("date"))
@@ -153,6 +173,7 @@ def _metric_series(
     dates: list[str],
     start: date,
     today: date,
+    canonical: GarminCanonicalMetrics | None = None,
 ) -> list[dict[str, Any]]:
     if key == "cycling_eftp_watts":
         source = INTERVALS_SOURCE
@@ -166,7 +187,7 @@ def _metric_series(
     else:
         source = "Garmin Connect"
         provider = ProviderId.GARMIN
-        observations = _garmin_values(key, garmin, start, today)
+        observations = _garmin_values(key, garmin, start, today, canonical)
     return [
         {
             "source": source,
@@ -200,9 +221,12 @@ def analysis_history(
     # Raw provider rows retain the history that the compact Coach projection trims.
     wellness = _wellness_history(raw, snapshot, load_start, today, canonical)
     activities = _activity_history_rows(raw, snapshot, canonical)
-    load = _load_history(load_dates, garmin)
+    garmin_canonical = None if canonical is None else canonical.garmin
+    load = _load_history(load_dates, garmin, garmin_canonical)
     series = {
-        key: _metric_series(key, activities, garmin, wellness, dates, start, today)
+        key: _metric_series(
+            key, activities, garmin, wellness, dates, start, today, garmin_canonical
+        )
         for key in METRIC_KEYS
     }
     return {
@@ -232,6 +256,9 @@ def analysis_history(
             if canonical is None
             else canonical.history_wellness_rows,
             activity_rows=None if canonical is None else canonical.activity_rows,
+            garmin_ftp=None
+            if garmin_canonical is None
+            else garmin_canonical.performance_history.get("cycling_ftp_watts", {}),
         ),
         # Remaining snapshot read: the power curve has no metric kind.
         "cycling_power_profile": {
@@ -245,17 +272,93 @@ def analysis_history(
                 and start <= day <= today
             ],
         },
-        "provider_metrics": _provider_metrics(garmin, start, today),
+        "provider_metrics": _provider_metrics(garmin, start, today, garmin_canonical),
         "metrics": series,
         "preferred_providers": preferred_providers(),
     }
 
 
-def _provider_metrics(
-    garmin: dict[str, Any], start: date, today: date
+# Provider chart -> (aggregation, ((value field, kind), ...)). The point value
+# fields are the ones the analysis view reads; readiness and the weekly status
+# carry their value in the point itself.
+_CANONICAL_PROVIDER_METRICS: Final = {
+    "endurance_score": (
+        "daily",
+        (
+            ("groupAverage", MetricKind.ENDURANCE_SCORE_GROUP_AVERAGE),
+            ("groupMax", MetricKind.ENDURANCE_SCORE_GROUP_MAX),
+            ("overallScore", MetricKind.ENDURANCE_SCORE),
+        ),
+    ),
+    "running_tolerance": (
+        "daily",
+        (("toleranceScore", MetricKind.RUNNING_TOLERANCE),),
+    ),
+    "training_readiness_history": ("daily", (("score", MetricKind.READINESS),)),
+    "weekly_training_status": (
+        "weekly",
+        (("dailyTrainingLoadAcute", MetricKind.ACUTE_LOAD),),
+    ),
+}
+
+
+def _canonical_provider_metrics(
+    garmin: dict[str, Any],
+    start: date,
+    today: date,
+    canonical: GarminCanonicalMetrics,
 ) -> dict[str, Any]:
-    # Remaining snapshot read: ENDURANCE_SCORE carries only the overall score, not
-    # the scalar fields and weekly records shown here; running tolerance has no kind.
+    """Build the provider charts from the canonical Garmin history.
+
+    A day with an endurance group value shows the group values only, as the
+    group map wins over the overall score in the snapshot reader.
+    """
+    metrics: dict[str, Any] = {}
+    for key, (aggregation, fields) in _CANONICAL_PROVIDER_METRICS.items():
+        by_day: dict[date, dict[str, Any]] = {}
+        for name, kind in fields:
+            for day, value in canonical.daily_history.get(kind, {}).items():
+                if not start <= day <= today:
+                    continue
+                values = by_day.setdefault(day, {})
+                if kind is MetricKind.ENDURANCE_SCORE and values:
+                    continue
+                values[name] = _number(value)
+        points = []
+        for day, values in sorted(by_day.items()):
+            point: dict[str, Any] = {
+                "date": day.isoformat(),
+                "values": values,
+                "source": garmin_metric_history.GARMIN_SOURCE,
+            }
+            if key in ("training_readiness_history", "weekly_training_status"):
+                point["value"] = next(iter(values.values()))
+            points.append(point)
+        metrics[key] = {
+            "status": "current" if points else "unavailable",
+            "aggregation": aggregation,
+            "source": garmin_metric_history.GARMIN_SOURCE,
+            "unit": "unknown",
+            "points": points,
+            "observed_at": points[-1]["date"] if points else None,
+            "fetched_at": garmin.get("synced_at"),
+            "metric": key,
+        }
+    return metrics
+
+
+def _number(value: float) -> float | int:
+    return int(value) if float(value).is_integer() else value
+
+
+def _provider_metrics(
+    garmin: dict[str, Any],
+    start: date,
+    today: date,
+    canonical: GarminCanonicalMetrics | None = None,
+) -> dict[str, Any]:
+    if canonical is not None:
+        return _canonical_provider_metrics(garmin, start, today, canonical)
     cached = garmin.get("provider_metrics") or {}
     metrics = dict(cached) if isinstance(cached, dict) else {}
     for key, aggregation in (

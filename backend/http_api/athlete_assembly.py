@@ -14,8 +14,10 @@ from backend.athlete.checkins import CheckinService
 from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
+from backend.athlete.zones import ZoneConfigurationService
 from backend.performance.training_report import deduplicated_rows
 from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.weather.cache import invalidate_for_location_change
 
 
@@ -91,6 +93,12 @@ class AthleteDataAssembly:
             self._utc_now,
             deduplicated_rows,
             resolve_activity=ActivityReferences(self._database_manager()).resolve,
+            gear_reader=CanonicalTableReader(),
+        )
+
+    def zones(self) -> ZoneConfigurationService:
+        return ZoneConfigurationService(
+            self._database_manager(), CanonicalTableReader(), self._utc_now
         )
 
     def activity_feedback(self) -> ActivityFeedbackService:

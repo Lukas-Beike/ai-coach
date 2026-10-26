@@ -7,13 +7,19 @@ import unittest
 
 from backend.canonical.labels import SPORT_LABELS_DE, sport_label_de
 from backend.canonical.vocabulary import (
+    CategoricalDomain,
     Environment,
     LoadModel,
     MetricKind,
+    ObservationAggregation,
+    ProjectionState,
     ProviderId,
     RecordingOrigin,
+    SleepKind,
     SourceKind,
     Sport,
+    ZoneConfigurationMetric,
+    ZonePercentBasis,
 )
 
 SNAKE_CASE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -101,9 +107,44 @@ class CanonicalVocabularyTests(unittest.TestCase):
                 "race_prediction_half": "s",
                 "race_prediction_full": "s",
                 "endurance_score": "score",
+                "daily_energy_resting": "kcal",
+                "body_battery_charged": "score",
+                "body_battery_drained": "score",
+                "acute_load": "load",
+                "chronic_load": "load",
+                "acute_chronic_ratio": "ratio",
+                "load_balance_aerobic_low": "load",
+                "load_balance_aerobic_low_target_min": "load",
+                "load_balance_aerobic_low_target_max": "load",
+                "load_balance_aerobic_high": "load",
+                "load_balance_aerobic_high_target_min": "load",
+                "load_balance_aerobic_high_target_max": "load",
+                "load_balance_anaerobic": "load",
+                "load_balance_anaerobic_target_min": "load",
+                "load_balance_anaerobic_target_max": "load",
+                "running_tolerance": "unknown",
+                "endurance_score_group_average": "score",
+                "endurance_score_group_max": "score",
+                "subjective_fatigue": "rating",
+                "subjective_soreness": "rating",
+                "subjective_stress": "rating",
+                "subjective_mood": "rating",
             },
             {kind.value: kind.unit for kind in MetricKind},
         )
+
+    def test_schema_v15_vocabularies_are_stable(self) -> None:
+        expected = {
+            ObservationAggregation: ["sample", "total", "mean", "minimum", "maximum"],
+            CategoricalDomain: ["training_status", "readiness_level", "hrv_status"],
+            SleepKind: ["night", "unknown"],
+            ZoneConfigurationMetric: ["heart_rate", "power", "pace"],
+            ZonePercentBasis: ["threshold", "maximum", "reserve"],
+            ProjectionState: ["active", "retired"],
+        }
+        for enum_type, values in expected.items():
+            with self.subTest(enum=enum_type.__name__):
+                self.assertEqual(values, [member.value for member in enum_type])
 
     def test_metric_kind_identifiers_are_snake_case(self) -> None:
         for kind in MetricKind:

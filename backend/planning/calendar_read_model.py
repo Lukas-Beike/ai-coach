@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import Any
 
@@ -10,6 +11,7 @@ from backend.activities.workout_profile import planned_profile
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import canonical, local
+from backend.canonical.domain_records import ZoneConfiguration
 from backend.planning import calendar as planning_calendar
 from backend.planning.conflicts import calendar_items_share_local_day
 from backend.planning.sport import planned_sport_environment
@@ -91,8 +93,25 @@ def snapshot_sport_settings(snapshot: Any) -> Any:
     return athlete.get("sport_settings") if isinstance(athlete, dict) else ()
 
 
-def _zone_settings(row: dict[str, Any], sport_settings: Any) -> ZoneSettings:
+def _row_day(row: dict[str, Any]) -> date | None:
+    try:
+        return date.fromisoformat(
+            iso_date_prefix(str(row.get("date") or row.get("start_date_local") or ""))
+        )
+    except ValueError:
+        return None
+
+
+def _zone_settings(
+    row: dict[str, Any],
+    sport_settings: Any,
+    zone_configurations: Sequence[ZoneConfiguration],
+) -> ZoneSettings:
     sport, environment = planned_sport_environment(row)
+    if any(configuration.sport is sport for configuration in zone_configurations):
+        return ZoneSettings.from_configurations(
+            zone_configurations, sport, environment, _row_day(row)
+        )
     return ZoneSettings.from_sport_settings(sport_settings, sport, environment)
 
 
@@ -107,11 +126,13 @@ def project_planning_calendar(
     provider_window: Any,
     default_name: str,
     sport_settings: Any = (),
+    zone_configurations: Sequence[ZoneConfiguration] = (),
 ) -> dict[str, Any]:
     """Project supplied planning data into the six calendar read models.
 
-    ``sport_settings`` are the athlete's Intervals.icu sport settings; they set
-    the zone limits and thresholds of the planned workout profiles.
+    The canonical ``zone_configurations`` set the zone limits and thresholds of
+    the planned workout profiles; for a sport without any, the athlete's
+    Intervals.icu ``sport_settings`` do.
     """
     canonical_planned = canonical.canonical_planned_workouts([], local_planned)
     compliance_planned, planning_compliance = (
@@ -124,7 +145,11 @@ def project_planning_calendar(
     )
     weather_planned = [
         {**row, "workout_profile": profile}
-        if (profile := planned_profile(row, _zone_settings(row, sport_settings)))
+        if (
+            profile := planned_profile(
+                row, _zone_settings(row, sport_settings, zone_configurations)
+            )
+        )
         else row
         for row in weather_planned
     ]

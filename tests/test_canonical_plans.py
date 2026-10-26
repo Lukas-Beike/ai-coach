@@ -167,7 +167,10 @@ class IntervalsPlanTests(unittest.TestCase):
         )
         self.assertTrue(plan.observations)
         self.assertTrue(
-            all(item.mapper_version == 6 for item in plan.observations),
+            all(
+                item.mapper_version == plans.INTERVALS_WELLNESS_VERSION
+                for item in plan.observations
+            ),
         )
 
     def test_athlete_block_is_mapped_and_a_non_mapping_athlete_is_counted(self) -> None:
@@ -272,7 +275,9 @@ class GarminSectionTimeTests(unittest.TestCase):
             observation
             for name in plans.GARMIN_HEALTH_SECTION_NAMES
             for section in (
-                plans.WEIGHT_SECTIONS if name == plans.GARMIN_WEIGHT_SECTION else (name,)
+                plans.WEIGHT_SECTIONS
+                if name == plans.GARMIN_WEIGHT_SECTION
+                else (name,)
             )
             for item in split_section(payload.get(section))
             if item.value is not None
@@ -297,9 +302,7 @@ class GarminSectionTimeTests(unittest.TestCase):
             item.source_record_id: item.retrieved_at for item in plan.raw_records
         }
         by_section = {
-            section_of(key): at
-            for key, at in raw_times.items()
-            if key != "910010"
+            section_of(key): at for key, at in raw_times.items() if key != "910010"
         }
         self.assertEqual(by_section["hrv"], EARLIER)
         self.assertEqual(by_section["sleep"], RETRIEVED_AT)
@@ -374,8 +377,21 @@ class GarminSectionTimeTests(unittest.TestCase):
             {"body_battery"},
         )
         self.assertTrue(all(item.retrieved_at == MORNING for item in plan.raw_records))
-        # Body Battery maps to no observation, and the undated sleep section is left out.
-        self.assertEqual(plan.observations, ())
+        # Only the Body Battery section has a fetch time; the sleep section is left out.
+        self.assertEqual(
+            {
+                (item.observation.provenance.source_record_id or "").partition(":")[0]
+                for item in plan.observations
+            },
+            {"body_battery"},
+        )
+        self.assertTrue(
+            all(
+                item.observation.provenance.retrieved_at == MORNING
+                for item in plan.observations
+            )
+        )
+        self.assertEqual(plan.domain_batches, ())
         self.assertEqual(plans.garmin_payload_retrieved_at(payload, zone=ZONE), MORNING)
 
     def test_no_fetch_time_at_all_gives_none(self) -> None:

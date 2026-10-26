@@ -277,6 +277,7 @@ class ServerHttpArchitectureTests(unittest.TestCase):
                 "PUBLIC_STATE.feedback_state_service",
                 "COACH_CONTEXT.preview_service",
                 "SETTINGS",
+                "ATHLETE_DATA.zones",
             ],
         )
 

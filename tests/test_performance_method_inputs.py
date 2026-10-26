@@ -102,7 +102,10 @@ class M1SessionRpeInputs(linking.LinkingCase):
         )
 
     def _stored_feedback(self, activity_id: str) -> list[dict[str, Any]]:
-        return self._feedback().for_activity_ids([activity_id])
+        """Rows stored under ``activity_id``, not the session feedback it shows."""
+        with self.manager.reader() as db:
+            rows = ActivityFeedbackRepository(lambda: "").all(db)
+        return [row for row in rows if row["activity_id"] == activity_id]
 
     def _ingest_ride(self, **intervals_fields: Any) -> None:
         self._ingest_intervals(
@@ -191,8 +194,8 @@ class M1SessionRpeInputs(linking.LinkingCase):
         self.assertEqual(
             (reference.activity_id, reference.provider),
             (local_id, None),
-            msg="#1423: feedback on a Wahoo-only session has no provider id; "
-            "expected a provider-neutral key once feedback follows the canonical session",
+            msg="#1423: a Wahoo-only session keeps its local id as the feedback key, "
+            "which is its canonical session",
         )
 
         service = self._feedback()
@@ -355,6 +358,8 @@ class M2HrvRestingHrInputs(unittest.TestCase):
         inputs = read_recovery_inputs(
             reader, None, as_of=TODAY, latest_wellness_day=None
         )
+        # A source without stored sleep periods leaves the regularity on raw rows.
+        self.assertIsNone(inputs.sleep_periods)
         served = personal_recovery([], {}, {}, TODAY, canonical=inputs)
 
         self.assertIn(MetricKind.HRV_RMSSD, [call[0] for call in reader.calls])
@@ -512,9 +517,9 @@ class M3SleepInputs(unittest.TestCase):
         ]
         self.assertEqual(
             sleep_storage,
-            [],
-            msg="#1419: no sleep-period table or column; expected one once sleep "
-            "periods are stored",
+            ["sleep_periods.sleep_periods"],
+            msg="#1419: canonical sleep periods are stored (schema v15); "
+            "sleep-regularity-v1 reads them when the tables serve",
         )
         series = mapped_personal_recovery(
             [], {"sleep": [_night(0)]}, self.profile, TODAY

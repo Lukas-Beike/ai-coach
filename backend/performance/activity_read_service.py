@@ -135,7 +135,9 @@ class ActivityAnalysisReadService(ActivityReadService):
             self._session_records,
             refreshable=self._refreshable,
             summary_row=summary_row,
-            failures=None if self._detail_store is None else self._detail_store.failures,
+            failures=None
+            if self._detail_store is None
+            else self._detail_store.failures,
             envelope=DetailEnvelopeReader(
                 feedback_service=self._feedback_service,
                 read_equipment=self._read_equipment,

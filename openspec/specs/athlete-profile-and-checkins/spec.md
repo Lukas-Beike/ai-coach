@@ -175,3 +175,20 @@ The system SHALL record explicitly completed equipment maintenance within the it
 - **THEN** maintenance counters use the implemented later-calendar-day rule and mark incomplete coverage rather than diagnosing wear or replacement need.
 
 Evidence: `backend/athlete/equipment.py:EquipmentService.maintain`, `backend/athlete/equipment.py:_maintenance_usage`, `backend/athlete/equipment.py:_lifetime_projection`; `tests/test_training_record_features.py:test_garmin_linked_sessions_feed_maintenance_usage`, `tests/test_training_record_features.py:test_truncated_or_stale_garmin_list_makes_session_maintenance_partial`; `tests/test_coach_tool_coverage.py:test_training_records_and_equipment_tools_use_confirmed_local_state`; `tests/test_equipment_post_route.py:test_maintenance_post_delegates_to_equipment_service`.
+
+### Requirement: Authoritative local zone edits and undo
+The athlete SHALL be able to read and explicitly edit local sport-specific zones and thresholds through the supported application contract. Saves SHALL validate units and ascending boundaries, preserve provider alternatives and record change history with undo. Confirmed local configuration SHALL remain authoritative across provider refresh, restart and backup/restore.
+
+#### Scenario: Valid local edit
+- **WHEN** an authenticated athlete saves valid local zone boundaries for a sport and metric
+- **THEN** effective calendar/plan configuration uses those boundaries, the provider alternative remains separately visible and the save produces an undoable receipt.
+
+#### Scenario: Invalid boundaries
+- **WHEN** a save contains nonfinite, incompatible-unit or nonascending boundaries
+- **THEN** the whole edit fails without partially modifying existing zones or history.
+
+#### Scenario: Undo after provider refresh
+- **WHEN** a saved local zone edit is undone after a provider refresh
+- **THEN** the previous local state is restored and effective selection follows local authority or the applicable provider alternative when no local configuration remains.
+
+Evidence baseline: `backend/activities/zone_settings.py`, `backend/change_history.py`, `backend/athlete/profile.py`; `tests/test_zone_settings.py`. Local canonical zone editing and its receipt/undo paths require new implementation and tests.

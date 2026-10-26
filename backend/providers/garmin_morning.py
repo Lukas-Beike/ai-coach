@@ -65,6 +65,22 @@ def fetch_morning_body_battery(
     return sleep_payload, records if isinstance(records, list) else []
 
 
+def morning_sleep_element(
+    checkin_date: date, sleep_payload: Any
+) -> dict[str, Any] | None:
+    """Return the fetched night as a ``sleep`` section element, keyed by its date.
+
+    The element holds the ``dailySleepDTO`` of the morning sleep read under the
+    check-in date, the identity the daily sleep read gives the same night.
+    """
+    dto = (
+        sleep_payload.get("dailySleepDTO") if isinstance(sleep_payload, dict) else None
+    )
+    if not isinstance(dto, dict) or not dto:
+        return None
+    return {"calendarDate": checkin_date.isoformat(), "dailySleepDTO": dto}
+
+
 def merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
     """Merge bounded-window results without discarding older snapshot records."""
     return merge_records(incoming, previous)

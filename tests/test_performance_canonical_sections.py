@@ -16,7 +16,13 @@ from unittest.mock import Mock
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.records import MetricValue, Observation, Provenance
+from backend.canonical.vocabulary import (
+    MetricKind,
+    ProviderId,
+    RecordingOrigin,
+    SourceKind,
+)
 from backend.performance import chart_history
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
@@ -40,10 +46,6 @@ SNAPSHOT_ONLY_WELLNESS = (
     "id",
     "tsb",
     "rampRate",
-    "fatigue",
-    "soreness",
-    "stress",
-    "mood",
     "sportInfo",
     "sport_info",
 )
@@ -91,6 +93,45 @@ class SectionHelperTests(unittest.TestCase):
 
     def test_wellness_rows_without_carrier_or_observations_are_empty(self) -> None:
         self.assertEqual(wellness_rows([], {}), [])
+
+    def test_subjective_ratings_are_rebuilt_from_their_observations(self) -> None:
+        provenance = Provenance(
+            provider=ProviderId.INTERVALS,
+            source_kind=SourceKind.PROVIDER_REPORTED,
+            source_record_id=TODAY.isoformat(),
+            recorded_by=RecordingOrigin.MANUAL,
+            retrieved_at=None,
+            label="Intervals.icu",
+        )
+        observed = {
+            kind: (
+                Observation(
+                    kind=kind,
+                    value=MetricValue(value, kind.unit),
+                    observed_on=TODAY,
+                    observed_at=None,
+                    provenance=provenance,
+                ),
+            )
+            for kind, value in (
+                (MetricKind.SUBJECTIVE_FATIGUE, 3.0),
+                (MetricKind.SUBJECTIVE_SORENESS, 1.0),
+                (MetricKind.SUBJECTIVE_STRESS, 2.0),
+                (MetricKind.SUBJECTIVE_MOOD, 4.0),
+            )
+        }
+        self.assertEqual(
+            wellness_rows([{"id": TODAY.isoformat(), "stress": 4}], observed),
+            [
+                {
+                    "id": TODAY.isoformat(),
+                    "stress": 2,
+                    "fatigue": 3,
+                    "soreness": 1,
+                    "mood": 4,
+                }
+            ],
+        )
 
     def test_carrier_rows_keep_non_canonical_fields_and_unmapped_rows(self) -> None:
         carrier: list[dict[str, Any]] = [
