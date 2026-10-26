@@ -349,7 +349,7 @@ class ActivityFeedbackService:
         self, db: Any, entity_id: str
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """The stored rows of one feedback group for change history."""
-        value = _audit_value(self._groups(db).get(_group_of(entity_id)))
+        value = _audit_value(self._groups(db).get(self._current_key(db, entity_id)))
         return value, change_history.audit_projection(ENTITY_TYPE, value)
 
     def restore_in_transaction(
@@ -374,7 +374,16 @@ class ActivityFeedbackService:
                     409, "Die Rückmeldung kann nicht wiederhergestellt werden."
                 )
             self._feedback_repository.restore(db, row)
-        return _audit_value(self._groups(db).get(_group_of(entity_id)))
+        return _audit_value(self._groups(db).get(self._current_key(db, entity_id)))
+
+    @staticmethod
+    def _current_key(db: Any, entity_id: str) -> tuple[str, str]:
+        """The group key of a recorded entity, through later session merges."""
+        kind, value = _group_of(entity_id)
+        if kind == "session":
+            effective = canonical_store.effective_session_ids(db, [value])
+            value = effective.get(value, value)
+        return (kind, value)
 
     def save_coach(self, activity_id: Any, value: Any) -> dict[str, Any]:
         """Save feedback only for an activity the canonical activity reads serve."""

@@ -175,6 +175,29 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
         (original,) = stored_rows(self)
         self.assertEqual(original["notes"], LONG_NOTES)
 
+    def test_undo_follows_a_session_merged_after_the_edit(self) -> None:
+        self.service.save(INTERVALS_ID, {"notes": "First"})
+        updated = self.service.save(INTERVALS_ID, {"notes": "Second"})["change"]
+        with self.manager.reader() as db:
+            effective = canonical_store.effective_session_ids(
+                db, [self.sessions["intervals"]]
+            )[self.sessions["intervals"]]
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "INSERT INTO activity_sessions(activity_id, primary_provider, "
+                "primary_provider_activity_id, started_at, created_at, updated_at) "
+                "VALUES ('act_survivor', 'intervals', 'survivor', ?, ?, ?)",
+                (SYNCED, SYNCED, SYNCED),
+            )
+            db.execute(
+                "UPDATE activity_sessions SET state = 'duplicate', merged_into = ? "
+                "WHERE activity_id = ?",
+                ("act_survivor", effective),
+            )
+        self.undo(updated)
+        (feedback,) = self.service.list()
+        self.assertEqual(feedback["notes"], "First")
+
     def test_deleting_the_surviving_copy_keeps_the_feedback(self) -> None:
         self.service.save(INTERVALS_ID, {"notes": "On the survivor"})
         with self.manager.unit_of_work() as db:

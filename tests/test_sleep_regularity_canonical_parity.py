@@ -13,6 +13,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.canonical.vocabulary import ProviderId
+from backend.performance.canonical_inputs import read_performance_inputs
 from backend.performance.canonical_recovery import (
     RECOVERY_HISTORY_DAYS,
     read_recovery_inputs,
@@ -170,6 +171,25 @@ class ReadPathTests(unittest.TestCase):
             [], {}, {"timezone": "Europe/Berlin"}, TODAY, canonical=inputs
         )["regularity"]
         self.assertEqual(regularity["status"], "ok")
+
+    def test_the_performance_read_keeps_the_periods(self) -> None:
+        periods = tuple(
+            canonical_periods([garmin_night(end, 8) for end in nights(30)], [])
+        )
+
+        class NoActivities:
+            def activity_rows(self, db: Any, **_: Any) -> tuple:
+                return ()
+
+        inputs = read_performance_inputs(
+            PeriodReader(periods),
+            None,
+            None,
+            activity_reader=NoActivities(),
+            as_of=TODAY,
+        )
+        assert inputs is not None and inputs.recovery is not None
+        self.assertEqual(inputs.recovery.sleep_periods, periods)
 
     def test_a_source_without_periods_keeps_the_legacy_rows(self) -> None:
         inputs = read_recovery_inputs(

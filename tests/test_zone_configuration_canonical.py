@@ -139,6 +139,32 @@ class EffectiveZoneTests(unittest.TestCase):
         self.assertEqual(zone(provider_configurations()), 5)
         self.assertEqual(zone((*provider_configurations(), local)), 4)
 
+    def test_a_missing_power_list_keeps_the_sport_settings_ftp(self) -> None:
+        heart_rate_only = {"types": ["Ride"], "lthr": 168, "hr_zones": RIDE["hr_zones"]}
+        planned = {
+            "id": "p1",
+            "date": "2026-10-12",
+            "type": "Ride",
+            "name": "Threshold",
+            "description": "- 10m 280w",
+        }
+        projection = calendar_read_model.project_planning_calendar(
+            [planned],
+            [],
+            {},
+            [],
+            [],
+            today=date(2026, 10, 11),
+            provider_window={},
+            default_name="Workout",
+            sport_settings=[{**RIDE, "types": ["Ride"]}],
+            zone_configurations=provider_configurations(
+                {"sportSettings": [heart_rate_only]}
+            ),
+        )
+        (row,) = projection["planned"]
+        self.assertEqual(row["workout_profile"]["segments"][0]["zone"], 5)
+
 
 class CoachZoneTests(unittest.TestCase):
     def test_the_coach_sees_the_zones_in_effect_with_their_source(self) -> None:

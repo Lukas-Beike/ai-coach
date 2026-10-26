@@ -127,15 +127,19 @@ class ZoneSettings:
         sport: Sport,
         environment: Environment = Environment.UNKNOWN,
         day: date | None = None,
+        *,
+        fallback: ZoneSettings | None = None,
     ) -> ZoneSettings:
         """Zone settings of ``sport`` from the effective canonical configurations.
 
         Lists keep the open top entry, which the percent limits leave out, as the
-        sport settings do. A metric without a usable configuration keeps the
-        default limits and has no threshold.
+        sport settings do. Each metric is decided on its own: one without an
+        applicable configuration keeps the ``fallback`` value, or the default
+        limits and no threshold when there is none.
         """
         chosen = list(configurations)
         indoor = environment in {Environment.INDOOR, Environment.VIRTUAL}
+        base = fallback or cls()
         power = effective_zone_configuration(
             chosen, ZoneConfigurationMetric.POWER, sport, indoor=indoor, day=day
         )
@@ -146,12 +150,12 @@ class ZoneSettings:
             chosen, ZoneConfigurationMetric.PACE, sport, indoor=indoor, day=day
         )
         return cls(
-            ftp=None if power is None else power.threshold,
-            lthr=None if heart_rate is None else heart_rate.threshold,
-            max_hr=None if heart_rate is None else heart_rate.maximum,
-            power_limits=_percent_limits(power) or POWER_ZONE_LIMITS,
-            hr_limits=_percent_limits(heart_rate) or HR_ZONE_LIMITS,
-            pace_limits=_percent_limits(pace) or PACE_ZONE_LIMITS,
+            ftp=base.ftp if power is None else power.threshold,
+            lthr=base.lthr if heart_rate is None else heart_rate.threshold,
+            max_hr=base.max_hr if heart_rate is None else heart_rate.maximum,
+            power_limits=_percent_limits(power) or base.power_limits,
+            hr_limits=_percent_limits(heart_rate) or base.hr_limits,
+            pace_limits=_percent_limits(pace) or base.pace_limits,
         )
 
     def power_zone(self, percent_of_ftp: float) -> int:

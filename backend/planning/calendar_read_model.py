@@ -108,11 +108,16 @@ def _zone_settings(
     zone_configurations: Sequence[ZoneConfiguration],
 ) -> ZoneSettings:
     sport, environment = planned_sport_environment(row)
+    legacy = ZoneSettings.from_sport_settings(sport_settings, sport, environment)
     if any(configuration.sport is sport for configuration in zone_configurations):
         return ZoneSettings.from_configurations(
-            zone_configurations, sport, environment, _row_day(row)
+            zone_configurations,
+            sport,
+            environment,
+            _row_day(row),
+            fallback=legacy,
         )
-    return ZoneSettings.from_sport_settings(sport_settings, sport, environment)
+    return legacy
 
 
 def project_planning_calendar(
