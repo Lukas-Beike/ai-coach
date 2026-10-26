@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any
 
@@ -102,20 +103,6 @@ def comparison_value(
     }
 
 
-def wellness_form_value(row: Any) -> float | int | None:
-    """Return direct Intervals form/TSB/freshness, or derive CTL minus ATL."""
-    if not isinstance(row, dict):
-        return None
-    direct = _as_number(_first_present(row, ("tsb", "form", "freshness")))
-    if direct is not None:
-        return direct
-    ctl = _as_number(_first_present(row, ("ctl",)))
-    atl = _as_number(_first_present(row, ("atl",)))
-    if ctl is None or atl is None:
-        return None
-    return round(float(ctl) - float(atl), 2)
-
-
 def readiness_score_value(value: Any) -> float | int | None:
     """Extract a scalar readiness score from nested provider payloads."""
     if isinstance(value, list):
@@ -148,21 +135,11 @@ def readiness_score_value(value: Any) -> float | int | None:
 
 
 def wellness_form_average(
-    rows: list[dict[str, Any]], days: int, end_date: date
+    form_by_day: Mapping[date, float] | None, days: int, end_date: date
 ) -> float | None:
-    """Average form/TSB over the inclusive, anchored date window."""
+    """Average the form observations of the inclusive window ending on ``end_date``."""
     cutoff = end_date - timedelta(days=days - 1)
-    values: list[float] = []
-    for row in rows:
-        try:
-            row_date = date.fromisoformat(
-                iso_date_prefix(str(row.get("id") or row.get("date") or ""))
-            )
-        except ValueError:
-            continue
-        if row_date < cutoff or row_date > end_date:
-            continue
-        value = wellness_form_value(row)
-        if value is not None:
-            values.append(float(value))
+    values = [
+        value for day, value in (form_by_day or {}).items() if cutoff <= day <= end_date
+    ]
     return round(sum(values) / len(values), 2) if values else None

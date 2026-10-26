@@ -1,5 +1,6 @@
 """Thirty-day cycling eFTP aggregation."""
 
+from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any
 
@@ -7,50 +8,6 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.performance import activity_validation
 from backend.providers import intervals_performance_fields as intervals_perf_fields
 from backend.providers.garmin_fields import first_present as _first_present
-
-
-def _sport_info_setting(wellness: dict[str, Any]) -> dict[str, Any]:
-    match_terms = ("ride", "bike", "rad", "cycling")
-    sport_info = wellness.get("sport_info", wellness.get("sportInfo", []))
-    if not isinstance(sport_info, list):
-        return {}
-    for info in sport_info:
-        if not isinstance(info, dict):
-            continue
-        configured_types = info.get("types")
-        raw_types = (
-            configured_types
-            if isinstance(configured_types, list)
-            else [info.get("type"), info.get("sport"), info.get("sport_type")]
-        )
-        if any(
-            any(term in str(activity_type or "").casefold() for term in match_terms)
-            for activity_type in raw_types
-        ):
-            return info
-    return {}
-
-
-def _wellness_eftp_value(
-    row: dict[str, Any], cutoff: date, anchor: date
-) -> float | None:
-    try:
-        row_date = date.fromisoformat(
-            iso_date_prefix(str(row.get("id") or row.get("date") or ""))
-        )
-    except ValueError:
-        return None
-    if not cutoff <= row_date <= anchor:
-        return None
-    info = _sport_info_setting(row)
-    model = info.get("mmp_model")
-    model = model if isinstance(model, dict) else {}
-    value = activity_validation.bounded_performance_metric(
-        "cycling_eftp_watts",
-        _first_present(model, ("ftp", "eftp", "eFTP"))
-        or _first_present(info, ("eftp", "eFTP")),
-    )
-    return float(value) if value is not None else None
 
 
 def _activity_eftp_value(activity: Any, cutoff: date, anchor: date) -> float | None:
@@ -80,23 +37,22 @@ def _activity_eftp_value(activity: Any, cutoff: date, anchor: date) -> float | N
 
 
 def eftp_30_day_average(
-    wellness_rows: list[dict[str, Any]], activities: list[Any], end_date: date
+    eftp_by_day: Mapping[date, float] | None, activities: list[Any], end_date: date
 ) -> float | None:
     cutoff = end_date - timedelta(days=29)
-    values = list(
-        eftp_daily_values(wellness_rows, activities, cutoff, end_date).values()
-    )
+    values = list(eftp_daily_values(eftp_by_day, activities, cutoff, end_date).values())
     return round(sum(values) / len(values), 1) if values else None
 
 
 def eftp_daily_values(
-    wellness_rows: list[dict[str, Any]],
+    eftp_by_day: Mapping[date, float] | None,
     activities: list[Any],
     start: date,
     end: date,
 ) -> dict[str, float]:
-    """Prefer dated wellness eFTP, otherwise the day's latest cycling activity.
+    """Prefer the canonical wellness-day eFTP, else the day's latest cycling activity.
 
+    ``eftp_by_day`` holds the ride eFTP observations of Intervals.icu wellness days.
     Each day contributes at most one value, so a same-day wellness and activity
     eFTP are not both counted.
     """
@@ -108,10 +64,12 @@ def eftp_daily_values(
         value = _activity_eftp_value(activity, start, end)
         if value is not None:
             observations[iso_date_prefix(str(activity["start_date_local"]))] = value
-    for row in wellness_rows:
-        if not isinstance(row, dict):
+    for day, raw in (eftp_by_day or {}).items():
+        if not start <= day <= end:
             continue
-        value = _wellness_eftp_value(row, start, end)
+        value = activity_validation.bounded_performance_metric(
+            "cycling_eftp_watts", raw
+        )
         if value is not None:
-            observations[iso_date_prefix(str(row.get("id") or row.get("date")))] = value
+            observations[day.isoformat()] = float(value)
     return observations

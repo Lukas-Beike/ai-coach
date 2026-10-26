@@ -21,6 +21,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.db.canonical_store import observation_natural_key
 from backend.performance.body import _number as legacy_weight_number
 from backend.providers.intervals_wellness_mapping import (
     MAPPER_VERSION,
@@ -289,13 +290,9 @@ class FormTests(unittest.TestCase):
         self.assertEqual(form[0].provenance.source_record_id, ROW_DAY)
         self.assertIsNone(form[0].sport)
 
-    def test_derivation_matches_the_legacy_form_reader(self) -> None:
-        from backend.performance.wellness import wellness_form_value
-
+    def test_derivation_is_ctl_minus_atl_rounded_to_two_decimals(self) -> None:
         source = row(ctl=52.1, atl=60.43)
-        self.assertEqual(
-            kinds(wellness([source]))[MetricKind.FORM], wellness_form_value(source)
-        )
+        self.assertEqual(kinds(wellness([source]))[MetricKind.FORM], -8.33)
 
     def test_form_is_not_derived_from_one_load_or_a_rejected_load(self) -> None:
         self.assertNotIn(MetricKind.FORM, kinds(wellness([row(ctl=50)])))
@@ -1268,6 +1265,52 @@ class AthleteGarbageTests(unittest.TestCase):
                     issue_tuples(result),
                     [(None, "athlete", IssueReason.INVALID_TYPE)],
                 )
+
+
+class KnownEftpClassificationLimitTests(unittest.TestCase):
+    """Pin where the mapper differs from the former snapshot eFTP readers (#1412).
+
+    These are known deviations of this mapper version, not requirements.
+    """
+
+    def eftp(self, result: MappingResult[Observation]) -> list[tuple[Sport | None, float]]:
+        return [
+            (record.sport, record.value.value)
+            for record in result.records
+            if record.kind is MetricKind.EFTP
+        ]
+
+    def test_sport_info_identified_only_by_sport_or_sport_type_has_no_eftp(
+        self,
+    ) -> None:
+        entries = [
+            {"sport": "Cycling", "eFTP": 270},
+            {"sport_type": "Ride", "eFTP": 280},
+        ]
+        self.assertEqual(self.eftp(wellness([row(sportInfo=entries)])), [])
+
+    def test_a_setting_is_classified_by_its_first_type_only(self) -> None:
+        athlete = {"sportSettings": [{"types": ["Run", "Ride"], "eftp": 300}]}
+        self.assertEqual(self.eftp(thresholds(athlete)), [(Sport.RUN, 300)])
+
+    def test_two_ride_settings_each_yield_an_observation_with_one_key(self) -> None:
+        athlete = {
+            "id": ATHLETE_ID,
+            "sportSettings": [
+                {"types": ["Ride"], "eftp": 250},
+                {"types": ["VirtualRide"], "eftp": 262},
+            ],
+        }
+        result = thresholds(athlete)
+        self.assertEqual(
+            self.eftp(result), [(Sport.RIDE, 250), (Sport.RIDE, 262)]
+        )
+        keys = {
+            observation_natural_key(record)
+            for record in result.records
+            if record.kind is MetricKind.EFTP
+        }
+        self.assertEqual(len(keys), 1)
 
 
 if __name__ == "__main__":

@@ -175,6 +175,8 @@ def current_performance_context(
         garmin_history=None
         if canonical is None or canonical.garmin is None
         else canonical.garmin.performance_history,
+        eftp_by_day=None if canonical is None else canonical.eftp_by_day,
+        form_by_day=None if canonical is None else canonical.form_by_day,
     )
     activity_performance = activity_validation.activity_performance_validation(
         activities, metrics, comparisons

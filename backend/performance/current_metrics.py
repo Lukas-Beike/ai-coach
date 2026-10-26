@@ -183,16 +183,14 @@ def _sport_info_setting(wellness: dict[str, Any], sport: str) -> dict[str, Any]:
     return {}
 
 
-def _intervals_eftp_value(setting: Any) -> Any:
-    """Read Intervals.icu's estimated FTP without falling back to user FTP."""
-    if not isinstance(setting, dict):
+def _canonical_eftp_value(canonical: CanonicalCurrentInputs | None) -> float | None:
+    """Return the athlete-record ride eFTP, else the latest wellness day's."""
+    if canonical is None:
         return None
-    mmp_model = setting.get("mmp_model")
-    if isinstance(mmp_model, dict):
-        value = _first_present(mmp_model, ("ftp", "eftp", "eFTP"))
-        if value not in (None, ""):
-            return value
-    return _first_present(setting, ("eftp", "eFTP"))
+    for observation in (canonical.athlete_eftp, canonical.wellness_eftp):
+        if observation is not None:
+            return observation.value.value
+    return None
 
 
 def _intervals_max_hr_metric(
@@ -626,12 +624,7 @@ def current_performance_metrics(
     latest_ride_eftp = _first_present(
         latest_ride_activity, intervals_perf_fields.ESTIMATED_FTP_ALIASES
     )
-    # Remaining snapshot read: EFTP observations are stored, but the current value
-    # follows the first matching sport setting, then sportInfo, then the latest
-    # ride, an order the observations do not yet reproduce.
-    current_ride_eftp = _intervals_eftp_value(ride) or _intervals_eftp_value(
-        wellness_ride
-    )
+    current_ride_eftp = _canonical_eftp_value(canonical)
     cycling_max_hr = _intervals_max_hr_metric(
         "cycling", ride, wellness_ride, activities, athlete
     )

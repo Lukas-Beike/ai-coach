@@ -169,17 +169,95 @@ def mapped_personal_recovery(
 def recovery_only_inputs(
     garmin: Mapping[str, Any] | None = None,
     wellness: list[dict[str, Any]] | None = None,
+    snapshot: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Return performance inputs that carry only the mapped recovery observations.
+    """Return performance inputs for a context test that changes only some sources.
 
-    Without a wellness day the load, threshold and Garmin metric readers keep the
-    snapshot path, so a context test changes only its recovery source.
+    The inputs carry the mapped recovery observations. Without a wellness day the
+    load, threshold and Garmin metric readers keep the snapshot path. With a
+    ``snapshot`` they also carry what the Intervals.icu observations of that
+    snapshot give for form, ramp rate and eFTP (#1412), which are not read from the
+    snapshot itself; ctl and atl stay on the snapshot rows.
     """
-    from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+    from dataclasses import replace
 
-    return CanonicalPerformanceInputs(
+    from backend.performance.canonical_current import CanonicalCurrentInputs
+    from backend.performance.canonical_inputs import (
+        CanonicalPerformanceInputs,
+        read_performance_inputs,
+    )
+    from backend.providers.snapshot_projection import project_intervals_snapshot
+
+    inputs = CanonicalPerformanceInputs(
         wellness_day=None,
         ctl=None,
         atl=None,
         recovery=mapped_recovery_inputs(garmin, wellness),
     )
+    if snapshot is None:
+        return inputs
+    _activities, mapped = project_intervals_snapshot(
+        snapshot, zone=ZoneInfo("Europe/Berlin"), retrieved_at=RETRIEVED
+    )
+    full = read_performance_inputs(
+        _FilteringReader(tuple(mapped.records)),
+        None,
+        snapshot,
+        activity_reader=_NoActivityRows(),
+        as_of=RETRIEVED.date(),
+    )
+    if full is None:
+        return inputs
+    current = full.current
+    return replace(
+        inputs,
+        wellness_day=full.wellness_day,
+        form_by_day=full.form_by_day,
+        eftp_by_day=full.eftp_by_day,
+        ramp_rate=full.ramp_rate,
+        current=None
+        if current is None
+        else CanonicalCurrentInputs(
+            bike_threshold_hr=(),
+            run_threshold_hr=(),
+            athlete_threshold_hr=None,
+            cycling_vo2max=(),
+            running_vo2max=(),
+            wellness_weight=None,
+            athlete_weight=None,
+            athlete_eftp=current.athlete_eftp,
+            wellness_eftp=current.wellness_eftp,
+        ),
+    )
+
+
+class _NoActivityRows:
+    """An activity row reader without rows: the activities stay on the snapshot."""
+
+    def activity_rows(self, db: Any, **bounds: Any) -> tuple[dict[str, Any], ...]:
+        return ()
+
+
+class _FilteringReader:
+    """Serves observations by kind, inclusive observed_on window and sport."""
+
+    def __init__(self, observations: tuple[Observation, ...]) -> None:
+        self._observations = observations
+
+    def observations(
+        self,
+        db: Any,
+        kind: MetricKind,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        sport: Sport | None = None,
+    ) -> tuple[Observation, ...]:
+        return tuple(
+            observation
+            for observation in self._observations
+            if observation.kind is kind
+            and (start is None or start <= observation.observed_on)
+            and (end is None or observation.observed_on <= end)
+            and (sport is None or observation.sport is sport)
+        )

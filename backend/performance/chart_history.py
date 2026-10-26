@@ -1,5 +1,6 @@
 """Bounded, content-free historical series for the public analysis view."""
 
+from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any, Final
 
@@ -59,25 +60,6 @@ def _activity_history_rows(
     if canonical is not None and canonical.activity_rows is not None:
         return list(canonical.activity_rows)
     return _rows(raw.get("activities")) + _rows(snapshot.get("recent_activities"))
-
-
-def _wellness_history(
-    raw: dict[str, Any],
-    snapshot: dict[str, Any],
-    start: date,
-    today: date,
-    canonical: CanonicalPerformanceInputs | None = None,
-) -> dict[date, dict[str, Any]]:
-    if canonical is not None and canonical.history_wellness_rows is not None:
-        rows = list(canonical.history_wellness_rows)
-    else:
-        rows = _rows(raw.get("wellness")) + _rows(snapshot.get("recent_wellness"))
-    return {
-        day: row
-        for row in rows
-        if (day := _day(row.get("id") or row.get("date"))) is not None
-        and start <= day <= today
-    }
 
 
 def _load_history(
@@ -169,7 +151,7 @@ def _metric_series(
     key: str,
     activities: list[dict[str, Any]],
     garmin: dict[str, Any],
-    wellness: dict[date, dict[str, Any]],
+    eftp_by_day: Mapping[date, float] | None,
     dates: list[str],
     start: date,
     today: date,
@@ -179,7 +161,7 @@ def _metric_series(
         source = INTERVALS_SOURCE
         provider = ProviderId.INTERVALS
         observations = eftp.eftp_daily_values(
-            list(wellness.values()),
+            eftp_by_day,
             activities,
             start,
             today,
@@ -219,13 +201,13 @@ def analysis_history(
     raw = snapshot.get("raw_provider_data")
     raw = raw if isinstance(raw, dict) else {}
     # Raw provider rows retain the history that the compact Coach projection trims.
-    wellness = _wellness_history(raw, snapshot, load_start, today, canonical)
+    eftp_by_day = None if canonical is None else canonical.eftp_by_day
     activities = _activity_history_rows(raw, snapshot, canonical)
     garmin_canonical = None if canonical is None else canonical.garmin
     load = _load_history(load_dates, garmin, garmin_canonical)
     series = {
         key: _metric_series(
-            key, activities, garmin, wellness, dates, start, today, garmin_canonical
+            key, activities, garmin, eftp_by_day, dates, start, today, garmin_canonical
         )
         for key in METRIC_KEYS
     }
@@ -259,6 +241,7 @@ def analysis_history(
             garmin_ftp=None
             if garmin_canonical is None
             else garmin_canonical.performance_history.get("cycling_ftp_watts", {}),
+            eftp_by_day=eftp_by_day,
         ),
         # Remaining snapshot read: the power curve has no metric kind.
         "cycling_power_profile": {

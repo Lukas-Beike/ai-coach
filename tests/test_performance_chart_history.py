@@ -2,6 +2,7 @@ import math
 import unittest
 from datetime import date
 
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.chart_history import analysis_history
 
 
@@ -305,7 +306,17 @@ class AnalysisHistoryTests(unittest.TestCase):
                 {"date": "2026-10-01", "metrics": {"cycling_eftp_watts": 999}}
             ]
         }
-        result = analysis_history(snapshot, garmin, date(2026, 10, 2))["metrics"]
+        # The wellness-day eFTP is a canonical observation (the mapper never stores
+        # the plain ftp as eFTP); the snapshot's sport_info is not read (#1412).
+        canonical = CanonicalPerformanceInputs(
+            wellness_day=None,
+            ctl=None,
+            atl=None,
+            eftp_by_day={date(2026, 10, 1): 270.0},
+        )
+        result = analysis_history(
+            snapshot, garmin, date(2026, 10, 2), canonical=canonical
+        )["metrics"]
         points = result["cycling_eftp_watts"][0]["points"]
         self.assertEqual(result["cycling_eftp_watts"][0]["source"], "Intervals.icu")
         self.assertIsNone(points[-3]["value"])

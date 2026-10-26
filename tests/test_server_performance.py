@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
+from canonical_recovery_support import recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
 from server_test_support import (
     ServerTestCase,
@@ -366,12 +367,18 @@ class ServerPerformanceTests(ServerTestCase):
                 ],
             },
             "recent_activities": [],
-            "recent_wellness": [],
+            # A wellness day (without values) lets the canonical inputs read the
+            # athlete record's eFTP.
+            "recent_wellness": [
+                {"id": _local_datetime.now().astimezone().date().isoformat()}
+            ],
         }
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),
+            # The setting's eFTP is a canonical observation (#1412).
+            canonical=recovery_only_inputs(snapshot=snapshot).current,
         )
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
         self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")

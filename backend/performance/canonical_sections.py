@@ -17,7 +17,10 @@ The athlete's Intervals.icu ratings ``fatigue``/``soreness``/``stress``/``mood``
 are rebuilt from their SUBJECTIVE_* observations. Wellness fields without a
 canonical observation (``tsb``, ``rampRate`` and the ``sportInfo`` eFTP) are not
 rebuilt. They still come from the snapshot's wellness rows when the
-snapshot holds them, and are absent when it does not. The snapshot rows act only as
+snapshot holds them, and are absent when it does not. Form, ramp rate and the
+cycling eFTP no longer read those carrier fields: they come from the form and
+eFTP day series (``wellness_day_values``) and the derived ramp rate of
+``backend.performance.canonical_inputs``. The snapshot rows act only as
 the carrier of these fields: a canonical observation always wins over a snapshot
 value of the same field, and a snapshot without wellness rows yields rows from
 observations alone.
@@ -34,7 +37,7 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.providers.intervals_activity_fields import ACTIVITY_FIELDS, selected
 from backend.runtime.ports import ObservationReader
 
@@ -133,13 +136,32 @@ def row_day(row: Mapping[str, Any]) -> date | None:
     return day if day.isoformat() == text else None
 
 
-def _is_wellness_day(observation: Observation) -> bool:
+def _is_wellness_record(observation: Observation) -> bool:
     provenance = observation.provenance
     return (
         provenance.provider is ProviderId.INTERVALS
-        and observation.sport is None
         and provenance.source_record_id == observation.observed_on.isoformat()
     )
+
+
+def _is_wellness_day(observation: Observation) -> bool:
+    return observation.sport is None and _is_wellness_record(observation)
+
+
+def wellness_day_values(
+    observations: Iterable[Observation], *, sport: Sport | None = None
+) -> dict[date, float]:
+    """Return the value of each Intervals.icu wellness-day observation by day.
+
+    ``sport`` selects the sport-scoped wellness observations (``sportInfo`` eFTP);
+    without it only sport-less observations count. Athlete-record observations are
+    left out, so the athlete eFTP never enters a daily series.
+    """
+    return {
+        observation.observed_on: observation.value.value
+        for observation in observations
+        if observation.sport is sport and _is_wellness_record(observation)
+    }
 
 
 def _values_by_day(observed: WellnessObservations) -> dict[date, dict[str, Any]]:

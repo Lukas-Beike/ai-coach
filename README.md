@@ -142,7 +142,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 
 ### Performance Analytics, Metrics & Trends
 - **30-Day Historical Trends**: Long-term tracking and trend lines for FTP, running threshold pace, VO2 max, resting heart rate, heart rate variability (HRV), and body weight.
-- **Impulse-Response Fitness Modeling**: Real-time tracking of Chronic Training Load (Fitness), Acute Training Load (Fatigue), and Training Stress Balance (Form).
+- **Impulse-Response Fitness Modeling**: Real-time tracking of Chronic Training Load (Fitness), Acute Training Load (Fatigue), and Training Stress Balance (Form) from Intervals.icu wellness observations. The Coach context shows a ramp rate that Intervals Coach derives from the CTL change over exactly seven days, labelled as calculated; it can differ from the Intervals.icu value and is unknown when a day is missing.
 - **Race Prediction Engine**: Dynamic race time estimations across standard distances (5K, 10K, Half Marathon, Marathon) based on current aerobic threshold and VO2 max trends.
 - **Sport-Specific Intensity Distributions**: Heart rate and power zone distribution analysis across running, outdoor cycling, and indoor/virtual cycling activities.
 - **Nutritional Intake Logging**: Integrated tracking of daily caloric intake and macronutrient splits (protein, carbohydrates, fats) stored alongside training load.
