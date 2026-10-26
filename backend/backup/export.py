@@ -477,7 +477,7 @@ class PrivacyArchiveExportService:
                 ):
                     self._write_jsonl(
                         archive,
-                        table + ".jsonl",
+                        f"{table}.jsonl",
                         (
                             sanitized_provider_row(row, "details")
                             for row in db.execute(

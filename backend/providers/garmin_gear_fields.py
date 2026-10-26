@@ -42,36 +42,39 @@ def canonical_gear_rows(
     for link in links:
         if link.provenance.provider is ProviderId.GARMIN:
             activity_ids.setdefault(link.gear_id, []).append(link.provider_activity_id)
-    rows: list[dict[str, Any]] = []
-    for item in items:
-        if item.provenance.provider is not ProviderId.GARMIN:
-            continue
-        row: dict[str, Any] = {
-            _GEAR_ID: item.gear_id,
-            "stats": {
-                key: value
-                for key, value in (
-                    ("totalDistance", item.total_distance_m),
-                    ("totalActivities", item.total_activities),
-                )
-                if value is not None
-            },
-        }
-        for key, value in (
-            (_GEAR_NAME, item.name),
-            ("gearTypeName", item.type_label),
-            ("activityTypeName", item.activity_type_label),
-            ("gearStatusName", item.status_label),
-            ("maximumMeters", item.maximum_distance_m),
-        ):
-            if value is not None:
-                row[key] = value
-        if item.activity_list_partial is not None:
-            row["activity_ids"] = activity_ids.get(item.gear_id, [])
-            if item.activity_list_partial:
-                row["activity_ids_truncated"] = True
-        rows.append(row)
-    return rows
+    return [
+        _gear_row(item, activity_ids)
+        for item in items
+        if item.provenance.provider is ProviderId.GARMIN
+    ]
+
+
+def _gear_row(item: GearItem, activity_ids: dict[str, list[str]]) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        _GEAR_ID: item.gear_id,
+        "stats": {
+            key: value
+            for key, value in (
+                ("totalDistance", item.total_distance_m),
+                ("totalActivities", item.total_activities),
+            )
+            if value is not None
+        },
+    }
+    for key, value in (
+        (_GEAR_NAME, item.name),
+        ("gearTypeName", item.type_label),
+        ("activityTypeName", item.activity_type_label),
+        ("gearStatusName", item.status_label),
+        ("maximumMeters", item.maximum_distance_m),
+    ):
+        if value is not None:
+            row[key] = value
+    if item.activity_list_partial is not None:
+        row["activity_ids"] = activity_ids.get(item.gear_id, [])
+        if item.activity_list_partial:
+            row["activity_ids_truncated"] = True
+    return row
 
 
 def activity_start_local(activity: Mapping[str, Any]) -> Any:

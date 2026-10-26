@@ -1013,15 +1013,7 @@ def _rows_by_garmin_id(
     sessions: tuple[dict[str, str], dict[str, str]] = ({}, {}),
 ) -> dict[str, set[str]]:
     row_ids = {str(row.get("id")) for row in rows}
-    by_garmin: dict[str, set[str]] = {}
-    garmin_sessions, row_sessions = sessions
-    rows_by_session: dict[str, set[str]] = {}
-    for row_id in row_ids:
-        if (session := row_sessions.get(row_id)) is not None:
-            rows_by_session.setdefault(session, set()).add(row_id)
-    for garmin_id, session in garmin_sessions.items():
-        for row_id in rows_by_session.get(session, ()):
-            by_garmin.setdefault(garmin_id, set()).add(row_id)
+    by_garmin = _rows_by_garmin_session(row_ids, *sessions)
     for match in matches if isinstance(matches, list) else []:
         if not isinstance(match, dict):
             continue
@@ -1033,6 +1025,21 @@ def _rows_by_garmin_id(
     for row in rows:
         if row.get("external_id") not in (None, ""):
             by_garmin.setdefault(str(row["external_id"]), set()).add(str(row.get("id")))
+    return by_garmin
+
+
+def _rows_by_garmin_session(
+    row_ids: set[str], garmin_sessions: dict[str, str], row_sessions: dict[str, str]
+) -> dict[str, set[str]]:
+    """Map each Garmin activity to the rows bundled into its canonical session."""
+    rows_by_session: dict[str, set[str]] = {}
+    for row_id in row_ids:
+        if (session := row_sessions.get(row_id)) is not None:
+            rows_by_session.setdefault(session, set()).add(row_id)
+    by_garmin: dict[str, set[str]] = {}
+    for garmin_id, session in garmin_sessions.items():
+        for row_id in rows_by_session.get(session, ()):
+            by_garmin.setdefault(garmin_id, set()).add(row_id)
     return by_garmin
 
 

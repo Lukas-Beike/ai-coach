@@ -43,6 +43,11 @@ def intervals_row(identifier: str, **extra: Any) -> dict[str, Any]:
     }
 
 
+def stored_rows(fixture: Any) -> list[dict[str, Any]]:
+    with fixture.manager.reader() as db:
+        return sorted(fixture.repository.all(db), key=lambda row: row["activity_id"])
+
+
 class FeedbackSessionFixture(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -99,10 +104,6 @@ class FeedbackSessionFixture(unittest.TestCase):
             references=ActivityReferences(self.manager),
         )
 
-    def rows(self) -> list[dict[str, Any]]:
-        with self.manager.reader() as db:
-            return sorted(self.repository.all(db), key=lambda row: row["activity_id"])
-
 
 class FeedbackSessionTests(FeedbackSessionFixture):
     def test_the_provider_copies_are_one_session(self) -> None:
@@ -120,7 +121,9 @@ class FeedbackSessionTests(FeedbackSessionFixture):
             (saved["activity_id"], saved["notes"], saved["session_rpe"]),
             (INTERVALS_ID, "Heavy legs", 5),
         )
-        self.assertEqual([row["activity_id"] for row in self.rows()], [INTERVALS_ID])
+        self.assertEqual(
+            [row["activity_id"] for row in stored_rows(self)], [INTERVALS_ID]
+        )
         (effective,) = self.service.list()
         self.assertEqual(effective["session_rpe"], 5)
         by_id = {
@@ -146,10 +149,10 @@ class FeedbackSessionTests(FeedbackSessionFixture):
             effective["conflicting_feedback"],
             [{"activity_id": INTERVALS_ID, "updated_at": "2026-09-19"}],
         )
-        self.assertEqual(len(self.rows()), 2)
+        self.assertEqual(len(stored_rows(self)), 2)
 
         self.service.save(INTERVALS_ID, {"notes": ""})
-        self.assertEqual((self.service.list(), self.rows()), ([], []))
+        self.assertEqual((self.service.list(), stored_rows(self)), ([], []))
 
     def test_an_ambiguous_id_stands_alone(self) -> None:
         with self.manager.unit_of_work() as db:
@@ -175,7 +178,9 @@ class FeedbackSessionTests(FeedbackSessionFixture):
             sorted(item["notes"] for item in self.service.list()),
             ["The Intervals ride", "Which one?"],
         )
-        (ambiguous,) = [row for row in self.rows() if row["activity_id"] == GARMIN_ID]
+        (ambiguous,) = [
+            row for row in stored_rows(self) if row["activity_id"] == GARMIN_ID
+        ]
         self.assertIsNone(ambiguous["session_id"])
 
     def test_local_feedback_never_takes_the_provider_rpe(self) -> None:
@@ -195,7 +200,7 @@ class FeedbackSessionTests(FeedbackSessionFixture):
                     now=SYNCED,
                 )
             )
-        (row,) = self.rows()
+        (row,) = stored_rows(self)
         self.assertEqual(row["notes"], "Saved on the Garmin copy")
         (shown,) = self.service.for_activity_ids([INTERVALS_ID])
         self.assertEqual(shown["notes"], "Saved on the Garmin copy")

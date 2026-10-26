@@ -282,8 +282,9 @@ def _map_wellness_row(
     first = len(collector.records)
     for kind, aliases in _WELLNESS_FIELDS:
         _add_field(collector, scope, row, kind, aliases)
-    manual = replace(
-        scope,
+    manual = _Scope(
+        record_ref=record_id,
+        observed_on=observed_on,
         provenance=replace(scope.provenance, recorded_by=RecordingOrigin.MANUAL),
     )
     for kind, aliases in _SUBJECTIVE_FIELDS:

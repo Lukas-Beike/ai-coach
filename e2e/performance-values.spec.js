@@ -29,6 +29,7 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
       running_max_hr_bpm: { value: 187, unit: "bpm", source_provider: "garmin" }, cycling_max_hr_bpm: { value: 200, unit: "bpm", source_provider: "intervals" },
       max_hr_bpm: { value: 187, unit: "bpm", source_provider: "garmin" },
       run_threshold_hr_bpm: { value: 170, unit: "bpm" },
+      run_threshold_watts: { value: null, unit: "W" },
     } };
     renderPerformance(state.data.performance);
   });

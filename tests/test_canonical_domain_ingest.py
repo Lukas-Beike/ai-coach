@@ -202,6 +202,17 @@ def bumped_wellness() -> Any:
     )
 
 
+def mapped_versions(manager: Any) -> set[int]:
+    with manager.reader() as db:
+        return {
+            int(row["mapped_version"])
+            for row in db.execute(
+                "SELECT mapped_version FROM provider_records WHERE record_kind = ?",
+                (WELLNESS,),
+            )
+        }
+
+
 class BackfillFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -244,16 +255,6 @@ class BackfillFixture(unittest.TestCase):
     def domain_rows(self, manager: Any = None) -> list[tuple[Any, ...]]:
         with (manager or self.manager).reader() as db:
             return rows(db)
-
-    def mapped_versions(self) -> set[int]:
-        with self.manager.reader() as db:
-            return {
-                int(row["mapped_version"])
-                for row in db.execute(
-                    "SELECT mapped_version FROM provider_records WHERE record_kind = ?",
-                    (WELLNESS,),
-                )
-            }
 
     def counters(self, backfill: CanonicalBackfill) -> dict[str, int]:
         with self.manager.reader() as db:
@@ -331,7 +332,7 @@ class BackfillReprojectionTests(BackfillFixture):
                 (day_id(2), "PRODUCTIVE", "active"),
             ],
         )
-        self.assertEqual(self.mapped_versions(), {current + 1})
+        self.assertEqual(mapped_versions(self.manager), {current + 1})
         self.assertEqual(self.counters(backfill)["retired"], 1)
 
     def test_a_failed_reprojection_rolls_back_rows_and_mapped_version(self) -> None:
@@ -351,7 +352,7 @@ class BackfillReprojectionTests(BackfillFixture):
             backfill.run_batch(db)
         self.assertEqual(self.domain_rows(), before)
         self.assertEqual(
-            self.mapped_versions(), {canonical_plans.INTERVALS_WELLNESS_VERSION}
+            mapped_versions(self.manager), {canonical_plans.INTERVALS_WELLNESS_VERSION}
         )
 
     def test_deleted_raw_records_keep_their_rows(self) -> None:

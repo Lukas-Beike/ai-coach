@@ -784,37 +784,29 @@ def _work_from_plan(
     items, duplicates = _raw_items(
         plan.raw_records, stamp, may_insert_activities=may_insert_activities
     )
-    seen_activities: set[str] = set()
-    seen_observations: set[str] = set()
-    superseded = 0
-    for activity in plan.activities:
-        source_id = activity.record.provenance.source_record_id or ""
-        if source_id in seen_activities:
-            duplicates += 1
-            continue
-        seen_activities.add(source_id)
-        if not may_insert_activities:
-            superseded += 1
-            continue
-        items.append(_Item(activity, _fetched_at(activity.retrieved_at, stamp)))
-    for observation in plan.observations:
-        natural_key = canonical_store.observation_natural_key(observation.observation)
-        if natural_key in seen_observations:
-            duplicates += 1
-            continue
-        seen_observations.add(natural_key)
-        items.append(_Item(observation, stamp))
-    batches: list[DomainBatch] = []
-    seen_batches: set[str] = set()
-    for batch in plan.domain_batches:
-        if batch.source_record_id in seen_batches:
-            duplicates += 1
-            continue
-        seen_batches.add(batch.source_record_id)
-        if domain_items:
-            items.append(_Item(batch, stamp))
-        else:
-            batches.append(batch)
+    activities, repeats = _distinct(
+        plan.activities, lambda item: item.record.provenance.source_record_id or ""
+    )
+    duplicates += repeats
+    superseded = 0 if may_insert_activities else len(activities)
+    if may_insert_activities:
+        items.extend(
+            _Item(activity, _fetched_at(activity.retrieved_at, stamp))
+            for activity in activities
+        )
+    observations, repeats = _distinct(
+        plan.observations,
+        lambda item: canonical_store.observation_natural_key(item.observation),
+    )
+    duplicates += repeats
+    items.extend(_Item(observation, stamp) for observation in observations)
+    batches, repeats = _distinct(
+        plan.domain_batches, lambda batch: batch.source_record_id
+    )
+    duplicates += repeats
+    if domain_items:
+        items.extend(_Item(batch, stamp) for batch in batches)
+        batches = []
     return _Work(
         items=tuple(items),
         skipped_invalid=plan.skipped_invalid,
@@ -822,6 +814,18 @@ def _work_from_plan(
         superseded=superseded,
         domain_batches=tuple(batches),
     )
+
+
+def _distinct[T](values: Sequence[T], key: Callable[[T], str]) -> tuple[list[T], int]:
+    """Keep the first value per key, in order, and count the repeats."""
+    seen: set[str] = set()
+    kept: list[T] = []
+    for value in values:
+        identity = key(value)
+        if identity not in seen:
+            seen.add(identity)
+            kept.append(value)
+    return kept, len(values) - len(kept)
 
 
 def _raw_items(

@@ -209,16 +209,7 @@ class ZoneConfiguration:
             require_instance(self.sport, Sport, "sport")
         if self.environment is not None:
             require_instance(self.environment, Environment, "environment")
-        if self.valid_from is not None:
-            require_date(self.valid_from, "valid_from")
-        if self.valid_until is not None:
-            require_date(self.valid_until, "valid_until")
-        if (
-            self.valid_from is not None
-            and self.valid_until is not None
-            and self.valid_until < self.valid_from
-        ):
-            raise ValueError("valid_until must not precede valid_from")
+        _require_validity(self.valid_from, self.valid_until)
         lower, upper = ZONE_VALUE_BOUNDS[self.metric]
         for field in ("threshold", "maximum", "resting"):
             object.__setattr__(
@@ -244,18 +235,33 @@ class ZoneConfiguration:
         if (self.percent_limits is None) != (self.percent_basis is None):
             raise ValueError("percent_limits and percent_basis go together")
         if self.percent_basis is not None:
-            require_instance(self.percent_basis, ZonePercentBasis, "percent_basis")
-            if (
-                self.percent_basis is ZonePercentBasis.RESERVE
-                and self.metric is not ZoneConfigurationMetric.HEART_RATE
-            ):
-                raise ValueError("reserve percentages apply to heart-rate zones only")
+            _require_percent_basis(self.percent_basis, self.metric)
         provenance = require_instance(self.provenance, Provenance, "provenance")
         if provenance.source_kind is SourceKind.DERIVED:
             raise ValueError("zone configurations must not be derived")
         if provenance.provider is not None and provenance.source_record_id is None:
             raise ValueError("provider zone configurations need a source record id")
         optional_slug(self.model, "model")
+
+
+def _require_validity(valid_from: date | None, valid_until: date | None) -> None:
+    if valid_from is not None:
+        require_date(valid_from, "valid_from")
+    if valid_until is not None:
+        require_date(valid_until, "valid_until")
+    if valid_from is not None and valid_until is not None and valid_until < valid_from:
+        raise ValueError("valid_until must not precede valid_from")
+
+
+def _require_percent_basis(
+    basis: ZonePercentBasis, metric: ZoneConfigurationMetric
+) -> None:
+    require_instance(basis, ZonePercentBasis, "percent_basis")
+    if (
+        basis is ZonePercentBasis.RESERVE
+        and metric is not ZoneConfigurationMetric.HEART_RATE
+    ):
+        raise ValueError("reserve percentages apply to heart-rate zones only")
 
 
 @dataclass(frozen=True, slots=True)

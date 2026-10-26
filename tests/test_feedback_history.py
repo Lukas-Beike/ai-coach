@@ -21,6 +21,7 @@ from test_feedback_session_identity import (
     INTERVALS_ID,
     SYNCED,
     FeedbackSessionFixture,
+    stored_rows,
 )
 
 from backend import change_history
@@ -61,12 +62,12 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
 
     def test_undo_restores_the_previous_feedback(self) -> None:
         created = self.service.save(INTERVALS_ID, {"notes": "First", "session_rpe": 6})
-        before = self.rows()
+        before = stored_rows(self)
         updated = self.service.save(GARMIN_ID, {"session_rpe": 4})
         self.undo(updated["change"])
-        self.assertEqual(self.rows(), before)
+        self.assertEqual(stored_rows(self), before)
         self.undo(created["change"])
-        self.assertEqual(self.rows(), [])
+        self.assertEqual(stored_rows(self), [])
 
     def test_undoing_a_clear_restores_hidden_originals_and_long_notes(self) -> None:
         with self.manager.unit_of_work() as db:
@@ -79,13 +80,15 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
                     "updated_at, session_id) VALUES (?, ?, ?, ?, ?)",
                     (key, notes, updated, updated, session),
                 )
-        before = self.rows()
+        before = stored_rows(self)
         cleared = self.service.save(INTERVALS_ID, {"notes": ""})
-        self.assertEqual(self.rows(), [])
+        self.assertEqual(stored_rows(self), [])
         self.undo(cleared["change"])
 
-        self.assertEqual(self.rows(), before)
-        (original,) = [row for row in self.rows() if row["activity_id"] == INTERVALS_ID]
+        self.assertEqual(stored_rows(self), before)
+        (original,) = [
+            row for row in stored_rows(self) if row["activity_id"] == INTERVALS_ID
+        ]
         self.assertEqual(original["notes"], LONG_NOTES)
         (effective,) = self.service.list()
         self.assertEqual(effective["notes"], "newer")
@@ -132,7 +135,7 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
                 ),
             )
         saved = self.service.save(INTERVALS_ID, {"notes": "Newest"})
-        before = self.rows()
+        before = stored_rows(self)
         path = Path(self.manager.path)
         backup = DatabaseBackupService(
             self.manager,
@@ -165,11 +168,11 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
         validation.validate(staged)
         self.reopen(staged)
 
-        self.assertEqual(self.rows(), before)
+        self.assertEqual(stored_rows(self), before)
         (effective,) = self.service.list()
         self.assertEqual(effective["notes"], "Newest")
         self.undo(saved["change"])
-        (original,) = self.rows()
+        (original,) = stored_rows(self)
         self.assertEqual(original["notes"], LONG_NOTES)
 
     def test_deleting_the_surviving_copy_keeps_the_feedback(self) -> None:

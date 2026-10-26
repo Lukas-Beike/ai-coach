@@ -79,14 +79,7 @@ class MorningBatteryStore:
         records: Any,
         sleep_payload: Any = None,
     ) -> dict[str, Any]:
-        same_date = bool(
-            existing and existing.get("sleep_date") == checkin_date.isoformat()
-        )
-        record["attempts"] = 1 + (
-            int(existing.get("attempts") or 1)
-            if same_date and existing is not None
-            else 0
-        )
+        record["attempts"] = _attempts(existing, checkin_date)
         sections: dict[str, Any] = (
             {"body_battery": records} if isinstance(records, list) else {}
         )
@@ -126,15 +119,7 @@ class MorningBatteryStore:
                 self._key_values.get(db, MORNING_BATTERY_HISTORY_KEY)
             )
             for saved in (existing, record):
-                if (
-                    isinstance(saved, dict)
-                    and saved.get("status") == "ready"
-                    and saved.get("sleep_date")
-                ):
-                    morning = saved.get("morning")
-                    history[saved["sleep_date"]] = (
-                        morning.get("value") if isinstance(morning, dict) else None
-                    )
+                _remember_ready(history, saved)
             self._key_values.set(db, MORNING_BATTERY_HISTORY_KEY, json.dumps(history))
 
         self.clear_body_battery_errors()
@@ -490,3 +475,22 @@ class MorningBodyBatteryServiceCache:
 
 
 MORNING_BODY_BATTERY_SERVICE_CACHE = MorningBodyBatteryServiceCache()
+
+
+def _attempts(existing: dict[str, Any] | None, checkin_date: date) -> int:
+    """Count this attempt on top of the earlier ones for the same night."""
+    if existing is None or existing.get("sleep_date") != checkin_date.isoformat():
+        return 1
+    return 1 + int(existing.get("attempts") or 1)
+
+
+def _remember_ready(history: dict[str, Any], saved: Any) -> None:
+    if (
+        isinstance(saved, dict)
+        and saved.get("status") == "ready"
+        and saved.get("sleep_date")
+    ):
+        morning = saved.get("morning")
+        history[saved["sleep_date"]] = (
+            morning.get("value") if isinstance(morning, dict) else None
+        )

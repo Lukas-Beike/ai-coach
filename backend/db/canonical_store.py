@@ -1519,6 +1519,16 @@ def effective_session_ids(db: Any, activity_ids: Sequence[str]) -> dict[str, str
     64 merges. An unmerged session maps to itself. Feedback keeps the session it
     was written for and is shown on the session this returns.
     """
+    targets = _merge_targets(db, activity_ids)
+    return {
+        activity_id: _follow_merges(targets, activity_id)
+        for activity_id in dict.fromkeys(activity_ids)
+        if activity_id in targets
+    }
+
+
+def _merge_targets(db: Any, activity_ids: Sequence[str]) -> dict[str, str | None]:
+    """Read each session's merge target along the chains, up to the hop limit."""
     targets: dict[str, str | None] = {}
     pending = list(activity_ids)
     for _ in range(_MAX_MERGE_HOPS + 1):
@@ -1539,19 +1549,18 @@ def effective_session_ids(db: Any, activity_ids: Sequence[str]) -> dict[str, str
             for activity_id in pending
             if (target := targets.get(activity_id)) is not None
         ]
-    resolved: dict[str, str] = {}
-    for activity_id in dict.fromkeys(activity_ids):
-        if activity_id not in targets:
-            continue
-        current, seen = activity_id, {activity_id}
-        while len(seen) <= _MAX_MERGE_HOPS:
-            target = targets.get(current)
-            if target is None or target not in targets or target in seen:
-                break
-            seen.add(target)
-            current = target
-        resolved[activity_id] = current
-    return resolved
+    return targets
+
+
+def _follow_merges(targets: dict[str, str | None], activity_id: str) -> str:
+    current, seen = activity_id, {activity_id}
+    while len(seen) <= _MAX_MERGE_HOPS:
+        target = targets.get(current)
+        if target is None or target not in targets or target in seen:
+            break
+        seen.add(target)
+        current = target
+    return current
 
 
 def set_activity_session_link_kind(

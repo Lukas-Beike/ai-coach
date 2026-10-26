@@ -131,8 +131,58 @@ def _audit_value(group: builtins.list[dict[str, Any]] | None) -> dict[str, Any] 
 
 def _ordered(group: Iterable[dict[str, Any]]) -> builtins.list[dict[str, Any]]:
     """Group rows, effective first: newest update, then the smaller original id."""
-    by_id = sorted(group, key=lambda row: str(row["activity_id"]))
-    return sorted(by_id, key=lambda row: str(row["updated_at"]), reverse=True)
+    rows = sorted(group, key=lambda row: str(row["activity_id"]))
+    rows.sort(key=lambda row: str(row["updated_at"]), reverse=True)
+    return rows
+
+
+def _save_group_key(
+    db: Any, key: str, origin: str | None, groups: dict[Any, Any]
+) -> tuple[str, str]:
+    """The group a save edits: the effective session, else the activity's rows."""
+    if origin is None:
+        return ("activity", key)
+    effective = canonical_store.effective_session_ids(db, [origin])
+    group_key = ("session", effective.get(origin, origin))
+    if group_key not in groups and ("activity", key) in groups:
+        return ("activity", key)
+    return group_key
+
+
+def _keep_omitted_fields(
+    feedback: dict[str, Any], value: Any, existing: dict[str, Any]
+) -> None:
+    """Omitted fields keep their effective value."""
+    for field in (
+        "notes",
+        "activity_name",
+        "activity_date",
+        "session_rpe",
+        "deviation_reason",
+    ):
+        if field not in value and field in existing:
+            feedback[field] = existing[field]
+
+
+def _is_cleared(feedback: dict[str, Any]) -> bool:
+    return (
+        not feedback["notes"]
+        and feedback.get("session_rpe") is None
+        and not feedback.get("deviation_reason")
+    )
+
+
+def _group_containing(
+    groups: dict[Any, builtins.list[dict[str, Any]]], activity_id: str, default: Any
+) -> Any:
+    return next(
+        (
+            candidate
+            for candidate, rows in groups.items()
+            if any(row["activity_id"] == activity_id for row in rows)
+        ),
+        default,
+    )
 
 
 def _effective_view(group: builtins.list[dict[str, Any]]) -> dict[str, Any]:
@@ -239,12 +289,7 @@ class ActivityFeedbackService:
                 db, [(key, reference.provider)]
             ).get(key)
             groups = self._groups(db)
-            group_key = ("activity", key)
-            if origin is not None:
-                effective = canonical_store.effective_session_ids(db, [origin])
-                group_key = ("session", effective.get(origin, origin))
-            if group_key not in groups and ("activity", key) in groups:
-                group_key = ("activity", key)
+            group_key = _save_group_key(db, key, origin, groups)
             group = groups.get(group_key) or []
             if len(group) >= change_history.MAX_FEEDBACK_GROUP_ROWS:
                 raise AppError(
@@ -255,20 +300,8 @@ class ActivityFeedbackService:
             if existing:
                 feedback["activity_id"] = existing["activity_id"]
             own_row = feedback["activity_id"] == key
-            for field in (
-                "notes",
-                "activity_name",
-                "activity_date",
-                "session_rpe",
-                "deviation_reason",
-            ):
-                if field not in value and field in existing:
-                    feedback[field] = existing[field]
-            if (
-                not feedback["notes"]
-                and feedback.get("session_rpe") is None
-                and not feedback.get("deviation_reason")
-            ):
+            _keep_omitted_fields(feedback, value, existing)
+            if _is_cleared(feedback):
                 for row in group or [{"activity_id": key}]:
                     self._feedback_repository.delete(db, row["activity_id"])
                 change = self._record(db, group_key, group, None)
@@ -280,15 +313,8 @@ class ActivityFeedbackService:
                 session_id=origin if own_row else None,
             )
             after_groups = self._groups(db)
-            saved_key = next(
-                (
-                    candidate
-                    for candidate, rows in after_groups.items()
-                    if any(
-                        row["activity_id"] == feedback["activity_id"] for row in rows
-                    )
-                ),
-                group_key,
+            saved_key = _group_containing(
+                after_groups, feedback["activity_id"], group_key
             )
             change = self._record(db, saved_key, group, after_groups.get(saved_key))
         # The committed save stands even if this read fails.
@@ -306,13 +332,12 @@ class ActivityFeedbackService:
     ) -> dict[str, str] | None:
         """Record the group change; its undo restores every stored row as it was."""
         before_value, after_value = _audit_value(before), _audit_value(after)
-        action = (
-            "create"
-            if before_value is None
-            else "delete"
-            if after_value is None
-            else "update"
-        )
+        if before_value is None:
+            action = "create"
+        elif after_value is None:
+            action = "delete"
+        else:
+            action = "update"
         record = change_history.record_change(
             db, ENTITY_TYPE, _entity_id(key), action, before_value, after_value
         )

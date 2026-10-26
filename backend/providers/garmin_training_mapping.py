@@ -252,37 +252,42 @@ def training_values(section: str, payload: object) -> list[TrainingValue]:
         day = _row_day(row)
         if day is None:
             continue
-        if section in (TRAINING_STATUS, WEEKLY_TRAINING_STATUS):
-            found = _acute_load(row)
-            if found is not None:
-                raw, field = found
-                values.append(
-                    TrainingValue(day, MetricKind.ACUTE_LOAD, raw, field, "acute_load")
-                )
-        elif section == RUNNING_TOLERANCE:
-            if row.get(_TOLERANCE_FIELD) is not None:
-                values.append(
-                    TrainingValue(
-                        day,
-                        MetricKind.RUNNING_TOLERANCE,
-                        row[_TOLERANCE_FIELD],
-                        _TOLERANCE_FIELD,
-                        "running_tolerance",
-                        Sport.RUN,
-                    )
-                )
-        elif section == TRAINING_READINESS_HISTORY:
-            alias = next(
-                (key for key in PLANNING_READINESS_ALIASES if row.get(key) is not None),
-                None,
-            )
-            if alias is not None:
-                values.append(
-                    TrainingValue(
-                        day, MetricKind.READINESS, row[alias], alias, "readiness"
-                    )
-                )
+        value = _history_value(section, row, day)
+        if value is not None:
+            values.append(value)
     return values
+
+
+def _history_value(
+    section: str, row: Mapping[str, Any], day: date
+) -> TrainingValue | None:
+    """Return the one value a dated history row reports for its section."""
+    if section in (TRAINING_STATUS, WEEKLY_TRAINING_STATUS):
+        found = _acute_load(row)
+        if found is None:
+            return None
+        raw, field = found
+        return TrainingValue(day, MetricKind.ACUTE_LOAD, raw, field, "acute_load")
+    if section == RUNNING_TOLERANCE:
+        if row.get(_TOLERANCE_FIELD) is None:
+            return None
+        return TrainingValue(
+            day,
+            MetricKind.RUNNING_TOLERANCE,
+            row[_TOLERANCE_FIELD],
+            _TOLERANCE_FIELD,
+            "running_tolerance",
+            Sport.RUN,
+        )
+    if section == TRAINING_READINESS_HISTORY:
+        alias = next(
+            (key for key in PLANNING_READINESS_ALIASES if row.get(key) is not None),
+            None,
+        )
+        if alias is None:
+            return None
+        return TrainingValue(day, MetricKind.READINESS, row[alias], alias, "readiness")
+    return None
 
 
 def endurance_group_values(payload: object) -> list[TrainingValue]:

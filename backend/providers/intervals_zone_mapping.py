@@ -78,12 +78,18 @@ def _first_settings(athlete: Mapping[str, Any]) -> dict[Sport, Mapping[str, Any]
     raw = athlete.get("sportSettings") or athlete.get("sport_settings")
     chosen: dict[Sport, Mapping[str, Any]] = {}
     for setting in raw if isinstance(raw, list) else ():
-        types = setting.get("types") if isinstance(setting, Mapping) else None
-        for text in types if isinstance(types, list) else ():
-            sport = classify_sport_text(text) if isinstance(text, str) else None
-            if sport is not None and sport is not Sport.OTHER:
+        if isinstance(setting, Mapping):
+            for sport in _setting_sports(setting):
                 chosen.setdefault(sport, setting)
     return chosen
+
+
+def _setting_sports(setting: Mapping[str, Any]) -> Iterator[Sport]:
+    types = setting.get("types")
+    for text in types if isinstance(types, list) else ():
+        sport = classify_sport_text(text) if isinstance(text, str) else None
+        if sport is not None and sport is not Sport.OTHER:
+            yield sport
 
 
 def _valid(**values: Any) -> Iterator[ZoneConfiguration]:

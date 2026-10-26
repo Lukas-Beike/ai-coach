@@ -284,6 +284,15 @@ class ObservationMetadataTests(unittest.TestCase):
         )
 
 
+def stored_observations(db: Any) -> list[dict[str, Any]]:
+    return [
+        dict(row)
+        for row in db.execute(
+            "SELECT natural_key, method, aggregation, details FROM observations"
+        ).fetchall()
+    ]
+
+
 class ObservationStoreFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -302,14 +311,6 @@ class ObservationStoreFixture(unittest.TestCase):
             self.db, record, mapper_version=self.version, now=STAMP
         )
 
-    def stored(self) -> list[dict[str, Any]]:
-        return [
-            dict(row)
-            for row in self.db.execute(
-                "SELECT natural_key, method, aggregation, details FROM observations"
-            ).fetchall()
-        ]
-
 
 class ObservationMetadataStoreTests(ObservationStoreFixture):
     def test_metadata_and_context_round_trip_through_store_and_reader(self) -> None:
@@ -322,7 +323,7 @@ class ObservationMetadataStoreTests(ObservationStoreFixture):
             period=NIGHT,
         )
         self.assertIs(WriteOutcome.WRITTEN, self.write(record))
-        (row,) = self.stored()
+        (row,) = stored_observations(self.db)
         self.assertEqual(("rmssd", "mean"), (row["method"], row["aggregation"]))
         self.assertEqual(
             {
@@ -364,7 +365,7 @@ class ObservationMetadataStoreTests(ObservationStoreFixture):
             period=ObservationPeriod(start=AUTUMN_START, end=AUTUMN_END),
         )
         self.assertIs(WriteOutcome.WRITTEN, self.write(record))
-        (row,) = self.stored()
+        (row,) = stored_observations(self.db)
         self.assertEqual(
             {"start": "2026-10-25T00:30:00+00:00", "end": "2026-10-25T01:15:00+00:00"},
             json.loads(row["details"])["period"],
@@ -381,7 +382,7 @@ class ObservationMetadataStoreTests(ObservationStoreFixture):
             [{"method": None, "aggregation": None, "details": "{}"}],
             [
                 {key: row[key] for key in ("method", "aggregation", "details")}
-                for row in self.stored()
+                for row in stored_observations(self.db)
             ],
         )
         self.assertIs(WriteOutcome.UNCHANGED, self.write(observation()))
@@ -400,7 +401,9 @@ class ObservationMetadataStoreTests(ObservationStoreFixture):
         self.assertIs(WriteOutcome.UPDATED, self.write(described))
         self.assertIs(WriteOutcome.UPDATED, self.write(measured))
         self.assertIs(WriteOutcome.UNCHANGED, self.write(measured))
-        self.assertEqual([key], [row["natural_key"] for row in self.stored()])
+        self.assertEqual(
+            [key], [row["natural_key"] for row in stored_observations(self.db)]
+        )
 
     def test_a_derived_form_row_without_metadata_reads_with_its_method(self) -> None:
         self.write(derived_form())

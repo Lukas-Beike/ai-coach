@@ -15,6 +15,8 @@ from backend.http_api.public_performance import (
 from backend.planning.competition_service import CompetitionService
 from backend.settings import SettingsService
 
+ZONES_PATH = "/api/zones"
+
 
 class AthleteGetRoutes:
     """Dispatch authenticated athlete reads through their state owners."""
@@ -46,10 +48,10 @@ class AthleteGetRoutes:
             "/api/feedback",
             "/api/context-preview",
             "/api/settings/activity-detail-floor",
-            "/api/zones",
+            ZONES_PATH,
         }:
             return False
-        if path == "/api/zones" and self._zone_service is None:
+        if path == ZONES_PATH and self._zone_service is None:
             return False
 
         self._session_auth_service().require_auth(handler)
@@ -62,7 +64,7 @@ class AthleteGetRoutes:
             }
         elif path == "/api/feedback":
             payload = self._public_feedback_state_service().feedback_state()
-        elif path == "/api/zones" and self._zone_service is not None:
+        elif path == ZONES_PATH and self._zone_service is not None:
             payload = self._zone_service().read()
         elif path == "/api/settings/activity-detail-floor":
             payload = {"date": self._settings_service.activity_detail_prefetch_floor()}

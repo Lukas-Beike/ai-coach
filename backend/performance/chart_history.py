@@ -313,38 +313,61 @@ def _canonical_provider_metrics(
     A day with an endurance group value shows the group values only, as the
     group map wins over the overall score in the snapshot reader.
     """
-    metrics: dict[str, Any] = {}
-    for key, (aggregation, fields) in _CANONICAL_PROVIDER_METRICS.items():
-        by_day: dict[date, dict[str, Any]] = {}
-        for name, kind in fields:
-            for day, value in canonical.daily_history.get(kind, {}).items():
-                if not start <= day <= today:
-                    continue
-                values = by_day.setdefault(day, {})
-                if kind is MetricKind.ENDURANCE_SCORE and values:
-                    continue
-                values[name] = _number(value)
-        points = []
-        for day, values in sorted(by_day.items()):
-            point: dict[str, Any] = {
-                "date": day.isoformat(),
-                "values": values,
-                "source": garmin_metric_history.GARMIN_SOURCE,
-            }
-            if key in ("training_readiness_history", "weekly_training_status"):
-                point["value"] = next(iter(values.values()))
-            points.append(point)
-        metrics[key] = {
-            "status": "current" if points else "unavailable",
-            "aggregation": aggregation,
+    return {
+        key: _canonical_metric(
+            key,
+            aggregation,
+            _canonical_values_by_day(fields, canonical, start, today),
+            garmin.get("synced_at"),
+        )
+        for key, (aggregation, fields) in _CANONICAL_PROVIDER_METRICS.items()
+    }
+
+
+def _canonical_values_by_day(
+    fields: tuple[tuple[str, MetricKind], ...],
+    canonical: GarminCanonicalMetrics,
+    start: date,
+    today: date,
+) -> dict[date, dict[str, Any]]:
+    by_day: dict[date, dict[str, Any]] = {}
+    for name, kind in fields:
+        for day, value in canonical.daily_history.get(kind, {}).items():
+            if not start <= day <= today:
+                continue
+            values = by_day.setdefault(day, {})
+            if kind is MetricKind.ENDURANCE_SCORE and values:
+                continue
+            values[name] = _number(value)
+    return by_day
+
+
+def _canonical_metric(
+    key: str,
+    aggregation: str,
+    by_day: dict[date, dict[str, Any]],
+    fetched_at: Any,
+) -> dict[str, Any]:
+    points = []
+    for day, values in sorted(by_day.items()):
+        point: dict[str, Any] = {
+            "date": day.isoformat(),
+            "values": values,
             "source": garmin_metric_history.GARMIN_SOURCE,
-            "unit": "unknown",
-            "points": points,
-            "observed_at": points[-1]["date"] if points else None,
-            "fetched_at": garmin.get("synced_at"),
-            "metric": key,
         }
-    return metrics
+        if key in ("training_readiness_history", "weekly_training_status"):
+            point["value"] = next(iter(values.values()))
+        points.append(point)
+    return {
+        "status": "current" if points else "unavailable",
+        "aggregation": aggregation,
+        "source": garmin_metric_history.GARMIN_SOURCE,
+        "unit": "unknown",
+        "points": points,
+        "observed_at": points[-1]["date"] if points else None,
+        "fetched_at": fetched_at,
+        "metric": key,
+    }
 
 
 def _number(value: float) -> float | int:

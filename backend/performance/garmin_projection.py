@@ -21,6 +21,7 @@ from backend.providers.garmin_fields import (
     first_present as _first_present,
 )
 
+GARMIN_SOURCE = "Garmin Connect"
 GARMIN_CONTEXT_FIELDS = {
     "date",
     garmin_perf_fields.CALENDAR_DATE,
@@ -150,7 +151,7 @@ def _canonical_load_projection(
         else:
             values = {name: values.get(name) for name in _DAILY_FIELDS.values()}
         result[key] = {
-            "source": "Garmin Connect",
+            "source": GARMIN_SOURCE,
             **freshness.get(section, {"freshness": "unknown"}),
             "date": day.isoformat(),
             **values,
@@ -205,7 +206,7 @@ def garmin_training_load_projection(
             "monthlyLoadAnaerobicTargetMax",
         )
         result["four_week_balance"] = {
-            "source": "Garmin Connect",
+            "source": GARMIN_SOURCE,
             **freshness.get("training_load_balance", {"freshness": "unknown"}),
             "date": _date(balance.get(garmin_perf_fields.CALENDAR_DATE)),
             **{
@@ -236,7 +237,7 @@ def garmin_training_load_projection(
     acute = acute if isinstance(acute, dict) else {}
     if daily is not None:
         result["daily_status"] = {
-            "source": "Garmin Connect",
+            "source": GARMIN_SOURCE,
             **freshness.get("daily_training_status", {"freshness": "unknown"}),
             "date": _date(daily.get(garmin_perf_fields.CALENDAR_DATE)),
             "acute_load": bounded_activity_metric(

@@ -1211,42 +1211,44 @@ class _HealthMapping:
         # The grouped Body Battery mapping already reported malformed elements.
         for ref, record, index in self._records(_BODY_BATTERY, payload, report=False):
             samples = _first_value(record, _BODY_BATTERY_SAMPLE_KEYS)
-            if samples is None:
-                continue
             if not isinstance(samples, list):
-                self.issue(ref, _BODY_BATTERY_SAMPLE_KEYS[0], IssueReason.INVALID_TYPE)
+                if samples is not None:
+                    self.issue(
+                        ref, _BODY_BATTERY_SAMPLE_KEYS[0], IssueReason.INVALID_TYPE
+                    )
                 continue
-            invalid = False
-            for sample in samples:
-                observed_at = (
-                    utc_timestamp(sample[0])
-                    if isinstance(sample, list | tuple) and len(sample) >= 2
-                    else None
-                )
-                level = None if observed_at is None else coerce_number(sample[1])
-                if observed_at is None or level is None:
-                    invalid = True
-                    continue
-                try:
-                    day = local_date(observed_at, self._zone)
-                except OverflowError:
-                    invalid = True
-                    continue
-                entry = _entry(
-                    _BODY_BATTERY, ref, day, "level", observed_at, index=index
-                )
-                self.emit(
-                    entry,
-                    MetricKind.BODY_BATTERY,
-                    float(round(level)),
-                    _BODY_BATTERY_SAMPLE_KEYS[0],
-                    _PROVIDER,
-                    aggregation=ObservationAggregation.SAMPLE,
-                )
-            if invalid:
+            emitted = [
+                self._emit_body_battery_sample(sample, ref, index) for sample in samples
+            ]
+            if not all(emitted):
                 self.issue(
                     ref, _BODY_BATTERY_SAMPLE_KEYS[0], IssueReason.INVALID_NUMBER
                 )
+
+    def _emit_body_battery_sample(
+        self, sample: object, ref: str, index: int | None
+    ) -> bool:
+        """Emit one ``[timestamp, level]`` sample; False when it is unreadable."""
+        if not isinstance(sample, list | tuple) or len(sample) < 2:
+            return False
+        observed_at = utc_timestamp(sample[0])
+        level = None if observed_at is None else coerce_number(sample[1])
+        if observed_at is None or level is None:
+            return False
+        try:
+            day = local_date(observed_at, self._zone)
+        except OverflowError:
+            return False
+        entry = _entry(_BODY_BATTERY, ref, day, "level", observed_at, index=index)
+        self.emit(
+            entry,
+            MetricKind.BODY_BATTERY,
+            float(round(level)),
+            _BODY_BATTERY_SAMPLE_KEYS[0],
+            _PROVIDER,
+            aggregation=ObservationAggregation.SAMPLE,
+        )
+        return True
 
     def _map_running_threshold(self, payload: object) -> None:
         for ref, record, index in self._records(_RUNNING_THRESHOLD, payload):
@@ -1268,18 +1270,22 @@ class _HealthMapping:
             if not isinstance(metrics, Mapping):
                 self.issue(ref, _HISTORY_METRICS, IssueReason.INVALID_TYPE)
                 continue
-            for key, (kind, sport, source_kind) in _HISTORY_KINDS.items():
-                value = metrics.get(key)
-                if value is None:
-                    continue
-                number = coerce_number(value)
-                if number is None or number <= 0:
-                    self.issue(ref, key, IssueReason.INVALID_NUMBER)
-                    continue
-                if key == _HISTORY_PACE:
-                    number = _METRES_PER_KM / number
-                entry = _entry(_PERFORMANCE_HISTORY, ref, day, key, index=index)
-                self.emit(entry, kind, number, key, source_kind, sport)
+            for key in _HISTORY_KINDS:
+                if (value := metrics.get(key)) is not None:
+                    self._emit_history_value(key, value, ref, day, index)
+
+    def _emit_history_value(
+        self, key: str, value: object, ref: str, day: date, index: int | None
+    ) -> None:
+        kind, sport, source_kind = _HISTORY_KINDS[key]
+        number = coerce_number(value)
+        if number is None or number <= 0:
+            self.issue(ref, key, IssueReason.INVALID_NUMBER)
+            return
+        if key == _HISTORY_PACE:
+            number = _METRES_PER_KM / number
+        entry = _entry(_PERFORMANCE_HISTORY, ref, day, key, index=index)
+        self.emit(entry, kind, number, key, source_kind, sport)
 
     def _map_race_predictions(self, payload: object) -> None:
         for ref, record, index in self._records(

@@ -63,7 +63,7 @@ class MetricValue:
 _SLUG: Final = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}")
 _FIRMWARE: Final = re.compile(r"[0-9A-Za-z][0-9A-Za-z._-]{0,31}")
 # A long hex or digit run in a model name is a serial, unit or owner id.
-_IDENTIFIER_RUN: Final = re.compile(r"[0-9A-Fa-f]{8,}|[0-9]{6,}")
+_IDENTIFIER_RUN: Final = re.compile(r"[0-9A-Fa-f]{8,}|\d{6,}", re.ASCII)
 _FINGERPRINT: Final = re.compile(r"[0-9a-f]{64}")
 _CONTEXT_FIELDS: Final = (
     "device_model",
@@ -270,17 +270,7 @@ class Observation:
         optional_slug(self.method, "method")
         if self.aggregation is not None:
             require_instance(self.aggregation, ObservationAggregation, "aggregation")
-        if self.method_version is not None:
-            version = self.method_version
-            if isinstance(version, bool) or not isinstance(version, int):
-                raise TypeError("method_version must be an integer")
-            if not 1 <= version <= MAX_METHOD_VERSION:
-                raise ValueError("method_version must be between 1 and 10000")
-        if self.input_fingerprint is not None and (
-            not isinstance(self.input_fingerprint, str)
-            or _FINGERPRINT.fullmatch(self.input_fingerprint) is None
-        ):
-            raise ValueError("input_fingerprint must be a lowercase SHA-256 hex digest")
+        _require_method_identity(self.method_version, self.input_fingerprint)
         if self.method is None and (
             self.method_version is not None or self.input_fingerprint is not None
         ):
@@ -295,6 +285,19 @@ class Observation:
             )
         if self.period is not None:
             require_instance(self.period, ObservationPeriod, "period")
+
+
+def _require_method_identity(method_version: object, input_fingerprint: object) -> None:
+    if method_version is not None:
+        if isinstance(method_version, bool) or not isinstance(method_version, int):
+            raise TypeError("method_version must be an integer")
+        if not 1 <= method_version <= MAX_METHOD_VERSION:
+            raise ValueError("method_version must be between 1 and 10000")
+    if input_fingerprint is not None and (
+        not isinstance(input_fingerprint, str)
+        or _FINGERPRINT.fullmatch(input_fingerprint) is None
+    ):
+        raise ValueError("input_fingerprint must be a lowercase SHA-256 hex digest")
 
 
 @dataclass(frozen=True, slots=True)
