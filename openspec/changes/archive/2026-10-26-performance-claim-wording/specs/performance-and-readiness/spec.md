@@ -6,7 +6,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Personal recovery comparison and sleep goal shortfall
-The system SHALL form personal recovery distributions separately by provider and measurement method, exclude the current reading from its comparison distribution, require at least 14 prior matching nights for provisional classification and 28 for full classification, and leave stale/future evidence unclassified. RMSSD and SDNN SHALL not be pooled. The quartile range is a comparison with the athlete's own earlier values (method `personal-quartiles-v1`); it SHALL not be described as a normal, healthy, abnormal or clinical range, and a position below or above it SHALL not be described as an alarm or deficiency. The 14/28-night thresholds, the 42-day window and the status `ok` are product rules and SHALL not be presented as validity, confirmation or a health standard. The sleep goal shortfall SHALL require an explicit valid sleep target, sum only known-night shortfalls against that target, and never offset them with excess sleep on another night; it SHALL not be called sleep debt or presented as a recovery need.
+The system SHALL form personal recovery distributions separately by provider and measurement method, exclude the current reading from its comparison distribution, require at least 14 prior matching nights for provisional classification and 28 for full classification, and leave stale/future evidence unclassified. RMSSD and SDNN SHALL not be pooled.
 
 #### Scenario: Baseline coverage thresholds
 - **WHEN** a current reading has 13, 14, or 28 prior matching nights
@@ -36,10 +36,12 @@ The system SHALL form personal recovery distributions separately by provider and
 - **WHEN** the sleep goal shortfall is reported or summarized
 - **THEN** it is worded as the sum of known shortfalls against the athlete's own sleep goal over known nights, with missing nights and unrecorded naps noted as limits, and no output uses the term sleep debt or states a needed number of hours of recovery sleep.
 
+Detailed contract: The quartile range (method `personal-quartiles-v1`) SHALL be described only as a comparison with the athlete's own earlier values and SHALL not be described as a normal, healthy, abnormal or clinical range, and a position below or above it SHALL not be described as an alarm or deficiency. The 14/28-night thresholds, the 42-day window and the status `ok` are product rules and SHALL not be presented as validity, confirmation or a health standard. The sleep goal shortfall SHALL require an explicit valid sleep target, sum only known-night shortfalls against that target, and never offset them with excess sleep on another night; it SHALL not be called sleep debt or presented as a recovery need.
+
 Evidence: `backend/performance/personal_recovery.py:personal_recovery`, `public/analysis.js:recoveryReferenceLabel`; `tests/test_personal_recovery.py:test_coverage_and_excluding_current_value_from_baseline`, `tests/test_personal_recovery.py:test_future_stale_and_separate_hrv_methods_are_not_classified`, `tests/test_personal_recovery.py:test_deficit_uses_known_nights_and_never_offsets_with_long_sleep`; wording and Coach cases in `tests/test_performance_claim_wording.py` and `tests/test_personal_recovery_coach_cases.py`; `e2e/analysis-info.spec.js` recovery scenarios. Claim lists: `docs/performance-methods/m2-hrv-resting-hr.md`, `m3-sleep-duration-timing.md`.
 
 ### Requirement: Sleep timing and tagged-day associations
-The system SHALL derive sleep timing variability (method `sleep-timing-variability-v1`) from validated dated onset/wake intervals with timezone/DST-aware duration and separate source/method series. The method compares each night's clock times circularly with the athlete's own earlier nights; it is not the Sleep Regularity Index and SHALL NOT be named, labelled or described as such, and no output SHALL share that name. It SHALL keep insufficient coverage explicit. Tagged-day analysis SHALL use only explicit boolean answers paired with the following provider-dated night, require ten measured days per comparison group, and label results as observed associations rather than causal effects or inferred answers.
+The system SHALL derive sleep timing variability (method `sleep-timing-variability-v1`) from validated dated onset/wake intervals with timezone/DST-aware duration and separate source/method series, and SHALL keep insufficient coverage explicit. Tagged-day analysis SHALL use only explicit boolean answers paired with the following provider-dated night, require ten measured days per comparison group, and label results as observed associations rather than causal effects or inferred answers.
 
 #### Scenario: Sleep across midnight or DST
 - **WHEN** valid sleep intervals cross midnight or a clock change
@@ -56,6 +58,8 @@ The system SHALL derive sleep timing variability (method `sleep-timing-variabili
 #### Scenario: Timing variability is not the Sleep Regularity Index
 - **WHEN** the timing variability result, its Coach report section or any description of it is produced
 - **THEN** the method id and section name are `sleep-timing-variability-v1` and `sleep_timing_variability`, the Sleep Regularity Index or SRI appears only in a sentence that denies the equivalence, and the unchanged fields `regularity` and `*_deviation_minutes` carry the same values as before the rename.
+
+Detailed contract: Sleep timing variability compares each night's clock times circularly with the athlete's own earlier nights; it is not the Sleep Regularity Index and SHALL NOT be named, labelled or described as such, and no output SHALL share that name.
 
 Evidence: `backend/performance/personal_recovery.py:sleep_timing_variability`, `backend/performance/tag_impact.py:tag_impact`; `tests/test_personal_recovery.py:test_sleep_timing_variability_circular_midnight_median_and_sources`, `tests/test_personal_recovery.py:test_sleep_intervals_reject_future_missing_and_reversed_and_keep_dst_duration`, `tests/test_training_record_features.py:test_tag_impact_requires_ten_measured_days_in_each_explicit_group`, `tests/test_performance_claim_wording.py`.
 
