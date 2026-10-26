@@ -6,7 +6,7 @@
 - **Status:** implemented for provider rows; canonical sleep periods planned (#1429)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-10-24
-- **Review:** released 2026-10-24 (athlete)
+- **Review:** released 2026-10-26 (athlete)
 
 ## Target construct
 
