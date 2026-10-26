@@ -1217,10 +1217,11 @@ class _HealthMapping:
                         ref, _BODY_BATTERY_SAMPLE_KEYS[0], IssueReason.INVALID_TYPE
                     )
                 continue
-            emitted = [
-                self._emit_body_battery_sample(sample, ref, index) for sample in samples
-            ]
-            if not all(emitted):
+            invalid = False
+            for sample in samples:
+                if not self._emit_body_battery_sample(sample, ref, index):
+                    invalid = True
+            if invalid:
                 self.issue(
                     ref, _BODY_BATTERY_SAMPLE_KEYS[0], IssueReason.INVALID_NUMBER
                 )
