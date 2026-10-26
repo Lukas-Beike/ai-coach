@@ -10,12 +10,22 @@ import json
 import unittest
 from datetime import date, timedelta
 from typing import Any
+from unittest.mock import Mock
 
-from canonical_recovery_support import mapped_personal_recovery
+from canonical_recovery_support import mapped_personal_recovery, recovery_only_inputs
 from performance_claim_support import claim_wording_violations
+from test_athlete_checkins import FakeManager
 
-from backend.coach.context import coach_performance_projection
+from backend.athlete.checkins import CheckinService
+from backend.coach.context import (
+    CoachPerformanceContextReader,
+    CoachPlanningContextReader,
+    CoachStructuredContextService,
+    coach_performance_projection,
+)
+from backend.coach.context_selection import CoachContextSelection
 from backend.coach.prompt import COACH_PROMPT
+from backend.db.repositories import CheckinRepository
 
 TODAY = date(2026, 10, 2)
 NO_CLEARANCE = "Keine Diagnose, keine Trainingsfreigabe und keine Trainingsänderung"
@@ -38,6 +48,46 @@ def _coach_view(
     recovery = mapped_personal_recovery(wellness, garmin or {}, {}, TODAY)
     view = coach_performance_projection({"personal_recovery": recovery})
     return view["personal_recovery"]
+
+
+class _StoredRecoveryReader(CoachPerformanceContextReader):
+    """The real reader with the canonical recovery inputs a database read would give."""
+
+    def __init__(self, inputs: Any, *args: Any) -> None:
+        super().__init__(*args)
+        self._inputs = inputs
+
+    def read_sources(self, read_snapshot: Any) -> Any:
+        return None, self._inputs, None
+
+
+def _coach_context(wellness: list[dict[str, Any]], checkins: CheckinService) -> Any:
+    """Build the Coach context through the real structured context service."""
+    profile = Mock()
+    profile.get.return_value = {"name": "Athlete", "timezone": "UTC"}
+    garmin_payload = Mock()
+    garmin_payload.recent_view.return_value = {}
+    reader = _StoredRecoveryReader(
+        recovery_only_inputs({}, wellness),
+        profile,
+        garmin_payload,
+        Mock(),
+        lambda: TODAY,
+    )
+    service = CoachStructuredContextService(
+        Mock(),
+        checkins,
+        Mock(),
+        Mock(),
+        CoachPlanningContextReader(
+            Mock(), Mock(), Mock(), Mock(), Mock(), Mock(), lambda: TODAY
+        ),
+        reader,
+    )
+    selection = CoachContextSelection(
+        "focused", frozenset({"local_feedback", "current_performance"})
+    )
+    return service.build(selection=selection)
 
 
 def _baselines(view: dict[str, Any], metric: str) -> list[dict[str, Any]]:
@@ -95,12 +145,28 @@ class RecoveryCoachCases(unittest.TestCase):
         self.assert_coach_text_is_clean(view)
 
     def test_contradictory_heavy_checkin_beside_an_unremarkable_value(self):
-        # A check-in reporting heavy legs is separate athlete context; the recovery
-        # view stays a plain comparison and says an unremarkable value clears nothing.
-        view = _coach_view(_wellness(30))
-        (hrv,) = _baselines(view, "hrv")
+        manager = FakeManager()
+        self.addCleanup(manager.close)
+        with manager.unit_of_work() as db:
+            db.execute(
+                "CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+            )
+        checkins = CheckinService(
+            manager,
+            CheckinRepository(lambda: "2026-10-02T07:00:00+00:00"),
+            lambda: TODAY,
+        )
+        checkins.save({"soreness": 8, "day_form": "Beine schwer"})
+
+        context = _coach_context(_wellness(30), checkins)
+
+        saved = context["local_feedback"]["today"]
+        self.assertEqual((8, "Beine schwer"), (saved["soreness"], saved["day_form"]))
+        recovery = context["current_performance"]["personal_recovery"]
+        (hrv,) = _baselines(recovery, "hrv")
         self.assertEqual(("ok", "within"), (hrv["status"], hrv["position"]))
-        self.assert_coach_text_is_clean(view)
+        self.assertNotIn("Beine schwer", json.dumps(recovery, ensure_ascii=False))
+        self.assert_coach_text_is_clean(recovery)
         self.assertIn("contradictory", COACH_PROMPT)
         self.assertIn("Never diagnose disease or injury.", COACH_PROMPT)
 

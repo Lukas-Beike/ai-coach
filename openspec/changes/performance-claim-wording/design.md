@@ -63,7 +63,7 @@ Decision: no alias and no data migration. A model that repeats the old section n
 | `personal_recovery.note` (German, Coach-visible) | "Quartile vergleichen den letzten Wert mit deinen eigenen früheren Werten. Die mittleren zwei Quartile enthalten per Definition etwa die Hälfte der Werte; ein Wert außerhalb ist weder selten noch ein Warnsignal. Keine Diagnose, keine Trainingsfreigabe und keine Trainingsänderung allein aus einer Abweichung. Krankheit und Schmerzen separat berücksichtigen. Quellen und Messfelder werden nicht gemischt. Der Fehlbetrag zum Schlafziel summiert nur bekannte Nächte und wird nicht mit längeren Nächten verrechnet. Die Schlafzeit-Streuung ist kein Sleep Regularity Index." |
 | `get_training_report` description (appended, English) | "sleep_timing_variability reports sleep onset and wake clock-time deviations from the athlete's own earlier nights; it is not the Sleep Regularity Index. Describe observed values; make no diagnosis and derive no training clearance or change from an isolated deviation." |
 
-`providerMetricStatus` keeps `ok: "bestätigt"` for provider metrics; the recovery call sites no longer use it, so provider-metric charts are unchanged. The `position` values stay `below`/`within`/`above` in the API. The wording "Bereich deiner früheren Werte" follows the issue ("above your previous comparison distribution") and the M2 allowed statement, which is updated to match (D9). Label lengths are checked at 320 px in the mobile-small project.
+`providerMetricStatus` (which mapped `ok` to "bestätigt") has no caller left once the recovery labels drop the status, so it is deleted; the provider-metric charts never used it. The `position` values stay `below`/`within`/`above` in the API. The wording "Bereich deiner früheren Werte" follows the issue ("above your previous comparison distribution") and the M2 allowed statement, which is updated to match (D9). Label lengths are checked at 320 px in the mobile-small project.
 
 ### D4 Coach text without a prompt rule
 
@@ -97,7 +97,7 @@ A test module `tests/test_personal_recovery_coach_cases.py` builds synthetic obs
 | Small data | 9 earlier nights | `status = insufficient_data`, no `position`/`median`/`lower`/`upper`, `reason` is the unchanged 14-night text; `note` carries the no-clearance sentence |
 | Fresh device change | Intervals series ends, a new Garmin series starts with 3 nights | two separate baselines, each with its own `nights`; the new one `insufficient_data`; no cross-provider baseline |
 | Stale values | newest value 3 days old with 30 earlier nights | `reason = "Messung veraltet."`, no `position`; the old value stays in `value`/`observed_at` |
-| Contradictory check-in | HRV `within` with 30 nights, a stored check-in reporting heavy legs | the projection keeps `position: "within"` and does not touch the check-in; `note` states that a deviation alone gives no clearance or change; the existing `COACH_PROMPT` markers stay unchanged |
+| Contradictory check-in | HRV `within` with 30 nights, a real `CheckinService` (in-memory store) holding a check-in reporting heavy legs, the context built through the real `CoachStructuredContextService` | `local_feedback.today` carries the check-in while `current_performance.personal_recovery` keeps `position: "within"` and contains none of the check-in text; `note` states that a deviation alone gives no clearance or change; the existing `COACH_PROMPT` markers stay unchanged |
 
 Each case also runs the D6 scan over the serialized projection.
 

@@ -38,7 +38,8 @@ separate from the language-understanding rubric below.
 
 `tests/test_personal_recovery_coach_cases.py` checks the recovery context the Coach
 receives for four situations: a small data amount, a fresh device change, stale
-values, and a heavy-legs check-in beside an unremarkable HRV. It asserts coverage,
+values, and a stored heavy-legs check-in beside an unremarkable HRV (built through
+the real context and check-in services). It asserts coverage,
 status, the absence of a position where none is supported, and that the supplied
 note states the limits (no diagnosis, clearance or training change from an
 isolated deviation). These are deterministic context and instruction checks, not

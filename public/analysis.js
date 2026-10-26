@@ -780,21 +780,6 @@ function renderAnalysisHistory(history) { // NOSONAR
   for (const target of [root, loadRoot, enduranceRoot]) target.querySelectorAll("details:not([data-analysis-section])").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
 }
 
-function providerMetricStatus(status) {
-  return {
-    current: "aktuell",
-    ok: "bestätigt",
-    provisional: "vorläufig",
-    insufficient_data: "nicht genügend Daten",
-    partial: "teilweise",
-    unavailable: "nicht verfügbar",
-    failed: "fehlgeschlagen",
-    stale: "veraltet",
-    unsupported: "nicht unterstützt",
-    unknown: "unbekannt",
-  }[status] || "unbekannt";
-}
-
 function providerMetricLabel(key) {
   return { endurance_score: "Ausdauer-Score", running_tolerance: "Lauf-Belastbarkeit", training_readiness_history: "Trainingsbereitschaft", weekly_training_status: "Trainingsstatus · akute Belastung" }[key] || key;
 }
