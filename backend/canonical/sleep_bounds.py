@@ -1,7 +1,7 @@
 """Sleep start and end instants in stored provider rows.
 
-One definition for the canonical sleep-period mappers and the sleep-regularity
-method (``sleep-regularity-v1``), so both read the same intervals: the same field
+One definition for the canonical sleep-period mappers and the sleep timing
+variability method (``sleep-timing-variability-v1``), so both read the same intervals: the same field
 aliases in the same precedence, the same timestamp parsing and the same walk over
 nested objects and lists.
 """
@@ -33,7 +33,7 @@ SLEEP_END_FIELDS: Final = (
     "wake_at",
 )
 MAX_SLEEP_INTERVAL: Final = timedelta(hours=24)
-# The walk limits of sleep-regularity-v1.
+# The walk limits of sleep-timing-variability-v1.
 _VISIT_LIMIT: Final = 2000
 _LIST_LIMIT: Final = 500
 _EPOCH_MILLISECONDS_ABOVE: Final = 10_000_000_000
@@ -93,7 +93,7 @@ def sleep_intervals(payload: Any) -> Iterator[SleepInterval]:
 
     Every object with a start and an end field yields one interval when the end
     is after the start and at most 24 hours later. The walk visits at most 2000
-    nodes and the first 500 items of each list, as sleep-regularity-v1 does.
+    nodes and the first 500 items of each list, as sleep-timing-variability-v1 does.
     """
     pending: list[tuple[Any, int]] = [(payload, 0)]
     visited = 0

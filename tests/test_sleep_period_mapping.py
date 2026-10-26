@@ -174,7 +174,7 @@ class BoundsMethodTests(unittest.TestCase):
         self.assertIsNone(bounds_fields("unknown.pair"))
 
     def test_regularity_reads_the_same_intervals(self) -> None:
-        """The mapper and sleep-regularity-v1 find the same instants and field pairs."""
+        """The mapper and sleep-timing-variability-v1 find the same instants and field pairs."""
         today = date(2026, 10, 12)
         nights = [
             garmin_night(datetime(2026, 10, day, 21, 0, tzinfo=UTC)) for day in (8, 9)

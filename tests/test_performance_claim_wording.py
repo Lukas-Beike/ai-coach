@@ -10,6 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCES = (
     "backend/performance/personal_recovery.py",
     "backend/performance/report_service.py",
+    "backend/performance/recovery_context.py",
+    "backend/performance/canonical_recovery.py",
+    "backend/canonical/sleep_bounds.py",
+    "backend/providers/sleep_period_mapping.py",
     "backend/coach/tool_schemas.py",
     "backend/coach/context.py",
     "backend/coach/activity_read_tools.py",

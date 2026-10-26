@@ -283,16 +283,16 @@ The manual morning check-in SHALL decide whether today's Garmin sleep is availab
 
 Evidence: `backend/coach/morning.py:ManualMorningCheckinService`, `backend/performance/garmin_observations.py:garmin_sleep_ready_for_checkin`; `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`, `tests/test_garmin_observations.py:test_sleep_day_comes_from_the_observation_never_from_raw_sleep`.
 
-### Requirement: Canonical sleep regularity parity
-Sleep timing regularity SHALL read canonical periods without traversing raw provider payloads. Equivalent synthetic periods SHALL preserve the existing sleep-regularity-v1 results, source separation and coverage before any intentional method change. Nightly bounds SHALL not be labelled as a complete sleep/wake series or original SRI.
+### Requirement: Canonical sleep timing variability parity
+Sleep timing variability SHALL read canonical periods without traversing raw provider payloads. Equivalent synthetic periods SHALL preserve the existing sleep-timing-variability-v1 results, source separation and coverage before any intentional method change. Nightly bounds SHALL not be labelled as a complete sleep/wake series or the Sleep Regularity Index.
 
 #### Scenario: Equivalent stored nights
 - **WHEN** equivalent synthetic nights are supplied through canonical periods rather than the previous provider aliases
-- **THEN** regularity values, method identity and coverage match the existing method.
+- **THEN** timing variability values, method identity and coverage match the existing method.
 
 #### Scenario: Sparse coverage
 - **WHEN** missing nights or overlapping provider periods exist
-- **THEN** those distinctions remain explicit and the result does not claim original SRI or fabricate full-day coverage.
+- **THEN** those distinctions remain explicit and the result does not claim the Sleep Regularity Index or fabricate full-day coverage.
 
 ### Requirement: Canonical retained provider performance reads
 Affected history, recovery, nutrition and Coach reads SHALL obtain retained provider status, load balance, tolerance, score details, performance history, Body Battery, stress, resting energy and subjective wellness from canonical data. Provider labels, dates and missing-value semantics SHALL survive without a snapshot dependency in these paths.

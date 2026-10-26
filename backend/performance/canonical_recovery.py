@@ -11,11 +11,11 @@ pins the Intervals values of ``select_current`` to the newest wellness row, as
 the legacy readers did; it is None when there is no usable wellness day, and
 Garmin values are still selected then.
 
-Sleep periods for the sleep regularity are read when the serving source stores
-them (``SleepPeriodReader``), one day before the window so a period dated in
-another zone is not missed; the regularity applies its own window. A source
-without them leaves ``sleep_periods`` None, and the regularity reads the legacy
-rows.
+Sleep periods for the sleep timing variability are read when the serving source
+stores them (``SleepPeriodReader``), one day before the window so a period dated
+in another zone is not missed; the timing variability applies its own window. A
+source without them leaves ``sleep_periods`` None, and the timing variability
+reads the legacy rows.
 """
 
 from __future__ import annotations

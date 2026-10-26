@@ -1,7 +1,7 @@
-"""sleep-regularity-v1 gives the same result from canonical periods as from raw rows.
+"""sleep-timing-variability-v1 gives the same result from canonical periods as raw rows.
 
 Each case maps synthetic Garmin sleep and Intervals.icu wellness rows to canonical
-periods with the production mapper and compares the full regularity result with
+periods with the production mapper and compares the full timing result with
 the legacy walk over the same rows. No account, network or real data is used.
 """
 
