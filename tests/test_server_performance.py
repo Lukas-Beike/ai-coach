@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from canonical_detail_support import seed_intervals_activity
 from canonical_recovery_support import recovery_only_inputs
+from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
 from server_test_support import (
     ServerTestCase,
@@ -1120,6 +1121,7 @@ class ServerPerformanceTests(ServerTestCase):
                 activity["id"],
                 **{key: value for key, value in activity.items() if key != "id"},
             )
+        mark_tables_serving(server)
         pair = server.ATHLETE_DATA.duplicate_inspector().latest()
         with patch.object(
             intervals_client_module.IntervalsClient,

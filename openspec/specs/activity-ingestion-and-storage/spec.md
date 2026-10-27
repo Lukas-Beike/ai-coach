@@ -223,7 +223,7 @@ The system SHALL detect and inspect the newest Wahoo/Garmin duplicate ride pair 
 
 #### Scenario: Legacy-state selector
 - **WHEN** the canonical read selector still serves the snapshot projection (before the first completed backfill)
-- **THEN** inspection and the delete validation read only the canonical tables, so a pair that exists only in the snapshot is not offered, a tombstoned copy is never offered again, and a second submission of an already-executed confirmation is rejected with a conflict before any provider call. Lists and reports served from the snapshot projection may still show the deleted copy until the backfill completes.
+- **THEN** no pair is offered at all: inspection returns none, so a Coach proposal cannot be created and `inspect_activity_duplicates` reports none, and a delete submission is rejected with a conflict before any provider call. This holds even for a copy tombstoned earlier whose record a later sync revived from the unchanged snapshot, and a pair that exists only in the snapshot is never offered. Once the tables serve reads, inspection and the delete validation read only the canonical tables, so a tombstoned copy is not offered again and a repeated confirmation is rejected with a conflict. Lists and reports served from the snapshot projection may still show a deleted copy until the backfill completes.
 
 #### Scenario: Confirmation token follows the records
 - **WHEN** either record of the pair is fetched again after the proposal was created

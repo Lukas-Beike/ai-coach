@@ -679,6 +679,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             key_values=KEY_VALUE_REPOSITORY,
             snapshot_reader=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
             activity_rows=lambda: CANONICAL_READ,
+            table_serving=lambda: CANONICAL_READ,
             competition=COMPETITION_REPOSITORY,
         ),
         runtime=AthleteRuntime(

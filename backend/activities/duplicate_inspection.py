@@ -9,7 +9,7 @@ from typing import Any
 from backend.activities.canonical_sessions import wahoo_garmin_copy_match
 from backend.canonical.records import ActivityRecord
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, Sport
-from backend.runtime.ports import ActivityReader
+from backend.runtime.ports import ActivityReader, CanonicalTableServing
 
 _NAME_LIMIT = 200
 
@@ -20,8 +20,13 @@ class DuplicateInspector:
     ``activities`` must be the table-backed reader, never the read selector: before
     the first backfill the selector serves the snapshot projection, which does not
     know a tombstoned copy. Only active Intervals.icu records are compared, so a
-    removed duplicate is no longer reported (a pair may be missed before the
-    backfill, never repeated). The stored snapshot is not read.
+    removed duplicate is no longer reported. The stored snapshot is not read.
+
+    While the tables do not serve reads (``serving``: before the first completed
+    backfill) no pair is offered. Their records can be revived by the next sync
+    from the unchanged snapshot, so a deleted copy would be offered again with a
+    fresh token and deleted twice. The delete validates against the same
+    inspection, so it conflicts instead.
     """
 
     def __init__(
@@ -29,14 +34,18 @@ class DuplicateInspector:
         database_manager: Any,
         activities: ActivityReader,
         zone: Callable[[], tzinfo],
+        serving: CanonicalTableServing,
     ) -> None:
         self._database_manager = database_manager
         self._activities = activities
+        self._serving = serving
         self._zone = zone
 
     def latest(self) -> dict[str, Any] | None:
         """Return the newest exact-source ride pair, always keeping Wahoo canonical."""
         with self._database_manager.read_snapshot() as db:
+            if not self._serving.serves_tables(db):
+                return None
             records = self._activities.activities(db)
         return latest_wahoo_garmin_duplicate(records, zone=self._zone())
 

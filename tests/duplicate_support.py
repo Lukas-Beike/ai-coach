@@ -7,11 +7,13 @@ duplicate flow reads only canonical records. All storage is temporary.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.activities.duplicate_inspection import DuplicateInspector
@@ -27,6 +29,7 @@ from backend.canonical.vocabulary import (
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.schema import initialize_schema
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
+from backend.sync.canonical_backfill import STATE_KEY as BACKFILL_STATE_KEY
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 ZONE = ZoneInfo("Europe/Berlin")
@@ -34,6 +37,21 @@ START = datetime(2026, 9, 20, 7, 0, tzinfo=ZONE)
 FETCHED_AT = "2026-09-20T10:00:00+00:00"
 WAHOO_ID = "wahoo-1"
 GARMIN_ID = "garmin-1"
+
+
+class TablesServe:
+    """A serving port for tests whose canonical tables serve reads."""
+
+    def serves_tables(self, db: object) -> bool:
+        return True
+
+
+def mark_tables_serving(server: Any) -> None:
+    """Record a completed backfill so the running app serves reads from the tables."""
+    with server.database_manager().unit_of_work() as db:
+        server.KEY_VALUE_REPOSITORY.set(
+            db, BACKFILL_STATE_KEY, json.dumps({"completed_once": True})
+        )
 
 
 class DuplicateCase(unittest.TestCase):
@@ -47,7 +65,9 @@ class DuplicateCase(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             initialize_schema(db)
         self.reader = CanonicalTableReader()
-        self.inspector = DuplicateInspector(self.manager, self.reader, lambda: ZONE)
+        self.inspector = DuplicateInspector(
+            self.manager, self.reader, lambda: ZONE, TablesServe()
+        )
 
     def open_manager(self) -> DatabaseManager:
         manager = DatabaseManager(self.path, sqlite3, row_factory=row_factory)

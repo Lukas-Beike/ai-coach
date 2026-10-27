@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
 from canonical_detail_support import seed_intervals_activity
+from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
 
 from backend.activities.feedback import ActivityFeedbackService
@@ -389,6 +390,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
             {"synced_at": runtime_clock.utc_now(), "recent_activities": activities}
         )
         # Duplicate inspection reads the canonical tables, not the snapshot.
+        mark_tables_serving(server)
         for activity in activities:
             seed_intervals_activity(
                 server.database_manager(),

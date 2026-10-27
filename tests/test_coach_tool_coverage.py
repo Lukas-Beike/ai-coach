@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from canonical_detail_support import seed_intervals_activity
+from duplicate_support import mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
@@ -1085,6 +1086,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
     @staticmethod
     def seed_duplicate_pair(common):
         """Ingest the Wahoo ride and its Garmin copy into the canonical tables."""
+        mark_tables_serving(server)
         for identifier, source in (
             ("synthetic-wahoo", "Wahoo"),
             ("synthetic-garmin", "GARMIN_CONNECT"),

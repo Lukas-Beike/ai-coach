@@ -84,7 +84,7 @@ class _ActivityCase(CanonicalReadFixture):
         )
 
     def inspector(self, selector: Any) -> DuplicateInspector:
-        return DuplicateInspector(self.manager, self.table, lambda: self.zone)
+        return DuplicateInspector(self.manager, self.table, lambda: self.zone, selector)
 
     def ids(self, rows: Any) -> set[str]:
         return {str(row["id"]) for row in rows}

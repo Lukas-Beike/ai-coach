@@ -29,6 +29,7 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         repositories = [Mock(name=f"repository_{index}") for index in range(4)]
         snapshot_reader = Mock(name="snapshot_reader")
         row_reader = Mock(name="row_reader")
+        serving = Mock(name="serving")
         now = Mock(name="utc_now")
         today = Mock(name="local_date")
         assembly = AthleteDataAssembly(
@@ -41,6 +42,7 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                     key_values=Mock(name="key_values"),
                     snapshot_reader=snapshot_reader,
                     activity_rows=lambda: row_reader,
+                    table_serving=lambda: serving,
                     competition=repositories[2],
                 ),
                 runtime=AthleteRuntime(
@@ -71,6 +73,7 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         self.assertIs(feedback._row_reader, row_reader)
         self.assertFalse(hasattr(assembly, "activity_read"))
         self.assertIsInstance(duplicate._inspector._activities, CanonicalTableReader)
+        self.assertIs(duplicate._inspector._serving, serving)
 
     def test_training_snapshot_uses_injected_reader_without_changing_provenance(self):
         manager = MagicMock()
@@ -91,6 +94,7 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                     key_values=Mock(),
                     snapshot_reader=reader,
                     activity_rows=Mock(),
+                    table_serving=Mock(),
                     competition=Mock(),
                 ),
                 runtime=AthleteRuntime(

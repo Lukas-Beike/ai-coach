@@ -18,7 +18,11 @@ from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
 from backend.performance.training_report import deduplicated_rows
-from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
+from backend.runtime.ports import (
+    ActivityRowReader,
+    CanonicalTableServing,
+    ProviderSnapshotReader,
+)
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.weather.cache import invalidate_for_location_change
 
@@ -31,6 +35,7 @@ class AthleteRepositories:
     key_values: Any
     snapshot_reader: ProviderSnapshotReader
     activity_rows: Callable[[], ActivityRowReader]
+    table_serving: Callable[[], CanonicalTableServing]
     competition: Any
 
 
@@ -68,6 +73,7 @@ class AthleteDataAssembly:
         self._key_value_repository = repositories.key_values
         self._snapshot_reader = repositories.snapshot_reader
         self._activity_rows = repositories.activity_rows
+        self._table_serving = repositories.table_serving
         self._utc_now = runtime.utc_now
         self._local_date = runtime.local_date
         self._event_buffer = runtime.event_buffer
@@ -114,11 +120,13 @@ class AthleteDataAssembly:
         return AthleteLocalClock(self.profile()).now().tzinfo or UTC
 
     def duplicate_inspector(self) -> DuplicateInspector:
-        # Always the canonical tables, never the selector: before the first
-        # backfill the selector serves the snapshot projection, which does not
-        # know a tombstoned copy and would offer it for deletion again.
+        # Always the canonical tables, never the selector's snapshot projection,
+        # and only while the tables serve reads (see DuplicateInspector).
         return DuplicateInspector(
-            self._database_manager(), CanonicalTableReader(), self._athlete_zone
+            self._database_manager(),
+            CanonicalTableReader(),
+            self._athlete_zone,
+            self._table_serving(),
         )
 
     def duplicate_activity(self) -> DuplicateActivityService:

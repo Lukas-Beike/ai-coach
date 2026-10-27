@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
-from duplicate_support import GARMIN_ID, WAHOO_ID, ZONE, DuplicateCase
+from duplicate_support import GARMIN_ID, WAHOO_ID, ZONE, DuplicateCase, TablesServe
 
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
@@ -130,7 +130,9 @@ class PersistenceTests(_PersistenceCase):
         reopened = DatabaseManager(self.path, sqlite3, row_factory=row_factory)
         self.addCleanup(reopened.close)
         self.restart_bootstrap(reopened)
-        inspector = DuplicateInspector(reopened, CanonicalTableReader(), lambda: ZONE)
+        inspector = DuplicateInspector(
+            reopened, CanonicalTableReader(), lambda: ZONE, TablesServe()
+        )
         with reopened.reader() as db:
             after = _states(db)
             served = {r.activity_id for r in CanonicalTableReader().activities(db)}

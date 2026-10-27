@@ -17,6 +17,7 @@ from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 from zoneinfo import ZoneInfo
 
+from duplicate_support import TablesServe
 from support import garmin_payload_fixture, load_provider_fixture
 
 from backend.activities.duplicate_inspection import DuplicateInspector
@@ -568,10 +569,15 @@ class DuplicateDeleteTests(StorageCase):
 
 
 class LegacyStateDuplicateTests(StorageCase):
-    """The selector still serves the snapshot; duplicates are read from the tables."""
+    """Duplicate deletes are offered only while the canonical tables serve reads.
+
+    Before the first completed backfill the snapshot stays the source of truth and
+    a delete does not rewrite it, so the next sync would revive a deleted copy.
+    """
 
     WAHOO = "i-wahoo-dup"
     GARMIN = "i-garmin-dup"
+    KEYS = ("canonical_id", "duplicate_id", "snapshot_synced_at")
 
     def pair(self) -> list[dict[str, Any]]:
         base = {
@@ -585,64 +591,81 @@ class LegacyStateDuplicateTests(StorageCase):
             {**base, "id": self.GARMIN, "source": "Garmin", "moving_time": 3580},
         ]
 
-    def legacy_environment(self) -> tuple[Environment, DuplicateInspector]:
+    def legacy_environment(self) -> Environment:
         env = self.environment(tables=False)
         env.sync(self.pair(), days=ALL_DAYS, day=FIRST_DAY)
         with env.manager.reader() as db:
             self.assertFalse(env.selector.serves_tables(db))
-        inspector = DuplicateInspector(env.manager, CanonicalTableReader(), lambda: UTC)
-        return env, inspector
+        return env
+
+    def inspector(self, env: Environment, serving: Any = None) -> DuplicateInspector:
+        return DuplicateInspector(
+            env.manager, CanonicalTableReader(), lambda: UTC, serving or env.selector
+        )
 
     def service(self, env: Environment, inspector: DuplicateInspector):
         return DuplicateActivityService(
             env.manager, inspector, lambda: "2026-11-12T00:00:00+00:00", Mock()
         )
 
-    def test_inspection_uses_only_the_table_records(self) -> None:
-        env, inspector = self.legacy_environment()
-        pair = inspector.latest()
-        self.assertEqual((pair or {}).get("duplicate_id"), self.GARMIN)
-        # A copy that exists only in the snapshot projection is not a candidate.
+    def confirmation(self, inspector: DuplicateInspector) -> dict[str, Any]:
+        pair = inspector.latest() or {}
+        return {key: pair[key] for key in self.KEYS}
+
+    def test_no_pair_is_offered_while_the_selector_is_legacy(self) -> None:
+        env = self.legacy_environment()
+        # The tables hold the pair, but they do not serve reads yet.
+        self.assertEqual(
+            (self.inspector(env, TablesServe()).latest() or {}).get("duplicate_id"),
+            self.GARMIN,
+        )
+        self.assertIsNone(self.inspector(env).latest())
+
+    def test_the_pair_is_offered_once_the_tables_serve(self) -> None:
+        env = self.legacy_environment()
         with env.manager.unit_of_work() as db:
-            db.execute("UPDATE activity_records SET state = 'deleted'")
-        with env.manager.reader() as db:
-            projected = {r.activity_id for r in env.selector.activities(db)}
-        self.assertIn(self.GARMIN, projected)
-        self.assertIsNone(inspector.latest())
+            env.key_values.set(db, STATE_KEY, json.dumps({"completed_once": True}))
 
-    def test_a_confirmed_delete_is_not_offered_again(self) -> None:
-        env, inspector = self.legacy_environment()
-        pair = inspector.latest() or {}
-        confirmation = {
-            key: pair[key]
-            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
-        }
-        service = self.service(env, inspector)
-        remote = Mock()
+        pair = self.inspector(env).latest()
 
-        service.delete(dict(confirmation), remote)
+        self.assertEqual((pair or {}).get("duplicate_id"), self.GARMIN)
 
-        remote.delete_activity.assert_called_once_with(self.GARMIN)
-        self.assertIsNone(inspector.latest())
-        # Lists may still show the copy until the backfill completes (accepted).
-        with env.manager.reader() as db:
-            projected = {r.activity_id for r in env.selector.activities(db)}
-        self.assertIn(self.GARMIN, projected)
-
-    def test_a_second_confirmation_conflicts_without_a_remote_call(self) -> None:
-        env, inspector = self.legacy_environment()
-        pair = inspector.latest() or {}
-        confirmation = {
-            key: pair[key]
-            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
-        }
-        service = self.service(env, inspector)
-        service.delete(dict(confirmation), Mock())
+    def test_a_confirmation_in_the_legacy_state_conflicts_without_a_remote_call(
+        self,
+    ) -> None:
+        env = self.legacy_environment()
+        confirmation = self.confirmation(self.inspector(env, TablesServe()))
         remote = Mock()
 
         with self.assertRaises(AppError) as raised:
-            service.delete(dict(confirmation), remote)
+            self.service(env, self.inspector(env)).delete(confirmation, remote)
 
+        self.assertEqual(raised.exception.status, 409)
+        remote.delete_activity.assert_not_called()
+        state = "SELECT state FROM activity_records WHERE provider_activity_id = ?"
+        self.assertEqual(env.rows(state, (self.GARMIN,))[0]["state"], "active")
+
+    def test_a_deleted_copy_revived_by_the_next_sync_is_not_offered_again(
+        self,
+    ) -> None:
+        env = self.legacy_environment()
+        confirmation = self.confirmation(self.inspector(env, TablesServe()))
+        # A confirmation issued while the tables served, executed in the legacy state.
+        self.service(env, self.inspector(env, TablesServe())).delete(
+            dict(confirmation), Mock()
+        )
+        copy = "SELECT state FROM activity_records WHERE provider_activity_id = ?"
+        self.assertEqual(env.rows(copy, (self.GARMIN,))[0]["state"], "deleted")
+
+        # The snapshot is unchanged, so the next incremental sync ingests the copy.
+        env.sync(self.pair(), days=ALL_DAYS, day=SECOND_DAY)
+        self.assertEqual(env.rows(copy, (self.GARMIN,))[0]["state"], "active")
+
+        inspector = self.inspector(env)
+        self.assertIsNone(inspector.latest())
+        remote = Mock()
+        with self.assertRaises(AppError) as raised:
+            self.service(env, inspector).delete(dict(confirmation), remote)
         self.assertEqual(raised.exception.status, 409)
         remote.delete_activity.assert_not_called()
 
