@@ -456,6 +456,10 @@ class SupervisorTests(unittest.TestCase):
                 )
             if name == "build":
                 (self.owner.output / "image.id").write_text("sha256:" + "b" * 64)
+            if name == "inspect-test-source":
+                (self.owner.output / "inspect-test-source.log").write_text(
+                    "sha256:" + "b" * 64
+                )
             if name == "prepare-test-image":
                 (self.owner.output / "test-image.id").write_text("sha256:" + "c" * 64)
             if name.startswith("list-"):
@@ -517,7 +521,14 @@ class SupervisorTests(unittest.TestCase):
         preparation = next(
             command for command, name in spawned if name == "prepare-test-image"
         )
-        self.assertIn("APP_IMAGE=ai-coach:local@sha256:" + "b" * 64, preparation)
+        tag = f"ai-coach-sqlcipher-source:{self.owner.run_id}"
+        self.assertIn(f"APP_IMAGE={tag}", preparation)
+        self.assertIn(
+            (["docker", "tag", "sha256:" + "b" * 64, tag], "tag-test-source"), spawned
+        )
+        self.assertIn(
+            (["docker", "image", "rm", tag], "remove-test-source-tag"), spawned
+        )
         self.assertTrue(all("/app/tests/run_tests.py" in command for command in tests))
         self.assertTrue(all("coverage" not in command for command in tests))
         self.assertEqual(

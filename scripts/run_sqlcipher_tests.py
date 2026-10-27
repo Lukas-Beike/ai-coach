@@ -408,18 +408,29 @@ class Supervisor:
             self.root / "scripts/Dockerfile.sqlcipher-tests", context / "Dockerfile"
         )
         iid = self.output / "test-image.id"
-        self.command(
-            [
-                "docker",
-                "build",
-                "--build-arg",
-                f"APP_IMAGE={self.args.image.split('@', 1)[0]}@{image}",
-                "--iidfile",
-                str(iid),
-                str(context),
-            ],
-            "prepare-test-image",
-        )
+        tag = f"ai-coach-sqlcipher-source:{self.run_id}"
+        self.command(["docker", "tag", image, tag], "tag-test-source")
+        try:
+            self.command(
+                ["docker", "image", "inspect", "--format", "{{.Id}}", tag],
+                "inspect-test-source",
+            )
+            if (self.output / "inspect-test-source.log").read_text().strip() != image:
+                raise ValueError("test source tag does not match built image")
+            self.command(
+                [
+                    "docker",
+                    "build",
+                    "--build-arg",
+                    f"APP_IMAGE={tag}",
+                    "--iidfile",
+                    str(iid),
+                    str(context),
+                ],
+                "prepare-test-image",
+            )
+        finally:
+            self.command(["docker", "image", "rm", tag], "remove-test-source-tag")
         prepared = iid.read_text().strip()
         if not re.fullmatch(r"sha256:[a-f0-9]{64}", prepared):
             raise ValueError("missing prepared test image identity")
