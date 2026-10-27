@@ -153,7 +153,7 @@ def mapped_personal_recovery(
 ) -> dict[str, Any]:
     """Run personal recovery on the observations the raw fixtures map to.
 
-    Sleep regularity still reads the raw records (#1419), so they are passed too.
+    Sleep timing variability still reads the raw records (#1419), so they are passed too.
     """
     from backend.performance.personal_recovery import personal_recovery
 

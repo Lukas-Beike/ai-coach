@@ -1,6 +1,6 @@
 """Map stored provider sleep rows to canonical sleep periods.
 
-The intervals are the ones ``sleep-regularity-v1`` reads (see
+The intervals are the ones ``sleep-timing-variability-v1`` reads (see
 ``backend.canonical.sleep_bounds``): every object of the row with a start and an
 end field, the same instants counted once. A Garmin daily sleep record, or its
 ``dailySleepDTO``, is Garmin's main sleep of the day, so its interval is NIGHT
@@ -61,7 +61,7 @@ def _reported_seconds(
 
 
 def _distinct(intervals: list[SleepInterval]) -> list[SleepInterval]:
-    """Keep one interval per instant pair (the last one, as sleep-regularity-v1),
+    """Keep one interval per instant pair (the last one, as sleep-timing-variability-v1),
     then one per start, the first, because a provider period is keyed by its start."""
     by_bounds: dict[tuple[datetime, datetime], SleepInterval] = {}
     for interval in intervals:

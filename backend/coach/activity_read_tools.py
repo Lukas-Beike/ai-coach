@@ -53,7 +53,7 @@ class CoachActivityReadToolService:
                 "season",
                 "comparisons",
                 "body_history",
-                "sleep_regularity",
+                "sleep_timing_variability",
             }
             if (
                 not isinstance(sections, list)
@@ -80,7 +80,7 @@ class CoachActivityReadToolService:
                 ),
                 "comparisons": self._report_services.records.comparisons,
                 "body_history": self._report_services.derived.body_history,
-                "sleep_regularity": self._report_services.derived.sleep_regularity,
+                "sleep_timing_variability": self._report_services.derived.sleep_timing_variability,
             }
             payload = {
                 section: readers[section]() for section in dict.fromkeys(sections)

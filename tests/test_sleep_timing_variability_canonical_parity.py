@@ -1,7 +1,7 @@
-"""sleep-regularity-v1 gives the same result from canonical periods as from raw rows.
+"""sleep-timing-variability-v1 gives the same result from canonical periods as raw rows.
 
 Each case maps synthetic Garmin sleep and Intervals.icu wellness rows to canonical
-periods with the production mapper and compares the full regularity result with
+periods with the production mapper and compares the full timing result with
 the legacy walk over the same rows. No account, network or real data is used.
 """
 
@@ -18,7 +18,10 @@ from backend.performance.canonical_recovery import (
     RECOVERY_HISTORY_DAYS,
     read_recovery_inputs,
 )
-from backend.performance.personal_recovery import personal_recovery, sleep_regularity
+from backend.performance.personal_recovery import (
+    personal_recovery,
+    sleep_timing_variability,
+)
 from backend.providers.sleep_period_mapping import map_sleep_periods
 
 INGEST_ZONE = ZoneInfo("Europe/Berlin")
@@ -88,10 +91,10 @@ class ParityTests(unittest.TestCase):
     def assert_parity(
         self, garmin_rows: list[dict], wellness_rows: list[dict], timezone: str
     ) -> dict:
-        legacy = sleep_regularity(
+        legacy = sleep_timing_variability(
             wellness_rows, {"sleep": garmin_rows}, timezone, TODAY
         )
-        canonical = sleep_regularity(
+        canonical = sleep_timing_variability(
             [],
             {},
             timezone,

@@ -415,10 +415,10 @@ class CoachPlanningContextReader:
 
 
 def coach_performance_projection(performance: Any) -> Any:
-    """Keep baseline and sleep-regularity summaries, without repeated per-day arrays.
+    """Keep baseline and sleep timing summaries, without repeated per-day arrays.
 
     The UI keeps the full history. The Coach receives each baseline's summary and
-    each regularity series' summary, so an 84-day window fits the section budget
+    each timing series' summary, so an 84-day window fits the section budget
     without dropping other performance keys.
     """
     if not isinstance(performance, dict):

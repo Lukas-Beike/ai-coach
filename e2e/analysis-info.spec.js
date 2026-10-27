@@ -163,8 +163,59 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(root.getByRole("heading", { name: /^Erholung · Letzte 14 Tage/ })).toBeVisible();
   await expect(root.getByRole("button", { name: "Erholung · Letzte 14 Tage: Informationen", exact: true })).toBeVisible();
   await expect(root.locator(".analysis-period-controls")).toHaveCount(1);
+  await root.getByRole("button", { name: "Erholung · Letzte 14 Tage: Informationen", exact: true }).click();
+  const info = root.locator(".analysis-info-tooltip:popover-open");
+  await expect(info).toContainText("Im Bereich deiner früheren Werte · 50 ms–60 ms");
+  await expect(info).toContainText("Vergleich mit 28 früheren Nächten.");
+  await expect(info).toContainText("Mindestens 14 frühere passende Nächte erforderlich.");
+  await expect(info).toContainText("Durchschnitt der angezeigten Werte");
+  await page.keyboard.press("Escape");
+  const recoveryText = await root.evaluate((element) => element.textContent);
+  for (const forbidden of ["Grüner Bereich", "üblichen Bereich", "Normalbereich", "Basis", "bestätigt", "Status:"]) {
+    expect(recoveryText).not.toContain(forbidden);
+  }
   expect((await new AxeBuilder({ page }).include("#personalRecovery").analyze()).violations).toEqual([]);
   expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
+test("@responsive recovery comparison band is neutral and keeps series contrast in both themes", async ({ page }) => {
+  await performanceFixture(page, { personal_recovery: {
+    as_of: "2026-10-02", sleep_target_hours: 8,
+    baselines: [
+      { metric: "hrv", source: "Garmin Connect", measurement: "lastNightAvg", observed_at: "2026-10-01", nights: 28,
+        status: "ok", lower: 50, upper: 60, position: "within", history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
+    ],
+  } }, "recovery");
+  const band = page.locator("#personalRecovery .analysis-baseline-band");
+  await expect(band).toHaveCount(1);
+  for (const theme of ["dark", "light"]) {
+    await page.evaluate((selected) => { document.documentElement.dataset.theme = selected; }, theme);
+    const result = await band.evaluate((element) => {
+      const parse = (value) => { const [r, g, b, a = 1] = value.match(/[\d.]+/g).map(Number); return { r, g, b, a }; };
+      const blend = (top, bottom) => ({ r: top.r * top.a + bottom.r * (1 - top.a), g: top.g * top.a + bottom.g * (1 - top.a), b: top.b * top.a + bottom.b * (1 - top.a), a: 1 });
+      const luminance = ({ r, g, b }) => { const [lr, lg, lb] = [r, g, b].map((channel) => { const c = channel / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }); return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb; };
+      const ratio = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+      const probe = (index) => {
+        const node = document.createElement("span");
+        node.style.color = "var(--chart-series-" + index + ")";
+        document.body.append(node);
+        const color = parse(getComputedStyle(node).color);
+        node.remove();
+        return color;
+      };
+      const style = getComputedStyle(element);
+      const page = blend(parse(getComputedStyle(document.body).backgroundColor), { r: 0, g: 0, b: 0, a: 1 });
+      const surface = blend(parse(getComputedStyle(element.closest(".analysis-chart-card")).backgroundColor), page);
+      const fill = parse(style.fill);
+      const composite = blend({ ...fill, a: Number(style.opacity) }, surface);
+      return {
+        spread: Math.max(fill.r, fill.g, fill.b) - Math.min(fill.r, fill.g, fill.b),
+        ratios: [1, 2, 3, 4].map((index) => ratio(probe(index), composite)),
+      };
+    });
+    expect(result.spread, theme + " band fill is neutral").toBeLessThanOrEqual(8);
+    for (const value of result.ratios) expect(value, theme + " series against band").toBeGreaterThanOrEqual(3);
+  }
 });
 
 test("@responsive Garmin acute load switches fourteen days and twelve weeks with real gaps", async ({ page }) => {
@@ -288,7 +339,7 @@ test("@responsive repeated performance values are labelled once without a normal
   await expect(root.locator(".analysis-current-line")).toHaveCount(0);
   await expect(root.locator(".analysis-baseline-band")).toHaveCount(0);
   await root.getByRole("button", { name: "Erklärung zu FTP", exact: true }).click();
-  await expect(root.locator(".analysis-info-tooltip:popover-open")).not.toContainText("Grüner Bereich");
+  await expect(root.locator(".analysis-info-tooltip:popover-open")).not.toContainText("Mittlere Hälfte deiner früheren Werte");
 });
 
 test("@responsive performance keeps dated FTP values and weekly medians independently of the load period", async ({ page }) => {
@@ -417,7 +468,7 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
     personal_recovery: {
       as_of: "2026-10-01", sleep_target_hours: null, baselines: [], sleep_deficits: [],
       regularity: {
-        method: "sleep-regularity-v1", timezone: "Europe/Berlin", status: "provisional", series: [{
+        method: "sleep-timing-variability-v1", timezone: "Europe/Berlin", status: "provisional", series: [{
           source: "Garmin Connect", method: "sleepStartTimestampGMT/sleepEndTimestampGMT", status: "provisional",
           coverage: { baseline_nights: 3, required_nights: 14 },
           points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5, onset_deviation_minutes: 15, wake_deviation_minutes: -10 }, { date: "2026-09-30" }],
