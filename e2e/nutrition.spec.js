@@ -246,6 +246,9 @@ test("@responsive composite meal shows immutable ingredient snapshots and proven
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test.describe("diary failure interception", () => {
+  test.use({ serviceWorkers: "block" });
+
 test("@responsive a failed diary load keeps the requested date, shows one error and retries the day", async ({ page }) => {
   let failing = true;
   await page.goto("/#nutrition/diary");
@@ -280,4 +283,5 @@ test("@responsive a failed diary load keeps the requested date, shows one error 
   await expect(page.locator("#nutritionDate")).toHaveValue("2026-10-05");
   await expect(page.locator("#nutritionExpenditure")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
 });
