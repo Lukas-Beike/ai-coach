@@ -15,8 +15,10 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
 
+from canonical_recovery_support import FilteringReader
+
 from backend.canonical.records import FORM_METHOD, FORM_METHOD_VERSION, Observation
-from backend.canonical.vocabulary import MetricKind, SourceKind, Sport
+from backend.canonical.vocabulary import MetricKind, SourceKind
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     read_performance_inputs,
@@ -24,38 +26,12 @@ from backend.performance.canonical_inputs import (
 from backend.performance.chart_history import analysis_history
 from backend.performance.context import current_performance_context
 from backend.providers.snapshot_projection import project_intervals_snapshot
-from backend.runtime.ports import ObservationReader
 
 DAY = date(2026, 9, 20)
 RETRIEVED_AT = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
 ZONE = ZoneInfo("Europe/Berlin")
 RAMP_LABEL = "Intervals.icu CTL (berechnet)"
 INTERVALS = "Intervals.icu"
-
-
-class ObservationStub(ObservationReader):
-    """Serves observations by kind, inclusive observed_on window and sport."""
-
-    def __init__(self, observations: tuple[Observation, ...]) -> None:
-        self._observations = observations
-
-    def observations(
-        self,
-        db: Any,
-        kind: MetricKind,
-        *,
-        start: date | None = None,
-        end: date | None = None,
-        sport: Sport | None = None,
-    ) -> tuple[Observation, ...]:
-        return tuple(
-            observation
-            for observation in self._observations
-            if observation.kind is kind
-            and (start is None or start <= observation.observed_on)
-            and (end is None or observation.observed_on <= end)
-            and (sport is None or observation.sport is sport)
-        )
 
 
 def _day(offset: int = 0) -> str:
@@ -96,7 +72,7 @@ def _inputs(
     snapshot: dict[str, Any], carrier: dict[str, Any] | None = None
 ) -> CanonicalPerformanceInputs:
     inputs = read_performance_inputs(
-        ObservationStub(_observations(snapshot)),
+        FilteringReader(_observations(snapshot)),
         None,
         _stripped(snapshot) if carrier is None else carrier,
         as_of=DAY,

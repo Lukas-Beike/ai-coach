@@ -200,7 +200,7 @@ def recovery_only_inputs(
         snapshot, zone=ZoneInfo("Europe/Berlin"), retrieved_at=RETRIEVED
     )
     full = read_performance_inputs(
-        _FilteringReader(tuple(mapped.records)),
+        FilteringReader(tuple(mapped.records)),
         None,
         snapshot,
         activity_reader=_NoActivityRows(),
@@ -238,7 +238,7 @@ class _NoActivityRows:
         return ()
 
 
-class _FilteringReader:
+class FilteringReader:
     """Serves observations by kind, inclusive observed_on window and sport."""
 
     def __init__(self, observations: tuple[Observation, ...]) -> None:

@@ -34,7 +34,7 @@ not current. Its row stays stored and readable, so history keeps it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
@@ -69,6 +69,27 @@ class CanonicalCurrentInputs:
     athlete_eftp: Observation | None = None
     wellness_eftp: Observation | None = None
 
+    def with_fallbacks(
+        self,
+        wahoo_ftp: Observation | None,
+        wahoo_weight: Observation | None,
+        wellness_eftp: Observation | None = None,
+    ) -> CanonicalCurrentInputs:
+        """Return these inputs with the Wahoo fallbacks and the wellness-day eFTP."""
+        return CanonicalCurrentInputs(
+            bike_threshold_hr=self.bike_threshold_hr,
+            run_threshold_hr=self.run_threshold_hr,
+            athlete_threshold_hr=self.athlete_threshold_hr,
+            cycling_vo2max=self.cycling_vo2max,
+            running_vo2max=self.running_vo2max,
+            wellness_weight=self.wellness_weight,
+            athlete_weight=self.athlete_weight,
+            wahoo_ftp=wahoo_ftp,
+            wahoo_weight=wahoo_weight,
+            athlete_eftp=self.athlete_eftp,
+            wellness_eftp=wellness_eftp,
+        )
+
 
 _NO_INTERVALS: Final = CanonicalCurrentInputs(
     bike_threshold_hr=(),
@@ -93,7 +114,7 @@ def read_wahoo_fallbacks(
     wahoo_ftp, wahoo_weight = _wahoo_current(reader, db, as_of=as_of)
     if wahoo_ftp is None and wahoo_weight is None:
         return None
-    return replace(_NO_INTERVALS, wahoo_ftp=wahoo_ftp, wahoo_weight=wahoo_weight)
+    return _NO_INTERVALS.with_fallbacks(wahoo_ftp, wahoo_weight)
 
 
 def read_current_inputs(
@@ -117,12 +138,7 @@ def read_current_inputs(
         if wahoo_ftp is None and wahoo_weight is None and wellness_eftp is None:
             return None
         intervals = _NO_INTERVALS
-    inputs = replace(
-        intervals,
-        wahoo_ftp=wahoo_ftp,
-        wahoo_weight=wahoo_weight,
-        wellness_eftp=wellness_eftp,
-    )
+    inputs = intervals.with_fallbacks(wahoo_ftp, wahoo_weight, wellness_eftp)
     values = (
         *inputs.bike_threshold_hr,
         *inputs.run_threshold_hr,
