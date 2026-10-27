@@ -10,7 +10,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock
 
-from duplicate_support import GARMIN_ID, WAHOO_ID, DuplicateCase
+from duplicate_support import GARMIN_ID, WAHOO_ID, DuplicateCase, seed_pair
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.duplicate_service import DuplicateActivityService
@@ -57,7 +57,7 @@ class DuplicateFeedbackTests(DuplicateCase):
         return by_id.get(activity_id, {})
 
     def seed_pair_with_copy_as_alias(self) -> None:
-        wahoo, garmin = self.seed_pair()
+        wahoo, garmin = seed_pair(self)
         self.merge(garmin, wahoo)
 
     def seed_pair_with_copy_as_survivor(self) -> None:
@@ -114,7 +114,7 @@ class DuplicateFeedbackTests(DuplicateCase):
     ) -> None:
         # The copy was never merged: its feedback keeps the session it was written
         # for. This is the existing behaviour of any deleted provider copy.
-        self.seed_pair()
+        seed_pair(self)
         self.feedback.save(GARMIN_ID, {"notes": "On the copy"})
 
         self.delete_copy()

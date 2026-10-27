@@ -9,7 +9,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
-from duplicate_support import GARMIN_ID, WAHOO_ID, ZONE, DuplicateCase, TablesServe
+from duplicate_support import (
+    GARMIN_ID,
+    WAHOO_ID,
+    ZONE,
+    DuplicateCase,
+    TablesServe,
+    seed_pair,
+)
 
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
@@ -100,7 +107,7 @@ class _PersistenceCase(DuplicateCase):
 class PersistenceTests(_PersistenceCase):
     def setUp(self) -> None:
         super().setUp()
-        self.wahoo_session, self.garmin_session = self.seed_pair()
+        self.wahoo_session, self.garmin_session = seed_pair(self)
         # A heuristic link, as the sync writes it, plus a deleted Garmin-provider copy.
         self.merge(self.garmin_session, self.wahoo_session)
         self.seed("garmin-direct", provider=ProviderId.GARMIN)

@@ -4,7 +4,14 @@ import unittest
 from datetime import timedelta
 from unittest.mock import Mock
 
-from duplicate_support import FETCHED_AT, GARMIN_ID, START, WAHOO_ID, DuplicateCase
+from duplicate_support import (
+    FETCHED_AT,
+    GARMIN_ID,
+    START,
+    WAHOO_ID,
+    DuplicateCase,
+    seed_pair,
+)
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.duplicate_service import DuplicateActivityService
@@ -31,7 +38,7 @@ class DuplicateDeleteTests(DuplicateCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.wahoo_session, self.garmin_session = self.seed_pair()
+        self.wahoo_session, self.garmin_session = seed_pair(self)
         self.intervals = Mock()
         self.events = _Events()
         self.service = DuplicateActivityService(

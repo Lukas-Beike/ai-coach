@@ -12,6 +12,7 @@ from duplicate_support import (
     WAHOO_ID,
     ZONE,
     DuplicateCase,
+    seed_pair,
 )
 
 from backend.activities.duplicate_inspection import latest_wahoo_garmin_duplicate
@@ -25,7 +26,7 @@ LATER = "2026-09-21T08:00:00+00:00"
 
 class InspectionTests(DuplicateCase):
     def test_current_pair_is_found_without_any_snapshot(self) -> None:
-        self.seed_pair()
+        seed_pair(self)
 
         pair = self.inspector.latest()
 
@@ -54,7 +55,7 @@ class InspectionTests(DuplicateCase):
         self.assertEqual(pair["duplicate_name"], "Garmin-Radeinheit")
 
     def test_other_providers_records_do_not_change_the_pair(self) -> None:
-        self.seed_pair()
+        seed_pair(self)
         # The same ride also arrived through the Garmin and Wahoo providers.
         self.seed("garmin-direct", provider=ProviderId.GARMIN)
         self.seed(
@@ -68,13 +69,13 @@ class InspectionTests(DuplicateCase):
         )
 
     def test_merged_alias_session_is_still_a_pair(self) -> None:
-        wahoo, garmin = self.seed_pair()
+        wahoo, garmin = seed_pair(self)
         self.merge(garmin, wahoo)
 
         self.assertEqual((self.inspector.latest() or {})["duplicate_id"], GARMIN_ID)
 
     def test_a_newer_unrelated_activity_blocks_the_pair(self) -> None:
-        self.seed_pair()
+        seed_pair(self)
         self.seed(
             "new-run",
             recorded_by=RecordingOrigin.GARMIN,
@@ -85,7 +86,7 @@ class InspectionTests(DuplicateCase):
         self.assertIsNone(self.inspector.latest())
 
     def test_a_tombstoned_copy_is_no_longer_reported(self) -> None:
-        self.seed_pair()
+        seed_pair(self)
         with self.manager.unit_of_work() as db:
             canonical_store.mark_activity_deleted(
                 db,
@@ -109,7 +110,7 @@ class InspectionTests(DuplicateCase):
         self.assertIsNone(self.inspector.latest())
 
     def test_the_token_follows_the_newest_fetch_of_either_record(self) -> None:
-        self.seed_pair()
+        seed_pair(self)
         before = (self.inspector.latest() or {})["snapshot_synced_at"]
         # A later fetch of the Garmin copy changes nothing but its fetch time.
         self.seed(

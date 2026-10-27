@@ -74,13 +74,6 @@ class DuplicateCase(unittest.TestCase):
         self.addCleanup(manager.close)
         return manager
 
-    def seed_pair(self) -> tuple[str, str]:
-        """Seed the Wahoo ride and its Garmin copy as Intervals.icu activities."""
-        return (
-            self.seed(WAHOO_ID, recorded_by=RecordingOrigin.WAHOO),
-            self.seed(GARMIN_ID, recorded_by=RecordingOrigin.GARMIN, duration_s=3580.0),
-        )
-
     def seed(
         self,
         source_id: str,
@@ -156,3 +149,11 @@ class DuplicateCase(unittest.TestCase):
     ) -> list[dict[str, object]]:
         with self.manager.reader() as db:
             return [dict(row) for row in db.execute(sql, params).fetchall()]
+
+
+def seed_pair(case: DuplicateCase) -> tuple[str, str]:
+    """Seed the Wahoo ride and its Garmin copy as Intervals.icu activities."""
+    return (
+        case.seed(WAHOO_ID, recorded_by=RecordingOrigin.WAHOO),
+        case.seed(GARMIN_ID, recorded_by=RecordingOrigin.GARMIN, duration_s=3580.0),
+    )
