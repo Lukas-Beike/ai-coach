@@ -56,7 +56,8 @@ _NOTE: Final = (
     "einer Abweichung. Krankheit und Schmerzen separat berücksichtigen. Quellen "
     "und Messfelder werden nicht gemischt. Der Fehlbetrag zum Schlafziel "
     "summiert nur bekannte Nächte und wird nicht mit längeren Nächten "
-    "verrechnet. Die Schlafzeit-Streuung ist kein Sleep Regularity Index."
+    "verrechnet; fehlende Nächte und nicht erfasste Nickerchen begrenzen "
+    "diese Aussage. Die Schlafzeit-Streuung ist kein Sleep Regularity Index."
 )
 
 

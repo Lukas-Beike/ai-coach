@@ -109,6 +109,7 @@ class PersonalRecoveryTests(unittest.TestCase):
             "etwa die Hälfte der Werte",
             "Keine Diagnose, keine Trainingsfreigabe und keine Trainingsänderung",
             "summiert nur bekannte Nächte",
+            "fehlende Nächte und nicht erfasste Nickerchen begrenzen diese Aussage",
             "kein Sleep Regularity Index",
         ):
             self.assertIn(sentence, note)

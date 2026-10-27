@@ -35,7 +35,7 @@ Tiers: L1 simple, L2 standard, L3 complex. No task is L3: there is no schema cha
 
 ## 6. Independence from Epic B PR #1464 (design D8)
 
-- [ ] 6.1 [L1] Before opening the PR, fetch `origin`, rebase on `develop`, and compare `git diff origin/develop...origin/t3/canonical-extensions-issues-1408-1423 --name-only` against this change's files. If #1464 has merged, re-bump the service-worker cache name and asset versions on top of its values, apply the rename to its new files (`tests/test_sleep_regularity_canonical_parity.py`, `tests/test_sleep_period_mapping.py`, `backend/canonical/sleep_bounds.py`, `backend/providers/sleep_period_mapping.py`) and add the follow-up wording of its "Canonical sleep regularity parity" requirement. Verify: after rebase, task 1.1's search is clean and the full suite of task 7.1 passes.
+- [x] 6.1 [L1] Before opening the PR, fetch `origin`, rebase on `develop`, and compare `git diff origin/develop...origin/t3/canonical-extensions-issues-1408-1423 --name-only` against this change's files. If #1464 has merged, re-bump the service-worker cache name and asset versions on top of its values, apply the rename to its new files (`tests/test_sleep_regularity_canonical_parity.py`, `tests/test_sleep_period_mapping.py`, `backend/canonical/sleep_bounds.py`, `backend/providers/sleep_period_mapping.py`) and add the follow-up wording of its "Canonical sleep regularity parity" requirement. Verify: after rebase, task 1.1's search is clean and the full suite of task 7.1 passes.
 
 ## 7. Validation
 
