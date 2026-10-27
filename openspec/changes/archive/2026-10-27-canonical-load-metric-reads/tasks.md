@@ -36,7 +36,7 @@ Implement in order. Each task names its tier (L1 simple, L2 standard, L3 complex
 ## 6. OpenSpec
 
 - [x] 6.1 [L1] Run `npm run openspec -- validate canonical-load-metric-reads --strict` after implementation and replace the "not yet covered" evidence notes in the delta specs with the final test names. Verify with the passing validate output.
-- [ ] 6.2 [L1] Run the repository retro and review per `openspec/config.yaml` before archiving. Verify that the retro report is included in the handoff.
+- [x] 6.2 [L1] Run the repository retro and review per `openspec/config.yaml` before archiving. Verify that the retro report is included in the handoff. Done: independent review of d74efbb4 (0 Important, 1 accepted P3 for the D6 deviation) before archiving; the delivery session runs one closing retro for #1412, #1414 and #1426 (deliver-issue step 6), reported in the final handoff.
 - [x] 6.3 [L1] Reconcile every #1412 acceptance criterion with evidence in the PR description:
   - eFTP, form and ramp rate identical in context, trends, Coach and UI for synthetic canonical data without snapshot rows: tasks 1.4, 2.2 and 3.5 (parity runs with empty snapshot rows), 3.3 (trends: comparisons, body and chart history), 2.2 (Coach context);
   - `tests/test_performance_load*.py` and the eFTP and trend tests cover missing, stale and multi-sport cases: tasks 1.2, 2.1, 3.2 and 3.3;
