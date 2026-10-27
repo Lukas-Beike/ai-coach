@@ -15,7 +15,7 @@ snapshot projects no activities, because the tables already hold them.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
 
@@ -114,6 +114,38 @@ def intervals_activity_rows(snapshot: object) -> tuple[dict[str, Any], ...]:
     if not isinstance(rows, list):
         return ()
     return tuple(row for row in rows if isinstance(row, dict))
+
+
+def without_intervals_activities(
+    snapshot: Mapping[str, Any], activity_ids: Collection[str]
+) -> dict[str, Any]:
+    """Return a copy of ``snapshot`` whose activity sections omit the given ids.
+
+    Rows are matched on their ``id``. The input is not changed, and a snapshot
+    without activity sections, or without a match, comes back equal.
+    """
+    if not activity_ids:
+        return dict(snapshot)
+
+    def kept(rows: Any) -> Any:
+        if not isinstance(rows, list):
+            return rows
+        return [
+            row
+            for row in rows
+            if not (isinstance(row, Mapping) and str(row.get("id")) in activity_ids)
+        ]
+
+    result = dict(snapshot)
+    if _INTERVALS_ACTIVITIES_KEY in result:
+        result[_INTERVALS_ACTIVITIES_KEY] = kept(result[_INTERVALS_ACTIVITIES_KEY])
+    raw = result.get(_INTERVALS_RAW_KEY)
+    if isinstance(raw, Mapping) and _INTERVALS_RAW_ACTIVITIES_KEY in raw:
+        result[_INTERVALS_RAW_KEY] = {
+            **raw,
+            _INTERVALS_RAW_ACTIVITIES_KEY: kept(raw[_INTERVALS_RAW_ACTIVITIES_KEY]),
+        }
+    return result
 
 
 def intervals_snapshot_is_stripped(snapshot: object) -> bool:

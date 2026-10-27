@@ -1646,6 +1646,19 @@ def feedback_origin_sessions(
     return sessions
 
 
+def deleted_activity_ids(db: Any, provider: str) -> frozenset[str]:
+    """Return the provider activity ids whose record is tombstoned (state ``deleted``)."""
+    return frozenset(
+        str(row["provider_activity_id"])
+        for row in _fetch_all(
+            db,
+            "SELECT provider_activity_id FROM activity_records "
+            "WHERE provider = ? AND state = ?",
+            (provider, ActivityRecordState.DELETED.value),
+        )
+    )
+
+
 def activity_local_ids(
     db: Any, provider: str, provider_activity_ids: Sequence[str]
 ) -> dict[str, str]:

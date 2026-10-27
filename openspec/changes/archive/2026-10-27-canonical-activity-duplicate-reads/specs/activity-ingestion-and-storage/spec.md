@@ -42,6 +42,10 @@ The system SHALL delete a remotely stored duplicate only after validating the cu
 - **WHEN** a duplicate is deleted
 - **THEN** no snapshot row is written and the stored Intervals.icu snapshot `synced_at` and the coverage fetch time are unchanged.
 
+#### Scenario: Deleted copy stays deleted across the next sync
+- **WHEN** a duplicate is deleted while the stored snapshot still carries its activity sections (a row the mapper rejects, or a snapshot stored before the backfill finished) and the next incremental Intervals.icu sync runs
+- **THEN** the merge base leaves out every activity whose canonical record is tombstoned, so the merged payload does not re-add the deleted copy, its record and session stay deleted, no pair is offered again and a repeated confirmation is rejected with a conflict before any provider call. The snapshot itself is still not rewritten by the delete; only the merge base is filtered. An activity that the provider returns in a later fetch is ingested from that fetch as before, and a full-window sync still tombstones activities the provider no longer returns.
+
 #### Scenario: Merged duplicate session
 - **WHEN** the deleted copy's session is a heuristic alias of the kept session
 - **THEN** its record, provider record and session are tombstoned in the same transaction and the kept Wahoo activity stays served.
