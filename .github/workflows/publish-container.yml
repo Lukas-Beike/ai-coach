@@ -270,15 +270,14 @@ jobs:
           if-no-files-found: error
           retention-days: 30
   e2e:
-    # Browser checks start as soon as the image exists, in parallel with the unit tests;
-    # publishing still requires both the test and browser aggregates.
+    # Browser checks start with the current-source image, beside the native suite.
     needs: [source, image]
     name: Browser checks (${{ matrix.project }}${{ matrix.shards > 1 && format(' {0}/{1}', matrix.shard, matrix.shards) || '' }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Desktop runs every functional contract, so its spec files are split round-robin.
+        # Preserve the initial matrix while validating the prepared environment.
         include:
           - { project: mobile-small, shard: 1, shards: 1 }
           - { project: mobile, shard: 1, shards: 1 }
@@ -286,17 +285,16 @@ jobs:
           - { project: tablet-landscape, shard: 1, shards: 1 }
           - { project: desktop, shard: 1, shards: 2 }
           - { project: desktop, shard: 2, shards: 2 }
-    env:
-      # This is an isolated fixture credential, never a repository or provider secret.
-      E2E_APP_PASSWORD: e2e-fixture-password-1234
-      SPEC_SHARD: ${{ matrix.shard }}
-      SPEC_SHARDS: ${{ matrix.shards }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6.0.0
         with:
@@ -307,17 +305,12 @@ jobs:
       - name: Run Node unit tests
         if: matrix.project == 'desktop' && matrix.shard == 1
         run: node --test tests/*.cjs
-      - name: Cache Chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: browser-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-chromium-${{ hashFiles('package-lock.json') }}
-      - name: Install Chromium
-        if: steps.browser-cache.outputs.cache-hit != 'true'
-        run: ./node_modules/.bin/playwright install chromium
-      - name: Install Chromium system dependencies
-        run: ./node_modules/.bin/playwright install-deps chromium
+      - name: Pull immutable prepared browser environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          browser_image="$(python -c "import json; print(json.load(open('scripts/browser_environment.json'))['image'])")"
+          docker pull "$browser_image"
       - name: Download shared CI image
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -325,133 +318,39 @@ jobs:
       - name: Load shared CI image
         run: gunzip -c ai-coach-ci-image.tar.gz | docker load
       - name: Run browser smoke and accessibility checks
+        env:
+          BROWSER_PROJECT: ${{ matrix.project }}
+          SPEC_SHARD: ${{ matrix.shard }}
+          SPEC_SHARDS: ${{ matrix.shards }}
         shell: bash
         run: |
           set -euo pipefail
-          project="${{ matrix.project }}"
-          prefix=ai-coach-e2e
-          base_port=8090
-          # Two fixture slots: spec i uses slot i % 2, so the next fixture can boot while this spec runs.
-          container_name() { echo "$prefix-$(($1 % 2))"; }
-          network_name() { echo "$prefix-net-$(($1 % 2))"; }
-          container_port() { echo "$((base_port + $1 % 2))"; }
-          # Playwright selects the files: desktop lists every file with tests, other projects
-          # keep only the tests whose titles match their config grep (@responsive). A sharded
-          # project keeps every SPEC_SHARDS-th file of the sorted list, starting at SPEC_SHARD.
-          spec_list="$(./node_modules/.bin/playwright test --list --project "$project" --reporter=json | node -e '
-            const chunks = [];
-            process.stdin.on("data", (chunk) => chunks.push(chunk));
-            process.stdin.on("end", () => {
-              const files = new Set();
-              const walk = (suite) => {
-                for (const spec of suite.specs || []) files.add(spec.file);
-                for (const child of suite.suites || []) walk(child);
-              };
-              for (const suite of JSON.parse(Buffer.concat(chunks).toString("utf8")).suites || []) walk(suite);
-              const shard = Number(process.env.SPEC_SHARD), shards = Number(process.env.SPEC_SHARDS);
-              [...files].sort().forEach((file, index) => {
-                if (index % shards === shard - 1) console.log("e2e/" + file);
-              });
-            });
-          ')"
-          mapfile -t specs <<< "$spec_list"
-          if [[ "${#specs[@]}" -eq 0 || -z "${specs[0]}" ]]; then
-            echo "Playwright listed no browser specs for $project shard $SPEC_SHARD/$SPEC_SHARDS."
-            exit 1
-          fi
-          current=""
-          cleanup() {
-            result=$?
-            if [[ "$result" != "0" && -n "$current" ]]; then
-              docker inspect --format 'fixture state={{.State.Status}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' "$current" >&2 || true
-              docker logs "$current" >&2 || true
-            fi
-            docker rm --force "$prefix-0" "$prefix-1" "$prefix-net-0" "$prefix-net-1" >/dev/null 2>&1 || true
-            return "$result"
-          }
-          trap cleanup EXIT
-          # Starting a container adds a veth interface to the runner, and Chromium fails in-flight
-          # requests with ERR_NETWORK_CHANGED. Each slot keeps one network namespace, created before
-          # any browser runs, which every fixture of that slot joins without changing host interfaces.
-          start_network() {
-            local index="$1"
-            docker run --detach --name "$(network_name "$index")" \
-              --publish "127.0.0.1:$(container_port "$index"):8090" --no-healthcheck \
-              --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
-              --pids-limit=16 --memory=32m --cpus=0.1 \
-              ai-coach:ci sleep infinity >/dev/null
-          }
-          start_fixture() {
-            local index="$1" name
-            name="$(container_name "$index")"
-            docker rm --force "$name" >/dev/null 2>&1 || true
-            docker run --detach --name "$name" --network "container:$(network_name "$index")" \
-              --read-only --security-opt no-new-privileges:true --cap-drop=ALL \
-              --pids-limit=256 --memory=1g --cpus=2 --tmpfs /data:uid=100,gid=101,mode=0700 --tmpfs /tmp \
-              --env APP_PASSWORD="$E2E_APP_PASSWORD" --env COOKIE_SECURE=false \
-              --env AI_COACH_DISPOSABLE_FIXTURE=1 \
-              --volume "${GITHUB_WORKSPACE}/e2e:/app/e2e:ro" \
-              ai-coach:ci python /app/e2e/fixture_runtime.py >/dev/null
-          }
-          wait_healthy() {
-            local index="$1" spec="$2" port
-            port="$(container_port "$index")"
-            for attempt in {1..90}; do
-              if curl --fail --silent "http://127.0.0.1:$port/api/health" >/dev/null && \
-                curl --fail --silent "http://127.0.0.1:$port/" >/dev/null; then
-                return 0
-              fi
-              if [[ "$attempt" == "90" ]]; then
-                echo "The isolated fixture application did not become healthy for $project ($spec)."
-                exit 1
-              fi
-              sleep 0.5
-            done
-          }
-          # Each spec gets a fresh disposable fixture because some specs delete data and sessions.
-          start_network 0
-          start_network 1
-          # Let the new veth link-local addresses finish duplicate address detection before Chromium starts.
-          for attempt in {1..50}; do
-            [[ -z "$(ip -6 address show tentative)" ]] && break
-            sleep 0.2
-          done
-          start_fixture 0
-          for i in "${!specs[@]}"; do
-            spec="${specs[$i]}"
-            name="$(container_name "$i")"
-            port="$(container_port "$i")"
-            current="$name"
-            wait_healthy "$i" "$spec"
-            if (( i + 1 < ${#specs[@]} )); then
-              # Point failure diagnostics at the prewarmed slot until it has started.
-              current="$(container_name "$((i + 1))")"
-              start_fixture "$((i + 1))"
-              current="$name"
-            fi
-            spec_name="$(basename "$spec" .spec.js)"
-            PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/$spec_name" \
-              E2E_BASE_URL="http://127.0.0.1:$port" \
-              npm run test:e2e -- "$spec" --project "$project" --output "test-results/$spec_name"
-            docker rm --force "$name" >/dev/null 2>&1 || true
-            current=""
-          done
-      # Traces are disabled in CI (playwright.config.cjs): CI artifacts are public and traces
-      # embed the fixture session. playwright/.auth is never uploaded.
+          browser_image="$(python -c "import json; print(json.load(open('scripts/browser_environment.json'))['image'])")"
+          python scripts/run_browser_tests.py --project "$BROWSER_PROJECT" \
+            --shard "$SPEC_SHARD" --total "$SPEC_SHARDS" --jobs 1 \
+            --image ai-coach:ci --browser-image "$browser_image" \
+            --results-dir test-results/browser-runs --cache-state unknown
+      - name: Upload browser run summaries
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-run-summary-${{ matrix.project }}-${{ matrix.shard }}
+          path: test-results/browser-runs/*/manifest.json
+          if-no-files-found: error
+          retention-days: 7
+      # Auth state is held in separate private temporary storage; traces are disabled.
       - name: Upload browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-test-artifacts-${{ matrix.project }}-${{ matrix.shard }}
           path: |
-            test-results/
-            playwright-report/
+            test-results/browser-runs/*/*/*/artifacts/
+            test-results/browser-runs/*/*/*/report/
+            !**/trace.zip
+            !**/.auth/**
           if-no-files-found: ignore
           retention-days: 7
-      - name: Remove isolated fixture application
-        if: always()
-        run: |
-          docker rm --force ai-coach-e2e-0 ai-coach-e2e-1 ai-coach-e2e-net-0 ai-coach-e2e-net-1 >/dev/null 2>&1 || true
 
   browser:
     if: always()
@@ -459,6 +358,20 @@ jobs:
     name: Browser checks
     runs-on: ubuntu-latest
     steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+      - name: Download browser evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: browser-run-summary-*
+          path: browser-run-summaries
       - name: Aggregate browser results
         env:
           E2E_RESULT: ${{ needs.e2e.result }}
@@ -469,7 +382,11 @@ jobs:
             echo "Browser checks: $E2E_RESULT"
             exit 1
           fi
-          echo "All browser projects passed."
+          python .github/scripts/aggregate_browser_results.py \
+            --results browser-run-summaries \
+            --expected mobile-small:1 --expected mobile:1 --expected tablet:1 \
+            --expected tablet-landscape:1 --expected desktop:2
+          echo "All browser projects passed with complete shard evidence."
 
   build-and-push:
     if: (github.event_name == 'release' && github.event.action == 'published') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_container == true)

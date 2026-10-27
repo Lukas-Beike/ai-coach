@@ -2,9 +2,10 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { chromium } = require("@playwright/test");
 
-const AUTH_STATE_PATH = path.join(__dirname, "..", "playwright", ".auth", "user.json");
+const AUTH_STATE_PATH = process.env.E2E_AUTH_STATE_PATH || path.join(__dirname, "..", "playwright", ".auth", "user.json");
 
 async function authenticate(config) {
+  const started = performance.now();
   const password = process.env.E2E_APP_PASSWORD;
   if (!password || password.length < 12) {
     throw new Error("E2E_APP_PASSWORD must be set to a fake password of at least 12 characters.");
@@ -26,6 +27,9 @@ async function authenticate(config) {
     await context.close();
   } finally {
     await browser.close();
+    if (process.env.E2E_PHASE_TIMINGS_PATH) {
+      await fs.writeFile(process.env.E2E_PHASE_TIMINGS_PATH, JSON.stringify({ authentication_seconds: (performance.now() - started) / 1000 }));
+    }
   }
 }
 

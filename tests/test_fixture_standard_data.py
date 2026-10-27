@@ -1129,7 +1129,7 @@ class StandardFixtureStagingTests(StandardFixtureTestCase):
                             return_value=datetime.combine(today, time(10, 0)),
                         ):
                             fixture_runtime.initialise_fixture()
-                            fixture_runtime.seed_preview_demo()
+                            fixture_runtime.seed_fixture_planning_calendar(today)
                             with server.database_manager().unit_of_work() as db:
                                 seeded_dates = {
                                     row["date"]
