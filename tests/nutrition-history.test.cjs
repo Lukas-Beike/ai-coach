@@ -42,7 +42,7 @@ test("history displays daily balance from paired days alongside the total", () =
   const valueEnd = source.indexOf("function renderNutritionHistoryPeriod(", valueStart);
   const ctx = vm.createContext({ document, nutritionExpenditureDate: (date) => date, AppFormat: { number: (value) => Math.round(value).toLocaleString("de-DE") } });
   vm.runInContext(source.slice(valueStart, valueEnd) + source.slice(renderStart, renderEnd) + "}\n", ctx);
-  for (const [count, balance, paired, expected] of [[14, -4468, 14, "-319 kcal"], [84, -600, 3, "-200 kcal"], [14, 300, 3, "+100 kcal"], [14, 0, 2, "0 kcal"], [84, null, 0, "Nicht verfügbar"]]) {
+  for (const [count, balance, paired, expected] of [[14, -4468, 14, "-319 kcal"], [84, -600, 3, "-200 kcal"], [14, 300, 3, "+100 kcal"], [14, 3, 14, "0 kcal"], [14, -5, 14, "0 kcal"], [14, -7, 14, "-1 kcal"], [14, 0, 2, "0 kcal"], [84, null, 0, "Nicht verfügbar"]]) {
     const averages = Object.fromEntries(["intake_kcal", "expenditure_kcal", "carbs_g", "protein_g", "fat_g", "sugar_g", "salt_g"].map((key) => [key, { value: null, days: 0 }]));
     ctx.renderNutritionWeek({ days: Array(count).fill({}), start_date: "start", end_date: "end", balance_kcal: balance, balance_days: paired, averages });
     const tiles = nodes.get("#nutritionWeekTotals").children;
