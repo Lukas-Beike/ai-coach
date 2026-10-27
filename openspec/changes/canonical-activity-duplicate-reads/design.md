@@ -23,7 +23,7 @@ Inspected revision: origin/develop `6eab8617d`. Constraints taken from source:
 **Non-Goals:**
 - A merge or undo flow, an `athlete_confirmed` writer, new remote writes, new Coach tools, or any change to the approval gate and receipts.
 - Removing the selector's legacy projection, the snapshot gate or the compact-row special case (#1416); performance fallbacks (#1415); renamed output keys (#1413).
-- A schema change, a mapper version change, or any `canonical_store` edit, which would conflict with the Epic B branch (PR #1464, schema v15) that edits `_delete_activity` and `merge_activity_session`.
+- A schema change or a mapper version change. The only `canonical_store` edit is the alias repair of D8.
 - Replacing `filter_garmin_activities`' raw Garmin payload input.
 
 ## Decisions
@@ -58,7 +58,7 @@ Alternative considered: a pair fingerprint (hash of ids and measurements). Rejec
 
 ### D4 Delete without snapshot surgery
 
-`DuplicateActivityService.delete` order stays: inspect, resolve ids, validate, remote `delete_activity`, then one local unit of work with `canonical_store.mark_activity_deleted` (record, provider record, session), then the event. The snapshot reader and repository dependencies, `remove_activity_from_snapshot`, `_save_snapshot` and the stripped-snapshot activity count are removed. The snapshot, its `synced_at` and the snapshot row count are not touched. Nothing in `canonical_store` changes.
+`DuplicateActivityService.delete` order stays: inspect, resolve ids, validate, remote `delete_activity`, then one local unit of work with `canonical_store.mark_activity_deleted` (record, provider record, session), then the event. The snapshot reader and repository dependencies, `remove_activity_from_snapshot`, `_save_snapshot` and the stripped-snapshot activity count are removed. The snapshot, its `synced_at` and the snapshot row count are not touched. The only `canonical_store` change is the alias repair of D8.
 
 Lists and reports served by the selector may still show the deleted copy until the first backfill completes, because the snapshot is deliberately not rewritten; this transient legacy-window visibility is accepted (#1416 removes the window). A remote failure leaves local data untouched. A local failure after a successful remote delete keeps the documented non-promise of distributed rollback.
 
@@ -88,9 +88,21 @@ Alternative considered: provider refresh freshness (`last_success_at`). Rejected
 
 Fixtures for the duplicate, deletion and service tests seed `activity_records` / `provider_records` / sessions for a Wahoo-recorded and a Garmin-recorded Intervals ride (and a Garmin-provider record) with `canonical_store.upsert_activity_record`, `upsert_provider_record` and, where needed, `merge_activity_session`, on a real temporary SQLite database, with an absent snapshot. The pattern of `MergedDuplicateDeleteTests` in `tests/test_activity_duplicate_service.py` is reused; `SnapshotActivityRows` stays only for tests that exercise the legacy selector. Report and lookup tests pass canonical rows through `FixedActivityRows`-style readers and assert that the snapshot is never read.
 
+### D8 Re-point the aliases of a deleted surviving session
+
+The canonical merge keeps the older session as survivor, which can be the Garmin copy that the confirmed delete tombstones. `canonical_store._delete_activity` (reached through `mark_activity_deleted` of the duplicate flow and `mark_missing_deleted` of provider disappearance, the only code that sets a session to `deleted`) therefore repairs the aliases in the same transaction:
+
+- the oldest live alias (by creation, then id) becomes the active survivor and its `merged_into` is cleared;
+- every other live alias merges into it;
+- the deleted session, and every deleted alias that retained it, now retain the new survivor in `merged_into_retained`. Epic B's semantics stay: feedback written for any of them keeps grouping on one live session (`effective_session_ids`), and `read_reference`, detail lookup, lists and `resolve_reference` never reach a deleted session.
+
+No live session is left merged into a deleted one. A deleted session without aliases is unchanged. No schema change is needed (`merged_into_retained` exists since v15, the existing CHECK constraints hold), so no migration or frozen-schema fixture applies. The remote delete is untouched: one `delete_activity` call, same gate, proposal and receipts.
+
+Alternative considered: re-pointing at read time in `read_reference`. Rejected: every reader of `merged_into` would need it, and the stored state would stay inconsistent across restart and backup/restore.
+
 ## Risks / Trade-offs
 
-- [Survivor-deleted alias] The canonical merge keeps the older session as survivor, which may be the Garmin copy. Deleting the Garmin copy then calls `canonical_store._delete_activity`, which tombstones that session and clears its own `merged_into` but does not re-point sessions merged into it, so the Wahoo record's alias session may point at a deleted survivor. The visible effect on lists, `resolve_reference` and detail lookup is unverified. → Task 1.3 pins it with a test. Re-checked after Epic B (PR #1464) merged: `_delete_activity` now also stores `merged_into_retained` for a deleted alias, so feedback of a deleted alias keeps resolving to its survivor, but the converse (an alias left pointing at a deleted survivor) is unchanged and the test still fails. The fix touches `canonical_store` and is a separate follow-up; this change does not edit `canonical_store`. Feedback is not affected in either direction (`tests/test_activity_duplicate_feedback.py`). It is recorded here as a known, unaccepted risk, not as a requirement.
+- [Survivor-deleted alias] Resolved by D8: deleting a surviving session now re-points its live aliases. Pinned by `tests/test_activity_duplicate_service.py` (`SurvivorDeletedAliasTests`, `SeveralAliasesTests`), `tests/test_activity_duplicate_feedback.py` and `tests/test_duplicate_persistence.py`.
 - [Pair-rule parity] Sport and duration fields differ from the raw-row rule (D2). → Characterization tests with the existing `WahooGarminDuplicateTests` and `IntervalsCyclingMatchTests` cases ported to records; each differing expectation is commented.
 - [In-flight proposals] A proposal created before the upgrade has an old token and returns 409. → Documented in the proposal; no data is lost.
 - [Pre-backfill coverage is empty] `snapshot_synced_at` is None until the backfill completes. → Accepted (D6); the legacy selector window is removed by #1416.
@@ -106,4 +118,4 @@ Fixtures for the duplicate, deletion and service tests seed `activity_records` /
 
 ## Open Questions
 
-None. The `canonical_store` alias handling is deferred by decision and recorded as a risk above.
+None.

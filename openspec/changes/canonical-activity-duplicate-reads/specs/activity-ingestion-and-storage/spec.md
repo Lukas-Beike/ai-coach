@@ -46,6 +46,10 @@ The system SHALL delete a remotely stored duplicate only after validating the cu
 - **WHEN** the deleted copy's session is a heuristic alias of the kept session
 - **THEN** its record, provider record and session are tombstoned in the same transaction and the kept Wahoo activity stays served.
 
+#### Scenario: Deleted copy was the surviving session
+- **WHEN** the deleted copy's session was the survivor of a heuristic merge and the Wahoo session an alias of it
+- **THEN** in the same transaction the Wahoo session becomes the active survivor (the oldest live alias takes over, any other alias merges into it), the deleted session retains it for feedback, no live session stays merged into a deleted one, and the Wahoo ride's detail lookup, lists and feedback keep resolving. The same repair applies when a provider's activity disappears.
+
 Detailed contract: This flow does not promise distributed rollback if remote deletion succeeds and a later local write fails. Merging or undoing duplicates, athlete-confirmed sessions and any other remote write are outside this flow.
 
 Evidence: `backend/activities/duplicates.py:validate_duplicate_delete`, `backend/activities/duplicate_service.py:DuplicateActivityService.delete`; `tests/test_activity_duplicate_service.py:test_stale_confirmation_has_no_side_effects`, `tests/test_activity_duplicate_service.py:test_remote_failure_does_not_mutate_snapshot_or_publish`, `tests/test_activity_duplicate_service.py:test_delete_tombstones_the_canonical_records_in_the_snapshot_transaction`, `tests/test_activity_duplicate_service.py:MergedDuplicateDeleteTests.test_confirmed_delete_tombstones_the_merged_duplicate_session`. Missing evidence (planned in this change): tests that no snapshot is read or saved and that the snapshot `synced_at` is unchanged, and restart and backup/restore tests of tombstones and merged state.

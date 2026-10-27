@@ -14,10 +14,11 @@ from duplicate_support import GARMIN_ID, WAHOO_ID, ZONE, DuplicateCase
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import ProviderId, RecordingOrigin
 from backend.db import DatabaseManager, row_factory
 from backend.db.bootstrap import initialize_application_database
 from backend.db.repositories import KeyValueRepository
+from backend.performance.canonical_detail import read_reference
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 DELETED_AT = "2026-09-20T11:00:00+00:00"
@@ -44,16 +45,8 @@ def _states(db: sqlite3.Connection) -> dict[str, list[tuple[object, ...]]]:
     }
 
 
-class PersistenceTests(DuplicateCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.wahoo_session, self.garmin_session = self.seed_pair()
-        # A heuristic link, as the sync writes it, plus a deleted Garmin-provider copy.
-        self.merge(self.garmin_session, self.wahoo_session)
-        self.seed("garmin-direct", provider=ProviderId.GARMIN)
-        self.service = DuplicateActivityService(
-            self.manager, self.inspector, lambda: DELETED_AT, Mock()
-        )
+class _PersistenceCase(DuplicateCase):
+    service: DuplicateActivityService
 
     @staticmethod
     def restart_bootstrap(manager: DatabaseManager) -> None:
@@ -83,6 +76,36 @@ class PersistenceTests(DuplicateCase):
                 ],
             },
             Mock(),
+        )
+
+    def backup_to_file(self, name: str) -> Path:
+        root = self.path.parent
+        config = DatabaseBackupConfig(
+            database_path=self.path,
+            data_dir=root,
+            maximum_bytes=10_000_000,
+            minimum_free_bytes=10,
+            time_limit_seconds=5,
+            monotonic=lambda: 10.0,
+            disk_usage=lambda _path: SimpleNamespace(free=100_000_000),
+        )
+        data = DatabaseBackupService(
+            self.manager, MagicMock(), config, Mock()
+        ).read_bytes()
+        target = root / f"restored-{name}.db"
+        target.write_bytes(data)
+        return target
+
+
+class PersistenceTests(_PersistenceCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.wahoo_session, self.garmin_session = self.seed_pair()
+        # A heuristic link, as the sync writes it, plus a deleted Garmin-provider copy.
+        self.merge(self.garmin_session, self.wahoo_session)
+        self.seed("garmin-direct", provider=ProviderId.GARMIN)
+        self.service = DuplicateActivityService(
+            self.manager, self.inspector, lambda: DELETED_AT, Mock()
         )
 
     def test_merged_state_survives_a_restart(self) -> None:
@@ -140,23 +163,65 @@ class PersistenceTests(DuplicateCase):
                     served, expected | ({GARMIN_ID} if label == "merged" else set())
                 )
 
-    def backup_to_file(self, name: str) -> Path:
-        root = self.path.parent
-        config = DatabaseBackupConfig(
-            database_path=self.path,
-            data_dir=root,
-            maximum_bytes=10_000_000,
-            minimum_free_bytes=10,
-            time_limit_seconds=5,
-            monotonic=lambda: 10.0,
-            disk_usage=lambda _path: SimpleNamespace(free=100_000_000),
+
+class RepairedAliasPersistenceTests(_PersistenceCase):
+    """The Garmin copy was the surviving session; deleting it re-pointed the Wahoo alias."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # The older session survives a merge, so the Garmin copy is seeded first.
+        self.garmin_session = self.seed(
+            GARMIN_ID,
+            recorded_by=RecordingOrigin.GARMIN,
+            duration_s=3580.0,
+            fetched_at="2026-09-20T09:00:00+00:00",
         )
-        data = DatabaseBackupService(
-            self.manager, MagicMock(), config, Mock()
-        ).read_bytes()
-        target = root / f"restored-{name}.db"
-        target.write_bytes(data)
-        return target
+        self.wahoo_session = self.seed(WAHOO_ID, recorded_by=RecordingOrigin.WAHOO)
+        self.merge(self.wahoo_session, self.garmin_session)
+        self.service = DuplicateActivityService(
+            self.manager, self.inspector, lambda: DELETED_AT, Mock()
+        )
+        self.delete_copy()
+
+    def assert_repaired(self, states: dict[str, list[tuple[object, ...]]]) -> None:
+        sessions = {row[0]: row for row in states["sessions"]}
+        self.assertEqual(sessions[WAHOO_ID][1:3], ("active", None))
+        self.assertEqual(sessions[GARMIN_ID][1], "deleted")
+
+    def test_the_repaired_survivor_persists_across_a_restart(self) -> None:
+        before = self.state()
+        self.assert_repaired(before)
+        self.manager.close()
+
+        reopened = DatabaseManager(self.path, sqlite3, row_factory=row_factory)
+        self.addCleanup(reopened.close)
+        self.restart_bootstrap(reopened)
+        with reopened.reader() as db:
+            after = _states(db)
+            reference = read_reference(db, WAHOO_ID)
+
+        self.assertEqual(after, before)
+        self.assertEqual(reference, self.wahoo_session)
+
+    def test_the_repaired_survivor_persists_through_backup_and_restore(self) -> None:
+        before = self.state()
+        restored = DatabaseManager(
+            self.backup_to_file("repaired"), sqlite3, row_factory=row_factory
+        )
+        self.addCleanup(restored.close)
+        with restored.reader() as db:
+            after = _states(db)
+            reference = read_reference(db, WAHOO_ID)
+            retained = db.execute(
+                "SELECT merged_into_retained AS target FROM activity_sessions "
+                "WHERE activity_id = ?",
+                (self.garmin_session,),
+            ).fetchone()["target"]
+
+        self.assertEqual(after, before)
+        self.assert_repaired(after)
+        self.assertEqual(reference, self.wahoo_session)
+        self.assertEqual(retained, self.wahoo_session)
 
 
 if __name__ == "__main__":

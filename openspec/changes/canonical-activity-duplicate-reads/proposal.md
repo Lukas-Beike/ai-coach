@@ -25,6 +25,7 @@ Proposed behavior:
 - `remove_activity_from_snapshot` and `latest_wahoo_garmin_duplicate(snapshot)` are removed.
 - Single-activity lookup, the four training-report callers and the Garmin projection read canonical rows only. `canonical` becomes a required dependency of these services; the snapshot fallbacks and `canonical_rows` are removed. `filter_garmin_activities` keeps comparing the raw Garmin payload with the canonical Intervals rows.
 - The `snapshot_synced_at` of `/api/activities`, the Coach `activities.synced_at` and `activities.source.synced_at`, and the report `observed_at` are read from canonical provider coverage (`activities_retrieved_at`). Keys do not change. Without stored coverage (before the first completed backfill) the value is None; there is no snapshot fallback.
+- Deleting a surviving session (the confirmed Garmin copy, or a provider disappearance) re-points its live aliases: the oldest alias becomes the active survivor and the others merge into it, so the kept Wahoo ride keeps resolving to a live session for detail, lists and feedback. Before, the alias stayed merged into the deleted session and its detail read as not found.
 - Merge and undo flows, an `athlete_confirmed` writer, and any new remote write are out of scope and would be a separate issue.
 
 ## Capabilities
@@ -47,9 +48,10 @@ None.
   - `backend/performance/activity_read_service.py`, `training_report.py`, `report_service.py`, `tag_impact.py`, `training_focus.py`, `canonical_inputs.py`
   - `backend/sync/garmin_projection_service.py`, `garmin_assembly.py`
   - `backend/coach/context.py`, `context_assembly.py`, `proposal_creation.py` and `sync_tools.py` (token only)
+  - `backend/db/canonical_store.py` (alias repair when a surviving session is deleted)
   - wiring in `backend/http_api/activity_assembly.py`, `athlete_assembly.py`, `public_state_assembly.py` and `server.py`
 - Tests: duplicate, duplicate service, deletion, training report, focus, activity read and analysis, Garmin projection and Coach context modules move from snapshot-seeded rows to synthetic canonical sessions of two providers.
-- Data: no schema change, no migration, no provider refetch. No `canonical_store` edit is planned.
+- Data: no schema change, no migration, no provider refetch. `backend/db/canonical_store.py` gets one repair in `_delete_activity`: deleting a surviving session re-points its live aliases (design D8).
 - API/Coach/PWA: same keys. No `public/` change is expected, so no asset version bump; if one becomes necessary, `public/index.html` query versions and the `public/service-worker.js` cache name change together.
 - Remote writes: unchanged. The only remote write remains the athlete-confirmed Intervals.icu delete of the Garmin copy.
 - Exclusions: removal of the canonical read selector fallback and snapshot gate (#1416), performance legacy fallbacks (#1415), provider-neutral key names (#1413), and Epic B schema work (PR #1464).

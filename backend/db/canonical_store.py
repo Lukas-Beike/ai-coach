@@ -960,7 +960,7 @@ def _delete_activity(
     # A deleted merged alias also leaves its merge: the schema allows merged_into
     # only on duplicate sessions. merged_into_retained keeps the survivor, so
     # feedback written for the alias still resolves (effective_session_ids).
-    db.execute(
+    cursor = db.execute(
         "UPDATE activity_sessions SET state = ?, "
         "merged_into_retained = COALESCE(merged_into, merged_into_retained), "
         "merged_into = NULL, updated_at = ? "
@@ -973,6 +973,48 @@ def _delete_activity(
             provider,
             provider_activity_id,
         ),
+    )
+    if cursor.rowcount == 1:
+        _repoint_aliases(db, activity_id, now=now)
+
+
+def _repoint_aliases(db: Any, deleted_id: str, *, now: str) -> None:
+    """Hand the live aliases of a deleted surviving session to a new survivor.
+
+    The oldest alias (by creation, then id) becomes the active survivor and the
+    other aliases merge into it, so no live session points at a deleted one. The
+    deleted session and every deleted alias that retained it now retain the new
+    survivor, so feedback written for them keeps resolving to a live session.
+    """
+    aliases = _fetch_all(
+        db,
+        "SELECT activity_id FROM activity_sessions WHERE merged_into = ? AND state = ? "
+        "ORDER BY created_at, activity_id",
+        (deleted_id, ActivitySessionState.DUPLICATE.value),
+    )
+    if not aliases:
+        return
+    survivor, *others = (str(row["activity_id"]) for row in aliases)
+    db.execute(
+        "UPDATE activity_sessions SET state = ?, merged_into = NULL, updated_at = ? "
+        "WHERE activity_id = ?",
+        (ActivitySessionState.ACTIVE.value, now, survivor),
+    )
+    for activity_id in others:
+        db.execute(
+            "UPDATE activity_sessions SET merged_into = ?, updated_at = ? "
+            "WHERE activity_id = ?",
+            (survivor, now, activity_id),
+        )
+    db.execute(
+        "UPDATE activity_sessions SET merged_into_retained = ?, updated_at = ? "
+        "WHERE merged_into_retained = ?",
+        (survivor, now, deleted_id),
+    )
+    db.execute(
+        "UPDATE activity_sessions SET merged_into_retained = ?, updated_at = ? "
+        "WHERE activity_id = ?",
+        (survivor, now, deleted_id),
     )
 
 

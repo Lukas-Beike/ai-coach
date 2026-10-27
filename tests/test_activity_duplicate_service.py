@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import unittest
+from datetime import timedelta
 from unittest.mock import Mock
 
-from duplicate_support import FETCHED_AT, GARMIN_ID, WAHOO_ID, DuplicateCase
+from duplicate_support import FETCHED_AT, GARMIN_ID, START, WAHOO_ID, DuplicateCase
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.duplicate_service import DuplicateActivityService
-from backend.canonical.vocabulary import RecordingOrigin
+from backend.canonical.vocabulary import ProviderId, RecordingOrigin
+from backend.db import canonical_store
 from backend.errors import AppError
 from backend.performance.canonical_detail import read_reference
+from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 
 DELETED_AT = "2026-09-20T11:00:00+00:00"
 SNAPSHOT_SYNCED_AT = "2026-09-20T09:00:00+00:00"
@@ -217,13 +220,7 @@ class SurvivorDeletedAliasTests(DuplicateCase):
             rows = {row["id"] for row in self.reader.activity_rows(db)}
         self.assertEqual((served, rows), ({WAHOO_ID}, {WAHOO_ID}))
 
-    @unittest.expectedFailure
     def test_no_session_is_left_merged_into_a_deleted_session(self) -> None:
-        # Known defect, not accepted behavior: canonical_store._delete_activity
-        # tombstones the survivor without re-pointing the aliases merged into it.
-        # Epic B (PR #1464) keeps a deleted alias's survivor in merged_into_retained,
-        # but still does not re-point aliases of a deleted survivor. The fix edits
-        # backend/db/canonical_store.py and is a separate follow-up to #1414.
         dangling = self.query(
             "SELECT alias.activity_id FROM activity_sessions AS alias "
             "JOIN activity_sessions AS target ON target.activity_id = alias.merged_into "
@@ -237,13 +234,106 @@ class SurvivorDeletedAliasTests(DuplicateCase):
         )
         self.assertEqual(reference.activity_id, WAHOO_ID)
 
-    @unittest.expectedFailure
     def test_the_wahoo_ride_detail_reference_is_its_own_session(self) -> None:
-        # Same known defect: read_reference follows the alias to the deleted
-        # survivor, so the detail of the surviving Wahoo ride reads as not found.
+        # read_reference must not follow the alias to the deleted survivor.
         with self.manager.reader() as db:
             self.assertEqual(read_reference(db, WAHOO_ID), self.wahoo_session)
             self.assertEqual(read_reference(db, self.wahoo_session), self.wahoo_session)
+
+    def test_the_wahoo_session_is_the_active_survivor_and_keeps_the_copys_feedback(
+        self,
+    ) -> None:
+        sessions = {
+            row["activity_id"]: row
+            for row in self.query(
+                "SELECT activity_id, state, merged_into, merged_into_retained "
+                "FROM activity_sessions"
+            )
+        }
+        self.assertEqual(sessions[self.wahoo_session]["state"], "active")
+        self.assertIsNone(sessions[self.wahoo_session]["merged_into"])
+        self.assertEqual(sessions[self.garmin_session]["state"], "deleted")
+        self.assertEqual(
+            sessions[self.garmin_session]["merged_into_retained"], self.wahoo_session
+        )
+
+
+class SeveralAliasesTests(DuplicateCase):
+    """A deleted survivor with two live aliases: the oldest alias takes over."""
+
+    def test_the_oldest_alias_becomes_the_survivor_and_the_other_merges_into_it(
+        self,
+    ) -> None:
+        survivor = self.seed(
+            GARMIN_ID,
+            recorded_by=RecordingOrigin.GARMIN,
+            fetched_at="2026-09-20T08:00:00+00:00",
+        )
+        first = self.seed(
+            WAHOO_ID,
+            recorded_by=RecordingOrigin.WAHOO,
+            fetched_at="2026-09-20T09:00:00+00:00",
+        )
+        second = self.seed(
+            "wahoo-2",
+            recorded_by=RecordingOrigin.WAHOO,
+            started_at=START + timedelta(hours=3),
+            fetched_at="2026-09-20T10:00:00+00:00",
+        )
+        self.merge(first, survivor)
+        self.merge(second, survivor)
+
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                ProviderId.INTERVALS.value,
+                record_kind=ACTIVITY_RECORD_KIND,
+                provider_activity_id=GARMIN_ID,
+                now=DELETED_AT,
+            )
+
+        rows = {
+            row["activity_id"]: row
+            for row in self.query(
+                "SELECT activity_id, state, merged_into, merged_into_retained "
+                "FROM activity_sessions"
+            )
+        }
+        self.assertEqual(
+            (rows[first]["state"], rows[first]["merged_into"]), ("active", None)
+        )
+        self.assertEqual(
+            (rows[second]["state"], rows[second]["merged_into"]),
+            ("duplicate", first),
+        )
+        self.assertEqual(
+            (rows[survivor]["state"], rows[survivor]["merged_into_retained"]),
+            ("deleted", first),
+        )
+
+    def test_a_provider_disappearance_repairs_the_same_way(self) -> None:
+        survivor = self.seed(
+            GARMIN_ID,
+            recorded_by=RecordingOrigin.GARMIN,
+            fetched_at="2026-09-20T08:00:00+00:00",
+        )
+        alias = self.seed(WAHOO_ID, recorded_by=RecordingOrigin.WAHOO)
+        self.merge(alias, survivor)
+
+        with self.manager.unit_of_work() as db:
+            deleted = canonical_store.mark_missing_deleted(
+                db,
+                ProviderId.INTERVALS.value,
+                record_kind=ACTIVITY_RECORD_KIND,
+                window_start=START.date(),
+                window_end=START.date(),
+                present_ids=frozenset({WAHOO_ID}),
+                now=DELETED_AT,
+            )
+
+        self.assertEqual(deleted, 1)
+        with self.manager.reader() as db:
+            self.assertEqual(read_reference(db, WAHOO_ID), alias)
 
 
 if __name__ == "__main__":
