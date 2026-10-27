@@ -63,13 +63,17 @@ The system SHALL detect and inspect the newest Wahoo/Garmin duplicate ride pair 
 - **WHEN** a newer unrelated Intervals.icu activity exists, a record of the pair is deleted, or an id is missing or equal
 - **THEN** inspection returns no pair.
 
+#### Scenario: Legacy-state selector
+- **WHEN** the canonical read selector still serves the snapshot projection (before the first completed backfill)
+- **THEN** inspection and the delete validation read only the canonical tables, so a pair that exists only in the snapshot is not offered, a tombstoned copy is never offered again, and a second submission of an already-executed confirmation is rejected with a conflict before any provider call. Lists and reports served from the snapshot projection may still show the deleted copy until the backfill completes.
+
 #### Scenario: Confirmation token follows the records
 - **WHEN** either record of the pair is fetched again after the proposal was created
 - **THEN** `snapshot_synced_at` (the newest canonical fetch time of the two records) differs and the submitted confirmation is rejected with a conflict before any provider call.
 
 Detailed contract: The manifest key `snapshot_synced_at` is kept for contract stability; its value is the newest canonical fetch time of the pair. Persisted session links (`merged_into`) are not consulted for detection.
 
-Evidence: `backend/activities/duplicate_inspection.py:DuplicateInspector.latest`, `backend/activities/canonical_sessions.py` (Wahoo/Garmin ride rule); `tests/test_activity_duplicates.py:WahooGarminDuplicateTests` (raw-row rule being ported), `tests/test_coach_tool_coverage.py:test_duplicate_inspection_returns_preview_without_deleting_provider_data`. Missing evidence (planned in this change): detection from canonical records with an absent snapshot, token change on refetch, and parity of sport and duration handling.
+Evidence: `backend/activities/duplicate_inspection.py:DuplicateInspector.latest`, `backend/activities/canonical_sessions.py` (Wahoo/Garmin ride rule), `tests/test_sync_snapshot_storage.py:LegacyStateDuplicateTests`; `tests/test_activity_duplicates.py:WahooGarminDuplicateTests` (raw-row rule being ported), `tests/test_coach_tool_coverage.py:test_duplicate_inspection_returns_preview_without_deleting_provider_data`. Missing evidence (planned in this change): detection from canonical records with an absent snapshot, token change on refetch, and parity of sport and duration handling.
 
 ### Requirement: Garmin status compares against canonical Intervals rows
 The system SHALL compute the Garmin status counts `activities` and `duplicate_activities_skipped` by comparing the raw Garmin payload activities with the canonical Intervals.icu activity rows only.

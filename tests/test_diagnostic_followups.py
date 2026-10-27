@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import test_coach_dialogue as dialogue
+from canonical_detail_support import seed_intervals_activity
 from garmin_support import read_garmin, save_garmin
 
 from backend.activities.feedback import ActivityFeedbackService
@@ -387,6 +388,13 @@ class DiagnosticFollowupTests(unittest.TestCase):
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(
             {"synced_at": runtime_clock.utc_now(), "recent_activities": activities}
         )
+        # Duplicate inspection reads the canonical tables, not the snapshot.
+        for activity in activities:
+            seed_intervals_activity(
+                server.database_manager(),
+                activity["id"],
+                **{key: value for key, value in activity.items() if key != "id"},
+            )
         before = server.SYNC_PERSISTENCE.state_repository().latest_snapshot()
         with patch.object(intervals_client_module, "IntervalsClient") as provider:
             result, model = self.turn(

@@ -84,7 +84,7 @@ class _ActivityCase(CanonicalReadFixture):
         )
 
     def inspector(self, selector: Any) -> DuplicateInspector:
-        return DuplicateInspector(self.manager, selector, lambda: self.zone)
+        return DuplicateInspector(self.manager, self.table, lambda: self.zone)
 
     def ids(self, rows: Any) -> set[str]:
         return {str(row["id"]) for row in rows}
@@ -191,18 +191,13 @@ class LegacyAndTableParityTests(_ActivityCase):
             {k: v for k, v in legacy_recent.items() if k != "activities"},
         )
 
-    def test_duplicate_inspection_matches_between_legacy_and_tables(self) -> None:
-        legacy = self.inspector(make_selector(self)).latest()
+    def test_duplicate_inspection_reads_only_the_tables(self) -> None:
+        # While the selector still serves the snapshot, nothing is in the tables:
+        # no pair is offered, so nothing can be deleted twice.
+        self.assertIsNone(self.inspector(make_selector(self)).latest())
         populate(self)
-        tables = self.inspector(make_selector(self)).latest()
-        # The confirmation token is the fetch time, which the two sources stamp alike
-        # only when the snapshot carries one; the pair itself must be the same.
-        identity = ("canonical_id", "duplicate_id", "start_date_local")
-        self.assertEqual(
-            {key: (tables or {}).get(key) for key in identity},
-            {key: (legacy or {}).get(key) for key in identity},
-        )
-        self.assertEqual((legacy or {}).get("duplicate_id"), GARMIN_ID)
+        pair = self.inspector(make_selector(self)).latest()
+        self.assertEqual((pair or {}).get("duplicate_id"), GARMIN_ID)
 
     def test_compact_rows_drop_empty_and_unlisted_fields(self) -> None:
         raw = [{"id": "x", "type": "Ride", "name": None, "private_comment": "free"}]

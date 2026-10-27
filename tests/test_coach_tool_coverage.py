@@ -1082,6 +1082,19 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["proposed_action"]["status"], "preview")
         self.assertEqual(server.PLANNING_DATA.workout_library().list(), before)
 
+    @staticmethod
+    def seed_duplicate_pair(common):
+        """Ingest the Wahoo ride and its Garmin copy into the canonical tables."""
+        for identifier, source in (
+            ("synthetic-wahoo", "Wahoo"),
+            ("synthetic-garmin", "GARMIN_CONNECT"),
+        ):
+            seed_intervals_activity(
+                server.database_manager(),
+                identifier,
+                **{**common, "source": source},
+            )
+
     @covers("inspect_activity_duplicates:success")
     def test_duplicate_inspection_returns_preview_without_deleting_provider_data(self):
         common = {
@@ -1097,6 +1110,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ]
         }
         server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
+        self.seed_duplicate_pair(common)
         result = self.run_tool(
             "inspect_activity_duplicates",
             message="Ist die letzte Radausfahrt doppelt vorhanden?",
@@ -1129,6 +1143,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ],
         }
         server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
+        self.seed_duplicate_pair(common)
         with patch.object(
             intervals_client_module.IntervalsClient,
             "delete_activity",

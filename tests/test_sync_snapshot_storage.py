@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 from support import garmin_payload_fixture, load_provider_fixture
 
+from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.canonical.garmin_payload import STATE_KEY as GARMIN_STATE_KEY
 from backend.db import DatabaseManager, row_factory
@@ -33,6 +34,7 @@ from backend.providers.snapshot_projection import (
 from backend.sync.canonical_backfill import STATE_KEY
 from backend.sync.canonical_projection import CanonicalSnapshotProjection
 from backend.sync.canonical_read_assembly import build_canonical_read
+from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import (
     GarminSnapshotWriter,
 )
@@ -563,6 +565,86 @@ class DuplicateDeleteTests(StorageCase):
         self.assertEqual(env.activity_count_column(), 5)
         self.assertEqual(KEPT_ID not in env.table_activity_ids(), True)
         self.assertEqual(len(env.table_activity_ids()), 4)
+
+
+class LegacyStateDuplicateTests(StorageCase):
+    """The selector still serves the snapshot; duplicates are read from the tables."""
+
+    WAHOO = "i-wahoo-dup"
+    GARMIN = "i-garmin-dup"
+
+    def pair(self) -> list[dict[str, Any]]:
+        base = {
+            **_activity(self.WAHOO, "2026-11-10T07:00:00"),
+            "type": "Ride",
+            "moving_time": 3600,
+            "distance": 30000.0,
+        }
+        return [
+            {**base, "source": "Wahoo"},
+            {**base, "id": self.GARMIN, "source": "Garmin", "moving_time": 3580},
+        ]
+
+    def legacy_environment(self) -> tuple[Environment, DuplicateInspector]:
+        env = self.environment(tables=False)
+        env.sync(self.pair(), days=ALL_DAYS, day=FIRST_DAY)
+        with env.manager.reader() as db:
+            self.assertFalse(env.selector.serves_tables(db))
+        inspector = DuplicateInspector(env.manager, CanonicalTableReader(), lambda: UTC)
+        return env, inspector
+
+    def service(self, env: Environment, inspector: DuplicateInspector):
+        return DuplicateActivityService(
+            env.manager, inspector, lambda: "2026-11-12T00:00:00+00:00", Mock()
+        )
+
+    def test_inspection_uses_only_the_table_records(self) -> None:
+        env, inspector = self.legacy_environment()
+        pair = inspector.latest()
+        self.assertEqual((pair or {}).get("duplicate_id"), self.GARMIN)
+        # A copy that exists only in the snapshot projection is not a candidate.
+        with env.manager.unit_of_work() as db:
+            db.execute("UPDATE activity_records SET state = 'deleted'")
+        with env.manager.reader() as db:
+            projected = {r.activity_id for r in env.selector.activities(db)}
+        self.assertIn(self.GARMIN, projected)
+        self.assertIsNone(inspector.latest())
+
+    def test_a_confirmed_delete_is_not_offered_again(self) -> None:
+        env, inspector = self.legacy_environment()
+        pair = inspector.latest() or {}
+        confirmation = {
+            key: pair[key]
+            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
+        }
+        service = self.service(env, inspector)
+        remote = Mock()
+
+        service.delete(dict(confirmation), remote)
+
+        remote.delete_activity.assert_called_once_with(self.GARMIN)
+        self.assertIsNone(inspector.latest())
+        # Lists may still show the copy until the backfill completes (accepted).
+        with env.manager.reader() as db:
+            projected = {r.activity_id for r in env.selector.activities(db)}
+        self.assertIn(self.GARMIN, projected)
+
+    def test_a_second_confirmation_conflicts_without_a_remote_call(self) -> None:
+        env, inspector = self.legacy_environment()
+        pair = inspector.latest() or {}
+        confirmation = {
+            key: pair[key]
+            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
+        }
+        service = self.service(env, inspector)
+        service.delete(dict(confirmation), Mock())
+        remote = Mock()
+
+        with self.assertRaises(AppError) as raised:
+            service.delete(dict(confirmation), remote)
+
+        self.assertEqual(raised.exception.status, 409)
+        remote.delete_activity.assert_not_called()
 
 
 class GarminRawRecordTests(StorageCase):

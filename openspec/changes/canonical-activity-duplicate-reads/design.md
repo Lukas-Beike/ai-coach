@@ -36,7 +36,7 @@ Alternative considered: implement athlete-confirmed merge with undo receipts as 
 
 ### D2 Canonical detection and inspection
 
-`DuplicateInspector` reads canonical Intervals activity records through the `ActivityReader` port (the selector in production) instead of raw rows, and takes the athlete's time zone provider.
+`DuplicateInspector` reads canonical Intervals activity records from the canonical tables directly (`CanonicalTableReader`, the table-backed `ActivityReader` that knows tombstones) instead of raw rows, and takes the athlete's time zone provider. It never reads through the read selector: before the first completed backfill the selector serves the snapshot projection, which is not rewritten by a delete and would keep offering the tombstoned copy, and a second confirmation would send another remote delete for an already-deleted id. Before the backfill the tables may hold no pair, so no pair is found; that is safe (nothing is deleted wrongly or twice). Validation in the delete path uses the same table-backed inspection, so a confirmation after the copy is tombstoned gives the existing 409 before any provider call.
 
 - Candidates: `provider == intervals`, `sport == ride`, active, `recorded_by` Wahoo (kept) or Garmin (duplicate).
 - Rule: `canonical_sessions` exposes its Wahoo/Garmin copy predicate publicly and the inspector uses it, so the all-pairs semantics of the legacy search are kept (the bundling assigns each copy to its first Wahoo match, which is not the same selection).
@@ -60,7 +60,7 @@ Alternative considered: a pair fingerprint (hash of ids and measurements). Rejec
 
 `DuplicateActivityService.delete` order stays: inspect, resolve ids, validate, remote `delete_activity`, then one local unit of work with `canonical_store.mark_activity_deleted` (record, provider record, session), then the event. The snapshot reader and repository dependencies, `remove_activity_from_snapshot`, `_save_snapshot` and the stripped-snapshot activity count are removed. The snapshot, its `synced_at` and the snapshot row count are not touched. Nothing in `canonical_store` changes.
 
-A remote failure leaves local data untouched. A local failure after a successful remote delete keeps the documented non-promise of distributed rollback.
+Lists and reports served by the selector may still show the deleted copy until the first backfill completes, because the snapshot is deliberately not rewritten; this transient legacy-window visibility is accepted (#1416 removes the window). A remote failure leaves local data untouched. A local failure after a successful remote delete keeps the documented non-promise of distributed rollback.
 
 ### D5 Required canonical dependency for lookup, reports and Garmin status
 
@@ -94,6 +94,7 @@ Fixtures for the duplicate, deletion and service tests seed `activity_records` /
 - [Pair-rule parity] Sport and duration fields differ from the raw-row rule (D2). → Characterization tests with the existing `WahooGarminDuplicateTests` and `IntervalsCyclingMatchTests` cases ported to records; each differing expectation is commented.
 - [In-flight proposals] A proposal created before the upgrade has an old token and returns 409. → Documented in the proposal; no data is lost.
 - [Pre-backfill coverage is empty] `snapshot_synced_at` is None until the backfill completes. → Accepted (D6); the legacy selector window is removed by #1416.
+- [Pre-backfill duplicate visibility] While the selector serves the snapshot, lists and reports can still show a deleted Garmin copy, and duplicate inspection may find no pair because the tables are empty. → Accepted (D4/D6): inspection and the delete validation read the tables only, so there is never a wrong or repeated remote delete; tests on a legacy-state selector pin this (`tests/test_sync_snapshot_storage.py:LegacyStateDuplicateTests`).
 - [Required dependencies break optional wiring] Tests and compositions that omitted `canonical` fail at construction. → Intended; production already wires everything; the full suite and `server.py` import prove the wiring.
 - [Conflict with Epic B PR #1464] Shared files: `backend/performance/activity_read_service.py`, `backend/coach/context.py`, `context_assembly.py`, `backend/http_api/athlete_assembly.py` and `public_state_assembly.py`, `server.py`, `tests/test_activity_reference.py`, `tests/canonical_read_support.py`. → Keep edits narrow, rebase onto whichever merges first.
 

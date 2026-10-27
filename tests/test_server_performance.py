@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
+from canonical_detail_support import seed_intervals_activity
 from canonical_recovery_support import recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
 from server_test_support import (
@@ -1113,6 +1114,12 @@ class ServerPerformanceTests(ServerTestCase):
             "activities": list(snapshot["recent_activities"])
         }
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
+        for activity in snapshot["recent_activities"]:
+            seed_intervals_activity(
+                server.database_manager(),
+                activity["id"],
+                **{key: value for key, value in activity.items() if key != "id"},
+            )
         pair = server.ATHLETE_DATA.duplicate_inspector().latest()
         with patch.object(
             intervals_client_module.IntervalsClient,

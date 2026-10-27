@@ -15,11 +15,13 @@ _NAME_LIMIT = 200
 
 
 class DuplicateInspector:
-    """Find the current duplicate pair from the injected canonical activity port.
+    """Find the current duplicate pair from the canonical activity tables.
 
-    Only active Intervals.icu records are compared; a tombstoned copy disappears
-    from the port, so a removed duplicate is no longer reported. The stored
-    snapshot is not read.
+    ``activities`` must be the table-backed reader, never the read selector: before
+    the first backfill the selector serves the snapshot projection, which does not
+    know a tombstoned copy. Only active Intervals.icu records are compared, so a
+    removed duplicate is no longer reported (a pair may be missed before the
+    backfill, never repeated). The stored snapshot is not read.
     """
 
     def __init__(
