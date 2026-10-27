@@ -28,6 +28,8 @@ from __future__ import annotations
 from datetime import tzinfo
 from typing import Any
 
+from backend.canonical.vocabulary import ProviderId
+from backend.db import canonical_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.planning.compact_activities import compact_activity_rows
@@ -36,6 +38,7 @@ from backend.providers.snapshot_projection import (
     intervals_snapshot_is_stripped,
     restore_intervals_activity_sections,
     strip_intervals_activity_sections,
+    without_intervals_activities,
 )
 from backend.runtime.ports import ActivityRowReader, CanonicalTableServing
 from backend.sync.state import SyncStateRepository
@@ -62,7 +65,12 @@ class SnapshotStorage:
         self._rows = rows
 
     def merge_base(self, db: Any | None = None) -> dict[str, Any] | None:
-        """Return the latest snapshot with its activity sections, rebuilt if stripped."""
+        """Return the latest snapshot with its activity sections, rebuilt if stripped.
+
+        Activities whose canonical record is tombstoned (a confirmed duplicate delete,
+        a provider disappearance) are left out, so a merge never re-adds them. A row
+        the provider returns again is ingested from the fresh fetch as usual.
+        """
         if db is not None:
             return self._merge_base(db)
         if self._database_manager is None or self._rows is None:
@@ -72,8 +80,16 @@ class SnapshotStorage:
 
     def _merge_base(self, db: Any) -> dict[str, Any] | None:
         snapshot = self._state.latest_snapshot(db)
-        if snapshot is None or not intervals_snapshot_is_stripped(snapshot):
+        if snapshot is None:
             return snapshot
+        if not intervals_snapshot_is_stripped(snapshot):
+            # A snapshot that still carries its activity sections (a rejected row,
+            # or stored before the backfill) must not bring back a tombstoned
+            # activity: the ingest of the merge would revive it.
+            return without_intervals_activities(
+                snapshot,
+                canonical_store.deleted_activity_ids(db, ProviderId.INTERVALS.value),
+            )
         if (
             self._serving is None
             or self._rows is None

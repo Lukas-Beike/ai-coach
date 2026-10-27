@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from datetime import date
 from typing import Any
 from unittest.mock import Mock
@@ -64,16 +63,6 @@ class _Feedback:
         return items
 
 
-class _SnapshotSaver:
-    """Stands in for the snapshot repository: the written snapshot becomes current."""
-
-    def __init__(self, case: CanonicalReadFixture) -> None:
-        self._case = case
-
-    def save(self, db: Any, snapshot: dict[str, Any], created_at: str) -> None:
-        self._case.intervals = snapshot
-
-
 class _ActivityCase(CanonicalReadFixture):
     def setUp(self) -> None:
         super().setUp()
@@ -95,7 +84,7 @@ class _ActivityCase(CanonicalReadFixture):
         )
 
     def inspector(self, selector: Any) -> DuplicateInspector:
-        return DuplicateInspector(self.manager, self.snapshots, selector)
+        return DuplicateInspector(self.manager, self.table, lambda: self.zone, selector)
 
     def ids(self, rows: Any) -> set[str]:
         return {str(row["id"]) for row in rows}
@@ -105,40 +94,42 @@ class DuplicateRemovalTests(_ActivityCase):
     def _service(self, selector: Any) -> DuplicateActivityService:
         return DuplicateActivityService(
             self.manager,
-            _SnapshotSaver(self),
-            self.snapshots,
-            selector,
+            self.inspector(selector),
             lambda: REMOVAL_AT,
             Mock(),
         )
 
-    def _payload(self) -> dict[str, Any]:
+    def _payload(self, selector: Any) -> dict[str, Any]:
+        pair = self.inspector(selector).latest() or {}
         return {
-            "canonical_id": WAHOO_ID,
-            "duplicate_id": GARMIN_ID,
-            "snapshot_synced_at": str(self.intervals["synced_at"]),
+            key: pair[key]
+            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
         }
 
-    def test_removal_is_recorded_in_tables_and_legacy_snapshot(self) -> None:
+    def test_removal_is_recorded_in_the_tables_and_leaves_the_snapshot(self) -> None:
         populate(self)
         selector = make_selector(self)
         self.assertIn(GARMIN_ID, self.ids(self.read(selector.activity_rows)))
+        snapshot = self.intervals["synced_at"]
 
         remote = Mock()
-        self._service(selector).delete(self._payload(), remote)
+        self._service(selector).delete(self._payload(selector), remote)
 
         remote.delete_activity.assert_called_once_with(GARMIN_ID)
         for source in (selector, self.table):
             rows = self.read(source.activity_rows)
             self.assertNotIn(GARMIN_ID, self.ids(rows))
             self.assertIn(WAHOO_ID, self.ids(rows))
-        self.assertNotIn(GARMIN_ID, self.ids(self.read(self.projection.activity_rows)))
+        # The snapshot is an ingestion artefact and is not rewritten by a delete.
+        self.assertEqual(self.intervals["synced_at"], snapshot)
+        self.assertIn(GARMIN_ID, self.ids(self.read(self.projection.activity_rows)))
         recent = self.read_service(selector).recent(today=TODAY)["activities"]
         self.assertNotIn(GARMIN_ID, self.ids(recent))
 
     def test_removal_tombstones_record_session_and_provider_record(self) -> None:
         populate(self)
-        self._service(make_selector(self)).delete(self._payload(), Mock())
+        selector = make_selector(self)
+        self._service(selector).delete(self._payload(selector), Mock())
 
         for table in ("activity_records", "provider_records", "activity_sessions"):
             with self.subTest(table=table):
@@ -156,7 +147,7 @@ class DuplicateRemovalTests(_ActivityCase):
         selector = make_selector(self)
         before = self.inspector(selector).latest()
         self.assertEqual((before or {}).get("duplicate_id"), GARMIN_ID)
-        self._service(selector).delete(self._payload(), Mock())
+        self._service(selector).delete(self._payload(selector), Mock())
         self.assertIsNone(self.inspector(selector).latest())
 
     def test_mark_activity_deleted_reports_whether_anything_changed(self) -> None:
@@ -200,11 +191,13 @@ class LegacyAndTableParityTests(_ActivityCase):
             {k: v for k, v in legacy_recent.items() if k != "activities"},
         )
 
-    def test_duplicate_inspection_matches_between_legacy_and_tables(self) -> None:
-        legacy = self.inspector(make_selector(self)).latest()
+    def test_duplicate_inspection_reads_only_the_tables(self) -> None:
+        # While the selector still serves the snapshot, nothing is in the tables:
+        # no pair is offered, so nothing can be deleted twice.
+        self.assertIsNone(self.inspector(make_selector(self)).latest())
         populate(self)
-        self.assertEqual(self.inspector(make_selector(self)).latest(), legacy)
-        self.assertEqual((legacy or {}).get("duplicate_id"), GARMIN_ID)
+        pair = self.inspector(make_selector(self)).latest()
+        self.assertEqual((pair or {}).get("duplicate_id"), GARMIN_ID)
 
     def test_compact_rows_drop_empty_and_unlisted_fields(self) -> None:
         raw = [{"id": "x", "type": "Ride", "name": None, "private_comment": "free"}]
@@ -241,21 +234,22 @@ class SnapshotWithoutCanonicalSectionsTests(_ActivityCase):
     def test_duplicate_removal_works_without_the_snapshot_sections(self) -> None:
         populate(self)
         selector = make_selector(self)
-        payload = {
-            "canonical_id": WAHOO_ID,
-            "duplicate_id": GARMIN_ID,
-            "snapshot_synced_at": str(self.intervals["synced_at"]),
-        }
+        payload = self._payload(selector)
         self.strip_canonical_sections()
         service = DuplicateActivityService(
             self.manager,
-            _SnapshotSaver(self),
-            self.snapshots,
-            selector,
+            self.inspector(selector),
             lambda: REMOVAL_AT,
             Mock(),
         )
 
-        service.delete(copy.deepcopy(payload), Mock())
+        service.delete(payload, Mock())
 
         self.assertNotIn(GARMIN_ID, self.ids(self.read(selector.activity_rows)))
+
+    def _payload(self, selector: Any) -> dict[str, Any]:
+        pair = self.inspector(selector).latest() or {}
+        return {
+            key: pair[key]
+            for key in ("canonical_id", "duplicate_id", "snapshot_synced_at")
+        }

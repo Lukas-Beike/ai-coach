@@ -4,7 +4,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import date
 
-from activity_row_support import SnapshotActivityRows
+from activity_row_support import SnapshotActivityRows, canonical_source
 from canonical_detail_support import add_session_record, open_manager
 
 from backend.activities.activity_reference import ActivityReferences
@@ -114,17 +114,19 @@ class ActivityReadServiceTests(unittest.TestCase):
 
     def detail_service(self, snapshot, **kwargs):
         """Serve details from the canonical sessions stored in ``setUp``."""
+        rows = SnapshotActivityRows(_Snapshots(snapshot))
+        kwargs.setdefault("canonical", canonical_source(rows, lambda: self.manager))
         return ActivityAnalysisReadService(
             self.manager,
             _Snapshots(snapshot),
-            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
+            CompactActivityRows(rows),
             _Feedback(),
             references=ActivityReferences(self.manager),
             session_records=CanonicalTableReader().session_activities,
             **kwargs,
         )
 
-    def service(self, detail_store=None):
+    def service(self, detail_store=None, fetched_at=None):
         snapshot = {
             "synced_at": "2026-09-20T08:00:00+00:00",
             "athlete": {},
@@ -150,12 +152,14 @@ class ActivityReadServiceTests(unittest.TestCase):
                 ]
             },
         }
+        rows = SnapshotActivityRows(_Snapshots(snapshot))
         return ActivityAnalysisReadService(
             _Manager(),
             _Snapshots(snapshot),
-            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
+            CompactActivityRows(rows),
             _Feedback(),
             detail_store,
+            canonical=canonical_source(rows, _Manager, fetched_at=fetched_at),
         )
 
     def test_page_keeps_activities_with_failed_details_and_names_the_error(self):
@@ -197,9 +201,12 @@ class ActivityReadServiceTests(unittest.TestCase):
             result["data_scope"],
         )
         self.assertFalse(LEGACY_KEYS & set(result))
-        self.assertEqual(result, self.detail_service(snapshot).detail(
-            "act_new", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
-        ))
+        self.assertEqual(
+            result,
+            self.detail_service(snapshot).detail(
+                "act_new", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
+            ),
+        )
 
     def test_detail_reads_an_activity_older_than_the_performance_window(self):
         snapshot = {"synced_at": "2026-09-20T08:00:00+00:00", "athlete": {}}
@@ -257,7 +264,7 @@ class ActivityReadServiceTests(unittest.TestCase):
                 "Diese Aktivität ist lokal nicht vorhanden.", str(missing.exception)
             )
 
-    def test_snapshot_reader_preserves_provider_provenance_and_freshness(self):
+    def test_snapshot_reader_preserves_provider_provenance(self):
         snapshot = {
             "synced_at": "2026-09-20T08:00:00+00:00",
             "source_freshness": {"intervals": {"freshness": "current"}},
@@ -269,25 +276,58 @@ class ActivityReadServiceTests(unittest.TestCase):
             SnapshotRepositoryReader(_Snapshots(snapshot)),
             CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
             _Feedback(),
+            canonical=canonical_source((), _Manager),
         )
         self.assertEqual(service._snapshot(), snapshot)
 
-    def test_activity_refresh_timestamp_is_independent_of_performance_refresh(self):
-        snapshot = {
-            "synced_at": "2026-10-20T12:00:00+00:00",
-            "activities_synced_at": "2026-10-19T12:00:00+00:00",
-            "recent_activities": [],
-        }
-        service = ActivityAnalysisReadService(
-            _Manager(),
-            SnapshotRepositoryReader(_Snapshots(snapshot)),
-            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
-            _Feedback(),
+    def test_activity_sync_time_comes_from_canonical_coverage(self):
+        # The snapshot carries other times; only the stored coverage is consulted.
+        fetched_at = "2026-10-19T12:00:00+00:00"
+        service = self.service(fetched_at=fetched_at)
+
+        page = service.page(today=date(2026, 9, 20))
+        recent = service.recent(today=date(2026, 9, 20))
+
+        self.assertEqual(fetched_at, page["snapshot_synced_at"])
+        self.assertEqual(fetched_at, recent["snapshot_synced_at"])
+        self.assertNotEqual("2026-09-20T08:00:00+00:00", page["snapshot_synced_at"])
+
+    def test_activity_sync_time_is_unknown_without_stored_coverage(self):
+        service = self.service()
+
+        self.assertIsNone(service.page(today=date(2026, 9, 20))["snapshot_synced_at"])
+        self.assertIsNone(service.recent(today=date(2026, 9, 20))["snapshot_synced_at"])
+
+    def test_detail_finds_the_summary_row_without_snapshot_activities(self):
+        snapshot = {"synced_at": "2026-09-20T08:00:00+00:00", "athlete": {}}
+        rows = _DatedRows(
+            [
+                {
+                    "id": "new",
+                    "type": "Run",
+                    "start_date_local": "2026-09-20T08:00:00",
+                    "average_speed": 3.3,
+                }
+            ]
+        )
+        service = self.detail_service(
+            snapshot, canonical=canonical_source(rows, _Manager)
         )
 
-        synced_at, _activities = service._read()
+        result = service.detail(
+            "new", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
+        )
 
-        self.assertEqual("2026-10-19T12:00:00+00:00", synced_at)
+        self.assertEqual(3.3, result["metrics"]["avg_speed_mps"]["value"])
+
+    def test_detail_service_requires_a_canonical_source(self):
+        with self.assertRaises(TypeError):
+            ActivityAnalysisReadService(  # type: ignore[call-arg]
+                _Manager(),
+                _Snapshots({}),
+                CompactActivityRows(SnapshotActivityRows(_Snapshots({}))),
+                _Feedback(),
+            )
 
 
 if __name__ == "__main__":

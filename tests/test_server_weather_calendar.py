@@ -1433,25 +1433,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
             }
             for index in range(6)
         ]
-        snapshot = {
-            "synced_at": "now",
-            "athlete": {},
-            "recent_activities": activities,
-            "recent_wellness": [],
-            "upcoming_calendar": [
-                {
-                    "id": "past",
-                    "name": "Past workout",
-                    "start_date_local": (today - timedelta(days=1)).isoformat(),
-                },
-                {
-                    "id": "future",
-                    "name": "Future workout",
-                    "start_date_local": (today + timedelta(days=1)).isoformat(),
-                    "description": "- 60m 65%",
-                },
-            ],
-        }
         server.PLANNING_DATA.planned_unit().create(
             {
                 "date": (today + timedelta(days=1)).isoformat(),
@@ -1462,7 +1443,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
             }
         )
         result = CoachIntervalsContextService().project(
-            snapshot,
             server.PLANNING_DATA.planned_unit().list(250, future_only=True),
             today,
             activities,

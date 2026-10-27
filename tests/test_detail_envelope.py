@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import date
 
-from activity_row_support import SnapshotActivityRows
+from activity_row_support import NoObservations, SnapshotActivityRows, StoredCoverage
 from canonical_detail_support import add_session_record, open_manager
 
 from backend.canonical.vocabulary import ProviderId
@@ -72,7 +72,12 @@ class DetailEnvelopeTests(unittest.TestCase):
         )
         self.assembly = ActivityReadAssembly(
             lambda: self.manager,
-            ActivityReadSources(snapshots, lambda: SnapshotActivityRows(snapshots)),
+            ActivityReadSources(
+                snapshots,
+                lambda: SnapshotActivityRows(snapshots),
+                observation_reader=NoObservations,
+                coverage=lambda: StoredCoverage(None),
+            ),
             lambda: feedback,
             self.read_equipment,
             refreshable_providers=lambda: self.configured,
@@ -105,9 +110,7 @@ class DetailEnvelopeTests(unittest.TestCase):
                 for key in ENVELOPE_KEYS:
                     self.assertIsNotNone(document[key])
                 self.assertEqual(reference, document["activity_feedback"]["notes"])
-                self.assertEqual(
-                    [{"id": f"bike-{reference}"}], document["equipment"]
-                )
+                self.assertEqual([{"id": f"bike-{reference}"}], document["equipment"])
                 self.assertEqual(reference, self.equipment_reads[-1])
 
     def test_validation_uses_the_intervals_summary_or_reports_no_data(self):

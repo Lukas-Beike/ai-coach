@@ -286,12 +286,13 @@ class GarminAssembly:
 
     def projection_service(self) -> GarminProjectionService:
         """Compose public and Coach projections over current Garmin state."""
+        if self._canonical is None:
+            raise RuntimeError("Garmin projections need the canonical read sources.")
         return GarminProjectionService(
             self._config(),
             self.payload_service(),
             self.sync_service(),
             self.sync_state_service(),
-            self._sync_state_repository(),
             self._morning_body_battery_service(),
             self.client_factory(),
             self._database_manager(),

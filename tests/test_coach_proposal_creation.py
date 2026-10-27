@@ -12,8 +12,6 @@ from typing import Any
 from unittest.mock import Mock
 from uuid import UUID
 
-from activity_row_support import SnapshotActivityRows
-
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.proposal_models import (
@@ -48,7 +46,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         )
         with self.database_manager.unit_of_work() as db:
             initialize_schema(db)
-        self.sync_state_repository = Mock()
+        self.inspector = Mock(spec=DuplicateInspector)
 
     def tearDown(self) -> None:
         self.database_manager.close()
@@ -63,11 +61,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         options.update(overrides)
         return CoachProposalCreationService(
             self.database_manager,
-            DuplicateInspector(
-                self.database_manager,
-                self.sync_state_repository,
-                SnapshotActivityRows(self.sync_state_repository),
-            ),
+            self.inspector,
             **options,
         )
 
@@ -81,29 +75,16 @@ class CoachProposalCreationTests(unittest.TestCase):
         }
 
     @staticmethod
-    def _duplicate_snapshot(synced_at: str) -> dict[str, object]:
+    def _duplicate_pair(token: str) -> dict[str, object]:
         return {
-            "synced_at": synced_at,
-            "raw_provider_data": {
-                "activities": [
-                    {
-                        "id": "wahoo-1",
-                        "source": "Wahoo",
-                        "type": "Ride",
-                        "start_date_local": "2026-08-29T07:00:00",
-                        "moving_time": 7200,
-                        "distance": 60000,
-                    },
-                    {
-                        "activityId": "garmin-1",
-                        "source": "Garmin",
-                        "type": "Ride",
-                        "start_date_local": "2026-08-29T07:05:00",
-                        "moving_time": 7160,
-                        "distance": 59800,
-                    },
-                ]
-            },
+            "canonical_id": "wahoo-1",
+            "canonical_name": "Wahoo",
+            "duplicate_id": "garmin-1",
+            "duplicate_name": "Garmin",
+            "start_date_local": "2026-08-29T07:00:00",
+            "moving_time": 7200,
+            "distance": 60000,
+            "snapshot_synced_at": token,
         }
 
     @staticmethod
@@ -163,7 +144,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertEqual(row["diff"], '[{"type":"restore","label":"Änderung"}]')
         self.assertEqual(row["created_at"], "2026-09-23T10:11:12+00:00")
         self.assertNotIn("private", repr(result))
-        self.sync_state_repository.latest_snapshot.assert_not_called()
+        self.inspector.latest.assert_not_called()
 
     def test_creation_prunes_expired_proposals_on_the_write_path(self) -> None:
         with self.database_manager.unit_of_work() as db:
@@ -734,13 +715,11 @@ class CoachProposalCreationTests(unittest.TestCase):
             {"session-a", "session-b"},
         )
 
-    def test_duplicate_delete_validates_against_fresh_snapshot_before_persisting(
+    def test_duplicate_delete_validates_against_the_current_pair_before_persisting(
         self,
     ) -> None:
         current_time = "2026-08-29T10:00:00+00:00"
-        self.sync_state_repository.latest_snapshot.return_value = (
-            self._duplicate_snapshot(current_time)
-        )
+        self.inspector.latest.return_value = self._duplicate_pair(current_time)
         result = self._service().create(self._delete_duplicate(current_time), "session")
 
         self.assertEqual(
@@ -748,13 +727,11 @@ class CoachProposalCreationTests(unittest.TestCase):
             "delete_duplicate_intervals_activity",
         )
         self.assertEqual(len(self._rows()), 1)
-        self.sync_state_repository.latest_snapshot.assert_called()
+        self.inspector.latest.assert_called()
 
     def test_duplicate_delete_resolves_local_ids_before_validation(self) -> None:
         current_time = "2026-08-29T10:00:00+00:00"
-        self.sync_state_repository.latest_snapshot.return_value = (
-            self._duplicate_snapshot(current_time)
-        )
+        self.inspector.latest.return_value = self._duplicate_pair(current_time)
         values = self._delete_duplicate(current_time)
         values["payload"] = {
             "canonical_id": "act_wahoo",
@@ -771,8 +748,8 @@ class CoachProposalCreationTests(unittest.TestCase):
         )
 
     def test_duplicate_remote_write_resolves_local_ids_before_manifest(self) -> None:
-        self.sync_state_repository.latest_snapshot.return_value = (
-            self._duplicate_snapshot("2026-08-29T10:00:00+00:00")
+        self.inspector.latest.return_value = self._duplicate_pair(
+            "2026-08-29T10:00:00+00:00"
         )
         intent = {
             "operation": "delete_duplicate_intervals_activity",
@@ -799,8 +776,8 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertEqual(arguments["_approval_manifest"]["duplicate_id"], "garmin-1")
 
     def test_unresolved_local_duplicate_id_still_conflicts(self) -> None:
-        self.sync_state_repository.latest_snapshot.return_value = (
-            self._duplicate_snapshot("2026-08-29T10:00:00+00:00")
+        self.inspector.latest.return_value = self._duplicate_pair(
+            "2026-08-29T10:00:00+00:00"
         )
         with self.assertRaises(AppError) as error:
             self._service(references=_LocalIds()).create_remote_write(
@@ -815,9 +792,9 @@ class CoachProposalCreationTests(unittest.TestCase):
         self.assertEqual(error.exception.status, 409)
         self.assertEqual(self._rows(), [])
 
-    def test_stale_duplicate_snapshot_rejects_before_id_clock_or_insert(self) -> None:
-        self.sync_state_repository.latest_snapshot.return_value = (
-            self._duplicate_snapshot("2026-08-29T10:01:00+00:00")
+    def test_stale_duplicate_token_rejects_before_id_clock_or_insert(self) -> None:
+        self.inspector.latest.return_value = self._duplicate_pair(
+            "2026-08-29T10:01:00+00:00"
         )
         uuid_factory = Mock(return_value=UUID("abc12345-6789-4abc-8def-0123456789ab"))
         now = Mock(return_value=100.0)
@@ -834,7 +811,7 @@ class CoachProposalCreationTests(unittest.TestCase):
         utc_now.assert_not_called()
         self.assertEqual(self._rows(), [])
 
-    def test_invalid_inputs_reject_before_snapshot_or_insert(self) -> None:
+    def test_invalid_inputs_reject_before_inspection_or_insert(self) -> None:
         invalid_values = [
             None,
             {},
@@ -845,7 +822,7 @@ class CoachProposalCreationTests(unittest.TestCase):
             with self.subTest(values=values), self.assertRaises(AppError):
                 self._service().create(values, "session")
 
-        self.sync_state_repository.latest_snapshot.assert_not_called()
+        self.inspector.latest.assert_not_called()
         self.assertEqual(self._rows(), [])
 
     def test_database_failure_rolls_back_insert(self) -> None:

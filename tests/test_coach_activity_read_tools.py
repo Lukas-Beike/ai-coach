@@ -9,7 +9,7 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
-from activity_row_support import SnapshotActivityRows
+from activity_row_support import SnapshotActivityRows, canonical_source
 from canonical_detail_support import NOW, open_manager, seed_intervals_activity
 
 from backend.activities.activity_reference import ActivityReferences
@@ -175,9 +175,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual("activity_detail.v1", result["contract"])
         self.assertEqual("Synthetic tempo", result["session"]["name"])
-        self.assertEqual(
-            [200, 250], result["streams"]["channels"]["power_w"]["values"]
-        )
+        self.assertEqual([200, 250], result["streams"]["channels"]["power_w"]["values"])
         self.assertEqual(
             "bounded sanitized activity_detail.v1 document of exactly one local "
             "session; providers: Intervals.icu; recorded by: unknown",
@@ -289,15 +287,17 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         self.assertIn(MetricKind.CTL, served_kinds)
         self.assertIn(MetricKind.ATL, served_kinds)
 
-    def test_detail_without_wellness_rows_keeps_legacy_call_shape(self):
+    def test_detail_without_wellness_rows_still_passes_the_canonical_inputs(self):
         selector, service = _canonical_activity_tool(self, _activity_snapshot([]))
         with patch(
             "backend.performance.activity_read_service.current_performance_context",
             return_value={},
         ) as project:
             service.execute("get_activity_details", {"activity_id": "synthetic-1"})
-        self.assertNotIn("canonical", project.call_args.kwargs)
-        # The wellness observations are now read to find the days, once per call.
+        canonical = project.call_args.kwargs["canonical"]
+        self.assertIsNone(canonical.wellness_day)
+        self.assertEqual(len(canonical.activity_rows), 1)
+        # The wellness observations are read to find the days, once per call.
         selector.reader_for.assert_called_once()
 
 
@@ -358,6 +358,9 @@ def _detail_tool(manager, activities: list[dict], garmin, profile):
         snapshot_repository,
         CompactActivityRows(SnapshotActivityRows(snapshot_repository)),
         feedback,
+        canonical=canonical_source(
+            SnapshotActivityRows(snapshot_repository), lambda: manager
+        ),
         references=ActivityReferences(manager),
         session_records=CanonicalTableReader().session_activities,
     )
@@ -386,6 +389,7 @@ def _canonical_activity_tool(case: unittest.TestCase, snapshot: dict):
         canonical=CanonicalPerformanceSource(
             database_manager=lambda: manager,
             observation_reader=lambda: selector,
+            activity_rows=lambda: SnapshotActivityRows(snapshot_reader),
         ),
         references=ActivityReferences(sessions),
         session_records=CanonicalTableReader().session_activities,

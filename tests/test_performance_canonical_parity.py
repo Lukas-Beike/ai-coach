@@ -18,6 +18,7 @@ from datetime import date
 from typing import Any
 from unittest.mock import Mock, patch
 
+from activity_row_support import SnapshotActivityRows
 from canonical_detail_support import add_session_record, open_manager
 from canonical_read_support import (
     CLOCK_AT,
@@ -717,20 +718,6 @@ class CanonicalWiringTests(unittest.TestCase):
         self.assertEqual(reader.db_seen, ["db"] * _UNIT_READS)
         self.assertEqual(_present(canonical).ctl, 50.0)
 
-    def test_activity_performance_inputs_without_a_source_read_nothing_extra(
-        self,
-    ) -> None:
-        snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
-        manager = RecordingManager()
-        snapshot_reader = Mock()
-        snapshot_reader.latest_snapshot.return_value = snapshot
-        service = ActivityAnalysisReadService(manager, snapshot_reader, Mock(), Mock())
-        read_snapshot, canonical, _ = service._performance_inputs(PARITY_TODAY)
-        self.assertIs(read_snapshot, snapshot)
-        self.assertIsNone(canonical)
-        # Only the legacy snapshot read's own reader lease runs.
-        self.assertEqual(manager.events, ["reader", "reader_exit"])
-
     def test_activity_detail_passes_canonical_inputs_to_the_load_context(self) -> None:
         activity = {
             "id": "a1",
@@ -760,6 +747,7 @@ class CanonicalWiringTests(unittest.TestCase):
             canonical=CanonicalPerformanceSource(
                 database_manager=lambda: manager,
                 observation_reader=lambda: reader,
+                activity_rows=lambda: SnapshotActivityRows(snapshot_reader),
             ),
             session_records=CanonicalTableReader().session_activities,
         )

@@ -26,7 +26,6 @@ from backend.sync.garmin import (
     GarminSyncStateService,
 )
 from backend.sync.garmin_service import GarminSyncService
-from backend.sync.state import SyncStateRepository
 
 # The recovery context shows the latest record; two weeks cover a missed sync.
 COACH_RECOVERY_DAYS = 14
@@ -41,16 +40,9 @@ class GarminCanonicalSources:
 
 
 def _recovery_presence(
-    snapshot: dict[str, Any], state: GarminCanonicalState | None
+    snapshot: dict[str, Any], state: GarminCanonicalState
 ) -> dict[str, bool]:
-    """Report which recovery sections exist, from observations when injected."""
-    if state is None:
-        return {
-            "sleep": bool(snapshot.get("sleep")),
-            "hrv": bool(snapshot.get("hrv")),
-            "resting_hr": bool(snapshot.get("resting_hr")),
-            "readiness": bool(snapshot.get("readiness")),
-        }
+    """Report which recovery sections exist, from the canonical observations."""
     return {
         "sleep": state.has_sleep,
         # A weekly-only HRV section has no canonical observation; it stays on the snapshot.
@@ -69,7 +61,6 @@ class GarminProjectionService:
         garmin_payload_service: GarminPayloadService,
         garmin_sync_service: GarminSyncService,
         garmin_sync_state_service: GarminSyncStateService,
-        sync_state_repository: SyncStateRepository,
         morning_body_battery_service: MorningBodyBatteryService,
         garmin_client_factory: GarminClientFactory,
         database_manager: DatabaseManager,
@@ -77,14 +68,13 @@ class GarminProjectionService:
         redactor: Redactor,
         local_now: Callable[[], datetime],
         *,
-        canonical: GarminCanonicalSources | None = None,
+        canonical: GarminCanonicalSources,
     ) -> None:
         self._canonical = canonical
         self._config = config
         self._garmin_payload_service = garmin_payload_service
         self._garmin_sync_service = garmin_sync_service
         self._garmin_sync_state_service = garmin_sync_state_service
-        self._sync_state_repository = sync_state_repository
         self._morning_body_battery_service = morning_body_battery_service
         self._garmin_client_factory = garmin_client_factory
         self._database_manager = database_manager
@@ -92,29 +82,16 @@ class GarminProjectionService:
         self._redactor = redactor
         self._local_now = local_now
 
-    def _intervals_rows_legacy(self) -> list[Any]:
-        canonical = self._sync_state_repository.latest_snapshot()
-        return (
-            canonical.get("recent_activities", [])
-            if isinstance(canonical, dict)
-            else []
-        )
-
-    def _observation_state(self) -> GarminCanonicalState | None:
-        """Read the Garmin observations, or None when none are injected."""
-        sources = self._canonical
-        if sources is None:
-            return None
+    def _observation_state(self) -> GarminCanonicalState:
+        """Read the Garmin observations."""
         with self._database_manager.reader() as db:
-            return read_garmin_state(sources.observations(), db)
+            return read_garmin_state(self._canonical.observations(), db)
 
     def _canonical_read(
         self, observations: ObservationReader | None = None
-    ) -> tuple[GarminCanonicalState | None, list[Any]]:
+    ) -> tuple[GarminCanonicalState, list[Any]]:
         """Read the Garmin observations and Intervals.icu rows from one source."""
         sources = self._canonical
-        if sources is None:
-            return None, self._intervals_rows_legacy()
         with self._database_manager.reader() as db:
             state = read_garmin_state(observations or sources.observations(), db)
             rows = list(sources.activity_rows().activity_rows(db))
@@ -133,7 +110,7 @@ class GarminProjectionService:
         performance_metrics = performance_garmin_metrics.garmin_performance_metrics(
             snapshot,
             self._local_now().date(),
-            None if state is None else state.metrics,
+            state.metrics,
         )
         filtered_activities, skipped = filter_garmin_activities(
             snapshot.get("activities"), intervals_rows
@@ -192,11 +169,7 @@ class GarminProjectionService:
                 )
             ),
             "has_readiness": recovery["readiness"],
-            "has_race_predictions": (
-                bool(snapshot.get("race_predictions"))
-                if state is None
-                else bool(state.metrics.race_predictions)
-            ),
+            "has_race_predictions": bool(state.metrics.race_predictions),
             "has_weight": performance_metrics["weight_kg"]["value"] is not None,
             "has_max_hr": any(
                 performance_metrics[key]["value"] is not None
@@ -261,7 +234,7 @@ class GarminProjectionService:
                 performance_garmin_metrics.garmin_performance_context(
                     snapshot,
                     self._local_now().date(),
-                    None if state is None else state.metrics,
+                    state.metrics,
                 )
             )
             context["scope"] = (

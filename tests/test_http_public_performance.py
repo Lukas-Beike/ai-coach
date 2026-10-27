@@ -48,10 +48,18 @@ class PublicPerformanceStateTests(unittest.TestCase):
                     "history": analysis_history(snapshot, garmin, today),
                     "training_focus_periods": {
                         "fortnight": training_focus(
-                            snapshot, garmin, today, "Europe/Berlin", days=14
+                            garmin,
+                            today,
+                            "Europe/Berlin",
+                            activity_rows=(),
+                            days=14,
                         ),
                         "twelveWeeks": training_focus(
-                            snapshot, garmin, today, "Europe/Berlin", days=84
+                            garmin,
+                            today,
+                            "Europe/Berlin",
+                            activity_rows=(),
+                            days=84,
                         ),
                     },
                 },

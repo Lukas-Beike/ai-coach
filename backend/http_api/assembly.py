@@ -442,7 +442,6 @@ class HttpApiAssembly:
             canonical = public.canonical_performance_source()
             records = TrainingRecordsService(
                 database_manager=database_manager(),
-                read_snapshot=report_snapshot,
                 read_equipment=lambda: (
                     athlete.equipment().read() if athlete.equipment else {}
                 ),
@@ -471,7 +470,6 @@ class HttpApiAssembly:
                 profiles=TrainingProfileSelectionService(local_today),
                 report=report_read,
                 derived=TrainingDerivedReadService(
-                    read_snapshot=report_snapshot,
                     read_checkins=report_checkins,
                     read_recovery=report_recovery,
                     read_performance=report_performance,

@@ -29,6 +29,7 @@ from backend.runtime.ports import (
     ActivityRowReader,
     CanonicalTableServing,
     ObservationReader,
+    ProviderCoverageReader,
 )
 from backend.sync.provider_runtime import ProviderRuntimeRegistry
 from backend.sync.status import SyncPublicStateService
@@ -53,6 +54,8 @@ class PublicStateCoreInputs:
     # When set, season preparation, load scenarios, the performance readers and
     # the state and plan endpoints read activity rows from it.
     activity_row_reader: Callable[[], ActivityRowReader] | None = None
+    # When set, the activities' sync time comes from the canonical provider coverage.
+    coverage: Callable[[], ProviderCoverageReader] | None = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,7 @@ class PublicStateAssembly:
         self._observation_reader = core.observation_reader
         self._canonical_serving = core.canonical_serving
         self._activity_row_reader = core.activity_row_reader
+        self._coverage = core.coverage
         self._snapshot_repository = owners.snapshot_repository
         self._sync_persistence = owners.sync_persistence
         self._planning_data = owners.planning_data
@@ -198,6 +202,7 @@ class PublicStateAssembly:
             self._observation_reader,
             serving=self._canonical_serving,
             activity_rows=self._activity_row_reader,
+            coverage=self._coverage,
         )
 
     def season_source(self) -> SeasonSource:

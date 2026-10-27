@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from canonical_detail_support import seed_intervals_activity
+from duplicate_support import mark_tables_serving
 from test_coach_dialogue import DialogueHarness, server
 
 from backend.coach.training_patch import CoachTrainingPatchService
@@ -1082,6 +1083,20 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(result["proposed_action"]["status"], "preview")
         self.assertEqual(server.PLANNING_DATA.workout_library().list(), before)
 
+    @staticmethod
+    def seed_duplicate_pair(common):
+        """Ingest the Wahoo ride and its Garmin copy into the canonical tables."""
+        mark_tables_serving(server)
+        for identifier, source in (
+            ("synthetic-wahoo", "Wahoo"),
+            ("synthetic-garmin", "GARMIN_CONNECT"),
+        ):
+            seed_intervals_activity(
+                server.database_manager(),
+                identifier,
+                **{**common, "source": source},
+            )
+
     @covers("inspect_activity_duplicates:success")
     def test_duplicate_inspection_returns_preview_without_deleting_provider_data(self):
         common = {
@@ -1097,6 +1112,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             ]
         }
         server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
+        self.seed_duplicate_pair(common)
         result = self.run_tool(
             "inspect_activity_duplicates",
             message="Ist die letzte Radausfahrt doppelt vorhanden?",
@@ -1122,12 +1138,14 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             "distance": 30000,
         }
         snapshot = {
+            "synced_at": "2026-09-06T12:00:00+00:00",
             "recent_activities": [
                 {**common, "id": "synthetic-wahoo", "source": "Wahoo"},
                 {**common, "id": "synthetic-garmin", "source": "GARMIN_CONNECT"},
-            ]
+            ],
         }
         server.SYNC_PERSISTENCE.state_repository().save_view(snapshot)
+        self.seed_duplicate_pair(common)
         with patch.object(
             intervals_client_module.IntervalsClient,
             "delete_activity",

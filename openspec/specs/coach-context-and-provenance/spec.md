@@ -75,7 +75,7 @@ The system SHALL support read-only loading of named local Coach context sections
 Evidence: `backend/coach/read_tools.py:CoachReadToolService._read_coach_context`; `backend/coach/structured_tool_round.py:CoachStructuredToolRoundService`; `tests/test_coach_context_reduction.py:test_detail_read_bounds_output_and_rejects_unknown_sections`; `tests/test_coach_context_selection.py:test_rephrased_requests_offer_required_registered_tools`.
 
 ### Requirement: CP5 Saved provider evidence and honest freshness
-The system SHALL build ordinary Coach context from saved provider observations and local planning, retain available source/sync metadata, and read cached weather without causing an unconditional provider refresh.
+The system SHALL build ordinary Coach context from saved provider observations and local planning, retain available source/sync metadata, and read cached weather without causing an unconditional provider refresh. The `activities` section SHALL report its sync time (`synced_at` and `source.synced_at`) from the Intervals.icu activity fetch time of the canonical provider coverage, read in the same read snapshot as the activity rows, and SHALL report null when no coverage is stored.
 
 #### Scenario: Ordinary context read
 - **WHEN** the athlete sends an ordinary Coach message
@@ -89,7 +89,11 @@ The system SHALL build ordinary Coach context from saved provider observations a
 - **WHEN** context combines planned units, competitions and external calendar entries
 - **THEN** calendar items identify their local-plan, competition or external-calendar origin; external calendar context is read-only.
 
-Evidence: `backend/coach/context.py:CoachStructuredContextService.build`, `backend/coach/context.py:CoachPlanningContextReader.calendar`, `backend/coach/context.py:CoachPlanningContextReader.external_calendar`, `backend/coach/context.py:CoachPerformanceContextReader.current_performance`; `tests/test_coach_structured_context.py:test_build_uses_snapshot_fallback_and_projects_safe_provider_context`, `tests/test_coach_structured_context.py:test_explicit_snapshot_is_used_without_fallback_and_empty_snapshot_enables_garmin_fallback`. Per-metric provenance is owned by performance/provider capabilities; this requirement does not assert that every legacy section label identifies every canonical provider correctly.
+#### Scenario: Activities freshness from canonical coverage
+- **WHEN** the context includes the activities section and canonical coverage stores an Intervals.icu activity fetch time
+- **THEN** the section's `synced_at` and `source.synced_at` equal that time regardless of the stored snapshot's `synced_at` or of a duplicate deletion, and are null when no coverage is stored.
+
+Evidence: `backend/coach/context.py:CoachStructuredContextService.build`, `backend/coach/context.py:CoachPlanningContextReader.calendar`, `backend/coach/context.py:CoachPlanningContextReader.external_calendar`, `backend/coach/context.py:CoachPerformanceContextReader.current_performance`, `backend/coach/context.py:CoachIntervalsContextService.project`; `tests/test_coach_structured_context.py:test_build_uses_snapshot_fallback_and_projects_safe_provider_context`, `tests/test_coach_structured_context.py:test_explicit_snapshot_is_used_without_fallback_and_empty_snapshot_enables_garmin_fallback`. Per-metric provenance is owned by performance/provider capabilities; this requirement does not assert that every legacy section label identifies every canonical provider correctly. Missing evidence (planned in this change): activities section `synced_at` from coverage and null without coverage.
 
 ### Requirement: CP6 Explicit provider refresh and current results
 The system SHALL route a requested provider update through the existing provider refresh owners, distinguish queued work from completed refreshed data, and use refreshed local context before the subsequent model response where the provider contract waits for completion.

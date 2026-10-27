@@ -968,8 +968,8 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                     }
                 ]
             },
-            {"raw_provider_data": {"activities": []}},
             date(2026, 9, 1),
+            activity_rows=[],
         )
         report = next(row for row in result["reports"] if row["tag"] == "travel")
         self.assertEqual(report["status"], "observed_association")
