@@ -57,7 +57,7 @@ The system SHALL calculate explicit current/previous 7- and 30-day completed-act
 Evidence: `backend/performance/load.py:activity_rollup`, `backend/performance/load.py:actual_atl_series`, `backend/performance/load_context.py:performance_load_context`, `backend/performance/garmin_load.py:acute_load_value`; `tests/test_performance_load.py:test_actual_atl_decays_across_missing_days_and_is_sorted`, `tests/test_performance_chart_history.py:test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load`, `tests/test_performance_chart_history.py:test_acute_load_rejects_invalid_and_conflicting_device_values`. The form scenarios are verified by `tests/test_performance_canonical_load_metrics.py:FormTests`, `tests/test_performance_load_context.py:test_form_and_ramp_rate_come_from_the_canonical_inputs` and `tests/test_characterization_load_focus.py:test_carrier_form_fields_are_not_read_without_canonical_inputs`.
 
 ### Requirement: Training reports retain coverage and actual execution
-The system SHALL build local period reports from deduplicated activity rows using athlete-local dates, exclude future completed data, and expose measured-session coverage for duration, distance, and load. Reports SHALL include supported period comparisons, daily/cumulative load, eight calendar weeks of load, sports, key sessions, feedback, and plan-execution context with a common period. Unknown values SHALL stay unknown while valid zero load remains measured.
+The system SHALL build local period reports from deduplicated canonical activity rows using athlete-local dates, exclude future completed data, and expose measured-session coverage for duration, distance, and load. Reports SHALL include supported period comparisons, daily/cumulative load, eight calendar weeks of load, sports, key sessions, feedback, and plan-execution context with a common period. Unknown values SHALL stay unknown while valid zero load remains measured.
 
 #### Scenario: Partial current week
 - **WHEN** a report includes the current calendar week with measured, zero, and missing load rows
@@ -67,7 +67,13 @@ The system SHALL build local period reports from deduplicated activity rows usin
 - **WHEN** an absolute start crosses an athlete-local midnight or an activity is dated in the future
 - **THEN** grouping uses the athlete-local date and future completed evidence does not inflate historical totals.
 
-Evidence: `backend/performance/training_report.py:training_report`, `backend/performance/training_report.py:activity_day`, `backend/performance/report_service.py:TrainingReportReadService`; `tests/test_training_report.py:test_eight_week_load_totals_keep_missing_zero_duplicates_and_boundaries`, `tests/test_training_report.py:test_sport_filter_and_plan_execution_use_the_same_period`, `tests/test_training_report.py:test_timezone_boundary_and_future_records_are_handled_without_provider_reads`.
+#### Scenario: Report without snapshot rows
+- **WHEN** a report is requested and the stored snapshot holds no activity rows
+- **THEN** the report is built from the canonical activity rows and its `observed_at` comes from canonical coverage, null when none is stored.
+
+Detailed contract: The report `observed_at` SHALL be the Intervals.icu activity fetch time of the canonical provider coverage, or null when none is stored.
+
+Evidence: `backend/performance/training_report.py:training_report`, `backend/performance/training_report.py:activity_day`, `backend/performance/report_service.py:TrainingReportReadService`; `tests/test_training_report.py:test_eight_week_load_totals_keep_missing_zero_duplicates_and_boundaries`, `tests/test_training_report.py:test_sport_filter_and_plan_execution_use_the_same_period`, `tests/test_training_report.py:test_timezone_boundary_and_future_records_are_handled_without_provider_reads`. Missing evidence (planned in this change): report, observation list, tag impact and focus tests with an empty snapshot, and `observed_at` from coverage.
 
 ### Requirement: Training focus and recorded sensor zones
 The system SHALL summarize the supported 28-day training focus from recorded heart-rate and power zones and Garmin activity training-effect categories with source freshness and classification coverage. Heart-rate and power zones SHALL remain separate and bounded by session coverage. Unknown categories, missing identities/load, and unsupported strength classification SHALL remain unclassified rather than becoming assumed endurance training.
@@ -378,3 +384,18 @@ The system SHALL read cycling eFTP and form only from canonical Intervals.icu ob
 Detailed contract (known limits, not requirements; tracked by a follow-up issue; the wellness mapper version 7 of Epic B did not change them): the mapper stores the last of two ride sport settings (the legacy reader took the first); a setting or `sportInfo` entry is classified by `types[0]` or `type` only, so entries identified solely by `sport` or `sport_type`, or by a later `types` entry, yield no eFTP; a reported form value that is not a number yields no form for that day.
 
 Evidence: `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`, `backend/providers/intervals_wellness_mapping.py:map_intervals_athlete_thresholds`, `backend/performance/canonical_sections.py:read_wellness_observations`; `tests/test_intervals_wellness_mapping.py` (EFTP and FORM mapping), `tests/test_performance_canonical_parity.py`. The strict-read scenarios are verified by `tests/test_performance_canonical_load_metrics.py` (carrier rows are stripped or contradicting), `tests/test_performance_canonical_parity.py:_assert_load_metric_split` and `tests/test_server_performance.py`.
+
+### Requirement: Report-family reads use canonical activity rows only
+The system SHALL read the activity rows of period reports, the training-record observation list, tag impact and training focus from the canonical activity row port only, and SHALL NOT fall back to the stored snapshot's `raw_provider_data.activities` or `recent_activities`.
+
+#### Scenario: Canonical rows with an empty snapshot
+- **WHEN** any of these reads runs with canonical activity rows and a snapshot without activity sections
+- **THEN** it computes from the canonical rows exactly as it would with the rows in the snapshot.
+
+#### Scenario: No activity rows
+- **WHEN** the canonical row port returns no rows
+- **THEN** the read returns its existing empty-data result (no sessions, insufficient data) instead of an error or snapshot data.
+
+Detailed contract: The services that run these reads require their canonical source at construction. Duplicate Garmin copies are still removed from the rows by the existing Wahoo/Garmin de-duplication.
+
+Evidence: `backend/performance/training_report.py:canonical_rows`, `backend/performance/report_service.py:TrainingRecordsService.observations`, `backend/performance/tag_impact.py:_day_loads`, `backend/performance/training_focus.py:training_focus`, `backend/performance/canonical_inputs.py:activity_rows_for`; `tests/test_training_report.py:test_derived_and_season_reads_keep_missing_data_fallbacks`, `tests/test_training_focus.py:test_recorded_hr_and_power_zones_remain_separate_and_bounded`. Missing evidence (planned in this change): tests that the snapshot is never read for activities and that construction without a canonical source is rejected.

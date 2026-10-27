@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Training reports retain coverage and actual execution
-The system SHALL build local period reports from deduplicated canonical activity rows using athlete-local dates, exclude future completed data, and expose measured-session coverage for duration, distance, and load. Reports SHALL include supported period comparisons, daily/cumulative load, eight calendar weeks of load, sports, key sessions, feedback, and plan-execution context with a common period. Unknown values SHALL stay unknown while valid zero load remains measured. The report `observed_at` SHALL be the Intervals.icu activity fetch time of the canonical provider coverage, or null when none is stored.
+The system SHALL build local period reports from deduplicated canonical activity rows using athlete-local dates, exclude future completed data, and expose measured-session coverage for duration, distance, and load. Reports SHALL include supported period comparisons, daily/cumulative load, eight calendar weeks of load, sports, key sessions, feedback, and plan-execution context with a common period. Unknown values SHALL stay unknown while valid zero load remains measured.
 
 #### Scenario: Partial current week
 - **WHEN** a report includes the current calendar week with measured, zero, and missing load rows
@@ -14,6 +14,8 @@ The system SHALL build local period reports from deduplicated canonical activity
 #### Scenario: Report without snapshot rows
 - **WHEN** a report is requested and the stored snapshot holds no activity rows
 - **THEN** the report is built from the canonical activity rows and its `observed_at` comes from canonical coverage, null when none is stored.
+
+Detailed contract: The report `observed_at` SHALL be the Intervals.icu activity fetch time of the canonical provider coverage, or null when none is stored.
 
 Evidence: `backend/performance/training_report.py:training_report`, `backend/performance/training_report.py:activity_day`, `backend/performance/report_service.py:TrainingReportReadService`; `tests/test_training_report.py:test_eight_week_load_totals_keep_missing_zero_duplicates_and_boundaries`, `tests/test_training_report.py:test_sport_filter_and_plan_execution_use_the_same_period`, `tests/test_training_report.py:test_timezone_boundary_and_future_records_are_handled_without_provider_reads`. Missing evidence (planned in this change): report, observation list, tag impact and focus tests with an empty snapshot, and `observed_at` from coverage.
 
