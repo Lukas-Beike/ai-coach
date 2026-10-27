@@ -362,7 +362,13 @@ class WorkflowSourceTests(unittest.TestCase):
             0
         ]
         self.assertIn("needs: e2e", browser)
-        self.assertIn("pattern: browser-run-summary-*", browser)
+        self.assertIn(
+            "name: browser-run-summary-${{ matrix.project }}-${{ matrix.shard }}-attempt-${{ github.run_attempt }}",
+            workflow,
+        )
+        self.assertIn(
+            "pattern: browser-run-summary-*-attempt-${{ github.run_attempt }}", browser
+        )
         self.assertIn("python .github/scripts/aggregate_browser_results.py", browser)
         self.assertIn("E2E_RESULT: ${{ needs.e2e.result }}", browser)
         self.assertIn("needs: [source, test, e2e, browser, quality]", workflow)

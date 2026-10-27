@@ -1032,8 +1032,10 @@ version and digest in `scripts/browser_environment.json`; ordinary matrix jobs
 pull that image and install no browser OS packages. The runner checks the locked
 package and installed browser revisions before tests. The required `Browser
 checks` aggregate rejects failed/missing shards and incomplete or duplicate
-selection evidence. Summaries are uploaded separately from failure reports;
-authentication remains in private temporary storage.
+selection evidence. Summaries are scoped to the GitHub run attempt; rerun all
+jobs to supply a complete matrix rather than rerunning only failed jobs.
+Summaries are uploaded separately from failure reports; authentication remains
+in private temporary storage.
 
 Prepared browser execution uses Linux host networking. Windows keeps the native
 browser path above. On a Linux host, pull the pinned image, then pass it explicitly:
