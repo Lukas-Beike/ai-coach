@@ -576,18 +576,6 @@ class DuplicateEnvironmentCase(StorageCase):
     GARMIN = "i-garmin-dup"
     KEYS = ("canonical_id", "duplicate_id", "snapshot_synced_at")
 
-    def pair(self) -> list[dict[str, Any]]:
-        base = {
-            **_activity(self.WAHOO, "2026-11-10T07:00:00"),
-            "type": "Ride",
-            "moving_time": 3600,
-            "distance": 30000.0,
-        }
-        return [
-            {**base, "source": "Wahoo"},
-            {**base, "id": self.GARMIN, "source": "Garmin", "moving_time": 3580},
-        ]
-
     def inspector(self, env: Environment, serving: Any = None) -> DuplicateInspector:
         return DuplicateInspector(
             env.manager, CanonicalTableReader(), lambda: UTC, serving or env.selector
@@ -603,6 +591,25 @@ class DuplicateEnvironmentCase(StorageCase):
         return {key: pair[key] for key in self.KEYS}
 
 
+def duplicate_pair() -> list[dict[str, Any]]:
+    """Return the Wahoo ride and its Garmin copy as Intervals.icu activities."""
+    base = {
+        **_activity(DuplicateEnvironmentCase.WAHOO, "2026-11-10T07:00:00"),
+        "type": "Ride",
+        "moving_time": 3600,
+        "distance": 30000.0,
+    }
+    return [
+        {**base, "source": "Wahoo"},
+        {
+            **base,
+            "id": DuplicateEnvironmentCase.GARMIN,
+            "source": "Garmin",
+            "moving_time": 3580,
+        },
+    ]
+
+
 class LegacyStateDuplicateTests(DuplicateEnvironmentCase):
     """Duplicate deletes are offered only while the canonical tables serve reads.
 
@@ -612,7 +619,7 @@ class LegacyStateDuplicateTests(DuplicateEnvironmentCase):
 
     def legacy_environment(self) -> Environment:
         env = self.environment(tables=False)
-        env.sync(self.pair(), days=ALL_DAYS, day=FIRST_DAY)
+        env.sync(duplicate_pair(), days=ALL_DAYS, day=FIRST_DAY)
         with env.manager.reader() as db:
             self.assertFalse(env.selector.serves_tables(db))
         return env
@@ -663,7 +670,7 @@ class LegacyStateDuplicateTests(DuplicateEnvironmentCase):
         self.assertEqual(env.rows(copy, (self.GARMIN,))[0]["state"], "deleted")
 
         # The snapshot is unchanged, so the next incremental sync ingests the copy.
-        env.sync(self.pair(), days=ALL_DAYS, day=SECOND_DAY)
+        env.sync(duplicate_pair(), days=ALL_DAYS, day=SECOND_DAY)
         self.assertEqual(env.rows(copy, (self.GARMIN,))[0]["state"], "active")
 
         inspector = self.inspector(env)
@@ -690,14 +697,14 @@ class DeletedCopyMergeBaseTests(DuplicateEnvironmentCase):
         """Tables serve, but a rejected row keeps the activity sections in the snapshot."""
         env = self.environment(tables=True)
         unmapped = {**_activities()[0], "id": UNMAPPED_ID, "start_date_local": None}
-        env.sync([*self.pair(), unmapped], days=ALL_DAYS, day=FIRST_DAY)
+        env.sync([*duplicate_pair(), unmapped], days=ALL_DAYS, day=FIRST_DAY)
         self.assert_full(env.stored(), 3)
         return env
 
     def prebackfill_environment(self) -> Environment:
         """The snapshot was stored in full before the backfill finished."""
         env = self.environment(tables=False)
-        env.sync(self.pair(), days=ALL_DAYS, day=FIRST_DAY)
+        env.sync(duplicate_pair(), days=ALL_DAYS, day=FIRST_DAY)
         with env.manager.unit_of_work() as db:
             env.key_values.set(db, STATE_KEY, json.dumps({"completed_once": True}))
         return env
@@ -717,7 +724,7 @@ class DeletedCopyMergeBaseTests(DuplicateEnvironmentCase):
         self, env: Environment, confirmation: dict[str, Any]
     ) -> None:
         # The provider window of the incremental sync holds only the Wahoo ride.
-        wahoo = self.pair()[0]
+        wahoo = duplicate_pair()[0]
         env.sync([wahoo], days=7, day=SECOND_DAY)
 
         self.assertEqual(
@@ -754,7 +761,7 @@ class DeletedCopyMergeBaseTests(DuplicateEnvironmentCase):
         self.delete_copy(env)
 
         # The copy still exists remotely, so a fresh fetch legitimately revives it.
-        env.sync(self.pair(), days=7, day=SECOND_DAY)
+        env.sync(duplicate_pair(), days=7, day=SECOND_DAY)
 
         self.assertEqual(
             env.rows(self.COPY_STATE, (self.GARMIN,))[0]["state"], "active"
@@ -763,7 +770,7 @@ class DeletedCopyMergeBaseTests(DuplicateEnvironmentCase):
     def test_a_full_window_sync_still_tombstones_missing_activities(self) -> None:
         env = self.prebackfill_environment()
 
-        env.sync([self.pair()[0]], days=ALL_DAYS, day=SECOND_DAY)
+        env.sync([duplicate_pair()[0]], days=ALL_DAYS, day=SECOND_DAY)
 
         self.assertEqual(
             env.rows(self.COPY_STATE, (self.GARMIN,))[0]["state"], "deleted"
