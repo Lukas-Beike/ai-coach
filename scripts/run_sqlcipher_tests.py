@@ -67,6 +67,34 @@ def hidden():
     return {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 
 
+def terminate_tree(process):
+    """Stop only this supervised process tree, then reap the direct child."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+            timeout=15,
+            **hidden(),
+        )
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        # The parent may exit before a descendant that ignores SIGTERM.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait(timeout=10)
+
+
 def source_identity(root):
     # Hash only declared source inputs, including untracked source; never secrets.
     allowed = (*INPUTS, "garmin-login.py", ".dockerignore")
@@ -202,8 +230,13 @@ class Supervisor:
     def spawn(self, command, name):
         log = (self.output / f"{name}.log").open("wb")
         try:
+            options = hidden()
+            if os.name == "nt":
+                options["creationflags"] |= subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                options["start_new_session"] = True
             process = subprocess.Popen(
-                command, cwd=self.root, stdout=log, stderr=subprocess.STDOUT, **hidden()
+                command, cwd=self.root, stdout=log, stderr=subprocess.STDOUT, **options
             )
         finally:
             log.close()
@@ -337,12 +370,7 @@ class Supervisor:
         for process in self.processes:
             try:
                 if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=10)
+                    terminate_tree(process)
             except OSError, subprocess.SubprocessError:
                 errors.append("child could not be reaped; container cleanup deferred")
         if errors:

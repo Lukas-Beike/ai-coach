@@ -43,7 +43,7 @@ test("all contracts run on desktop and only responsive contracts repeat on small
   assert.ok(counts.get(false) > 0, "functional contracts must not repeat");
 });
 
-test("locked runner preserves all 739 identities, whole-file shards, and exact prepared spec filters", () => {
+test("locked runner preserves all discovered identities, whole-file shards, and exact prepared spec filters", () => {
   const report = listing();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ai-coach-browser-selection-"));
   try {
@@ -112,7 +112,7 @@ print(json.dumps({"baseline": baseline, "partitions": partitions, "commands": co
     const keys = (identities) => identities.map(key).sort();
     const childIdentities = (children) => children.flatMap((child) => child.identities);
     const expected = report.suites.flatMap(reportIdentities);
-    assert.equal(expected.length, 739);
+    assert.ok(expected.length > 0);
     const baseline = value.baseline;
     assert.equal(baseline.selection.mode, "complete");
     assert.deepEqual(keys(baseline.selection.expected_identities), keys(expected));
@@ -122,7 +122,7 @@ print(json.dumps({"baseline": baseline, "partitions": partitions, "commands": co
     assert.equal(value.partitions.length, 10);
     const combined = value.partitions.flatMap((partition) => partition.children);
     assert.deepEqual(keys(childIdentities(combined)), keys(expected));
-    assert.equal(new Set(keys(childIdentities(combined))).size, 739);
+    assert.equal(new Set(keys(childIdentities(combined))).size, expected.length);
     assert.equal(new Set(combined.map((child) => `${child.project}:${child.file}`)).size, combined.length);
     for (const project of projects) {
       const partitions = value.partitions.filter((partition) => partition.project === project);

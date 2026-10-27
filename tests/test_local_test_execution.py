@@ -3,9 +3,13 @@
 import contextlib
 import io
 import json
+import os
+import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -256,18 +260,20 @@ class SupervisorTests(unittest.TestCase):
     def test_cleanup_reaps_before_owned_removal_and_never_removes_other_owner(self):
         process = mock.Mock()
         process.poll.return_value = None
-        process.wait.side_effect = [subprocess.TimeoutExpired("synthetic", 10), 0]
         self.owner.processes = [process]
         cidfile = self.owner.output / "owned.cid"
         cidfile.write_text("a" * 64)
         self.owner.containers = [cidfile]
 
         def inspected(*args, **kwargs):
-            process.kill.assert_called_once()
-            self.assertEqual(process.wait.call_count, 2)
+            stop.assert_called_once_with(process)
+            process.wait.assert_called_once()
             return b"unrelated-run"
 
         with (
+            mock.patch.object(
+                local, "terminate_tree", side_effect=lambda child: child.wait()
+            ) as stop,
             mock.patch.object(local.subprocess, "check_output", side_effect=inspected),
             mock.patch.object(local.subprocess, "run") as remove,
         ):
@@ -325,11 +331,70 @@ class SupervisorTests(unittest.TestCase):
     def test_unreaped_child_defers_all_container_removal(self):
         child = mock.Mock()
         child.poll.return_value = None
-        child.terminate.side_effect = OSError("synthetic termination failure")
         self.owner.processes = [child]
-        with mock.patch.object(local.subprocess, "check_output") as inspect:
+        with (
+            mock.patch.object(
+                local,
+                "terminate_tree",
+                side_effect=OSError("synthetic termination failure"),
+            ),
+            mock.patch.object(local.subprocess, "check_output") as inspect,
+        ):
             self.assertFalse(self.owner.cleanup())
             inspect.assert_not_called()
+
+    def test_cancellation_stops_a_real_owned_descendant(self):
+        ready = self.root / "descendant.json"
+        descendant = (
+            "import json,os,socket,sys;from pathlib import Path;"
+            "s=socket.socket();s.bind(('127.0.0.1',0));s.listen();"
+            "p=Path(sys.argv[1]);q=p.with_suffix('.tmp');"
+            "q.write_text(json.dumps({'pid':os.getpid(),'port':s.getsockname()[1]}));q.replace(p);"
+            "\nwhile True:\n c,_=s.accept();c.close()"
+        )
+        parent = (
+            "import subprocess,sys,time;"
+            f"subprocess.Popen([sys.executable,'-c',{descendant!r},{str(ready)!r}]);"
+            "time.sleep(120)"
+        )
+        child = self.owner.spawn([sys.executable, "-c", parent], "tree")
+        observed = None
+        cleaned = False
+        try:
+            deadline = time.monotonic() + 10
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(ready.exists(), "owned descendant reached readiness")
+            observed = json.loads(ready.read_text())
+            with socket.create_connection(("127.0.0.1", observed["port"]), timeout=1):
+                pass
+            cleaned = self.owner.cleanup()
+            self.assertTrue(cleaned)
+            self.assertIsNotNone(child.poll())
+            with (
+                self.assertRaises(OSError),
+                socket.create_connection(("127.0.0.1", observed["port"]), timeout=1),
+            ):
+                pass
+        finally:
+            if child.poll() is None:
+                local.terminate_tree(child)
+            # Failure cleanup is limited to this exact observed synthetic child.
+            if observed and not cleaned:
+                if os.name == "nt":
+                    subprocess.run(
+                        ["taskkill", "/PID", str(observed["pid"]), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=15,
+                        check=False,
+                        **local.hidden(),
+                    )
+                else:
+                    try:
+                        os.kill(observed["pid"], signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_windows_children_are_hidden(self):
         with (
