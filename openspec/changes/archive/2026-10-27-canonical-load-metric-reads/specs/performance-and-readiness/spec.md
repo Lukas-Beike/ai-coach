@@ -16,14 +16,18 @@ The system SHALL compose current body, cycling/running thresholds, VO2max, maxim
 - **THEN** `cycling_eftp_watts` is the ride eFTP observation of the latest Intervals sync's athlete record, else the ride eFTP observation of the latest wellness day, else the latest ride activity's eFTP, with the unchanged Intervals source label; the snapshot's athlete `sport_settings` and wellness `sportInfo` are not read for it.
 
 #### Scenario: No canonical eFTP input
-- **WHEN** no canonical current inputs exist, there is no usable wellness day, or no athlete-record or wellness-day ride eFTP observation is stored
+- **WHEN** no canonical current inputs exist, or no athlete-record or wellness-day ride eFTP observation is stored
 - **THEN** the athlete-record and wellness steps contribute nothing and only the latest ride activity's eFTP can supply the value; otherwise it remains unknown.
+
+#### Scenario: Athlete eFTP without a wellness day
+- **WHEN** the latest Intervals sync's athlete record stores a ride eFTP but there is no usable wellness day
+- **THEN** `cycling_eftp_watts` is that athlete-record eFTP; the wellness-day eFTP step contributes nothing, and the thresholds, VO2max and weight keep the behaviour of the no-wellness-day path.
 
 #### Scenario: Run and other sports do not feed cycling eFTP
 - **WHEN** Run and Ride eFTP observations coexist
 - **THEN** only ride-scoped observations feed `cycling_eftp_watts`.
 
-Evidence: `backend/performance/current_metrics.py:current_performance_metrics`, `backend/performance/canonical_current.py:read_current_inputs`; `tests/test_performance_current_metrics.py:test_garmin_priority_and_metric_shape`, `tests/test_performance_current_metrics.py:test_intervals_wellness_athlete_profile_fallbacks_and_eftp`, `tests/test_performance_current_metrics.py:test_invalid_values_and_inputs_are_not_mutated`. The canonical eFTP scenarios are verified by `tests/test_performance_canonical_current_metrics.py:CanonicalEftpInputTests`, `tests/test_performance_current_metrics.py:test_eftp_follows_the_canonical_chain_then_the_latest_ride_activity`, `tests/test_characterization_current_metrics.py:test_eftp_athlete_then_wellness_then_latest_ride_activity` and `tests/test_performance_canonical_load_metrics.py:EftpTests`.
+Evidence: `backend/performance/current_metrics.py:current_performance_metrics`, `backend/performance/canonical_current.py:read_current_inputs`; `tests/test_performance_current_metrics.py:test_garmin_priority_and_metric_shape`, `tests/test_performance_current_metrics.py:test_intervals_wellness_athlete_profile_fallbacks_and_eftp`, `tests/test_performance_current_metrics.py:test_invalid_values_and_inputs_are_not_mutated`. The canonical eFTP scenarios are verified by `tests/test_performance_canonical_current_metrics.py:CanonicalEftpInputTests`, `tests/test_performance_current_metrics.py:test_eftp_follows_the_canonical_chain_then_the_latest_ride_activity`, `tests/test_characterization_current_metrics.py:test_eftp_athlete_then_wellness_then_latest_ride_activity` and `tests/test_performance_canonical_load_metrics.py:EftpTests` (including `test_the_athlete_record_eftp_needs_no_wellness_day`).
 
 ### Requirement: Load rollups and actual-load reconstruction
 The system SHALL calculate explicit current/previous 7- and 30-day completed-activity rollups and supported actual ATL reconstruction using known completed loads. It SHALL sum multiple known loads on the same day, decay the reconstructed series across gaps using its implemented model, and keep Intervals CTL/ATL/form separate from Garmin measured acute load. Activity-derived load SHALL not be presented as Garmin's device-reported acute load.

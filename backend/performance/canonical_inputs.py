@@ -28,8 +28,8 @@ the daily totals (steps, floors, energy) of the recent days from
 
 Without a usable wellness day the inputs still carry the activities, the
 wellness rows and the recovery observations, and no load or Intervals threshold; a
-stored Wahoo
-cycling FTP or weight fallback still applies. Without a canonical
+stored Wahoo cycling FTP or weight fallback and the athlete record's eFTP still
+apply. Without a canonical
 activity reader and without wellness rows there are no inputs, and the caller keeps
 the legacy values.
 

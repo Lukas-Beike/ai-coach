@@ -203,7 +203,7 @@ def recovery_only_inputs(
         FilteringReader(tuple(mapped.records)),
         None,
         snapshot,
-        activity_reader=_NoActivityRows(),
+        activity_reader=NoActivityRows(),
         as_of=RETRIEVED.date(),
     )
     if full is None:
@@ -231,7 +231,7 @@ def recovery_only_inputs(
     )
 
 
-class _NoActivityRows:
+class NoActivityRows:
     """An activity row reader without rows: the activities stay on the snapshot."""
 
     def activity_rows(self, db: Any, **bounds: Any) -> tuple[dict[str, Any], ...]:

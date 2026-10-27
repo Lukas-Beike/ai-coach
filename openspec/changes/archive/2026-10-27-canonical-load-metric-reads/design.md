@@ -54,7 +54,7 @@ Alternative considered: overlay `FORM` into the canonical wellness rows through 
 
 `read_current_inputs` includes both in its "all empty" check. `current_metrics.current_performance_metrics` then computes the current value as `athlete_eftp or wellness_eftp or latest ride activity eFTP`, with the unchanged source label `PROVIDER_INTERVALS_NAME`. The mapper already drops zero values, which keeps the legacy "zero means unset" behaviour. The latest-ride-activity step still reads the canonical activity rows (`ESTIMATED_FTP_ALIASES`) and is unchanged. The snapshot `athlete.sport_settings` and the wellness `sportInfo` are no longer read for eFTP; `_sport_setting` and `_sport_info_setting` keep serving FTP, LTHR, VO2max and the other fallbacks.
 
-Without `CanonicalCurrentInputs` (no Intervals sync marker and no Wahoo value) the first two steps are absent and only the activity step applies. As for the Intervals thresholds, the athlete-record step needs a usable wellness day (`read_performance_inputs` reads the Intervals current inputs only then); an athlete without any wellness day has no athlete eFTP.
+Without `CanonicalCurrentInputs` (no Intervals sync marker and no Wahoo value) the first two steps are absent and only the activity step applies. Without a usable wellness day `read_performance_inputs` reads the Intervals thresholds, VO2max and weight not at all (unchanged), but it still reads the latest sync's athlete-record ride eFTP (`read_wahoo_fallbacks`), so an athlete-only snapshot keeps its eFTP; only the wellness-day eFTP step needs that day.
 
 The current value is not bounded (as today); the mapper bound is 0-2500 W with zero unset.
 
