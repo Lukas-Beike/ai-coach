@@ -1,6 +1,7 @@
 """Synthetic local-runner lifecycle and evidence checks; Docker is always mocked."""
 
 import contextlib
+import ctypes
 import io
 import json
 import os
@@ -344,21 +345,29 @@ class SupervisorTests(unittest.TestCase):
             inspect.assert_not_called()
 
     def test_cancellation_stops_a_real_owned_descendant(self):
+        self.check_real_owned_descendant(parent_exits=False)
+
+    def test_cleanup_stops_descendants_after_the_parent_exits(self):
+        self.check_real_owned_descendant(parent_exits=True)
+
+    def check_real_owned_descendant(self, parent_exits):
         ready = self.root / "descendant.json"
         descendant = (
             "import json,os,socket,sys;from pathlib import Path;"
             "s=socket.socket();s.bind(('127.0.0.1',0));s.listen();"
             "p=Path(sys.argv[1]);q=p.with_suffix('.tmp');"
             "q.write_text(json.dumps({'pid':os.getpid(),'port':s.getsockname()[1]}));q.replace(p);"
-            "\nwhile True:\n c,_=s.accept();c.close()"
+            "\nwhile True:\n c,_=s.accept();c.send(b'x');c.close()"
         )
         parent = (
             "import subprocess,sys,time;"
             f"subprocess.Popen([sys.executable,'-c',{descendant!r},{str(ready)!r}]);"
-            "time.sleep(120)"
+            + ("time.sleep(0.4)" if parent_exits else "time.sleep(120)")
         )
         child = self.owner.spawn([sys.executable, "-c", parent], "tree")
         observed = None
+        descendant_handle = None
+        kernel = None
         cleaned = False
         try:
             deadline = time.monotonic() + 10
@@ -366,17 +375,43 @@ class SupervisorTests(unittest.TestCase):
                 time.sleep(0.02)
             self.assertTrue(ready.exists(), "owned descendant reached readiness")
             observed = json.loads(ready.read_text())
-            with socket.create_connection(("127.0.0.1", observed["port"]), timeout=1):
-                pass
+            if os.name == "nt":
+                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel.OpenProcess.argtypes = [
+                    ctypes.c_uint32,
+                    ctypes.c_int,
+                    ctypes.c_uint32,
+                ]
+                kernel.OpenProcess.restype = ctypes.c_void_p
+                kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+                kernel.WaitForSingleObject.restype = ctypes.c_uint32
+                kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+                descendant_handle = kernel.OpenProcess(0x100000, False, observed["pid"])
+                self.assertTrue(descendant_handle)
+            if parent_exits:
+                self.assertEqual(child.wait(timeout=10), 0)
+            with socket.create_connection(
+                ("127.0.0.1", observed["port"]), timeout=1
+            ) as connection:
+                self.assertEqual(connection.recv(1), b"x")
             cleaned = self.owner.cleanup()
             self.assertTrue(cleaned)
             self.assertIsNotNone(child.poll())
-            with (
-                self.assertRaises(OSError),
-                socket.create_connection(("127.0.0.1", observed["port"]), timeout=1),
-            ):
-                pass
+            if kernel is not None:
+                self.assertEqual(kernel.WaitForSingleObject(descendant_handle, 5000), 0)
+            else:
+                try:
+                    with socket.create_connection(
+                        ("127.0.0.1", observed["port"]), timeout=1
+                    ) as connection:
+                        self.assertNotEqual(connection.recv(1), b"x")
+                except OSError:
+                    pass
         finally:
+            if kernel is not None and descendant_handle:
+                kernel.CloseHandle(descendant_handle)
+            if not cleaned:
+                self.owner.cleanup()
             if child.poll() is None:
                 local.terminate_tree(child)
             # Failure cleanup is limited to this exact observed synthetic child.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -65,6 +66,126 @@ def atomic_json(path, value):
 
 def hidden():
     return {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
+WINDOWS_JOB_LAUNCHER = """import ctypes,subprocess,sys
+k=ctypes.WinDLL('kernel32',use_last_error=True)
+k.OpenJobObjectW.argtypes=[ctypes.c_uint32,ctypes.c_int,ctypes.c_wchar_p]
+k.OpenJobObjectW.restype=ctypes.c_void_p
+k.AssignProcessToJobObject.argtypes=[ctypes.c_void_p,ctypes.c_void_p]
+k.CloseHandle.argtypes=[ctypes.c_void_p]
+h=k.OpenJobObjectW(1,False,sys.argv[1])
+if not h: raise ctypes.WinError(ctypes.get_last_error())
+try:
+ if not k.AssignProcessToJobObject(h,ctypes.c_void_p(-1)):
+  raise ctypes.WinError(ctypes.get_last_error())
+finally: k.CloseHandle(h)
+sys.exit(subprocess.call(sys.argv[2:]))
+"""
+
+
+class WindowsJob:
+    def __init__(self):
+        self.name = "Local\\ai-coach-tests-" + uuid.uuid4().hex
+        self.api = ctypes.WinDLL("kernel32", use_last_error=True)
+        for name, arguments, result in (
+            ("CreateJobObjectW", [ctypes.c_void_p, ctypes.c_wchar_p], ctypes.c_void_p),
+            (
+                "SetInformationJobObject",
+                [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32],
+                ctypes.c_int,
+            ),
+            (
+                "QueryInformationJobObject",
+                [
+                    ctypes.c_void_p,
+                    ctypes.c_int,
+                    ctypes.c_void_p,
+                    ctypes.c_uint32,
+                    ctypes.c_void_p,
+                ],
+                ctypes.c_int,
+            ),
+            ("TerminateJobObject", [ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
+            ("CloseHandle", [ctypes.c_void_p], ctypes.c_int),
+        ):
+            function = getattr(self.api, name)
+            function.argtypes, function.restype = arguments, result
+        self.handle = self.api.CreateJobObjectW(None, self.name)
+        if not self.handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        class BasicLimit(ctypes.Structure):
+            _fields_ = [
+                ("process_time", ctypes.c_int64),
+                ("job_time", ctypes.c_int64),
+                ("flags", ctypes.c_uint32),
+                ("min_working", ctypes.c_size_t),
+                ("max_working", ctypes.c_size_t),
+                ("active_limit", ctypes.c_uint32),
+                ("affinity", ctypes.c_size_t),
+                ("priority", ctypes.c_uint32),
+                ("scheduling", ctypes.c_uint32),
+            ]
+
+        class Limits(ctypes.Structure):
+            _fields_ = [
+                ("basic", BasicLimit),
+                ("io", ctypes.c_uint64 * 6),
+                ("process_memory", ctypes.c_size_t),
+                ("job_memory", ctypes.c_size_t),
+                ("peak_process", ctypes.c_size_t),
+                ("peak_job", ctypes.c_size_t),
+            ]
+
+        limits = Limits()
+        limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not self.api.SetInformationJobObject(
+            self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)
+        ):
+            error = ctypes.WinError(ctypes.get_last_error())
+            self.close()
+            raise error
+
+    def close(self):
+        if self.handle:
+            if not self.api.CloseHandle(self.handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+            self.handle = None
+
+    def terminate(self):
+        if not self.handle:
+            return
+        if not self.api.TerminateJobObject(self.handle, 1):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        # JOBOBJECT_BASIC_ACCOUNTING_INFORMATION has four int64 and four DWORD fields.
+        class Accounting(ctypes.Structure):
+            _fields_ = [
+                ("times", ctypes.c_int64 * 4),
+                ("faults", ctypes.c_uint32),
+                ("total", ctypes.c_uint32),
+                ("active", ctypes.c_uint32),
+                ("terminated", ctypes.c_uint32),
+            ]
+
+        deadline = time.monotonic() + 10
+        while True:
+            accounting = Accounting()
+            if not self.api.QueryInformationJobObject(
+                self.handle,
+                1,
+                ctypes.byref(accounting),
+                ctypes.sizeof(accounting),
+                None,
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not accounting.active:
+                self.close()
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Owned process job did not stop")
+            time.sleep(0.02)
 
 
 def terminate_tree(process):
@@ -206,6 +327,7 @@ class Supervisor:
         self.output = base.resolve() / self.run_id
         self.output.mkdir()
         self.processes = []
+        self.jobs = {}
         self.containers = []
         self.summary = {
             "version": 1,
@@ -229,19 +351,39 @@ class Supervisor:
 
     def spawn(self, command, name):
         log = (self.output / f"{name}.log").open("wb")
+        job, process = None, None
         try:
             options = hidden()
             if os.name == "nt":
+                job = WindowsJob()
+                # The launcher joins before starting the payload: no assignment race.
+                command = [
+                    sys.executable,
+                    "-c",
+                    WINDOWS_JOB_LAUNCHER,
+                    job.name,
+                    *command,
+                ]
                 options["creationflags"] |= subprocess.CREATE_NEW_PROCESS_GROUP
             else:
                 options["start_new_session"] = True
             process = subprocess.Popen(
                 command, cwd=self.root, stdout=log, stderr=subprocess.STDOUT, **options
             )
+            self.processes.append(process)
+            if job is not None:
+                self.jobs[process] = job
+            return process
+        except BaseException:
+            if job is not None:
+                job.terminate()
+            elif process is not None:
+                terminate_tree(process)
+            if process is not None:
+                process.wait(timeout=10)
+            raise
         finally:
             log.close()
-        self.processes.append(process)
-        return process
 
     def command(self, command, name):
         started = time.time()
@@ -369,7 +511,13 @@ class Supervisor:
         errors = []
         for process in self.processes:
             try:
-                if process.poll() is None:
+                job = self.jobs.get(process)
+                if job is not None:
+                    # Keep job ownership even after the direct child has exited.
+                    job.terminate()
+                    process.wait(timeout=10)
+                    del self.jobs[process]
+                elif os.name != "nt" or process.poll() is None:
                     terminate_tree(process)
             except OSError, subprocess.SubprocessError:
                 errors.append("child could not be reaped; container cleanup deferred")
