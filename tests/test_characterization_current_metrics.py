@@ -6,11 +6,17 @@ asserted because it is not part of the precedence contract.
 """
 
 import unittest
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
+from backend.canonical.vocabulary import MetricKind
+from backend.performance.canonical_current import CanonicalCurrentInputs
 from backend.performance.current_metrics import current_performance_metrics
 from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.providers.intervals_wellness_mapping import (
+    map_intervals_athlete_thresholds,
+    map_intervals_wellness,
+)
 
 TODAY = date(2026, 5, 4)
 GARMIN = "Garmin Connect"
@@ -52,6 +58,46 @@ def _current(
         snapshot or _snapshot(),
         profile or {},
         garmin if garmin is not None else _garmin(),
+    )
+
+
+def _eftp_inputs(
+    *, athlete: float | None = None, wellness: float | None = None
+) -> CanonicalCurrentInputs:
+    """Canonical current inputs with ride eFTP observations from the real mappers."""
+    retrieved = datetime(2026, 5, 4, 8, 0, tzinfo=UTC)
+    athlete_eftp = wellness_eftp = None
+    if athlete is not None:
+        records = map_intervals_athlete_thresholds(
+            {
+                "id": "athlete-1",
+                "sportSettings": [{"types": ["Ride"], "eftp": athlete}],
+            },
+            observed_on=TODAY,
+            retrieved_at=retrieved,
+        ).records
+        athlete_eftp = next(r for r in records if r.kind is MetricKind.EFTP)
+    if wellness is not None:
+        records = map_intervals_wellness(
+            [
+                {
+                    "id": "2026-05-03",
+                    "sportInfo": [{"types": ["Ride"], "eftp": wellness}],
+                }
+            ],
+            retrieved_at=retrieved,
+        ).records
+        wellness_eftp = next(r for r in records if r.kind is MetricKind.EFTP)
+    return CanonicalCurrentInputs(
+        bike_threshold_hr=(),
+        run_threshold_hr=(),
+        athlete_threshold_hr=None,
+        cycling_vo2max=(),
+        running_vo2max=(),
+        wellness_weight=None,
+        athlete_weight=None,
+        athlete_eftp=athlete_eftp,
+        wellness_eftp=wellness_eftp,
     )
 
 
@@ -590,25 +636,32 @@ class CurrentMaxHrTests(unittest.TestCase):
 
 
 class CurrentEftpTests(unittest.TestCase):
-    def test_eftp_setting_then_wellness_then_latest_ride_activity(self) -> None:
+    def test_eftp_athlete_then_wellness_then_latest_ride_activity(self) -> None:
+        # Intended difference (#1412): the athlete setting and the wellness
+        # sportInfo are read as canonical observations (the real mappers produce
+        # them), not from the snapshot, which is ignored for eFTP.
         activity = {"type": "Ride", "start_date_local": "2026-05-03", "icu_eftp": 270}
         wellness = [
             _wellness("2026-05-03", sport_info=[{"types": ["Ride"], "eFTP": 265}])
         ]
-        result = _current(
-            _snapshot(
-                athlete={"sport_settings": [_setting("Ride", eFTP=262)]},
-                wellness=wellness,
-                activities=[activity],
-            )
+        snapshot = _snapshot(
+            athlete={"sport_settings": [_setting("Ride", eFTP=262)]},
+            wellness=wellness,
+            activities=[activity],
         )
-        self.assertEqual(_pair(result["cycling_eftp_watts"]), (262, INTERVALS))
-
-        result = _current(_snapshot(wellness=wellness, activities=[activity]))
-        self.assertEqual(_pair(result["cycling_eftp_watts"]), (265, INTERVALS))
-
-        result = _current(_snapshot(activities=[activity]))
-        self.assertEqual(_pair(result["cycling_eftp_watts"]), (270, INTERVALS))
+        for name, canonical, expected in (
+            ("athlete first", _eftp_inputs(athlete=262, wellness=265), 262),
+            ("then wellness", _eftp_inputs(wellness=265), 265),
+            ("then latest ride", _eftp_inputs(), 270),
+            ("snapshot is not read", None, 270),
+        ):
+            with self.subTest(name):
+                result = current_performance_metrics(
+                    snapshot, {}, _garmin(), canonical=canonical
+                )
+                self.assertEqual(
+                    _pair(result["cycling_eftp_watts"]), (expected, INTERVALS)
+                )
 
     def test_latest_ride_is_chosen_by_start_date_not_list_order(self) -> None:
         activities = [

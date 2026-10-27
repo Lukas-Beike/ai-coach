@@ -380,6 +380,27 @@ class ObservationStoreTests(StoreFixture):
         )
         self.assertEqual((value, details, updated_at, count), (80.0, "{}", LATER, 1))
 
+    def test_two_athlete_eftp_observations_of_one_sport_keep_the_last_written(
+        self,
+    ) -> None:
+        # Known deviation (#1412): two ride sport settings of one athlete record
+        # share one key, so the store keeps the last one; the snapshot reader took
+        # the first matching setting. The mapper is unchanged by that work.
+        first = observation(
+            250.0, kind=MetricKind.EFTP, sport=Sport.RIDE, source_record_id="i12345"
+        )
+        last = replace(first, value=replace(first.value, value=262.0))
+        self.assertEqual(
+            canonical_store.observation_natural_key(first),
+            canonical_store.observation_natural_key(last),
+        )
+        self.write(first)
+        self.write(last)
+        (value, count) = self.one(
+            "SELECT value, (SELECT COUNT(*) FROM observations) FROM observations"
+        )
+        self.assertEqual((value, count), (262.0, 1))
+
     def test_different_sport_or_day_is_a_different_observation(self) -> None:
         self.write(observation())
         self.write(observation(observed_on=date(2026, 10, 2)))

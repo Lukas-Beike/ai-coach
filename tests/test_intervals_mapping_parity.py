@@ -578,10 +578,11 @@ class ThresholdParityTests(unittest.TestCase):
             frozenset({"max_heartrate"}),
         )
 
-    def test_eftp_matches_legacy_cycling_eftp(self) -> None:
-        # Legacy reports Intervals' estimated FTP as cycling_eftp_watts.
+    def test_eftp_is_a_ride_observation_and_not_read_from_the_snapshot(self) -> None:
+        # The snapshot reader of cycling_eftp_watts was removed (#1412): the value
+        # is read from this observation, so the snapshot-only path reports none.
         result = map_thresholds(self.athlete)
-        self.assertEqual(self.legacy["cycling_eftp_watts"]["value"], 258)
+        self.assertIsNone(self.legacy["cycling_eftp_watts"]["value"])
         self.assertEqual(first_value(result, MetricKind.EFTP, sport=Sport.RIDE), 258)
 
     def test_zero_values_mean_unset_in_both_readers(self) -> None:

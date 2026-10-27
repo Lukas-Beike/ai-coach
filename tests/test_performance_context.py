@@ -105,7 +105,11 @@ class PerformanceContextTests(unittest.TestCase):
         )
         self.assertEqual(result["as_of"], snapshot["synced_at"])
         self.assertEqual(result["thresholds"]["icu_ftp"], 300)
-        self.assertEqual(result["current_load"]["tsb"], -6)
+        # Form and ramp rate come from canonical observations only (#1412): the
+        # row's tsb is a carrier field and is not read without canonical inputs.
+        self.assertIsNone(result["current_load"]["tsb"])
+        self.assertIsNone(result["current_load"]["rampRate"])
+        self.assertIsNone(result["current_load"]["rampRate_source"])
         self.assertEqual(
             result["rolling_training"]["last_7_days"]["training_load"], 110.0
         )

@@ -339,14 +339,22 @@ class CharacterizationLoadContextTests(unittest.TestCase):
     def test_missing_latest_wellness_yields_null_load_block(self) -> None:
         self.assertEqual(
             performance_load_context([], [], {}, TODAY)["load"],
-            {"id": None, "ctl": None, "atl": None, "tsb": None, "rampRate": None},
+            {
+                "id": None,
+                "ctl": None,
+                "atl": None,
+                "tsb": None,
+                "rampRate": None,
+                "rampRate_source": None,
+            },
         )
 
     def test_load_block_takes_ctl_and_atl_from_aliases_without_normalising(
         self,
     ) -> None:
-        # Quirk: ctl and atl come from the latest Intervals row (with aliases), raw
-        # values are passed through, and TSB is derived only from the plain keys.
+        # Quirk: ctl and atl come from the latest Intervals row (with aliases) and
+        # raw values are passed through. Form and ramp rate no longer come from the
+        # row (#1412): without canonical inputs they are unknown.
         result = performance_load_context(
             [],
             [],
@@ -365,7 +373,8 @@ class CharacterizationLoadContextTests(unittest.TestCase):
                 "ctl": "55",
                 "atl": 65,
                 "tsb": None,
-                "rampRate": "1,5",
+                "rampRate": None,
+                "rampRate_source": None,
             },
         )
 
@@ -376,17 +385,18 @@ class CharacterizationLoadContextTests(unittest.TestCase):
         self.assertEqual(result["load"]["ctl"], 55)
         self.assertEqual(result["load"]["atl"], 0)
 
-    def test_tsb_prefers_direct_fields_then_derives_from_plain_ctl_and_atl(
-        self,
-    ) -> None:
-        derived = performance_load_context(
-            [], [], {"ctl": 50, "atl": 60, "tsb": ""}, TODAY
-        )
-        direct = performance_load_context(
-            [], [], {"ctl": 50, "atl": 60, "freshness": 4}, TODAY
-        )
-        self.assertEqual(derived["load"]["tsb"], -10.0)
-        self.assertEqual(direct["load"]["tsb"], 4)
+    def test_carrier_form_fields_are_not_read_without_canonical_inputs(self) -> None:
+        # Intended difference (#1412): the row's tsb/form/freshness and a derived
+        # CTL minus ATL are gone; form is read from canonical observations only.
+        for row in (
+            {"ctl": 50, "atl": 60, "tsb": ""},
+            {"ctl": 50, "atl": 60, "freshness": 4},
+            {"ctl": 50, "atl": 60, "tsb": 3, "form": 2},
+        ):
+            with self.subTest(row=row):
+                self.assertIsNone(
+                    performance_load_context([], [], row, TODAY)["load"]["tsb"]
+                )
 
     def test_actual_atl_current_falls_back_to_a_stale_row_while_average_is_empty(
         self,

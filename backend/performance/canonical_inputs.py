@@ -12,6 +12,13 @@ wellness day, which is the row the legacy load context reads. The read window sp
 the wellness rows and never extends past the latest day, so older or newer
 canonical history cannot change the current load.
 
+Form, ramp rate and eFTP: the Intervals.icu wellness-day form and ride eFTP
+observations are read as day series (``form_by_day``, ``eftp_by_day``), the only
+source of those values. The ramp rate is the latest wellness day's CTL minus the CTL
+of exactly seven days earlier, derived from the wellness-day CTL observations; it is
+None when either day is missing. The current eFTP of the sport thresholds comes from
+``backend.performance.canonical_current``.
+
 Current sport thresholds and VO2max come from the latest Intervals sync, see
 ``backend.performance.canonical_current``. The recovery observations (sleep, resting
 HR, HRV, readiness) come from ``backend.performance.canonical_recovery`` and are read
@@ -21,8 +28,8 @@ the daily totals (steps, floors, energy) of the recent days from
 
 Without a usable wellness day the inputs still carry the activities, the
 wellness rows and the recovery observations, and no load or Intervals threshold; a
-stored Wahoo
-cycling FTP or weight fallback still applies. Without a canonical
+stored Wahoo cycling FTP or weight fallback and the athlete record's eFTP still
+apply. Without a canonical
 activity reader and without wellness rows there are no inputs, and the caller keeps
 the legacy values.
 
@@ -84,6 +91,11 @@ class CanonicalPerformanceInputs:
     ``garmin`` holds the Garmin performance values and ``daily_health`` the daily
     totals of the last ``DAILY_HEALTH_DAYS`` days by ISO date; both are None when
     they were not read.
+
+    ``form_by_day`` and ``eftp_by_day`` are the Intervals.icu wellness-day form and
+    ride eFTP observations by day; they are the only source of those values.
+    ``ramp_rate`` is the latest wellness day's CTL minus the CTL of exactly seven
+    days earlier, rounded to two decimals, or None when either day is missing.
     """
 
     wellness_day: date | None
@@ -97,6 +109,9 @@ class CanonicalPerformanceInputs:
     history_wellness_rows: tuple[dict[str, Any], ...] | None = None
     garmin: GarminCanonicalMetrics | None = None
     daily_health: Mapping[str, Mapping[str, Any]] | None = None
+    form_by_day: Mapping[date, float] | None = None
+    eftp_by_day: Mapping[date, float] | None = None
+    ramp_rate: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +138,8 @@ class CanonicalPerformanceSource:
 ACTIVITY_HISTORY_DAYS: Final = 365
 # Daily totals of the days before ``as_of`` that the 7-day averages read.
 DAILY_HEALTH_DAYS: Final = 7
+# The ramp rate compares the CTL of the latest wellness day with this many days before.
+RAMP_RATE_DAYS: Final = 7
 
 
 def snapshot_with_inputs(
@@ -314,6 +331,8 @@ class _CarriedRows:
     garmin: GarminCanonicalMetrics
     daily_health: Mapping[str, Mapping[str, Any]]
     recovery: CanonicalRecoveryInputs
+    form_by_day: Mapping[date, float]
+    eftp_by_day: Mapping[date, float]
 
     def inputs(
         self,
@@ -322,6 +341,7 @@ class _CarriedRows:
         ctl: float | None,
         atl: float | None,
         current: CanonicalCurrentInputs | None = None,
+        ramp_rate: float | None = None,
     ) -> CanonicalPerformanceInputs:
         return CanonicalPerformanceInputs(
             wellness_day=wellness_day,
@@ -335,6 +355,9 @@ class _CarriedRows:
             history_wellness_rows=self.history_wellness_rows,
             garmin=self.garmin,
             daily_health=self.daily_health,
+            form_by_day=self.form_by_day,
+            eftp_by_day=self.eftp_by_day,
+            ramp_rate=ramp_rate,
         )
 
 
@@ -394,6 +417,13 @@ def read_performance_inputs(
         recovery=read_recovery_inputs(
             reader, db, as_of=as_of, latest_wellness_day=latest_day
         ),
+        form_by_day=canonical_sections.wellness_day_values(
+            reader.observations(db, MetricKind.FORM)
+        ),
+        eftp_by_day=canonical_sections.wellness_day_values(
+            reader.observations(db, MetricKind.EFTP, sport=Sport.RIDE),
+            sport=Sport.RIDE,
+        ),
     )
     if latest_day is None:
         return carried.inputs(
@@ -413,7 +443,20 @@ def read_performance_inputs(
         current=read_current_inputs(
             reader, db, latest_wellness_day=latest_day, as_of=as_of
         ),
+        ramp_rate=_ramp_rate(
+            canonical_sections.wellness_day_values(observed[MetricKind.CTL]),
+            latest_day,
+        ),
     )
+
+
+def _ramp_rate(ctl_by_day: Mapping[date, float], day: date) -> float | None:
+    """Return the CTL change over ``RAMP_RATE_DAYS`` days; exact days only."""
+    current = ctl_by_day.get(day)
+    earlier = ctl_by_day.get(day - timedelta(days=RAMP_RATE_DAYS))
+    if current is None or earlier is None:
+        return None
+    return round(current - earlier, 2)
 
 
 def _activity_start(rows: list[dict[str, Any]], as_of: date) -> date:

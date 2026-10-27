@@ -56,7 +56,7 @@ class PerformanceLoadContextTests(unittest.TestCase):
         self.assertEqual(result["actual_atl_date"], today)
         self.assertEqual(result["actual_atl_average"], 6.78)
 
-    def test_load_alias_priority_and_tsb(self):
+    def test_load_alias_priority_and_carrier_form_and_ramp_rate_are_ignored(self):
         today = date(2026, 9, 30)
         latest = {
             "id": today.isoformat(),
@@ -64,7 +64,7 @@ class PerformanceLoadContextTests(unittest.TestCase):
             "ctLoad": 55,
             "atlLoad": 65,
             "atl": 65,
-            "tsb": "invalid",
+            "tsb": 7,
             "form": 3,
             "rampRate": "1.5",
         }
@@ -76,13 +76,52 @@ class PerformanceLoadContextTests(unittest.TestCase):
                 "ctl": "invalid",
                 "atl": 65,
                 "tsb": None,
-                "rampRate": "1.5",
+                "rampRate": None,
+                "rampRate_source": None,
             },
         )
-        latest["ctl"] = 55
-        self.assertEqual(
-            performance_load_context([], [], latest, today)["load"]["tsb"], -10.0
+
+    def test_form_and_ramp_rate_come_from_the_canonical_inputs(self):
+        today = date(2026, 9, 30)
+        latest = {"id": today.isoformat(), "ctl": 55, "atl": 65, "tsb": 99}
+        canonical = CanonicalPerformanceInputs(
+            wellness_day=today,
+            ctl=58.4,
+            atl=60.0,
+            form_by_day={today: -1.6, today - timedelta(days=1): 5.0},
+            ramp_rate=4.3,
         )
+        load = performance_load_context([], [], latest, today, canonical=canonical)[
+            "load"
+        ]
+        self.assertEqual(load["tsb"], -1.6)
+        self.assertEqual(load["rampRate"], 4.3)
+        self.assertEqual(load["rampRate_source"], "Intervals.icu CTL (berechnet)")
+
+    def test_missing_canonical_form_and_ramp_rate_are_unknown(self):
+        today = date(2026, 9, 30)
+        latest = {"id": today.isoformat(), "tsb": 9, "rampRate": 2}
+        for name, canonical in {
+            "no_form_day": CanonicalPerformanceInputs(
+                wellness_day=today,
+                ctl=50,
+                atl=40,
+                form_by_day={today - timedelta(days=1): 1.0},
+            ),
+            "form_not_read": CanonicalPerformanceInputs(
+                wellness_day=today, ctl=50, atl=40
+            ),
+            "no_wellness_day": CanonicalPerformanceInputs(
+                wellness_day=None, ctl=None, atl=None, form_by_day={today: 1.0}
+            ),
+        }.items():
+            with self.subTest(name):
+                load = performance_load_context(
+                    [], [], latest, today, canonical=canonical
+                )["load"]
+                self.assertIsNone(load["tsb"])
+                self.assertIsNone(load["rampRate"])
+                self.assertIsNone(load["rampRate_source"])
 
     def test_canonical_ctl_and_atl_override_legacy_when_observed(self):
         today = date(2026, 9, 30)

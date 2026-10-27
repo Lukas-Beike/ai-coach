@@ -22,6 +22,7 @@ from backend.canonical.vocabulary import (
     ProviderId,
     RecordingOrigin,
     SourceKind,
+    Sport,
 )
 from backend.performance import chart_history
 from backend.performance.canonical_inputs import (
@@ -33,6 +34,7 @@ from backend.performance.canonical_sections import (
     compact_activity_rows,
     read_wellness_observations,
     row_day,
+    wellness_day_values,
     wellness_rows,
 )
 from backend.performance.context import current_performance_context
@@ -139,6 +141,54 @@ class SectionHelperTests(unittest.TestCase):
             {"id": "later"},
         ]
         self.assertEqual(wellness_rows(carrier, {}), carrier)
+
+    def test_wellness_day_values_keep_wellness_days_of_one_scope_only(self) -> None:
+        wellness_form = _observation(
+            MetricKind.FORM, TODAY, 3.5, record=TODAY.isoformat()
+        )
+        ride_eftp = _observation(
+            MetricKind.EFTP, TODAY, 258, record=TODAY.isoformat(), sport=Sport.RIDE
+        )
+        athlete_eftp = _observation(
+            MetricKind.EFTP, TODAY, 262, record="athlete-1", sport=Sport.RIDE
+        )
+        garmin = _observation(
+            MetricKind.FORM, TODAY, 9, record=TODAY.isoformat(), garmin=True
+        )
+        self.assertEqual(wellness_day_values([wellness_form, garmin]), {TODAY: 3.5})
+        self.assertEqual(
+            wellness_day_values([ride_eftp, athlete_eftp], sport=Sport.RIDE),
+            {TODAY: 258},
+        )
+        # A sport-scoped observation is not a sport-less wellness value.
+        self.assertEqual(wellness_day_values([ride_eftp]), {})
+        self.assertEqual(wellness_day_values([]), {})
+
+
+def _observation(
+    kind: MetricKind,
+    day: date,
+    value: float,
+    *,
+    record: str,
+    sport: Sport | None = None,
+    garmin: bool = False,
+) -> Observation:
+    return Observation(
+        kind=kind,
+        value=MetricValue(value, kind.unit),
+        observed_on=day,
+        observed_at=None,
+        provenance=Provenance(
+            provider=ProviderId.GARMIN if garmin else ProviderId.INTERVALS,
+            source_kind=SourceKind.PROVIDER_REPORTED,
+            source_record_id=record,
+            recorded_by=RecordingOrigin.UNKNOWN,
+            retrieved_at=None,
+            label=None,
+        ),
+        sport=sport,
+    )
 
 
 class _NoObservations:

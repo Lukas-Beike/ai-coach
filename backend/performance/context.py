@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any
 
@@ -61,6 +62,15 @@ def _activities_and_wellness(
         else []
     )
     return activities, wellness_rows
+
+
+def _canonical_day_series(
+    canonical: CanonicalPerformanceInputs | None,
+) -> dict[str, Mapping[date, float] | None]:
+    """The canonical eFTP and form day series; both absent without canonical inputs."""
+    if canonical is None:
+        return {"eftp_by_day": None, "form_by_day": None}
+    return {"eftp_by_day": canonical.eftp_by_day, "form_by_day": canonical.form_by_day}
 
 
 def _unavailable_context(
@@ -175,6 +185,7 @@ def current_performance_context(
         garmin_history=None
         if canonical is None or canonical.garmin is None
         else canonical.garmin.performance_history,
+        **_canonical_day_series(canonical),
     )
     activity_performance = activity_validation.activity_performance_validation(
         activities, metrics, comparisons

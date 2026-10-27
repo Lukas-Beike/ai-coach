@@ -6,11 +6,15 @@ refactor. Deliberately pinned quirks are marked with "Quirk:" comments.
 
 import math
 import unittest
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
-from backend.performance.body import body_history
-from backend.performance.chart_history import analysis_history
+from backend.canonical.vocabulary import MetricKind, Sport
+from backend.performance import body as _body
+from backend.performance import chart_history as _chart_history
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.canonical_sections import wellness_day_values
+from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 
 TODAY = date(2026, 5, 4)
 GARMIN = "Garmin Connect"
@@ -41,6 +45,39 @@ def _wellness(
     if eftp is not None:
         row["sportInfo"] = [{"types": ["Ride"], "mmp_model": {"ftp": eftp}}]
     return row
+
+
+def _eftp_by_day(snapshot: Any) -> dict[date, float]:
+    """The ride eFTP of each wellness day, as the canonical reader provides it.
+
+    The snapshot's wellness rows (raw, then compact) go through the real mapper;
+    since #1412 the history reads the resulting observations, not the rows.
+    """
+    rows: list[Any] = []
+    if isinstance(snapshot, dict):
+        raw = snapshot.get("raw_provider_data")
+        rows += raw.get("wellness", []) if isinstance(raw, dict) else []
+        rows += snapshot.get("recent_wellness", [])
+    mapped = map_intervals_wellness(
+        rows, retrieved_at=datetime(2026, 5, 4, 8, 0, tzinfo=UTC)
+    )
+    return wellness_day_values(
+        (record for record in mapped.records if record.kind is MetricKind.EFTP),
+        sport=Sport.RIDE,
+    )
+
+
+def body_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
+    return _body.body_history(
+        snapshot, garmin, today, eftp_by_day=_eftp_by_day(snapshot)
+    )
+
+
+def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
+    canonical = CanonicalPerformanceInputs(
+        wellness_day=None, ctl=None, atl=None, eftp_by_day=_eftp_by_day(snapshot)
+    )
+    return _chart_history.analysis_history(snapshot, garmin, today, canonical=canonical)
 
 
 def _garmin_weight(day: str, kg: float) -> dict[str, Any]:
@@ -602,9 +639,10 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             any(point.get("ftp_watts") in (240, 250) for point in body_points)
         )
 
-    def test_compact_wellness_row_replaces_raw_row_for_chart_eftp_but_not_body(
-        self,
-    ) -> None:
+    def test_wellness_day_eftp_does_not_depend_on_the_carrier_rows(self) -> None:
+        # Intended difference (#1412): the eFTP of a wellness day is a canonical
+        # observation. A compact row for the same day no longer replaces the raw
+        # row's eFTP in the chart, so chart and body report the same 270.
         snapshot = {
             "raw_provider_data": {
                 "wellness": [_wellness("2026-05-03", eftp=270)],
@@ -612,11 +650,9 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             "recent_wellness": [{"id": "2026-05-03", "ctl": 40}],
         }
         result = analysis_history(snapshot, {}, TODAY)
-        # Quirk: chart history keys wellness rows by day, so the compact row
-        # replaces the raw row wholesale and its eFTP is lost. Body history
-        # keeps both rows and still reports 270.
-        self.assertIsNone(
-            _point_value(_analysis_points(result, "cycling_eftp_watts"), "2026-05-03")
+        self.assertEqual(
+            _point_value(_analysis_points(result, "cycling_eftp_watts"), "2026-05-03"),
+            270,
         )
         body_point = _point(
             _body_series(result["body"], "12w", "cycling_w_per_kg", INTERVALS),

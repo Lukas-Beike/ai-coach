@@ -1194,8 +1194,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "backend.performance.eftp",
         (
-            "_sport_info_setting",
-            "_wellness_eftp_value",
             "_activity_eftp_value",
             "eftp_30_day_average",
         ),
@@ -1205,7 +1203,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "wellness_average",
             "comparison_value",
-            "wellness_form_value",
             "readiness_score_value",
             "wellness_form_average",
         ),

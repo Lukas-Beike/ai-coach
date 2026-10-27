@@ -14,6 +14,12 @@ value rather than a canonical pick. The athlete-wide threshold heart rate has no
 sport and comes from the single athlete ``lthr`` field, so this sync stores at most
 one such row and it is taken directly.
 
+Cycling eFTP: the ride eFTP of the latest sync's athlete record is read like the
+athlete weight, and the ride eFTP of the latest wellness day like the wellness weight.
+The sync instant is the latest of the threshold, VO2max, weight and athlete-record
+eFTP observations, so an athlete record that stores only an eFTP still defines it. The athlete record's eFTP is also read without a usable
+wellness day (``read_wahoo_fallbacks``); the wellness-day eFTP needs that day.
+
 Weight is read for the snapshot's latest wellness row (the row the legacy reader
 picks) and for the athlete record of the same sync. Garmin weight stays on the
 legacy path.
@@ -61,10 +67,20 @@ class CanonicalCurrentInputs:
     athlete_weight: Observation | None
     wahoo_ftp: Observation | None = None
     wahoo_weight: Observation | None = None
+    athlete_eftp: Observation | None = None
+    wellness_eftp: Observation | None = None
 
-    def with_wahoo(
-        self, wahoo_ftp: Observation | None, wahoo_weight: Observation | None
+    def with_fallbacks(
+        self,
+        wahoo_ftp: Observation | None,
+        wahoo_weight: Observation | None,
+        wellness_eftp: Observation | None = None,
+        athlete_eftp: Observation | None = None,
     ) -> CanonicalCurrentInputs:
+        """Return these inputs with the Wahoo fallbacks and the eFTP observations.
+
+        A given ``athlete_eftp`` replaces the one these inputs hold.
+        """
         return CanonicalCurrentInputs(
             bike_threshold_hr=self.bike_threshold_hr,
             run_threshold_hr=self.run_threshold_hr,
@@ -75,6 +91,8 @@ class CanonicalCurrentInputs:
             athlete_weight=self.athlete_weight,
             wahoo_ftp=wahoo_ftp,
             wahoo_weight=wahoo_weight,
+            athlete_eftp=athlete_eftp or self.athlete_eftp,
+            wellness_eftp=wellness_eftp,
         )
 
 
@@ -92,16 +110,21 @@ _NO_INTERVALS: Final = CanonicalCurrentInputs(
 def read_wahoo_fallbacks(
     reader: ObservationReader, db: Any, *, as_of: date
 ) -> CanonicalCurrentInputs | None:
-    """Return only the stored Wahoo fallbacks, or None when neither is stored.
+    """Return the stored Wahoo fallbacks and the athlete record's eFTP, or None.
 
-    Used without a usable wellness day: the Intervals sport values and weight stay
-    absent, and the caller's Wahoo cycling FTP and weight fallbacks still apply.
+    Used without a usable wellness day: the Intervals sport thresholds, VO2max and
+    weight stay absent, and the caller's Wahoo cycling FTP and weight fallbacks
+    still apply. The latest sync's athlete-record ride eFTP does not depend on a
+    wellness day, so it is kept.
     ``as_of`` is the athlete-local day the Wahoo values must be current on.
     """
     wahoo_ftp, wahoo_weight = _wahoo_current(reader, db, as_of=as_of)
-    if wahoo_ftp is None and wahoo_weight is None:
+    athlete_eftp = _latest_athlete_eftp(reader, db)
+    if wahoo_ftp is None and wahoo_weight is None and athlete_eftp is None:
         return None
-    return _NO_INTERVALS.with_wahoo(wahoo_ftp, wahoo_weight)
+    return _NO_INTERVALS.with_fallbacks(
+        wahoo_ftp, wahoo_weight, athlete_eftp=athlete_eftp
+    )
 
 
 def read_current_inputs(
@@ -120,11 +143,12 @@ def read_current_inputs(
     """
     intervals = _intervals_current(reader, db, latest_wellness_day=latest_wellness_day)
     wahoo_ftp, wahoo_weight = _wahoo_current(reader, db, as_of=as_of)
+    wellness_eftp = _wellness_eftp(reader, db, latest_wellness_day)
     if intervals is None:
-        if wahoo_ftp is None and wahoo_weight is None:
+        if wahoo_ftp is None and wahoo_weight is None and wellness_eftp is None:
             return None
         intervals = _NO_INTERVALS
-    inputs = intervals.with_wahoo(wahoo_ftp, wahoo_weight)
+    inputs = intervals.with_fallbacks(wahoo_ftp, wahoo_weight, wellness_eftp)
     values = (
         *inputs.bike_threshold_hr,
         *inputs.run_threshold_hr,
@@ -135,6 +159,8 @@ def read_current_inputs(
         inputs.athlete_weight,
         inputs.wahoo_ftp,
         inputs.wahoo_weight,
+        inputs.athlete_eftp,
+        inputs.wellness_eftp,
     )
     if all(value is None for value in values):
         return None
@@ -169,6 +195,9 @@ def _intervals_current(
     weights = _sync_observations(
         reader, db, MetricKind.WEIGHT, synced, start=weight_start, end=weight_end
     )
+    eftps = _sync_observations(
+        reader, db, MetricKind.EFTP, synced, start=start, end=end
+    )
     return CanonicalCurrentInputs(
         bike_threshold_hr=_sport_candidates(thresholds, Sport.RIDE),
         run_threshold_hr=_sport_candidates(thresholds, Sport.RUN),
@@ -177,6 +206,54 @@ def _intervals_current(
         running_vo2max=_sport_candidates(vo2max, Sport.RUN),
         wellness_weight=_wellness_weight(weights, latest_wellness_day),
         athlete_weight=_athlete_weight(weights),
+        athlete_eftp=_athlete_eftp(eftps),
+    )
+
+
+def _latest_athlete_eftp(reader: ObservationReader, db: Any) -> Observation | None:
+    """Return the ride eFTP of the latest sync's athlete record; None without one."""
+    synced = _latest_sync_instant(reader, db)
+    if synced is None:
+        return None
+    try:
+        day = synced.astimezone(UTC).date()
+        start, end = day - timedelta(days=1), day + timedelta(days=1)
+    except OverflowError:
+        return None
+    return _athlete_eftp(
+        _sync_observations(reader, db, MetricKind.EFTP, synced, start=start, end=end)
+    )
+
+
+def _athlete_eftp(observations: tuple[Observation, ...]) -> Observation | None:
+    """Return the ride eFTP of this sync's athlete record, if stored."""
+    return next(
+        (
+            observation
+            for observation in observations
+            if observation.sport is Sport.RIDE and _is_athlete_record(observation)
+        ),
+        None,
+    )
+
+
+def _wellness_eftp(
+    reader: ObservationReader, db: Any, day: date | None
+) -> Observation | None:
+    """Return the ride eFTP observation of the Intervals wellness day ``day``."""
+    if day is None:
+        return None
+    record_id = day.isoformat()
+    return next(
+        (
+            observation
+            for observation in reader.observations(
+                db, MetricKind.EFTP, start=day, end=day, sport=Sport.RIDE
+            )
+            if observation.provenance.provider is ProviderId.INTERVALS
+            and observation.provenance.source_record_id == record_id
+        ),
+        None,
     )
 
 
@@ -281,13 +358,21 @@ def _athlete_observation(observations: tuple[Observation, ...]) -> Observation |
     )
 
 
+def _is_athlete_record(observation: Observation) -> bool:
+    """Return True for a value of the athlete record, not of a wellness day."""
+    return (
+        observation.provenance.source_record_id != observation.observed_on.isoformat()
+    )
+
+
 def _latest_sync_instant(reader: ObservationReader, db: Any) -> datetime | None:
     """Return the latest Intervals sync instant that stored a current-metric kind."""
     instants = [
         observation.provenance.retrieved_at
-        for kind in _SYNC_KINDS
+        for kind in (*_SYNC_KINDS, MetricKind.EFTP)
         for observation in reader.observations(db, kind)
         if observation.provenance.provider is ProviderId.INTERVALS
         and observation.provenance.retrieved_at is not None
+        and (kind is not MetricKind.EFTP or _is_athlete_record(observation))
     ]
     return max(instants, default=None)

@@ -5,8 +5,9 @@ from typing import Any
 
 from backend.canonical.decimal_text import provider_number
 from backend.performance import load as performance_load
-from backend.performance import wellness as performance_wellness
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+
+RAMP_RATE_SOURCE = "Intervals.icu CTL (berechnet)"
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -54,8 +55,9 @@ def performance_load_context(
         "id": latest_wellness.get("id"),
         "ctl": _first_present(latest_wellness, ("ctl", "ctLoad")),
         "atl": _first_present(latest_wellness, ("atl", "atlLoad")),
-        "tsb": performance_wellness.wellness_form_value(latest_wellness),
-        "rampRate": _first_present(latest_wellness, ("rampRate",)),
+        "tsb": None,
+        "rampRate": None,
+        "rampRate_source": None,
     }
     if canonical is not None and canonical.wellness_day is not None:
         # Only CTL and ATL come from canonical observations; the rest of the
@@ -64,6 +66,14 @@ def performance_load_context(
         # the same Intervals.icu wellness day, so the load block's source holds.
         for key, observed in (("ctl", canonical.ctl), ("atl", canonical.atl)):
             load[key] = observed if observed is not None else provider_number(load[key])
+        # Form and ramp rate come from canonical observations only; the form of
+        # the latest wellness day is that day's form observation, and the ramp rate
+        # is the derived CTL change over seven days (None when a day is missing).
+        form_by_day = canonical.form_by_day or {}
+        load["tsb"] = form_by_day.get(canonical.wellness_day)
+        load["rampRate"] = canonical.ramp_rate
+        if canonical.ramp_rate is not None:
+            load["rampRate_source"] = RAMP_RATE_SOURCE
     return {
         "load": load,
         "last_7": last_7,
