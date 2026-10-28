@@ -219,7 +219,7 @@ class YazioConnectionTests(unittest.TestCase):
             script.requests[-1].get_header("Authorization"), "Bearer access-1"
         )
 
-    def test_successful_inflight_check_cannot_restore_an_old_generation(self):
+    def _run_successful_inflight_check(self, mutate):
         holder = {"config": config()}
         entered, release = threading.Event(), threading.Event()
 
@@ -235,14 +235,21 @@ class YazioConnectionTests(unittest.TestCase):
         )
         thread.start()
         self.assertTrue(entered.wait(5))
-        holder["config"] = config(yazio_password="replacement")
-        client.connection_status()
-        holder["config"] = config()
-        client.connection_status()
+        mutate(holder, client)
         release.set()
         thread.join(5)
         self.assertFalse(thread.is_alive())
-        self.assertEqual(results[0]["status"], "unchecked")
+        return client, results[0]
+
+    def test_successful_inflight_check_cannot_restore_an_old_generation(self):
+        def mutate(holder, client):
+            holder["config"] = config(yazio_password="replacement")
+            client.connection_status()
+            holder["config"] = config()
+            client.connection_status()
+
+        client, result = self._run_successful_inflight_check(mutate)
+        self.assertEqual(result["status"], "unchecked")
         self.assertEqual((client._access_token, client._refresh_token), ("", ""))
 
     def test_changed_then_restored_credentials_invalidate_previous_result(self):
@@ -272,26 +279,12 @@ class YazioConnectionTests(unittest.TestCase):
         )
 
     def test_inflight_result_is_discarded_after_credential_replacement(self):
-        holder = {"config": config()}
-        entered, release = threading.Event(), threading.Event()
-
-        def opener(request, timeout):
-            entered.set()
-            self.assertTrue(release.wait(5))
-            return reply(token())
-
-        client = YazioClient(lambda: holder["config"], opener=opener)
-        results = []
-        thread = threading.Thread(
-            target=lambda: results.append(client.check_connection())
+        client, result = self._run_successful_inflight_check(
+            lambda holder, client: holder.update(
+                config=config(yazio_password="replacement")
+            )
         )
-        thread.start()
-        self.assertTrue(entered.wait(5))
-        holder["config"] = config(yazio_password="replacement")
-        release.set()
-        thread.join(5)
-        self.assertFalse(thread.is_alive())
-        self.assertEqual(results[0]["status"], "unchecked")
+        self.assertEqual(result["status"], "unchecked")
         self.assertEqual(client.connection_status()["status"], "unchecked")
 
 
