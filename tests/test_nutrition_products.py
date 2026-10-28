@@ -124,6 +124,17 @@ class NutritionProductContractTests(unittest.TestCase):
         self.assertEqual(result["foods"][0]["id"], saved["id"])
         self.food_database.lookup.assert_not_called()
 
+    def test_precise_label_values_survive_save_and_consumption_snapshot(self):
+        saved = self.library.save_product(
+            self.product_payload(sugar_g=4.1234, fiber_g=0.05, salt_g=0.03)
+        )
+        reloaded = self.library.get_product(saved["id"])
+        self.assertEqual(reloaded["sugar_g"], 4.1234)
+        self.assertEqual(reloaded["fiber_g"], 0.05)
+        self.assertEqual(reloaded["salt_g"], 0.03)
+        entry = self.diary.log_product(saved["id"], 100, "g")
+        self.assertEqual(entry["nutrition_basis"]["product"]["salt_g"], 0.03)
+
     def test_text_lookup_matches_saved_product_by_words_in_any_order(self):
         saved = self.library.save_product(self.product_payload())
 

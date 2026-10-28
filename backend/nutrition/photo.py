@@ -42,7 +42,7 @@ def _validated_number(value: Any, *, field: str) -> float | None:
         raise AppError(
             400, f"Ungültiger Wert für {field}.", reason="invalid_food_extraction"
         )
-    return round(number, 1)
+    return round(number, 4)
 
 
 def _basis_amount(value: Any) -> float | None:
