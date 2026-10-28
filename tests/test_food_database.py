@@ -29,6 +29,37 @@ def response(payload):
 
 
 class FoodDatabaseTests(unittest.TestCase):
+    def test_additional_off_nutrients_preserve_label_values_and_unknowns(self):
+        legacy = project_product(
+            product(
+                nutriments={
+                    "sugars_100g": 3,
+                    "fiber_100g": 0,
+                    "salt_100g": -1,
+                }
+            )
+        )
+        self.assertEqual(legacy["per_100"]["sugar_g"], 3)
+        self.assertEqual(legacy["per_100"]["fiber_g"], 0)
+        self.assertIsNone(legacy["per_100"]["salt_g"])
+        modern = project_product(
+            product(
+                nutrition={
+                    "aggregated_set": {
+                        "per": "100g",
+                        "nutrients": {
+                            "sugars": {"value": 4, "unit": "g", "source": "packaging"},
+                            "fiber": {"value": 2, "unit": "g", "source": "estimate"},
+                            "salt": {"value": 1, "unit": "g", "modifier": "<"},
+                        },
+                    }
+                }
+            )
+        )
+        self.assertEqual(modern["per_100"]["sugar_g"], 4)
+        self.assertIsNone(modern["per_100"]["fiber_g"])
+        self.assertIsNone(modern["per_100"]["salt_g"])
+
     def test_current_off_schema_uses_label_values_and_excludes_provider_estimates(self):
         raw = product(
             nutrition={

@@ -97,8 +97,31 @@ class YazioProjectionTests(unittest.TestCase):
         self.assertEqual(food["basis_unit"], "g")
         self.assertEqual(
             food["per_100"],
-            {"kcal": 63.0, "carbs_g": 4.0, "protein_g": 11.0, "fat_g": 0.2},
+            {
+                "kcal": 63.0,
+                "carbs_g": 4.0,
+                "protein_g": 11.0,
+                "fat_g": 0.2,
+                "sugar_g": None,
+                "fiber_g": None,
+                "salt_g": None,
+            },
         )
+
+    def test_additional_nutrients_are_scaled_and_invalid_values_remain_unknown(self):
+        food = project_product(
+            hit(
+                nutrients={
+                    "energy.energy": 0.63,
+                    "nutrient.sugar": 0.04,
+                    "nutrient.dietaryfiber": 0,
+                    "nutrient.salt": -1,
+                }
+            )
+        )
+        self.assertEqual(food["per_100"]["sugar_g"], 4)
+        self.assertEqual(food["per_100"]["fiber_g"], 0)
+        self.assertIsNone(food["per_100"]["salt_g"])
 
     def test_unknown_unit_and_missing_values_stay_unknown(self):
         food = project_product(hit(base_unit="piece", nutrients={"energy.energy": 0.5}))

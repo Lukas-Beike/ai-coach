@@ -1445,6 +1445,8 @@ MongoDB/InfluxDB und ist keine produktbezogene Lookup-API. Die Nährwerte werden
 Bezugsmenge und Einheit gespeichert. Gramm und Milliliter werden ohne bekannte
 Dichte nicht ineinander umgerechnet.
 
+Beim Barcode-Treffer erscheint das Produktformular direkt darunter. Verfügbare Angaben zu Zucker, Ballaststoffen und Salz werden übernommen; fehlende Werte bleiben leer. Erst das Speichern legt das Produkt lokal an.
+
 Ein Foto der Nährwerttabelle wird begrenzt und nur vorübergehend an die
 konfigurierte OpenAI Responses-kompatible API übertragen. Die API liefert einen
 strukturierten, editierbaren Vorschlag; Bilddaten, Providerantworten und

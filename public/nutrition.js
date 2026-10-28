@@ -607,6 +607,9 @@ function normalizeNutritionProduct(product = {}) {
     carbs_g: product.carbs_g ?? per100.carbs_g ?? null,
     protein_g: product.protein_g ?? per100.protein_g ?? null,
     fat_g: product.fat_g ?? per100.fat_g ?? null,
+    sugar_g: product.sugar_g ?? per100.sugar_g ?? null,
+    fiber_g: product.fiber_g ?? per100.fiber_g ?? null,
+    salt_g: product.salt_g ?? per100.salt_g ?? null,
     confidence: product.confidence ?? product.extraction_confidence ?? null,
     source_url: product.source_url || "",
     source,
@@ -648,7 +651,7 @@ function populateNutritionProductFields(form, product) {
   for (const [key, label] of [["sugar_g", "Zucker (g)"], ["fiber_g", "Ballaststoffe (g)"], ["salt_g", "Salz (g)"]]) {
     const wrapper = document.createElement("label");
     wrapper.append(document.createTextNode(label));
-    const input = document.createElement("input"); input.name = key; input.type = "number"; input.min = "0"; input.step = "0.1";
+    const input = document.createElement("input"); input.name = key; input.type = "number"; input.min = "0"; input.step = "any";
     input.value = nutritionProductValue(product[key]); wrapper.append(input); grid.append(wrapper);
   }
 }
@@ -849,7 +852,8 @@ async function saveNutritionProduct(product) {
     } catch (error) { if (generation === state.sessionGeneration) document.querySelector("#nutritionProductStatus").textContent = `Produkt konnte nicht gespeichert werden: ${error.message}`; }
     return;
   }
-  editor.replaceChildren(); editor.append(form); editor.hidden = false;
+  editor.replaceChildren(); editor.append(form); editor.hidden = false;
+  form.scrollIntoView({ block: "nearest" });
   form.addEventListener("submit", (event) => { event.preventDefault(); void saveNutritionProduct(form); });
   form.querySelector("[data-product-cancel]").addEventListener("click", () => { editor.hidden = true; editor.replaceChildren(); });
 }
@@ -886,6 +890,8 @@ async function lookupNutritionProduct(barcode) {
     nutritionLookupResultShown = true;
     const product = result.product || result.foods?.[0] || result.products?.[0] || null;
     const isLocal = result.local !== false && result.source !== "open_food_facts";
+    const editor = document.querySelector("#nutritionExtraction");
+    if (editor) { editor.replaceChildren(); editor.hidden = true; }
     const lookup = document.querySelector("#nutritionLookupResult");
     if (lookup) lookup.hidden = false;
     renderNutritionProducts(product ? [{ ...product, local: isLocal }] : [], { local: isLocal, targetId: "#nutritionLookupResult" });

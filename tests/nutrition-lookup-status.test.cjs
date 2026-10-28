@@ -78,3 +78,20 @@ test("an explicit product search still replaces the lookup result", async () => 
   await context.loadNutritionProducts("", { background: true });
   assert.equal(elements["#nutritionProductStatus"].textContent, "Keine lokalen Produkte gefunden.");
 });
+
+test("online nutrients fill the product editor without replacing zero or local values", () => {
+  const context = vm.createContext({ nutritionDatabaseSource: (source) => source });
+  vm.runInContext(slice("function normalizeNutritionProduct", "function nutritionProductForm"), context);
+  const result = context.normalizeNutritionProduct({
+    source: "yazio", sugar_g: 0, per_100: { sugar_g: 5, fiber_g: 2, salt_g: null },
+  });
+  assert.equal(result.sugar_g, 0);
+  assert.equal(result.fiber_g, 2);
+  assert.equal(result.salt_g, null);
+});
+
+test("product editor follows the barcode result before the product lists", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../public/index.html"), "utf8");
+  assert.ok(html.indexOf('id="nutritionLookupResult"') < html.indexOf('id="nutritionExtraction"'));
+  assert.ok(html.indexOf('id="nutritionExtraction"') < html.indexOf('id="nutritionProducts"'));
+});

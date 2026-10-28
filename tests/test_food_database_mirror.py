@@ -14,6 +14,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 from backend.db import DatabaseManager, row_factory
 from backend.db.schema import initialize_schema
@@ -33,7 +34,15 @@ def food(barcode: str = BARCODE, name: str = "Haselnuss Riegel") -> dict:
         "source": "Open Food Facts",
         "basis_amount": 100,
         "basis_unit": "g",
-        "per_100": {"kcal": 540, "carbs_g": 50, "protein_g": 8, "fat_g": 33},
+        "per_100": {
+            "kcal": 540,
+            "carbs_g": 50,
+            "protein_g": 8,
+            "fat_g": 33,
+            "sugar_g": None,
+            "fiber_g": None,
+            "salt_g": None,
+        },
     }
 
 
@@ -125,6 +134,27 @@ class FoodMirrorTests(MirrorFixture):
 
 
 class FoodDatabaseServiceMirrorTests(MirrorFixture):
+    def test_legacy_barcode_entry_refreshes_once_and_falls_back_offline(self):
+        legacy = food()
+        for key in ("sugar_g", "fiber_g", "salt_g"):
+            del legacy["per_100"][key]
+        self.mirror.store([legacy])
+        with patch("backend.nutrition.food_database.time.monotonic") as clock:
+            clock.return_value = 10
+            self.off.offline = True
+            fallback = self.service.lookup({"barcode": BARCODE})["foods"][0]
+            self.assertEqual(fallback["data_origin"], "local_database")
+            self.assertEqual(fallback["stored_at"], START.isoformat())
+            self.service.lookup({"barcode": BARCODE})
+            self.assertEqual(len(self.off.calls), 1)
+            self.off.offline = False
+            clock.return_value += 901
+            fresh = self.service.lookup({"barcode": BARCODE})["foods"][0]
+            self.assertEqual(fresh["data_origin"], "live")
+            self.assertIn("sugar_g", fresh["per_100"])
+            self.service.lookup({"barcode": BARCODE})
+        self.assertEqual(len(self.off.calls), 2)
+
     def test_barcode_lookup_stores_the_live_hit_and_then_reads_locally(self):
         first = self.service.lookup({"barcode": BARCODE})["foods"][0]
         second = self.service.lookup({"barcode": BARCODE})["foods"][0]
