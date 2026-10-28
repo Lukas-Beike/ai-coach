@@ -32,7 +32,10 @@ test("@responsive local zones save with provider alternatives and undo", async (
   await page.goto("/#more/profile");
   await expect(page.locator("#profilePanel")).toHaveClass(/active/);
   const section = page.locator("#zoneSettings");
+  const initialZones = page.waitForResponse((response) => response.url().endsWith("/api/zones") && response.request().method() === "GET");
   await section.locator("summary").click();
+  expect((await initialZones).ok()).toBeTruthy();
+  await page.evaluate(() => loadZones());
   await page.locator("#zoneSport").selectOption("ride");
   await page.locator("#zoneMetric").selectOption("power");
   await page.getByLabel("FTP (W)").fill("280");
@@ -56,7 +59,10 @@ test("@responsive local zones save with provider alternatives and undo", async (
 test("@responsive invalid local zones change nothing", async ({ page, request }) => {
   await page.goto("/#more/profile");
   const section = page.locator("#zoneSettings");
+  const initialZones = page.waitForResponse((response) => response.url().endsWith("/api/zones") && response.request().method() === "GET");
   await section.locator("summary").click();
+  expect((await initialZones).ok()).toBeTruthy();
+  await page.evaluate(() => loadZones());
   await page.locator("#zoneMetric").selectOption("heart_rate");
   await page.getByLabel("LTHR (bpm)").fill("170");
   await page.getByLabel("Zonenobergrenzen (bpm)").fill("150, 140, 160");

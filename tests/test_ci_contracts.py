@@ -200,7 +200,7 @@ class WorkflowSourceTests(unittest.TestCase):
             encoding="utf-8"
         )
         checkout_refs = re.findall(r"^          ref: (.+)$", workflow, re.MULTILINE)
-        self.assertEqual(len(checkout_refs), 9)
+        self.assertEqual(len(checkout_refs), 10)
         self.assertTrue(all(ref == "${{ github.sha }}" for ref in checkout_refs[1:]))
         self.assertIn("'refs/heads/main' || github.sha", checkout_refs[0])
         self.assertNotIn("source_ref", workflow)
@@ -254,8 +254,9 @@ class WorkflowSourceTests(unittest.TestCase):
         )
         e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]
         self.assertNotIn("grep -q '@responsive'", e2e)
-        self.assertIn('--list --project "$project" --reporter=json', e2e)
-        self.assertIn("mapfile -t specs", e2e)
+        self.assertIn("python scripts/run_browser_tests.py --project", e2e)
+        self.assertIn('--shard "$SPEC_SHARD" --total "$SPEC_SHARDS"', e2e)
+        self.assertNotIn("mapfile -t specs", e2e)
 
     def test_e2e_runs_beside_unit_tests_and_shards_desktop_completely(self):
         root = Path(__file__).resolve().parents[1]
@@ -282,7 +283,17 @@ class WorkflowSourceTests(unittest.TestCase):
                 self.assertEqual(
                     sorted(shards), [(i, count) for i in range(1, count + 1)]
                 )
-        self.assertIn("index % shards === shard - 1", e2e)
+        aggregate = workflow.split("  browser:\n", 1)[1].split(
+            "  build-and-push:\n", 1
+        )[0]
+        expected = {
+            name: int(count)
+            for name, count in re.findall(r"--expected ([a-z-]+):(\d+)", aggregate)
+        }
+        self.assertEqual(
+            expected, {name: shards[0][1] for name, shards in projects.items()}
+        )
+        self.assertIn("--jobs 1", e2e)
         self.assertIn(
             "browser-test-artifacts-${{ matrix.project }}-${{ matrix.shard }}", e2e
         )
@@ -294,17 +305,24 @@ class WorkflowSourceTests(unittest.TestCase):
             encoding="utf-8"
         )
         e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]
-        start_fixture = e2e.split("start_fixture() {", 1)[1].split("\n          }", 1)[
-            0
-        ]
-        # A fixture that brings its own network adds a host veth mid-spec, and Chromium
-        # then fails in-flight requests with ERR_NETWORK_CHANGED.
-        self.assertIn('--network "container:$(network_name "$index")"', start_fixture)
-        self.assertNotIn("--publish", start_fixture)
-        loop = e2e.split('for i in "${!specs[@]}"; do', 1)
-        self.assertIn("start_network 0\n", loop[0])
-        self.assertIn("start_network 1\n", loop[0])
-        self.assertNotIn("start_network", loop[1])
+        runner = (root / "scripts/run_browser_tests.py").read_text(encoding="utf-8")
+        fixture = runner.split("    def fixture(", 1)[1].split(
+            "    def browser_command(", 1
+        )[0]
+        self.assertIn('"container:" + network', fixture)
+        self.assertNotIn('"--publish"', fixture)
+        prepare = runner.split("    def prepare_slots(", 1)[1].split(
+            "    def fixture(", 1
+        )[0]
+        self.assertIn("reserve_ports(count * 2)", prepare)
+        execute = runner.split("    def execute(self, children):", 1)[1]
+        self.assertLess(
+            execute.index("self.prepare_slots(jobs)"),
+            execute.index("pool.submit(self.lane"),
+        )
+        lane = runner.split("    def lane(", 1)[1].split("    def execute(", 1)[0]
+        self.assertNotIn("prepare_slots", lane)
+        self.assertIn("python scripts/run_browser_tests.py", e2e)
 
     def test_ci_failure_artifacts_exclude_traces_and_auth_state(self):
         root = Path(__file__).resolve().parents[1]
@@ -317,7 +335,19 @@ class WorkflowSourceTests(unittest.TestCase):
         upload = workflow.split("name: Upload browser failure artifacts\n", 1)[1]
         upload = upload.split("      - name:", 1)[0]
         paths = upload.split("path: |\n", 1)[1].split("if-no-files-found:", 1)[0]
-        self.assertEqual(paths.split(), ["test-results/", "playwright-report/"])
+        self.assertEqual(
+            paths.split(),
+            [
+                "test-results/browser-runs/*/*/*/artifacts/",
+                "test-results/browser-runs/*/*/*/report/",
+                "!**/trace.zip",
+                "!**/.auth/**",
+            ],
+        )
+        self.assertNotIn("manifest.json", paths)
+        runner = (root / "scripts/run_browser_tests.py").read_text(encoding="utf-8")
+        self.assertIn('prefix="ai-coach-browser-private-"', runner)
+        self.assertIn('"--trace=off"', runner)
         # The login state lives outside both uploaded directories.
         self.assertIn(
             'path.join(__dirname, "playwright", ".auth", "user.json")', config
@@ -332,6 +362,14 @@ class WorkflowSourceTests(unittest.TestCase):
             0
         ]
         self.assertIn("needs: e2e", browser)
+        self.assertIn(
+            "name: browser-run-summary-${{ matrix.project }}-${{ matrix.shard }}-attempt-${{ github.run_attempt }}",
+            workflow,
+        )
+        self.assertIn(
+            "pattern: browser-run-summary-*-attempt-${{ github.run_attempt }}", browser
+        )
+        self.assertIn("python .github/scripts/aggregate_browser_results.py", browser)
         self.assertIn("E2E_RESULT: ${{ needs.e2e.result }}", browser)
         self.assertIn("needs: [source, test, e2e, browser, quality]", workflow)
 
@@ -720,12 +758,18 @@ class ContainerSuiteContractTests(unittest.TestCase):
         ]
         self.assertIn("python /review/tests/run_tests.py --suite container", container)
         local = (root / "tests/run_sqlcipher_tests.ps1").read_text(encoding="utf-8")
-        # The local SQLCipher runner must keep running the full suite.
-        self.assertIn("python /review/tests/run_tests.py @runnerArguments\n", local)
-        self.assertNotIn("--suite", local)
+        from scripts import run_sqlcipher_tests as supervisor
+
+        # The wrapper delegates to the full-suite owner, retaining the CI inputs.
+        self.assertIn("scripts/run_sqlcipher_tests.py", local)
+        self.assertIn("& python @runnerArguments", local)
+        source = (root / "scripts/run_sqlcipher_tests.py").read_text(encoding="utf-8")
+        self.assertIn('"/app/tests/run_tests.py"', source)
+        self.assertNotIn('"--suite"', source)
         mount_pattern = r':(/[^":\s]+):ro"'
         ci_targets = set(re.findall(mount_pattern, container))
-        local_targets = set(re.findall(mount_pattern, local))
+        local_targets = {f"/review/{relative}" for relative in supervisor.INPUTS}
+        local_targets.update(target for _, target in supervisor.EXTRA_MOUNTS)
         self.assertIn("/review/scripts", ci_targets)
         self.assertEqual(ci_targets - local_targets, set())
 

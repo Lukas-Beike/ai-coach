@@ -1,0 +1,373 @@
+{
+  "environment": {
+    "measured_on": "2026-10-26/27",
+    "measurement": "One warm native Windows observation per project; browser_seconds includes authentication and test execution. Desktop project complete within a later-failed all-project run. Mobile-small predates the privacy-only test configuration change. Not a Linux CI performance benchmark.",
+    "metric": "browser_seconds",
+    "records": {
+      "desktop": {
+        "cache_state": "warm",
+        "completed_files": 43,
+        "identities": 183,
+        "images": {
+          "application": "sha256:24cce39f5910bb0e9dc9272ddc82d4a6c789684f370053d5662e8c1fd10c0418",
+          "browser": {
+            "mode": "native",
+            "node": "v24.22.1",
+            "revisions": {
+              "chromium": "1248",
+              "chromium_headless_shell": "1248"
+            }
+          }
+        },
+        "input_sha256": "b3a4d39b51ec17864a0d865d2337131340802c10d1cf8e79d7b1c6224c7289da",
+        "run_id": "f5b82d0692374300ae5ff45f08d8ca36",
+        "source": {
+          "dirty": true,
+          "revision": "c7ff60519520d553a00bfd33f6cf884b8de879b8"
+        },
+        "tools": {
+          "node": "v24.22.1",
+          "packages": {
+            "@playwright/test": "1.64.1",
+            "playwright": "1.64.1",
+            "playwright-core": "1.64.1"
+          },
+          "platform": "win32",
+          "python": "3.14.7"
+        }
+      },
+      "mobile": {
+        "cache_state": "warm",
+        "completed_files": 37,
+        "identities": 139,
+        "images": {
+          "application": "sha256:24cce39f5910bb0e9dc9272ddc82d4a6c789684f370053d5662e8c1fd10c0418",
+          "browser": {
+            "mode": "native",
+            "node": "v24.22.1",
+            "revisions": {
+              "chromium": "1248",
+              "chromium_headless_shell": "1248"
+            }
+          }
+        },
+        "input_sha256": "6fe322525e58f2b3295fe62d1562d5ab917c4e98b9c2438161d3579dc71b8836",
+        "run_id": "4da33aaf5c504c85bffeb983cb1feaaa",
+        "source": {
+          "dirty": true,
+          "revision": "c7ff60519520d553a00bfd33f6cf884b8de879b8"
+        },
+        "tools": {
+          "node": "v24.22.1",
+          "packages": {
+            "@playwright/test": "1.64.1",
+            "playwright": "1.64.1",
+            "playwright-core": "1.64.1"
+          },
+          "platform": "win32",
+          "python": "3.14.7"
+        }
+      },
+      "mobile-small": {
+        "cache_state": "warm",
+        "completed_files": 37,
+        "identities": 139,
+        "images": {
+          "application": "sha256:24cce39f5910bb0e9dc9272ddc82d4a6c789684f370053d5662e8c1fd10c0418",
+          "browser": {
+            "mode": "native",
+            "node": "v24.22.1",
+            "revisions": {
+              "chromium": "1248",
+              "chromium_headless_shell": "1248"
+            }
+          }
+        },
+        "input_sha256": "0ef925670c6486cc8c5b0f2fe20de5803565d40dd0855f102e5da0540ff296f8",
+        "run_id": "ddca254a36bd48f5bfb151cb47fdf626",
+        "source": {
+          "dirty": true,
+          "revision": "c7ff60519520d553a00bfd33f6cf884b8de879b8"
+        },
+        "tools": {
+          "node": "v24.22.1",
+          "packages": {
+            "@playwright/test": "1.64.1",
+            "playwright": "1.64.1",
+            "playwright-core": "1.64.1"
+          },
+          "platform": "win32",
+          "python": "3.14.7"
+        }
+      },
+      "tablet": {
+        "cache_state": "warm",
+        "completed_files": 37,
+        "identities": 139,
+        "images": {
+          "application": "sha256:24cce39f5910bb0e9dc9272ddc82d4a6c789684f370053d5662e8c1fd10c0418",
+          "browser": {
+            "mode": "native",
+            "node": "v24.22.1",
+            "revisions": {
+              "chromium": "1248",
+              "chromium_headless_shell": "1248"
+            }
+          }
+        },
+        "input_sha256": "3ed16aa44aad87c7a6b39963b61b8a8adc7718467b1a1ad62df801068b907cf2",
+        "run_id": "265d71d234544aef8e108d15dcd7ef85",
+        "source": {
+          "dirty": true,
+          "revision": "c7ff60519520d553a00bfd33f6cf884b8de879b8"
+        },
+        "tools": {
+          "node": "v24.22.1",
+          "packages": {
+            "@playwright/test": "1.64.1",
+            "playwright": "1.64.1",
+            "playwright-core": "1.64.1"
+          },
+          "platform": "win32",
+          "python": "3.14.7"
+        }
+      },
+      "tablet-landscape": {
+        "cache_state": "warm",
+        "completed_files": 37,
+        "identities": 139,
+        "images": {
+          "application": "sha256:24cce39f5910bb0e9dc9272ddc82d4a6c789684f370053d5662e8c1fd10c0418",
+          "browser": {
+            "mode": "native",
+            "node": "v24.22.1",
+            "revisions": {
+              "chromium": "1248",
+              "chromium_headless_shell": "1248"
+            }
+          }
+        },
+        "input_sha256": "6bf5274fad0c3fe825ea069ae2cfa74c2db27ea701684a35180765cbb002c7c3",
+        "run_id": "0a9e72d5644e4c5ca27b501f4f2c9685",
+        "source": {
+          "dirty": true,
+          "revision": "c7ff60519520d553a00bfd33f6cf884b8de879b8"
+        },
+        "tools": {
+          "node": "v24.22.1",
+          "packages": {
+            "@playwright/test": "1.64.1",
+            "playwright": "1.64.1",
+            "playwright-core": "1.64.1"
+          },
+          "platform": "win32",
+          "python": "3.14.7"
+        }
+      }
+    }
+  },
+  "projects": {
+    "desktop": {
+      "e2e/activity-detail-floor.spec.js": 9.132982,
+      "e2e/activity-details.spec.js": 21.758004,
+      "e2e/analysis-info.spec.js": 80.505338,
+      "e2e/analysis-on-demand.spec.js": 9.509463,
+      "e2e/attachments.spec.js": 8.808028,
+      "e2e/audit-remediation.spec.js": 17.696483,
+      "e2e/body-analysis.spec.js": 8.923803,
+      "e2e/calendar-contrast.spec.js": 45.269608,
+      "e2e/chat-status-polling.spec.js": 24.367407,
+      "e2e/coach-composer.spec.js": 14.698001,
+      "e2e/coach-follow-latest.spec.js": 36.168155,
+      "e2e/coach-history-anchor.spec.js": 7.610988,
+      "e2e/coach-layout.spec.js": 10.656873,
+      "e2e/coach-message-actions.spec.js": 6.116875,
+      "e2e/coach-message-cache.spec.js": 18.27293,
+      "e2e/coach-queue.spec.js": 9.332438,
+      "e2e/coach-tool-receipts.spec.js": 22.008515,
+      "e2e/coach.spec.js": 79.067804,
+      "e2e/competitions.spec.js": 15.306766,
+      "e2e/contracts.spec.js": 68.596586,
+      "e2e/css-cascade.spec.js": 5.633427,
+      "e2e/diagnostic-followups.spec.js": 5.778425,
+      "e2e/history-undo.spec.js": 10.847131,
+      "e2e/login-dialog.spec.js": 8.963624,
+      "e2e/model-settings.spec.js": 8.586251,
+      "e2e/navigation.spec.js": 12.195315,
+      "e2e/nutrition-expenditure.spec.js": 32.05075,
+      "e2e/nutrition-intake.spec.js": 7.757213,
+      "e2e/nutrition-week.spec.js": 11.429128,
+      "e2e/nutrition.spec.js": 37.112871,
+      "e2e/offline-errors.spec.js": 8.93002,
+      "e2e/performance-values.spec.js": 29.051098,
+      "e2e/privacy-delete.spec.js": 10.526601,
+      "e2e/provider-actions.spec.js": 18.632694,
+      "e2e/startup-area-cache.spec.js": 8.417592,
+      "e2e/state-events.spec.js": 9.302976,
+      "e2e/text-reflow.spec.js": 29.975892,
+      "e2e/toast.spec.js": 7.38763,
+      "e2e/training-feature-panels.spec.js": 48.534267,
+      "e2e/update-reload.spec.js": 12.552909,
+      "e2e/update-start.spec.js": 17.453022,
+      "e2e/view-refresh.spec.js": 7.797038,
+      "e2e/wahoo-connection.spec.js": 21.046177
+    },
+    "mobile": {
+      "e2e/activity-detail-floor.spec.js": 10.572919,
+      "e2e/activity-details.spec.js": 30.530406,
+      "e2e/analysis-info.spec.js": 96.728743,
+      "e2e/analysis-on-demand.spec.js": 25.165556,
+      "e2e/attachments.spec.js": 8.165548,
+      "e2e/body-analysis.spec.js": 12.459518,
+      "e2e/calendar-contrast.spec.js": 46.288586,
+      "e2e/chat-status-polling.spec.js": 16.154368,
+      "e2e/coach-composer.spec.js": 12.054627,
+      "e2e/coach-follow-latest.spec.js": 29.281674,
+      "e2e/coach-history-anchor.spec.js": 8.220227,
+      "e2e/coach-layout.spec.js": 11.906941,
+      "e2e/coach-message-actions.spec.js": 6.59794,
+      "e2e/coach-message-cache.spec.js": 15.100557,
+      "e2e/coach-queue.spec.js": 7.986914,
+      "e2e/coach.spec.js": 51.618077,
+      "e2e/competitions.spec.js": 10.449158,
+      "e2e/contracts.spec.js": 21.236193,
+      "e2e/css-cascade.spec.js": 5.894575,
+      "e2e/history-undo.spec.js": 6.398454,
+      "e2e/login-dialog.spec.js": 19.254991,
+      "e2e/model-settings.spec.js": 7.549431,
+      "e2e/navigation.spec.js": 12.078152,
+      "e2e/nutrition-expenditure.spec.js": 28.440315,
+      "e2e/nutrition-intake.spec.js": 8.986852,
+      "e2e/nutrition-week.spec.js": 11.953649,
+      "e2e/nutrition.spec.js": 30.881108,
+      "e2e/offline-errors.spec.js": 10.402632,
+      "e2e/performance-values.spec.js": 29.070809,
+      "e2e/provider-actions.spec.js": 14.878619,
+      "e2e/startup-area-cache.spec.js": 9.356858,
+      "e2e/text-reflow.spec.js": 34.457697,
+      "e2e/toast.spec.js": 7.560962,
+      "e2e/training-feature-panels.spec.js": 46.58647,
+      "e2e/update-start.spec.js": 18.103805,
+      "e2e/view-refresh.spec.js": 8.664614,
+      "e2e/wahoo-connection.spec.js": 32.672564
+    },
+    "mobile-small": {
+      "e2e/activity-detail-floor.spec.js": 8.095685,
+      "e2e/activity-details.spec.js": 19.654421,
+      "e2e/analysis-info.spec.js": 77.865346,
+      "e2e/analysis-on-demand.spec.js": 9.528405,
+      "e2e/attachments.spec.js": 7.398328,
+      "e2e/body-analysis.spec.js": 8.956605,
+      "e2e/calendar-contrast.spec.js": 36.66963,
+      "e2e/chat-status-polling.spec.js": 14.285957,
+      "e2e/coach-composer.spec.js": 10.4005,
+      "e2e/coach-follow-latest.spec.js": 27.523785,
+      "e2e/coach-history-anchor.spec.js": 6.766497,
+      "e2e/coach-layout.spec.js": 12.65489,
+      "e2e/coach-message-actions.spec.js": 5.555271,
+      "e2e/coach-message-cache.spec.js": 14.551989,
+      "e2e/coach-queue.spec.js": 5.496468,
+      "e2e/coach.spec.js": 44.57377,
+      "e2e/competitions.spec.js": 9.628418,
+      "e2e/contracts.spec.js": 18.395019,
+      "e2e/css-cascade.spec.js": 4.752581,
+      "e2e/history-undo.spec.js": 15.278022,
+      "e2e/login-dialog.spec.js": 7.364064,
+      "e2e/model-settings.spec.js": 6.523058,
+      "e2e/navigation.spec.js": 9.653517,
+      "e2e/nutrition-expenditure.spec.js": 25.371986,
+      "e2e/nutrition-intake.spec.js": 7.795694,
+      "e2e/nutrition-week.spec.js": 10.524998,
+      "e2e/nutrition.spec.js": 23.943586,
+      "e2e/offline-errors.spec.js": 8.198514,
+      "e2e/performance-values.spec.js": 22.439756,
+      "e2e/provider-actions.spec.js": 10.993281,
+      "e2e/startup-area-cache.spec.js": 8.00394,
+      "e2e/text-reflow.spec.js": 21.764992,
+      "e2e/toast.spec.js": 8.045215,
+      "e2e/training-feature-panels.spec.js": 35.004004,
+      "e2e/update-start.spec.js": 15.999494,
+      "e2e/view-refresh.spec.js": 6.243071,
+      "e2e/wahoo-connection.spec.js": 17.137795
+    },
+    "tablet": {
+      "e2e/activity-detail-floor.spec.js": 9.573658,
+      "e2e/activity-details.spec.js": 25.071893,
+      "e2e/analysis-info.spec.js": 92.169308,
+      "e2e/analysis-on-demand.spec.js": 12.193517,
+      "e2e/attachments.spec.js": 8.355441,
+      "e2e/body-analysis.spec.js": 10.311712,
+      "e2e/calendar-contrast.spec.js": 44.579251,
+      "e2e/chat-status-polling.spec.js": 15.168397,
+      "e2e/coach-composer.spec.js": 11.876652,
+      "e2e/coach-follow-latest.spec.js": 29.119392,
+      "e2e/coach-history-anchor.spec.js": 8.651924,
+      "e2e/coach-layout.spec.js": 23.810727,
+      "e2e/coach-message-actions.spec.js": 6.618121,
+      "e2e/coach-message-cache.spec.js": 17.310197,
+      "e2e/coach-queue.spec.js": 6.866657,
+      "e2e/coach.spec.js": 54.30298,
+      "e2e/competitions.spec.js": 12.283107,
+      "e2e/contracts.spec.js": 24.680364,
+      "e2e/css-cascade.spec.js": 6.447473,
+      "e2e/history-undo.spec.js": 6.752773,
+      "e2e/login-dialog.spec.js": 9.244639,
+      "e2e/model-settings.spec.js": 8.659911,
+      "e2e/navigation.spec.js": 11.581677,
+      "e2e/nutrition-expenditure.spec.js": 33.248033,
+      "e2e/nutrition-intake.spec.js": 7.183589,
+      "e2e/nutrition-week.spec.js": 11.658056,
+      "e2e/nutrition.spec.js": 28.996287,
+      "e2e/offline-errors.spec.js": 8.866207,
+      "e2e/performance-values.spec.js": 24.597116,
+      "e2e/provider-actions.spec.js": 22.019566,
+      "e2e/startup-area-cache.spec.js": 7.494871,
+      "e2e/text-reflow.spec.js": 25.265076,
+      "e2e/toast.spec.js": 6.791903,
+      "e2e/training-feature-panels.spec.js": 43.173241,
+      "e2e/update-start.spec.js": 15.739349,
+      "e2e/view-refresh.spec.js": 7.750905,
+      "e2e/wahoo-connection.spec.js": 18.170095
+    },
+    "tablet-landscape": {
+      "e2e/activity-detail-floor.spec.js": 8.431978,
+      "e2e/activity-details.spec.js": 23.40531,
+      "e2e/analysis-info.spec.js": 77.844024,
+      "e2e/analysis-on-demand.spec.js": 12.146753,
+      "e2e/attachments.spec.js": 7.012839,
+      "e2e/body-analysis.spec.js": 10.043538,
+      "e2e/calendar-contrast.spec.js": 45.832095,
+      "e2e/chat-status-polling.spec.js": 16.634964,
+      "e2e/coach-composer.spec.js": 12.171237,
+      "e2e/coach-follow-latest.spec.js": 28.64556,
+      "e2e/coach-history-anchor.spec.js": 9.654426,
+      "e2e/coach-layout.spec.js": 10.862103,
+      "e2e/coach-message-actions.spec.js": 7.462808,
+      "e2e/coach-message-cache.spec.js": 15.338473,
+      "e2e/coach-queue.spec.js": 5.807188,
+      "e2e/coach.spec.js": 44.377318,
+      "e2e/competitions.spec.js": 11.701157,
+      "e2e/contracts.spec.js": 22.865367,
+      "e2e/css-cascade.spec.js": 5.595165,
+      "e2e/history-undo.spec.js": 6.094714,
+      "e2e/login-dialog.spec.js": 8.63277,
+      "e2e/model-settings.spec.js": 7.703586,
+      "e2e/navigation.spec.js": 11.527865,
+      "e2e/nutrition-expenditure.spec.js": 35.065021,
+      "e2e/nutrition-intake.spec.js": 7.392386,
+      "e2e/nutrition-week.spec.js": 12.861552,
+      "e2e/nutrition.spec.js": 29.363948,
+      "e2e/offline-errors.spec.js": 10.904915,
+      "e2e/performance-values.spec.js": 23.426457,
+      "e2e/provider-actions.spec.js": 12.257057,
+      "e2e/startup-area-cache.spec.js": 8.505223,
+      "e2e/text-reflow.spec.js": 28.298288,
+      "e2e/toast.spec.js": 6.189823,
+      "e2e/training-feature-panels.spec.js": 42.554135,
+      "e2e/update-start.spec.js": 16.218901,
+      "e2e/view-refresh.spec.js": 6.272157,
+      "e2e/wahoo-connection.spec.js": 19.217502
+    }
+  },
+  "version": 1
+}

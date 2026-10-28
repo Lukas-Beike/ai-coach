@@ -596,6 +596,29 @@ def _save_activity_detail(activity_id, record):
         raise RuntimeError(f"Fixture detail for {activity_id} not stored: {result.outcome}")
 
 
+def _fixture_seed_fueling_ride(today):
+    """Reuse the feature seed's local fueling workout without activity history."""
+    units = server.PLANNING_DATA.planned_unit().list(500)
+    planned = next(
+        (unit for unit in units if unit.get("name") == "Fixture fueling ride"), None
+    )
+    if planned is None:
+        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+            [
+                {
+                    "date": (today + timedelta(days=1)).isoformat(),
+                    "name": "Fixture fueling ride",
+                    "sport": "Ride",
+                    "description": "- 90m 200w Steady",
+                    "duration_minutes": 90,
+                    "target": "AUTO",
+                    "rationale": "Synthetic fixture",
+                }
+            ]
+        )[0]
+    return planned
+
+
 def seed_training_features():
     from backend.activities.detail_store import summary_fingerprint
     from backend.performance.power_profile import power_profile
@@ -783,24 +806,7 @@ def seed_training_features():
         {"activity_id": "feature-ride-1", "equipment_id": equipment["id"]}
     )
     _fixture_cycling_target(now.date() + timedelta(days=30))
-    units = server.PLANNING_DATA.planned_unit().list(500)
-    planned = next(
-        (unit for unit in units if unit.get("name") == "Fixture fueling ride"), None
-    )
-    if planned is None:
-        planned = server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
-            [
-                {
-                    "date": (now.date() + timedelta(days=1)).isoformat(),
-                    "name": "Fixture fueling ride",
-                    "sport": "Ride",
-                    "description": "- 90m 200w Steady",
-                    "duration_minutes": 90,
-                    "target": "AUTO",
-                    "rationale": "Synthetic fixture",
-                }
-            ]
-        )[0]
+    planned = _fixture_seed_fueling_ride(now.date())
     with server.database_manager().unit_of_work() as db:
         server.KEY_VALUE_REPOSITORY.set(
             db, "training_features_seed_version", FIXTURE_TRAINING_FEATURES_SEED_VERSION
@@ -1198,6 +1204,32 @@ def _fixture_gear_metadata(
         item["garmin_distance_km"] = garmin_distances_km.get(garmin_uuid)
 
 
+def _fixture_demo_workouts(today):
+    """Return fresh synthetic workout inputs shared by full and staging seeds."""
+    return [
+        {
+            "date": (today + timedelta(days=offset)).isoformat(),
+            "name": name,
+            "sport": sport,
+            "duration_minutes": duration,
+            "description": description,
+            "target": "AUTO",
+            "rationale": FIXTURE_RATIONALE,
+        }
+        for offset, name, sport, duration, description in [
+            (2, "Lockerer Dauerlauf", "Run", 40, "- 40m Z1 HR"),
+            (
+                3,
+                "Radintervalle",
+                "Ride",
+                60,
+                "- 15m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 15m 50%",
+            ),
+            (5, "Grundlagenausfahrt", "Ride", 90, "- 90m 65%"),
+        ]
+    ]
+
+
 def _fixture_calendar_payload(today):
     """Build the fixture feed with descriptive titles and parsed markers."""
     start = today + timedelta(days=2)
@@ -1278,6 +1310,23 @@ def _fixture_seed_calendar(today):
             )
         server.KEY_VALUE_REPOSITORY.set(db, "last_external_calendar_sync_at", now)
     return len(events)
+
+
+def seed_fixture_planning_calendar(today):
+    """Seed staging inputs in a fresh disposable database, without demo history.
+
+    Keep the full seed's ordering: ordinary units and the distance run precede
+    external constraints; marker-day v6 units are then inserted deliberately.
+    """
+    _fixture_cycling_target(today + timedelta(days=30))
+    _fixture_seed_fueling_ride(today)
+    server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+        _fixture_demo_workouts(today)
+    )
+    _fixture_seed_distance_run(today)
+    _fixture_seed_calendar(today)
+    _fixture_wave2_competitions(today)
+    _fixture_seed_v6_units(today)
 
 
 def _fixture_seed_wave2(today, snapshot, garmin):
@@ -1792,9 +1841,6 @@ def _fixture_seed_v6(today):
     replace or skip the same fixture rows instead of duplicating them.
     Returns False when the mocked contract-test connection cannot persist data.
     """
-    from backend import change_history
-    from backend.planning import planned_units, workouts
-
     if not _fixture_database_is_real():
         return False
     rest_day = today - timedelta(days=FIXTURE_V6_REST_OFFSET)
@@ -1830,6 +1876,15 @@ def _fixture_seed_v6(today):
             )
         ]
     )
+    _fixture_seed_v6_units(today)
+    return True
+
+
+def _fixture_seed_v6_units(today):
+    """Persist the shared v6 marker units without check-ins or swim history."""
+    from backend import change_history
+    from backend.planning import planned_units, workouts
+
     planned = server.PLANNING_DATA.planned_unit()
     with server.database_manager().unit_of_work() as db:
         for name, workout in _fixture_v6_units(today):
@@ -1848,7 +1903,6 @@ def _fixture_seed_v6(today):
                 db, "planned_unit", unit_id, "create", None, entry, source="fixture"
             )
             server.PLANNING_REVISION_SERVICE.bump(db)
-    return True
 
 
 def _fixture_seed_distance_run(today):
@@ -2026,29 +2080,9 @@ def seed_preview_demo():
                     "source": "manual",
                 }
             )
-    workouts = [
-        {
-            "date": (today + timedelta(days=offset)).isoformat(),
-            "name": name,
-            "sport": sport,
-            "duration_minutes": duration,
-            "description": description,
-            "target": "AUTO",
-            "rationale": FIXTURE_RATIONALE,
-        }
-        for offset, name, sport, duration, description in [
-            (2, "Lockerer Dauerlauf", "Run", 40, "- 40m Z1 HR"),
-            (
-                3,
-                "Radintervalle",
-                "Ride",
-                60,
-                "- 15m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 5m 100%\n- 5m 50%\n- 15m 50%",
-            ),
-            (5, "Grundlagenausfahrt", "Ride", 90, "- 90m 65%"),
-        ]
-    ]
-    server.PLANNING_WORKFLOWS.local_plan_creation_service().save(workouts)
+    server.PLANNING_WORKFLOWS.local_plan_creation_service().save(
+        _fixture_demo_workouts(today)
+    )
     _fixture_seed_distance_run(today)
     history = demo_performance_history(today)
     garmin = _fixture_demo_garmin(today, history)

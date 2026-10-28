@@ -14,9 +14,12 @@ async function openHistoryFixture(page) {
   const olderMessages = Array.from({ length: 30 }, (_, index) => historyMessage(60_000 + index, index, "2026-10-01"));
   const recentMessages = Array.from({ length: 40 }, (_, index) => historyMessage(61_000 + index, index, "2026-10-02"));
   const firstId = recentMessages[0].id;
-  await page.route("**/api/chat/history?*", (route) => {
+  let releaseOlder;
+  const olderReady = new Promise((resolve) => { releaseOlder = resolve; });
+  await page.route("**/api/chat/history?*", async (route) => {
     const olderPage = new URL(route.request().url()).searchParams.has("cursor");
-    route.fulfill({
+    if (olderPage) await olderReady;
+    await route.fulfill({
       json: olderPage
         ? { messages: olderMessages, generation, next_cursor: null, proposed_actions: [] }
         : { messages: recentMessages, generation, next_cursor: "older-page", proposed_actions: [] },
@@ -39,11 +42,11 @@ async function openHistoryFixture(page) {
   // run, and that jump would scroll a reader's earlier scroll back down.
   await expect.poll(() => page.evaluate(() => !state.chatInitialScrollPending && !state.chatScrollRestoring)).toBe(true);
   await expect(page.locator('#messages [data-page-area="chat"]')).toBeAttached();
-  return { firstId };
+  return { firstId, releaseOlder };
 }
 
 test("older chat history keeps the reading position without moving focus @responsive", async ({ page }) => {
-  const { firstId } = await openHistoryFixture(page);
+  const { firstId, releaseOlder } = await openHistoryFixture(page);
 
   // Scrolling the history button into view triggers the observer; the visible anchor is restored after the older page renders.
   const before = await page.evaluate((messageId) => {
@@ -52,6 +55,7 @@ test("older chat history keeps the reading position without moving focus @respon
     return document.querySelector(`#messages [data-message-id="${messageId}"]`).getBoundingClientRect().top;
   }, firstId);
 
+  releaseOlder();
   await expect(page.locator("#messages [data-message-id]")).toHaveCount(70);
   await expect(page.locator("#chatOperationStatus")).toHaveText("30 ältere Nachrichten geladen");
   const after = await page.evaluate((messageId) => (
@@ -63,7 +67,7 @@ test("older chat history keeps the reading position without moving focus @respon
 });
 
 test("automatic older chat loading keeps focus on the focused message action @responsive", async ({ page }) => {
-  const { firstId } = await openHistoryFixture(page);
+  const { firstId, releaseOlder } = await openHistoryFixture(page);
 
   // Focus a message action in the first loaded message before the scroll triggers the automatic load, as a keyboard user moving toward the start would.
   const focused = await page.evaluate((messageId) => {
@@ -75,6 +79,7 @@ test("automatic older chat loading keeps focus on the focused message action @re
   }, firstId);
   expect(focused).toBe(true);
 
+  releaseOlder();
   await expect(page.locator("#messages [data-message-id]")).toHaveCount(70);
   await expect(page.locator("#chatOperationStatus")).toHaveText("30 ältere Nachrichten geladen");
   expect(await page.evaluate(() => {

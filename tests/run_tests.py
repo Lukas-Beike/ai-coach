@@ -17,6 +17,8 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
+import platform
 import statistics
 import sys
 import time
@@ -50,6 +52,14 @@ CONTAINER_SUITE_PATTERNS = (
     "test_startup_sync_scheduler*",
 )
 SUITES = ("all", "container")
+
+
+def write_result(path: Path, value: dict) -> None:
+    """Replace evidence atomically; a killed runner leaves its last known state."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def iter_tests(suite: unittest.TestSuite):
@@ -97,7 +107,9 @@ def class_weights(tests, durations: dict[str, float]) -> dict[str, float]:
     for test in tests:
         key = class_key(test)
         sizes[key] = sizes.get(key, 0) + 1
-    recorded = [durations[key] / size for key, size in sizes.items() if key in durations]
+    recorded = [
+        durations[key] / size for key, size in sizes.items() if key in durations
+    ]
     per_test = statistics.median(recorded) if recorded else 1.0
     return {key: durations.get(key, size * per_test) for key, size in sizes.items()}
 
@@ -116,7 +128,9 @@ def assign_classes(
     return assignment
 
 
-def select_shard(tests, shard: int, total: int, durations: dict[str, float] | None = None):
+def select_shard(
+    tests, shard: int, total: int, durations: dict[str, float] | None = None
+):
     tests = list(tests)
     assignment = assign_classes(tests, total, durations)
     return [test for test in tests if assignment[class_key(test)] == shard - 1]
@@ -130,6 +144,11 @@ class ClassTimingResult(unittest.TextTestResult):
         super().__init__(*args, **kwargs)
         self.class_seconds: dict[str, float] = {}
         self._mark = time.perf_counter()
+        self.executed_ids: list[str] = []
+
+    def startTest(self, test):
+        self.executed_ids.append(test.id())
+        super().startTest(test)
 
     def stopTest(self, test):
         super().stopTest(test)
@@ -160,6 +179,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shard", type=int, default=1, help="1-based shard number")
     parser.add_argument("--total", type=int, default=1, help="number of total shards")
     parser.add_argument(
+        "--result-json", type=Path, help="atomic selection/result evidence"
+    )
+    parser.add_argument(
         "--suite",
         choices=SUITES,
         default="all",
@@ -181,25 +203,72 @@ def parse_args() -> argparse.Namespace:
         parser.error(
             "--shard must be between 1 and --total, and --total must be positive"
         )
-    if args.record_durations and (args.total != 1 or args.suite != "all"):
+    if args.record_durations and (args.total != 1 or args.suite != "all" or args.list):
         parser.error("--record-durations needs the full suite in a single shard")
     return args
 
 
 def main() -> int:
     args = parse_args()
-    tests = select_suite(discover_tests(), args.suite)
+    evidence = {
+        "version": 1,
+        "status": "discovering",
+        "suite": args.suite,
+        "python_version": platform.python_version(),
+        "shard": args.shard,
+        "total": args.total,
+    }
+
+    def save():
+        if args.result_json:
+            write_result(args.result_json, evidence)
+
+    save()
+    try:
+        discovered = discover_tests()
+    except Exception:
+        evidence["status"] = "discovery_failed"
+        save()
+        raise
+    tests = select_suite(discovered, args.suite)
     selected = select_shard(tests, args.shard, args.total)
+    evidence.update(
+        discovered_ids=[test.id() for test in discovered],
+        suite_ids=[test.id() for test in tests],
+        selected_ids=[test.id() for test in selected],
+        selected_classes=sorted({class_key(test) for test in selected}),
+        status="selected" if selected else "empty",
+    )
+    save()
+    if not selected:
+        raise SystemExit(f"shard {args.shard}/{args.total} contains no tests")
     if args.list:
         print("\n".join(test.id() for test in selected))
         return 0
-    if not selected:
-        raise SystemExit(f"shard {args.shard}/{args.total} contains no tests")
 
     started = time.perf_counter()
+    evidence["status"] = "running"
+    save()
     runner = unittest.TextTestRunner(verbosity=1, resultclass=ClassTimingResult)
-    result = runner.run(unittest.TestSuite(selected))
+    try:
+        result = runner.run(unittest.TestSuite(selected))
+    except BaseException:
+        evidence["status"] = "interrupted"
+        save()
+        raise
+    assert isinstance(result, ClassTimingResult)
     elapsed = time.perf_counter() - started
+    evidence.update(
+        status="passed" if result.wasSuccessful() else "failed",
+        tests_run=result.testsRun,
+        skips=len(result.skipped),
+        failures=len(result.failures),
+        errors=len(result.errors),
+        error_ids=[test.id() for test, _ in result.errors],
+        executed_ids=result.executed_ids,
+        elapsed_seconds=elapsed,
+    )
+    save()
     print(
         f"Discovery: {len(tests)} tests; shard {args.shard}/{args.total}: "
         f"{result.testsRun} run, {len(result.skipped)} skipped in {elapsed:.2f}s"
@@ -210,9 +279,8 @@ def main() -> int:
             key: round(seconds, 3)
             for key, seconds in sorted(result.class_seconds.items())
         }
-        args.record_durations.write_text(
-            json.dumps(recorded, indent=1) + "\n", encoding="utf-8"
-        )
+        if result.wasSuccessful():
+            write_result(args.record_durations, recorded)
     return 0 if result.wasSuccessful() else 1
 
 

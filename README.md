@@ -948,37 +948,119 @@ python tests/run_tests.py --suite container --list
 ```
 
 #### Isolated SQLCipher Integration Tests
-`tests/run_sqlcipher_tests.ps1` builds the image and runs the full native suite
-(`python /review/tests/run_tests.py`) in a read-only, network-less container, without
-exposing local host `.env` or data files. Only test inputs are mounted from the
-checkout, including `scripts/` read-only for the demo-container contract tests; the
-application code comes from the freshly built image:
+
+The PowerShell helper delegates to the standard-library supervisor. It builds
+current application source once, then derives a disposable test image with Git
+for synthetic repository tests; production `Dockerfile` stays unchanged. Tool
+preparation may use the network, but tests run as the app user in read-only,
+networkless containers with temporary data, one CPU and 512 MiB per worker.
+Explicit read-only test inputs exclude the checkout root, `.git`, `.env` and live
+data. Application server/backend/public files come from the current image.
+
 ```powershell
 ./tests/run_sqlcipher_tests.ps1
+./tests/run_sqlcipher_tests.ps1 -Workers 2 -CacheState warm
+./tests/run_sqlcipher_tests.ps1 -Workers 1 -ResultsDirectory $env:TEMP\coach-test-results
 ```
 
-#### Playwright Browser E2E Tests
-End-to-end browser testing validates PWA responsiveness, keyboard navigation, and UI flows across 5 device viewports:
-```sh
-npm ci
-npm run test:e2e
+The serial default is preserved; `-Workers` accepts 1-4, with two as the first
+benchmark candidate. Each run owns a unique directory below
+`$env:TEMP/ai-coach-tests` (or the supplied parent), with `summary.json`, per-shard
+selection/results and logs. Failed, missing, inconsistent or interrupted shards
+cannot report complete success. Every class remains in one shard; all selected
+IDs must form the complete discovery set exactly once. Compare complete one- and
+two-worker runs on the same host, including the additional CPU/memory and summed
+runner time, before increasing concurrency.
+
+Coverage is optional. Prepare an offline wheel matching the locked dev pin and
+the image's Python/Linux architecture separately; for the default amd64 image:
+
+```powershell
+$coverageVersion = (Select-String -Path requirements-dev.txt -Pattern '^coverage==([^ \\]+)').Matches.Groups[1].Value
+python -m pip download --only-binary=:all: --no-deps --platform manylinux_2_17_x86_64 --python-version 314 --implementation cp --abi cp314 --dest $env:TEMP\coverage-wheels "coverage==$coverageVersion"
+# Pass the downloaded .whl path explicitly:
+./tests/run_sqlcipher_tests.ps1 -Workers 2 -CoverageWheel $env:TEMP\coverage-wheels\coverage-<version>-<wheel-tags>.whl
 ```
-Functional contracts run once on desktop. Tests tagged `@responsive` also run on
-all four smaller viewports. CI builds the application image once per run, shares
-it as the `ai-coach-ci-image` artifact with the native container, SBOM and browser
-jobs, and runs the five projects in independent jobs that start as soon as the
-image exists, in parallel with the native tests; publishing still needs both. Each
-project derives its spec list from `playwright test --list --project <project>`:
-desktop covers every spec file, split round-robin over two jobs, and the other
-projects run only files whose test titles match `@responsive`.
-Each spec gets a fresh disposable SQLCipher fixture, and the next spec's fixture is
-prewarmed while the current one runs; there is one worker per invocation. Browser
-traces are local-only: CI turns them off because CI artifacts are public and traces
-embed the fixture session.
-Chromium downloads are cached by the locked dependency version; system
-dependencies are installed on every runner. Follow
-`.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md` for safe local
-fixture setup; never target a connected installation.
+
+The supervisor verifies the wheel hash against `requirements-dev.txt`, installs
+it offline into temporary test storage, and combines exactly one independent
+coverage file per successful shard. It retains the originals and the combined
+`coverage/.coverage`; missing coverage blocks success. No dynamic per-test
+coverage contexts are enabled. Duration recording remains a complete, unsharded
+operation; `-RecordDurationsDirectory` cannot be combined with multiple workers,
+and failed/partial/list runs never overwrite the authoritative recording.
+
+#### Playwright Browser E2E Tests
+
+The shared runner lists the locked Playwright selection and gives every spec its
+own disposable SQLCipher fixture. Prepare the locked native browser and build
+current application source before running locally:
+
+```powershell
+npm ci --ignore-scripts
+node node_modules/@playwright/test/cli.js install chromium
+docker build -t ai-coach:e2e .
+python scripts/run_browser_tests.py --project all --list
+python scripts/run_browser_tests.py --project mobile-small --spec e2e/css-cascade.spec.js
+python scripts/run_browser_tests.py --project all --jobs 1 --cache-state warm
+```
+
+`--list` starts no containers. A project/spec selection reports its focused scope;
+unknown projects, missing specs, invalid shards and empty selections fail. Desktop
+runs every functional contract, and the four smaller projects repeat only
+`@responsive` scenarios. Use `--shard 1 --total 2` and `--shard 2 --total 2` for
+complementary whole-file selections. Assignment uses the frozen
+`e2e/browser_durations.json` weights, longest first to the least-loaded shard,
+with a project's median (one second when unmeasured) for new files. Weights never
+exclude tests. Replace weights only from comparable complete per-project records,
+including environment/source identity; do not update them during a run.
+The current weights are one warm native Windows observation per project, with
+source/tool/image provenance in the file; they are not a Linux CI benchmark.
+
+One process is the local default; `--jobs 2` is the bounded concurrency trial.
+There is still one Playwright worker per spec. The two prewarm slots per process
+have distinct containers, stable networks and loopback ports. Runs use separate
+private authentication files and a unique result directory under
+`test-results/browser-runs/` (override its parent with `--results-dir`).
+`manifest.json` records selection, source, environment, phase times, child exits
+and final status. Pending or interrupted records are unverified. Keep private
+storage state and traces out of reports; the runner disables traces.
+
+CI builds and shares the current application image once, then starts browser
+jobs beside the native suite. Its prepared browser image is pinned by exact
+version and digest in `scripts/browser_environment.json`; ordinary matrix jobs
+pull that image and install no browser OS packages. The runner checks the locked
+package and installed browser revisions before tests. The required `Browser
+checks` aggregate rejects failed/missing shards and incomplete or duplicate
+selection evidence. Summaries are scoped to the GitHub run attempt; rerun all
+jobs to supply a complete matrix rather than rerunning only failed jobs.
+Summaries are uploaded separately from failure reports; authentication remains
+in private temporary storage.
+
+Prepared browser execution uses Linux host networking. Windows keeps the native
+browser path above. On a Linux host, pull the pinned image, then pass it explicitly:
+
+```sh
+browser_image="$(python -c "import json; print(json.load(open('scripts/browser_environment.json'))['image'])")"
+docker pull "$browser_image"
+python scripts/run_browser_tests.py --project desktop --browser-image "$browser_image"
+```
+
+When Playwright changes, resolve the matching upstream tag, inspect its digest
+with `docker buildx imagetools inspect`, update the pin with the lockfile, and
+verify observed browser revisions plus a disposable login/PWA run. A mismatch
+fails explicitly. Measure complete cold and warm preparation costs; a warm cache
+is not a cold-pull result. To roll back prepared execution locally, omit
+`--browser-image` after preparing the locked native browser. CI rollback requires
+restoring native browser/system preparation together with that invocation.
+Keep the smaller matrix/serial path until measured concurrency gains justify
+additional runner-minutes. The full isolated selection can take substantial time
+on Docker Desktop; retain its manifest and wait for the terminal result.
+
+Follow the [disposable browser validation notes](.agents/skills/ai-coach-pwa-e2e/references/browser-validation.md)
+for manual login, PWA/offline and UI checks. Never target a connected installation.
+Direct `npm run test:e2e` remains available for an explicitly prepared fixture;
+stateful specs require the shared runner's fresh per-file fixtures.
 
 Configured viewports in `playwright.config.cjs`:
 - `mobile-small`: 320x568 (Compact mobile)
@@ -987,7 +1069,49 @@ Configured viewports in `playwright.config.cjs`:
 - `tablet-landscape`: 844x390 (Mobile/tablet landscape)
 - `desktop`: 1440x1000 (Desktop workstation)
 
+#### Measuring validation performance
+
+Record performance against a frozen source revision and the same complete test
+selection on the same host. Keep focused results separate. Save the revision,
+working-tree changes, Python/Node/Docker versions, image identities, CPU/memory
+limits, process count, and whether caches were cold, warm, or unknown alongside
+start/end timestamps and the process exit code. Store these records outside
+athlete storage; never include authentication state, credentials, or traces in
+published evidence. An unfinished record is unverified, never a pass.
+
+For Python, measure image build and test execution separately using the full
+SQLCipher helper above. For browsers, retain the complete five-project selection
+and fresh fixture per spec; measure image transfer/preparation, fixture readiness,
+authentication, and execution separately. Do not compare a focused run against a
+complete baseline or enable per-test dynamic coverage contexts for routine timing.
+
+For GitHub, measure elapsed time from workflow creation until the required test,
+browser, and quality gates finish, excluding review and publication. Report queue
+time where available and sum job durations as runner-minutes separately from
+wall time. Compare at least five naturally occurring successful runs with
+comparable selections and environments before claiming an improved median;
+report failed and cold-cache runs separately. Do not dispatch extra workflows
+just to populate a benchmark.
+
+The provisional goals for `accelerate-test-execution` are a GitHub validation
+median below six minutes and at least 30% less local wall time for each complete
+Python and browser selection against its own newly captured baseline. Report
+each goal as met, missed, or unverified. Timing goals do not change correctness
+results, required checks, assertions, retries, or timeouts.
+
+A same-host complete SQLCipher comparison on 26 October 2026 ran all 7,289
+tests exactly once with one and two workers (14 platform skips in each). Warm
+whole-run time was 728.71 seconds versus 525.62 seconds, a 27.87% reduction in
+one sample. This compares worker counts on the new runner, not a successful
+pre-change baseline; browser and hosted improvement goals remain unverified.
+
 #### Standard synthetic preview data
+
+Specialized staging/collision tests use `seed_fixture_planning_calendar(today)`
+in a fresh temporary database. It shares the complete seed's planning/calendar
+generation and omits unrelated history. `seed_preview_demo()` remains the
+complete demo seed used by creation, upgrade, repeated-seed, and restart tests;
+startup invokes it only when `FIXTURE_AUTO_SEED=1`.
 
 The disposable fixture runtime exposes `GET /api/fixture/demo` for a reusable,
 mobile-safe preview. It seeds profile, check-ins, nutrition, competitions,

@@ -1,7 +1,7 @@
 const path = require("node:path");
 const { defineConfig, devices } = require("@playwright/test");
 
-const authStatePath = path.join(__dirname, "playwright", ".auth", "user.json");
+const authStatePath = process.env.E2E_AUTH_STATE_PATH || path.join(__dirname, "playwright", ".auth", "user.json");
 
 module.exports = defineConfig({
   testDir: "./e2e",

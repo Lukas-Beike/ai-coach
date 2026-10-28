@@ -26,17 +26,17 @@ async function openConnections(page, url = "/#more/connections") {
   return page.locator("#wahooConnectionStatus").locator("xpath=ancestor::article");
 }
 
-test("@responsive Wahoo without server credentials explains the missing configuration", async ({ page }) => {
+test("@responsive Wahoo without server credentials explains the missing configuration", async ({ page }, testInfo) => {
   const card = await openConnections(page);
   await expect(page.locator("#wahooConnectionStatus")).toHaveText("Nicht konfiguriert");
   await expect(page.locator("#wahooSetupHint")).toContainText("WAHOO_CLIENT_ID");
   await expect(page.locator("#wahooConnectButton")).toBeHidden();
   await expect(page.locator("#wahooDisconnectButton")).toBeHidden();
   await card.scrollIntoViewIfNeeded();
-  await card.screenshot({ path: "test-results/wahoo-not-configured.png" });
+  await card.screenshot({ path: testInfo.outputPath("wahoo-not-configured.png") });
 });
 
-test("@responsive configured Wahoo offers Connect and follows the authorize URL", async ({ page }) => {
+test("@responsive configured Wahoo offers Connect and follows the authorize URL", async ({ page }, testInfo) => {
   await withWahooState(page, { configured: true, connected: false, scope: null, connected_at: null }, () => ({}));
   await page.route("**/api/wahoo/connect", (route) => route.fulfill({ json: { authorize_url: FAKE_AUTHORIZE_URL } }));
   await page.route("https://wahoo.example.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>fake wahoo</title>" }));
@@ -47,7 +47,7 @@ test("@responsive configured Wahoo offers Connect and follows the authorize URL"
   await expect(page.locator("#wahooSyncButton")).toBeHidden();
   await expect(page.locator("#wahooFullResyncButton")).toBeHidden();
   await card.scrollIntoViewIfNeeded();
-  await card.screenshot({ path: "test-results/wahoo-configured.png" });
+  await card.screenshot({ path: testInfo.outputPath("wahoo-configured.png") });
   await page.locator("#wahooConnectButton").click();
   await expect(page).toHaveURL(FAKE_AUTHORIZE_URL);
 });
@@ -61,7 +61,7 @@ test("@responsive a rejected Wahoo token asks for a reconnect", async ({ page })
   await expect(page.locator("#wahooConnectButton")).toHaveText("Wahoo erneut verbinden");
 });
 
-test("@responsive connected Wahoo shows its label everywhere and can be disconnected", async ({ page }) => {
+test("@responsive connected Wahoo shows its label everywhere and can be disconnected", async ({ page }, testInfo) => {
   let disconnected = false;
   await withWahooState(page, { configured: true, connected: true, scope: "workouts_read", connected_at: "2026-01-02T08:00:00+00:00" }, (body) => ({
     provider_labels: { ...body.provider_labels, wahoo: "Wahoo" },
@@ -79,7 +79,7 @@ test("@responsive connected Wahoo shows its label everywhere and can be disconne
   await expect(page.locator("#wahooConnectButton")).toBeHidden();
   await expect(card).not.toContainText("workouts_read");
   await card.scrollIntoViewIfNeeded();
-  await card.screenshot({ path: "test-results/wahoo-connected.png" });
+  await card.screenshot({ path: testInfo.outputPath("wahoo-connected.png") });
   await page.locator("#wahooDisconnectButton").click();
   await page.locator("#confirmationDialog").locator("#confirmationDialogAccept").click();
   await expect.poll(() => disconnected).toBe(true);
@@ -89,7 +89,7 @@ test("@responsive connected Wahoo shows its label everywhere and can be disconne
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
-test("@responsive connected Wahoo runs manual and full resync with the CSRF token", async ({ page }) => {
+test("@responsive connected Wahoo runs manual and full resync with the CSRF token", async ({ page }, testInfo) => {
   const requests = [];
   await withWahooState(page, { configured: true, connected: true, scope: "workouts_read", connected_at: "2026-01-02T08:00:00+00:00" }, () => ({}));
   await page.route("**/api/wahoo/sync", (route) => {
@@ -106,7 +106,7 @@ test("@responsive connected Wahoo runs manual and full resync with the CSRF toke
   await expect(page.locator("#wahooFullResyncButton")).toBeVisible();
   await expect(page.locator("#wahooFullResyncStatus")).toContainText("90 Tage");
   await card.scrollIntoViewIfNeeded();
-  await card.screenshot({ path: "test-results/wahoo-sync-controls.png" });
+  await card.screenshot({ path: testInfo.outputPath("wahoo-sync-controls.png") });
   await page.locator("#wahooSyncButton").click();
   await expect(page.locator("#toast")).toContainText("Wahoo synchronisiert");
   await page.locator("#wahooFullResyncButton").click();

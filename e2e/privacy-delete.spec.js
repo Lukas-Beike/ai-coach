@@ -4,6 +4,8 @@ const { test, expect } = require("@playwright/test");
 // local deletion is safe there. Deleting local data also removes the login
 // sessions, so a retry would start logged out and is disabled.
 test.describe.configure({ retries: 0 });
+// Keep the backup request visible to page.route; PWA coverage runs in other specs.
+test.use({ serviceWorkers: "block" });
 const REQUIRED_TEXT = "LOKALE DATEN LÖSCHEN";
 
 test.beforeEach(async ({ page }) => {
