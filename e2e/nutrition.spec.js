@@ -178,7 +178,7 @@ test("@responsive Open Food Facts lookup can be explicitly saved into the local 
       if (lookupCount > 1) return route.fulfill({ json: { ok: true, source: "manual", local: true, product: { ...savedPayload, id: "product-off-local" } } });
       return route.fulfill({ json: {
         ok: true, source: "open_food_facts", local: false,
-        product: { id: "off:4006381333931", name: "Bio Haferdrink", brands: "Beispiel", per_100: { kcal: 46, carbs_g: 6.7, protein_g: 1, fat_g: 1.5 }, basis_amount: 100, basis_unit: "ml", source: "open_food_facts", source_url: "https://world.openfoodfacts.org/product/4006381333931" },
+        product: { id: "off:4006381333931", name: "Bio Haferdrink", brands: "Beispiel", per_100: { kcal: 46, carbs_g: 6.7, protein_g: 1, fat_g: 1.5, sugar_g: 4, fiber_g: 0, salt_g: null }, basis_amount: 100, basis_unit: "ml", source: "open_food_facts", source_url: "https://world.openfoodfacts.org/product/4006381333931" },
       } });
     }
     savedPayload = request.postDataJSON();
@@ -194,11 +194,18 @@ test("@responsive Open Food Facts lookup can be explicitly saved into the local 
   const editor = page.locator("#nutritionExtraction");
   await expect(editor.locator('[name="name"]')).toHaveValue("Bio Haferdrink");
   await expect(editor.locator('[name="barcode"]')).toHaveValue("4006381333931");
+  await expect(editor.locator('[name="sugar_g"]')).toHaveValue("4");
+  await expect(editor.locator('[name="fiber_g"]')).toHaveValue("0");
+  await expect(editor.locator('[name="salt_g"]')).toHaveValue("");
+  await editor.locator('[name="salt_g"]').fill("0.2");
   await editor.getByRole("button", { name: "Produkt lokal speichern" }).click();
   await expect.poll(() => savedPayload?.name).toBe("Bio Haferdrink");
   expect(savedPayload.source).toBe("open_food_facts");
   expect(savedPayload.external_id).toBe("off:4006381333931");
   expect(savedPayload.barcode).toBe("4006381333931");
+  expect(savedPayload.sugar_g).toBe(4);
+  expect(savedPayload.fiber_g).toBe(0);
+  expect(savedPayload.salt_g).toBe(0.2);
   await page.locator("#nutritionBarcodeButton").click();
   await page.locator("#nutritionBarcodeManual").fill("4006381333931");
   await page.locator("#nutritionBarcodeLookup").click();

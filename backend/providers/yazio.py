@@ -96,7 +96,13 @@ def _nutrition(raw: dict[str, Any]) -> dict[str, Any] | None:
     # A scale error shows as macros above 100 g per 100 g; never guess a value.
     if sum(known) > 110 or (kcal is None and not known):
         return None
-    return {"kcal": kcal, **macros}
+    return {
+        "kcal": kcal,
+        **macros,
+        "sugar_g": _per_100(nutrients, "nutrient.sugar", 100),
+        "fiber_g": _per_100(nutrients, "nutrient.dietaryfiber", 100),
+        "salt_g": _per_100(nutrients, "nutrient.salt", 100),
+    }
 
 
 def _barcode(raw: dict[str, Any]) -> str | None:

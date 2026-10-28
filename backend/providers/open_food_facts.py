@@ -64,6 +64,9 @@ def _aggregated_nutrition_values(
         ("carbohydrates", "g"),
         ("proteins", "g"),
         ("fat", "g"),
+        ("sugars", "g"),
+        ("fiber", "g"),
+        ("salt", "g"),
     ):
         entry = nutrients.get(name)
         if not isinstance(entry, dict) or entry.get("unit") != unit:
@@ -121,6 +124,9 @@ def project_product(raw: Any) -> dict[str, Any] | None:
             "carbs_g": _number(nutrients.get("carbohydrates_100g"), 100),
             "protein_g": _number(nutrients.get("proteins_100g"), 100),
             "fat_g": _number(nutrients.get("fat_100g"), 100),
+            "sugar_g": _number(nutrients.get("sugars_100g"), 100),
+            "fiber_g": _number(nutrients.get("fiber_100g"), 100),
+            "salt_g": _number(nutrients.get("salt_100g"), 100),
         },
         "quality": "community_label_data",
         "origins": origins,

@@ -607,6 +607,9 @@ function normalizeNutritionProduct(product = {}) {
     carbs_g: product.carbs_g ?? per100.carbs_g ?? null,
     protein_g: product.protein_g ?? per100.protein_g ?? null,
     fat_g: product.fat_g ?? per100.fat_g ?? null,
+    sugar_g: product.sugar_g ?? per100.sugar_g ?? null,
+    fiber_g: product.fiber_g ?? per100.fiber_g ?? null,
+    salt_g: product.salt_g ?? per100.salt_g ?? null,
     confidence: product.confidence ?? product.extraction_confidence ?? null,
     source_url: product.source_url || "",
     source,
@@ -886,6 +889,8 @@ async function lookupNutritionProduct(barcode) {
     nutritionLookupResultShown = true;
     const product = result.product || result.foods?.[0] || result.products?.[0] || null;
     const isLocal = result.local !== false && result.source !== "open_food_facts";
+    const editor = document.querySelector("#nutritionExtraction");
+    if (editor) { editor.replaceChildren(); editor.hidden = true; }
     const lookup = document.querySelector("#nutritionLookupResult");
     if (lookup) lookup.hidden = false;
     renderNutritionProducts(product ? [{ ...product, local: isLocal }] : [], { local: isLocal, targetId: "#nutritionLookupResult" });

@@ -223,6 +223,13 @@ def _chain_notice(
     )
 
 
+def _has_additional_nutrients(food: dict[str, Any]) -> bool:
+    values = food.get("per_100")
+    return isinstance(values, dict) and all(
+        key in values for key in ("sugar_g", "fiber_g", "salt_g")
+    )
+
+
 def _usable(food: dict[str, Any]) -> bool:
     """A stored food needs a known energy value and basis unit to be served."""
     return food.get("basis_unit") is not None and food["per_100"]["kcal"] is not None
@@ -305,11 +312,20 @@ class FoodDatabaseService:
         return self._yazio is not None and self._yazio.configured
 
     def _product(
-        self, food_id: str, fetch: Callable[[], dict[str, Any]]
+        self,
+        food_id: str,
+        fetch: Callable[[], dict[str, Any]],
+        *,
+        refresh_legacy: bool = False,
     ) -> tuple[dict[str, Any], str]:
         """Return the food and where it came from; stored foods carry fetched_at."""
         stored = self._mirror.get(food_id) if self._mirror else None
-        if stored and self._mirror and self._mirror.is_fresh(stored):
+        if (
+            stored
+            and self._mirror
+            and self._mirror.is_fresh(stored)
+            and (not refresh_legacy or _has_additional_nutrients(stored))
+        ):
             return stored, LOCAL_DATABASE
         try:
             food = fetch()
@@ -346,8 +362,14 @@ class FoodDatabaseService:
             self._mirror.store(foods)
         return foods, LIVE
 
-    def _off_product(self, barcode: str) -> tuple[dict[str, Any], str]:
-        return self._product("off:" + barcode, lambda: self._off.product(barcode))
+    def _off_product(
+        self, barcode: str, *, refresh_legacy: bool = False
+    ) -> tuple[dict[str, Any], str]:
+        return self._product(
+            "off:" + barcode,
+            lambda: self._off.product(barcode),
+            refresh_legacy=refresh_legacy,
+        )
 
     def _off_search(
         self, query: str, *, live: bool = False
@@ -394,7 +416,14 @@ class FoodDatabaseService:
         stored = self._mirror.by_barcode(barcode) if self._mirror else []
         if self._mirror and (
             fresh := next(
-                (e for e in stored if self._mirror.is_fresh(e) and _usable(e)), None
+                (
+                    e
+                    for e in stored
+                    if self._mirror.is_fresh(e)
+                    and _usable(e)
+                    and _has_additional_nutrients(e)
+                ),
+                None,
             )
         ):
             return fresh, LOCAL_DATABASE, False
@@ -402,7 +431,7 @@ class FoodDatabaseService:
         if food is not None:
             return food, LIVE, False
         try:
-            food, origin = self._off_product(barcode)
+            food, origin = self._off_product(barcode, refresh_legacy=True)
         except AppError:
             usable = next((entry for entry in stored if _usable(entry)), None)
             if usable is None:

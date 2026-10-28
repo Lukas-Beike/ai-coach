@@ -30,7 +30,15 @@ def yazio_food(name="Synthetic Haferflocken", kcal=370.0, food_id=YAZIO_ID):
         "source": "Yazio",
         "basis_amount": 100,
         "basis_unit": "g",
-        "per_100": {"kcal": kcal, "carbs_g": 60.0, "protein_g": 13.0, "fat_g": 7.0},
+        "per_100": {
+            "kcal": kcal,
+            "carbs_g": 60.0,
+            "protein_g": 13.0,
+            "fat_g": 7.0,
+            "sugar_g": None,
+            "fiber_g": None,
+            "salt_g": None,
+        },
     }
 
 
@@ -42,7 +50,15 @@ def off_food(name="Synthetic Haferflocken", barcode=BARCODE):
         "source": "Open Food Facts",
         "basis_amount": 100,
         "basis_unit": "g",
-        "per_100": {"kcal": 365.0, "carbs_g": 58.0, "protein_g": 12.0, "fat_g": 6.0},
+        "per_100": {
+            "kcal": 365.0,
+            "carbs_g": 58.0,
+            "protein_g": 12.0,
+            "fat_g": 6.0,
+            "sugar_g": None,
+            "fiber_g": None,
+            "salt_g": None,
+        },
     }
 
 
