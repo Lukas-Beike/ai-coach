@@ -1377,6 +1377,8 @@ Upgrade von Schema v9 oder v10 legt die leere Tabelle an und erhält alle Daten.
 
 #### Yazio-Produktsuche (optional)
 
+Unter **Mehr > Anbindungen** prüft „Verbindung prüfen“ die Anmeldung ausdrücklich. Der Status zeigt das letzte Prüfergebnis und seine Zeit; nach Neustart oder Änderung der Zugangsdaten ist eine neue Prüfung nötig. Abgelehnte Anmeldungen können Konto- oder App-Zugangsdaten betreffen; die genaue Ursache ist nicht immer bekannt. Bei Begrenzung oder Ausfall später erneut versuchen. Das Laden des Status stellt keine Anfrage an Yazio.
+
 Mit eingerichteten Yazio-Zugangsdaten (`YAZIO_*` oder **Mehr > Anbindungen >
 Zugangsdaten**) gilt für Produktsuchen ohne ausdrückliche Quelle diese
 Reihenfolge: eigene gespeicherte Produkte, lokale Datenbank (Spiegel), Yazio,
@@ -1444,6 +1446,8 @@ nicht integriert: Der Wrapper exportiert ein bestehendes FDDB-Tagebuch in
 MongoDB/InfluxDB und ist keine produktbezogene Lookup-API. Die Nährwerte werden immer mit
 Bezugsmenge und Einheit gespeichert. Gramm und Milliliter werden ohne bekannte
 Dichte nicht ineinander umgerechnet.
+
+Beim Barcode-Treffer erscheint das Produktformular direkt darunter. Verfügbare Angaben zu Zucker, Ballaststoffen und Salz werden übernommen; fehlende Werte bleiben leer. Erst das Speichern legt das Produkt lokal an.
 
 Ein Foto der Nährwerttabelle wird begrenzt und nur vorübergehend an die
 konfigurierte OpenAI Responses-kompatible API übertragen. Die API liefert einen

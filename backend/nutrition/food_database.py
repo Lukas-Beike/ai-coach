@@ -9,7 +9,10 @@ import difflib
 import json
 import math
 import re
+import threading
+import time
 import unicodedata
+from collections import OrderedDict
 from collections.abc import Callable
 from functools import lru_cache
 from itertools import accumulate
@@ -32,6 +35,7 @@ STALE_NOTICE = " Der Online-Abruf war nicht möglich; der gespeicherte Stand (st
 FALLBACK_NOTICE = " Eine Onlinequelle war nicht verfügbar oder ohne passenden Treffer."
 YAZIO_NOT_CONFIGURED = "Yazio ist nicht konfiguriert."
 YAZIO_LOGIN_NOTICE = " Yazio-Zugangsdaten prüfen."
+YAZIO_VERSION_NOTICE = " Yazio-App-Version prüfen (YAZIO_USER_AGENT)."
 _YAZIO_ID = re.compile(r"yazio:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
 
@@ -213,13 +217,22 @@ def _chain_notice(
     stale: bool = False,
     skipped: bool = False,
     auth_failed: bool = False,
+    version_blocked: bool = False,
     partial: bool = False,
 ) -> str:
     return (
         (STALE_NOTICE if stale else "")
         + (FALLBACK_NOTICE if skipped else "")
         + (YAZIO_LOGIN_NOTICE if auth_failed else "")
+        + (YAZIO_VERSION_NOTICE if version_blocked else "")
         + (PARTIAL_NOTICE if partial else "")
+    )
+
+
+def _has_additional_nutrients(food: dict[str, Any]) -> bool:
+    values = food.get("per_100")
+    return isinstance(values, dict) and all(
+        key in values for key in ("sugar_g", "fiber_g", "salt_g")
     )
 
 
@@ -299,17 +312,28 @@ class FoodDatabaseService:
         self._off = off or OpenFoodFactsClient()
         self._mirror = mirror
         self._yazio = yazio
+        self._legacy_retry_after: OrderedDict[str, float] = OrderedDict()
+        self._legacy_retry_lock = threading.Lock()
 
     @property
     def yazio_configured(self) -> bool:
         return self._yazio is not None and self._yazio.configured
 
     def _product(
-        self, food_id: str, fetch: Callable[[], dict[str, Any]]
+        self,
+        food_id: str,
+        fetch: Callable[[], dict[str, Any]],
+        *,
+        refresh_legacy: bool = False,
     ) -> tuple[dict[str, Any], str]:
         """Return the food and where it came from; stored foods carry fetched_at."""
         stored = self._mirror.get(food_id) if self._mirror else None
-        if stored and self._mirror and self._mirror.is_fresh(stored):
+        if (
+            stored
+            and self._mirror
+            and self._mirror.is_fresh(stored)
+            and (not refresh_legacy or _has_additional_nutrients(stored))
+        ):
             return stored, LOCAL_DATABASE
         try:
             food = fetch()
@@ -346,13 +370,29 @@ class FoodDatabaseService:
             self._mirror.store(foods)
         return foods, LIVE
 
-    def _off_product(self, barcode: str) -> tuple[dict[str, Any], str]:
-        return self._product("off:" + barcode, lambda: self._off.product(barcode))
+    def _off_product(
+        self, barcode: str, *, refresh_legacy: bool = False
+    ) -> tuple[dict[str, Any], str]:
+        return self._product(
+            "off:" + barcode,
+            lambda: self._off.product(barcode),
+            refresh_legacy=refresh_legacy,
+        )
 
     def _off_search(
         self, query: str, *, live: bool = False
     ) -> tuple[list[dict[str, Any]], str]:
         return self._search_source("off:", self._off.search, query, live=live)
+
+    def yazio_connection_status(self) -> dict[str, Any]:
+        if self._yazio is None:
+            return {"status": "not_configured", "checked_at": None}
+        return self._yazio.connection_status()
+
+    def check_yazio_connection(self) -> dict[str, Any]:
+        if self._yazio is None:
+            return {"status": "not_configured", "checked_at": None}
+        return self._yazio.check_connection()
 
     def _require_yazio(self) -> YazioClient:
         if self._yazio is None or not self._yazio.configured:
@@ -394,21 +434,54 @@ class FoodDatabaseService:
         stored = self._mirror.by_barcode(barcode) if self._mirror else []
         if self._mirror and (
             fresh := next(
-                (e for e in stored if self._mirror.is_fresh(e) and _usable(e)), None
+                (
+                    e
+                    for e in stored
+                    if self._mirror.is_fresh(e)
+                    and _usable(e)
+                    and _has_additional_nutrients(e)
+                ),
+                None,
             )
         ):
             return fresh, LOCAL_DATABASE, False
+        legacy_fresh = next(
+            (
+                e
+                for e in stored
+                if self._mirror and self._mirror.is_fresh(e) and _usable(e)
+            ),
+            None,
+        )
+        with self._legacy_retry_lock:
+            retry_after = self._legacy_retry_after.get(barcode, 0)
+        if legacy_fresh and time.monotonic() < retry_after:
+            return legacy_fresh, LOCAL_DATABASE, False
         food, failed = self._yazio_barcode(barcode)
         if food is not None:
             return food, LIVE, False
         try:
-            food, origin = self._off_product(barcode)
+            food, origin = self._off_product(barcode, refresh_legacy=True)
         except AppError:
             usable = next((entry for entry in stored if _usable(entry)), None)
             if usable is None:
                 raise
+            if legacy_fresh:
+                self._defer_legacy_retry(barcode)
+                return legacy_fresh, LOCAL_DATABASE, failed
             return usable, LOCAL_DATABASE_STALE, failed
+        if origin == LOCAL_DATABASE_STALE and legacy_fresh:
+            self._defer_legacy_retry(barcode)
+            return legacy_fresh, LOCAL_DATABASE, failed
         return food, origin, failed
+
+    def _defer_legacy_retry(self, barcode: str) -> None:
+        # Do not rewrite the provider fetch time after a failed refresh.
+        with self._legacy_retry_lock:
+            self._legacy_retry_after[barcode] = time.monotonic() + 900
+            self._legacy_retry_after.move_to_end(barcode)
+            while len(self._legacy_retry_after) > 256:
+                self._legacy_retry_after.popitem(last=False)
 
     @staticmethod
     def _labelled(foods: list[dict[str, Any]], origin: str) -> list[dict[str, Any]]:
@@ -447,6 +520,8 @@ class FoodDatabaseService:
             notice += FALLBACK_NOTICE
             if yazio_failed == "food_database_auth_failed":
                 notice += YAZIO_LOGIN_NOTICE
+            if yazio_failed == "food_database_version_blocked":
+                notice += YAZIO_VERSION_NOTICE
         if origin == LOCAL_DATABASE_STALE:
             notice += STALE_NOTICE
         return self._labelled([food], origin), notice
@@ -511,22 +586,30 @@ class FoodDatabaseService:
         """Yazio, then Open Food Facts, then BLS; the first suitable match wins."""
         if local := self._fresh_local_hits(query):
             return self._labelled(local, LOCAL_DATABASE), ""
-        skipped = auth_failed = False
+        skipped = auth_failed = version_blocked = False
         for search in (self._yazio_search, self._off_search):
             try:
                 suitable, origin = self._chain_hit(search, query)
             except AppError as exc:
                 skipped = True
                 auth_failed = auth_failed or exc.reason == "food_database_auth_failed"
+                version_blocked = (
+                    version_blocked or exc.reason == "food_database_version_blocked"
+                )
                 continue
             if suitable:
                 return self._labelled(suitable, origin), _chain_notice(
-                    stale=origin == LOCAL_DATABASE_STALE, auth_failed=auth_failed
+                    stale=origin == LOCAL_DATABASE_STALE,
+                    auth_failed=auth_failed,
+                    version_blocked=version_blocked,
                 )
             skipped = True
         foods, partial = _bls_search(query)
         return foods, _chain_notice(
-            skipped=skipped, auth_failed=auth_failed, partial=partial
+            skipped=skipped,
+            auth_failed=auth_failed,
+            version_blocked=version_blocked,
+            partial=partial,
         )
 
     def resolve(self, food_id: Any) -> dict[str, Any]:

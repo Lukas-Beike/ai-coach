@@ -173,6 +173,7 @@ class Config:
     yazio_client_secret: str = ""
     yazio_user_agent: str = ""
     yazio_country: str = ""
+    yazio_credential_generation: int = 0
     sync_history_earliest_date: date = DEFAULT_SYNC_HISTORY_EARLIEST_DATE
     trusted_proxies: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
     invalid_trusted_proxies: int = 0

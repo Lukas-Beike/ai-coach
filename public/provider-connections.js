@@ -241,6 +241,7 @@ async function saveProviderCredentials(event, provider) {
     return;
   }
   setCredentialError(errorId, "");
+  if (provider === "yazio") invalidateYazioStatus();
   try {
     await runCredentialRequest(provider, async () => {
       await api("/api/settings/credentials", { method: "PUT", body: JSON.stringify(payload) });
@@ -250,6 +251,8 @@ async function saveProviderCredentials(event, provider) {
     });
   } catch (error) {
     setCredentialError(errorId, error.message);
+  } finally {
+    if (provider === "yazio") await loadYazioStatus();
   }
 }
 
@@ -261,6 +264,7 @@ async function clearProviderCredential(field, provider) {
     { title: `${label} entfernen?` },
   );
   if (!confirmed) return;
+  if (provider === "yazio") invalidateYazioStatus();
   try {
     await runCredentialRequest(provider, async () => {
       await api("/api/settings/credentials", { method: "PUT", body: JSON.stringify({ [field]: null }) });
@@ -270,6 +274,8 @@ async function clearProviderCredential(field, provider) {
     });
   } catch (error) {
     setCredentialError(credentialFormIds(provider).error, error.message);
+  } finally {
+    if (provider === "yazio") await loadYazioStatus();
   }
 }
 
@@ -379,4 +385,51 @@ if (typeof module !== "undefined") {
     credentialSourceView,
     garminCardView,
   };
+}
+
+let yazioStatusGeneration = 0;
+
+function invalidateYazioStatus() {
+  yazioStatusGeneration += 1;
+  providerCredentialBusy.delete("yazio-check");
+  renderYazioStatus(null);
+}
+
+function renderYazioStatus(result) {
+  const labels = {
+    not_configured: "Nicht konfiguriert", unchecked: "Noch nicht geprüft",
+    success: "Anmeldung erfolgreich", auth_failed: "Anmeldung abgelehnt – Zugangsdaten und App-Konfiguration prüfen",
+    rate_limited: "Anfragen begrenzt – später erneut versuchen", unavailable: "Momentan nicht verfügbar – später erneut versuchen",
+  };
+  setCredentialText("yazioConnectionStatus", labels[result?.status] || "Status nicht verfügbar");
+  const date = result?.checked_at ? new Date(result.checked_at) : null;
+  setCredentialText("yazioConnectionDetail", date && !Number.isNaN(date.getTime()) ? `Geprüft: ${date.toLocaleString("de-DE")}` : "");
+  const button = $("#yazioCheckButton");
+  if (button) button.disabled = providerCredentialBusy.has("yazio-check") || result?.status === "not_configured";
+}
+
+async function loadYazioStatus() {
+  if (providerCredentialBusy.has("yazio") || providerCredentialBusy.has("yazio-check")) return;
+  const generation = ++yazioStatusGeneration;
+  let result = null;
+  try { result = await api("/api/nutrition/yazio/status"); }
+  catch { /* Do not display response bodies. */ }
+  if (generation === yazioStatusGeneration) renderYazioStatus(result);
+}
+
+async function checkYazioConnection() {
+  if (providerCredentialBusy.has("yazio")) return;
+  const generation = ++yazioStatusGeneration;
+  providerCredentialBusy.add("yazio-check");
+  const button = $("#yazioCheckButton");
+  if (button) button.disabled = true;
+  let result = null;
+  try { result = await api("/api/nutrition/yazio/check", { method: "POST", body: "{}" }); }
+  catch { /* Show an unavailable status without exposing an error body. */ }
+  finally {
+    if (generation === yazioStatusGeneration) {
+      providerCredentialBusy.delete("yazio-check");
+      renderYazioStatus(result);
+    }
+  }
 }

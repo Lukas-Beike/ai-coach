@@ -358,3 +358,81 @@ test("the Yazio form saves only filled fields and clears every input", async () 
     assert.equal(harness.element(`cred-${field}`).value, "");
   }
 });
+
+
+test("Yazio status is passive and explicit check renders a safe result", async () => {
+  const harness = loadProviderConnections();
+  harness.setApi(async (url) => url.endsWith("/status") ? { status: "unchecked" } : { status: "success", checked_at: "2026-01-01T00:00:00Z" });
+  await harness.fn("loadYazioStatus")();
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Noch nicht geprüft");
+  assert.equal(harness.calls[0].method, "GET");
+  await harness.fn("checkYazioConnection")();
+  assert.equal(harness.calls[1].method, "POST");
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Anmeldung erfolgreich");
+  assert.match(harness.element("yazioConnectionDetail").textContent, /Geprüft:/);
+  harness.setApi(async () => { throw Error("synthetic secret"); });
+  await harness.fn("checkYazioConnection")();
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Status nicht verfügbar");
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+test("Yazio ignores out-of-order status GET and overlapping checks", async () => {
+  const harness = loadProviderConnections();
+  const requests = [];
+  harness.setApi(() => { const request = deferred(); requests.push(request); return request.promise; });
+  const oldGet = harness.fn("loadYazioStatus")();
+  const newerGet = harness.fn("loadYazioStatus")();
+  requests[1].resolve({ status: "unchecked" });
+  await newerGet;
+  requests[0].resolve({ status: "success" });
+  await oldGet;
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Noch nicht geprüft");
+
+  const first = harness.fn("checkYazioConnection")();
+  const second = harness.fn("checkYazioConnection")();
+  requests[2].resolve({ status: "success" });
+  await first;
+  assert.equal(harness.element("yazioCheckButton").disabled, true);
+  requests[3].resolve({ status: "auth_failed" });
+  await second;
+  assert.match(harness.element("yazioConnectionStatus").textContent, /abgelehnt/);
+  assert.equal(harness.element("yazioCheckButton").disabled, false);
+});
+
+test("a pending passive status cannot overwrite a newer explicit check", async () => {
+  const harness = loadProviderConnections();
+  const oldStatus = deferred();
+  harness.setApi((url) => url.endsWith("/status") ? oldStatus.promise : Promise.resolve({ status: "success" }));
+  const pending = harness.fn("loadYazioStatus")();
+  await harness.fn("checkYazioConnection")();
+  oldStatus.resolve({ status: "unchecked" });
+  await pending;
+  assert.equal(harness.element("yazioConnectionStatus").textContent, "Anmeldung erfolgreich");
+});
+
+test("credential changes invalidate pending GET and POST status results", async () => {
+  for (const operation of ["loadYazioStatus", "checkYazioConnection"]) {
+    const harness = loadProviderConnections();
+    const pendingStatus = deferred();
+    const save = deferred();
+    harness.setApi((url, options) => {
+      if (options.method === "PUT") return save.promise;
+      if (url.endsWith("/status") && harness.calls.length > 2) return Promise.resolve({ status: "unchecked" });
+      return pendingStatus.promise;
+    });
+    const pending = harness.fn(operation)();
+    harness.element("cred-yazio_password").value = "new-synthetic-password";
+    const saving = harness.fn("saveProviderCredentials")(event(), "yazio");
+    pendingStatus.resolve({ status: "success" });
+    await pending;
+    assert.notEqual(harness.element("yazioConnectionStatus").textContent, "Anmeldung erfolgreich");
+    save.resolve({});
+    await saving;
+    assert.equal(harness.element("yazioConnectionStatus").textContent, "Noch nicht geprüft");
+  }
+});

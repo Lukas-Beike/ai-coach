@@ -30,7 +30,15 @@ def yazio_food(name="Synthetic Haferflocken", kcal=370.0, food_id=YAZIO_ID):
         "source": "Yazio",
         "basis_amount": 100,
         "basis_unit": "g",
-        "per_100": {"kcal": kcal, "carbs_g": 60.0, "protein_g": 13.0, "fat_g": 7.0},
+        "per_100": {
+            "kcal": kcal,
+            "carbs_g": 60.0,
+            "protein_g": 13.0,
+            "fat_g": 7.0,
+            "sugar_g": None,
+            "fiber_g": None,
+            "salt_g": None,
+        },
     }
 
 
@@ -42,7 +50,15 @@ def off_food(name="Synthetic Haferflocken", barcode=BARCODE):
         "source": "Open Food Facts",
         "basis_amount": 100,
         "basis_unit": "g",
-        "per_100": {"kcal": 365.0, "carbs_g": 58.0, "protein_g": 12.0, "fat_g": 6.0},
+        "per_100": {
+            "kcal": 365.0,
+            "carbs_g": 58.0,
+            "protein_g": 12.0,
+            "fat_g": 6.0,
+            "sugar_g": None,
+            "fiber_g": None,
+            "salt_g": None,
+        },
     }
 
 
@@ -160,6 +176,19 @@ class LookupChainTests(unittest.TestCase):
         self.assertEqual(result["foods"][0]["data_origin"], "local_database_stale")
         self.assertIn("Onlinequelle", result["notice"])
 
+    def test_fresh_legacy_yazio_fallback_does_not_retry_each_scan(self):
+        legacy = {**yazio_food(), "barcode": BARCODE}
+        for key in ("sugar_g", "fiber_g", "salt_g"):
+            del legacy["per_100"][key]
+        self.mirror.store([legacy])
+        self.yazio.configured = False
+        self.off.error = UNAVAILABLE
+        first = self.service.lookup({"barcode": BARCODE})["foods"][0]
+        second = self.service.lookup({"barcode": BARCODE})["foods"][0]
+        self.assertEqual(first["id"], f"yazio:{YAZIO_ID}")
+        self.assertEqual(second["data_origin"], "local_database")
+        self.assertEqual(self.off.calls, [("product", BARCODE)])
+
     def test_fresh_entry_of_another_source_beats_a_newer_stale_one(self):
         self.mirror.store([off_food()])
         self.now = datetime(2027, 1, 20, tzinfo=UTC)
@@ -179,6 +208,18 @@ class LookupChainTests(unittest.TestCase):
         self.off.hits = [off_food()]
         result = self.service.lookup({"query": "Haferflocken"})
         self.assertIn("Zugangsdaten", result["notice"])
+
+    def test_version_block_is_reported_while_fallback_remains_available(self):
+        self.yazio.error = AppError(502, "x", reason="food_database_version_blocked")
+        self.off.hits = [off_food()]
+        result = self.service.lookup({"query": "Haferflocken"})
+        self.assertTrue(result["foods"])
+        self.assertIn("YAZIO_USER_AGENT", result["notice"])
+
+    def test_version_block_is_reported_in_barcode_fallback(self):
+        self.yazio.error = AppError(502, "x", reason="food_database_version_blocked")
+        result = self.service.lookup({"barcode": BARCODE})
+        self.assertIn("YAZIO_USER_AGENT", result["notice"])
 
     def test_internal_chain_name_is_not_a_public_source(self):
         with self.assertRaises(AppError) as raised:

@@ -37,6 +37,7 @@ class NutritionGetRoutes:
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {
+            "/api/nutrition/yazio/status",
             "/api/nutrition/day",
             "/api/nutrition/range",
             "/api/nutrition/week",
@@ -46,6 +47,12 @@ class NutritionGetRoutes:
             return False
 
         self._session_auth_service().require_auth(handler)
+        if path == "/api/nutrition/yazio/status":
+            handler.send_json(
+                200,
+                self._meal_library_service().food_database.yazio_connection_status(),
+            )
+            return True
         query = parse_qs(urlparse(handler.path).query)
         if path == "/api/nutrition/week":
             try:
@@ -120,6 +127,7 @@ class NutritionPostRoutes:
 
     def handle(self, handler: Any, path: str) -> bool:
         routes = {
+            "/api/nutrition/yazio/check": self._check_yazio,
             NUTRITION_ENTRY_PATH: self._create,
             f"{NUTRITION_ENTRY_PATH}/delete": self._delete,
             "/api/nutrition/sync": self._sync,
@@ -135,6 +143,12 @@ class NutritionPostRoutes:
             return False
         route(handler)
         return True
+
+    def _check_yazio(self, handler: Any) -> None:
+        handler.read_json()
+        handler.send_json(
+            200, self._meal_library_service().food_database.check_yazio_connection()
+        )
 
     def _create(self, handler: Any) -> None:
         entry = self._diary_service().log_meal(handler.read_json())
@@ -229,7 +243,11 @@ class NutritionPostRoutes:
                 date.fromisoformat(end),
             )
         except AppError as exc:
-            if exc.reason not in {"not_configured", "not_supported", "library_unavailable"}:
+            if exc.reason not in {
+                "not_configured",
+                "not_supported",
+                "library_unavailable",
+            }:
                 raise
             return {"status": "partial", "reason": exc.reason}
 

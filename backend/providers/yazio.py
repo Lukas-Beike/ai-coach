@@ -15,6 +15,7 @@ import threading
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -96,7 +97,13 @@ def _nutrition(raw: dict[str, Any]) -> dict[str, Any] | None:
     # A scale error shows as macros above 100 g per 100 g; never guess a value.
     if sum(known) > 110 or (kcal is None and not known):
         return None
-    return {"kcal": kcal, **macros}
+    return {
+        "kcal": kcal,
+        **macros,
+        "sugar_g": _per_100(nutrients, "nutrient.sugar", 100),
+        "fiber_g": _per_100(nutrients, "nutrient.dietaryfiber", 100),
+        "salt_g": _per_100(nutrients, "nutrient.salt", 100),
+    }
 
 
 def _barcode(raw: dict[str, Any]) -> str | None:
@@ -173,13 +180,79 @@ class YazioClient:
         self._blocked_until = 0.0
         self._login_blocked_until = 0.0
         self._identity: tuple[str, ...] = ()
+        self._identity_generation = 0
         self._access_token = ""
         self._refresh_token = ""
         self._expires_at = 0.0
+        self._last_check: dict[str, Any] | None = None
 
     @property
     def configured(self) -> bool:
         return self._config().yazio_configured
+
+    def connection_status(self) -> dict[str, Any]:
+        """Read only local verification state; never contact the provider."""
+        with self._lock:
+            self._follow_credentials()
+            if not self._config().yazio_configured:
+                return {"status": "not_configured", "checked_at": None}
+            return dict(self._last_check or {"status": "unchecked", "checked_at": None})
+
+    def check_connection(self) -> dict[str, Any]:
+        """Check authentication through the same token, limits and backoff as lookup."""
+        with self._network:
+            with self._lock:
+                self._follow_credentials()
+                config = self._config()
+                if not config.yazio_configured:
+                    return {"status": "not_configured", "checked_at": None}
+                identity = self._identity
+                identity_generation = self._identity_generation
+                tokens = (self._access_token, self._refresh_token, self._expires_at)
+            try:
+                now = self._clock()
+                if now < self._blocked_until:
+                    raise _throttled()
+                if now < self._login_blocked_until:
+                    raise AppError(503, UNAVAILABLE, reason="food_database_auth_failed")
+                self._grant(
+                    {
+                        "grant_type": "password",
+                        "username": config.yazio_email,
+                        "password": config.yazio_password,
+                    },
+                    now,
+                    sign_in=True,
+                )
+                result = "success"
+            except AppError as exc:
+                with self._lock:
+                    self._follow_credentials()
+                    if identity_generation == self._identity_generation:
+                        self._access_token, self._refresh_token, self._expires_at = (
+                            tokens
+                        )
+                result = {
+                    "food_database_auth_failed": "auth_failed",
+                    "food_database_rate_limited": "rate_limited",
+                }.get(exc.reason or "", "unavailable")
+            with self._lock:
+                self._follow_credentials()
+                if (
+                    identity != self._identity
+                    or identity_generation != self._identity_generation
+                ):
+                    return {
+                        "status": "unchecked"
+                        if self._config().yazio_configured
+                        else "not_configured",
+                        "checked_at": None,
+                    }
+                self._last_check = {
+                    "status": result,
+                    "checked_at": datetime.now(UTC).isoformat(),
+                }
+                return dict(self._last_check)
 
     def search(self, query: str) -> list[dict[str, Any]]:
         params = urlencode(
@@ -325,6 +398,18 @@ class YazioClient:
         return response.payload
 
     def _raise_http_error(self, exc: HTTPError) -> None:
+        if exc.code == 403:
+            try:
+                raw = exc.read(4097)
+                payload = json.loads(raw) if len(raw) <= 4096 else None
+            except OSError, http.client.HTTPException, ValueError, TypeError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("error") == "version_blocked":
+                raise AppError(
+                    502,
+                    "Yazio lehnt die App-Version ab. YAZIO_USER_AGENT prüfen.",
+                    reason="food_database_version_blocked",
+                ) from None
         if exc.code == 404:
             raise AppError(
                 404, "Produkt nicht gefunden.", reason="food_not_found"
@@ -342,9 +427,12 @@ class YazioClient:
             config.yazio_password,
             config.yazio_client_id,
             config.yazio_client_secret,
+            str(config.yazio_credential_generation),
         )
         if identity != self._identity:
             self._identity = identity
+            self._identity_generation += 1
+            self._last_check = None
             self._access_token = self._refresh_token = ""
             self._login_blocked_until = 0.0
             self._cache.clear()
@@ -386,6 +474,7 @@ class YazioClient:
     def _grant(self, fields: dict[str, str], now: float, *, sign_in: bool) -> bool:
         config = self._config()
         identity = self._identity
+        identity_generation = self._identity_generation
         body = json.dumps(
             {
                 **fields,
@@ -403,22 +492,34 @@ class YazioClient:
         try:
             payload = self._call(request)
         except HTTPError as exc:
-            return self._grant_rejected(exc, now, sign_in=sign_in)
+            with self._lock:
+                self._follow_credentials()
+                if (
+                    identity != self._identity
+                    or identity_generation != self._identity_generation
+                ):
+                    return self._grant_unusable(sign_in, "food_database_unavailable")
+                return self._grant_rejected(exc, now, sign_in=sign_in)
         with self._lock:
-            if identity != self._identity:
+            self._follow_credentials()
+            if (
+                identity != self._identity
+                or identity_generation != self._identity_generation
+            ):
                 # The account changed during the login; its token is not wanted.
                 return self._grant_unusable(sign_in, "food_database_unavailable")
-        token = payload.get("access_token") if isinstance(payload, dict) else None
-        lifetime = _number(
-            payload.get("expires_in") if isinstance(payload, dict) else None, 31_536_000
-        )
-        if not isinstance(token, str) or not token or not lifetime:
-            return self._grant_unusable(sign_in, "food_database_invalid_response")
-        self._access_token = token
-        self._expires_at = now + lifetime
-        refresh = payload.get("refresh_token")
-        self._refresh_token = refresh if isinstance(refresh, str) else ""
-        return True
+            token = payload.get("access_token") if isinstance(payload, dict) else None
+            lifetime = _number(
+                payload.get("expires_in") if isinstance(payload, dict) else None,
+                31_536_000,
+            )
+            if not isinstance(token, str) or not token or not lifetime:
+                return self._grant_unusable(sign_in, "food_database_invalid_response")
+            self._access_token = token
+            self._expires_at = now + lifetime
+            refresh = payload.get("refresh_token")
+            self._refresh_token = refresh if isinstance(refresh, str) else ""
+            return True
 
     def _grant_unusable(self, sign_in: bool, reason: str) -> bool:
         self._access_token = ""
