@@ -651,7 +651,7 @@ function populateNutritionProductFields(form, product) {
   for (const [key, label] of [["sugar_g", "Zucker (g)"], ["fiber_g", "Ballaststoffe (g)"], ["salt_g", "Salz (g)"]]) {
     const wrapper = document.createElement("label");
     wrapper.append(document.createTextNode(label));
-    const input = document.createElement("input"); input.name = key; input.type = "number"; input.min = "0"; input.step = "0.1";
+    const input = document.createElement("input"); input.name = key; input.type = "number"; input.min = "0"; input.step = "any";
     input.value = nutritionProductValue(product[key]); wrapper.append(input); grid.append(wrapper);
   }
 }
@@ -852,7 +852,8 @@ async function saveNutritionProduct(product) {
     } catch (error) { if (generation === state.sessionGeneration) document.querySelector("#nutritionProductStatus").textContent = `Produkt konnte nicht gespeichert werden: ${error.message}`; }
     return;
   }
-  editor.replaceChildren(); editor.append(form); editor.hidden = false;
+  editor.replaceChildren(); editor.append(form); editor.hidden = false;
+  form.scrollIntoView({ block: "nearest" });
   form.addEventListener("submit", (event) => { event.preventDefault(); void saveNutritionProduct(form); });
   form.querySelector("[data-product-cancel]").addEventListener("click", () => { editor.hidden = true; editor.replaceChildren(); });
 }
