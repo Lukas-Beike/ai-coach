@@ -35,6 +35,7 @@ STALE_NOTICE = " Der Online-Abruf war nicht möglich; der gespeicherte Stand (st
 FALLBACK_NOTICE = " Eine Onlinequelle war nicht verfügbar oder ohne passenden Treffer."
 YAZIO_NOT_CONFIGURED = "Yazio ist nicht konfiguriert."
 YAZIO_LOGIN_NOTICE = " Yazio-Zugangsdaten prüfen."
+YAZIO_VERSION_NOTICE = " Yazio-App-Version prüfen (YAZIO_USER_AGENT)."
 _YAZIO_ID = re.compile(r"yazio:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
 
@@ -216,12 +217,14 @@ def _chain_notice(
     stale: bool = False,
     skipped: bool = False,
     auth_failed: bool = False,
+    version_blocked: bool = False,
     partial: bool = False,
 ) -> str:
     return (
         (STALE_NOTICE if stale else "")
         + (FALLBACK_NOTICE if skipped else "")
         + (YAZIO_LOGIN_NOTICE if auth_failed else "")
+        + (YAZIO_VERSION_NOTICE if version_blocked else "")
         + (PARTIAL_NOTICE if partial else "")
     )
 
@@ -381,6 +384,16 @@ class FoodDatabaseService:
     ) -> tuple[list[dict[str, Any]], str]:
         return self._search_source("off:", self._off.search, query, live=live)
 
+    def yazio_connection_status(self) -> dict[str, Any]:
+        if self._yazio is None:
+            return {"status": "not_configured", "checked_at": None}
+        return self._yazio.connection_status()
+
+    def check_yazio_connection(self) -> dict[str, Any]:
+        if self._yazio is None:
+            return {"status": "not_configured", "checked_at": None}
+        return self._yazio.check_connection()
+
     def _require_yazio(self) -> YazioClient:
         if self._yazio is None or not self._yazio.configured:
             raise AppError(409, YAZIO_NOT_CONFIGURED, reason="not_configured")
@@ -507,6 +520,8 @@ class FoodDatabaseService:
             notice += FALLBACK_NOTICE
             if yazio_failed == "food_database_auth_failed":
                 notice += YAZIO_LOGIN_NOTICE
+            if yazio_failed == "food_database_version_blocked":
+                notice += YAZIO_VERSION_NOTICE
         if origin == LOCAL_DATABASE_STALE:
             notice += STALE_NOTICE
         return self._labelled([food], origin), notice
@@ -571,22 +586,30 @@ class FoodDatabaseService:
         """Yazio, then Open Food Facts, then BLS; the first suitable match wins."""
         if local := self._fresh_local_hits(query):
             return self._labelled(local, LOCAL_DATABASE), ""
-        skipped = auth_failed = False
+        skipped = auth_failed = version_blocked = False
         for search in (self._yazio_search, self._off_search):
             try:
                 suitable, origin = self._chain_hit(search, query)
             except AppError as exc:
                 skipped = True
                 auth_failed = auth_failed or exc.reason == "food_database_auth_failed"
+                version_blocked = (
+                    version_blocked or exc.reason == "food_database_version_blocked"
+                )
                 continue
             if suitable:
                 return self._labelled(suitable, origin), _chain_notice(
-                    stale=origin == LOCAL_DATABASE_STALE, auth_failed=auth_failed
+                    stale=origin == LOCAL_DATABASE_STALE,
+                    auth_failed=auth_failed,
+                    version_blocked=version_blocked,
                 )
             skipped = True
         foods, partial = _bls_search(query)
         return foods, _chain_notice(
-            skipped=skipped, auth_failed=auth_failed, partial=partial
+            skipped=skipped,
+            auth_failed=auth_failed,
+            version_blocked=version_blocked,
+            partial=partial,
         )
 
     def resolve(self, food_id: Any) -> dict[str, Any]:

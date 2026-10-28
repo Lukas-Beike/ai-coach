@@ -183,6 +183,7 @@ function renderMaintenanceStatus(maintenance) {
 
 function handleSyncStatus(status, broadcast = false) {
   if (!status || typeof status !== "object") return;
+  if ($('details[data-more-segment-panel="connections"]')?.open) void loadYazioStatus();
   if (broadcast) broadcastSyncMessage({ type: "status", status });
   if (status.operation_id && status.running) {
     state.syncPoll.operationId = status.operation_id;

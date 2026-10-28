@@ -59,6 +59,7 @@ $("#systemIntervalsFullResyncButton").addEventListener("click", () => fullResync
 $("#garminSyncButton").addEventListener("click", syncGarmin);
 bindExternalCalendar(syncExternalCalendar);
 $("#weatherSyncButton").addEventListener("click", syncWeather);
+$("#yazioCheckButton").addEventListener("click", checkYazioConnection);
 $("#wahooConnectButton").addEventListener("click", connectWahoo);
 $("#wahooDisconnectButton").addEventListener("click", disconnectWahoo);
 $("#wahooSyncButton").addEventListener("click", syncWahoo);
@@ -81,7 +82,7 @@ $("#modelSelect").addEventListener("change", saveModel);
 $("#serviceTierSelect").addEventListener("change", saveServiceTier);
 $("#thinkingLevelSelect").addEventListener("change", saveThinkingLevel);
 $("#calendarDisplayForm").addEventListener("submit", saveCalendarDisplaySettings);
-$('details[data-more-segment-panel="connections"]').addEventListener("toggle", (event) => { if (event.currentTarget.open) void loadActivityDetailFloor(); });
+$('details[data-more-segment-panel="connections"]').addEventListener("toggle", (event) => { if (event.currentTarget.open) { void loadActivityDetailFloor(); void loadYazioStatus(); } });
 $("#activityDetailFloorSaveButton").addEventListener("click", saveActivityDetailFloor);
 $("#zoneSettings").addEventListener("toggle", (event) => { if (event.currentTarget.open) void loadZones(); });
 ["#zoneSport", "#zoneMetric", "#zoneEnvironment"].forEach((selector) => $(selector).addEventListener("change", renderZoneEditor));

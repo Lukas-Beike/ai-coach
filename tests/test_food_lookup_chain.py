@@ -209,6 +209,18 @@ class LookupChainTests(unittest.TestCase):
         result = self.service.lookup({"query": "Haferflocken"})
         self.assertIn("Zugangsdaten", result["notice"])
 
+    def test_version_block_is_reported_while_fallback_remains_available(self):
+        self.yazio.error = AppError(502, "x", reason="food_database_version_blocked")
+        self.off.hits = [off_food()]
+        result = self.service.lookup({"query": "Haferflocken"})
+        self.assertTrue(result["foods"])
+        self.assertIn("YAZIO_USER_AGENT", result["notice"])
+
+    def test_version_block_is_reported_in_barcode_fallback(self):
+        self.yazio.error = AppError(502, "x", reason="food_database_version_blocked")
+        result = self.service.lookup({"barcode": BARCODE})
+        self.assertIn("YAZIO_USER_AGENT", result["notice"])
+
     def test_internal_chain_name_is_not_a_public_source(self):
         with self.assertRaises(AppError) as raised:
             self.service.lookup({"query": "Haferflocken", "source": "chain"})
