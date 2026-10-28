@@ -291,6 +291,20 @@ class ProviderCredentialService:
             effective = effective_config(base, stored)
             self._overridden = frozenset(stored) & CREDENTIAL_FIELDS
             if effective != current:
+                if any(
+                    getattr(effective, field) != getattr(current, field)
+                    for field in (
+                        "yazio_email",
+                        "yazio_password",
+                        "yazio_client_id",
+                        "yazio_client_secret",
+                    )
+                ):
+                    effective = dataclasses.replace(
+                        effective,
+                        yazio_credential_generation=current.yazio_credential_generation
+                        + 1,
+                    )
                 self._apply_config(effective)
         return effective
 

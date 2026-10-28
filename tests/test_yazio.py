@@ -213,19 +213,52 @@ class YazioConnectionTests(unittest.TestCase):
 
         client = YazioClient(lambda: holder["config"], opener=opener, clock=lambda: 100)
         self.assertEqual(client.check_connection()["status"], "success")
-        self.assertEqual(client.check_connection()["status"], "unchecked")
+        self.assertEqual(client.check_connection()["status"], "auth_failed")
         self.assertEqual(len(client.search("skyr")), 1)
         self.assertEqual(
             script.requests[-1].get_header("Authorization"), "Bearer access-1"
         )
+
+    def test_successful_inflight_check_cannot_restore_an_old_generation(self):
+        holder = {"config": config()}
+        entered, release = threading.Event(), threading.Event()
+
+        def opener(request, timeout):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return reply(token())
+
+        client = YazioClient(lambda: holder["config"], opener=opener)
+        results = []
+        thread = threading.Thread(
+            target=lambda: results.append(client.check_connection())
+        )
+        thread.start()
+        self.assertTrue(entered.wait(5))
+        holder["config"] = config(yazio_password="replacement")
+        client.connection_status()
+        holder["config"] = config()
+        client.connection_status()
+        release.set()
+        thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results[0]["status"], "unchecked")
+        self.assertEqual((client._access_token, client._refresh_token), ("", ""))
 
     def test_changed_then_restored_credentials_invalidate_previous_result(self):
         holder = {"config": config()}
         client = YazioClient(lambda: holder["config"], opener=Script(tokens=[token()]))
         self.assertEqual(client.check_connection()["status"], "success")
         holder["config"] = config(yazio_password="replacement")
-        holder["config"] = config()
+        holder["config"] = config(yazio_credential_generation=2)
         self.assertEqual(client.connection_status()["status"], "unchecked")
+
+    def test_unrelated_provider_credentials_preserve_check_status(self):
+        holder = {"config": config()}
+        client = YazioClient(lambda: holder["config"], opener=Script(tokens=[token()]))
+        result = client.check_connection()
+        holder["config"] = config(openai_api_key="other-synthetic-key")
+        self.assertEqual(client.connection_status(), result)
 
     def test_rejection_and_backoff_are_safe(self):
         current = config()

@@ -185,7 +185,6 @@ class YazioClient:
         self._refresh_token = ""
         self._expires_at = 0.0
         self._last_check: dict[str, Any] | None = None
-        self._last_check_config: Config | None = None
 
     @property
     def configured(self) -> bool:
@@ -195,8 +194,6 @@ class YazioClient:
         """Read only local verification state; never contact the provider."""
         with self._lock:
             self._follow_credentials()
-            if self._last_check_config is not self._config():
-                self._last_check = None
             if not self._config().yazio_configured:
                 return {"status": "not_configured", "checked_at": None}
             return dict(self._last_check or {"status": "unchecked", "checked_at": None})
@@ -241,14 +238,16 @@ class YazioClient:
                 }.get(exc.reason or "", "unavailable")
             with self._lock:
                 self._follow_credentials()
-                if identity != self._identity or config is not self._config():
+                if (
+                    identity != self._identity
+                    or identity_generation != self._identity_generation
+                ):
                     return {
                         "status": "unchecked"
                         if self._config().yazio_configured
                         else "not_configured",
                         "checked_at": None,
                     }
-                self._last_check_config = config
                 self._last_check = {
                     "status": result,
                     "checked_at": datetime.now(UTC).isoformat(),
@@ -428,6 +427,7 @@ class YazioClient:
             config.yazio_password,
             config.yazio_client_id,
             config.yazio_client_secret,
+            str(config.yazio_credential_generation),
         )
         if identity != self._identity:
             self._identity = identity
@@ -474,6 +474,7 @@ class YazioClient:
     def _grant(self, fields: dict[str, str], now: float, *, sign_in: bool) -> bool:
         config = self._config()
         identity = self._identity
+        identity_generation = self._identity_generation
         body = json.dumps(
             {
                 **fields,
@@ -493,12 +494,18 @@ class YazioClient:
         except HTTPError as exc:
             with self._lock:
                 self._follow_credentials()
-                if identity != self._identity:
+                if (
+                    identity != self._identity
+                    or identity_generation != self._identity_generation
+                ):
                     return self._grant_unusable(sign_in, "food_database_unavailable")
                 return self._grant_rejected(exc, now, sign_in=sign_in)
         with self._lock:
             self._follow_credentials()
-            if identity != self._identity:
+            if (
+                identity != self._identity
+                or identity_generation != self._identity_generation
+            ):
                 # The account changed during the login; its token is not wanted.
                 return self._grant_unusable(sign_in, "food_database_unavailable")
             token = payload.get("access_token") if isinstance(payload, dict) else None

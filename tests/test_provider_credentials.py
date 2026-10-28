@@ -235,6 +235,18 @@ class ProviderCredentialTests(unittest.TestCase):
         status = self.service.update({"yazio_client_secret": None})
         self.assertFalse(status["yazio_configured"])
 
+    def test_yazio_generation_ignores_other_credentials_and_tracks_replacements(self):
+        start = self.holder["config"].yazio_credential_generation
+        unrelated = {"openai_api_key": "test"}
+        first, second = "first", "second"
+        self.service.update(unrelated)
+        self.assertEqual(self.holder["config"].yazio_credential_generation, start)
+        self.service.update({"yazio_password": first})
+        self.assertEqual(self.holder["config"].yazio_credential_generation, start + 1)
+        self.service.update({"yazio_password": second})
+        self.service.update({"yazio_password": first})
+        self.assertEqual(self.holder["config"].yazio_credential_generation, start + 3)
+
     def test_environment_password_is_stripped_like_the_stored_one(self):
         root = Path(self._temporary.name)
         config = load_config(root, root / "data", {**ENV, "YAZIO_PASSWORD": " pw "})
