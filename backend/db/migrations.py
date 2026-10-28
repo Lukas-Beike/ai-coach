@@ -16,6 +16,7 @@ from typing import Any, Final
 from backend.db.garmin_items_migration import split_garmin_snapshot
 from backend.db.schema import (
     ACTIVITY_DETAIL_DDL,
+    CANONICAL_EXTENSIONS_DDL,
     CURRENT_SCHEMA_VERSION,
     FOOD_DATABASE_DDL,
     NUTRITION_PRODUCTS_DDL,
@@ -31,6 +32,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V11,
     SHAPE_SCHEMA_V12,
     SHAPE_SCHEMA_V13,
+    SHAPE_SCHEMA_V14,
     released_shape,
 )
 
@@ -162,10 +164,42 @@ def _upgrade_v13_to_v14(db: Any) -> None:
     _rebuild_table_allowing_yazio(db, "nutrition_products", NUTRITION_PRODUCTS_DDL)
 
 
+# Feedback written before schema version 15 is keyed by a provider activity id
+# and names its provider only when the client posted a local id.
+_FEEDBACK_RECORD_MATCH: Final = (
+    "record.provider_activity_id = activity_feedback.activity_id "
+    "AND (activity_feedback.provider IS NULL "
+    "OR record.provider = activity_feedback.provider) "
+    "AND record.activity_id IS NOT NULL"
+)
+
+
+def _upgrade_v14_to_v15(db: Any) -> None:
+    # Adds the canonical model extensions, then links feedback to the session it
+    # was written for: a local session id links to itself, a provider id only
+    # when exactly one provider record matches. Ambiguous and unmatched feedback
+    # keeps session_id NULL; ids, contents, timestamps and row count stay as is.
+    execute_ddl(db, CANONICAL_EXTENSIONS_DDL)
+    db.execute(
+        "UPDATE activity_feedback SET session_id = activity_id WHERE EXISTS "
+        "(SELECT 1 FROM activity_sessions AS session "
+        "WHERE session.activity_id = activity_feedback.activity_id)"
+    )
+    db.execute(
+        "UPDATE activity_feedback SET session_id = (SELECT record.activity_id "
+        f"FROM activity_records AS record WHERE {_FEEDBACK_RECORD_MATCH}) "
+        "WHERE session_id IS NULL AND (SELECT COUNT(*) FROM activity_records AS record "
+        f"WHERE {_FEEDBACK_RECORD_MATCH}) = 1 AND EXISTS (SELECT 1 "
+        "FROM activity_records AS record JOIN activity_sessions AS session "
+        f"ON session.activity_id = record.activity_id WHERE {_FEEDBACK_RECORD_MATCH})"
+    )
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V9: (SHAPE_SCHEMA_V10, _upgrade_v9_to_v10),
     SHAPE_SCHEMA_V10: (SHAPE_SCHEMA_V11, _upgrade_v10_to_v11),
     SHAPE_SCHEMA_V11: (SHAPE_SCHEMA_V12, _upgrade_v11_to_v12),
     SHAPE_SCHEMA_V12: (SHAPE_SCHEMA_V13, _upgrade_v12_to_v13),
-    SHAPE_SCHEMA_V13: (SHAPE_CURRENT, _upgrade_v13_to_v14),
+    SHAPE_SCHEMA_V13: (SHAPE_SCHEMA_V14, _upgrade_v13_to_v14),
+    SHAPE_SCHEMA_V14: (SHAPE_CURRENT, _upgrade_v14_to_v15),
 }

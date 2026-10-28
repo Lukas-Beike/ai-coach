@@ -12,9 +12,9 @@ from backend.performance.canonical_body import CanonicalBodyInputs, read_body_in
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
-    ReadOnceObservationReader,
     inputs_for_snapshot,
     performance_options,
+    read_once,
     read_performance_inputs,
     resolve_reader,
 )
@@ -55,9 +55,7 @@ class PublicPerformanceStateService:
         with source.database_manager().read_snapshot() as db:
             snapshot = self._sync_state_repository.latest_snapshot()
             garmin = self._garmin_payload_service.recent_view_in(db)
-            reader = ReadOnceObservationReader(
-                resolve_reader(source.observation_reader(), db)
-            )
+            reader = read_once(resolve_reader(source.observation_reader(), db))
             canonical = read_performance_inputs(
                 reader,
                 db,

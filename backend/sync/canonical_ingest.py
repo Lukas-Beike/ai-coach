@@ -19,7 +19,8 @@ from typing import Any
 
 from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.local_time import local_date
-from backend.db import canonical_store
+from backend.db import canonical_domain_store, canonical_store
+from backend.db.canonical_domain_store import ReplaceResult
 from backend.db.canonical_store import WriteOutcome
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
@@ -42,6 +43,7 @@ class CanonicalIngestCounters:
     skipped_invalid: int = 0
     deleted: int = 0
     linked: int = 0
+    retired: int = 0
 
     def count(self, outcome: WriteOutcome) -> None:
         if outcome is WriteOutcome.WRITTEN:
@@ -51,6 +53,12 @@ class CanonicalIngestCounters:
         else:
             self.unchanged += 1
 
+    def add(self, result: ReplaceResult) -> None:
+        self.written += result.written
+        self.updated += result.updated
+        self.unchanged += result.unchanged
+        self.retired += result.retired
+
     def as_dict(self) -> dict[str, int]:
         return {
             "written": self.written,
@@ -59,6 +67,7 @@ class CanonicalIngestCounters:
             "skipped_invalid": self.skipped_invalid,
             "deleted": self.deleted,
             "linked": self.linked,
+            "retired": self.retired,
         }
 
 
@@ -184,7 +193,11 @@ def ingest_plan(
     deletion_window: DeletionWindow | None,
     zone: tzinfo,
 ) -> CanonicalIngestCounters:
-    """Write raw records, then activities, then observations, then apply deletions.
+    """Write raw records, activities, observations and domain rows, then apply deletions.
+
+    The domain rows of each raw record replace the rows that record projected
+    before. A raw record the plan does not carry keeps its rows, so a payload
+    without a section never retires that section's rows.
 
     The written activities are then linked to duplicates from other providers on
     the athlete's wall clock ``zone`` (see ``link_activity_sessions``).
@@ -225,7 +238,29 @@ def ingest_plan(
         seen_keys.add(natural_key)
         counters.count(
             canonical_store.upsert_observation(
-                db, item.observation, mapper_version=item.mapper_version, now=stamp
+                db,
+                item.observation,
+                mapper_version=item.mapper_version,
+                now=stamp,
+                fill_only=item.fill_only,
+            )
+        )
+    raw_ids = {raw.source_record_id for raw in plan.raw_records}
+    for batch in plan.domain_batches:
+        if batch.source_record_id not in raw_ids:
+            raise ValueError("a domain batch needs its raw record in the same plan")
+        counters.add(
+            canonical_domain_store.replace_source_rows(
+                db,
+                provider=plan.provider,
+                source_record_id=batch.source_record_id,
+                mapper_version=batch.mapper_version,
+                now=stamp,
+                sleep_periods=batch.sleep_periods,
+                categorical=batch.categorical,
+                zones=batch.zones,
+                gear_items=batch.gear_items,
+                gear_links=batch.gear_links,
             )
         )
     if deletion_window is not None:

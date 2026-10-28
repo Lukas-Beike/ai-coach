@@ -23,6 +23,9 @@ Results use the same inclusive bounds and the same total order as
 ``CanonicalSnapshotProjection``. Activity bounds filter the stored athlete-local
 date, which the ingest computed with the athlete's zone at write time.
 
+Sleep periods, zone configurations, provider statuses and gear are served from
+their active rows; rows a re-projection retired are not served.
+
 Mapping issue counts are not stored in the tables, so this reader does not
 implement ``coverage``. It serves ``metric_windows`` from the same rows as
 ``observations``, as counts and oldest and newest days only. ``CanonicalReadSelector`` serves
@@ -37,23 +40,38 @@ from datetime import date, datetime
 from typing import Any, Final
 
 from backend.canonical.coverage import MetricWindow
+from backend.canonical.domain_records import (
+    CategoricalObservation,
+    GearActivityLink,
+    GearItem,
+    SleepPeriod,
+    ZoneConfiguration,
+)
 from backend.canonical.ordering import activity_order, observation_order
 from backend.canonical.records import (
+    FORM_METHOD,
+    FORM_METHOD_VERSION,
     ActivityRecord,
     MetricValue,
     Observation,
     Provenance,
+    fingerprint_inputs,
 )
 from backend.canonical.vocabulary import (
+    CategoricalDomain,
     Environment,
     LoadModel,
     MetricKind,
+    ObservationAggregation,
     ProviderId,
     RecordingOrigin,
+    SleepKind,
     SourceKind,
     Sport,
+    ZoneConfigurationMetric,
+    ZonePercentBasis,
 )
-from backend.db import canonical_store
+from backend.db import canonical_domain_store, canonical_store
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
     current_observation_mapper_versions,
@@ -167,6 +185,42 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
         windows = (_metric_window(row) for row in rows)
         return tuple(window for window in windows if window is not None)
 
+    def sleep_periods(
+        self, db: Any, *, start: date | None = None, end: date | None = None
+    ) -> tuple[SleepPeriod, ...]:
+        """Return sleep periods by inclusive wake date, oldest first."""
+        rows = canonical_domain_store.active_sleep_period_rows(
+            db, start=_iso(start), end=_iso(end)
+        )
+        return tuple(_sleep_period(row) for row in rows)
+
+    def categorical_observations(
+        self,
+        db: Any,
+        domain: CategoricalDomain,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> tuple[CategoricalObservation, ...]:
+        """Return the provider statuses of one domain by inclusive day, oldest first."""
+        rows = canonical_domain_store.active_categorical_rows(
+            db, domain.value, start=_iso(start), end=_iso(end)
+        )
+        return tuple(_categorical_observation(row) for row in rows)
+
+    def zone_configurations(self, db: Any) -> tuple[ZoneConfiguration, ...]:
+        """Return local and provider zone configurations by configuration key."""
+        rows = canonical_domain_store.active_zone_configuration_rows(db)
+        return tuple(_zone_configuration(row) for row in rows)
+
+    def gear_items(self, db: Any) -> tuple[GearItem, ...]:
+        rows = canonical_domain_store.active_gear_item_rows(db)
+        return tuple(_gear_item(row) for row in rows)
+
+    def gear_activity_links(self, db: Any) -> tuple[GearActivityLink, ...]:
+        rows = canonical_domain_store.active_gear_link_rows(db)
+        return tuple(_gear_activity_link(row) for row in rows)
+
 
 def _payload_object(text: str) -> dict[str, Any] | None:
     try:
@@ -196,6 +250,7 @@ def _activity(row: Mapping[str, Any]) -> ActivityRecord:
             # The row's own fetch time. Garmin sections keep their own fetch time.
             retrieved_at=datetime.fromisoformat(str(row["fetched_at"])),
             label=_ACTIVITY_LABELS[provider],
+            context=canonical_store.measurement_context(row["details"]),
         ),
         sport=Sport(row["sport"]),
         environment=Environment(row["environment"]),
@@ -226,20 +281,48 @@ def _activity(row: Mapping[str, Any]) -> ActivityRecord:
 
 def _observation(row: Mapping[str, Any]) -> Observation:
     provider = row["provider"]
+    kind = MetricKind(row["metric"])
+    source_kind = SourceKind(row["source_kind"])
+    derivation = canonical_store.observation_derivation(row["details"])
+    method = row["method"]
+    method_version = derivation.method_version
+    input_fingerprint = derivation.input_fingerprint
+    if source_kind is SourceKind.DERIVED and method is None and kind is MetricKind.FORM:
+        # A derived FORM stored before schema version 15 has no metadata. It was
+        # CTL minus ATL; its fingerprint is fixed by the row, as its inputs are
+        # not stored with it. Re-projection replaces it with the full metadata.
+        method, method_version = FORM_METHOD, FORM_METHOD_VERSION
+        input_fingerprint = fingerprint_inputs(
+            {
+                "unversioned_row": provider,
+                "source_record_id": row["source_record_id"],
+                "observed_on": str(row["observed_on"]),
+                "value": row["value"],
+            }
+        )
+    aggregation = row["aggregation"]
     return Observation(
-        kind=MetricKind(row["metric"]),
+        kind=kind,
         value=MetricValue(value=row["value"], unit=row["unit"]),
         observed_on=date.fromisoformat(str(row["observed_on"])),
         observed_at=_optional_datetime(row["observed_at"]),
         provenance=Provenance(
             provider=None if provider is None else ProviderId(provider),
-            source_kind=SourceKind(row["source_kind"]),
+            source_kind=source_kind,
             source_record_id=row["source_record_id"],
             recorded_by=RecordingOrigin(row["recorded_by"]),
             retrieved_at=_optional_datetime(row["retrieved_at"]),
             label=row["label"],
+            context=canonical_store.measurement_context(row["details"]),
         ),
         sport=None if row["sport"] is None else Sport(row["sport"]),
+        method=method,
+        aggregation=(
+            None if aggregation is None else ObservationAggregation(aggregation)
+        ),
+        method_version=method_version,
+        input_fingerprint=input_fingerprint,
+        period=derivation.period,
     )
 
 
@@ -261,3 +344,93 @@ def _provider_or_none(value: object) -> ProviderId | None:
         return ProviderId(str(value))
     except ValueError:
         return None
+
+
+def _optional_date(text: object) -> date | None:
+    return None if text is None else date.fromisoformat(str(text))
+
+
+def _domain_provenance(row: Mapping[str, Any]) -> Provenance:
+    provider = row["provider"]
+    return Provenance(
+        provider=None if provider is None else ProviderId(provider),
+        source_kind=SourceKind(row["source_kind"]),
+        source_record_id=row["source_record_id"],
+        recorded_by=RecordingOrigin(row["recorded_by"]),
+        retrieved_at=_optional_datetime(row["retrieved_at"]),
+        label=row["label"],
+        context=canonical_store.measurement_context(row.get("details")),
+    )
+
+
+def _sleep_period(row: Mapping[str, Any]) -> SleepPeriod:
+    return SleepPeriod(
+        start=datetime.fromisoformat(str(row["started_at"])),
+        end=datetime.fromisoformat(str(row["ended_at"])),
+        wake_date=date.fromisoformat(str(row["wake_date"])),
+        kind=SleepKind(row["kind"]),
+        timezone=row["timezone"],
+        reported_duration_s=row["reported_duration_s"],
+        bounds_method=row["bounds_method"],
+        provenance=_domain_provenance(row),
+    )
+
+
+def _categorical_observation(row: Mapping[str, Any]) -> CategoricalObservation:
+    return CategoricalObservation(
+        domain=CategoricalDomain(row["domain"]),
+        code=row["code"],
+        observed_on=date.fromisoformat(str(row["observed_on"])),
+        observed_at=_optional_datetime(row["observed_at"]),
+        provenance=_domain_provenance(row),
+        sport=None if row["sport"] is None else Sport(row["sport"]),
+    )
+
+
+def _zone_limits(text: object) -> tuple[float, ...] | None:
+    return None if text is None else tuple(json.loads(str(text)))
+
+
+def _zone_configuration(row: Mapping[str, Any]) -> ZoneConfiguration:
+    details = _payload_object(str(row["details"])) or {}
+    environment = row["environment"]
+    basis = row["percent_basis"]
+    return ZoneConfiguration(
+        metric=ZoneConfigurationMetric(row["metric"]),
+        sport=None if row["sport"] is None else Sport(row["sport"]),
+        environment=None if environment is None else Environment(environment),
+        valid_from=_optional_date(row["valid_from"]),
+        valid_until=_optional_date(row["valid_until"]),
+        threshold=row["threshold"],
+        maximum=row["maximum"],
+        resting=row["resting"],
+        limits=_zone_limits(row["limits"]),
+        percent_limits=_zone_limits(row["percent_limits"]),
+        percent_basis=None if basis is None else ZonePercentBasis(basis),
+        provenance=_domain_provenance(row),
+        model=details.get(canonical_domain_store.ZONE_MODEL_KEY),
+    )
+
+
+def _gear_item(row: Mapping[str, Any]) -> GearItem:
+    details = _payload_object(str(row["details"])) or {}
+    return GearItem(
+        gear_id=row["gear_id"],
+        name=row["name"],
+        type_label=row["type_label"],
+        activity_type_label=row["activity_type_label"],
+        status_label=row["status_label"],
+        maximum_distance_m=row["maximum_distance_m"],
+        total_distance_m=row["total_distance_m"],
+        total_activities=row["total_activities"],
+        provenance=_domain_provenance(row),
+        activity_list_partial=details.get(canonical_domain_store.GEAR_LIST_PARTIAL_KEY),
+    )
+
+
+def _gear_activity_link(row: Mapping[str, Any]) -> GearActivityLink:
+    return GearActivityLink(
+        gear_id=row["gear_id"],
+        provider_activity_id=row["provider_activity_id"],
+        provenance=_domain_provenance(row),
+    )

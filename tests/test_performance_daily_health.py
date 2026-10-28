@@ -513,18 +513,25 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.reader = MappedDailyReader(self.SNAPSHOT)
 
-    def test_by_date_matches_the_snapshot_and_adds_active_energy(self) -> None:
+    def test_by_date_matches_the_snapshot_and_adds_active_and_resting_energy(
+        self,
+    ) -> None:
         canonical = read_daily_health_by_date(self.reader, "db")
         legacy = garmin_daily_health_by_date(self.SNAPSHOT)
 
         self.assertEqual(
             {
-                day: {key: value for key, value in health.items() if key != "active_kcal"}
+                day: {
+                    key: value
+                    for key, value in health.items()
+                    if key not in ("active_kcal", "resting_kcal")
+                }
                 for day, health in canonical.items()
             },
             legacy,
         )
         self.assertEqual(canonical["2026-09-19"]["active_kcal"], 700)
+        self.assertEqual(canonical["2026-09-19"]["resting_kcal"], 1700)
         self.assertEqual(canonical["2026-09-20"]["source"], "Garmin Connect")
 
     def test_by_date_reads_each_kind_once_within_the_window(self) -> None:
@@ -535,7 +542,7 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
         )
 
         self.assertEqual(list(canonical), ["2026-09-20"])
-        self.assertEqual(len(self.reader.calls), 4)
+        self.assertEqual(len(self.reader.calls), 5)
         self.assertTrue(all(call[1:] == window for call in self.reader.calls))
 
     def test_metrics_window_matches_the_snapshot_with_an_empty_snapshot(self) -> None:
@@ -552,21 +559,26 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
         self.assertEqual(canonical, legacy)
         self.assertEqual(canonical["steps_7d"]["value"], 6500)
 
-    def test_expenditure_uses_measured_totals_and_keeps_resting_on_the_snapshot(
-        self,
-    ) -> None:
+    def test_expenditure_reads_every_component_from_the_observations(self) -> None:
         measured = read_daily_health_by_date(self.reader, "db")
-        legacy = daily_energy_expenditure(self.SNAPSHOT, "2026-09-19", date(2026, 9, 21))
+        legacy = daily_energy_expenditure(
+            self.SNAPSHOT, "2026-09-19", date(2026, 9, 21)
+        )
         canonical = daily_energy_expenditure(
             {}, "2026-09-19", date(2026, 9, 21), measured=measured["2026-09-19"]
         )
 
-        for key in ("total_kcal", "active_kcal", "source", "status", "measured_date"):
+        for key in (
+            "total_kcal",
+            "active_kcal",
+            "resting_kcal",
+            "source",
+            "status",
+            "measured_date",
+        ):
             with self.subTest(key=key):
                 self.assertEqual(canonical[key], legacy[key])
-        # Resting calories have no metric kind; without the snapshot they are unknown.
-        self.assertEqual(legacy["resting_kcal"], 1700)
-        self.assertIsNone(canonical["resting_kcal"])
+        self.assertEqual(canonical["resting_kcal"], 1700)
 
     def test_measured_day_without_values_is_unavailable_without_a_snapshot(
         self,

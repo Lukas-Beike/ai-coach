@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
@@ -59,13 +60,20 @@ def performance_trend_average(
     end_date: date,
     *,
     wellness_rows: list[dict[str, Any]] | None = None,
+    garmin_history: Mapping[str, Mapping[date, float]] | None = None,
 ) -> float | None:
-    """Average a metric over ``days``; ``wellness_rows`` replace the snapshot rows."""
+    """Average a metric over ``days``.
+
+    ``wellness_rows`` replace the snapshot rows and ``garmin_history`` the Garmin
+    snapshot's performance history.
+    """
     current_source = metrics.get(key, {}).get("source")
     if current_source == garmin_metrics.GARMIN_PERFORMANCE_SOURCE:
         if key == "weight_kg":
             return garmin_weight.garmin_weight_average(garmin, days, end_date)
-        return trends.garmin_history_average(garmin, key, days, end_date)
+        return trends.garmin_history_average(
+            garmin, key, days, end_date, garmin_history
+        )
     if wellness_rows is None:
         raw_rows = snapshot.get("recent_wellness")
         rows = raw_rows if isinstance(raw_rows, list) else []
@@ -82,11 +90,19 @@ def _performance_trend(
     today: date,
     higher_is_better: bool | None = True,
     wellness_rows: list[dict[str, Any]] | None = None,
+    garmin_history: Mapping[str, Mapping[date, float]] | None = None,
 ) -> dict[str, Any] | None:
     return wellness.comparison_value(
         metrics.get(key, {}).get("value"),
         performance_trend_average(
-            snapshot, garmin, metrics, key, 30, today, wellness_rows=wellness_rows
+            snapshot,
+            garmin,
+            metrics,
+            key,
+            30,
+            today,
+            wellness_rows=wellness_rows,
+            garmin_history=garmin_history,
         ),
         unit,
         30,
@@ -103,6 +119,8 @@ def performance_comparisons(
     wellness_rows: list[dict[str, Any]],
     activities: list[Any],
     today: date,
+    *,
+    garmin_history: Mapping[str, Mapping[date, float]] | None = None,
 ) -> dict[str, Any]:
     load = load_context["load"]
     last_7 = load_context["last_7"]
@@ -121,6 +139,7 @@ def performance_comparisons(
             today,
             higher_is_better,
             wellness_rows=wellness_rows,
+            garmin_history=garmin_history,
         )
 
     readiness_trend = wellness.comparison_value(
@@ -133,6 +152,7 @@ def performance_comparisons(
             30,
             today,
             wellness_rows=wellness_rows,
+            garmin_history=garmin_history,
         ),
         "",
         30,

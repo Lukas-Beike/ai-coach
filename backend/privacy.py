@@ -239,8 +239,14 @@ PRIVACY_DELETE_SCOPE = (
         "Kanonische Provider-Aktivitäten, Beobachtungen und Provider-Records",
         # Children first: detail rows reference their set, sets reference
         # activity_records and analysis rows and records reference sessions.
+        # The schema v15 sleep, zone, status and gear tables reference none.
         (
             "observations",
+            "sleep_periods",
+            "zone_configurations",
+            "categorical_observations",
+            "gear_activity_links",
+            "gear_items",
             "activity_stream_channels",
             "activity_laps",
             "activity_zone_times",

@@ -13,9 +13,10 @@ where the values come from:
   (``ObservationReader``): one row per day, holding the first alias of each
   canonical field (``restingHR``, ``hrv``, ``sleepSecs``, ``ctl`` ...).
 
-Wellness fields without a canonical observation (``tsb``, ``rampRate``, the
-subjective ``fatigue``/``soreness``/``stress``/``mood`` and the ``sportInfo`` eFTP)
-are not rebuilt. They still come from the snapshot's wellness rows when the
+The athlete's Intervals.icu ratings ``fatigue``/``soreness``/``stress``/``mood``
+are rebuilt from their SUBJECTIVE_* observations. Wellness fields without a
+canonical observation (``tsb``, ``rampRate`` and the ``sportInfo`` eFTP) are not
+rebuilt. They still come from the snapshot's wellness rows when the
 snapshot holds them, and are absent when it does not. The snapshot rows act only as
 the carrier of these fields: a canonical observation always wins over a snapshot
 value of the same field, and a snapshot without wellness rows yields rows from
@@ -53,6 +54,10 @@ WELLNESS_ROW_KEYS: Final[Mapping[MetricKind, str]] = {
     MetricKind.VO2MAX: "vo2max",
     MetricKind.CTL: "ctl",
     MetricKind.ATL: "atl",
+    MetricKind.SUBJECTIVE_FATIGUE: "fatigue",
+    MetricKind.SUBJECTIVE_SORENESS: "soreness",
+    MetricKind.SUBJECTIVE_STRESS: "stress",
+    MetricKind.SUBJECTIVE_MOOD: "mood",
 }
 
 type WellnessObservations = Mapping[MetricKind, Sequence[Observation]]

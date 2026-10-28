@@ -11,11 +11,17 @@ import hashlib
 import json
 import uuid
 from collections.abc import Mapping, Sequence
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
-from backend.canonical.records import ActivityRecord, Observation
+from backend.canonical.records import (
+    UNKNOWN_CONTEXT,
+    ActivityRecord,
+    MeasurementContext,
+    Observation,
+    ObservationPeriod,
+)
 from backend.canonical.vocabulary import (
     ActivityLinkKind,
     ActivityRecordState,
@@ -40,6 +46,11 @@ _ELEVATION_HIGH_KEY: Final = "elevation_high_m"
 _ELEVATION_LOW_KEY: Final = "elevation_low_m"
 _STEPS_KEY: Final = "steps"
 _DEVICE_TYPE_KEY: Final = "device_type"
+_CONTEXT_KEY: Final = "context"
+_METHOD_VERSION_KEY: Final = "method_version"
+_INPUT_FINGERPRINT_KEY: Final = "input_fingerprint"
+_PERIOD_KEY: Final = "period"
+_MAX_MERGE_HOPS: Final = 64
 _PROVIDER_RECORD_EXISTS: Final = (
     "SELECT 1 AS present FROM provider_records "
     "WHERE provider = ? AND record_kind = ? AND source_record_id = ?"
@@ -86,6 +97,9 @@ _OBSERVATION_COLUMNS: Final = (
     "retrieved_at",
     "label",
     "mapper_version",
+    "method",
+    "aggregation",
+    "details",
 )
 
 
@@ -227,14 +241,19 @@ def upsert_activity_record(
         now=now,
     )
     db.execute(
+        # A revived session is active again, so it no longer keeps the survivor
+        # of a merge that its deletion cleared.
         "UPDATE activity_sessions SET started_at = ?, local_date = ?, "
-        "state = CASE WHEN state = ? THEN ? ELSE state END, updated_at = ? "
+        "state = CASE WHEN state = ? THEN ? ELSE state END, "
+        "merged_into_retained = CASE WHEN state = ? THEN NULL "
+        "ELSE merged_into_retained END, updated_at = ? "
         "WHERE activity_id = ?",
         (
             started_at,
             day,
             ActivitySessionState.DELETED.value,
             ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.DELETED.value,
             now,
             existing["activity_id"],
         ),
@@ -478,6 +497,9 @@ _OBSERVATION_READ_COLUMNS: Final = (
     "observed_at",
     "retrieved_at",
     "label",
+    "method",
+    "aggregation",
+    "details",
 )
 
 
@@ -788,9 +810,19 @@ def _observation_series(observation: Observation) -> str:
 
 
 def upsert_observation(
-    db: Any, observation: Observation, *, mapper_version: int, now: str
+    db: Any,
+    observation: Observation,
+    *,
+    mapper_version: int,
+    now: str,
+    fill_only: bool = False,
 ) -> WriteOutcome:
-    """Insert or update one observation by its natural key."""
+    """Insert or update one observation by its natural key.
+
+    A ``fill_only`` observation never replaces a current row another source
+    record wrote; it inserts, updates its own row, or replaces a row left at an
+    older mapper version, which no stored record re-projects any more.
+    """
     natural_key = observation_natural_key(observation)
     values = _observation_values(observation, mapper_version=mapper_version)
     existing = _fetch_row(
@@ -803,6 +835,12 @@ def upsert_observation(
     if existing is None:
         _insert_observation(db, natural_key=natural_key, values=values, now=now)
         return WriteOutcome.WRITTEN
+    if (
+        fill_only
+        and existing["source_record_id"] != values["source_record_id"]
+        and existing["mapper_version"] >= values["mapper_version"]
+    ):
+        return WriteOutcome.UNCHANGED
     if all(existing[column] == values[column] for column in _OBSERVATION_COLUMNS):
         return WriteOutcome.UNCHANGED
     assignments = ", ".join(f"{column} = ?" for column in _OBSERVATION_COLUMNS)
@@ -920,9 +958,12 @@ def _delete_activity(
         ),
     )
     # A deleted merged alias also leaves its merge: the schema allows merged_into
-    # only on duplicate sessions.
+    # only on duplicate sessions. merged_into_retained keeps the survivor, so
+    # feedback written for the alias still resolves (effective_session_ids).
     db.execute(
-        "UPDATE activity_sessions SET state = ?, merged_into = NULL, updated_at = ? "
+        "UPDATE activity_sessions SET state = ?, "
+        "merged_into_retained = COALESCE(merged_into, merged_into_retained), "
+        "merged_into = NULL, updated_at = ? "
         "WHERE activity_id = ? AND primary_provider = ? "
         "AND primary_provider_activity_id = ?",
         (
@@ -1064,7 +1105,6 @@ def _insert_observation(
     columns = (
         "natural_key",
         *_OBSERVATION_COLUMNS,
-        "details",
         "created_at",
         "updated_at",
     )
@@ -1074,7 +1114,6 @@ def _insert_observation(
         (
             natural_key,
             *(values[column] for column in _OBSERVATION_COLUMNS),
-            OBSERVATION_DETAILS,
             now,
             now,
         ),
@@ -1136,6 +1175,7 @@ def _activity_details(record: ActivityRecord) -> str:
                 _DEVICE_TYPE_KEY,
                 None if record.device_type is None else record.device_type.value,
             ),
+            (_CONTEXT_KEY, record.provenance.context.as_details() or None),
         )
         if value is not None
     }
@@ -1198,6 +1238,55 @@ def activity_device_type(details: object) -> DeviceType | None:
         return None
 
 
+def measurement_context(details: object) -> MeasurementContext:
+    """Return the measurement context stored in activity or observation details.
+
+    A missing or invalid stored context is unknown; it never raises.
+    """
+    value = _activity_detail_value(details, _CONTEXT_KEY)
+    if value is None:
+        return UNKNOWN_CONTEXT
+    try:
+        return MeasurementContext.from_details(value)
+    except TypeError, ValueError:
+        return UNKNOWN_CONTEXT
+
+
+class ObservationDerivation(NamedTuple):
+    method_version: int | None
+    input_fingerprint: str | None
+    period: ObservationPeriod | None
+
+
+def observation_derivation(details: object) -> ObservationDerivation:
+    """Return the method version, input fingerprint and period stored in details.
+
+    Missing values are None. A stored value of the wrong type raises ValueError,
+    because only validated observations are written.
+    """
+    version = _activity_detail_value(details, _METHOD_VERSION_KEY)
+    fingerprint = _activity_detail_value(details, _INPUT_FINGERPRINT_KEY)
+    period = _activity_detail_value(details, _PERIOD_KEY)
+    if version is not None and (
+        isinstance(version, bool) or not isinstance(version, int)
+    ):
+        raise ValueError("stored method_version must be an integer")
+    if fingerprint is not None and not isinstance(fingerprint, str):
+        raise ValueError("stored input_fingerprint must be text")
+    if period is None:
+        return ObservationDerivation(version, fingerprint, None)
+    if not isinstance(period, dict) or set(period) != {"start", "end"}:
+        raise ValueError("stored period must have a start and an end")
+    return ObservationDerivation(
+        version,
+        fingerprint,
+        ObservationPeriod(
+            start=datetime.fromisoformat(str(period["start"])),
+            end=datetime.fromisoformat(str(period["end"])),
+        ),
+    )
+
+
 def _activity_detail_number(details: object, key: str) -> float | None:
     value = _activity_detail_value(details, key)
     if isinstance(value, bool) or not isinstance(value, int | float):
@@ -1243,7 +1332,36 @@ def _observation_values(
         ),
         "label": provenance.label,
         "mapper_version": mapper_version,
+        "method": observation.method,
+        "aggregation": (
+            observation.aggregation.value
+            if observation.aggregation is not None
+            else None
+        ),
+        "details": _observation_details(observation),
     }
+
+
+def _observation_details(observation: Observation) -> str:
+    # Metadata without a column of its own. A row without any keeps "{}", so
+    # stored rows written before schema version 15 compare unchanged.
+    period = observation.period
+    details = {
+        key: value
+        for key, value in (
+            (_CONTEXT_KEY, observation.provenance.context.as_details() or None),
+            (_METHOD_VERSION_KEY, observation.method_version),
+            (_INPUT_FINGERPRINT_KEY, observation.input_fingerprint),
+            (
+                _PERIOD_KEY,
+                None
+                if period is None
+                else {"start": period.start.isoformat(), "end": period.end.isoformat()},
+            ),
+        )
+        if value is not None
+    }
+    return canonical_json(details) if details else OBSERVATION_DETAILS
 
 
 def _fetch_row(db: Any, sql: str, params: tuple[object, ...]) -> dict[str, Any] | None:
@@ -1361,7 +1479,88 @@ def merge_activity_session(db: Any, *, activity_id: str, into: str, now: str) ->
         "WHERE merged_into = ? AND state = ?",
         (into, now, activity_id, ActivitySessionState.DUPLICATE.value),
     )
+    db.execute(
+        "UPDATE activity_sessions SET merged_into_retained = ?, updated_at = ? "
+        "WHERE merged_into_retained = ?",
+        (into, now, activity_id),
+    )
     return True
+
+
+def provider_activity_sessions(
+    db: Any, provider: str, provider_activity_ids: Sequence[str]
+) -> dict[str, str]:
+    """Map active provider activity ids to the session their merges lead to.
+
+    Unknown, invalid and deleted records are absent.
+    """
+    sessions: dict[str, str] = {}
+    for chunk in _chunked(list(dict.fromkeys(provider_activity_ids))):
+        for row in _fetch_all(
+            db,
+            "SELECT provider_activity_id, activity_id FROM activity_records "
+            f"WHERE provider = ? AND state = ? AND provider_activity_id IN "
+            f"({_placeholders(chunk)})",
+            (provider, ActivityRecordState.ACTIVE.value, *chunk),
+        ):
+            sessions[str(row["provider_activity_id"])] = str(row["activity_id"])
+    effective = effective_session_ids(db, list(sessions.values()))
+    return {
+        activity_id: effective.get(session, session)
+        for activity_id, session in sessions.items()
+    }
+
+
+def effective_session_ids(db: Any, activity_ids: Sequence[str]) -> dict[str, str]:
+    """Map stored session ids to the session their merges lead to; unknown ids are absent.
+
+    A chain follows ``merged_into``, or for a deleted alias the survivor its
+    deletion retained. It stops at a session without either, at a cycle or after
+    64 merges. An unmerged session maps to itself. Feedback keeps the session it
+    was written for and is shown on the session this returns.
+    """
+    targets = _merge_targets(db, activity_ids)
+    return {
+        activity_id: _follow_merges(targets, activity_id)
+        for activity_id in dict.fromkeys(activity_ids)
+        if activity_id in targets
+    }
+
+
+def _merge_targets(db: Any, activity_ids: Sequence[str]) -> dict[str, str | None]:
+    """Read each session's merge target along the chains, up to the hop limit."""
+    targets: dict[str, str | None] = {}
+    pending = list(activity_ids)
+    for _ in range(_MAX_MERGE_HOPS + 1):
+        pending = [activity_id for activity_id in pending if activity_id not in targets]
+        if not pending:
+            break
+        for chunk in _chunked(pending):
+            for row in _fetch_all(
+                db,
+                "SELECT activity_id, COALESCE(merged_into, merged_into_retained) "
+                "AS target FROM activity_sessions "
+                f"WHERE activity_id IN ({_placeholders(chunk)})",
+                tuple(chunk),
+            ):
+                targets[row["activity_id"]] = row["target"]
+        pending = [
+            target
+            for activity_id in pending
+            if (target := targets.get(activity_id)) is not None
+        ]
+    return targets
+
+
+def _follow_merges(targets: dict[str, str | None], activity_id: str) -> str:
+    current, seen = activity_id, {activity_id}
+    while len(seen) <= _MAX_MERGE_HOPS:
+        target = targets.get(current)
+        if target is None or target not in targets or target in seen:
+            break
+        seen.add(target)
+        current = target
+    return current
 
 
 def set_activity_session_link_kind(
@@ -1373,6 +1572,36 @@ def set_activity_session_link_kind(
         "WHERE activity_id = ? AND state = ?",
         (link_kind, now, activity_id, ActivitySessionState.ACTIVE.value),
     )
+
+
+def feedback_origin_sessions(
+    db: Any, references: Sequence[tuple[str, str | None]]
+) -> dict[str, str]:
+    """Map feedback keys to the session they were written for.
+
+    A local session id is its own session. Any other key is the provider activity
+    id of the only activity record that carries it, of the named provider when one
+    is given. Ambiguous and unknown keys are absent, as in the schema v15 backfill.
+    """
+    keys = list(dict.fromkeys(key for key, _ in references))
+    providers = dict(references)
+    sessions = {key: key for key in activity_sessions_by_ids(db, keys)}
+    matches: dict[str, set[str]] = {}
+    for chunk in _chunked([key for key in keys if key not in sessions]):
+        for row in _fetch_all(
+            db,
+            "SELECT provider, provider_activity_id, activity_id FROM activity_records "
+            f"WHERE provider_activity_id IN ({_placeholders(chunk)})",
+            tuple(chunk),
+        ):
+            key = str(row["provider_activity_id"])
+            provider = providers.get(key)
+            if provider is None or row["provider"] == provider:
+                matches.setdefault(key, set()).add(str(row["activity_id"]))
+    for key, found in matches.items():
+        if len(found) == 1:
+            (sessions[key],) = found
+    return sessions
 
 
 def activity_local_ids(

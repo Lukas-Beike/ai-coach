@@ -11,11 +11,13 @@ Provenance has three separate parts. Fixtures check them separately:
 - **Transport provider:** `Provenance.provider` / the record's `provider`
   (Intervals.icu, Garmin, Wahoo).
 - **Recording origin:** `recorded_by` (`RecordingOrigin`, a brand) and, for
-  activities, `device_type` (`DeviceType`, a class). No device model, firmware
-  or measurement window exists (#1420).
+  activities, `device_type` (`DeviceType`, a class). A typed measurement
+  context (device model, firmware, algorithm, sensor, window, protocol) is
+  stored since schema v15; unreported fields stay explicitly unknown (#1420).
 - **Local method:** the method ID on the card (for example
-  `personal-quartiles-v1`). The `observations.method` and `aggregation` columns
-  exist but are never written (#1418).
+  `personal-quartiles-v1`). Provider-fixed `observations.method` and
+  `aggregation` are written since schema v15, for example Garmin last-night HRV
+  as `rmssd` mean over the overnight window (#1418).
 
 ## M1 — Session-RPE load
 
@@ -49,16 +51,18 @@ Consumer trace (no M1 method exists yet):
 | HRV RMSSD | `MetricKind.HRV_RMSSD` from Intervals `hrv` and Garmin last-night HRV | `backend/canonical/vocabulary.py:86` |
 | HRV SDNN | `MetricKind.HRV_SDNN` from Intervals `hrvSDNN` only | `backend/canonical/vocabulary.py:87` |
 | Resting HR | `MetricKind.RESTING_HR` | `backend/canonical/vocabulary.py:85` |
-| Nightly or morning, window | not stored; `observed_at` is empty for daily values | #1418, #1420 |
+| Nightly or morning, window | Garmin HRV: `overnight` window in the measurement context; Intervals HRV: not reported | #1418, #1420 |
 
 Consumer trace:
 
 - Canonical read: `read_recovery_inputs` reads sleep duration and score, resting
   HR, RMSSD, SDNN, the Garmin weekly HRV average and readiness of all providers
-  (`backend/performance/canonical_recovery.py`) since #1411.
+  (`backend/performance/canonical_recovery.py`) since #1411, and for M3 timing
+  the canonical sleep periods when the tables serve reads (#1419).
 - Method: `personal_recovery` (`backend/performance/personal_recovery.py`)
   builds one series per provider and measurement from the daily canonical
-  observations; raw rows and payloads feed only sleep regularity (#1419).
+  observations; raw rows and payloads feed sleep timing variability only before the
+  canonical tables serve reads.
 - Report/context: `current_performance_context` (`backend/performance/context.py:167`).
 - HTTP: `GET /api/performance` (`backend/http_api/athlete_get.py:51`) and the
   report services (`backend/http_api/assembly.py:430`).
@@ -71,18 +75,18 @@ Consumer trace:
 | Input | Canonical storage today | Evidence |
 | --- | --- | --- |
 | Sleep duration | `MetricKind.SLEEP_DURATION` (s) from Intervals and Garmin | `backend/canonical/vocabulary.py:88` |
-| Sleep start and end, night or nap | no canonical kind or table; read from raw payload fields | `backend/performance/personal_recovery.py:297` |
+| Sleep start and end, night kind | canonical `sleep_periods` (schema v15): UTC bounds, ingest zone, wake date, NIGHT or UNKNOWN; naps out of scope | `backend/canonical/domain_records.py`, `backend/providers/sleep_period_mapping.py` |
 | Sleep goal | athlete profile `sleep_target_hours` | `backend/performance/personal_recovery.py:63` |
 
 Consumer trace:
 
-- Method: `personal_recovery` → `_sleep_deficits` (`personal_recovery.py:170`)
-  and `sleep_regularity` (`:241`), both on raw rows. No canonical sleep read
-  exists.
+- Method: `personal_recovery` → `_sleep_deficits` on raw rows, and
+  `sleep_timing_variability` on canonical sleep periods once the tables serve (raw
+  rows before that), with pinned parity.
 - Report/context, HTTP, UI and Coach as for M2; in addition the Coach tool
-  `get_training_report(sections=["sleep_regularity"])`
+  `get_training_report(sections=["sleep_timing_variability"])`
   (`backend/coach/activity_read_tools.py:83`) via
-  `TrainingDerivedReadService.sleep_regularity`
+  `TrainingDerivedReadService.sleep_timing_variability`
   (`backend/performance/report_service.py:399`).
 
 ## M4 — Critical Power and Critical Speed
@@ -112,18 +116,16 @@ Consumer trace (no M4 method exists yet):
 
 | Gap | Method | Kind | Owner |
 | --- | --- | --- | --- |
-| Feedback keyed by provider id, not canonical session | M1 | persistence | #1423 (#1408) |
 | Elapsed duration in three provider-specific places; Wahoo keeps none | M1 | mapping, maybe persistence | #1427; no #1408 sub-issue yet |
 | `icu_rpe` has no canonical field | M1 | mapping, maybe persistence | D3 on #1406; no #1408 sub-issue yet |
 | Two duplicate rules (session state and `deduplicated_rows`) | M1 | read path | #1427 |
 | Planning context omits feedback `session_rpe` | M1 | read path | #1427 |
 | HRV and sleep duration read from raw rows | M2, M3 | read path | resolved by #1411 |
 | Canonical resting HR only replaces an equal legacy value | M2 | read path | resolved by #1411 |
-| No method, aggregation or measurement window on observations | M2, M3 | persistence | #1418 (#1408) |
-| No device model or firmware | M2, M3, M4 | persistence | #1420 (#1408) |
-| No sleep periods (start, end, night or nap) | M3 | persistence | #1419 (#1408) |
+| Method, aggregation and window stored; only Garmin HRV populates them | M2, M3 | mapping | #1418 (#1408) |
+| Device model and firmware unknown for Garmin HRV (no measurement-associated evidence) | M2, M3, M4 | mapping | #1420 (#1408) |
 | Timing deviations computed below 14 earlier intervals | M3 | method | #1429 |
-| Labels "sleep deficit" and regularity | M3 | wording | #1426 |
+| Labels "sleep deficit" and regularity | M3 | wording | resolved by #1426 |
 | No full-resolution filter and no 180/420/720 s windows | M4 | method | #1430 |
 | Reports read stored analyses with kv fallback | M4 | read path | #1410 |
 | No CP/CS fit | M4 | method | #1431 |
@@ -140,7 +142,7 @@ Classes in `tests/test_performance_method_inputs.py`; each has `test_complete`,
 
 | Method | Class | Extra tests | Pinned gaps |
 | --- | --- | --- | --- |
-| M1 | `M1SessionRpeInputs` | — | #1427, #1423, D3 on #1406 |
+| M1 | `M1SessionRpeInputs` | — | #1427, D3 on #1406 |
 | M2 | `M2HrvRestingHrInputs` | `test_canonical_resting_hr_is_the_primary_input`, `test_canonical_hrv_is_read_per_provider` | — |
 | M3 | `M3SleepInputs` | `test_canonical_sleep_duration_is_read_but_timing_is_not` | #1429, #1419 |
 | M4 | `M4BestEffortInputs` | — | #1430 |

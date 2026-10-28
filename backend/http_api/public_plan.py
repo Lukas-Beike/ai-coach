@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -10,6 +10,7 @@ from typing import Any
 from backend.activities.detail_analysis_reads import calendar_profiles
 from backend.activities.detail_store import summary_fingerprint
 from backend.calendar import canonical as calendar_canonical
+from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.public_metrics import neutral_calendar_entries
 from backend.db.manager import DatabaseManager
 from backend.planning import calendar_read_model
@@ -42,6 +43,8 @@ class PublicPlanDependencies:
     default_workout_name: str
     # Compact recent activities come from the canonical activity row port.
     activity_rows: ActivityRowSource | None = None
+    # Canonical zone configurations; the snapshot sport settings apply without any.
+    zone_configurations: Callable[[], Sequence[ZoneConfiguration]] = tuple
 
 
 class PublicPlanStateService:
@@ -68,6 +71,7 @@ class PublicPlanStateService:
         self._external_calendar_window_days = dependencies.external_calendar_window_days
         self._default_workout_name = dependencies.default_workout_name
         self._activity_rows = dependencies.activity_rows
+        self._zone_configurations = dependencies.zone_configurations
 
     def read_public(self, local_only: bool = False) -> dict[str, Any]:
         """Return the plan state with neutral metric names for the browser.
@@ -146,6 +150,7 @@ class PublicPlanStateService:
             provider_window=calendar_window,
             default_name=self._default_workout_name,
             sport_settings=calendar_read_model.snapshot_sport_settings(snapshot),
+            zone_configurations=self._zone_configurations(),
         )
         return {
             "plans": self._training_plans.list(limit=30),

@@ -43,7 +43,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         report.read.return_value = {"start": "2026-09-01", "totals": {"sessions": 2}}
         records = SimpleNamespace(endurance=Mock(), comparisons=Mock())
         derived = SimpleNamespace(
-            impact=Mock(), body_history=Mock(), sleep_regularity=Mock()
+            impact=Mock(), body_history=Mock(), sleep_timing_variability=Mock()
         )
         reports = SimpleNamespace(
             report=report,
@@ -73,7 +73,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             report=report,
             records=records,
             derived=SimpleNamespace(
-                impact=Mock(), body_history=Mock(), sleep_regularity=Mock()
+                impact=Mock(), body_history=Mock(), sleep_timing_variability=Mock()
             ),
             profiles=SimpleNamespace(power_profiles=Mock()),
             season=SimpleNamespace(season=Mock()),
@@ -88,11 +88,11 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         with self.assertRaises(AppError):
             service.execute("get_training_report", {"sections": ["unknown"]})
 
-    def test_report_can_select_body_history_and_sleep_regularity(self):
+    def test_report_can_select_body_history_and_sleep_timing_variability(self):
         report = Mock()
-        derived = SimpleNamespace(body_history=Mock(), sleep_regularity=Mock())
+        derived = SimpleNamespace(body_history=Mock(), sleep_timing_variability=Mock())
         derived.body_history.return_value = {"weight": []}
-        derived.sleep_regularity.return_value = {"status": "ok"}
+        derived.sleep_timing_variability.return_value = {"status": "ok"}
         reports = SimpleNamespace(
             report=report,
             records=SimpleNamespace(endurance=Mock(), comparisons=Mock()),
@@ -105,11 +105,20 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             Mock(), Mock(), Mock(), date.today, reports
         )
         result = service.execute(
-            "get_training_report", {"sections": ["body_history", "sleep_regularity"]}
+            "get_training_report",
+            {"sections": ["body_history", "sleep_timing_variability"]},
         )
         self.assertEqual(result["body_history"], {"weight": []})
-        self.assertEqual(result["sleep_regularity"]["status"], "ok")
+        self.assertEqual(result["sleep_timing_variability"]["status"], "ok")
         report.read.assert_not_called()
+
+    def test_retired_sleep_regularity_section_is_rejected(self):
+        service = CoachActivityReadToolService(
+            Mock(), Mock(), Mock(), date.today, Mock()
+        )
+        with self.assertRaises(AppError) as raised:
+            service.execute("get_training_report", {"sections": ["sleep_regularity"]})
+        self.assertEqual(400, raised.exception.status)
 
     def test_recent_activities_applies_defaults_bounds_and_today(self):
         activity_read = Mock()

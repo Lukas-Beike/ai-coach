@@ -136,7 +136,9 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await page.evaluate(async () => { await AppRouter.navigate("analysis/recovery", { historyMode: "replace" }); });
   await expect(page.getByRole("heading", { name: "Aktuelle Erholung", exact: true })).toHaveCount(0);
   const recovery = page.locator("#personalRecovery");
-  await expect(recovery.locator("svg")).toHaveCount(3);
+  // The fixture's Garmin readiness is canonical history, so its chart joins the three baselines.
+  await expect(recovery.getByRole("heading", { name: /^Trainingsbereitschaft/ })).toHaveCount(1);
+  await expect(recovery.locator("svg")).toHaveCount(4);
   await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 14 Tage");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 
@@ -154,7 +156,8 @@ test("@responsive recovery, power, training focus, season and calendar profiles 
   await expect(recovery.locator(".analysis-period-controls")).toHaveCount(1);
   await recovery.getByRole("button", { name: "12 Wochen", exact: true }).click();
   await expect(recovery.locator(".analysis-chart-card").first()).toContainText("Erholung · Letzte 12 Wochen");
-  await expect(recovery.locator(".analysis-subchart")).toHaveCount(3);
+  // Three baselines plus the fixture's Garmin readiness chart.
+  await expect(recovery.locator(".analysis-subchart")).toHaveCount(4);
 
   await page.evaluate(async () => { await AppRouter.navigate("plan/season", { historyMode: "replace" }); });
   await expect(page.locator("#seasonPreparation .competition-card").filter({ hasText: "Fixture cycling target" }).first()).toBeVisible();

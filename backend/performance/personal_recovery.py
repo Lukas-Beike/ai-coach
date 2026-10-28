@@ -1,22 +1,24 @@
 """Personal recovery distributions, separated by provider and measurement field.
 
-The baselines and sleep deficits read the daily canonical observations of each
-provider. Sleep regularity is the one exception: sleep onset and wake times have
-no canonical form yet (#1419), so it still reads the stored provider sleep and
-wellness records.
+The comparisons and sleep goal shortfalls read the daily canonical observations of
+each provider. Sleep timing variability reads the canonical sleep periods when the
+serving source stores them (#1419) and otherwise the stored provider sleep and
+wellness records, through the same interval reader.
 """
 
 import math
-from datetime import UTC, date, timedelta, tzinfo
+from collections.abc import Sequence
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from functools import partial
 from statistics import median, quantiles
 from typing import Any, Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from backend.canonical.domain_records import SleepPeriod
+from backend.canonical.sleep_bounds import bounds_fields, sleep_intervals
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.canonical_recovery import CanonicalRecoveryInputs
 from backend.performance.display_sources import preferred_providers
-from backend.performance.morning_battery import timestamp
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -46,6 +48,19 @@ _SERIES: Final = {
 }
 
 
+_NOTE: Final = (
+    "Quartile vergleichen den letzten Wert mit deinen eigenen früheren Werten. "
+    "Die mittleren zwei Quartile enthalten per Definition etwa die Hälfte der "
+    "Werte; ein Wert außerhalb ist weder selten noch ein Warnsignal. Keine "
+    "Diagnose, keine Trainingsfreigabe und keine Trainingsänderung allein aus "
+    "einer Abweichung. Krankheit und Schmerzen separat berücksichtigen. Quellen "
+    "und Messfelder werden nicht gemischt. Der Fehlbetrag zum Schlafziel "
+    "summiert nur bekannte Nächte und wird nicht mit längeren Nächten "
+    "verrechnet; fehlende Nächte und nicht erfasste Nickerchen begrenzen "
+    "diese Aussage. Die Schlafzeit-Streuung ist kein Sleep Regularity Index."
+)
+
+
 def _number(value: Any) -> float | None:
     return (
         float(value) if type(value) in {int, float} and math.isfinite(value) else None
@@ -60,9 +75,9 @@ def personal_recovery(
     *,
     canonical: CanonicalRecoveryInputs | None = None,
 ) -> dict[str, Any]:
-    """Return baselines, deficits and regularity; no baselines without ``canonical``.
+    """Return comparisons, shortfalls and timing variability from ``canonical``.
 
-    ``wellness`` and ``garmin`` feed only the sleep regularity (#1419).
+    ``wellness`` and ``garmin`` feed only the sleep timing variability (#1419).
     """
     cutoff = (today - timedelta(days=42)).isoformat()
     history_start = (today - timedelta(days=83)).isoformat()
@@ -84,8 +99,12 @@ def personal_recovery(
     except ValueError, TypeError:
         target = float("nan")
     deficits = _sleep_deficits(groups, target, today)
-    regularity = sleep_regularity(
-        wellness, garmin, str(profile.get("timezone") or "UTC"), today
+    regularity = sleep_timing_variability(
+        wellness,
+        garmin,
+        str(profile.get("timezone") or "UTC"),
+        today,
+        periods=None if canonical is None else canonical.sleep_periods,
     )
     return {
         "method": "personal-quartiles-v1",
@@ -95,7 +114,7 @@ def personal_recovery(
         "sleep_target_hours": target if math.isfinite(target) else None,
         "regularity": regularity,
         "preferred_providers": preferred_providers(),
-        "note": "Persönliche Quartile beschreiben Abweichungen, keine medizinische Trainingsfreigabe. Krankheit und Schmerzen separat berücksichtigen. Quellen und Messfelder werden nicht gemischt; lange Nächte gleichen Defizite nicht rechnerisch aus.",
+        "note": _NOTE,
     }
 
 
@@ -130,7 +149,7 @@ def _baseline(
 ) -> dict[str, Any]:
     provider, metric, field = key
     observed = max(records)
-    # Today's value never influences its own normal range.
+    # Today's value never influences its own comparison distribution.
     prior = [value for day, value in records.items() if cutoff <= day < observed]
     latest = records[observed]
     current = observed >= (today - timedelta(days=1)).isoformat()
@@ -204,53 +223,50 @@ def _sleep_deficits(
     return deficits
 
 
-_SLEEP_START_FIELDS = (
-    "sleepStartTimestampGMT",
-    "sleepStartTimestamp",
-    "sleep_start_at",
-    "sleepStart",
-    "sleep_start",
-    "onset_at",
-)
-_SLEEP_END_FIELDS = (
-    "sleepEndTimestampGMT",
-    "sleepEndTimestamp",
-    "sleep_end_at",
-    "sleepEnd",
-    "sleep_end",
-    "wake_at",
-)
-
-
-def sleep_regularity(
+def sleep_timing_variability(
     wellness: list[dict[str, Any]],
     garmin: dict[str, Any],
     timezone_name: str,
     today: date,
+    *,
+    periods: Sequence[SleepPeriod] | None = None,
 ) -> dict[str, Any]:
-    """Summarize actual sleep intervals without turning them into a score.
+    """Summarize clock-time deviations of actual sleep intervals, without a score.
 
-    Reads the stored provider records until canonical sleep periods exist (#1419).
+    Compares onset and wake with the athlete's own earlier nights; this is not the
+    Sleep Regularity Index.
+
+    ``periods`` are the canonical sleep periods when the serving source stores
+    them; they replace the walk over the legacy rows. Both read the same
+    intervals (``backend.canonical.sleep_bounds``), keep each provider and field
+    pair apart, date an interval by its end in the profile zone and keep the
+    latest interval of a day.
     """
     try:
         zone: tzinfo = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError, ValueError:
         zone = UTC
     groups: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
-    for row in wellness:
-        for item in _sleep_intervals(row, zone, today):
-            groups.setdefault(("Intervals.icu", item["method"]), {})[item["date"]] = (
+    if periods is not None:
+        for source, item in _period_items(periods, zone, today):
+            groups.setdefault((source, item["method"]), {})[item["date"]] = item
+    else:
+        for row in wellness:
+            for item in _sleep_intervals(row, zone, today):
+                groups.setdefault(("Intervals.icu", item["method"]), {})[
+                    item["date"]
+                ] = item
+        for item in _sleep_intervals(garmin.get("sleep"), zone, today):
+            groups.setdefault(("Garmin Connect", item["method"]), {})[item["date"]] = (
                 item
             )
-    for item in _sleep_intervals(garmin.get("sleep"), zone, today):
-        groups.setdefault(("Garmin Connect", item["method"]), {})[item["date"]] = item
     series = []
     for (source, method), records in sorted(groups.items()):
         series.append(_sleep_series(source, method, records, today))
     if not series:
         reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
         return {
-            "method": "sleep-regularity-v1",
+            "method": "sleep-timing-variability-v1",
             "timezone": timezone_name,
             "status": "insufficient_data",
             "reason": reason,
@@ -263,7 +279,7 @@ def sleep_regularity(
         }
     rank = {"insufficient_data": 0, "provisional": 1, "ok": 2}
     return {
-        "method": "sleep-regularity-v1",
+        "method": "sleep-timing-variability-v1",
         "timezone": timezone_name,
         "status": max(
             (item["status"] for item in series), key=lambda status: rank[status]
@@ -281,57 +297,62 @@ def sleep_regularity(
     }
 
 
-def _sleep_intervals(payload: Any, zone: Any, today: date) -> list[dict[str, Any]]:
+_PERIOD_SOURCES: Final = {
+    ProviderId.INTERVALS: "Intervals.icu",
+    ProviderId.GARMIN: "Garmin Connect",
+}
+
+
+def _interval_item(
+    start: datetime, end: datetime, method: str, zone: tzinfo, today: date
+) -> dict[str, Any] | None:
+    """Describe one interval in the profile zone, or None outside the 84 days."""
+    local_start, local_end = start.astimezone(zone), end.astimezone(zone)
+    if not today - timedelta(days=83) <= local_end.date() <= today:
+        return None
+    return {
+        "method": method,
+        "date": local_end.date().isoformat(),
+        "onset_at": local_start.isoformat(),
+        "wake_at": local_end.isoformat(),
+        "onset_at_utc": start.isoformat(),
+        "wake_at_utc": end.isoformat(),
+        "duration_hours": round((end - start).total_seconds() / 3600, 3),
+        "onset_minutes_local": local_start.hour * 60 + local_start.minute,
+        "wake_minutes_local": local_end.hour * 60 + local_end.minute,
+    }
+
+
+def _sleep_intervals(payload: Any, zone: tzinfo, today: date) -> list[dict[str, Any]]:
     result: dict[tuple[str, str], dict[str, Any]] = {}
-    pending, visited = [payload], 0
-    while pending and visited < 2000:
-        current = pending.pop()
-        visited += 1
-        if isinstance(current, dict):
-            sf = next(
-                (
-                    key
-                    for key in _SLEEP_START_FIELDS
-                    if current.get(key) not in (None, "")
-                ),
-                "unknown",
-            )
-            ef = next(
-                (
-                    key
-                    for key in _SLEEP_END_FIELDS
-                    if current.get(key) not in (None, "")
-                ),
-                "unknown",
-            )
-            start, end = timestamp(current.get(sf)), timestamp(current.get(ef))
-            if (
-                start is not None
-                and end is not None
-                and timedelta(0) < end - start <= timedelta(hours=24)
-            ):
-                local_start, local_end = start.astimezone(zone), end.astimezone(zone)
-                if today - timedelta(days=83) <= local_end.date() <= today:
-                    result[(start.isoformat(), end.isoformat())] = {
-                        "method": f"{sf}/{ef}",
-                        "date": local_end.date().isoformat(),
-                        "onset_at": local_start.isoformat(),
-                        "wake_at": local_end.isoformat(),
-                        "onset_at_utc": start.isoformat(),
-                        "wake_at_utc": end.isoformat(),
-                        "duration_hours": round(
-                            (end - start).total_seconds() / 3600, 3
-                        ),
-                        "onset_minutes_local": local_start.hour * 60
-                        + local_start.minute,
-                        "wake_minutes_local": local_end.hour * 60 + local_end.minute,
-                    }
-            pending.extend(
-                value for value in current.values() if isinstance(value, (dict, list))
-            )
-        elif isinstance(current, list):
-            pending.extend(current[:500])
+    for interval in sleep_intervals(payload):
+        item = _interval_item(
+            interval.start,
+            interval.end,
+            f"{interval.start_field}/{interval.end_field}",
+            zone,
+            today,
+        )
+        if item is not None:
+            result[(interval.start.isoformat(), interval.end.isoformat())] = item
     return list(result.values())
+
+
+def _period_items(
+    periods: Sequence[SleepPeriod], zone: tzinfo, today: date
+) -> list[tuple[str, dict[str, Any]]]:
+    """Describe canonical periods as the legacy intervals, oldest start first."""
+    items: list[tuple[str, dict[str, Any]]] = []
+    for period in sorted(periods, key=lambda period: period.start):
+        provider = period.provenance.provider
+        source = None if provider is None else _PERIOD_SOURCES.get(provider)
+        fields = bounds_fields(period.bounds_method or "")
+        if source is None or fields is None:
+            continue
+        item = _interval_item(period.start, period.end, "/".join(fields), zone, today)
+        if item is not None:
+            items.append((source, item))
+    return items
 
 
 def _circular_median(values: list[float]) -> float:

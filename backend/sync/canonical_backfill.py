@@ -10,7 +10,10 @@ row, live or deleted. A row that already exists counts as ``already_present``. A
 new activity gets a single-link session, as in ``upsert_activity_record``. Backfill
 never deletes. A snapshot without ``raw_provider_data`` is not mapped, because its
 ``recent_activities`` fallback is a compact read model with no mapper; such a
-snapshot counts as ``skipped_invalid``.
+snapshot counts as ``skipped_invalid``. The sleep, status, zone and gear rows of a
+raw record (its domain batch) are inserted only when that source record has no domain
+row at all, active or retired; otherwise the batch counts as ``already_present``. An
+empty batch inserts nothing and counts nothing.
 
 Supersession: the newest snapshot present when the run starts is the only one that
 may insert activities. Its activities and their raw ``activity`` records are inserted
@@ -53,7 +56,11 @@ they keep their old ``mapper_version``. The table reader that follows this phase
 only observations whose ``mapper_version`` equals the current version of their mapper,
 so stale observations are never served as current. The cursor is bound to the mapper
 version, so a version bump during a partial run restarts that record from its first
-item. This is the only phase that updates existing canonical rows.
+item. Domain rows have exact ownership: on completion, in the transaction that advances
+``mapped_version``, the rows of the re-projected source record are replaced by its new
+batch, and the rows it no longer emits are retired (counted as ``retired``). Other
+source records and providers are untouched. This is the only phase that updates
+existing canonical rows.
 
 Time zone: the canonical tables store local dates computed in the athlete's zone at
 write time, so the state records the zone it projected with. A different current zone
@@ -93,12 +100,13 @@ from typing import Any, Final
 
 from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ProviderId
-from backend.db import canonical_store
+from backend.db import canonical_domain_store, canonical_store
 from backend.db.repositories import KeyValueRepository
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
     ActivityItem,
+    DomainBatch,
     IngestPlan,
     ObservationItem,
     RawRecord,
@@ -151,7 +159,7 @@ class BatchReport:
 
 @dataclass(frozen=True, slots=True)
 class _Item:
-    value: RawRecord | ActivityItem | ObservationItem
+    value: RawRecord | ActivityItem | ObservationItem | DomainBatch
     fetched_at: str
 
 
@@ -163,6 +171,8 @@ class _Work:
     skipped_invalid: int = 0
     duplicates: int = 0
     superseded: int = 0
+    # Re-projection only: the domain rows of the raw record, written on completion.
+    domain_batches: tuple[DomainBatch, ...] = ()
 
 
 # Wahoo is ingested live and has no legacy snapshot to backfill, so persisted
@@ -621,6 +631,7 @@ def _complete_reprojection(
         row["provider"], dict.fromkeys(COUNTER_NAMES, 0)
     )
     bucket["retired"] += _retire_unemitted(db, row, work, now=now)
+    bucket["retired"] += _replace_domain_rows(db, row, work, version=version, now=now)
     # After the retirement, so an activity the new projection drops is never bundled.
     link_activity_sessions(
         db,
@@ -663,6 +674,36 @@ def _retire_unemitted(db: Any, row: Mapping[str, Any], work: _Work, *, now: str)
             db, provider=row["provider"], provider_activity_id=source_id, now=now
         )
     )
+
+
+def _replace_domain_rows(
+    db: Any, row: Mapping[str, Any], work: _Work, *, version: int, now: str
+) -> int:
+    """Replace the domain rows of a re-projected raw row; return how many were retired.
+
+    A projection without a batch for the row retires all of its rows, so a mapper
+    that stops emitting a period or status removes it from reads.
+    """
+    source_id = str(row["source_record_id"])
+    if any(batch.source_record_id != source_id for batch in work.domain_batches):
+        raise ValueError("a re-projected domain batch must belong to its raw record")
+    batch = (
+        work.domain_batches[0]
+        if work.domain_batches
+        else DomainBatch(source_id, version)
+    )
+    return canonical_domain_store.replace_source_rows(
+        db,
+        provider=ProviderId(row["provider"]),
+        source_record_id=source_id,
+        mapper_version=batch.mapper_version,
+        now=now,
+        sleep_periods=batch.sleep_periods,
+        categorical=batch.categorical,
+        zones=batch.zones,
+        gear_items=batch.gear_items,
+        gear_links=batch.gear_links,
+    ).retired
 
 
 def _next_source(db: Any, state: dict[str, Any]) -> dict[str, Any] | None:
@@ -714,6 +755,7 @@ def _ingest_work(
         intervals_snapshot_ingest_plan(payload, zone=zone),
         stored_retrieved_at(payload, zone=zone),
         may_insert_activities=may_insert_activities,
+        domain_items=True,
     )
 
 
@@ -721,47 +763,69 @@ def _reprojection_work(row: Mapping[str, Any], zone: tzinfo) -> _Work:
     plan = reprojection_plan(row, zone=zone)
     if plan is None:
         return _Work()
-    return _work_from_plan(plan, None, may_insert_activities=True)
+    return _work_from_plan(plan, None, may_insert_activities=True, domain_items=False)
 
 
 def _work_from_plan(
-    plan: IngestPlan, fetched: datetime | None, *, may_insert_activities: bool
+    plan: IngestPlan,
+    fetched: datetime | None,
+    *,
+    may_insert_activities: bool,
+    domain_items: bool,
 ) -> _Work:
     """Flatten a plan into ordered items, dropping repeats within the same source.
 
     When the source may not insert activities, its activities and their raw records are
-    left out, and each distinct activity is counted once as superseded.
+    left out, and each distinct activity is counted once as superseded. Domain batches
+    follow the observations as items when ``domain_items`` is set (ingest); otherwise
+    they are kept aside for the completion of a re-projection.
     """
     stamp = fetched.isoformat() if fetched is not None else ""
     items, duplicates = _raw_items(
         plan.raw_records, stamp, may_insert_activities=may_insert_activities
     )
-    seen_activities: set[str] = set()
-    seen_observations: set[str] = set()
-    superseded = 0
-    for activity in plan.activities:
-        source_id = activity.record.provenance.source_record_id or ""
-        if source_id in seen_activities:
-            duplicates += 1
-            continue
-        seen_activities.add(source_id)
-        if not may_insert_activities:
-            superseded += 1
-            continue
-        items.append(_Item(activity, _fetched_at(activity.retrieved_at, stamp)))
-    for observation in plan.observations:
-        natural_key = canonical_store.observation_natural_key(observation.observation)
-        if natural_key in seen_observations:
-            duplicates += 1
-            continue
-        seen_observations.add(natural_key)
-        items.append(_Item(observation, stamp))
+    activities, repeats = _distinct(
+        plan.activities, lambda item: item.record.provenance.source_record_id or ""
+    )
+    duplicates += repeats
+    superseded = 0 if may_insert_activities else len(activities)
+    if may_insert_activities:
+        items.extend(
+            _Item(activity, _fetched_at(activity.retrieved_at, stamp))
+            for activity in activities
+        )
+    observations, repeats = _distinct(
+        plan.observations,
+        lambda item: canonical_store.observation_natural_key(item.observation),
+    )
+    duplicates += repeats
+    items.extend(_Item(observation, stamp) for observation in observations)
+    batches, repeats = _distinct(
+        plan.domain_batches, lambda batch: batch.source_record_id
+    )
+    duplicates += repeats
+    if domain_items:
+        items.extend(_Item(batch, stamp) for batch in batches)
+        batches = []
     return _Work(
         items=tuple(items),
         skipped_invalid=plan.skipped_invalid,
         duplicates=duplicates,
         superseded=superseded,
+        domain_batches=tuple(batches),
     )
+
+
+def _distinct[T](values: Sequence[T], key: Callable[[T], str]) -> tuple[list[T], int]:
+    """Keep the first value per key, in order, and count the repeats."""
+    seen: set[str] = set()
+    kept: list[T] = []
+    for value in values:
+        identity = key(value)
+        if identity not in seen:
+            seen.add(identity)
+            kept.append(value)
+    return kept, len(values) - len(kept)
 
 
 def _raw_items(
@@ -815,6 +879,25 @@ def _write_ingest(
         )
         if inserted:
             bucket["sessions_created"] += 1
+    elif isinstance(value, DomainBatch):
+        if value.is_empty:
+            return
+        inserted = not canonical_domain_store.has_source_rows(
+            db, provider=ProviderId(provider), source_record_id=value.source_record_id
+        )
+        if inserted:
+            canonical_domain_store.replace_source_rows(
+                db,
+                provider=ProviderId(provider),
+                source_record_id=value.source_record_id,
+                mapper_version=value.mapper_version,
+                now=now,
+                sleep_periods=value.sleep_periods,
+                categorical=value.categorical,
+                zones=value.zones,
+                gear_items=value.gear_items,
+                gear_links=value.gear_links,
+            )
     else:
         inserted = canonical_store.insert_observation_if_absent(
             db,
@@ -839,10 +922,15 @@ def _write_reprojection(db: Any, item: _Item, now: str) -> None:
         )
     elif isinstance(value, ObservationItem):
         canonical_store.upsert_observation(
-            db, value.observation, mapper_version=value.mapper_version, now=now
+            db,
+            value.observation,
+            mapper_version=value.mapper_version,
+            now=now,
+            fill_only=value.fill_only,
         )
     else:
-        # Re-projection plans carry activities and observations, never raw records.
+        # Re-projection plans carry activities and observations as items; raw records
+        # are never re-written and domain batches are written on completion.
         raise TypeError("re-projection items must be activities or observations")
 
 

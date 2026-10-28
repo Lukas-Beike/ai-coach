@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
 from backend.athlete.checkins import CheckinService
 from backend.calendar.external import ExternalCalendarReader
+from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.public_metrics import neutral_calendar_entries
 from backend.planning import calendar_read_model
 from backend.planning.competition_service import CompetitionService
@@ -40,6 +41,7 @@ class PublicStateCalendarProjection:
         external_calendar_window_days: int,
         default_workout_name: str,
         today: Callable[[], date],
+        zone_configurations: Callable[[], Sequence[ZoneConfiguration]] = tuple,
     ) -> None:
         self._checkins = checkins
         self._competitions = competitions
@@ -50,6 +52,7 @@ class PublicStateCalendarProjection:
         self._external_calendar_window_days = external_calendar_window_days
         self._default_workout_name = default_workout_name
         self._today = today
+        self._zone_configurations = zone_configurations
 
     def read(
         self,
@@ -91,6 +94,7 @@ class PublicStateCalendarProjection:
             provider_window=calendar_window,
             default_name=self._default_workout_name,
             sport_settings=calendar_read_model.snapshot_sport_settings(snapshot),
+            zone_configurations=self._zone_configurations(),
         )
         for key in ("training_calendar", "planned"):
             if key in calendar_projection:

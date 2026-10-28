@@ -82,13 +82,25 @@ EXPECTED_FIXTURE_ROWS: list[tuple[str, float, str, str]] = [
     ("race_prediction_half", 6150.0, "2026-10-11", "run"),
     ("race_prediction_full", 13050.0, "2026-10-11", "run"),
     ("endurance_score", 6850.0, "2026-10-05", "-"),
+    ("body_battery_charged", 72.0, "2026-10-09", "-"),
+    ("body_battery_drained", 55.0, "2026-10-09", "-"),
+    ("body_battery_charged", 68.0, "2026-10-10", "-"),
+    ("body_battery_drained", 41.0, "2026-10-10", "-"),
+    ("acute_load", 480.0, "2026-10-10", "-"),
+    ("chronic_load", 410.0, "2026-10-10", "-"),
+    ("acute_chronic_ratio", 1.17, "2026-10-10", "-"),
+    ("load_balance_aerobic_low", 420.0, "2026-10-10", "-"),
+    ("load_balance_aerobic_low_target_min", 300.0, "2026-10-10", "-"),
+    ("load_balance_aerobic_low_target_max", 600.0, "2026-10-10", "-"),
+    ("load_balance_aerobic_high", 180.0, "2026-10-10", "-"),
+    ("load_balance_aerobic_high_target_min", 120.0, "2026-10-10", "-"),
+    ("load_balance_aerobic_high_target_max", 260.0, "2026-10-10", "-"),
+    ("load_balance_anaerobic", 30.0, "2026-10-10", "-"),
+    ("load_balance_anaerobic_target_min", 0.0, "2026-10-10", "-"),
+    ("load_balance_anaerobic_target_max", 80.0, "2026-10-10", "-"),
 ]
 
-EXPECTED_FIXTURE_ISSUES: list[Triple] = [
-    (None, "body_battery", IssueReason.UNSUPPORTED),
-    (None, "daily_training_status", IssueReason.UNSUPPORTED),
-    (None, "training_load_balance", IssueReason.UNSUPPORTED),
-]
+EXPECTED_FIXTURE_ISSUES: list[Triple] = []
 
 # (label, sections, expected issues, expected observation count)
 GARBAGE_CASES: list[tuple[str, dict[str, object], list[Triple], int]] = [
@@ -311,15 +323,25 @@ GARBAGE_CASES: list[tuple[str, dict[str, object], list[Triple], int]] = [
         0,
     ),
     (
-        "body battery is unsupported",
-        {"body_battery": [{"calendarDate": DAY, "charged": 72, "drained": 55}]},
-        [(None, "body_battery", IssueReason.UNSUPPORTED)],
+        "body battery samples are not a list",
+        {"body_battery": [{"calendarDate": DAY, "bodyBatteryValuesArray": 5}]},
+        [("body_battery[0]", "bodyBatteryValuesArray", IssueReason.INVALID_TYPE)],
         0,
     ),
     (
-        "device-keyed training status is unsupported",
+        "body battery sample is unreadable",
+        {
+            "body_battery": [
+                {"calendarDate": DAY, "bodyBatteryValuesArray": [["soon", 40], [5]]}
+            ]
+        },
+        [("body_battery[0]", "bodyBatteryValuesArray", IssueReason.INVALID_NUMBER)],
+        0,
+    ),
+    (
+        "device-keyed training status without devices maps nothing",
         {"daily_training_status": {"mostRecentTrainingStatus": {}}},
-        [(None, "daily_training_status", IssueReason.UNSUPPORTED)],
+        [],
         0,
     ),
     (
@@ -1241,6 +1263,7 @@ class DailyStatsTests(unittest.TestCase):
             _rows(result),
             [
                 ("daily_energy_active", 610.0, DAY, "-"),
+                ("daily_energy_resting", 1800.0, DAY, "-"),
                 ("daily_energy_total", 2410.0, DAY, "-"),
                 ("floors", 12.0, DAY, "-"),
                 ("steps", 9123.0, DAY, "-"),
@@ -1451,9 +1474,67 @@ class EnduranceScoreTests(unittest.TestCase):
         )
 
 
+class PerformanceHistoryTests(unittest.TestCase):
+    """The app's accumulated Garmin values keep their measurement day and kind."""
+
+    def test_each_value_is_an_observation_of_its_day(self) -> None:
+        result = _map(
+            {
+                "performance_history": [
+                    {
+                        "date": "2026-08-02",
+                        "metrics": {
+                            "cycling_ftp_watts": 262,
+                            "running_vo2max_ml_kg_min": 52,
+                            "run_threshold_pace_seconds_per_km": 250,
+                            "weight_kg": 71.4,
+                            "readiness": 64,
+                            "run_5k_seconds": 1260,
+                        },
+                    },
+                    {"date": "2026-08-03", "metrics": {"cycling_ftp_watts": 265}},
+                ]
+            }
+        )
+        self.assertEqual(
+            _rows(result),
+            [
+                ("ftp", 262.0, "2026-08-02", "ride"),
+                ("ftp", 265.0, "2026-08-03", "ride"),
+                ("race_prediction_5k", 1260.0, "2026-08-02", "run"),
+                ("readiness", 64.0, "2026-08-02", "-"),
+                ("threshold_pace", 4.0, "2026-08-02", "run"),
+                ("vo2max", 52.0, "2026-08-02", "run"),
+                ("weight", 71.4, "2026-08-02", "-"),
+            ],
+        )
+        self.assertEqual(_issues(result), [])
+
+    def test_max_hr_is_not_a_garmin_value_and_bad_rows_are_issues(self) -> None:
+        result = _map(
+            {
+                "performance_history": [
+                    {"date": "2026-08-02", "metrics": {"cycling_max_hr_bpm": 188}},
+                    {"date": "not a day", "metrics": {"cycling_ftp_watts": 260}},
+                    {"date": "2026-08-03", "metrics": "none"},
+                    {"date": "2026-08-04", "metrics": {"cycling_ftp_watts": "x"}},
+                ]
+            }
+        )
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            [reason for _, _, reason in _issues(result)],
+            [
+                IssueReason.INVALID_TYPE,
+                IssueReason.INVALID_TYPE,
+                IssueReason.INVALID_NUMBER,
+            ],
+        )
+
+
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 11)
+        self.assertEqual(MAPPER_VERSION, 13)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):
@@ -1484,8 +1565,8 @@ class ContractTests(unittest.TestCase):
             {
                 "activities": [{"activityId": 1}],
                 "gear": {"id": 2},
+                # Undated history rows are skipped.
                 "training_status": {"acuteTrainingLoadDTO": {"acuteTrainingLoad": 480}},
-                "running_tolerance": [{"calendarDate": DAY, "toleranceScore": 72}],
                 "unknown_provider_key": {"calendarDate": DAY, "value": 1},
             }
         )

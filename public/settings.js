@@ -250,3 +250,121 @@ async function saveServiceTier(event) {
     await load();
   } finally { select.disabled = false; }
 }
+
+// Local zones win over provider zones; the editor shows both and saves local values only.
+const ZONE_METRIC_LABELS = {
+  power: { threshold: "FTP (W)", limits: "Zonenobergrenzen (% der FTP)", key: "percent_limits" },
+  heart_rate: { threshold: "LTHR (bpm)", limits: "Zonenobergrenzen (bpm)", key: "limits" },
+  pace: { threshold: "", limits: "Zonenobergrenzen (% der Schwellenpace)", key: "percent_limits" },
+};
+let zoneConfigurations = [];
+
+async function loadZones() {
+  try {
+    zoneConfigurations = (await api("/api/zones")).configurations || [];
+    renderZoneEditor();
+  } catch (error) { toast(error.message, true); }
+}
+
+function selectedZoneConfigurations() {
+  const sport = $("#zoneSport").value;
+  const metric = $("#zoneMetric").value;
+  const environment = $("#zoneEnvironment").value || null;
+  return zoneConfigurations.filter((item) => item.sport === sport && item.metric === metric && item.environment === environment && !item.valid_from);
+}
+
+function zoneLimitsText(item) {
+  return (item[ZONE_METRIC_LABELS[item.metric].key] || item.limits || item.percent_limits || []).join(", ");
+}
+
+function renderZoneEditor() {
+  const metric = $("#zoneMetric").value;
+  const labels = ZONE_METRIC_LABELS[metric];
+  const selected = selectedZoneConfigurations();
+  const local = selected.find((item) => item.source === "local");
+  const shown = local || selected[0];
+  $("#zoneThresholdLabel").textContent = labels.threshold;
+  $("#zoneThresholdField").hidden = !labels.threshold;
+  $("#zoneThreshold").required = Boolean(labels.threshold);
+  $("#zoneMaximumField").hidden = metric !== "heart_rate";
+  $("#zoneLimitsLabel").textContent = labels.limits;
+  $("#zoneThreshold").value = shown?.threshold ?? "";
+  $("#zoneMaximum").value = shown?.maximum ?? "";
+  $("#zoneLimits").value = shown ? zoneLimitsText(shown) : "";
+  $("#zoneRemoveButton").hidden = !local;
+  $("#zoneRemoveButton").dataset.key = local?.key || "";
+  const sources = $("#zoneSources");
+  sources.replaceChildren(...selected.map((item) => {
+    const line = document.createElement("li");
+    const threshold = item.threshold == null ? "" : ` · Schwelle ${item.threshold}`;
+    line.textContent = `${item.source === "local" ? "Lokal (gilt)" : item.label || item.source}${threshold} · ${zoneLimitsText(item)}`;
+    return line;
+  }));
+}
+
+function zoneNumber(value) {
+  return value === "" ? null : Number(value);
+}
+
+async function saveZones(event) {
+  event.preventDefault();
+  const metric = $("#zoneMetric").value;
+  const button = $("#zoneSaveButton");
+  const limits = $("#zoneLimits").value.split(/[\s,;]+/).filter(Boolean).map(Number);
+  button.disabled = true;
+  try {
+    const result = await api("/api/zones", {
+      method: "PUT",
+      body: JSON.stringify({
+        sport: $("#zoneSport").value,
+        metric,
+        environment: $("#zoneEnvironment").value || null,
+        threshold: ZONE_METRIC_LABELS[metric].threshold ? zoneNumber($("#zoneThreshold").value) : null,
+        maximum: metric === "heart_rate" ? zoneNumber($("#zoneMaximum").value) : null,
+        [ZONE_METRIC_LABELS[metric].key]: limits,
+      }),
+    });
+    showZoneReceipt("Lokale Zonen gespeichert", result.change);
+    await loadZones();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+}
+
+async function removeZones() {
+  const button = $("#zoneRemoveButton");
+  const confirmed = await requestConfirmation("Lokale Zonen entfernen? Danach gelten wieder die Zonen des Anbieters.", { title: "Lokale Zonen entfernen?", confirmLabel: "Entfernen" });
+  if (!confirmed) return;
+  button.disabled = true;
+  try {
+    const result = await api("/api/zones/remove", { method: "PUT", body: JSON.stringify({ key: button.dataset.key, confirmed: true }) });
+    showZoneReceipt("Lokale Zonen entfernt", result.change);
+    await loadZones();
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+}
+
+function showZoneReceipt(message, change) {
+  const receipt = $("#zoneReceipt");
+  const text = document.createElement("span");
+  text.textContent = `${message}. `;
+  receipt.replaceChildren(text);
+  if (change?.id) {
+    const undo = document.createElement("button");
+    undo.type = "button";
+    undo.className = "message-undo";
+    undo.textContent = "Rückgängig";
+    undo.addEventListener("click", async () => {
+      undo.disabled = true;
+      try {
+        await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
+        receipt.replaceChildren(document.createTextNode("Zurückgenommen."));
+        await loadZones();
+      } catch (error) {
+        undo.disabled = false;
+        toast(error.message, true);
+      }
+    });
+    receipt.append(undo);
+  }
+  receipt.hidden = false;
+}

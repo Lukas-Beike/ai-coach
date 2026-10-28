@@ -36,7 +36,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
@@ -61,6 +61,7 @@ from backend.runtime.ports import (
     CanonicalTableServing,
     ObservationReader,
     ObservationSourceSelector,
+    SleepPeriodReader,
 )
 
 
@@ -282,6 +283,26 @@ class ReadOnceObservationReader:
         )
 
 
+class ReadOnceSleepPeriodReader(ReadOnceObservationReader):
+    """A read-once reader that keeps the sleep periods of a source that stores them."""
+
+    def __init__(self, reader: ObservationReader) -> None:
+        super().__init__(reader)
+        self._sleep_reader = cast(SleepPeriodReader, reader)
+
+    def sleep_periods(
+        self, db: Any, *, start: date | None = None, end: date | None = None
+    ) -> tuple[Any, ...]:
+        return self._sleep_reader.sleep_periods(db, start=start, end=end)
+
+
+def read_once(reader: ObservationReader) -> ReadOnceObservationReader:
+    """Wrap a reader for one snapshot unit, keeping its sleep-period reads when it has any."""
+    if isinstance(reader, SleepPeriodReader):
+        return ReadOnceSleepPeriodReader(reader)
+    return ReadOnceObservationReader(reader)
+
+
 @dataclass(frozen=True, slots=True)
 class _CarriedRows:
     """The rows and Garmin values every canonical performance input carries."""
@@ -337,7 +358,7 @@ def read_performance_inputs(
     """
     reader = resolve_reader(reader, db)
     if not isinstance(reader, ReadOnceObservationReader):
-        reader = ReadOnceObservationReader(reader)
+        reader = read_once(reader)
     observed = canonical_sections.read_wellness_observations(reader, db)
     compact = _snapshot_rows(snapshot, "recent_wellness")
     rows = canonical_sections.wellness_rows(compact, observed)

@@ -9,14 +9,15 @@ tables) is decided by the injected reader.
 
 Selection follows the legacy readers: the latest observed day wins, and on one day
 a timestamped record beats an untimed one and a later record beats an earlier one.
-Values with no canonical form (the heart rate fallbacks from Garmin activities,
-Body Battery, training status and freshness) stay on the snapshot path of their
-owners.
+Garmin's training load and load balance are read here too, as the latest value
+of each kind with its day. Values with no canonical form (the heart rate
+fallbacks from Garmin activities and freshness) stay on the snapshot path of
+their owners.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -39,6 +40,33 @@ RACE_PREDICTION_KEYS: Mapping[MetricKind, str] = {
     MetricKind.RACE_PREDICTION_10K: "run_10k_seconds",
     MetricKind.RACE_PREDICTION_HALF: "run_half_marathon_seconds",
     MetricKind.RACE_PREDICTION_FULL: "run_marathon_seconds",
+}
+# Garmin's daily training status and four-week load balance.
+DAILY_STATUS_KINDS: tuple[MetricKind, ...] = (
+    MetricKind.ACUTE_LOAD,
+    MetricKind.CHRONIC_LOAD,
+    MetricKind.ACUTE_CHRONIC_RATIO,
+)
+LOAD_BALANCE_KINDS: tuple[MetricKind, ...] = (
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW,
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MIN,
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MAX,
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH,
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MIN,
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MAX,
+    MetricKind.LOAD_BALANCE_ANAEROBIC,
+    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MIN,
+    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MAX,
+)
+TRAINING_LOAD_KINDS: tuple[MetricKind, ...] = (*DAILY_STATUS_KINDS, *LOAD_BALANCE_KINDS)
+# Kinds the Garmin history charts show day by day; running tolerance is running.
+HISTORY_KINDS: Mapping[MetricKind, Sport | None] = {
+    MetricKind.ACUTE_LOAD: None,
+    MetricKind.READINESS: None,
+    MetricKind.RUNNING_TOLERANCE: Sport.RUN,
+    MetricKind.ENDURANCE_SCORE: None,
+    MetricKind.ENDURANCE_SCORE_GROUP_AVERAGE: None,
+    MetricKind.ENDURANCE_SCORE_GROUP_MAX: None,
 }
 _MAX_HR_CATEGORIES: Mapping[Sport | None, str] = {
     Sport.RIDE: "cycling",
@@ -67,6 +95,17 @@ class GarminCanonicalMetrics:
     bike_threshold_hr_bpm: float | None = None
     profile_max_hr: Mapping[str, float] = field(default_factory=dict)
     race_predictions: Mapping[str, float] = field(default_factory=dict)
+    # Latest (day, value) of each training-load and load-balance kind.
+    training_load: Mapping[MetricKind, tuple[date, float]] = field(default_factory=dict)
+    # Legacy performance-history key -> day -> the value the current metric would
+    # show on that day (same kind, sport, bounds and unit).
+    performance_history: Mapping[str, Mapping[date, float]] = field(
+        default_factory=dict
+    )
+    # Day -> value of the history charts' kinds, the latest record of each day.
+    daily_history: Mapping[MetricKind, Mapping[date, float]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +169,8 @@ _READ_KINDS = (
     MetricKind.MAX_HR,
     MetricKind.RUN_THRESHOLD_POWER,
     *RACE_PREDICTION_KEYS,
+    *TRAINING_LOAD_KINDS,
+    *(kind for kind in HISTORY_KINDS if kind not in TRAINING_LOAD_KINDS),
 )
 
 
@@ -168,7 +209,129 @@ def _metrics(
             for kind, key in RACE_PREDICTION_KEYS.items()
             if (value := _latest_value(by_kind[kind], Sport.RUN)) is not None
         },
+        training_load={
+            kind: (latest.observed_on, latest.value.value)
+            for kind in TRAINING_LOAD_KINDS
+            if (latest := max(by_kind[kind], key=_order, default=None)) is not None
+        },
+        performance_history=_performance_history(by_kind),
+        daily_history={
+            kind: values
+            for kind, sport in HISTORY_KINDS.items()
+            if (
+                values := _daily_values(
+                    item for item in by_kind[kind] if item.sport is sport
+                )
+            )
+        },
     )
+
+
+def _per_day(
+    observations: Iterable[Observation],
+    pick: Callable[[list[Observation]], float | None],
+) -> dict[date, float]:
+    """Apply a latest-value rule to each day's observations alone."""
+    days: dict[date, list[Observation]] = {}
+    for item in observations:
+        days.setdefault(item.observed_on, []).append(item)
+    return {
+        day: value
+        for day, items in sorted(days.items())
+        if (value := pick(items)) is not None
+    }
+
+
+def _performance_history(
+    by_kind: Mapping[MetricKind, tuple[Observation, ...]],
+) -> dict[str, dict[date, float]]:
+    """Return each legacy performance-history key's value per day.
+
+    Each day uses the rule that ``_metrics`` applies to the latest values, so a day
+    shows what the current Garmin metric would have shown on it.
+    """
+    vo2 = by_kind[MetricKind.VO2MAX]
+    threshold_hr = by_kind[MetricKind.THRESHOLD_HR]
+    rules: dict[
+        str, tuple[Iterable[Observation], Callable[[list[Observation]], Any]]
+    ] = {
+        "weight_kg": (
+            by_kind[MetricKind.WEIGHT],
+            lambda items: _bounded(_latest_value(items), _WEIGHT_KG_RANGE),
+        ),
+        "cycling_ftp_watts": (
+            by_kind[MetricKind.FTP],
+            lambda items: _latest_value(items, Sport.RIDE),
+        ),
+        "cycling_vo2max_ml_kg_min": (
+            vo2,
+            lambda items: _bounded(_latest_value(items, Sport.RIDE), _VO2MAX_RANGE),
+        ),
+        "running_vo2max_ml_kg_min": (
+            vo2,
+            lambda items: _bounded(_running_vo2max(items), _VO2MAX_RANGE),
+        ),
+        "run_threshold_watts": (
+            by_kind[MetricKind.RUN_THRESHOLD_POWER],
+            lambda items: _bounded(
+                _latest_value(items, Sport.RUN), _RUN_THRESHOLD_POWER_RANGE
+            ),
+        ),
+        "run_threshold_pace_seconds_per_km": (
+            by_kind[MetricKind.THRESHOLD_PACE],
+            lambda items: _pace_seconds_per_km(_latest_value(items, Sport.RUN)),
+        ),
+        "run_threshold_hr_bpm": (
+            threshold_hr,
+            lambda items: _latest_value(items, Sport.RUN),
+        ),
+        "bike_threshold_hr_bpm": (
+            threshold_hr,
+            lambda items: _latest_value(items, Sport.RIDE),
+        ),
+        "cycling_max_hr_bpm": (
+            by_kind[MetricKind.MAX_HR],
+            lambda items: _profile_category_max_hr(items, "cycling"),
+        ),
+        "running_max_hr_bpm": (
+            by_kind[MetricKind.MAX_HR],
+            lambda items: _profile_category_max_hr(items, "running"),
+        ),
+        "readiness": (
+            by_kind[MetricKind.READINESS],
+            lambda items: _bounded(_latest_value(items), (0, 100)),
+        ),
+        **{
+            key: (by_kind[kind], lambda items: _latest_value(items, Sport.RUN))
+            for kind, key in RACE_PREDICTION_KEYS.items()
+        },
+    }
+    return {
+        key: values
+        for key, (observations, pick) in rules.items()
+        if (values := _per_day(observations, pick))
+    }
+
+
+def _profile_category_max_hr(
+    observations: Iterable[Observation], category: str
+) -> float | None:
+    """A category's profile max heart rate, else the generic one, as the metric reads it.
+
+    The activity-derived fallback of the metric stays on the snapshot path.
+    """
+    values = _profile_max_hr(observations)
+    return values.get(category) or values.get("generic")
+
+
+def _daily_values(observations: Iterable[Observation]) -> dict[date, float]:
+    """Return the value of each day's latest observation."""
+    days: dict[date, Observation] = {}
+    for item in observations:
+        kept = days.get(item.observed_on)
+        if kept is None or _order(item) >= _order(kept):
+            days[item.observed_on] = item
+    return {day: item.value.value for day, item in sorted(days.items())}
 
 
 def _latest_value(

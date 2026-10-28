@@ -44,6 +44,8 @@ from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import queue as sync_queue
 from backend.weather import cache as weather_cache
 
+SERVER_PHRASE = "synthetic server phrase"
+
 
 class ServerDatabaseTests(ServerTestCase):
     def test_shared_database_resources_have_one_backend_owner(self):
@@ -55,7 +57,7 @@ class ServerDatabaseTests(ServerTestCase):
         self,
     ):
         manager = server.database_manager()
-        configured = replace(server.CONFIG, app_password="synthetic-encrypted-key")
+        configured = replace(server.CONFIG, app_password=SERVER_PHRASE)
         with (
             patch.object(server, "CONFIG", configured),
             patch.object(server, "SQLCIPHER_AVAILABLE", False),
@@ -697,7 +699,7 @@ class ServerDatabaseTests(ServerTestCase):
                 names = set(archive.namelist())
                 manifest = json.loads(archive.read("manifest.json"))
                 self.assertEqual(manifest["format"], "intervals-coach-privacy-export")
-                self.assertEqual(manifest["format_version"], 6)
+                self.assertEqual(manifest["format_version"], 7)
                 self.assertEqual(manifest["status"], "complete")
                 self.assertIn("snapshots.jsonl", names)
                 self.assertIn("remote_links.jsonl", names)

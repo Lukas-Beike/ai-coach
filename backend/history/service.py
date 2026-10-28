@@ -12,9 +12,17 @@ from backend.errors import AppError
 
 
 class ChangeHistoryService:
-    def __init__(self, database_manager: Any, profile_repository: Any):
+    def __init__(
+        self,
+        database_manager: Any,
+        profile_repository: Any,
+        zone_service: Any | None = None,
+        feedback_service: Any | None = None,
+    ):
         self._database_manager = database_manager
         self._profile_repository = profile_repository
+        self._zone_service = zone_service
+        self._feedback_service = feedback_service
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         # Retention is enforced on read in SQL; recording a change prunes rows.
@@ -39,6 +47,10 @@ class ChangeHistoryService:
                 value = normalize_profile(json.loads(payload or "{}"))
             except TypeError, json.JSONDecodeError:
                 value = dict(DEFAULT_PROFILE)
+        elif entity_type == "zone_configuration" and self._zone_service is not None:
+            return self._zone_service.current(db, entity_id)
+        elif entity_type == "activity_feedback" and self._feedback_service is not None:
+            return self._feedback_service.current(db, entity_id)
         else:
             value = self._current_record(db, entity_type, entity_id)
         return value, change_history.audit_projection(entity_type, value)

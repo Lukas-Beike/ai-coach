@@ -22,6 +22,8 @@ ENTITY_TYPES = {
     "planned_unit",
     "competition",
     "training_plan",
+    "zone_configuration",
+    "activity_feedback",
 }
 ACTIONS = {"create", "update", "delete", "undo"}
 # Fields a caller needs to undo a recorded change later.
@@ -135,6 +137,25 @@ COMPETITION_FIELDS = {
     "sync_state",
 }
 PLAN_FIELDS = {"id", "name", "goal", "start_date", "end_date", "status"}
+# Every stored feedback row of one session group, kept whole so undo restores
+# hidden originals and full-length notes; the entity id is the group key.
+ACTIVITY_FEEDBACK_FIELDS = ("rows",)
+# Feedback rows reach 4000-character notes, so their field bound is the bounded
+# group (MAX_FEEDBACK_GROUP_ROWS rows) instead of the general 4000 characters.
+MAX_FEEDBACK_GROUP_ROWS = 32
+_FIELD_LIMITS = {"activity_feedback": 400_000}
+_DEFAULT_FIELD_LIMIT = 4000
+# A local zone configuration; its entity id is the configuration key.
+ZONE_CONFIGURATION_FIELDS = (
+    "sport",
+    "metric",
+    "environment",
+    "valid_from",
+    "threshold",
+    "maximum",
+    "limits",
+    "percent_limits",
+)
 
 
 def audit_projection_fields(entity_type: str) -> set[str]:
@@ -144,6 +165,8 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "planned_unit": PLANNED_UNIT_FIELDS,
         "competition": COMPETITION_FIELDS,
         "training_plan": PLAN_FIELDS,
+        "zone_configuration": set(ZONE_CONFIGURATION_FIELDS),
+        "activity_feedback": set(ACTIVITY_FEEDBACK_FIELDS),
     }
     try:
         return fields_by_entity[entity_type]
@@ -187,7 +210,7 @@ def audit_projection(entity_type: str, value: Any) -> dict[str, Any] | None:
             )
         except TypeError, ValueError:
             continue
-        if len(encoded) > 4000:
+        if len(encoded) > _FIELD_LIMITS.get(entity_type, _DEFAULT_FIELD_LIMIT):
             continue
         result[field] = candidate
     return result

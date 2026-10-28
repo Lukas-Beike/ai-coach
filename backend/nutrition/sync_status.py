@@ -54,12 +54,12 @@ class NutritionSyncStatusService:
         )
         with self._database_manager.read_snapshot() as db:
             summary = self._nutrition_repository.day_summary(db, validated_date)
-            # The snapshot only carries the resting calories (no metric kind) and
-            # the daily-stats sync status.
+            # The snapshot carries the daily-stats sync status, and the energy
+            # values when no canonical reader serves them.
             garmin_snapshot = garmin_store.read_view(
                 db, _ENERGY_SECTIONS, start=snapshot_start, end=validated_date
             )
-            measured = self._measured_energy(db, validated_date, validated_date)
+            measured = self._measured_energy(db, snapshot_start, validated_date)
         if measured is not None:
             measured = _filter_targeted_missing_energy(
                 measured, garmin_snapshot, [validated_date]
@@ -70,6 +70,7 @@ class NutritionSyncStatusService:
             validated_date,
             today,
             measured=None if measured is None else measured.get(validated_date, {}),
+            measured_history=measured,
         )
         return summary
 
@@ -120,6 +121,7 @@ class NutritionSyncStatusService:
                 measured=None
                 if measured is None
                 else measured.get(summary["date"], {}),
+                measured_history=measured,
             )
             days.append(_week_day(summary, expenditure))
         averages = {}

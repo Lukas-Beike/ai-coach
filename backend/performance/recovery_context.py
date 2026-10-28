@@ -98,9 +98,7 @@ def _sleep(recovery: CanonicalRecoveryInputs, today: date) -> dict[str, Any]:
     score, score_source, _, _ = _metric(recovery, MetricKind.SLEEP_SCORE, today)
     return {
         "sleep_hours": (
-            None
-            if duration is None
-            else round(_number(duration, _SECONDS_PER_HOUR), 1)
+            None if duration is None else round(_number(duration, _SECONDS_PER_HOUR), 1)
         ),
         "sleep_source": _source(duration),
         "sleep_average": _average(

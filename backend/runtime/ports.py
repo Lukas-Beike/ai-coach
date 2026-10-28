@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any, Protocol, runtime_checkable
 
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
+from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, Sport
 
@@ -80,6 +81,19 @@ class ObservationReader(Protocol):
         end: date | None = None,
         sport: Sport | None = None,
     ) -> tuple[Observation, ...]: ...
+
+
+@runtime_checkable
+class SleepPeriodReader(Protocol):
+    """Reads canonical sleep periods by inclusive wake date, oldest first.
+
+    Only a source that stores sleep periods implements it; a reader without it
+    means the periods are not available from the serving source.
+    """
+
+    def sleep_periods(
+        self, db: Any, *, start: date | None = None, end: date | None = None
+    ) -> tuple[SleepPeriod, ...]: ...
 
 
 class CanonicalReader(ActivityReader, ActivityRowReader, ObservationReader, Protocol):

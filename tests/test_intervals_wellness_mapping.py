@@ -90,7 +90,7 @@ def sport_records(
 
 class ModuleContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 6)
+        self.assertEqual(MAPPER_VERSION, 7)
 
     def test_naive_retrieved_at_is_a_programming_error_for_both_mappers(self) -> None:
         naive_time = naive("2026-10-11T08:00:00")
@@ -117,11 +117,11 @@ class WellnessFixtureTests(unittest.TestCase):
     def test_fixture_maps_without_issues(self) -> None:
         self.assertEqual(self.result.issues, ())
 
-    def test_each_fixture_row_yields_ten_observations(self) -> None:
+    def test_each_fixture_row_yields_fourteen_observations(self) -> None:
         # Per row: weight, restingHR, hrv, sleepSecs, sleepScore, readiness,
-        # ctl (ctLoad duplicates it), atl (atlLoad duplicates it), tsb and the
-        # Ride sportInfo eFTP.
-        self.assertEqual(len(self.result.records), 3 * 10)
+        # ctl (ctLoad duplicates it), atl (atlLoad duplicates it), tsb, the
+        # Ride sportInfo eFTP and the four subjective ratings.
+        self.assertEqual(len(self.result.records), 3 * 14)
         for day in ("2026-10-08", "2026-10-09", "2026-10-10"):
             day_kinds = {
                 record.kind
@@ -141,6 +141,10 @@ class WellnessFixtureTests(unittest.TestCase):
                     MetricKind.ATL,
                     MetricKind.FORM,
                     MetricKind.EFTP,
+                    MetricKind.SUBJECTIVE_FATIGUE,
+                    MetricKind.SUBJECTIVE_SORENESS,
+                    MetricKind.SUBJECTIVE_STRESS,
+                    MetricKind.SUBJECTIVE_MOOD,
                 },
             )
 
@@ -223,13 +227,38 @@ class WellnessFieldTests(unittest.TestCase):
     def test_row_without_mapped_fields_is_kept_empty_not_dropped_with_issue(
         self,
     ) -> None:
-        result = wellness([row(rampRate=1.2, fatigue=2, sportInfo=[])])
+        result = wellness([row(rampRate=1.2, sportInfo=[])])
         self.assertEqual(result.records, ())
         self.assertEqual(result.issues, ())
 
     def test_numeric_text_with_dot_decimal_is_accepted(self) -> None:
         result = wellness([row(weight=" 70.4 ")])
         self.assertEqual(only_value(result), 70.4)
+
+
+class SubjectiveRatingTests(unittest.TestCase):
+    def test_ratings_are_provider_reported_manual_entries(self) -> None:
+        result = wellness([row(fatigue=2, soreness="1", stress=3, mood=4)])
+        self.assertEqual(
+            sorted((r.kind.value, r.value.value) for r in result.records),
+            [
+                ("subjective_fatigue", 2.0),
+                ("subjective_mood", 4.0),
+                ("subjective_soreness", 1.0),
+                ("subjective_stress", 3.0),
+            ],
+        )
+        for record in result.records:
+            self.assertIs(record.provenance.source_kind, SourceKind.PROVIDER_REPORTED)
+            self.assertIs(record.provenance.recorded_by, RecordingOrigin.MANUAL)
+            self.assertEqual(record.value.unit, "rating")
+
+    def test_out_of_scale_ratings_are_issues(self) -> None:
+        for value in (0, 5, "high"):
+            with self.subTest(value=value):
+                result = wellness([row(stress=value)])
+                self.assertEqual(result.records, ())
+                self.assertEqual(len(result.issues), 1)
 
 
 class FormTests(unittest.TestCase):
@@ -281,7 +310,9 @@ class FormTests(unittest.TestCase):
 
 
 class SportInfoEftpTests(unittest.TestCase):
-    def eftp(self, result: MappingResult[Observation]) -> list[tuple[Sport | None, float]]:
+    def eftp(
+        self, result: MappingResult[Observation]
+    ) -> list[tuple[Sport | None, float]]:
         return [
             (record.sport, record.value.value)
             for record in result.records
@@ -290,11 +321,15 @@ class SportInfoEftpTests(unittest.TestCase):
 
     def test_mmp_model_ftp_wins_over_the_entry_eftp(self) -> None:
         entry = {"types": ["Ride"], "mmp_model": {"ftp": 262}, "eftp": 258}
-        self.assertEqual(self.eftp(wellness([row(sportInfo=[entry])])), [(Sport.RIDE, 262)])
+        self.assertEqual(
+            self.eftp(wellness([row(sportInfo=[entry])])), [(Sport.RIDE, 262)]
+        )
 
     def test_zero_mmp_model_falls_back_to_the_entry_eftp(self) -> None:
         entry = {"types": ["Ride"], "mmp_model": {"ftp": 0}, "eftp": 258}
-        self.assertEqual(self.eftp(wellness([row(sportInfo=[entry])])), [(Sport.RIDE, 258)])
+        self.assertEqual(
+            self.eftp(wellness([row(sportInfo=[entry])])), [(Sport.RIDE, 258)]
+        )
 
     def test_empty_mmp_model_falls_back_to_the_entry_eftp(self) -> None:
         entry = {"type": "VirtualRide", "mmp_model": {"ftp": None}, "eFTP": 255}

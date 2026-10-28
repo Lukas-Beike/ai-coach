@@ -29,6 +29,8 @@ class HistoryUndoService:
         planned_unit_service: Any,
         training_plan_service: Any,
         planning_revision_service: Any,
+        zone_service: Any | None = None,
+        feedback_service: Any | None = None,
     ):
         self._database_manager = database_manager
         self._history_service = history_service
@@ -38,6 +40,8 @@ class HistoryUndoService:
         self._planned_unit_service = planned_unit_service
         self._training_plan_service = training_plan_service
         self._planning_revision_service = planning_revision_service
+        self._zone_service = zone_service
+        self._feedback_service = feedback_service
 
     def preview(self, change_id: Any) -> dict[str, Any]:
         with self._database_manager.unit_of_work() as db:
@@ -189,6 +193,14 @@ class HistoryUndoService:
             )
         if entity_type == "training_plan":
             return self._training_plan_service.restore_in_transaction(
+                db, entity_id, current, target
+            )
+        if entity_type == "zone_configuration" and self._zone_service is not None:
+            return self._zone_service.restore_in_transaction(
+                db, entity_id, current, target
+            )
+        if entity_type == "activity_feedback" and self._feedback_service is not None:
+            return self._feedback_service.restore_in_transaction(
                 db, entity_id, current, target
             )
         raise AppError(400, "Unbekannte lokale Änderung.")

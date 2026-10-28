@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import builtins
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
@@ -887,22 +887,59 @@ class ActivityFeedbackRepository:
         ).fetchone()
         return dict(row) if row else None
 
+    def restore(self, db: Any, row: Mapping[str, Any]) -> None:
+        """Insert one recorded row exactly as it was, timestamps included."""
+        db.execute(
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, "
+            "session_rpe, deviation_reason, created_at, updated_at, provider, session_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(row["activity_id"]),
+                str(row.get("activity_name") or ""),
+                str(row.get("activity_date") or ""),
+                str(row.get("notes") or ""),
+                row.get("session_rpe"),
+                str(row.get("deviation_reason") or ""),
+                str(row["created_at"]),
+                str(row["updated_at"]),
+                row.get("provider"),
+                row.get("session_id"),
+            ),
+        )
+
+    def all(self, db: Any) -> builtins.list[dict[str, Any]]:
+        """Every stored feedback row with the session it was written for."""
+        return [
+            dict(row)
+            for row in db.execute(
+                "SELECT activity_id, activity_name, activity_date, notes, session_rpe, "
+                "deviation_reason, created_at, updated_at, provider, session_id "
+                "FROM activity_feedback"
+            ).fetchall()
+        ]
+
     def delete(self, db: Any, activity_id: str) -> None:
         db.execute(
             "DELETE FROM activity_feedback WHERE activity_id = ?", (activity_id,)
         )
 
     def upsert(
-        self, db: Any, feedback: dict[str, Any], *, provider: str | None = None
+        self,
+        db: Any,
+        feedback: dict[str, Any],
+        *,
+        provider: str | None = None,
+        session_id: str | None = None,
     ) -> None:
-        """Write feedback; a write without a resolved provider keeps the stored one."""
+        """Write feedback; a write without a resolved provider or session keeps the stored one."""
         now = self._now()
         db.execute(
-            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at, provider) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at, provider, session_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(activity_id) DO UPDATE SET activity_name=excluded.activity_name, "
             "activity_date=excluded.activity_date, notes=excluded.notes, session_rpe=excluded.session_rpe, deviation_reason=excluded.deviation_reason, updated_at=excluded.updated_at, "
-            "provider=COALESCE(excluded.provider, activity_feedback.provider)",
+            "provider=COALESCE(excluded.provider, activity_feedback.provider), "
+            "session_id=COALESCE(excluded.session_id, activity_feedback.session_id)",
             (
                 feedback["activity_id"],
                 feedback["activity_name"],
@@ -913,6 +950,7 @@ class ActivityFeedbackRepository:
                 now,
                 now,
                 provider,
+                session_id,
             ),
         )
 

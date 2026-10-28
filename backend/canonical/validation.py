@@ -64,6 +64,30 @@ METRIC_BOUNDS: Final[Mapping[MetricKind, tuple[float, float]]] = {
     MetricKind.RACE_PREDICTION_HALF: RACE_PREDICTION_BOUNDS,
     MetricKind.RACE_PREDICTION_FULL: RACE_PREDICTION_BOUNDS,
     MetricKind.ENDURANCE_SCORE: (0.0, 20_000.0),
+    MetricKind.DAILY_ENERGY_RESTING: (0.0, 20_000.0),
+    # Charged and drained are totals of level changes, so a day can exceed 100.
+    MetricKind.BODY_BATTERY_CHARGED: (0.0, 500.0),
+    MetricKind.BODY_BATTERY_DRAINED: (0.0, 500.0),
+    MetricKind.ACUTE_LOAD: (0.0, 100_000.0),
+    MetricKind.CHRONIC_LOAD: (0.0, 100_000.0),
+    MetricKind.ACUTE_CHRONIC_RATIO: (0.0, 100.0),
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW: (0.0, 100_000.0),
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MIN: (0.0, 100_000.0),
+    MetricKind.LOAD_BALANCE_AEROBIC_LOW_TARGET_MAX: (0.0, 100_000.0),
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH: (0.0, 100_000.0),
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MIN: (0.0, 100_000.0),
+    MetricKind.LOAD_BALANCE_AEROBIC_HIGH_TARGET_MAX: (0.0, 100_000.0),
+    MetricKind.LOAD_BALANCE_ANAEROBIC: (0.0, 100_000.0),
+    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MIN: (0.0, 100_000.0),
+    MetricKind.LOAD_BALANCE_ANAEROBIC_TARGET_MAX: (0.0, 100_000.0),
+    MetricKind.RUNNING_TOLERANCE: (0.0, 100_000.0),
+    MetricKind.ENDURANCE_SCORE_GROUP_AVERAGE: (0.0, 20_000.0),
+    MetricKind.ENDURANCE_SCORE_GROUP_MAX: (0.0, 20_000.0),
+    # The provider's 1 to 4 wellness rating scale.
+    MetricKind.SUBJECTIVE_FATIGUE: (1.0, 4.0),
+    MetricKind.SUBJECTIVE_SORENESS: (1.0, 4.0),
+    MetricKind.SUBJECTIVE_STRESS: (1.0, 4.0),
+    MetricKind.SUBJECTIVE_MOOD: (1.0, 4.0),
 }
 
 

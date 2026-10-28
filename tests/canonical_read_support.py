@@ -11,6 +11,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -159,3 +160,16 @@ def populate(case: CanonicalReadFixture) -> CanonicalBackfill:
 
 def first_activity_name(case: CanonicalReadFixture) -> str:
     return str(case.intervals["raw_provider_data"]["activities"][0]["name"])
+
+
+def without_garmin_history(inputs: Any) -> Any:
+    """The inputs without the canonical Garmin performance history.
+
+    The canonical history also holds days the legacy snapshot cache never kept (a
+    superset accepted on 2026-10-25), so byte-parity tests of the rest of the
+    context leave it out; its own parity is pinned in
+    tests/test_garmin_performance_history_canonical.py.
+    """
+    if inputs is None or inputs.garmin is None:
+        return inputs
+    return replace(inputs, garmin=replace(inputs.garmin, performance_history={}))

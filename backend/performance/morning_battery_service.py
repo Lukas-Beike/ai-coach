@@ -7,12 +7,14 @@ import threading
 from collections.abc import Callable, Hashable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.db import garmin_store
 from backend.performance import garmin_projection, morning_battery
+from backend.providers.garmin_morning import morning_sleep_element
+from backend.runtime.ports import ObservationReader, SleepPeriodReader
 from backend.weather import history as weather_history
 
 MORNING_RETRY_SECONDS = 15 * 60
@@ -20,7 +22,7 @@ MORNING_MAX_ATTEMPTS = 3
 MORNING_LOCK_POLL_SECONDS = 1
 
 MORNING_BATTERY_HISTORY_KEY = "morning_body_battery_history"
-MORNING_SOURCES = frozenset({"body_battery"})
+MORNING_SOURCES = frozenset({"body_battery", "sleep"})
 _GARMIN_ERROR_KEY = "last_garmin_error"
 
 
@@ -39,15 +41,30 @@ class GarminSnapshotSink(Protocol):
     ) -> object: ...
 
 
+class MorningCanonicalReader(SleepPeriodReader, ObservationReader, Protocol):
+    """Reads the canonical sleep periods and Body Battery levels just stored."""
+
+
 class MorningBatteryStore:
-    """Own the morning Garmin reading, morning history, and Body Battery error state."""
+    """Own the morning Garmin reading, morning history, and Body Battery error state.
+
+    With a ``canonical`` reader the refresh stores the night's sleep record next to
+    the Body Battery samples and derives the morning record from the canonical
+    NIGHT period and BODY_BATTERY levels inside the same unit of work; without one
+    the record computed from the fetched payloads is stored.
+    """
 
     def __init__(
-        self, manager: Any, key_values: Any, garmin_snapshots: GarminSnapshotSink
+        self,
+        manager: Any,
+        key_values: Any,
+        garmin_snapshots: GarminSnapshotSink,
+        canonical: MorningCanonicalReader | None = None,
     ) -> None:
         self._manager = manager
         self._key_values = key_values
         self._garmin_snapshots = garmin_snapshots
+        self._canonical = canonical
 
     def current(self) -> dict[str, Any] | None:
         with self._manager.reader() as db:
@@ -60,20 +77,40 @@ class MorningBatteryStore:
         existing: dict[str, Any] | None,
         record: dict[str, Any],
         records: Any,
+        sleep_payload: Any = None,
     ) -> dict[str, Any]:
-        same_date = bool(
-            existing and existing.get("sleep_date") == checkin_date.isoformat()
+        record["attempts"] = _attempts(existing, checkin_date)
+        sections: dict[str, Any] = (
+            {"body_battery": records} if isinstance(records, list) else {}
         )
-        record["attempts"] = 1 + (
-            int(existing.get("attempts") or 1)
-            if same_date and existing is not None
-            else 0
-        )
+        night = morning_sleep_element(checkin_date, sleep_payload)
+        if self._canonical is not None and night is not None:
+            sections["sleep"] = [night]
         with self._manager.unit_of_work() as db:
+            fetched_at = datetime.now(UTC).isoformat()
+            if self._canonical is not None and not record.get("error"):
+                # Store the night and the levels first, then read them back.
+                self._garmin_snapshots.write_refresh(
+                    db,
+                    fetched_at=fetched_at,
+                    sections=sections,
+                    view={},
+                    windows={},
+                    allowed=MORNING_SOURCES,
+                )
+                sections = {}
+                attempts, attempted_at = record["attempts"], record["attempted_at"]
+                record.clear()
+                record.update(
+                    self._canonical_record(
+                        self._canonical, db, checkin_date, attempted_at=attempted_at
+                    ),
+                    attempts=attempts,
+                )
             self._garmin_snapshots.write_refresh(
                 db,
-                fetched_at=datetime.now(UTC).isoformat(),
-                sections={"body_battery": records} if isinstance(records, list) else {},
+                fetched_at=fetched_at,
+                sections=sections,
                 view={"morning_body_battery": record},
                 windows={},
                 allowed=MORNING_SOURCES,
@@ -82,15 +119,7 @@ class MorningBatteryStore:
                 self._key_values.get(db, MORNING_BATTERY_HISTORY_KEY)
             )
             for saved in (existing, record):
-                if (
-                    isinstance(saved, dict)
-                    and saved.get("status") == "ready"
-                    and saved.get("sleep_date")
-                ):
-                    morning = saved.get("morning")
-                    history[saved["sleep_date"]] = (
-                        morning.get("value") if isinstance(morning, dict) else None
-                    )
+                _remember_ready(history, saved)
             self._key_values.set(db, MORNING_BATTERY_HISTORY_KEY, json.dumps(history))
 
         self.clear_body_battery_errors()
@@ -99,6 +128,30 @@ class MorningBatteryStore:
             "sleep_date": record["sleep_date"],
             "records": len(records) if isinstance(records, list) else 0,
         }
+
+    @staticmethod
+    def _canonical_record(
+        reader: MorningCanonicalReader,
+        db: Any,
+        checkin_date: date,
+        *,
+        attempted_at: str,
+    ) -> dict[str, Any]:
+        return morning_battery.canonical_morning_record(
+            checkin_date,
+            reader.sleep_periods(
+                db,
+                start=checkin_date - timedelta(days=1),
+                end=checkin_date + timedelta(days=1),
+            ),
+            reader.observations(
+                db,
+                MetricKind.BODY_BATTERY,
+                start=checkin_date - timedelta(days=2),
+                end=checkin_date + timedelta(days=1),
+            ),
+            attempted_at=attempted_at,
+        )
 
     def clear_body_battery_errors(self) -> None:
         with self._manager.unit_of_work() as db:
@@ -358,9 +411,11 @@ class MorningBodyBatteryService:
                     checkin_date, {}, [], attempted_at=attempted_at
                 )
                 record["error"] = self.source.safe_provider_error(exc)
-                records = []
+                sleep_payload, records = {}, []
 
-        result = self.store.persist(checkin_date, existing, record, records)
+        result = self.store.persist(
+            checkin_date, existing, record, records, sleep_payload
+        )
         self._events.provider_updated(record)
         if record.get("error"):
             result["failed"] = True
@@ -420,3 +475,22 @@ class MorningBodyBatteryServiceCache:
 
 
 MORNING_BODY_BATTERY_SERVICE_CACHE = MorningBodyBatteryServiceCache()
+
+
+def _attempts(existing: dict[str, Any] | None, checkin_date: date) -> int:
+    """Count this attempt on top of the earlier ones for the same night."""
+    if existing is None or existing.get("sleep_date") != checkin_date.isoformat():
+        return 1
+    return 1 + int(existing.get("attempts") or 1)
+
+
+def _remember_ready(history: dict[str, Any], saved: Any) -> None:
+    if (
+        isinstance(saved, dict)
+        and saved.get("status") == "ready"
+        and saved.get("sleep_date")
+    ):
+        morning = saved.get("morning")
+        history[saved["sleep_date"]] = (
+            morning.get("value") if isinstance(morning, dict) else None
+        )

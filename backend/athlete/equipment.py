@@ -6,19 +6,21 @@ import uuid
 from collections import Counter
 from collections.abc import Callable, Sequence
 from datetime import date
-from typing import Any
+from typing import Any, Protocol
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.canonical.domain_records import GearActivityLink, GearItem
 from backend.canonical.stored_sports import (
     StoredSport,
     activity_type_environment,
     resolve_equipment_sport,
 )
 from backend.canonical.vocabulary import ProviderId, Sport
-from backend.db import garmin_store
+from backend.db import canonical_store, garmin_store
 from backend.errors import AppError
 from backend.providers.garmin_gear_fields import (
+    canonical_gear_rows,
     garmin_gear_descriptor_texts,
     garmin_gear_id,
     garmin_gear_name,
@@ -35,6 +37,14 @@ SPORT_DERIVATION_SHARE = 0.75
 SPORT_DERIVATION_MIN_ROWS = 3
 
 
+class GearReader(Protocol):
+    """Reads the canonical gear and gear-to-activity links."""
+
+    def gear_items(self, db: Any) -> tuple[GearItem, ...]: ...
+
+    def gear_activity_links(self, db: Any) -> tuple[GearActivityLink, ...]: ...
+
+
 class EquipmentService:
     def __init__(
         self,
@@ -44,6 +54,7 @@ class EquipmentService:
         utc_now: Callable[[], str],
         deduplicate: Callable[[Sequence[Any]], tuple[list[dict[str, Any]], int]],
         resolve_activity: Callable[[Any], Any] | None = None,
+        gear_reader: GearReader | None = None,
     ):
         self._manager, self._read_activity_rows, self._today, self._utc_now = (
             manager,
@@ -52,6 +63,7 @@ class EquipmentService:
             utc_now,
         )
         self._deduplicate = deduplicate
+        self._gear_reader = gear_reader
         self._resolve_activity = (
             (lambda reference: reference)
             if resolve_activity is None
@@ -75,6 +87,17 @@ class EquipmentService:
         rows, duplicates = self._deduplicate(self._read_activity_rows())
         with self._manager.unit_of_work() as db:
             garmin = garmin_store.read_view(db, ("gear", "activity_matches"))
+            canonical_gear = (
+                canonical_gear_rows(
+                    self._gear_reader.gear_items(db),
+                    self._gear_reader.gear_activity_links(db),
+                )
+                if self._gear_reader is not None
+                else []
+            )
+            if canonical_gear:
+                # Canonical gear wins once it was projected; freshness stays sync status.
+                garmin = {**garmin, "gear": canonical_gear}
             if garmin.get("source") == "fixture":
                 garmin = {key: value for key, value in garmin.items() if key != "gear"}
             gear_initialized = (
@@ -88,7 +111,11 @@ class EquipmentService:
             }
             items = self._records(db, "equipment", 100)
             links = _garmin_links(
-                items, garmin.get("gear"), garmin.get("activity_matches"), rows
+                items,
+                garmin.get("gear"),
+                garmin.get("activity_matches"),
+                rows,
+                _gear_sessions(db, garmin.get("gear"), rows),
             )
             partial = _partial_garmin_history(items, garmin.get("gear"))
             # Every explicit assignment, including an unassignment, overrides the link.
@@ -185,7 +212,11 @@ class EquipmentService:
                 for row in self._records(db, "equipment_assignment", None)
             }
             links = _garmin_links(
-                local_rows, rows, snapshot.get("activity_matches"), activity_rows
+                local_rows,
+                rows,
+                snapshot.get("activity_matches"),
+                activity_rows,
+                _gear_sessions(db, rows, activity_rows),
             )
             derived = _derived_sports(
                 local_rows,
@@ -902,17 +933,42 @@ def _partial_garmin_history(items: list[dict[str, Any]], gear_rows: Any) -> set[
     }
 
 
+def _gear_sessions(
+    db: Any, gear_rows: Any, rows: list[dict[str, Any]]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return the canonical sessions of the listed Garmin activities and the rows."""
+    garmin_ids = [
+        str(activity_id)
+        for row in gear_rows or []
+        if isinstance(row, dict) and isinstance(row.get("activity_ids"), list)
+        for activity_id in row["activity_ids"]
+    ]
+    if not garmin_ids:
+        return {}, {}
+    return (
+        canonical_store.provider_activity_sessions(
+            db, ProviderId.GARMIN.value, garmin_ids
+        ),
+        canonical_store.provider_activity_sessions(
+            db, ProviderId.INTERVALS.value, [str(row.get("id")) for row in rows]
+        ),
+    )
+
+
 def _garmin_links(
     items: list[dict[str, Any]],
     gear_rows: Any,
     matches: Any,
     rows: list[dict[str, Any]],
+    sessions: tuple[dict[str, str], dict[str, str]] = ({}, {}),
 ) -> dict[str, list[str]]:
     """Map activity ids to every main item whose Garmin gear lists the activity.
 
     Garmin's own gear-to-activity list is the link. Garmin activity ids reach the
-    stored Intervals.icu rows through ``activity_matches`` and through an
-    ``external_id`` equal to the Garmin id. Only the given (deduplicated) rows
+    stored Intervals.icu rows through their canonical session (``sessions`` holds
+    the effective session of each Garmin activity and of each row), through
+    ``activity_matches`` and through an ``external_id`` equal to the Garmin id.
+    Only the given (deduplicated) rows
     can link, so a duplicate recording counts once. Components and items without
     a Garmin gear row that lists activities never link; a gear row without
     ``activity_ids`` is unknown, not empty. Garmin records several gear items
@@ -928,7 +984,7 @@ def _garmin_links(
     }
     if not activity_ids:
         return {}
-    by_garmin = _rows_by_garmin_id(matches, rows)
+    by_garmin = _rows_by_garmin_id(matches, rows, sessions)
     owners: dict[str, set[str]] = {}
     for item in items:
         if item.get("parent_id") or item.get("kind") == "component":
@@ -951,9 +1007,13 @@ def _listed_row_ids(garmin_ids: list[Any], by_garmin: dict[str, set[str]]) -> se
     }
 
 
-def _rows_by_garmin_id(matches: Any, rows: list[dict[str, Any]]) -> dict[str, set[str]]:
+def _rows_by_garmin_id(
+    matches: Any,
+    rows: list[dict[str, Any]],
+    sessions: tuple[dict[str, str], dict[str, str]] = ({}, {}),
+) -> dict[str, set[str]]:
     row_ids = {str(row.get("id")) for row in rows}
-    by_garmin: dict[str, set[str]] = {}
+    by_garmin = _rows_by_garmin_session(row_ids, *sessions)
     for match in matches if isinstance(matches, list) else []:
         if not isinstance(match, dict):
             continue
@@ -965,6 +1025,21 @@ def _rows_by_garmin_id(matches: Any, rows: list[dict[str, Any]]) -> dict[str, se
     for row in rows:
         if row.get("external_id") not in (None, ""):
             by_garmin.setdefault(str(row["external_id"]), set()).add(str(row.get("id")))
+    return by_garmin
+
+
+def _rows_by_garmin_session(
+    row_ids: set[str], garmin_sessions: dict[str, str], row_sessions: dict[str, str]
+) -> dict[str, set[str]]:
+    """Map each Garmin activity to the rows bundled into its canonical session."""
+    rows_by_session: dict[str, set[str]] = {}
+    for row_id in row_ids:
+        if (session := row_sessions.get(row_id)) is not None:
+            rows_by_session.setdefault(session, set()).add(row_id)
+    by_garmin: dict[str, set[str]] = {}
+    for garmin_id, session in garmin_sessions.items():
+        for row_id in rows_by_session.get(session, ()):
+            by_garmin.setdefault(garmin_id, set()).add(row_id)
     return by_garmin
 
 
