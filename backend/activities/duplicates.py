@@ -1,27 +1,18 @@
-"""Pure duplicate detection for provider activity snapshots."""
+"""Pure duplicate rules for provider activity rows and the duplicate-delete contract."""
 
 from __future__ import annotations
 
 import math
 from bisect import bisect_left, bisect_right
-from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
 from backend.activities.identity import activity_datetime, activity_kind
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import comma_decimal_float
-from backend.canonical.vocabulary import ProviderId, RecordingOrigin
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.providers.garmin_gear_fields import activity_start_local
-from backend.providers.intervals_activity_fields import (
-    intervals_activity_device_source,
-    intervals_activity_recorded_by_wahoo,
-)
-from backend.providers.snapshot_projection import (
-    intervals_activity_rows,
-    intervals_snapshot_is_stripped,
-)
 from backend.providers.source_labels import SourceView, provider_label
 
 _GARMIN_DUPLICATE_START_WINDOW = timedelta(minutes=30)
@@ -36,8 +27,6 @@ __all__ = [
     "filter_garmin_activities",
     "garmin_activity_duplicates_intervals",
     "intervals_cycling_activities_match",
-    "latest_wahoo_garmin_duplicate",
-    "remove_activity_from_snapshot",
     "validate_duplicate_delete",
 ]
 
@@ -84,38 +73,6 @@ def validate_duplicate_delete(payload: Any, current: Any) -> tuple[str, str]:
     return str(payload.get("canonical_id") or ""), str(
         payload.get("duplicate_id") or ""
     )
-
-
-def remove_activity_from_snapshot(
-    snapshot: Any, activity_id: str, *, synced_at: Any
-) -> dict[str, Any] | None:
-    """Return a copied snapshot with only exact matching activity IDs removed."""
-    # A snapshot stored without its activity sections stays without them.
-    if intervals_snapshot_is_stripped(snapshot):
-        return {**snapshot, "synced_at": synced_at}
-    if not isinstance(snapshot, dict):
-        return None
-
-    def retained(activities: Any) -> Any:
-        if not isinstance(activities, list):
-            return []
-        return [
-            activity
-            for activity in activities
-            if not isinstance(activity, dict)
-            or str(_first_present(activity, ("id", "activityId")) or "") != activity_id
-        ]
-
-    updated = dict(snapshot)
-    updated["recent_activities"] = retained(snapshot.get("recent_activities"))
-    raw = snapshot.get("raw_provider_data")
-    if isinstance(raw, dict):
-        updated["raw_provider_data"] = {
-            **raw,
-            "activities": retained(raw.get("activities")),
-        }
-    updated["synced_at"] = synced_at
-    return updated
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -338,105 +295,4 @@ def intervals_cycling_activities_match(left: Any, right: Any) -> bool:
         <= max(120, max(float(left_duration), float(right_duration)) * 0.10)
         and abs(float(left_distance) - float(right_distance))
         <= max(500, max(float(left_distance), float(right_distance)) * 0.10)
-    )
-
-
-def _latest_activity_id(activities: list[dict[str, Any]]) -> str | None:
-    dated = [
-        (started, item)
-        for item in activities
-        if (
-            started := activity_datetime(
-                item.get("start_date_local") or item.get("start_date")
-            )
-        )
-        is not None
-    ]
-    if not dated:
-        return None
-    latest = max(dated, key=lambda item: item[0])[1]
-    value = str(_first_present(latest, ("id", "activityId")) or "").strip()
-    return value or None
-
-
-def _wahoo_garmin_pairs(
-    activities: list[dict[str, Any]], latest_id: str
-) -> list[tuple[datetime, dict[str, Any], dict[str, Any]]]:
-    candidates = [item for item in activities if activity_kind(item) == "cycling"]
-    candidates.sort(
-        key=lambda item: (
-            activity_datetime(item.get("start_date_local") or item.get("start_date"))
-            or datetime.min  # noqa: DTZ901 - identity timestamps are intentionally naive
-        ),
-        reverse=True,
-    )
-    wahoo = [item for item in candidates if intervals_activity_recorded_by_wahoo(item)]
-    garmin = [
-        item
-        for item in candidates
-        if intervals_activity_device_source(item) == RecordingOrigin.GARMIN
-    ]
-    pairs: list[tuple[datetime, dict[str, Any], dict[str, Any]]] = []
-    for canonical in wahoo:
-        for duplicate in garmin:
-            if not intervals_cycling_activities_match(canonical, duplicate):
-                continue
-            started = activity_datetime(
-                canonical.get("start_date_local") or canonical.get("start_date")
-            )
-            canonical_id = str(
-                _first_present(canonical, ("id", "activityId")) or ""
-            ).strip()
-            duplicate_id = str(
-                _first_present(duplicate, ("id", "activityId")) or ""
-            ).strip()
-            if started is not None and latest_id in {canonical_id, duplicate_id}:
-                pairs.append((started, canonical, duplicate))
-    return pairs
-
-
-def _wahoo_garmin_duplicate_view(
-    snapshot_synced_at: Any, pair: tuple[datetime, dict[str, Any], dict[str, Any]]
-) -> dict[str, Any] | None:
-    _started, canonical, duplicate = pair
-    canonical_id = str(_first_present(canonical, ("id", "activityId")) or "").strip()
-    duplicate_id = str(_first_present(duplicate, ("id", "activityId")) or "").strip()
-    if not canonical_id or not duplicate_id or canonical_id == duplicate_id:
-        return None
-    return {
-        "canonical_id": canonical_id,
-        "canonical_name": str(canonical.get("name") or "Wahoo-Radeinheit")[:200],
-        "duplicate_id": duplicate_id,
-        "duplicate_name": str(duplicate.get("name") or "Garmin-Radeinheit")[:200],
-        "start_date_local": str(
-            canonical.get("start_date_local") or canonical.get("start_date") or ""
-        )[:40],
-        "moving_time": canonical.get("moving_time") or canonical.get("elapsed_time"),
-        "distance": canonical.get("distance"),
-        "snapshot_synced_at": snapshot_synced_at,
-    }
-
-
-def latest_wahoo_garmin_duplicate_from_rows(
-    rows: Sequence[Any], *, snapshot_synced_at: Any = None
-) -> dict[str, Any] | None:
-    """Return the newest exact-source ride pair of raw rows, keeping Wahoo canonical."""
-    all_activities = [item for item in rows if isinstance(item, dict)]
-    latest_id = _latest_activity_id(all_activities)
-    if not latest_id:
-        return None
-    pairs = _wahoo_garmin_pairs(all_activities, latest_id)
-    if not pairs:
-        return None
-    return _wahoo_garmin_duplicate_view(
-        snapshot_synced_at, max(pairs, key=lambda item: item[0])
-    )
-
-
-def latest_wahoo_garmin_duplicate(snapshot: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the newest exact-source ride pair of a stored snapshot."""
-    if not isinstance(snapshot, dict):
-        return None
-    return latest_wahoo_garmin_duplicate_from_rows(
-        intervals_activity_rows(snapshot), snapshot_synced_at=snapshot.get("synced_at")
     )

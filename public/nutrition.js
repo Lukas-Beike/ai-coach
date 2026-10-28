@@ -347,11 +347,9 @@ function renderNutritionWeek(week) {
   const totals = document.querySelector("#nutritionWeekTotals");
   const balance = week.balance_kcal;
   let balanceLabel = "Bilanz";  if (balance != null) {    balanceLabel = "Ausgeglichene Bilanz";    if (balance > 0) balanceLabel = "Kalorienüberschuss";    if (balance < 0) balanceLabel = "Kaloriendefizit";  }  if (balance != null && week.balance_days < dayCount) balanceLabel = "Erfasste Teilbilanz";
-  const items = [[balanceLabel, balance, "kcal", week.balance_days, true],
-    ...[["Ø Aufnahme", "intake_kcal", "kcal"], ["Ø Verbrauch", "expenditure_kcal", "kcal"], ["Ø Kohlenhydrate", "carbs_g", "g"], ["Ø Protein", "protein_g", "g"], ["Ø Fett", "fat_g", "g"], ["Ø Zucker", "sugar_g", "g"], ["Ø Salz", "salt_g", "g"]].map(([label, key, unit]) => [label, week.averages[key].value, unit, week.averages[key].days, false])];
+  const items = [[balanceLabel, balance, "kcal", week.balance_days, true],    ["Ø Kalorienbilanz pro Tag", week.balance_days > 0 && balance != null ? Math.sign(balance) * Math.round(Math.abs(balance / week.balance_days)) || 0 : null, "kcal", week.balance_days, true],    ...[["Ø Aufnahme", "intake_kcal", "kcal"], ["Ø Verbrauch", "expenditure_kcal", "kcal"], ["Ø Kohlenhydrate", "carbs_g", "g"], ["Ø Protein", "protein_g", "g"], ["Ø Fett", "fat_g", "g"], ["Ø Zucker", "sugar_g", "g"], ["Ø Salz", "salt_g", "g"]].map(([label, key, unit]) => [label, week.averages[key].value, unit, week.averages[key].days, false])];
   totals.replaceChildren(...items.map(([label, value, unit, days, isBalance]) => {
     const tile = document.createElement("div"); tile.className = "nutrition-total";
-    if (isBalance) tile.style.gridColumn = "1 / -1";
     const number = document.createElement("strong"); number.textContent = nutritionWeekValue(value, unit, isBalance);
     const caption = document.createElement("span"); caption.textContent = label;
     const coverage = document.createElement("small"); coverage.textContent = `${days} von ${dayCount} Tagen${isBalance && days < dayCount ? " · Teilbilanz" : ""}`;

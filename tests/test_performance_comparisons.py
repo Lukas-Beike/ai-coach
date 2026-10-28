@@ -195,6 +195,29 @@ class PerformanceComparisonsTests(unittest.TestCase):
         self.assertEqual(result["readiness_30d"]["days"], 30)
         self.assertEqual(values, before)
 
+    def test_eftp_and_form_comparisons_read_the_canonical_days_only(self):
+        values = self._inputs()
+        # The rows carry sportInfo eFTP 290 and tsb -7/-8; they are not read.
+        eftp_by_day = {date(2026, 9, 1): 250.0, date(2026, 8, 1): 999.0}
+        form_by_day = {
+            date(2026, 9, 1): -7.0,
+            date(2026, 9, 6): -8.0,
+            date(2026, 9, 7): -9.0,
+            date(2026, 8, 31): 40.0,
+        }
+        result = performance_comparisons(
+            *values, TODAY, eftp_by_day=eftp_by_day, form_by_day=form_by_day
+        )
+        # Wellness day 250 and the 2026-09-07 ride 290; the older day is outside.
+        self.assertEqual(result["cycling_eftp_30d"]["average"], 270.0)
+        self.assertEqual(result["form_tsb"]["average"], -8)
+        self.assertEqual(result["form_tsb"]["current"], -5)
+
+    def test_without_canonical_days_only_activity_eftp_and_no_form_remain(self):
+        result = performance_comparisons(*self._inputs(), TODAY)
+        self.assertEqual(result["cycling_eftp_30d"]["average"], 290.0)
+        self.assertIsNone(result["form_tsb"])
+
     def test_missing_values_return_none_without_mutation(self):
         values = self._inputs()
         values = list(values)

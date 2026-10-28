@@ -1482,6 +1482,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .nutrition-toolbar label { flex: 1; min-width: 140px; }
 .nutrition-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); gap: 12px; margin: 18px 0; }
 .nutrition-total, .nutrition-card { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.nutrition-total { min-width: 0; overflow-wrap: anywhere; }
 .nutrition-total strong { display: block; font-size: 1.4rem; }
 .nutrition-list { display: grid; gap: 12px; margin: 18px 0; }
 .nutrition-card h3 { margin: 0 0 8px; overflow-wrap: anywhere; }

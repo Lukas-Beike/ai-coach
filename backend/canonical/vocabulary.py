@@ -222,9 +222,6 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
 # fails while the list and the code disagree.
 EXPORT_ONLY_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
     MetricKind.TRAINING_LOAD: "never produced (see UNPRODUCED_METRIC_KINDS)",
-    MetricKind.EFTP: (
-        "stored for export; readers still use the sportInfo eFTP (#1412)"
-    ),
     MetricKind.STRESS: (
         "Garmin daily physiological stress, stored for export and history; no "
         "reader showed it before the canonical model"

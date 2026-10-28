@@ -15,7 +15,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
-from activity_row_support import FixedActivityRows, SnapshotActivityRows
+from activity_row_support import (
+    FixedActivityRows,
+    SnapshotActivityRows,
+    canonical_source,
+)
 
 from backend.activities.activity_reference import (
     ActivityReference,
@@ -336,6 +340,7 @@ class ActivityCallerResolutionTests(_Fixture):
             ),
             ActivityDetailStore(self.manager),
             references=ActivityReferences(self.manager),
+            canonical=canonical_source(FixedActivityRows([raw]), lambda: self.manager),
             session_records=CanonicalTableReader().session_activities,
         )
         for requested in (local, "ride-1"):
@@ -427,9 +432,7 @@ class ActivityCallerResolutionTests(_Fixture):
         duplicate = self.seed("garmin-1")
         service = DuplicateActivityService(
             self.manager,
-            Mock(),
-            Mock(latest_snapshot=Mock(return_value=None)),
-            FixedActivityRows(),
+            Mock(latest=Mock(return_value=None)),
             Mock(),
             Mock(),
             references=ActivityReferences(self.manager),

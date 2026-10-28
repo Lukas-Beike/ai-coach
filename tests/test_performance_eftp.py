@@ -15,39 +15,23 @@ class EftpAggregationTests(unittest.TestCase):
         anchor = date(2026, 9, 30)
         cutoff = anchor - timedelta(days=29)
         result = eftp_30_day_average(
-            [
-                {
-                    "id": cutoff.isoformat(),
-                    "sportInfo": [{"types": ["Ride"], "eFTP": 250}],
-                },
-                {
-                    "id": anchor.isoformat(),
-                    "sportInfo": [{"types": ["Ride"], "eFTP": 270}],
-                },
-                {
-                    "id": (cutoff - timedelta(days=1)).isoformat(),
-                    "sportInfo": [{"types": ["Ride"], "eFTP": 999}],
-                },
-                {
-                    "id": (anchor + timedelta(days=1)).isoformat(),
-                    "sportInfo": [{"types": ["Ride"], "eFTP": 999}],
-                },
-            ],
+            {
+                cutoff: 250.0,
+                anchor: 270.0,
+                cutoff - timedelta(days=1): 999.0,
+                anchor + timedelta(days=1): 999.0,
+            },
             [],
             anchor,
         )
         self.assertEqual(result, 260.0)
 
-    def test_wellness_sport_info_aliases_are_accepted_and_non_cycling_is_ignored(self):
+    def test_without_canonical_days_only_activity_eftp_contributes(self):
         anchor = date(2026, 9, 30)
-        rows = [
-            {"id": "2026-09-01", "sport_info": [{"types": ["Bike"], "eftp": 250}]},
-            {"id": "2026-09-02", "sportInfo": [{"type": "Rad", "eFTP": 260}]},
-            {"id": "2026-09-03", "sportInfo": [{"sport": "Cycling", "eFTP": 270}]},
-            {"id": "2026-09-04", "sportInfo": [{"sport_type": "Ride", "eFTP": 280}]},
-            {"id": "2026-09-05", "sportInfo": [{"types": ["Run"], "eFTP": 999}]},
-        ]
-        self.assertEqual(eftp_30_day_average(rows, [], anchor), 265.0)
+        activities = [{"start_date_local": "2026-09-02", "type": "Ride", "eFTP": 260}]
+        self.assertEqual(eftp_30_day_average(None, activities, anchor), 260.0)
+        self.assertEqual(eftp_30_day_average({}, activities, anchor), 260.0)
+        self.assertIsNone(eftp_30_day_average(None, [], anchor))
 
     def test_activity_type_aliases_and_eftp_key_priority_are_preserved(self):
         anchor = date(2026, 9, 30)
@@ -68,13 +52,16 @@ class EftpAggregationTests(unittest.TestCase):
 
     def test_invalid_malformed_and_out_of_bounds_values_are_ignored(self):
         anchor = date(2026, 9, 30)
-        rows = [
-            {"id": "not-a-date", "sportInfo": [{"types": ["Ride"], "eFTP": 250}]},
-            {"id": "2026-09-01", "sportInfo": [{"types": ["Ride"], "eFTP": 19}]},
-            {"id": "2026-09-02", "sportInfo": [{"types": ["Ride"], "eFTP": 2001}]},
-            {"id": "2026-09-03", "sportInfo": [{"types": ["Ride"], "eFTP": "invalid"}]},
-            {"id": "2026-09-04", "sportInfo": "malformed", "eFTP": 300},
-        ]
+        canonical_days = {
+            date(2026, 9, 1): 19.0,
+            date(2026, 9, 2): 2001.0,
+            date(2026, 9, 3): 20.0,
+            date(2026, 9, 4): 2000.0,
+        }
+        self.assertEqual(
+            eftp_daily_values(canonical_days, [], date(2026, 9, 1), anchor),
+            {"2026-09-03": 20.0, "2026-09-04": 2000.0},
+        )
         activities = [
             None,
             {"start_date_local": "not-a-date", "type": "Ride", "eFTP": 250},
@@ -83,16 +70,13 @@ class EftpAggregationTests(unittest.TestCase):
             {"start_date_local": "2026-09-07", "type": "Ride", "eFTP": "invalid"},
             {"start_date_local": "2026-09-08", "type": "Run", "eFTP": 300},
         ]
-        self.assertIsNone(eftp_30_day_average(rows, activities, anchor))
+        self.assertIsNone(eftp_30_day_average({}, activities, anchor))
 
     def test_same_day_wellness_and_activity_eftp_count_once_with_wellness_precedence(
         self,
     ):
         anchor = date(2026, 9, 30)
-        wellness = [
-            {"id": "2026-09-10", "sportInfo": [{"types": ["Ride"], "eFTP": 250}]},
-            {"id": "2026-09-20", "sportInfo": [{"types": ["Ride"], "eFTP": 260}]},
-        ]
+        wellness = {date(2026, 9, 10): 250.0, date(2026, 9, 20): 260.0}
         activities = [
             {"start_date_local": "2026-09-10", "type": "Ride", "icu_eftp": 270},
         ]
@@ -101,7 +85,7 @@ class EftpAggregationTests(unittest.TestCase):
     def test_daily_values_skip_non_dict_activities(self):
         self.assertEqual(
             eftp_daily_values(
-                [],
+                {},
                 [
                     None,
                     "junk",
@@ -113,11 +97,9 @@ class EftpAggregationTests(unittest.TestCase):
             {"2026-09-10": 260.0},
         )
 
-    def test_bounded_values_round_average_and_do_not_mutate_inputs(self):
+    def test_round_average_and_do_not_mutate_inputs(self):
         anchor = date(2026, 9, 30)
-        wellness = [
-            {"id": "2026-09-01", "sportInfo": [{"types": ["Ride"], "eFTP": "250,4"}]},
-        ]
+        wellness = {date(2026, 9, 1): 250.4}
         activities = [
             {"start_date_local": "2026-09-02", "type": "Ride", "icu_eftp": 261},
         ]

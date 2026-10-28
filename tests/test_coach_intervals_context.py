@@ -35,11 +35,14 @@ class CoachIntervalsContextTests(unittest.TestCase):
                 "start_date_local": self.today.isoformat(),
             },
         ]
-        snapshot = {"synced_at": "sync-time"}
-
         result = self.service.project(
-            snapshot, [], self.today, rides + same_day + [None, "invalid"]
+            [],
+            self.today,
+            rides + same_day + [None, "invalid"],
+            synced_at="sync-time",
         )
+        self.assertEqual(result["synced_at"], "sync-time")
+        self.assertEqual(result["source"]["synced_at"], "sync-time")
 
         self.assertEqual(
             [row["name"] for row in result["recent_activities_by_sport"]["Radfahren"]],
@@ -59,7 +62,6 @@ class CoachIntervalsContextTests(unittest.TestCase):
 
     def test_ignores_invalid_activities_and_preserves_unclassified_sport(self):
         result = self.service.project(
-            {},
             None,
             self.today,
             [None, {"name": "No sport", "start_date_local": "bad-date"}],
@@ -99,7 +101,7 @@ class CoachIntervalsContextTests(unittest.TestCase):
             for index in range(55)
         )
 
-        result = self.service.project({}, events, self.today)
+        result = self.service.project(events, self.today)
         projected = result["planned_workouts"]
 
         self.assertEqual(len(projected), 50)
@@ -108,8 +110,8 @@ class CoachIntervalsContextTests(unittest.TestCase):
         self.assertNotIn("description", projected[0])
         self.assertNotIn("athlete_detail", projected[1])
 
-    def test_none_snapshot_has_exact_empty_projection_shape(self):
-        result = self.service.project(None, None, self.today)
+    def test_no_planned_units_or_activities_has_exact_empty_projection_shape(self):
+        result = self.service.project(None, self.today)
 
         self.assertEqual(
             result,

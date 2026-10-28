@@ -833,13 +833,8 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "garmin_activity_duplicates_intervals",
             "filter_garmin_activities",
             "intervals_cycling_activities_match",
-            "_latest_activity_id",
-            "_wahoo_garmin_pairs",
-            "_wahoo_garmin_duplicate_view",
-            "latest_wahoo_garmin_duplicate",
             "duplicate_delete_action",
             "validate_duplicate_delete",
-            "remove_activity_from_snapshot",
             "duplicate_activity_delete_preview",
             "assert_duplicate_action_preview_is_current",
             "_remove_intervals_activity_from_local_snapshot",
@@ -1194,8 +1189,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "backend.performance.eftp",
         (
-            "_sport_info_setting",
-            "_wellness_eftp_value",
             "_activity_eftp_value",
             "eftp_30_day_average",
         ),
@@ -1205,7 +1198,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "wellness_average",
             "comparison_value",
-            "wellness_form_value",
             "readiness_score_value",
             "wellness_form_average",
         ),

@@ -1,0 +1,8 @@
+# Local test prerequisites only; APP_IMAGE is the freshly built immutable ID.
+ARG APP_IMAGE
+FROM ${APP_IMAGE}
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+USER app

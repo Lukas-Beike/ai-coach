@@ -25,9 +25,8 @@ Wellness rows
 
     FORM is the reported ``tsb``, ``form`` or ``freshness``. A row without one
     stores its mapped CTL minus its mapped ATL, rounded to two decimals, as a
-    DERIVED observation, as ``performance.wellness.wellness_form_value`` derives
-    it. Storing the derived value keeps one form series per day for every
-    consumer instead of each one deriving it again.
+    DERIVED observation. Storing the derived value keeps one form series per day
+    for every consumer instead of each one deriving it again.
 
     Each ``sportInfo`` (or ``sport_info``) entry yields an EFTP observation with
     the sport that its first ``types`` text, or else its ``type``, classifies to.

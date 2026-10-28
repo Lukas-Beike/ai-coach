@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
-from backend.performance.training_report import canonical_rows, deduplicated_rows
+from backend.performance.training_report import deduplicated_rows
 
 
 def _by_id(rows: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
@@ -159,18 +159,10 @@ class ActivityRowSelectorTests(CanonicalReadFixture):
 
 
 class DeduplicatedRowsTests(CanonicalReadFixture):
-    def test_helper_matches_canonical_rows_for_the_snapshot(self) -> None:
-        snapshot = self.intervals
-        self.assertEqual(
-            canonical_rows(snapshot),
-            deduplicated_rows(snapshot["raw_provider_data"]["activities"]),
-        )
-
     def test_helper_drops_repeated_ids_and_non_mapping_rows(self) -> None:
         first = {"id": "a", "start_date_local": "2026-10-01T07:00:00"}
         rows = [first, dict(first), "not a row", {"id": "b"}]
         kept, dropped = deduplicated_rows(rows)
         self.assertEqual([r["id"] for r in kept], ["a", "b"])
         self.assertEqual(dropped, 0)
-        self.assertEqual(canonical_rows({"recent_activities": rows}), (kept, dropped))
         json.dumps(kept)

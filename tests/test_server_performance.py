@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
 
+from canonical_detail_support import seed_intervals_activity
+from canonical_recovery_support import recovery_only_inputs
+from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
 from server_test_support import (
     ServerTestCase,
@@ -19,7 +22,6 @@ from server_test_support import (
 from backend.activities.duplicates import (
     filter_garmin_activities,
     garmin_activity_duplicates_intervals,
-    latest_wahoo_garmin_duplicate,
 )
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import current_metrics as performance_current_metrics
@@ -366,12 +368,18 @@ class ServerPerformanceTests(ServerTestCase):
                 ],
             },
             "recent_activities": [],
-            "recent_wellness": [],
+            # A wellness day (without values) lets the canonical inputs read the
+            # athlete record's eFTP.
+            "recent_wellness": [
+                {"id": _local_datetime.now().astimezone().date().isoformat()}
+            ],
         }
         metrics = performance_current_metrics.current_performance_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),
+            # The setting's eFTP is a canonical observation (#1412).
+            canonical=recovery_only_inputs(snapshot=snapshot).current,
         )
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
         self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")
@@ -1078,7 +1086,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(len(kept), 1)
         self.assertEqual(skipped, 0)
 
-    def test_confirmed_duplicate_delete_removes_only_garmin_copy(self):
+    def test_confirmed_duplicate_delete_removes_only_garmin_copy_and_keeps_the_snapshot(self):
         snapshot = {
             "synced_at": "2026-08-29T10:00:00+00:00",
             "athlete": {},
@@ -1107,9 +1115,14 @@ class ServerPerformanceTests(ServerTestCase):
             "activities": list(snapshot["recent_activities"])
         }
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
-        pair = latest_wahoo_garmin_duplicate(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot() or {}
-        )
+        for activity in snapshot["recent_activities"]:
+            seed_intervals_activity(
+                server.database_manager(),
+                activity["id"],
+                **{key: value for key, value in activity.items() if key != "id"},
+            )
+        mark_tables_serving(server)
+        pair = server.ATHLETE_DATA.duplicate_inspector().latest()
         with patch.object(
             intervals_client_module.IntervalsClient,
             "delete_activity",
@@ -1125,14 +1138,10 @@ class ServerPerformanceTests(ServerTestCase):
             )
         delete.assert_called_once_with("i-garmin")
         self.assertEqual(result["kept_activity_id"], "i-wahoo")
+        # The snapshot is an ingestion artefact: a delete leaves it as it was.
         self.assertEqual(
-            [
-                item["id"]
-                for item in server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
-                    "recent_activities"
-                ]
-            ],
-            ["i-wahoo"],
+            server.SYNC_PERSISTENCE.state_repository().latest_snapshot()["synced_at"],
+            snapshot["synced_at"],
         )
 
 

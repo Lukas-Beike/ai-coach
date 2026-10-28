@@ -65,7 +65,7 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-__all__ = ["ActivitySession", "bundle_sessions"]
+__all__ = ["ActivitySession", "bundle_sessions", "wahoo_garmin_copy_match"]
 
 START_WINDOW: Final = timedelta(minutes=30)
 DURATION_FLOOR_S: Final = 120.0
@@ -98,12 +98,26 @@ def bundle_sessions(
     records: Iterable[ActivityRecord], *, zone: tzinfo
 ) -> tuple[ActivitySession, ...]:
     """Group records into sessions, with the primary first in each session."""
-    entries = tuple(
-        _Entry(record, _wall_clock(record, zone), legacy_activity_family(record.sport))
-        for record in sorted(records, key=_order_key)
-    )
+    entries = tuple(_entry(record, zone) for record in sorted(records, key=_order_key))
     duplicate_of = _assign_duplicates(entries)
     return _sessions(entries, duplicate_of)
+
+
+def wahoo_garmin_copy_match(
+    wahoo: ActivityRecord, copy: ActivityRecord, *, zone: tzinfo
+) -> bool:
+    """Return True when ``copy`` is a Garmin-recorded copy of the Wahoo ride ``wahoo``.
+
+    Applies the Wahoo/Garmin ride rule on the athlete's wall clock ``zone``; the
+    caller decides which records are Wahoo- and Garmin-recorded Intervals.icu rides.
+    """
+    return _wahoo_and_garmin_copy_match(_entry(wahoo, zone), _entry(copy, zone))
+
+
+def _entry(record: ActivityRecord, zone: tzinfo) -> _Entry:
+    return _Entry(
+        record, _wall_clock(record, zone), legacy_activity_family(record.sport)
+    )
 
 
 def _order_key(record: ActivityRecord) -> tuple[datetime, str, str]:

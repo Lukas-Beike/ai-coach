@@ -102,14 +102,17 @@ def _current_performance_context(snapshot=None):
 
     garmin = read_garmin()
     wellness = (effective_snapshot or {}).get("recent_wellness")
-    # Recovery values come only from observations (#1411); map the raw fixtures.
+    # Recovery, form, ramp rate and eFTP come only from observations (#1411,
+    # #1412); map the raw fixtures.
     return performance_context.current_performance_context(
         effective_snapshot,
         garmin,
         server.ATHLETE_DATA.profile().get(),
         server.ATHLETE_CLOCK.now().date(),
         canonical=recovery_only_inputs(
-            garmin, wellness if isinstance(wellness, list) else None
+            garmin,
+            wellness if isinstance(wellness, list) else None,
+            snapshot=effective_snapshot,
         ),
     )
 

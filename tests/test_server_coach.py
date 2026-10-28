@@ -949,7 +949,7 @@ class ServerCoachTests(ServerTestCase):
             }
             for index in range(coach_context.COACH_PLANNED_EVENT_LIMIT + 5)
         ]
-        result = CoachIntervalsContextService().project({}, events, today)
+        result = CoachIntervalsContextService().project(events, today)
         self.assertEqual(
             len(result["planned_workouts"]), coach_context.COACH_PLANNED_EVENT_LIMIT
         )
@@ -1040,10 +1040,9 @@ class ServerCoachTests(ServerTestCase):
         }
         planned = server.PLANNING_DATA.planned_unit().list(250, future_only=True)
         first = CoachIntervalsContextService().project(
-            snapshot, planned, today, snapshot["recent_activities"]
+            planned, today, snapshot["recent_activities"]
         )
         second = CoachIntervalsContextService().project(
-            snapshot,
             planned,
             today,
             list(reversed(snapshot["recent_activities"])),
@@ -1077,7 +1076,6 @@ class ServerCoachTests(ServerTestCase):
         }
         server.PLANNING_DATA.planned_unit().create({**event, "sport": event["type"]})
         projected = CoachIntervalsContextService().project(
-            {"upcoming_calendar": []},
             server.PLANNING_DATA.planned_unit().list(250, future_only=True),
             today,
         )["planned_workouts"][0]

@@ -34,7 +34,9 @@ class TrainingFocusTests(unittest.TestCase):
         rows.append(
             {**rows[0], "activityId": 6, "startTimeLocal": "2026-10-03T08:00:00"}
         )
-        result = training_focus({}, {"activities": rows}, date(2026, 10, 2))
+        result = training_focus(
+            {"activities": rows}, date(2026, 10, 2), activity_rows=()
+        )
         self.assertEqual(3, result["classified_sessions"])
         self.assertEqual(2, result["unclassified_sessions"])
         self.assertEqual(
@@ -64,7 +66,7 @@ class TrainingFocusTests(unittest.TestCase):
             }
         ]
         rows.append({**rows[0], "id": "old", "start_date_local": "2026-01-01T08:00:00"})
-        result = training_focus({"recent_activities": rows}, {}, date(2026, 10, 2))
+        result = training_focus({}, date(2026, 10, 2), activity_rows=rows)
         zones = {row["sensor"]: row for row in result["zones"]}
         self.assertEqual(
             {"Z1": 600, "Z2": 1800, "Z3": 1200}, zones["heart_rate"]["seconds"]
@@ -84,7 +86,9 @@ class TrainingFocusTests(unittest.TestCase):
                 ("2026-09-04", "2026-09-05", "2026-10-02", "2026-10-03"), 1
             )
         ]
-        result = training_focus({}, {"activities": rows}, date(2026, 10, 2))
+        result = training_focus(
+            {"activities": rows}, date(2026, 10, 2), activity_rows=()
+        )
         self.assertEqual(result["start"], "2026-09-05")
         self.assertEqual(result["end"], "2026-10-02")
         self.assertEqual(result["classified_sessions"], 2)
@@ -101,7 +105,6 @@ class TrainingFocusTests(unittest.TestCase):
             {"activityId": "unmatched", "startTimeLocal": "2026-10-02T09:00:00"},
         ]
         result = training_focus(
-            {},
             {
                 "activities": base,
                 "training_load_activities": [
@@ -122,6 +125,7 @@ class TrainingFocusTests(unittest.TestCase):
                 },
             },
             date(2026, 10, 2),
+            activity_rows=(),
         )
         self.assertEqual(result["coverage"]["known_sessions"], 2)
         self.assertEqual(result["classified_sessions"], 1)
@@ -134,7 +138,6 @@ class TrainingFocusTests(unittest.TestCase):
 
     def test_activity_without_identity_is_not_classified_from_its_category(self):
         result = training_focus(
-            {},
             {
                 "activities": [
                     {
@@ -145,6 +148,7 @@ class TrainingFocusTests(unittest.TestCase):
                 ]
             },
             date(2026, 10, 2),
+            activity_rows=(),
         )
         self.assertEqual(result["coverage"]["known_sessions"], 1)
         self.assertEqual(result["classified_sessions"], 0)

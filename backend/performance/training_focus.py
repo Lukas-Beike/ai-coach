@@ -8,7 +8,6 @@ from backend.performance import freshness as performance_freshness
 from backend.performance.activity_validation import bounded_activity_metric
 from backend.performance.training_report import (
     activity_day,
-    canonical_rows,
     deduplicated_rows,
     zone_distribution,
 )
@@ -31,21 +30,16 @@ _CATEGORIES = {
 
 
 def training_focus(
-    snapshot: dict[str, Any] | None,
     garmin: dict[str, Any],
     today: date,
     timezone: str = "UTC",
     *,
-    activity_rows: Sequence[Any] | None = None,
+    activity_rows: Sequence[Any],
     days: int = 28,
 ) -> dict[str, Any]:
     start = (today - timedelta(days=days - 1)).isoformat()
     end = today.isoformat()
-    activities, _ = (
-        canonical_rows(snapshot or {})
-        if activity_rows is None
-        else deduplicated_rows(activity_rows)
-    )
+    activities, _ = deduplicated_rows(activity_rows)
     zones = zone_distribution(
         [row for row in activities if start <= activity_day(row, timezone) <= end]
     )

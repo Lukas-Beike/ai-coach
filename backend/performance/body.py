@@ -445,6 +445,7 @@ def body_history(
     wellness_rows: Sequence[dict[str, Any]] | None = None,
     activity_rows: Sequence[dict[str, Any]] | None = None,
     garmin_ftp: Mapping[date, float] | None = None,
+    eftp_by_day: Mapping[date, float] | None = None,
 ) -> dict[str, Any]:
     """Return API-ready 14d/12w charts under performance.history.body.
 
@@ -457,7 +458,8 @@ def body_history(
     dropped. When None, the legacy wellness and Garmin readers are used, as before.
 
     ``wellness_rows`` and ``activity_rows`` are the rows rebuilt from the canonical
-    read ports; without them the snapshot sections are read.
+    read ports; without them the snapshot sections are read. ``eftp_by_day`` is the
+    canonical wellness-day eFTP; without it only activity eFTP contributes.
     """
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     garmin = garmin if isinstance(garmin, dict) else {}
@@ -487,7 +489,7 @@ def body_history(
     }
     intervals_ftp: dict[date, tuple[float, str, Any]] = {}
     for observed_at, value in eftp.eftp_daily_values(
-        _wellness_records(snapshot) if wellness_rows is None else list(wellness_rows),
+        eftp_by_day,
         _snapshot_activity_rows(snapshot)
         if activity_rows is None
         else list(activity_rows),

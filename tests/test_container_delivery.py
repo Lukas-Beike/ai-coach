@@ -290,9 +290,11 @@ class ContainerRuntimeTests(unittest.TestCase):
     def test_ci_fixture_container_declares_itself_disposable(self):
         workflow = _read(".github/workflows/publish-container.yml")
         e2e = workflow.split("  e2e:\n", 1)[1].split("  browser:\n", 1)[0]
-        launch = e2e.split("docker run --detach", 1)[1]
-        launch = launch.split("fixture_runtime.py", 1)[0]
-        self.assertIn(f"--env {FIXTURE_MARKER}=1", launch)
+        self.assertIn("python scripts/run_browser_tests.py", e2e)
+        runner = _read("scripts/run_browser_tests.py")
+        launch = runner.split("    def fixture(", 1)[1].split("    def ", 1)[0]
+        self.assertIn(f'"--env",\n                "{FIXTURE_MARKER}=1"', launch)
+        self.assertIn('"/app/e2e/fixture_runtime.py"', launch)
 
 
 if __name__ == "__main__":

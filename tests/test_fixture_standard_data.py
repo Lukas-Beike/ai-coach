@@ -19,7 +19,7 @@ from server_test_support import server
 
 from backend.calendar.ical_mapping import calendar_event_constraints
 from backend.canonical.section_items import split_section
-from backend.canonical.vocabulary import StreamChannel
+from backend.canonical.vocabulary import MetricKind, Sport, StreamChannel
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.db import garmin_store
 from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
@@ -27,10 +27,12 @@ from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
+from backend.performance.canonical_sections import wellness_day_values
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.daily_health import daily_energy_expenditure
 from backend.performance.garmin_metrics import garmin_performance_metrics
 from backend.providers.calendar import parse_ical_calendar
+from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 
 # Importing the fixture rewrites os.environ and sys.path and replaces shared server
 # callables. Capture those replacements, restore the process state at once, and let
@@ -252,7 +254,15 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             "raw_provider_data": {"wellness": wellness},
         }
 
-        result = body_history(snapshot, garmin, self.today)
+        # The Intervals.icu eFTP of a wellness day is a canonical observation
+        # (#1412); map the fixture rows as a sync would.
+        mapped = map_intervals_wellness(
+            wellness, retrieved_at=datetime.now(ZoneInfo("UTC"))
+        )
+        eftp_by_day = wellness_day_values(
+            (r for r in mapped.records if r.kind is MetricKind.EFTP), sport=Sport.RIDE
+        )
+        result = body_history(snapshot, garmin, self.today, eftp_by_day=eftp_by_day)
         window = result["windows"]["12w"]
         self.assertEqual(window["days"], 84)
         self.assertEqual(len(window["metrics"]["weight_kg"][0]["points"]), 84)
@@ -1119,7 +1129,7 @@ class StandardFixtureStagingTests(StandardFixtureTestCase):
                             return_value=datetime.combine(today, time(10, 0)),
                         ):
                             fixture_runtime.initialise_fixture()
-                            fixture_runtime.seed_preview_demo()
+                            fixture_runtime.seed_fixture_planning_calendar(today)
                             with server.database_manager().unit_of_work() as db:
                                 seeded_dates = {
                                     row["date"]

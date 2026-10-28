@@ -16,6 +16,13 @@ test("@responsive nutrition week shows coverage, signed balance and missing days
   await expect(week).toContainText("22.09.2026 – 05.10.2026");
   await expect(week).toContainText("Erfasste Teilbilanz");
   await expect(week).toContainText("+500 kcal");
+  const balanceTiles = week.locator("#nutritionWeekTotals .nutrition-total");
+  await expect(balanceTiles.nth(1)).toContainText("+100 kcal");
+  await expect(balanceTiles.nth(1)).toContainText("Ø Kalorienbilanz pro Tag");
+  const totalBox = await balanceTiles.nth(0).boundingBox();
+  const averageBox = await balanceTiles.nth(1).boundingBox();
+  expect(averageBox.y).toBe(totalBox.y);
+  expect(averageBox.x).toBeGreaterThan(totalBox.x);
   await expect(week).toContainText("5 von 14 Tagen · Teilbilanz");
   const intake = week.locator(".nutrition-total").filter({ hasText: "Ø Aufnahme" });
   await expect(intake).toContainText("2.200 kcal");
@@ -95,6 +102,8 @@ test("@responsive nutrition gaps keep expenditure visible without inventing inta
   await expect(first.locator(".is-expenditure")).toContainText("7 von 7 Tagen");
   await expect(root.locator(".is-expenditure .is-missing")).toHaveCount(0);
   await expect(root.locator(".is-intake .is-missing")).toHaveCount(11);
+  await expect(root.locator("#nutritionWeekTotals .nutrition-total").nth(1)).toContainText("-300 kcal");
+  await expect(root.locator("#nutritionWeekTotals .nutrition-total").nth(1)).toContainText("1 von 84 Tagen");
   await expect(root).not.toContainText("Kaloriendefizit");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

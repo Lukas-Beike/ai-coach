@@ -1,12 +1,15 @@
 """Training report coverage and historical zone contracts."""
 
 import unittest
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import Mock, patch
 
 from backend.activities.duplicates import intervals_cycling_activities_match
+from backend.canonical.coverage import ProviderCoverage
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.http_api.analysis import AnalysisRoutes
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.report_service import (
     TrainingDerivedReadService,
     TrainingProfileSelectionService,
@@ -42,6 +45,47 @@ class _FakeDatabaseManager:
         return _FakeUnitOfWork()
 
     read_snapshot = unit_of_work
+    reader = unit_of_work
+
+
+class _Rows:
+    """Activity-row reader over fixed rows."""
+
+    def __init__(self, rows):
+        self._rows = tuple(rows)
+
+    def activity_rows(self, db, *, start=None, end=None, limit=None):
+        return self._rows
+
+
+class _Coverage:
+    """Provider coverage with one Intervals.icu activity fetch time."""
+
+    def __init__(self, fetched_at):
+        self._fetched_at = fetched_at
+
+    def coverage(self, db):
+        return (
+            ProviderCoverage(
+                provider=ProviderId.INTERVALS,
+                retrieved_at=self._fetched_at,
+                activity_count=0,
+                observation_count=0,
+                issue_counts={},
+                first_observed_on=None,
+                last_observed_on=None,
+                activities_retrieved_at=self._fetched_at,
+            ),
+        )
+
+
+def _canonical(rows=(), fetched_at=None):
+    return CanonicalPerformanceSource(
+        database_manager=_FakeDatabaseManager,
+        observation_reader=_EmptyReader,
+        activity_rows=lambda: _Rows(rows),
+        coverage=None if fetched_at is None else lambda: _Coverage(fetched_at),
+    )
 
 
 def _empty_season_source():
@@ -370,13 +414,10 @@ class TrainingReportTests(unittest.TestCase):
 
     def report(self, rows, **kwargs):
         return training_report(
-            {
-                "synced_at": "2026-10-02T08:00:00Z",
-                "raw_provider_data": {"activities": rows},
-            },
             start=date(2026, 9, 28),
             days=7,
             today=date(2026, 10, 2),
+            activity_rows=rows,
             **kwargs,
         )
 
@@ -472,9 +513,9 @@ class TrainingReportTests(unittest.TestCase):
     def test_records_service_reads_equipment_and_rejects_invalid_record_kinds(self):
         service = TrainingRecordsService(
             database_manager=Mock(),
-            read_snapshot=dict,
             read_equipment=lambda: {"items": [{"id": "gear"}]},
             read_record=None,
+            canonical=_canonical(),
         )
         self.assertEqual(
             {"equipment": {"items": [{"id": "gear"}]}}, service.training_records()
@@ -520,6 +561,7 @@ class TrainingReportTests(unittest.TestCase):
             today=lambda: date(2026, 10, 2),
             load_scenarios=load_scenarios,
             season_source=_empty_season_source(),
+            canonical=_canonical(),
         )
         result = service.read({}, "Europe/Berlin")
         self.assertEqual("Europe/Berlin", result["timezone"])
@@ -528,11 +570,11 @@ class TrainingReportTests(unittest.TestCase):
 
     def test_derived_and_season_reads_keep_missing_data_fallbacks(self):
         derived = TrainingDerivedReadService(
-            read_snapshot=dict,
             read_checkins=list,
             read_recovery=dict,
             read_performance=dict,
             today=lambda: date(2026, 10, 2),
+            canonical=_canonical(),
         )
         self.assertEqual({"status": "insufficient_data"}, derived.body_history())
         self.assertEqual(
@@ -547,6 +589,63 @@ class TrainingReportTests(unittest.TestCase):
             season_source=_empty_season_source(),
         )
         self.assertIsInstance(season.season("Europe/Berlin"), dict)
+
+    def _report_service(self, canonical, snapshot_rows=()):
+        snapshot = {
+            "synced_at": "2030-01-01T00:00:00Z",
+            "raw_provider_data": {"activities": list(snapshot_rows)},
+            "recent_activities": list(snapshot_rows),
+        }
+        return TrainingReportReadService(
+            read_snapshot=lambda: snapshot,
+            read_plan=dict,
+            read_checkins=list,
+            read_feedback=list,
+            today=lambda: date(2026, 10, 2),
+            load_scenarios=load_scenarios,
+            season_source=_empty_season_source(),
+            canonical=canonical,
+        )
+
+    def test_report_reads_canonical_rows_and_coverage_time_not_the_snapshot(self):
+        ride = {
+            "id": "canonical",
+            "type": "Ride",
+            "start_date_local": "2026-09-30T08:00:00",
+            "moving_time": 3600,
+            "distance": 30000,
+        }
+        fetched = datetime(2026, 10, 2, 8, 0, tzinfo=UTC)
+        service = self._report_service(
+            _canonical([ride], fetched), snapshot_rows=[{**ride, "id": "stale"}] * 3
+        )
+
+        result = service.read({"start": "2026-09-28", "days": 7})
+
+        self.assertEqual(1, result["totals"]["sessions"])
+        self.assertEqual(fetched.isoformat(), result["observed_at"])
+
+    def test_report_without_stored_coverage_has_no_observed_time(self):
+        service = self._report_service(_canonical(), snapshot_rows=[{"id": "x"}])
+
+        result = service.read({"start": "2026-09-28", "days": 7})
+
+        self.assertEqual(0, result["totals"]["sessions"])
+        self.assertIsNone(result["observed_at"])
+
+    def test_report_services_require_a_canonical_source(self):
+        with self.assertRaises(TypeError):
+            TrainingDerivedReadService(  # type: ignore[call-arg]
+                read_checkins=list,
+                read_recovery=dict,
+                read_performance=dict,
+                today=lambda: date(2026, 10, 2),
+            )
+        source = CanonicalPerformanceSource(
+            database_manager=_FakeDatabaseManager, observation_reader=_EmptyReader
+        )
+        with self.assertRaises(RuntimeError):
+            self._report_service(source).read({"start": "2026-09-28", "days": 7})
 
     def test_removed_analysis_routes_are_unmatched(self):
         auth = Mock()

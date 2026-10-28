@@ -120,7 +120,7 @@ class CoachDomainSectionAliasTests(unittest.TestCase):
 class CoachDomainSectionSourceTests(unittest.TestCase):
     def test_activities_source_block_comes_first_and_uses_provider_label(self):
         projection = CoachIntervalsContextService().project(
-            {"synced_at": SYNCED_AT, "recent_activities": []}, [], TODAY
+            [], TODAY, synced_at=SYNCED_AT
         )
         self.assertEqual(next(iter(projection)), "source")
         self.assertEqual(
@@ -217,7 +217,7 @@ class CoachDomainSectionFullContextTests(unittest.TestCase):
             {
                 "provider": ProviderId.INTERVALS.value,
                 "label": _label(ProviderId.INTERVALS),
-                "synced_at": fixture.snapshot["synced_at"],
+                "synced_at": context_tests.COVERAGE_SYNCED_AT,
                 "applies_to": [
                     "recent_activities_by_sport",
                     "activity_rollups_by_sport",
@@ -225,7 +225,10 @@ class CoachDomainSectionFullContextTests(unittest.TestCase):
             },
         )
         expected_activities = CoachIntervalsContextService().project(
-            fixture.snapshot, [], TODAY
+            [],
+            TODAY,
+            fixture.snapshot["recent_activities"],
+            synced_at=context_tests.COVERAGE_SYNCED_AT,
         )
         self.assertEqual(
             _without(activities, "source", "planned_workouts"),

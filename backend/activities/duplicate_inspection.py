@@ -1,37 +1,98 @@
-"""Read the newest Wahoo/Garmin duplicate pair through the canonical activity rows."""
+"""Read the newest Wahoo/Garmin duplicate pair from the canonical activity records."""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+from datetime import tzinfo
 from typing import Any
 
-from backend.activities.duplicates import latest_wahoo_garmin_duplicate_from_rows
-from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
+from backend.activities.canonical_sessions import wahoo_garmin_copy_match
+from backend.canonical.records import ActivityRecord
+from backend.canonical.vocabulary import ProviderId, RecordingOrigin, Sport
+from backend.runtime.ports import ActivityReader, CanonicalTableServing
+
+_NAME_LIMIT = 200
 
 
 class DuplicateInspector:
-    """Find the current duplicate pair from injected canonical row and snapshot ports.
+    """Find the current duplicate pair from the canonical activity tables.
 
-    The snapshot only supplies the sync time that the duplicate manifest records;
-    the activities themselves come from the canonical selector, so a removed
-    duplicate disappears once it is tombstoned.
+    ``activities`` must be the table-backed reader, never the read selector: before
+    the first backfill the selector serves the snapshot projection, which does not
+    know a tombstoned copy. Only active Intervals.icu records are compared, so a
+    removed duplicate is no longer reported. The stored snapshot is not read.
+
+    While the tables do not serve reads (``serving``: before the first completed
+    backfill) no pair is offered. Their records can be revived by the next sync
+    from the unchanged snapshot, so a deleted copy would be offered again with a
+    fresh token and deleted twice. The delete validates against the same
+    inspection, so it conflicts instead.
     """
 
     def __init__(
         self,
         database_manager: Any,
-        snapshot_reader: ProviderSnapshotReader,
-        row_reader: ActivityRowReader,
+        activities: ActivityReader,
+        zone: Callable[[], tzinfo],
+        serving: CanonicalTableServing,
     ) -> None:
         self._database_manager = database_manager
-        self._snapshot_reader = snapshot_reader
-        self._row_reader = row_reader
+        self._activities = activities
+        self._serving = serving
+        self._zone = zone
 
     def latest(self) -> dict[str, Any] | None:
         """Return the newest exact-source ride pair, always keeping Wahoo canonical."""
         with self._database_manager.read_snapshot() as db:
-            snapshot = self._snapshot_reader.latest_snapshot(db)
-            rows = self._row_reader.activity_rows(db)
-        synced_at = snapshot.get("synced_at") if isinstance(snapshot, dict) else None
-        return latest_wahoo_garmin_duplicate_from_rows(
-            rows, snapshot_synced_at=synced_at
-        )
+            if not self._serving.serves_tables(db):
+                return None
+            records = self._activities.activities(db)
+        return latest_wahoo_garmin_duplicate(records, zone=self._zone())
+
+
+def latest_wahoo_garmin_duplicate(
+    records: Iterable[ActivityRecord], *, zone: tzinfo
+) -> dict[str, Any] | None:
+    """Return the manifest of the newest Wahoo/Garmin ride pair that holds the newest activity.
+
+    ``snapshot_synced_at`` is the newest canonical fetch time of the two records,
+    so a later fetch of either record invalidates an earlier confirmation.
+    """
+    intervals = [
+        record
+        for record in records
+        if record.provenance.provider is ProviderId.INTERVALS
+    ]
+    if not intervals:
+        return None
+    latest = max(intervals, key=lambda record: (record.started_at, record.activity_id))
+    rides = [record for record in intervals if record.sport is Sport.RIDE]
+    wahoo = [r for r in rides if r.provenance.recorded_by is RecordingOrigin.WAHOO]
+    garmin = [r for r in rides if r.provenance.recorded_by is RecordingOrigin.GARMIN]
+    pairs = [
+        (keep, copy)
+        for keep in wahoo
+        for copy in garmin
+        if keep.activity_id != copy.activity_id
+        and latest.activity_id in {keep.activity_id, copy.activity_id}
+        and wahoo_garmin_copy_match(keep, copy, zone=zone)
+    ]
+    if not pairs:
+        return None
+    keep, copy = max(pairs, key=lambda pair: pair[0].started_at)
+    fetched = [
+        record.provenance.retrieved_at
+        for record in (keep, copy)
+        if record.provenance.retrieved_at is not None
+    ]
+    wall = keep.started_at.astimezone(zone).replace(tzinfo=None)
+    return {
+        "canonical_id": keep.activity_id,
+        "canonical_name": (keep.name or "Wahoo-Radeinheit")[:_NAME_LIMIT],
+        "duplicate_id": copy.activity_id,
+        "duplicate_name": (copy.name or "Garmin-Radeinheit")[:_NAME_LIMIT],
+        "start_date_local": wall.isoformat(timespec="seconds"),
+        "moving_time": keep.duration_s,
+        "distance": keep.distance_m,
+        "snapshot_synced_at": max(fetched).isoformat() if fetched else None,
+    }

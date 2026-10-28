@@ -121,6 +121,8 @@ def performance_comparisons(
     today: date,
     *,
     garmin_history: Mapping[str, Mapping[date, float]] | None = None,
+    eftp_by_day: Mapping[date, float] | None = None,
+    form_by_day: Mapping[date, float] | None = None,
 ) -> dict[str, Any]:
     load = load_context["load"]
     last_7 = load_context["last_7"]
@@ -176,7 +178,7 @@ def performance_comparisons(
         ),
         "cycling_eftp_30d": wellness.comparison_value(
             metrics["cycling_eftp_watts"]["value"],
-            eftp.eftp_30_day_average(wellness_rows, activities, today),
+            eftp.eftp_30_day_average(eftp_by_day, activities, today),
             "W",
             30,
         ),
@@ -187,7 +189,7 @@ def performance_comparisons(
             7,
         ),
         "form_tsb": wellness.comparison_value(
-            load["tsb"], wellness.wellness_form_average(wellness_rows, 7, today), "", 7
+            load["tsb"], wellness.wellness_form_average(form_by_day, 7, today), "", 7
         ),
         "fatigue_atl": wellness.comparison_value(
             load["atl"],

@@ -13,8 +13,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Final
 
+from backend.activities.sync_time import activities_synced_at
 from backend.planning.context import ACTIVITY_FIELDS, selected
-from backend.runtime.ports import ActivityRowReader
+from backend.runtime.ports import ActivityRowReader, ProviderCoverageReader
 
 RECENT_ACTIVITY_LIMIT: Final = 500
 
@@ -37,6 +38,16 @@ class ActivityRowSource:
 
     database_manager: Callable[[], Any]
     reader: Callable[[], ActivityRowReader]
+    # Where the activities' sync time comes from; without it the time is unknown.
+    coverage: Callable[[], ProviderCoverageReader] | None = None
+
+    def read(self, db: Any | None = None) -> tuple[list[dict[str, Any]], str | None]:
+        """Return the compact recent activities and their sync time from one read."""
+        if db is None:
+            with self.database_manager().reader() as own:
+                return self.read(own)
+        coverage = None if self.coverage is None else self.coverage()
+        return self.compact(db), activities_synced_at(coverage, db)
 
     def compact(self, db: Any | None = None) -> list[dict[str, Any]]:
         """Return compact recent activities, newest first.

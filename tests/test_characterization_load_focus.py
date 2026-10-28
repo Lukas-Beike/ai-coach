@@ -14,7 +14,7 @@ from typing import Any
 from backend.performance.load import activity_rollup, actual_atl_series
 from backend.performance.load_context import performance_load_context
 from backend.performance.training_focus import training_focus
-from backend.performance.training_report import canonical_rows
+from backend.performance.training_report import deduplicated_rows
 
 TODAY = date(2026, 5, 4)
 RETENTION = math.exp(-1.0 / 7.0)
@@ -339,14 +339,22 @@ class CharacterizationLoadContextTests(unittest.TestCase):
     def test_missing_latest_wellness_yields_null_load_block(self) -> None:
         self.assertEqual(
             performance_load_context([], [], {}, TODAY)["load"],
-            {"id": None, "ctl": None, "atl": None, "tsb": None, "rampRate": None},
+            {
+                "id": None,
+                "ctl": None,
+                "atl": None,
+                "tsb": None,
+                "rampRate": None,
+                "rampRate_source": None,
+            },
         )
 
     def test_load_block_takes_ctl_and_atl_from_aliases_without_normalising(
         self,
     ) -> None:
-        # Quirk: ctl and atl come from the latest Intervals row (with aliases), raw
-        # values are passed through, and TSB is derived only from the plain keys.
+        # Quirk: ctl and atl come from the latest Intervals row (with aliases) and
+        # raw values are passed through. Form and ramp rate no longer come from the
+        # row (#1412): without canonical inputs they are unknown.
         result = performance_load_context(
             [],
             [],
@@ -365,7 +373,8 @@ class CharacterizationLoadContextTests(unittest.TestCase):
                 "ctl": "55",
                 "atl": 65,
                 "tsb": None,
-                "rampRate": "1,5",
+                "rampRate": None,
+                "rampRate_source": None,
             },
         )
 
@@ -376,17 +385,18 @@ class CharacterizationLoadContextTests(unittest.TestCase):
         self.assertEqual(result["load"]["ctl"], 55)
         self.assertEqual(result["load"]["atl"], 0)
 
-    def test_tsb_prefers_direct_fields_then_derives_from_plain_ctl_and_atl(
-        self,
-    ) -> None:
-        derived = performance_load_context(
-            [], [], {"ctl": 50, "atl": 60, "tsb": ""}, TODAY
-        )
-        direct = performance_load_context(
-            [], [], {"ctl": 50, "atl": 60, "freshness": 4}, TODAY
-        )
-        self.assertEqual(derived["load"]["tsb"], -10.0)
-        self.assertEqual(direct["load"]["tsb"], 4)
+    def test_carrier_form_fields_are_not_read_without_canonical_inputs(self) -> None:
+        # Intended difference (#1412): the row's tsb/form/freshness and a derived
+        # CTL minus ATL are gone; form is read from canonical observations only.
+        for row in (
+            {"ctl": 50, "atl": 60, "tsb": ""},
+            {"ctl": 50, "atl": 60, "freshness": 4},
+            {"ctl": 50, "atl": 60, "tsb": 3, "form": 2},
+        ):
+            with self.subTest(row=row):
+                self.assertIsNone(
+                    performance_load_context([], [], row, TODAY)["load"]["tsb"]
+                )
 
     def test_actual_atl_current_falls_back_to_a_stale_row_while_average_is_empty(
         self,
@@ -421,7 +431,7 @@ class CharacterizationLoadContextTests(unittest.TestCase):
 
     def test_context_rollups_count_garmin_and_wahoo_copies_twice(self) -> None:
         # Quirk: the production caller passes raw recent_activities, so the load
-        # context does not apply canonical_rows and both copies of one ride count.
+        # context does not apply deduplicated_rows and both copies of one ride count.
         activities = [
             _ride(
                 "w",
@@ -457,7 +467,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 },
             ]
         }
-        result = training_focus(snapshot, {}, TODAY)
+        result = training_focus({}, TODAY, activity_rows=snapshot["recent_activities"])
         self.assertEqual(
             sorted({row["sensor"] for row in result["zones"]}),
             ["heart_rate", "power"],
@@ -466,7 +476,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         self.assertEqual(zones["heart_rate"], {"Z1": 600.0})
         self.assertEqual(zones["power"], {"Z1": 300.0})
 
-    def test_zones_are_built_from_canonical_rows_so_garmin_copies_are_excluded(
+    def test_zones_are_built_from_deduplicated_rows_so_garmin_copies_are_excluded(
         self,
     ) -> None:
         snapshot = {
@@ -475,18 +485,8 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 _ride("g", source="garmin", icu_hr_zone_times=[600]),
             ]
         }
-        result = training_focus(snapshot, {}, TODAY)
+        result = training_focus({}, TODAY, activity_rows=snapshot["recent_activities"])
         self.assertEqual(result["zones"][0]["seconds"], {"Z1": 600.0})
-
-    def test_zones_prefer_raw_provider_activities_even_when_that_list_is_empty(
-        self,
-    ) -> None:
-        # Quirk: an empty raw_provider_data.activities list wins over recent_activities.
-        snapshot = {
-            "raw_provider_data": {"activities": []},
-            "recent_activities": [_ride("r", icu_hr_zone_times=[600])],
-        }
-        self.assertEqual(training_focus(snapshot, {}, TODAY)["zones"], [])
 
     def test_zone_window_includes_today_minus_27_and_today_only(self) -> None:
         snapshot = {
@@ -497,7 +497,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 _ride("after", start=f"{_day(1)}T08:00:00", icu_hr_zone_times=[900]),
             ]
         }
-        result = training_focus(snapshot, {}, TODAY)
+        result = training_focus({}, TODAY, activity_rows=snapshot["recent_activities"])
         self.assertEqual(result["zones"][0]["seconds"], {"Z1": 600.0})
         self.assertEqual(result["zones"][0]["training_seconds"], 7200)
 
@@ -508,7 +508,9 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 _ride("first", start=f"{_day(-13)}T08:00:00", icu_hr_zone_times=[300]),
             ]
         }
-        result = training_focus(snapshot, {}, TODAY, days=14)
+        result = training_focus(
+            {}, TODAY, activity_rows=snapshot["recent_activities"], days=14
+        )
         self.assertEqual(result["start"], _day(-13))
         self.assertEqual(result["zones"][0]["seconds"], {"Z1": 300.0})
 
@@ -519,10 +521,8 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
             start_date="2026-05-04T22:30:00Z",
             icu_hr_zone_times=[600],
         )
-        utc = training_focus({"recent_activities": [ride]}, {}, TODAY, "UTC")
-        berlin = training_focus(
-            {"recent_activities": [ride]}, {}, TODAY, "Europe/Berlin"
-        )
+        utc = training_focus({}, TODAY, "UTC", activity_rows=[ride])
+        berlin = training_focus({}, TODAY, "Europe/Berlin", activity_rows=[ride])
         self.assertEqual(utc["zones"][0]["seconds"], {"Z1": 600.0})
         # 22:30 UTC is 00:30 on 2026-05-05 in Berlin, after the window end.
         self.assertEqual(berlin["zones"], [])
@@ -534,9 +534,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
             start_date="2026-05-04T22:30:00Z",
             icu_hr_zone_times=[600],
         )
-        result = training_focus(
-            {"recent_activities": [ride]}, {}, TODAY, "Mars/Olympus"
-        )
+        result = training_focus({}, TODAY, "Mars/Olympus", activity_rows=[ride])
         self.assertEqual(result["zones"][0]["seconds"], {"Z1": 600.0})
 
     def test_garmin_coverage_uses_local_start_time_and_ignores_timezone(self) -> None:
@@ -550,14 +548,13 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         }
         for timezone in ("UTC", "Europe/Berlin"):
             with self.subTest(timezone=timezone):
-                result = training_focus({}, garmin, TODAY, timezone)
+                result = training_focus(garmin, TODAY, timezone, activity_rows=())
                 self.assertEqual(result["coverage"]["known_sessions"], 1)
                 self.assertEqual(result["coverage"]["observed_end"], "2026-05-04")
 
     def test_activity_id_zero_is_treated_as_missing_identity(self) -> None:
         # Quirk: a numeric activityId of 0 is falsy, so the row is unclassified.
         result = training_focus(
-            {},
             {
                 "activities": [
                     {
@@ -569,6 +566,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 ]
             },
             TODAY,
+            activity_rows=(),
         )
         self.assertEqual(result["coverage"]["known_sessions"], 1)
         self.assertEqual(result["classified_sessions"], 0)
@@ -588,7 +586,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 _garmin("f", "TEMPO", "9" * 33),
             ]
         }
-        result = training_focus({}, garmin, TODAY)
+        result = training_focus(garmin, TODAY, activity_rows=())
         self.assertEqual(result["classified_sessions"], 3)
         self.assertEqual(result["unclassified_sessions"], 3)
         self.assertEqual(
@@ -613,7 +611,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 _garmin("j", None, 5),
             ]
         }
-        result = training_focus({}, garmin, TODAY)
+        result = training_focus(garmin, TODAY, activity_rows=())
         categories = result["categories"]
         self.assertEqual(categories["high_aerobic"], {"load": 20.0, "sessions": 4})
         self.assertEqual(categories["low_aerobic"], {"load": 5.0, "sessions": 1})
@@ -638,7 +636,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         for label, category in expected.items():
             with self.subTest(label=label):
                 result = training_focus(
-                    {}, {"activities": [_garmin("a", label, 5)]}, TODAY
+                    {"activities": [_garmin("a", label, 5)]}, TODAY, activity_rows=()
                 )
                 self.assertEqual(result["categories"][category]["sessions"], 1)
                 self.assertEqual(result["classified_sessions"], 1)
@@ -656,7 +654,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 }
             ],
         }
-        result = training_focus({}, garmin, TODAY)
+        result = training_focus(garmin, TODAY, activity_rows=())
         self.assertEqual(
             result["categories"]["anaerobic"], {"load": 40.0, "sessions": 1}
         )
@@ -673,7 +671,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 "training_load_activities": {"freshness": "current"},
             },
         }
-        result = training_focus({}, garmin, TODAY)
+        result = training_focus(garmin, TODAY, activity_rows=())
         self.assertEqual(result["category_source_key"], "activities")
         self.assertEqual(set(result["category_freshness"]), {"activities"})
 
@@ -693,7 +691,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 }
             },
         }
-        result = training_focus({}, garmin, TODAY)
+        result = training_focus(garmin, TODAY, activity_rows=())
         self.assertEqual(
             result["category_freshness"]["activities"],
             {
@@ -716,7 +714,9 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         )
 
     def test_missing_source_freshness_defaults_the_activities_source(self) -> None:
-        result = training_focus({}, {"activities": [_garmin("a", "TEMPO", 40)]}, TODAY)
+        result = training_focus(
+            {"activities": [_garmin("a", "TEMPO", 40)]}, TODAY, activity_rows=()
+        )
         self.assertEqual(
             result["category_freshness"],
             {
@@ -738,7 +738,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 _ride("r", icu_training_load=99, start="2026-05-04T08:00:00")
             ]
         }
-        result = training_focus(snapshot, {}, TODAY)
+        result = training_focus({}, TODAY, activity_rows=snapshot["recent_activities"])
         self.assertEqual(result["classified_sessions"], 0)
         self.assertEqual(result["unclassified_sessions"], 0)
         self.assertEqual(
@@ -755,7 +755,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         garmin = {
             "activities": [_garmin(str(index), "TEMPO", 1) for index in range(1002)]
         }
-        result = training_focus({}, garmin, TODAY)
+        result = training_focus(garmin, TODAY, activity_rows=())
         self.assertEqual(result["coverage"]["known_sessions"], 1000)
         self.assertEqual(result["categories"]["high_aerobic"]["sessions"], 1000)
 
@@ -770,13 +770,11 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
             ("external_id", "wahoo-123"),
         ):
             with self.subTest(field=field):
-                rows, duplicates = canonical_rows(
-                    {
-                        "recent_activities": [
-                            _ride("w", **{field: value}),
-                            _ride("g", source="garmin"),
-                        ]
-                    }
+                rows, duplicates = deduplicated_rows(
+                    [
+                        _ride("w", **{field: value}),
+                        _ride("g", source="garmin"),
+                    ]
                 )
                 self.assertEqual(_ids(rows), ["w"])
                 self.assertEqual(duplicates, 1)
@@ -785,21 +783,17 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
         self,
     ) -> None:
         wahoo = _ride("w", source="wahoo")
-        at_limit = canonical_rows(
-            {
-                "recent_activities": [
-                    wahoo,
-                    _ride("g", start="2026-05-04T08:30:00", source="garmin"),
-                ]
-            }
+        at_limit = deduplicated_rows(
+            [
+                wahoo,
+                _ride("g", start="2026-05-04T08:30:00", source="garmin"),
+            ]
         )
-        past_limit = canonical_rows(
-            {
-                "recent_activities": [
-                    wahoo,
-                    _ride("g", start="2026-05-04T08:31:00", source="garmin"),
-                ]
-            }
+        past_limit = deduplicated_rows(
+            [
+                wahoo,
+                _ride("g", start="2026-05-04T08:31:00", source="garmin"),
+            ]
         )
         self.assertEqual(_ids(at_limit[0]), ["w"])
         self.assertEqual(_ids(past_limit[0]), ["w", "g"])
@@ -821,13 +815,11 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
         ]
         for wahoo_fields, garmin_fields, matches in cases:
             with self.subTest(wahoo=wahoo_fields, garmin=garmin_fields):
-                rows, duplicates = canonical_rows(
-                    {
-                        "recent_activities": [
-                            _ride("w", source="wahoo", **wahoo_fields),
-                            _ride("g", source="garmin", **garmin_fields),
-                        ]
-                    }
+                rows, duplicates = deduplicated_rows(
+                    [
+                        _ride("w", source="wahoo", **wahoo_fields),
+                        _ride("g", source="garmin", **garmin_fields),
+                    ]
                 )
                 self.assertEqual(_ids(rows), ["w"] if matches else ["w", "g"])
                 self.assertEqual(duplicates, 1 if matches else 0)
@@ -838,28 +830,24 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
         # Quirk: a Garmin row without a type is treated as cycling from its name
         # ("Morning Ride") and removed; a Garmin Run copy is not matched at all.
         wahoo = _ride("w", source="wahoo")
-        run_copy = canonical_rows(
-            {
-                "recent_activities": [
-                    wahoo,
-                    _ride("g", source="garmin", type="Run"),
-                ]
-            }
+        run_copy = deduplicated_rows(
+            [
+                wahoo,
+                _ride("g", source="garmin", type="Run"),
+            ]
         )
-        name_only = canonical_rows(
-            {
-                "recent_activities": [
-                    wahoo,
-                    {
-                        "id": "g",
-                        "name": "Morning Ride",
-                        "source": "garmin",
-                        "start_date_local": "2026-05-04T08:00:00",
-                        "moving_time": 3600,
-                        "distance": 30000,
-                    },
-                ]
-            }
+        name_only = deduplicated_rows(
+            [
+                wahoo,
+                {
+                    "id": "g",
+                    "name": "Morning Ride",
+                    "source": "garmin",
+                    "start_date_local": "2026-05-04T08:00:00",
+                    "moving_time": 3600,
+                    "distance": 30000,
+                },
+            ]
         )
         self.assertEqual(_ids(run_copy[0]), ["w", "g"])
         self.assertEqual(_ids(name_only[0]), ["w"])
@@ -867,46 +855,38 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
     def test_missing_or_zero_wahoo_distance_keeps_the_garmin_copy(self) -> None:
         for distance in (None, 0):
             with self.subTest(distance=distance):
-                rows, duplicates = canonical_rows(
-                    {
-                        "recent_activities": [
-                            _ride("w", source="wahoo", distance=distance),
-                            _ride("g", source="garmin"),
-                        ]
-                    }
+                rows, duplicates = deduplicated_rows(
+                    [
+                        _ride("w", source="wahoo", distance=distance),
+                        _ride("g", source="garmin"),
+                    ]
                 )
                 self.assertEqual(_ids(rows), ["w", "g"])
                 self.assertEqual(duplicates, 0)
 
     def test_string_garmin_distance_still_matches_for_removal(self) -> None:
         # Quirk: the duplicate matcher parses decimal strings, unlike training totals.
-        rows, duplicates = canonical_rows(
-            {
-                "recent_activities": [
-                    _ride("w", source="wahoo"),
-                    _ride("g", source="garmin", distance="30000"),
-                ]
-            }
+        rows, duplicates = deduplicated_rows(
+            [
+                _ride("w", source="wahoo"),
+                _ride("g", source="garmin", distance="30000"),
+            ]
         )
         self.assertEqual(_ids(rows), ["w"])
         self.assertEqual(duplicates, 1)
 
     def test_garmin_only_and_wahoo_only_pairs_are_not_collapsed(self) -> None:
-        garmin_pair = canonical_rows(
-            {
-                "recent_activities": [
-                    _ride("g1", source="garmin"),
-                    _ride("g2", source="garmin"),
-                ]
-            }
+        garmin_pair = deduplicated_rows(
+            [
+                _ride("g1", source="garmin"),
+                _ride("g2", source="garmin"),
+            ]
         )
-        wahoo_pair = canonical_rows(
-            {
-                "recent_activities": [
-                    _ride("w1", source="wahoo"),
-                    _ride("w2", source="wahoo"),
-                ]
-            }
+        wahoo_pair = deduplicated_rows(
+            [
+                _ride("w1", source="wahoo"),
+                _ride("w2", source="wahoo"),
+            ]
         )
         self.assertEqual((_ids(garmin_pair[0]), garmin_pair[1]), (["g1", "g2"], 0))
         self.assertEqual((_ids(wahoo_pair[0]), wahoo_pair[1]), (["w1", "w2"], 0))
@@ -915,63 +895,32 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
         # Quirk: excluded_duplicates only counts Wahoo/Garmin removals, because the
         # identical-id duplicates are dropped before the count is taken.
         wahoo = _ride("w", source="wahoo")
-        rows, duplicates = canonical_rows({"recent_activities": [wahoo, dict(wahoo)]})
+        rows, duplicates = deduplicated_rows([wahoo, dict(wahoo)])
         self.assertEqual(_ids(rows), ["w"])
         self.assertEqual(duplicates, 0)
 
     def test_numeric_and_string_ids_are_the_same_identity(self) -> None:
-        rows, duplicates = canonical_rows(
-            {"recent_activities": [_ride(5), _ride("5")]}  # type: ignore[arg-type]
+        rows, duplicates = deduplicated_rows(
+            [_ride(5), _ride("5")]  # type: ignore[arg-type]
         )
         self.assertEqual(len(rows), 1)
         self.assertEqual(duplicates, 0)
 
     def test_non_dict_records_are_dropped_and_not_counted(self) -> None:
-        rows, duplicates = canonical_rows(
-            {"recent_activities": ["junk", None, _ride("a")]}
-        )
+        rows, duplicates = deduplicated_rows(["junk", None, _ride("a")])
         self.assertEqual(_ids(rows), ["a"])
         self.assertEqual(duplicates, 0)
 
-    def test_raw_provider_list_takes_precedence_even_when_empty(self) -> None:
-        # Quirk: a list in raw_provider_data wins, even when it is empty.
-        self.assertEqual(
-            canonical_rows(
-                {
-                    "raw_provider_data": {"activities": []},
-                    "recent_activities": [_ride("r")],
-                }
-            ),
-            ([], 0),
-        )
-        rows, _ = canonical_rows(
-            {
-                "raw_provider_data": {"activities": {"not": "a list"}},
-                "recent_activities": [_ride("r")],
-            }
-        )
-        self.assertEqual(_ids(rows), ["r"])
-        rows, _ = canonical_rows(
-            {
-                "raw_provider_data": {"activities": [_ride("raw")]},
-                "recent_activities": [_ride("r")],
-            }
-        )
-        self.assertEqual(_ids(rows), ["raw"])
-
     def test_missing_recent_activities_yield_no_rows(self) -> None:
-        self.assertEqual(canonical_rows({"recent_activities": None}), ([], 0))
-        self.assertEqual(canonical_rows({}), ([], 0))
+        self.assertEqual(deduplicated_rows([]), ([], 0))
 
     def test_output_keeps_input_order_and_first_occurrence(self) -> None:
-        rows, _ = canonical_rows(
-            {
-                "recent_activities": [
-                    _ride("b"),
-                    _ride("a", moving_time=1),
-                    _ride("a", moving_time=2),
-                ]
-            }
+        rows, _ = deduplicated_rows(
+            [
+                _ride("b"),
+                _ride("a", moving_time=1),
+                _ride("a", moving_time=2),
+            ]
         )
         self.assertEqual(_ids(rows), ["b", "a"])
         self.assertEqual(rows[1]["moving_time"], 1)

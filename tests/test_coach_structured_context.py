@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from typing import Any, cast
 from unittest.mock import Mock
+
+from activity_row_support import FixedActivityRows, ReadOnlyManager, StoredCoverage
 
 from backend.coach.context import (
     CoachPerformanceContextReader,
     CoachPlanningContextReader,
     CoachStructuredContextService,
 )
+from backend.planning.compact_activities import ActivityRowSource
+
+# The coverage time is deliberately not the snapshot's own `synced_at`.
+COVERAGE_SYNCED_AT = "2026-09-22T09:30:00+00:00"
 
 
 class CoachStructuredContextServiceTests(unittest.TestCase):
@@ -105,6 +112,11 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
                 self.garmin_payload_service,
                 self.garmin_projection_service,
                 lambda: date(2026, 9, 23),
+                activity_rows=ActivityRowSource(
+                    ReadOnlyManager,
+                    lambda: FixedActivityRows(cast(list[dict[str, Any]], self.snapshot["recent_activities"])),
+                    coverage=lambda: StoredCoverage(COVERAGE_SYNCED_AT),
+                ),
             ),
         )
 
@@ -145,7 +157,17 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         self.assertEqual(
             result["external_calendar"]["trust"], "untrusted_external_text"
         )
-        self.assertEqual(result["activities"]["synced_at"], self.snapshot["synced_at"])
+        self.assertEqual(result["activities"]["synced_at"], COVERAGE_SYNCED_AT)
+        self.assertEqual(
+            result["activities"]["source"]["synced_at"], COVERAGE_SYNCED_AT
+        )
+        self.assertEqual(
+            [
+                row["id"]
+                for row in result["activities"]["recent_activities_by_sport"]["Laufen"]
+            ],
+            ["activity-1"],
+        )
         self.assertNotIn("raw_secret", result["activities"])
         self.assertNotIn("intervals", result)
         self.assertNotIn("garmin", result)

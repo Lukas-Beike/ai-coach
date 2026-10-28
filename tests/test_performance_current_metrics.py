@@ -1,11 +1,17 @@
 import copy
 import unittest
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
+from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_current import CanonicalCurrentInputs
 from backend.performance.current_metrics import (
     PROVIDER_INTERVALS_NAME,
     current_performance_metrics,
+)
+from backend.providers.intervals_wellness_mapping import (
+    map_intervals_athlete_thresholds,
+    map_intervals_wellness,
 )
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
 from backend.providers.wahoo_threshold_mapping import (
@@ -171,16 +177,24 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             snapshot,
             {"weight_kg": 80, "body_fat_pct": 20, "height_cm": 170},
             empty_garmin(),
+            canonical=eftp_canonical(athlete=260, wellness=266),
         )
         self.assertEqual(result["weight_kg"]["value"], 78)
         self.assertEqual(result["body_fat_pct"]["value"], 18)
         self.assertEqual(result["height_cm"]["value"], 180)
         self.assertEqual(result["cycling_ftp_watts"]["value"], 250)
         self.assertEqual(result["cycling_eftp_watts"]["value"], 260)
+        self.assertEqual(
+            result["cycling_eftp_watts"]["source"], PROVIDER_INTERVALS_NAME
+        )
         self.assertEqual(result["run_threshold_watts"]["value"], 280)
         self.assertEqual(result["run_threshold_hr_bpm"]["value"], 165)
+        # Strict canonical eFTP: the snapshot's setting eFTP and sportInfo eFTP are
+        # not read, so without canonical inputs the latest ride activity applies.
+        result = current_performance_metrics(snapshot, {}, empty_garmin())
+        self.assertEqual(result["cycling_eftp_watts"]["value"], 275)
 
-    def test_eftp_uses_mmp_model_and_latest_ride_fallback(self):
+    def test_eftp_follows_the_canonical_chain_then_the_latest_ride_activity(self):
         snapshot = {
             "athlete": {
                 "sport_settings": [
@@ -192,12 +206,28 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
                 {"type": "Ride", "start_date_local": "2026-09-01", "icu_eftp": 290}
             ],
         }
+        chain = {
+            "athlete": eftp_canonical(athlete=309, wellness=266),
+            "wellness": eftp_canonical(wellness=266),
+            "activity": eftp_canonical(),
+            "no canonical inputs": None,
+        }
+        expected = {
+            "athlete": 309,
+            "wellness": 266,
+            "activity": 290,
+            "no canonical inputs": 290,
+        }
+        for name, canonical in chain.items():
+            with self.subTest(name):
+                result = current_performance_metrics(
+                    snapshot, {}, empty_garmin(), canonical=canonical
+                )
+                self.assertEqual(result["cycling_ftp_watts"]["value"], 300)
+                self.assertEqual(result["cycling_eftp_watts"]["value"], expected[name])
+        snapshot["recent_activities"] = []
         result = current_performance_metrics(snapshot, {}, empty_garmin())
-        self.assertEqual(result["cycling_ftp_watts"]["value"], 300)
-        self.assertEqual(result["cycling_eftp_watts"]["value"], 309)
-        snapshot["athlete"]["sport_settings"][0].pop("mmp_model")
-        result = current_performance_metrics(snapshot, {}, empty_garmin())
-        self.assertEqual(result["cycling_eftp_watts"]["value"], 290)
+        self.assertIsNone(result["cycling_eftp_watts"]["value"])
 
     def test_max_hr_activity_fallback_and_sport_aliases(self):
         snapshot = {
@@ -259,6 +289,36 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
 
 
 RETRIEVED = datetime(2026, 10, 12, 8, 0, tzinfo=UTC)
+
+
+def eftp_canonical(*, athlete=None, wellness=None):
+    """Canonical inputs holding ride eFTP observations, mapped by the real mappers."""
+    athlete_eftp = None
+    if athlete is not None:
+        thresholds = map_intervals_athlete_thresholds(
+            {
+                "id": "athlete-1",
+                "sportSettings": [{"types": ["Ride"], "eftp": athlete}],
+            },
+            observed_on=date(2026, 10, 12),
+            retrieved_at=RETRIEVED,
+        )
+        athlete_eftp = next(r for r in thresholds.records if r.kind is MetricKind.EFTP)
+    wellness_eftp = None
+    if wellness is not None:
+        rows = map_intervals_wellness(
+            [
+                {
+                    "id": "2026-10-11",
+                    "sportInfo": [{"types": ["Ride"], "eftp": wellness}],
+                }
+            ],
+            retrieved_at=RETRIEVED,
+        )
+        wellness_eftp = next(r for r in rows.records if r.kind is MetricKind.EFTP)
+    return replace(
+        wahoo_canonical(), athlete_eftp=athlete_eftp, wellness_eftp=wellness_eftp
+    )
 
 
 def wahoo_canonical(*, ftp=None, weight=None):

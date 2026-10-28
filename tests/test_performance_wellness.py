@@ -7,7 +7,6 @@ from backend.performance.wellness import (
     readiness_score_value,
     wellness_average,
     wellness_form_average,
-    wellness_form_value,
 )
 
 
@@ -42,24 +41,23 @@ class WellnessAverageTests(unittest.TestCase):
 
 
 class WellnessFormTests(unittest.TestCase):
-    def test_direct_form_alias_wins_over_ctl_atl_derivation(self):
-        self.assertEqual(wellness_form_value({"tsb": 3, "ctl": 80, "atl": 100}), 3)
-        self.assertEqual(wellness_form_value({"form": "-2,5"}), -2.5)
-        self.assertEqual(
-            wellness_form_value({"freshness": 0, "ctl": 80, "atl": 100}), 0
-        )
-        self.assertEqual(wellness_form_value({"ctl": 80, "atl": 100}), -20)
+    def test_form_average_uses_the_inclusive_window_of_canonical_days(self):
+        form_by_day = {
+            date(2026, 9, 7): 40.0,  # before the window
+            date(2026, 9, 8): -10.0,
+            date(2026, 9, 9): 2.0,
+            date(2026, 9, 10): -4.0,
+            date(2026, 9, 11): 99.0,  # after the end date
+        }
+        self.assertEqual(wellness_form_average(form_by_day, 3, date(2026, 9, 10)), -4)
+        self.assertEqual(wellness_form_average(form_by_day, 1, date(2026, 9, 10)), -4)
 
-    def test_form_average_uses_same_window_and_skips_invalid_rows(self):
-        rows = [
-            {"id": "2026-09-08", "ctl": 80, "atl": 90},
-            {"id": "2026-09-09", "form": 2},
-            {"id": "2026-09-10", "ctl": 60, "atl": 70},
-            {"id": "2026-09-11", "ctl": 100, "atl": 0},
-            {"id": "invalid", "form": 50},
-        ]
-        self.assertEqual(wellness_form_average(rows, 3, date(2026, 9, 10)), -6)
-        self.assertIsNone(wellness_form_average([], 7, date(2026, 9, 10)))
+    def test_form_average_is_unknown_without_days_in_the_window(self):
+        self.assertIsNone(wellness_form_average({}, 7, date(2026, 9, 10)))
+        self.assertIsNone(wellness_form_average(None, 7, date(2026, 9, 10)))
+        self.assertIsNone(
+            wellness_form_average({date(2026, 8, 1): 3.0}, 7, date(2026, 9, 10))
+        )
 
 
 class ReadinessTests(unittest.TestCase):

@@ -138,24 +138,48 @@ The system SHALL read activity rows and sync metadata from one local read snapsh
 - **WHEN** the repository test suite runs
 - **THEN** a guard test fails if any production module outside the backfill and retirement modules references the `activity_detail:` kv record prefix or the legacy detail record reader.
 
-Detailed contract: Activity freshness SHALL remain independent of unrelated performance refresh timestamps. Production activity, detail, report and calendar reads SHALL NOT read `activity_detail:<sha>` kv records; only the backfill and retirement maintenance modules may read them.
+#### Scenario: Activity list freshness from canonical coverage
+- **WHEN** the activity list is read and canonical coverage stores an Intervals.icu activity fetch time
+- **THEN** `snapshot_synced_at` equals that time in the same read snapshot as the rows, independent of the stored snapshot's `synced_at`, of unrelated performance refreshes and of a duplicate deletion.
 
-Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService._read`; `tests/test_activity_read_service.py:test_page_filters_orders_attaches_feedback_and_uses_cursor`, `tests/test_activity_read_service.py:test_page_keeps_activities_with_failed_details_and_names_the_error`, `tests/test_activity_read_service.py:test_activity_refresh_timestamp_is_independent_of_performance_refresh`. `tests/test_activity_detail_kv_guard.py:test_production_code_does_not_touch_kv_detail_records`.
+#### Scenario: No stored coverage
+- **WHEN** no Intervals.icu coverage is stored
+- **THEN** `snapshot_synced_at` is null, the list still renders, and no snapshot timestamp is substituted.
+
+Detailed contract: The sync time reported with the activity list (`snapshot_synced_at`) SHALL be the Intervals.icu activity fetch time of the canonical provider coverage and SHALL be null when no coverage is stored. Activity freshness SHALL remain independent of unrelated performance refresh timestamps. Production activity, detail, report and calendar reads SHALL NOT read `activity_detail:<sha>` kv records; only the backfill and retirement maintenance modules may read them. The key `snapshot_synced_at` keeps its name.
+
+Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService._read`; `tests/test_activity_read_service.py:test_page_filters_orders_attaches_feedback_and_uses_cursor`, `tests/test_activity_read_service.py:test_page_keeps_activities_with_failed_details_and_names_the_error`, `tests/test_activity_read_service.py:test_activity_refresh_timestamp_is_independent_of_performance_refresh`. `tests/test_activity_detail_kv_guard.py:test_production_code_does_not_touch_kv_detail_records`. Missing evidence (planned in this change): tests that `snapshot_synced_at` comes from coverage, is null without coverage and is unchanged by a duplicate deletion; `public/activity-analysis.js:load` consumes the key unchanged (no frontend change planned).
 
 ### Requirement: Explicit duplicate deletion
-The system SHALL delete a remotely stored duplicate only after validating the current detected Wahoo/Garmin duplicate pair and the explicit delete confirmation. The duplicate service SHALL retain the Wahoo activity, delete the selected Garmin copy through Intervals first, then update the local snapshot and canonical deletion state in one transaction and publish the resulting state change. A stale confirmation or remote-delete error SHALL not mutate local data.
+The system SHALL delete a remotely stored duplicate only after validating the current detected Wahoo/Garmin duplicate pair and the explicit delete confirmation. The duplicate service SHALL retain the Wahoo activity, delete the selected Garmin copy through Intervals first, then tombstone the canonical records and session in one local transaction and publish the resulting state change. It SHALL NOT read, rewrite or save the Intervals.icu snapshot.
 
 #### Scenario: Confirmed current duplicate
 - **WHEN** the submitted pair still matches the current duplicate and confirmation is valid
-- **THEN** only the duplicate is remotely deleted and local canonical readers cease serving it after the local commit.
+- **THEN** exactly one Intervals.icu delete request names only the duplicate, and local canonical readers cease serving it after the local commit.
 
 #### Scenario: Stale or rejected delete
-- **WHEN** the submitted pair has changed or the provider delete fails
-- **THEN** no local snapshot deletion or success event occurs.
+- **WHEN** the submitted pair or its confirmation token has changed or the provider delete fails
+- **THEN** no provider delete (for a stale pair), no local deletion and no success event occur.
 
-Detailed contract: This flow does not promise distributed rollback if remote deletion succeeds and a later local write fails.
+#### Scenario: Snapshot untouched by a delete
+- **WHEN** a duplicate is deleted
+- **THEN** no snapshot row is written and the stored Intervals.icu snapshot `synced_at` and the coverage fetch time are unchanged.
 
-Evidence: `backend/activities/duplicates.py:validate_duplicate_delete`, `backend/activities/duplicate_service.py:DuplicateActivityService.delete`; `tests/test_activity_duplicate_service.py:test_stale_confirmation_has_no_side_effects`, `tests/test_activity_duplicate_service.py:test_remote_failure_does_not_mutate_snapshot_or_publish`, `tests/test_activity_duplicate_service.py:test_delete_tombstones_the_canonical_records_in_the_snapshot_transaction`.
+#### Scenario: Deleted copy stays deleted across the next sync
+- **WHEN** a duplicate is deleted while the stored snapshot still carries its activity sections (a row the mapper rejects, or a snapshot stored before the backfill finished) and the next incremental Intervals.icu sync runs
+- **THEN** the merge base leaves out every activity whose canonical record is tombstoned, so the merged payload does not re-add the deleted copy, its record and session stay deleted, no pair is offered again and a repeated confirmation is rejected with a conflict before any provider call. The snapshot itself is still not rewritten by the delete; only the merge base is filtered. An activity that the provider returns in a later fetch is ingested from that fetch as before, and a full-window sync still tombstones activities the provider no longer returns.
+
+#### Scenario: Merged duplicate session
+- **WHEN** the deleted copy's session is a heuristic alias of the kept session
+- **THEN** its record, provider record and session are tombstoned in the same transaction and the kept Wahoo activity stays served.
+
+#### Scenario: Deleted copy was the surviving session
+- **WHEN** the deleted copy's session was the survivor of a heuristic merge and the Wahoo session an alias of it
+- **THEN** in the same transaction the Wahoo session becomes the active survivor (the oldest live alias takes over, any other alias merges into it), the deleted session retains it for feedback, no live session stays merged into a deleted one, and the Wahoo ride's detail lookup, lists and feedback keep resolving. The same repair applies when a provider's activity disappears.
+
+Detailed contract: A stale confirmation or remote-delete error SHALL not mutate local data. This flow does not promise distributed rollback if remote deletion succeeds and a later local write fails. Merging or undoing duplicates, athlete-confirmed sessions and any other remote write are outside this flow.
+
+Evidence: `backend/activities/duplicates.py:validate_duplicate_delete`, `backend/activities/duplicate_service.py:DuplicateActivityService.delete`; `tests/test_activity_duplicate_service.py:test_stale_confirmation_has_no_side_effects`, `tests/test_activity_duplicate_service.py:test_remote_failure_does_not_mutate_snapshot_or_publish`, `tests/test_activity_duplicate_service.py:test_delete_tombstones_the_canonical_records_in_the_snapshot_transaction`, `tests/test_activity_duplicate_service.py:MergedDuplicateDeleteTests.test_confirmed_delete_tombstones_the_merged_duplicate_session`. Missing evidence (planned in this change): tests that no snapshot is read or saved and that the snapshot `synced_at` is unchanged, and restart and backup/restore tests of tombstones and merged state.
 
 ### Requirement: Verified kv detail retirement
 The canonical backfill runner SHALL run a retirement stage after the activity detail backfill. Per kv detail record it SHALL map the record with the legacy mapper, refill canonical lap metrics that are missing, compare the defined fields with the canonical rows, and delete the kv record in the same transaction only when every comparison passes. It SHALL NOT request provider data, and unverifiable records SHALL stay unchanged and be counted.
@@ -189,3 +213,39 @@ The canonical backfill runner SHALL run a retirement stage after the activity de
 - **THEN** the canonical detail sets, stream channels, laps, zone times and analysis payloads are present, and retired kv records are absent from the exported application state.
 
 Evidence: `backend/sync/activity_detail_retirement.py:ActivityDetailRetirement`, `backend/db/activity_detail_store.py:refill_lap_metrics`, `backend/sync/canonical_backfill_assembly.py`; `tests/test_activity_detail_retirement.py:test_proven_record_is_deleted_and_other_keys_are_kept`, `tests/test_activity_detail_retirement.py:test_missing_lap_speed_is_refilled_before_the_record_is_retired`, `tests/test_activity_detail_retirement.py:test_lap_metric_that_differs`, `tests/test_activity_detail_retirement.py:test_failed_batch_rolls_back_refills_and_deletions`, `tests/test_activity_detail_retirement.py:test_restart_resumes_from_the_cursor_and_repeats_nothing`, `tests/test_activity_detail_retirement_upgrade.py:test_released_schemas_upgrade_and_retire_proven_records` (the SQLCipher variant is skipped without SQLCipher), `tests/test_activity_detail_retirement_backup.py:test_restored_backup_serves_the_same_document`, `tests/test_activity_detail_retirement_backup.py:test_privacy_export_holds_the_retired_detail_in_the_canonical_files`. Related existing behavior: `backend/sync/activity_detail_backfill.py:ActivityDetailBackfill`, `backend/sync/canonical_backfill_worker.py`.
+
+### Requirement: Canonical duplicate pair detection
+The system SHALL detect and inspect the newest Wahoo/Garmin duplicate ride pair from canonical active Intervals.icu activity records, keeping the Wahoo-recorded activity and offering the Garmin-recorded copy for deletion, without reading the Intervals.icu snapshot. A pair SHALL contain the newest Intervals.icu activity.
+
+#### Scenario: Current pair
+- **WHEN** an active Wahoo-recorded and an active Garmin-recorded Intervals.icu ride start within 30 minutes and their durations and distances agree within the duplicate tolerances
+- **THEN** inspection returns `canonical_id` and `duplicate_id` (the Intervals.icu activity ids), names, local start, moving time, distance and `snapshot_synced_at`, with Wahoo kept, even when no snapshot exists.
+
+#### Scenario: Newer unrelated or tombstoned activity
+- **WHEN** a newer unrelated Intervals.icu activity exists, a record of the pair is deleted, or an id is missing or equal
+- **THEN** inspection returns no pair.
+
+#### Scenario: Legacy-state selector
+- **WHEN** the canonical read selector still serves the snapshot projection (before the first completed backfill)
+- **THEN** no pair is offered at all: inspection returns none, so a Coach proposal cannot be created and `inspect_activity_duplicates` reports none, and a delete submission is rejected with a conflict before any provider call. This holds even for a copy tombstoned earlier whose record a later sync revived from the unchanged snapshot, and a pair that exists only in the snapshot is never offered. Once the tables serve reads, inspection and the delete validation read only the canonical tables, so a tombstoned copy is not offered again and a repeated confirmation is rejected with a conflict. Lists and reports served from the snapshot projection may still show a deleted copy until the backfill completes.
+
+#### Scenario: Confirmation token follows the records
+- **WHEN** either record of the pair is fetched again after the proposal was created
+- **THEN** `snapshot_synced_at` (the newest canonical fetch time of the two records) differs and the submitted confirmation is rejected with a conflict before any provider call.
+
+Detailed contract: The manifest key `snapshot_synced_at` is kept for contract stability; its value is the newest canonical fetch time of the pair. Persisted session links (`merged_into`) are not consulted for detection.
+
+Evidence: `backend/activities/duplicate_inspection.py:DuplicateInspector.latest`, `backend/activities/canonical_sessions.py` (Wahoo/Garmin ride rule), `tests/test_sync_snapshot_storage.py:LegacyStateDuplicateTests`; `tests/test_activity_duplicates.py:WahooGarminDuplicateTests` (raw-row rule being ported), `tests/test_coach_tool_coverage.py:test_duplicate_inspection_returns_preview_without_deleting_provider_data`. Missing evidence (planned in this change): detection from canonical records with an absent snapshot, token change on refetch, and parity of sport and duration handling.
+
+### Requirement: Garmin status compares against canonical Intervals rows
+The system SHALL compute the Garmin status counts `activities` and `duplicate_activities_skipped` by comparing the raw Garmin payload activities with the canonical Intervals.icu activity rows only.
+
+#### Scenario: Canonical source
+- **WHEN** the Garmin public state is built
+- **THEN** the Intervals.icu rows come from the canonical row port and the stored snapshot is not read for activities.
+
+#### Scenario: No Intervals rows
+- **WHEN** the canonical row port holds no Intervals.icu activities
+- **THEN** no Garmin activity is skipped as a duplicate.
+
+Evidence: `backend/sync/garmin_projection_service.py:GarminProjectionService._canonical_read`, `backend/activities/duplicates.py:filter_garmin_activities`; `tests/test_garmin_canonical_reads.py`, `tests/test_sync_garmin_projection_service.py:test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors`. Missing evidence (planned in this change): construction without canonical sources is rejected and no snapshot activity fallback remains.

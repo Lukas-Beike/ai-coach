@@ -148,7 +148,6 @@ SOURCE_LABEL_SCOPES = (
 
 _SYNC_WRITER = "writer: persists or ingests the raw provider snapshot"
 _BACKUP = "export: backup/privacy export serializes the stored raw snapshot"
-_DUPLICATE = "duplicate-delete: duplicate removal edits the raw snapshot"
 _SYNC_STATUS = "sync-status: reads synced_at/freshness, not metric values"
 _AWAITING_PERFORMANCE_KINDS = (
     "awaiting-kind: legacy builders still take the snapshot; needs metric kinds for "
@@ -170,11 +169,8 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/sync/snapshot_storage.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/state.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/canonical_projection_assembly.py"): _SYNC_WRITER,
-    (RULE_SNAPSHOT_KEY, "backend/sync/garmin_projection_service.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/backup/export.py"): _BACKUP,
     (RULE_SNAPSHOT_KEY, "backend/privacy.py"): _BACKUP,
-    (RULE_SNAPSHOT_KEY, "backend/activities/duplicate_inspection.py"): _DUPLICATE,
-    (RULE_SNAPSHOT_KEY, "backend/activities/duplicate_service.py"): _DUPLICATE,
     (RULE_SNAPSHOT_KEY, "backend/activities/read_service.py"): _SYNC_STATUS,
     (RULE_SOURCE_LABEL, "backend/athlete/equipment.py"): _LEGACY_LABEL,
     (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,

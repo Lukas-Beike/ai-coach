@@ -26,12 +26,6 @@ from backend.providers.intervals_activity_fields import (
 METHOD = "local-training-report-v1"
 
 
-def canonical_rows(snapshot: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
-    raw = (snapshot.get("raw_provider_data") or {}).get("activities")
-    rows = raw if isinstance(raw, list) else snapshot.get("recent_activities", [])
-    return deduplicated_rows(rows or [])
-
-
 def deduplicated_rows(rows: Sequence[Any]) -> tuple[list[dict[str, Any]], int]:
     """Drop duplicate rows and Garmin rows that a matching Wahoo row duplicates.
 
@@ -182,7 +176,6 @@ def zone_distribution(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def training_report(
-    snapshot: dict[str, Any] | None,
     *,
     start: date,
     days: int,
@@ -192,18 +185,14 @@ def training_report(
     checkins: list[dict[str, Any]] | None = None,
     activity_feedback: list[dict[str, Any]] | None = None,
     timezone: str = "UTC",
-    activity_rows: Sequence[Any] | None = None,
+    activity_rows: Sequence[Any],
+    observed_at: str | None = None,
 ) -> dict[str, Any]:
-    """Build the report; ``activity_rows`` are the raw rows of the activity reader.
+    """Build the report from the raw rows of the activity reader.
 
-    Without them the rows come from the snapshot, as before.
+    ``observed_at`` is the sync time of those rows (canonical coverage).
     """
-    snapshot = snapshot or {}
-    rows, duplicates = (
-        canonical_rows(snapshot)
-        if activity_rows is None
-        else deduplicated_rows(activity_rows)
-    )
+    rows, duplicates = deduplicated_rows(activity_rows)
     end = start + timedelta(days=days - 1)
     effective_end = min(today, end)
     eligible = [row for row in rows if sport == "all" or str(row.get("type")) == sport]
@@ -237,7 +226,7 @@ def training_report(
     return {
         "method": METHOD,
         "source": "Intervals.icu + local planning/check-ins",
-        "observed_at": snapshot.get("synced_at"),
+        "observed_at": observed_at,
         "start": start.isoformat(),
         "end": end.isoformat(),
         "days": days,

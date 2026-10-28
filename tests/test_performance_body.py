@@ -3,6 +3,7 @@ import unittest
 from datetime import date
 
 from backend.performance.body import body_history
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.garmin_weight import (
     garmin_body_fat_daily_records,
     garmin_body_fat_records,
@@ -54,16 +55,19 @@ class BodyHistoryTests(unittest.TestCase):
         )
 
     def test_ftp_sources_and_weight_age_limit(self):
+        # The eFTP of a wellness day is a canonical observation; the snapshot's
+        # sportInfo is not read (#1412).
         snapshot = {
             "synced_at": "intervals-sync",
             "recent_wellness": [
                 {
                     "id": "2026-10-01",
-                    "sportInfo": [{"types": ["Ride"], "mmp_model": {"ftp": 250}}],
+                    "sportInfo": [{"types": ["Ride"], "mmp_model": {"ftp": 999}}],
                 }
             ],
             "recent_activities": [],
         }
+        eftp_by_day = {date(2026, 10, 1): 250.0}
         garmin = {
             "weight": [{"date": "2026-09-29", "weightKg": 70}],
             "performance_history": [
@@ -75,7 +79,7 @@ class BodyHistoryTests(unittest.TestCase):
                 "cycling_ftp": {"fetched_at": "ftp-fetch"},
             },
         }
-        result = body_history(snapshot, garmin, TODAY)
+        result = body_history(snapshot, garmin, TODAY, eftp_by_day=eftp_by_day)
         garmin_series = _series(result, "12w", "cycling_w_per_kg", "Garmin Connect")[
             "points"
         ]
@@ -217,17 +221,15 @@ class BodyHistoryTests(unittest.TestCase):
             "recent_wellness": [
                 {"id": "2026-10-05", "weight": 70},
                 {"id": "2026-10-06", "weight": 70},
-                {
-                    "id": "2026-10-05",
-                    "sportInfo": [{"types": ["Ride"], "mmp_model": {"ftp": 280}}],
-                },
-                {
-                    "id": "2026-10-06",
-                    "sportInfo": [{"types": ["Ride"], "mmp_model": {"ftp": 300}}],
-                },
             ]
         }
-        result = analysis_history(snapshot, {}, TODAY)
+        canonical = CanonicalPerformanceInputs(
+            wellness_day=None,
+            ctl=None,
+            atl=None,
+            eftp_by_day={date(2026, 10, 5): 280.0, date(2026, 10, 6): 300.0},
+        )
+        result = analysis_history(snapshot, {}, TODAY, canonical=canonical)
         self.assertIn("body", result)
         series = _series(result["body"], "12w", "cycling_w_per_kg", "Intervals.icu")
         self.assertEqual(len(series["weekly"]), 12)

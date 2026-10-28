@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
@@ -63,6 +64,24 @@ def _activities_and_wellness(
     return activities, wellness_rows
 
 
+def _canonical_day_series(
+    canonical: CanonicalPerformanceInputs | None,
+) -> dict[str, Mapping[date, float] | None]:
+    """The canonical eFTP and form day series; both absent without canonical inputs."""
+    if canonical is None:
+        return {"eftp_by_day": None, "form_by_day": None}
+    return {"eftp_by_day": canonical.eftp_by_day, "form_by_day": canonical.form_by_day}
+
+
+def _activity_rows(canonical: CanonicalPerformanceInputs | None) -> Sequence[Any]:
+    """The canonical activity rows, none without canonical inputs."""
+    return (
+        ()
+        if canonical is None or canonical.activity_rows is None
+        else canonical.activity_rows
+    )
+
+
 def _unavailable_context(
     garmin: dict[str, Any],
     profile: dict[str, Any],
@@ -83,7 +102,10 @@ def _unavailable_context(
             canonical=None if canonical is None else canonical.recovery,
         ),
         "training_focus": training_focus(
-            None, garmin, today, str(profile.get("timezone") or "UTC")
+            garmin,
+            today,
+            str(profile.get("timezone") or "UTC"),
+            activity_rows=_activity_rows(canonical),
         ),
     }
     load_projection = garmin_projection.garmin_training_load_projection(garmin, today)
@@ -175,6 +197,7 @@ def current_performance_context(
         garmin_history=None
         if canonical is None or canonical.garmin is None
         else canonical.garmin.performance_history,
+        **_canonical_day_series(canonical),
     )
     activity_performance = activity_validation.activity_performance_validation(
         activities, metrics, comparisons
@@ -192,11 +215,10 @@ def current_performance_context(
             garmin, today, None if canonical is None else canonical.garmin
         ),
         "training_focus": training_focus(
-            snapshot,
             garmin,
             today,
             str(profile.get("timezone") or "UTC"),
-            activity_rows=None if canonical is None else canonical.activity_rows,
+            activity_rows=_activity_rows(canonical),
         ),
         "source": "Letzter gespeicherter Intervals.icu-Snapshot",
         "as_of": snapshot.get("synced_at"),
