@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
+import threading
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -12,6 +14,7 @@ from urllib.error import HTTPError
 
 from backend.config import load_config
 from backend.errors import AppError
+from backend.nutrition.food_database import FoodDatabaseService
 from backend.providers.yazio import YazioClient, project_product
 
 PRODUCT_ID = "11111111-2222-3333-4444-555555555555"
@@ -87,6 +90,176 @@ class Script:
             for r in self.requests
             if r.full_url.endswith("/oauth/token")
         ]
+
+
+class YazioConnectionTests(unittest.TestCase):
+    def test_passive_status_check_and_credential_change(self):
+        holder = {"config": config()}
+        script = Script(tokens=[token()])
+        client = YazioClient(lambda: holder["config"], opener=script)
+        self.assertEqual(client.connection_status()["status"], "unchecked")
+        self.assertEqual(script.requests, [])
+        result = client.check_connection()
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["checked_at"])
+        self.assertEqual(len(script.requests), 1)
+        self.assertEqual(client.connection_status(), result)
+        holder["config"] = config(yazio_password="replacement")
+        self.assertEqual(client.connection_status()["status"], "unchecked")
+        holder["config"] = config(yazio_password="")
+        self.assertEqual(client.check_connection()["status"], "not_configured")
+        self.assertEqual(len(script.requests), 1)
+
+    def test_check_uses_password_grant_and_restart_is_unchecked(self):
+        current = config()
+        script = Script(tokens=[token(), token(access_token="new")])
+        client = YazioClient(lambda: current, opener=script)
+        self.assertEqual(client.check_connection()["status"], "success")
+        self.assertEqual(client.check_connection()["status"], "success")
+        self.assertEqual(len(script.requests), 2)
+        self.assertEqual(script.bodies()[1]["grant_type"], "password")
+        self.assertEqual(
+            YazioClient(lambda: current, opener=script).connection_status()["status"],
+            "unchecked",
+        )
+
+    def test_transient_check_failures_preserve_tokens_for_lookup(self):
+        for failed in (failure(500), failure(429), {}):
+            with self.subTest(failure=failed):
+                current = config()
+                script = Script(tokens=[token(), failed], api=[[hit()]])
+                client = YazioClient(
+                    lambda current=current: current, opener=script, clock=lambda: 100
+                )
+                self.assertEqual(client.check_connection()["status"], "success")
+                result = client.check_connection()
+                self.assertIn(result["status"], ("unavailable", "rate_limited"))
+                self.assertEqual(client._access_token, "access-1")
+                self.assertEqual(client._refresh_token, "refresh-1")
+                self.assertEqual(client._expires_at, 3700)
+                if result["status"] != "rate_limited":
+                    self.assertEqual(len(client.search("skyr")), 1)
+                    self.assertEqual(len(script.bodies()), 2)
+
+    def test_password_rejection_does_not_succeed_with_retained_refresh(self):
+        current = config()
+        script = Script(tokens=[token(), failure(401)])
+        client = YazioClient(lambda: current, opener=script, clock=lambda: 100)
+        self.assertEqual(client.check_connection()["status"], "success")
+        self.assertEqual(client.check_connection()["status"], "auth_failed")
+        self.assertEqual(client.check_connection()["status"], "auth_failed")
+        self.assertEqual(
+            [body["grant_type"] for body in script.bodies()], ["password", "password"]
+        )
+
+    def test_rejected_check_preserves_previous_token_for_lookup(self):
+        for code in (400, 401, 403):
+            with self.subTest(code=code):
+                current = config()
+                script = Script(tokens=[token(), failure(code)], api=[[hit()]])
+                client = YazioClient(
+                    lambda current=current: current, opener=script, clock=lambda: 100
+                )
+                self.assertEqual(client.check_connection()["status"], "success")
+                self.assertEqual(client.check_connection()["status"], "auth_failed")
+                self.assertEqual(client.check_connection()["status"], "auth_failed")
+                self.assertEqual(len(client.search("skyr")), 1)
+                self.assertEqual(
+                    script.requests[-1].get_header("Authorization"), "Bearer access-1"
+                )
+                self.assertEqual(len(script.bodies()), 2)
+
+    def test_rejected_inflight_check_does_not_restore_replaced_identity(self):
+        holder = {"config": config()}
+        entered, release = threading.Event(), threading.Event()
+        script = Script(tokens=[token()])
+
+        def opener(request, timeout):
+            if not script.requests:
+                return script(request, timeout)
+            entered.set()
+            self.assertTrue(release.wait(5))
+            raise failure(401)
+
+        client = YazioClient(lambda: holder["config"], opener=opener)
+        self.assertEqual(client.check_connection()["status"], "success")
+        results = []
+        thread = threading.Thread(
+            target=lambda: results.append(client.check_connection())
+        )
+        thread.start()
+        self.assertTrue(entered.wait(5))
+        holder["config"] = config(yazio_password="replacement")
+        self.assertEqual(client.connection_status()["status"], "unchecked")
+        holder["config"] = config()
+        self.assertEqual(client.connection_status()["status"], "unchecked")
+        release.set()
+        thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results[0]["status"], "unchecked")
+        self.assertEqual((client._access_token, client._refresh_token), ("", ""))
+
+    def test_rejected_check_preserves_token_after_unrelated_config_change(self):
+        holder = {"config": config()}
+        script = Script(tokens=[token()], api=[[hit()]])
+
+        def opener(request, timeout):
+            if not script.requests:
+                return script(request, timeout)
+            if request.full_url.endswith("/oauth/token"):
+                holder["config"] = config(yazio_country="FR")
+                raise failure(401)
+            return script(request, timeout)
+
+        client = YazioClient(lambda: holder["config"], opener=opener, clock=lambda: 100)
+        self.assertEqual(client.check_connection()["status"], "success")
+        self.assertEqual(client.check_connection()["status"], "unchecked")
+        self.assertEqual(len(client.search("skyr")), 1)
+        self.assertEqual(
+            script.requests[-1].get_header("Authorization"), "Bearer access-1"
+        )
+
+    def test_changed_then_restored_credentials_invalidate_previous_result(self):
+        holder = {"config": config()}
+        client = YazioClient(lambda: holder["config"], opener=Script(tokens=[token()]))
+        self.assertEqual(client.check_connection()["status"], "success")
+        holder["config"] = config(yazio_password="replacement")
+        holder["config"] = config()
+        self.assertEqual(client.connection_status()["status"], "unchecked")
+
+    def test_rejection_and_backoff_are_safe(self):
+        current = config()
+        script = Script(tokens=[failure(401)])
+        client = YazioClient(lambda: current, opener=script, clock=lambda: 100)
+        self.assertEqual(client.check_connection()["status"], "auth_failed")
+        self.assertEqual(client.check_connection()["status"], "auth_failed")
+        self.assertEqual(len(script.requests), 1)
+        self.assertTrue(
+            all(secret not in str(client.connection_status()) for secret in SECRETS)
+        )
+
+    def test_inflight_result_is_discarded_after_credential_replacement(self):
+        holder = {"config": config()}
+        entered, release = threading.Event(), threading.Event()
+
+        def opener(request, timeout):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return reply(token())
+
+        client = YazioClient(lambda: holder["config"], opener=opener)
+        results = []
+        thread = threading.Thread(
+            target=lambda: results.append(client.check_connection())
+        )
+        thread.start()
+        self.assertTrue(entered.wait(5))
+        holder["config"] = config(yazio_password="replacement")
+        release.set()
+        thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results[0]["status"], "unchecked")
+        self.assertEqual(client.connection_status()["status"], "unchecked")
 
 
 class YazioProjectionTests(unittest.TestCase):
@@ -278,6 +451,46 @@ class YazioClientTests(unittest.TestCase):
                 self.assertEqual(raised.exception.reason, reason)
                 for secret in (*SECRETS, "Skyr", "access-1"):
                     self.assertNotIn(secret, raised.exception.message)
+
+    def test_recognized_version_block_is_safe_and_distinct(self):
+        blocked = HTTPError(
+            "https://yzapi.yazio.com/",
+            403,
+            "forbidden",
+            {},
+            io.BytesIO(b'{"error":"version_blocked","detail":"synthetic-secret"}'),
+        )
+        client = self.client(Script(tokens=[token()], api=[blocked]))
+        with self.assertRaises(AppError) as raised:
+            client.search("Skyr")
+        self.assertEqual(raised.exception.reason, "food_database_version_blocked")
+        self.assertNotIn("synthetic-secret", raised.exception.message)
+
+    def test_truncated_forbidden_response_is_sanitized(self):
+        class BrokenBody(io.BytesIO):
+            def read(self, size=-1):
+                raise http.client.IncompleteRead(b"synthetic-secret")
+
+        blocked = HTTPError(
+            "https://yzapi.yazio.com/", 403, "forbidden", {}, BrokenBody()
+        )
+        client = self.client(Script(tokens=[token()], api=[blocked]))
+        with self.assertRaises(AppError) as raised:
+            client.search("Skyr")
+        self.assertEqual(raised.exception.reason, "food_database_unavailable")
+        self.assertNotIn("synthetic-secret", raised.exception.message)
+
+        blocked = HTTPError(
+            "https://yzapi.yazio.com/", 403, "forbidden", {}, BrokenBody()
+        )
+        client = self.client(Script(tokens=[token()], api=[blocked]))
+        off = Mock()
+        off.search.return_value = []
+        result = FoodDatabaseService(off=off, yazio=client).lookup(
+            {"query": "Haferflocken"}
+        )
+        self.assertTrue(result["foods"])
+        self.assertIn("Onlinequelle", result["notice"])
 
     def test_failed_refresh_during_an_outage_keeps_the_token_and_does_not_log_in(self):
         clock = Mock(return_value=0.0)

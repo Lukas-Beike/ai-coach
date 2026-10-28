@@ -130,6 +130,20 @@ function frontend({ eventSource = false } = {}) {
 
 const event = (type, payload = {}, lastEventId = "") => ({ type, data: JSON.stringify(payload), lastEventId });
 
+test("sync status refreshes Yazio only while the connections panel is open", () => {
+  const app = frontend();
+  const panel = { open: true };
+  const originalSelector = app.context.$;
+  app.context.$ = (selector) => selector === 'details[data-more-segment-panel="connections"]' ? panel : originalSelector(selector);
+  let checks = 0;
+  app.context.loadYazioStatus = async () => { checks += 1; };
+  app.context.handleSyncStatus({ running: false });
+  assert.equal(checks, 1);
+  panel.open = false;
+  app.context.handleSyncStatus({ running: false });
+  assert.equal(checks, 1);
+});
+
 test("reloads requested during a load run as one follow-up", async () => {
   const app = frontend();
   const first = app.context.requestBackgroundLoad(BOOTSTRAP, ["plan"]);

@@ -1377,6 +1377,8 @@ Upgrade von Schema v9 oder v10 legt die leere Tabelle an und erhält alle Daten.
 
 #### Yazio-Produktsuche (optional)
 
+Unter **Mehr > Anbindungen** prüft „Verbindung prüfen“ die Anmeldung ausdrücklich. Der Status zeigt das letzte Prüfergebnis und seine Zeit; nach Neustart oder Änderung der Zugangsdaten ist eine neue Prüfung nötig. Abgelehnte Anmeldungen können Konto- oder App-Zugangsdaten betreffen; die genaue Ursache ist nicht immer bekannt. Bei Begrenzung oder Ausfall später erneut versuchen. Das Laden des Status stellt keine Anfrage an Yazio.
+
 Mit eingerichteten Yazio-Zugangsdaten (`YAZIO_*` oder **Mehr > Anbindungen >
 Zugangsdaten**) gilt für Produktsuchen ohne ausdrückliche Quelle diese
 Reihenfolge: eigene gespeicherte Produkte, lokale Datenbank (Spiegel), Yazio,
