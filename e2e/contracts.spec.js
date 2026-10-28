@@ -30,8 +30,8 @@ async function ready(page) {
     state.data.messages = [];
     renderMessages([]);
   });
+  await expect.poll(() => page.evaluate(() => state.chatStatusPollInFlight === null)).toBe(true);
   await page.evaluate(async () => {
-    await state.chatStatusPollInFlight?.catch(() => {});
     await state.loadPromise?.catch(() => {});
     state.pendingLoads.clear();
   });

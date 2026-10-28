@@ -176,6 +176,19 @@ class LookupChainTests(unittest.TestCase):
         self.assertEqual(result["foods"][0]["data_origin"], "local_database_stale")
         self.assertIn("Onlinequelle", result["notice"])
 
+    def test_fresh_legacy_yazio_fallback_does_not_retry_each_scan(self):
+        legacy = {**yazio_food(), "barcode": BARCODE}
+        for key in ("sugar_g", "fiber_g", "salt_g"):
+            del legacy["per_100"][key]
+        self.mirror.store([legacy])
+        self.yazio.configured = False
+        self.off.error = UNAVAILABLE
+        first = self.service.lookup({"barcode": BARCODE})["foods"][0]
+        second = self.service.lookup({"barcode": BARCODE})["foods"][0]
+        self.assertEqual(first["id"], f"yazio:{YAZIO_ID}")
+        self.assertEqual(second["data_origin"], "local_database")
+        self.assertEqual(self.off.calls, [("product", BARCODE)])
+
     def test_fresh_entry_of_another_source_beats_a_newer_stale_one(self):
         self.mirror.store([off_food()])
         self.now = datetime(2027, 1, 20, tzinfo=UTC)

@@ -9,7 +9,10 @@ import difflib
 import json
 import math
 import re
+import threading
+import time
 import unicodedata
+from collections import OrderedDict
 from collections.abc import Callable
 from functools import lru_cache
 from itertools import accumulate
@@ -306,6 +309,8 @@ class FoodDatabaseService:
         self._off = off or OpenFoodFactsClient()
         self._mirror = mirror
         self._yazio = yazio
+        self._legacy_retry_after: OrderedDict[str, float] = OrderedDict()
+        self._legacy_retry_lock = threading.Lock()
 
     @property
     def yazio_configured(self) -> bool:
@@ -427,6 +432,18 @@ class FoodDatabaseService:
             )
         ):
             return fresh, LOCAL_DATABASE, False
+        legacy_fresh = next(
+            (
+                e
+                for e in stored
+                if self._mirror and self._mirror.is_fresh(e) and _usable(e)
+            ),
+            None,
+        )
+        with self._legacy_retry_lock:
+            retry_after = self._legacy_retry_after.get(barcode, 0)
+        if legacy_fresh and time.monotonic() < retry_after:
+            return legacy_fresh, LOCAL_DATABASE, False
         food, failed = self._yazio_barcode(barcode)
         if food is not None:
             return food, LIVE, False
@@ -436,8 +453,22 @@ class FoodDatabaseService:
             usable = next((entry for entry in stored if _usable(entry)), None)
             if usable is None:
                 raise
+            if legacy_fresh:
+                self._defer_legacy_retry(barcode)
+                return legacy_fresh, LOCAL_DATABASE, failed
             return usable, LOCAL_DATABASE_STALE, failed
+        if origin == LOCAL_DATABASE_STALE and legacy_fresh:
+            self._defer_legacy_retry(barcode)
+            return legacy_fresh, LOCAL_DATABASE, failed
         return food, origin, failed
+
+    def _defer_legacy_retry(self, barcode: str) -> None:
+        # Do not rewrite the provider fetch time after a failed refresh.
+        with self._legacy_retry_lock:
+            self._legacy_retry_after[barcode] = time.monotonic() + 900
+            self._legacy_retry_after.move_to_end(barcode)
+            while len(self._legacy_retry_after) > 256:
+                self._legacy_retry_after.popitem(last=False)
 
     @staticmethod
     def _labelled(foods: list[dict[str, Any]], origin: str) -> list[dict[str, Any]]:
