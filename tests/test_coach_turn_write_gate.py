@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import unittest
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
@@ -338,6 +339,7 @@ class ChokePointTests(unittest.TestCase):
                 default_max_output_tokens=6000,
                 long_plan_max_output_tokens=32000,
             ),
+            threading.RLock(),
         )
 
     @staticmethod

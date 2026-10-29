@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 import unittest
 from contextlib import contextmanager
 
@@ -90,6 +91,7 @@ class AthleteContextServiceTests(unittest.TestCase):
             _Manager(self.db),
             ProfileRepository(self.key_values),
             self.key_values,
+            mutation_coordinator=threading.RLock(),
             on_location_changed=lambda *args, **kwargs: None,
         )
         self._new_ids = iter(("tombstone-1", "tombstone-2", "tombstone-3"))

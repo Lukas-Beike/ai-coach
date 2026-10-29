@@ -56,6 +56,7 @@ class AthleteDataAssembly:
     @dataclass(frozen=True)
     class Inputs:
         database_manager: Callable[[], Any]
+        profile_mutation_coordinator: Any
         repositories: AthleteRepositories
         runtime: AthleteRuntime
 
@@ -67,6 +68,7 @@ class AthleteDataAssembly:
         repositories = dependencies.repositories
         runtime = dependencies.runtime
         self._database_manager = dependencies.database_manager
+        self._profile_mutation_coordinator = dependencies.profile_mutation_coordinator
         self._activity_feedback_repository = repositories.activity_feedback
         self._checkin_repository = repositories.checkin
         self._profile_repository = repositories.profile
@@ -153,6 +155,7 @@ class AthleteDataAssembly:
             self._profile_repository,
             self._key_value_repository,
             on_location_changed=invalidate_for_location_change,
+            mutation_coordinator=self._profile_mutation_coordinator,
         )
 
     def context(self) -> AthleteContextService:

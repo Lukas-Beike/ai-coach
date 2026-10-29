@@ -200,6 +200,7 @@ class HttpAthleteServices:
     equipment: Callable[[], Any] | None = None
     activity_feedback: Callable[[], Any] | None = None
     zones: Callable[[], Any] | None = None
+    body_export: Callable[[dict[str, str], str | None, float], str] | None = None
 
 
 @dataclass(frozen=True)
@@ -574,6 +575,7 @@ class HttpApiAssembly:
             profile_service,
             database_lock(),
             athlete.zones,
+            athlete.body_export,
         )
         self.planning_commands_post_routes = PlanningCommandsPostRoutes(
             coach_planning_command_service,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import unittest
 from unittest.mock import MagicMock, Mock
 
@@ -34,6 +35,7 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         today = Mock(name="local_date")
         assembly = AthleteDataAssembly(
             dependencies=AthleteDataAssembly.Inputs(
+                profile_mutation_coordinator=threading.RLock(),
                 database_manager=lambda: manager,
                 repositories=AthleteRepositories(
                     activity_feedback=repositories[0],
@@ -86,6 +88,7 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         reader = Mock(latest_snapshot=Mock(return_value=snapshot))
         assembly = AthleteDataAssembly(
             dependencies=AthleteDataAssembly.Inputs(
+                profile_mutation_coordinator=threading.RLock(),
                 database_manager=lambda: manager,
                 repositories=AthleteRepositories(
                     activity_feedback=Mock(),

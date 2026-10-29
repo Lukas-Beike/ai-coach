@@ -12,6 +12,8 @@ class AthletePutRoutesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.context = Mock()
         self.profile = Mock()
+        self.profile.mutation_coordinator = RLock()
+        self.context.profile_service = self.profile
         self.context_factory = Mock(return_value=self.context)
         self.profile_factory = Mock(return_value=self.profile)
         self.handler = Mock()
@@ -106,6 +108,8 @@ class AthletePutRoutesTests(unittest.TestCase):
 
     def test_service_factories_are_resolved_per_request(self) -> None:
         first_context, second_context = Mock(), Mock()
+        first_context.profile_service = self.profile
+        second_context.profile_service = self.profile
         first_result, second_result = {"id": "first"}, {"id": "second"}
         first_context.save.return_value = first_result
         second_context.save.return_value = second_result

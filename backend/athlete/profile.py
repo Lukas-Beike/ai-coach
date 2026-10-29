@@ -82,7 +82,9 @@ class ProfileService:
         key_value_repository: Any,
         *,
         on_location_changed: Callable[..., Any],
+        mutation_coordinator: Any,
     ):
+        self.mutation_coordinator = mutation_coordinator
         self._manager = manager
         self._profile_repository = profile_repository
         self._key_value_repository = key_value_repository
@@ -98,6 +100,15 @@ class ProfileService:
     def get(self) -> dict[str, str]:
         with self._manager.reader() as db:
             return self.get_from_db(db)
+
+    def revision(self) -> str | None:
+        """Identify the latest committed profile history entry for export ordering."""
+        with self._manager.reader() as db:
+            row = db.execute(
+                "SELECT id FROM change_history WHERE entity_type=? AND entity_id=? ORDER BY rowid DESC LIMIT 1",
+                ("profile", "profile"),
+            ).fetchone()
+            return str(row["id"]) if row else None
 
     def save_in_transaction(
         self,
@@ -146,13 +157,13 @@ class ProfileService:
     def save(self, profile: dict[str, Any]) -> dict[str, str]:
         """Replace the whole profile; callers must send every field they keep."""
         normalized = normalize_profile(profile, validate_timezone=True)
-        with self._manager.unit_of_work() as db:
+        with self.mutation_coordinator, self._manager.unit_of_work() as db:
             return self.save_in_transaction(normalized, db, already_normalized=True)
 
     def patch(self, changes: dict[str, Any]) -> dict[str, str]:
         """Apply only the submitted fields onto the profile stored in this transaction."""
         if not isinstance(changes, dict):
             raise AppError(400, "Die Profiländerung muss ein Objekt sein.")
-        with self._manager.unit_of_work() as db:
+        with self.mutation_coordinator, self._manager.unit_of_work() as db:
             current = self.get_from_db(db)
             return self.save_in_transaction({**current, **changes}, db)

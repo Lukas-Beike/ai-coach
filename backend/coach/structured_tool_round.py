@@ -26,6 +26,7 @@ from backend.coach.structured_response import CoachStructuredResponseService
 from backend.coach.tool_call_metadata import structured_tool_call_metadata
 from backend.coach.tool_execution_service import (
     COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
+    PROFILE_MUTATING_COACH_TOOLS,
     CoachStructuredToolExecutionService,
 )
 from backend.coach.tool_failures import CoachStructuredToolFailureService
@@ -155,7 +156,9 @@ class CoachStructuredToolRoundService:
         response: CoachStructuredResponseService,
         write_gate: CoachWriteGateService,
         limits: CoachStructuredToolRoundLimits,
+        profile_mutation_coordinator: Any,
     ) -> None:
+        self._profile_mutation_coordinator = profile_mutation_coordinator
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._replay = replay
@@ -274,6 +277,9 @@ class CoachStructuredToolRoundService:
             *COACH_EXTERNAL_FOOD_LOOKUP_TOOLS,
         }
         with (
+            self._profile_mutation_coordinator
+            if name in PROFILE_MUTATING_COACH_TOOLS
+            else nullcontext(),
             self._database_lock if local_transaction else nullcontext(),
             self._database_manager().unit_of_work()
             if local_transaction

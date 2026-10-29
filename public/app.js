@@ -78,6 +78,7 @@ $("#garmin-disconnect").addEventListener("click", disconnectGarmin);
 $("#garmin-metric-export-toggle").addEventListener("click", (event) => toggleMetricExport(event.currentTarget));
 $("#garminFullResyncButton").addEventListener("click", () => fullResync(providerIds().garmin));
 $("#profileForm").addEventListener("submit", saveProfile);
+$("#retryBodyGarmin").addEventListener("click", retryBodyGarmin);
 $("#profileForm").addEventListener("input", () => { state.profileDirty = true; setDirtyIndicator("profileDirtyIndicator", true); });
 $("#modelSelect").addEventListener("change", saveModel);
 $("#serviceTierSelect").addEventListener("change", saveServiceTier);

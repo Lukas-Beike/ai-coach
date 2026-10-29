@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -55,6 +56,7 @@ class CoachDialogueReadServiceTests(unittest.TestCase):
             self.database_manager,
             ProfileRepository(self.key_values),
             self.key_values,
+            mutation_coordinator=threading.RLock(),
             on_location_changed=lambda *args, **kwargs: None,
         )
 

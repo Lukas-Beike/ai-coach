@@ -1,3 +1,5 @@
+import threading
+
 """Privacy export format v2 and deletion of canonical provider data (schema v6)."""
 
 import json
@@ -598,6 +600,7 @@ class PrivacyDeleteProviderTests(ProviderDataFixture):
         database = _Manager(self.db)
         return PrivacyDeleteService(
             PrivacyDeleteDependencies(
+                profile_mutation_coordinator=threading.RLock(),
                 database_manager=database,
                 database_lock=_Lock(),
                 key_value_repository=_KeyValues(),

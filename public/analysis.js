@@ -875,6 +875,13 @@ function bodyMetricChart(metric, title, unit, window, period, preferred = {}) {
   return chart;
 }
 
+function bodyProfileFat(profile) {
+  const raw = profile?.body_fat_pct;
+  if (raw == null || String(raw).trim() === "") return null;
+  const value = Number(String(raw).replace(",", "."));
+  return Number.isFinite(value) && value >= 1 && value <= 70 ? value : null;
+}
+
 function renderBodyAnalysis(body) {
   const root = document.getElementById("bodyAnalysisCharts");
   if (!root) return;
@@ -888,7 +895,7 @@ function renderBodyAnalysis(body) {
   const overview = reportNode("section", null, "analysis-chart-card");
   const table = reportNode("table", null, "current-performance-table");
   table.dataset.bodyOverview = "";
-  table.append(reportNode("caption", "Zuletzt gemessene Körperwerte"));
+  table.append(reportNode("caption", "Körperwerte"));
   const rows = reportNode("tbody");
   for (const [metric, title, unit] of metrics) {
     const readings = Object.values(body?.windows || {}).flatMap((window) => (window.metrics?.[metric] || [])
@@ -898,8 +905,10 @@ function renderBodyAnalysis(body) {
     const latest = readings.at(-1);
     const row = reportNode("tr"); row.dataset.metric = metric;
     const heading = reportNode("th", title); heading.scope = "row";
-    if (latest) heading.append(reportNode("small", dateLabel(latest.observed_at || latest.date)));
-    row.append(heading, reportNode("td", latest ? analysisValue(latest.value, unit) : "\u2014"));
+    const profileFat = metric === "body_fat_pct" ? bodyProfileFat(state.data?.profile) : null;
+    if (profileFat != null) heading.append(reportNode("small", "Profil"));
+    else if (latest) heading.append(reportNode("small", dateLabel(latest.observed_at || latest.date)));
+    row.append(heading, reportNode("td", profileFat != null ? analysisValue(profileFat, unit) : latest ? analysisValue(latest.value, unit) : "\u2014"));
     rows.append(row);
   }
   table.append(rows); overview.append(table); root.append(overview);

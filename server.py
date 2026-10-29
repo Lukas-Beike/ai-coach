@@ -673,9 +673,12 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
     )
 
 
+PROFILE_MUTATION_COORDINATOR = threading.RLock()
+
 ATHLETE_DATA = AthleteDataAssembly(
     dependencies=AthleteDataAssembly.Inputs(
         database_manager=database_manager,
+        profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
         repositories=AthleteRepositories(
             activity_feedback=ACTIVITY_FEEDBACK_REPOSITORY,
             checkin=CHECKIN_REPOSITORY,
@@ -883,6 +886,7 @@ BACKUP_ASSEMBLY = BackupAssembly(
         ),
         lifecycle=RestoreLifecycleDependencies(
             maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+            profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
             sync_jobs=lambda: SYNC_JOB_QUEUE.service(),
             coach_jobs=lambda: COACH_BACKGROUND_JOBS.job_store(),
             coach_failures=lambda: COACH_BACKGROUND_JOBS.turn_failure_service(),
@@ -1786,6 +1790,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
         runtime=StructuredToolRoundRuntime(
             database_manager=lambda: database_manager(),
             database_lock=DB_LOCK,
+            profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
             key_value_repository=KEY_VALUE_REPOSITORY,
             root=ROOT,
             logger=LOGGER,
@@ -2144,6 +2149,11 @@ HTTP_API = HttpApiAssembly(
                 equipment=ATHLETE_DATA.equipment,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
                 zones=ATHLETE_DATA.zones,
+                body_export=lambda profile, revision, deadline: (
+                    GARMIN_ASSEMBLY.body_export(ATHLETE_DATA.profile()).export(
+                        profile, revision, deadline
+                    )
+                ),
                 checkin=ATHLETE_DATA.checkin,
                 context_service=ATHLETE_DATA.context,
                 clock=ATHLETE_CLOCK,

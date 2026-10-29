@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
@@ -126,6 +127,7 @@ class BackupAssemblyTests(unittest.TestCase):
                         schema_is_current=Mock(),
                     ),
                     lifecycle=RestoreLifecycleDependencies(
+                        profile_mutation_coordinator=threading.RLock(),
                         maintenance_gate=lambda: Mock(name="maintenance_gate"),
                         sync_jobs=lambda: queue,
                         coach_jobs=lambda: coach_store,

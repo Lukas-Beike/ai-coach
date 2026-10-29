@@ -47,19 +47,22 @@ const coachSource = readPublic("coach.js");
 const syncStatusSource = readPublic("sync-status.js");
 const notificationsSource = readPublic("notifications.js");
 
-function profileContext({ server, baseline, stateProfile }) {
+function profileContext({ server, baseline, stateProfile, exportStatus, error }) {
   const calls = [];
   const toasts = [];
+  const retryButton = { hidden: true, disabled: false };
   const state = { sessionGeneration: 1, data: { profile: stateProfile }, profileBaseline: baseline, profileDirty: false };
   const context = vm.createContext({
     state,
+    document: { getElementById: () => retryButton },
     FormData: FormDataStub,
     api: async (path, options = {}) => {
       const method = options.method || "GET";
       const body = options.body ? JSON.parse(options.body) : null;
       calls.push({ path, method, body });
+      if (error && method === "PUT") throw error;
       if (path === "/api/profile" && method === "GET") return { profile: { ...server }, competitions: [] };
-      return { ...body };
+      return { ...body, ...(exportStatus ? { garmin_body_export: exportStatus } : {}) };
     },
     toast: (message, isError) => toasts.push({ message, isError: Boolean(isError) }),
     setDirtyIndicator() {},
@@ -71,7 +74,7 @@ function profileContext({ server, baseline, stateProfile }) {
       + slice(performanceSource, "async function saveInlineMetric", "\nfunction performanceSection"),
     context,
   );
-  return { context, state, calls, toasts };
+  return { context, state, calls, toasts, retryButton };
 }
 
 test("profile save sends only the fields the athlete edited", async () => {
@@ -93,6 +96,94 @@ test("profile save sends only the fields the athlete edited", async () => {
   assert.deepEqual(Object.keys(plain(put.body)), ["name"]);
   assert.equal(plain(put.body).name, "Anna M.");
   assert.equal(toasts.at(-1).isError, false);
+});
+
+test("body profile changes request Garmin export and report its outcome", async () => {
+  for (const status of ["success", "invalid", "unavailable", "superseded", "rejected", "uncertain"]) {
+    const { context, calls, toasts } = profileContext({ server: {}, baseline: { weight_kg: "70", sports: "" }, stateProfile: {}, exportStatus: status });
+    const { event } = submitEvent([["weight_kg", "71"]]);
+    await context.saveProfile(event);
+    const put = calls.find((call) => call.method === "PUT");
+    assert.equal(put.body.sync_body_to_garmin, true);
+    assert.equal(put.body.weight_kg, "71");
+    assert.equal(toasts.at(-1).isError, status !== "success");
+    assert.match(toasts.at(-1).message, /Garmin/);
+  }
+});
+
+test("known failed body export offers explicit retry; unknown outcome does not", async () => {
+  const args = { server: {}, baseline: { weight_kg: "70", sports: "" }, stateProfile: {} };
+  const failed = profileContext({ ...args, exportStatus: "unavailable" });
+  await failed.context.saveProfile(submitEvent([["weight_kg", "71"]]).event);
+  assert.equal(failed.retryButton.hidden, false);
+  await failed.context.retryBodyGarmin({ currentTarget: failed.retryButton });
+  assert.equal(failed.calls.at(-1).body.retry_body_to_garmin, true);
+  const unknown = profileContext({ ...args, error: new Error("timeout") });
+  await unknown.context.saveProfile(submitEvent([["weight_kg", "71"]]).event);
+  assert.equal(unknown.retryButton.hidden, true);
+  assert.match(unknown.toasts.at(-1).message, /unklar/);
+});
+
+test("unrelated profile saves retain the known Garmin retry option", async () => {
+  const { context, retryButton } = profileContext({ server: {}, baseline: { name: "Anna", sports: "" }, stateProfile: {} });
+  retryButton.hidden = false;
+  await context.saveProfile(submitEvent([["name", "Anna M."]]).event);
+  assert.equal(retryButton.hidden, false);
+});
+
+test("a rejected body save preserves the previous retry but a lost response hides it", async () => {
+  for (const status of [200, 403, 408, 429, 0, 500]) {
+    const error = Object.assign(new Error("synthetic"), { status });
+    const { context, retryButton } = profileContext({ server: {}, baseline: { weight_kg: "70", sports: "" }, stateProfile: {}, error });
+    retryButton.hidden = false;
+    await context.saveProfile(submitEvent([["weight_kg", "71"]]).event);
+    assert.equal(retryButton.hidden, status === 0 || status === 200 || status === 408 || status === 500);
+  }
+});
+
+test("retry preserves known failures only for definite rejected requests", async () => {
+  for (const status of [200, 403, 408, 429, 0, 500]) {
+    const error = Object.assign(new Error("synthetic"), { status });
+    const { context, retryButton, toasts } = profileContext({ server: {}, baseline: {}, stateProfile: {}, error });
+    retryButton.hidden = false;
+    await context.retryBodyGarmin({ currentTarget: retryButton });
+    assert.equal(retryButton.hidden, status !== 403 && status !== 429);
+    if (retryButton.hidden) assert.match(toasts.at(-1).message, /unklar/);
+  }
+});
+
+test("profile save and Garmin retry cannot overlap or apply delayed results out of order", async () => {
+  for (const first of ["save", "retry"]) {
+    const { context, calls, retryButton, toasts } = profileContext({ server: {}, baseline: { weight_kg: "70", sports: "" }, stateProfile: {} });
+    let resolve;
+    context.api = (_path, options) => {
+      calls.push({ body: JSON.parse(options.body) });
+      return new Promise((done) => { resolve = done; });
+    };
+    const save = () => context.saveProfile(submitEvent([["weight_kg", "71"]]).event);
+    const retry = () => context.retryBodyGarmin({ currentTarget: retryButton });
+    const pending = first === "save" ? save() : retry();
+    await (first === "save" ? retry() : save());
+    assert.equal(calls.length, 1, "second operation must not issue a request");
+    resolve(first === "save" ? { weight_kg: "71", garmin_body_export: "success" } : { garmin_body_export: "unavailable" });
+    await pending;
+    assert.equal(retryButton.hidden, first === "save");
+    assert.match(toasts.at(-1).message, /Garmin/);
+  }
+});
+
+test("an unchanged server value keeps a previous retry available", async () => {
+  const { context, retryButton } = profileContext({ server: {}, baseline: { weight_kg: "75", sports: "" }, stateProfile: {}, exportStatus: "unchanged" });
+  retryButton.hidden = false;
+  await context.saveProfile(submitEvent([["weight_kg", "76"]]).event);
+  assert.equal(retryButton.hidden, false);
+});
+
+test("a body save without an export receipt is reported as uncertain", async () => {
+  const { context, toasts, retryButton } = profileContext({ server: {}, baseline: { weight_kg: "70", sports: "" }, stateProfile: {} });
+  await context.saveProfile(submitEvent([["weight_kg", "71"]]).event);
+  assert.match(toasts.at(-1).message, /unklar/);
+  assert.equal(retryButton.hidden, true);
 });
 
 test("profile save refuses to write before the rendered baseline is known", async () => {

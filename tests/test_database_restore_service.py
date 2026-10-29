@@ -99,6 +99,7 @@ class DatabaseRestoreServiceTests(unittest.TestCase):
         )
         self.service = DatabaseRestoreService(
             RestoreDependencies(
+                profile_mutation_coordinator=threading.RLock(),
                 validation=self.validation,
                 backup=self.backup,
                 database_manager=manager,

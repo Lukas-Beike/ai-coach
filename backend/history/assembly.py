@@ -85,4 +85,5 @@ class HistoryAssembly:
             self._planning_revision_service,
             zone_service=self._zones(),
             feedback_service=self._feedback(),
+            profile_mutation_coordinator=self._profile_service().mutation_coordinator,
         )

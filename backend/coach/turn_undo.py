@@ -36,7 +36,11 @@ class CoachTurnUndoService:
         if not turn_id or len(turn_id) > 120:
             raise AppError(400, "Ungültiger Coach-Auftrag.")
         history_undo = self._history_undo_service()
-        with self._database_lock, self._database_manager().unit_of_work() as db:
+        with (
+            history_undo.profile_mutation_coordinator,
+            self._database_lock,
+            self._database_manager().unit_of_work() as db,
+        ):
             row = db.execute(
                 "SELECT status, receipt FROM coach_commands WHERE client_turn_id=?",
                 (turn_id,),

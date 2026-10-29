@@ -37,6 +37,7 @@ class RestoreDependencies:
     database_manager: Callable[[], DatabaseManager]
     database_lock: Any
     maintenance_gate: MaintenanceGate
+    profile_mutation_coordinator: Any
     sync_jobs: SyncJobQueueService
     coach_jobs: CoachJobStore
     coach_failures: CoachTurnFailureService
@@ -197,7 +198,10 @@ class DatabaseRestoreService:
         """
         temporary_path = self._stage(payload)
         try:
-            with self._dependencies.maintenance_gate.restore():
+            with (
+                self._dependencies.maintenance_gate.restore(),
+                self._dependencies.profile_mutation_coordinator,
+            ):
                 # Flushes stay blocked from before the swap until the cache is dropped,
                 # so the pre-restore diagnostics cannot overwrite the restored ones.
                 with self._dependencies.diagnostics_suspended():
