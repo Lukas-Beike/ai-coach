@@ -474,7 +474,6 @@ class YazioClient:
         return self._access_token
 
     def _grant(self, fields: dict[str, str], now: float, *, sign_in: bool) -> bool:
-        config = self._config()
         identity = self._identity
         identity_generation = self._identity_generation
         body = json.dumps(
