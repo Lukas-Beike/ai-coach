@@ -169,8 +169,6 @@ class Config:
     wahoo_redirect_uri: str = ""
     yazio_email: str = ""
     yazio_password: str = ""
-    yazio_client_id: str = ""
-    yazio_client_secret: str = ""
     yazio_user_agent: str = ""
     yazio_country: str = ""
     yazio_credential_generation: int = 0
@@ -189,13 +187,8 @@ class Config:
 
     @property
     def yazio_configured(self) -> bool:
-        """Yazio is usable only when account and application identifiers are set."""
-        return bool(
-            self.yazio_email.strip()
-            and self.yazio_password.strip()
-            and self.yazio_client_id.strip()
-            and self.yazio_client_secret.strip()
-        )
+        """Yazio is usable only when the account email and password are set."""
+        return bool(self.yazio_email.strip() and self.yazio_password.strip())
 
 
 def security_configuration_error(
@@ -267,8 +260,6 @@ def load_config(
         wahoo_redirect_uri=value("WAHOO_REDIRECT_URI", "").strip(),
         yazio_email=value("YAZIO_EMAIL", "").strip(),
         yazio_password=value("YAZIO_PASSWORD", "").strip(),
-        yazio_client_id=value("YAZIO_CLIENT_ID", "").strip(),
-        yazio_client_secret=value("YAZIO_CLIENT_SECRET", "").strip(),
         yazio_user_agent=value("YAZIO_USER_AGENT", "").strip(),
         yazio_country=value("YAZIO_COUNTRY", "").strip(),
         sync_history_earliest_date=_env_date(

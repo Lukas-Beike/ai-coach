@@ -354,7 +354,7 @@ test("the Yazio form saves only filled fields and clears every input", async () 
   await harness.fn("saveProviderCredentials")(event(), "yazio");
 
   assert.deepEqual(JSON.parse(harness.calls[0].body), { yazio_email: "athlete@example.test", yazio_password: "synthetic-password" });
-  for (const field of ["yazio_email", "yazio_password", "yazio_client_id", "yazio_client_secret"]) {
+  for (const field of ["yazio_email", "yazio_password"]) {
     assert.equal(harness.element(`cred-${field}`).value, "");
   }
 });

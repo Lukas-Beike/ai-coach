@@ -214,12 +214,10 @@ class ProviderCredentialTests(unittest.TestCase):
         self.assertEqual(status["fields"]["intervals_api_key"]["source"], "env")
         self.assertEqual(status["fields"]["intervals_athlete_id"]["value"], "i42")
 
-    def test_yazio_needs_all_four_values_and_never_appears_in_status(self):
+    def test_yazio_needs_email_and_password_and_never_appears_in_status(self):
         values = {
             "yazio_email": "athlete@yazio.example",
             "yazio_password": "secret-yazio-password",
-            "yazio_client_id": "secret-yazio-client-id",
-            "yazio_client_secret": "secret-yazio-client-secret",
         }
         self.assertFalse(self.service.status()["yazio_configured"])
         self.service.update({k: v for k, v in values.items() if k != "yazio_password"})
@@ -232,7 +230,7 @@ class ProviderCredentialTests(unittest.TestCase):
             self.assertNotIn(secret, payload)
         self.assertEqual(status["fields"]["yazio_email"]["source"], "db")
         self.assertNotIn("value", status["fields"]["yazio_email"])
-        status = self.service.update({"yazio_client_secret": None})
+        status = self.service.update({"yazio_password": None})
         self.assertFalse(status["yazio_configured"])
 
     def test_yazio_generation_ignores_other_credentials_and_tracks_replacements(self):
