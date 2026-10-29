@@ -607,6 +607,56 @@ class GarminRemoteReaderTests(unittest.TestCase):
         client.login.assert_called_once_with('{"di_token": "synthetic"}')
         tokens.write_back.assert_called_once_with(client, '{"di_token": "synthetic"}')
 
+    def _stored_login_reader(self, login, connected=True):
+        client = Mock()
+        client.login.side_effect = login
+        factory = Mock()
+        factory.create.return_value = client
+        tokens = Mock()
+        tokens.connected.return_value = connected
+        tokens.login_argument.return_value = '{"di_token": "synthetic"}'
+        return self.make_reader(factory, garmin_tokens=tokens), factory, client, tokens
+
+    def _check(self, reader):
+        with patch(
+            "backend.sync.garmin_service.provider_http.external_call",
+            side_effect=lambda _service, _operation, call, _details, **_kwargs: call(),
+        ):
+            return reader.check_stored_login()
+
+    def test_stored_login_check_never_uses_credentials(self):
+        reader, factory, client, tokens = self._stored_login_reader(
+            lambda _argument: (False, None)
+        )
+        self._check(reader)
+        factory.create.assert_called_once_with(None, None, return_on_mfa=True)
+        client.login.assert_called_once_with('{"di_token": "synthetic"}')
+        tokens.write_back.assert_called_once()
+
+    def test_stored_login_check_without_tokens_makes_no_request(self):
+        reader, factory, _client, _tokens = self._stored_login_reader(
+            lambda _argument: (False, None), connected=False
+        )
+        with self.assertRaises(AppError) as context:
+            self._check(reader)
+        self.assertEqual(context.exception.reason, "reconnect_required")
+        factory.create.assert_not_called()
+
+    def test_stored_login_check_failure_and_mfa_hide_provider_text(self):
+        secret = "synthetic-token-text"
+        reader, _factory, _client, tokens = self._stored_login_reader(
+            RuntimeError(secret)
+        )
+        with self.assertRaises(AppError) as context:
+            self._check(reader)
+        self.assertNotIn(secret, context.exception.message)
+        self.assertEqual(context.exception.reason, "reconnect_required")
+        tokens.write_back.assert_not_called()
+        mfa_reader, *_ = self._stored_login_reader(lambda _argument: (True, None))
+        with self.assertRaises(AppError) as context:
+            self._check(mfa_reader)
+        self.assertEqual(context.exception.reason, "reconnect_required")
+
     def test_reader_logs_in_and_collects_with_historical_options(self):
         client = Mock()
         client.login.return_value = (False, None)
@@ -861,3 +911,16 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GarminCheckFixtureTests(unittest.TestCase):
+    def test_fixture_mode_never_reaches_the_sdk(self):
+        from backend.sync.garmin_assembly import GarminAssembly
+
+        assembly = object.__new__(GarminAssembly)
+        loader = Mock()
+        loader.path.return_value = "/synthetic/fixture.json"
+        assembly.fixture_loader = lambda: loader
+        with self.assertRaises(AppError) as context:
+            assembly.check_stored_login()
+        self.assertEqual(context.exception.reason, "check_unsupported")

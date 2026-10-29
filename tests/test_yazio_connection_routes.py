@@ -30,6 +30,7 @@ class YazioRouteTests(unittest.TestCase):
                     "wahoo",
                     "metric_export",
                     "garmin",
+                    "provider_connections",
                 )
             }
         )

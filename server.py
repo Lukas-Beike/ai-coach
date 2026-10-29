@@ -274,7 +274,7 @@ from backend.privacy import (
     PrivacyPlanningSources,
     PrivacyStateDependencies,
 )
-from backend.provider_credentials import ProviderCredentialService
+from backend.provider_credentials import GARMIN_SOURCE_DB, ProviderCredentialService
 from backend.providers import air_quality as air_quality_provider
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
@@ -282,6 +282,10 @@ from backend.providers import dwd_pollen as dwd_pollen_provider
 from backend.providers import http as provider_http
 from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
+from backend.providers.connection_check_probes import (
+    build_probes as build_connection_probes,
+)
+from backend.providers.connection_checks import ProviderConnectionChecks
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
     ModelBackgroundPolicy,
@@ -2037,6 +2041,22 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
 )
 
 
+PROVIDER_CONNECTION_CHECKS = ProviderConnectionChecks(
+    build_connection_probes(
+        config=lambda: CONFIG,
+        request=lambda *args, **kwargs: PROVIDER_TRANSPORT.json_http_client().request(
+            *args, **kwargs
+        ),
+        default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
+        intervals_get=lambda path: PROVIDER_TRANSPORT.intervals_client().get(path),
+        wahoo_status=lambda: WAHOO_CONNECTION.service().status(),
+        wahoo_user=lambda: WAHOO_SYNC.client().user(),
+        garmin_connected=lambda: GARMIN_TOKENS.source() == GARMIN_SOURCE_DB,
+        garmin_fingerprint=GARMIN_TOKENS.fingerprint,
+        garmin_login=lambda: GARMIN_ASSEMBLY.check_stored_login(),
+    ),
+    operation=lambda: runtime_maintenance.MAINTENANCE_GATE.operation(),
+)
 HTTP_API = HttpApiAssembly(
     dependencies=HttpApiAssembly.Inputs(
         core=HttpCoreAndTransport(
@@ -2172,6 +2192,7 @@ HTTP_API = HttpApiAssembly(
             metric_export=lambda: METRIC_EXPORT,
             provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
             garmin_login=lambda: GARMIN_LOGIN,
+            connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
         ),
     ),
 )
