@@ -36,6 +36,10 @@ BASE_URL = "https://yzapi.yazio.com/v22"
 DEFAULT_USER_AGENT = (
     "YAZIO/26.30.1 (com.yazio.ios.YAZIO; build:2607271240; iOS 27.0.0) Ktor"
 )
+# The mobile app's OAuth client. Every install ships the same public pair, so it
+# identifies the app rather than the athlete and is not a credential.
+CLIENT_ID = "3_5rbw4kehpugw8ogsc8ck8oo4ogswgckcskc04gcg8kk8k48ssw"
+CLIENT_SECRET = "25gdtt1hvdi8gwowoww4oo88sgsw0oo04o0og0kkgwwks8k0k"
 UNAVAILABLE = "Yazio ist momentan nicht verfügbar. Nächste Datenquelle verwenden."
 THROTTLED = "Yazio begrenzt die Anfragen. Bitte später erneut versuchen."
 SOURCE = "Yazio"
@@ -425,8 +429,6 @@ class YazioClient:
         identity = (
             config.yazio_email,
             config.yazio_password,
-            config.yazio_client_id,
-            config.yazio_client_secret,
             str(config.yazio_credential_generation),
         )
         if identity != self._identity:
@@ -472,14 +474,13 @@ class YazioClient:
         return self._access_token
 
     def _grant(self, fields: dict[str, str], now: float, *, sign_in: bool) -> bool:
-        config = self._config()
         identity = self._identity
         identity_generation = self._identity_generation
         body = json.dumps(
             {
                 **fields,
-                "client_id": config.yazio_client_id,
-                "client_secret": config.yazio_client_secret,
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
             }
         ).encode("utf-8")
         request = Request(

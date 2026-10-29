@@ -50,6 +50,7 @@ class RestoreValidationDependencies:
 @dataclass(frozen=True)
 class RestoreLifecycleDependencies:
     maintenance_gate: Callable[[], MaintenanceGate]
+    profile_mutation_coordinator: Any
     sync_jobs: Callable[[], SyncJobQueueService]
     coach_jobs: Callable[[], CoachJobStore]
     coach_failures: Callable[[], CoachTurnFailureService]
@@ -89,6 +90,7 @@ class BackupAssembly:
         self._row_factory = validation.row_factory
         self._schema_is_current = validation.schema_is_current
         self._maintenance_gate = lifecycle.maintenance_gate
+        self._profile_mutation_coordinator = lifecycle.profile_mutation_coordinator
         self._sync_jobs = lifecycle.sync_jobs
         self._coach_jobs = lifecycle.coach_jobs
         self._coach_failures = lifecycle.coach_failures
@@ -134,6 +136,7 @@ class BackupAssembly:
             database_manager=self._database_manager,
             database_lock=self._database_lock(),
             maintenance_gate=self._maintenance_gate(),
+            profile_mutation_coordinator=self._profile_mutation_coordinator,
             sync_jobs=self._sync_jobs(),
             coach_jobs=self._coach_jobs(),
             coach_failures=self._coach_failures(),

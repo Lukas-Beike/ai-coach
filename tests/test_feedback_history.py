@@ -10,6 +10,7 @@ the feedback. Temporary database and synthetic rows only.
 from __future__ import annotations
 
 import sqlite3
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,6 +57,7 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
             unused,
             unused,
             feedback_service=self.service,
+            profile_mutation_coordinator=threading.RLock(),
         ).apply(
             {"change_id": change["id"], "expected_current_hash": change["after_hash"]}
         )

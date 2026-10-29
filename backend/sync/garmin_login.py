@@ -11,6 +11,7 @@ module; the redactor receives the live token values through
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -145,6 +146,11 @@ class GarminTokenStore:
         self._tokenstore_path = tokenstore_path
         self._registry = registry
         self._env_credentials = env_credentials
+
+    def fingerprint(self) -> str:
+        """Identity of the stored login: a digest of the blob, never the blob itself."""
+        blob = self._read_blob() or ""
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest() if blob else ""
 
     def _read_blob(self) -> str | None:
         with self._database_manager().reader() as db:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+import threading
 import unittest
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -244,6 +245,7 @@ class LocalZoneEditTests(unittest.TestCase):
             unused,
             unused,
             zone_service=self.service,
+            profile_mutation_coordinator=threading.RLock(),
         )
 
     @staticmethod

@@ -183,6 +183,8 @@ async function disconnectWahoo() {
     await api("/api/wahoo/disconnect", { method: "POST", body: "{}" });
     toast(`${label} getrennt`);
     invalidateContextPreview();
+    invalidateProviderChecks("wahoo-connection");
+    void loadProviderChecks();
     await load();
     button.disabled = false;
   } catch (error) {

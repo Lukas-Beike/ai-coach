@@ -281,6 +281,7 @@ class PrivacyDeleteDependencies:
     database_lock: AbstractContextManager[Any]
     key_value_repository: KeyValueRepository
     maintenance_gate: MaintenanceGate
+    profile_mutation_coordinator: AbstractContextManager[Any]
     planning_revision_service: PlanningRevisionService
     openai_client: OpenAIResponsesClient
     logger: logging.Logger
@@ -342,7 +343,10 @@ class PrivacyDeleteService:
                 "Zum Löschen muss LOKALE DATEN LÖSCHEN bestätigt werden.",
             )
         dependencies = self._dependencies
-        with dependencies.maintenance_gate.restore():
+        with (
+            dependencies.maintenance_gate.restore(),
+            dependencies.profile_mutation_coordinator,
+        ):
             with dependencies.database_manager.reader() as db:
                 conversation_id = (
                     dependencies.key_value_repository.get(db, "openai_conversation_id")
@@ -518,6 +522,7 @@ class PrivacyAssembly:
                 database_lock=self._database_lock(),
                 key_value_repository=self._key_value_repository,
                 maintenance_gate=self._maintenance_gate(),
+                profile_mutation_coordinator=self._profile_service().mutation_coordinator,
                 planning_revision_service=self._planning_revision_service,
                 openai_client=self._openai_client(),
                 logger=self._logger,

@@ -12,6 +12,7 @@ from backend.errors import AppError
 class CoachProfileUpdateTests(unittest.TestCase):
     def setUp(self):
         self.profile = Mock()
+        self.profile.mutation_coordinator = threading.RLock()
         self.profile.get.return_value = {"name": "Athlete", "goals": "Current"}
         self.profile.save.side_effect = lambda updated: updated
         self.manager = Mock()

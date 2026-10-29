@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 import uuid
 from contextlib import contextmanager
@@ -1220,6 +1221,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
             self.service,
             None,
             self.revisions,
+            profile_mutation_coordinator=threading.RLock(),
         )
         preview = undo.preview(self._update_change_id())
         undo.apply(preview["proposal"]["payload"])
@@ -1242,6 +1244,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
             self.service,
             None,
             self.revisions,
+            profile_mutation_coordinator=threading.RLock(),
         )
 
         with self.assertRaises(AppError) as caught:
@@ -1284,6 +1287,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
             self.service,
             None,
             self.revisions,
+            profile_mutation_coordinator=threading.RLock(),
         )
 
         preview = undo.preview(self._update_change_id())

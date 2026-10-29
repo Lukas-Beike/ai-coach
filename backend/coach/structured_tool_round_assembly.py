@@ -23,6 +23,7 @@ from backend.coach.write_gate import ImpactClassifier, build_openai_impact_class
 class StructuredToolRoundRuntime:
     database_manager: Callable[[], Any]
     database_lock: Any
+    profile_mutation_coordinator: Any
     key_value_repository: Any
     root: Any
     logger: Any
@@ -79,6 +80,7 @@ class CoachStructuredToolRoundAssembly:
         conversation = dependencies.conversation
         self._database_manager = runtime.database_manager
         self._database_lock = runtime.database_lock
+        self._profile_mutation_coordinator = runtime.profile_mutation_coordinator
         self._key_value_repository = runtime.key_value_repository
         self._root = runtime.root
         self._logger = runtime.logger
@@ -107,6 +109,7 @@ class CoachStructuredToolRoundAssembly:
             self._duplicate_inspector(),
             self._proposal_creation_service(),
             self._tool_dispatch_service(),
+            self._profile_mutation_coordinator,
         )
 
     def failure_service(self) -> CoachStructuredToolFailureService:
@@ -158,4 +161,5 @@ class CoachStructuredToolRoundAssembly:
             self._response_service(),
             self.write_gate_service(),
             self._tool_round_limits(),
+            self._profile_mutation_coordinator,
         )

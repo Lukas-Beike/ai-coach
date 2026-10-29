@@ -58,6 +58,7 @@ class StructuredToolRoundTests(unittest.TestCase):
                 default_max_output_tokens=6000,
                 long_plan_max_output_tokens=32000,
             ),
+            threading.RLock(),
         )
 
     @staticmethod
@@ -91,6 +92,47 @@ class StructuredToolRoundTests(unittest.TestCase):
             "call_id": "call-one",
             "arguments": "{}",
         }
+
+    def test_profile_round_waits_before_database_lock(self) -> None:
+        coordinator = threading.RLock()
+        self.service._profile_mutation_coordinator = coordinator
+        self.jobs.turn_open.return_value = True
+        state = self.state()
+        metadata = {
+            key: "synthetic"
+            for key in (
+                "call_id",
+                "effect_key",
+                "step_key",
+                "repair_key",
+                "scope_repair_key",
+                "request_binding_key",
+                "plan_effect_key",
+            )
+        }
+        metadata["name"] = "update_profile"
+        done = threading.Event()
+        errors = []
+
+        def run() -> None:
+            try:
+                self.service._execute_and_record(metadata, {}, state)
+            except Exception as exc:  # noqa: BLE001 - propagate worker failures to the test thread
+                errors.append(exc)
+            finally:
+                done.set()
+
+        with coordinator:
+            thread = threading.Thread(target=run)
+            thread.start()
+            self.assertFalse(done.wait(0.15))
+            self.lock.__enter__.assert_not_called()
+            self.manager.unit_of_work.assert_not_called()
+        self.assertTrue(done.wait(5))
+        thread.join(5)
+        self.assertEqual(errors, [])
+        self.execution.execute.assert_called_once()
+        self.jobs.merge_receipt.assert_called_once()
 
     def test_local_tool_execution_and_receipt_share_transaction(self) -> None:
         state = self.state()

@@ -171,6 +171,7 @@ class CoachTurnFailureTests(unittest.TestCase):
         self.assertEqual(reloaded[0]["coach_changes"], summary)
 
         history = Mock()
+        history.profile_mutation_coordinator = threading.RLock()
         undo = CoachTurnUndoService(
             lambda: self.manager, threading.RLock(), lambda: history, now=self.now
         )

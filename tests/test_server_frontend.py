@@ -45,6 +45,7 @@ def frontend_source():
             "sync-actions.js",
             "wahoo-connection.js",
             "provider-connections.js",
+            "provider-checks.js",
             "settings.js",
             "app.js",
         )

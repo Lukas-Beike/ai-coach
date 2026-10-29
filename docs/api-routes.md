@@ -62,6 +62,7 @@ provider-keyed.
 | GET | `/api/analysis/endurance`, `/api/analysis/power-profiles`, `/api/analysis/season`, `/api/analysis/training-records` | Analysis projections | Auth |
 | GET | `/api/nutrition/day`, `/api/nutrition/range`, `/api/nutrition/templates`, `/api/nutrition/week`, `/api/nutrition/products` | Nutrition projections and product search | Auth |
 | GET | `/api/nutrition/yazio/status` | Read the last local Yazio authentication check without contacting Yazio | Auth |
+| GET | `/api/providers/connections` | Read the last local connection check per provider without contacting any provider | Auth |
 
 ## Writes and jobs
 
@@ -81,6 +82,7 @@ provider-keyed.
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |
 | POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/sync` | Write, delete or synchronize nutrition entries | CSRF |
 | POST | `/api/nutrition/yazio/check` | Explicitly check Yazio authentication and record an in-memory result | CSRF |
+| POST | `/api/providers/{id}/check` | Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result | CSRF |
 | POST | `/api/nutrition/products`, `/api/nutrition/products/lookup`, `/api/nutrition/products/extract`, `/api/nutrition/products/archive`, `/api/nutrition/products/database/delete` | Save, look up, extract or archive products, or forget a food database entry | CSRF |
 | POST | `/api/wahoo/connect`, `/api/wahoo/disconnect` | Start the Wahoo OAuth connection or disconnect Wahoo | CSRF |
 | POST | `/api/metric-export/preview` | Preview metric values for export without writing | CSRF |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+import threading
 import unittest
 import uuid
 from datetime import date
@@ -427,6 +428,7 @@ class CoachUndoToolPersistenceTests(unittest.TestCase):
             self.units,
             None,
             revisions,
+            profile_mutation_coordinator=threading.RLock(),
         )
         proposals = CoachProposalCreationService(self.manager, Mock())
         self.service = CoachPlanningActionToolService(

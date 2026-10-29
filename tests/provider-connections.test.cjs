@@ -30,6 +30,7 @@ function loadProviderConnections() {
   const confirmations = [];
   const toasts = [];
   let invalidated = 0;
+  const providerCheckCalls = [];
   let apiHandler = async () => ({});
   let loadedData = {};
   const context = {
@@ -50,6 +51,8 @@ function loadProviderConnections() {
     },
     confirmAnswer: true,
     invalidateContextPreview: () => { invalidated += 1; },
+    invalidateProviderChecks: () => { providerCheckCalls.push("invalidate"); },
+    loadProviderChecks: async () => { providerCheckCalls.push("load"); },
   };
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -63,6 +66,7 @@ function loadProviderConnections() {
     elements,
     fn,
     invalidatedCount: () => invalidated,
+    providerCheckCalls,
     setApi(handler) { apiHandler = handler; },
     setData(data) {
       loadedData = data;
@@ -354,7 +358,7 @@ test("the Yazio form saves only filled fields and clears every input", async () 
   await harness.fn("saveProviderCredentials")(event(), "yazio");
 
   assert.deepEqual(JSON.parse(harness.calls[0].body), { yazio_email: "athlete@example.test", yazio_password: "synthetic-password" });
-  for (const field of ["yazio_email", "yazio_password", "yazio_client_id", "yazio_client_secret"]) {
+  for (const field of ["yazio_email", "yazio_password"]) {
     assert.equal(harness.element(`cred-${field}`).value, "");
   }
 });

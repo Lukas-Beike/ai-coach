@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import unittest
 from unittest.mock import Mock
 
@@ -46,6 +47,7 @@ class CoachStructuredToolRoundAssemblyTests(unittest.TestCase):
         assembly = CoachStructuredToolRoundAssembly(
             dependencies=CoachStructuredToolRoundAssembly.Inputs(
                 runtime=StructuredToolRoundRuntime(
+                    profile_mutation_coordinator=threading.RLock(),
                     database_manager=dependencies["database_manager"],
                     database_lock=lock,
                     key_value_repository=key_values,

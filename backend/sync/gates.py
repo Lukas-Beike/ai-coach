@@ -16,6 +16,8 @@ from backend.providers.descriptors import (
     WAHOO_ID,
 )
 
+RESYNC_RUNNING_REASON = "provider_resync_running"
+
 _Function = TypeVar("_Function", bound=Callable[..., Any])
 
 
@@ -38,6 +40,7 @@ class ProviderResyncGate:
                 raise AppError(
                     409,
                     f"Der vollständige {self.provider}-Resync läuft bereits. Bitte warten.",
+                    reason=RESYNC_RUNNING_REASON,
                 )
             if not self.resetting:
                 self.active += 1

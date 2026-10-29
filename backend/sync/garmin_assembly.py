@@ -31,6 +31,7 @@ from backend.sync.garmin_service import (
     shared_garmin_sync_lock,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.gates import RESYNC_RUNNING_REASON
 from backend.sync.state import SyncStateRepository
 from backend.sync.status import SyncOperationStateWriter
 
@@ -176,6 +177,13 @@ class GarminAssembly:
             ),
         )
 
+    def body_export(self, profile: Any) -> Any:
+        from backend.sync.garmin_profile_body_export import GarminProfileBodyExport
+
+        return GarminProfileBodyExport(
+            profile, self.remote_reader(), self.fixture_loader(), self._garmin_tokens
+        )
+
     def remote_reader(self) -> GarminRemoteReader:
         """Compose authenticated Garmin SDK reads without contacting Garmin."""
         return GarminRemoteReader(
@@ -192,6 +200,31 @@ class GarminAssembly:
             self._all_sync_days,
             garmin_tokens=self._garmin_tokens,
         )
+
+    def check_stored_login(self) -> None:
+        """Verify the stored tokens while holding Garmin's sync guard.
+
+        A running sync makes the check report busy. Holding the guard keeps a
+        sync from refreshing the same token blob during the login, because a
+        lost write-back could force a reconnect.
+        """
+        if self.fixture_loader().path() is not None:
+            # Fixture mode never reaches the real Garmin SDK, as in the other entry points.
+            raise AppError(
+                503, "Die Garmin-Testdatei ist aktiv.", reason="check_unsupported"
+            )
+        try:
+            with _non_blocking_garmin_guard(self._sync_coordination()):
+                self.remote_reader().check_stored_login()
+        except AppError as error:
+            if error.reason == RESYNC_RUNNING_REASON:
+                # A full resync holds the gate; report it like a running sync.
+                raise AppError(
+                    503,
+                    "Eine Garmin-Synchronisierung läuft.",
+                    reason="provider_busy",
+                ) from error
+            raise
 
     def sync_service(self) -> GarminSyncService:
         """Compose the Garmin synchronization use case."""

@@ -274,7 +274,7 @@ from backend.privacy import (
     PrivacyPlanningSources,
     PrivacyStateDependencies,
 )
-from backend.provider_credentials import ProviderCredentialService
+from backend.provider_credentials import GARMIN_SOURCE_DB, ProviderCredentialService
 from backend.providers import air_quality as air_quality_provider
 from backend.providers import audio as audio_provider
 from backend.providers import calendar as calendar_provider
@@ -282,6 +282,10 @@ from backend.providers import dwd_pollen as dwd_pollen_provider
 from backend.providers import http as provider_http
 from backend.providers import state as provider_state
 from backend.providers import weather as weather_provider
+from backend.providers.connection_check_probes import (
+    build_probes as build_connection_probes,
+)
+from backend.providers.connection_checks import ProviderConnectionChecks
 from backend.providers.model_assembly import (
     AudioTranscriptionSettings,
     ModelBackgroundPolicy,
@@ -465,7 +469,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.29"
+APP_VERSION = "1.13.30"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -669,9 +673,12 @@ def morning_body_battery_service() -> MorningBodyBatteryService:
     )
 
 
+PROFILE_MUTATION_COORDINATOR = threading.RLock()
+
 ATHLETE_DATA = AthleteDataAssembly(
     dependencies=AthleteDataAssembly.Inputs(
         database_manager=database_manager,
+        profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
         repositories=AthleteRepositories(
             activity_feedback=ACTIVITY_FEEDBACK_REPOSITORY,
             checkin=CHECKIN_REPOSITORY,
@@ -879,6 +886,7 @@ BACKUP_ASSEMBLY = BackupAssembly(
         ),
         lifecycle=RestoreLifecycleDependencies(
             maintenance_gate=lambda: runtime_maintenance.MAINTENANCE_GATE,
+            profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
             sync_jobs=lambda: SYNC_JOB_QUEUE.service(),
             coach_jobs=lambda: COACH_BACKGROUND_JOBS.job_store(),
             coach_failures=lambda: COACH_BACKGROUND_JOBS.turn_failure_service(),
@@ -1782,6 +1790,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
         runtime=StructuredToolRoundRuntime(
             database_manager=lambda: database_manager(),
             database_lock=DB_LOCK,
+            profile_mutation_coordinator=PROFILE_MUTATION_COORDINATOR,
             key_value_repository=KEY_VALUE_REPOSITORY,
             root=ROOT,
             logger=LOGGER,
@@ -2037,6 +2046,22 @@ DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
 )
 
 
+PROVIDER_CONNECTION_CHECKS = ProviderConnectionChecks(
+    build_connection_probes(
+        config=lambda: CONFIG,
+        request=lambda *args, **kwargs: PROVIDER_TRANSPORT.json_http_client().request(
+            *args, **kwargs
+        ),
+        default_openai_base_url=DEFAULT_OPENAI_BASE_URL,
+        intervals_get=lambda path: PROVIDER_TRANSPORT.intervals_client().get(path),
+        wahoo_status=lambda: WAHOO_CONNECTION.service().status(),
+        wahoo_user=lambda: WAHOO_SYNC.client().user(),
+        garmin_connected=lambda: GARMIN_TOKENS.source() == GARMIN_SOURCE_DB,
+        garmin_fingerprint=GARMIN_TOKENS.fingerprint,
+        garmin_login=lambda: GARMIN_ASSEMBLY.check_stored_login(),
+    ),
+    operation=lambda: runtime_maintenance.MAINTENANCE_GATE.operation(),
+)
 HTTP_API = HttpApiAssembly(
     dependencies=HttpApiAssembly.Inputs(
         core=HttpCoreAndTransport(
@@ -2124,6 +2149,11 @@ HTTP_API = HttpApiAssembly(
                 equipment=ATHLETE_DATA.equipment,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
                 zones=ATHLETE_DATA.zones,
+                body_export=lambda profile, revision, deadline: (
+                    GARMIN_ASSEMBLY.body_export(ATHLETE_DATA.profile()).export(
+                        profile, revision, deadline
+                    )
+                ),
                 checkin=ATHLETE_DATA.checkin,
                 context_service=ATHLETE_DATA.context,
                 clock=ATHLETE_CLOCK,
@@ -2172,6 +2202,7 @@ HTTP_API = HttpApiAssembly(
             metric_export=lambda: METRIC_EXPORT,
             provider_credentials=PROVIDER_CREDENTIAL_SERVICE,
             garmin_login=lambda: GARMIN_LOGIN,
+            connection_checks=lambda: PROVIDER_CONNECTION_CHECKS,
         ),
     ),
 )

@@ -384,6 +384,8 @@ async function loadState(path = "/api/bootstrap", requestedAreas = null) {
       renderLoadedState(payload, liveAreasOnly);
       // A stored snapshot may already have revealed the shell.
       if ($("#appShell").classList.contains("is-loading")) finishAppShellLoading();
+      // The panel may already be open after a start or re-login, which fires no toggle.
+      refreshOpenProviderChecks();
     }
     const current = () => sessionGeneration === state.sessionGeneration && requestSequence === state.loadSequence;
     const { failures, unsettled, rendered } = await renderAreasAsTheyArrive(domainData, areas, {

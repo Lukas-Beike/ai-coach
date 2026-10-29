@@ -59,7 +59,10 @@ class AthleteContextService:
             self._validated_context(profile, competitions)
         )
         now = self.now()
-        with self.manager.unit_of_work() as db:
+        with (
+            self.profile_service.mutation_coordinator,
+            self.manager.unit_of_work() as db,
+        ):
             listed = self.competition_repository.list(db)
             existing = {
                 row["id"]: full_row

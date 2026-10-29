@@ -35,6 +35,11 @@ REGISTERED_ELSEWHERE = {
         NUTRITION,
         'f"{NUTRITION_PRODUCTS_PATH}/database/delete"',
     ),
+    # Matched by a prefix and suffix around the provider segment.
+    "/api/providers/{id}/check": (
+        "provider_connections.py",
+        'CHECK_PREFIX = "/api/providers/"',
+    ),
     # Matched by regular expressions over the id segment.
     "/api/activities/{id}": ("sync_get.py", '"^/api/activities/([^/]+)$"'),
     "/api/activities/{id}/feedback": (

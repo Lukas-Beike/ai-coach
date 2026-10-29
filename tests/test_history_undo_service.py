@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -142,6 +143,7 @@ class HistoryUndoServiceTests(unittest.TestCase):
             services["planned_unit"],
             services["training_plan"],
             revision or self.revision,
+            profile_mutation_coordinator=threading.RLock(),
         )
 
     def _insert_history(
