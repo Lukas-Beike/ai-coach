@@ -227,6 +227,16 @@ class ProviderConnectionChecks:
             try:
                 with self._operation():
                     outcome["result"] = self._perform(provider, probe, fingerprint)
+            except AppError as error:
+                # A maintenance window (restore, privacy delete) is not a crash.
+                _LOGGER.info(
+                    "Provider connection check interrupted",
+                    extra={
+                        "event": "provider_check_interrupted",
+                        "context": {"provider": provider, "reason": error.reason},
+                    },
+                )
+                outcome["result"] = _result(probe, UNKNOWN, None)
             except Exception:
                 _LOGGER.exception("Provider connection check crashed")
                 outcome["result"] = _result(probe, UNKNOWN, None)

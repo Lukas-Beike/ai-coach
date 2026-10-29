@@ -39,6 +39,13 @@ function providerCheckView(result, busy = false) {
 const PROVIDER_CHECK_POLL_MS = 3000;
 // One pending poll at a time, however many loads complete meanwhile.
 let providerCheckPoll = null;
+let providerCheckPolls = 0;
+const PROVIDER_CHECK_MAX_POLLS = 60;
+
+function connectionsVisible() {
+  return document.visibilityState !== "hidden"
+    && Boolean(document.querySelector('details[data-more-segment-panel="connections"]')?.open);
+}
 const providerCheckResults = new Map();
 const providerCheckBusy = new Set();
 // Bumped when credentials change, so an in-flight answer for the old ones is dropped.
@@ -87,8 +94,13 @@ async function loadProviderChecks() {
   // A check still running on the server finishes later; read again until it has.
   clearTimeout(providerCheckPoll);
   providerCheckPoll = null;
-  if ([...providerCheckResults.values()].some((result) => result?.status === "checking")) {
+  const running = [...providerCheckResults.values()].some((result) => result?.status === "checking");
+  // Poll only while someone can see the card, and for a bounded time.
+  if (running && providerCheckPolls < PROVIDER_CHECK_MAX_POLLS && connectionsVisible()) {
+    providerCheckPolls += 1;
     providerCheckPoll = setTimeout(() => void loadProviderChecks(), PROVIDER_CHECK_POLL_MS);
+  } else if (!running) {
+    providerCheckPolls = 0;
   }
 }
 
