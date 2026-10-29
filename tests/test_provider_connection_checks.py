@@ -402,10 +402,6 @@ class RouteTests(unittest.TestCase):
         self.assertFalse(routes.handle(handler, "/api/nutrition/yazio/check"))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RotationAndDeadlineTests(unittest.TestCase):
     def test_check_that_rotates_its_own_identity_keeps_its_success(self):
         state = {"identity": "before"}
@@ -515,3 +511,7 @@ class GarminCheckGuardTests(unittest.TestCase):
             assembly.check_stored_login()
             reader.check_stored_login.assert_called_once_with()
             coordination.release.assert_called_once_with()
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -35,6 +35,48 @@ def _identity(*values: object) -> str:
     return "\x1f".join(str(value or "") for value in values)
 
 
+def _openai_check(
+    current: Config, request: Callable[..., Any], default_base_url: str
+) -> None:
+    try:
+        url = openai_requests.endpoint(
+            current.openai_base_url,
+            OPENAI_MODELS_PATH,
+            default_base_url=default_base_url,
+        )
+    except AppError as error:
+        raise AppError(
+            400, "Ungültige Konfiguration.", reason=MISCONFIGURED_REASON
+        ) from error
+    try:
+        request(
+            "GET",
+            url,
+            headers={"Authorization": f"Bearer {current.openai_api_key.strip()}"},
+            timeout=_TIMEOUT_SECONDS,
+            service="openai-check",
+        )
+    except AppError as error:
+        # Compatible endpoints may not implement the model listing.
+        if error.upstream_status in {404, 405, 501}:
+            raise AppError(
+                502, "Prüfung nicht unterstützt.", reason=UNSUPPORTED_REASON
+            ) from error
+        raise
+
+
+def _intervals_check(current: Config, intervals_get: Callable[[str], Any]) -> None:
+    athlete = quote(str(current.intervals_athlete_id).strip(), safe="")
+    try:
+        intervals_get(f"/athlete/{athlete}")
+    except AppError as error:
+        if error.upstream_status == 404:
+            raise AppError(
+                400, "Ungültige Konfiguration.", reason=MISCONFIGURED_REASON
+            ) from error
+        raise
+
+
 def build_probes(
     *,
     config: Callable[[], Config],
@@ -50,43 +92,10 @@ def build_probes(
     """Return the probes for the providers that support a safe explicit check."""
 
     def openai() -> None:
-        current = config()
-        try:
-            url = openai_requests.endpoint(
-                current.openai_base_url,
-                OPENAI_MODELS_PATH,
-                default_base_url=default_openai_base_url,
-            )
-        except AppError as error:
-            raise AppError(
-                400, "Ungültige Konfiguration.", reason=MISCONFIGURED_REASON
-            ) from error
-        try:
-            request(
-                "GET",
-                url,
-                headers={"Authorization": f"Bearer {current.openai_api_key.strip()}"},
-                timeout=_TIMEOUT_SECONDS,
-                service="openai-check",
-            )
-        except AppError as error:
-            # Compatible endpoints may not implement the model listing.
-            if error.upstream_status in {404, 405, 501}:
-                raise AppError(
-                    502, "Prüfung nicht unterstützt.", reason=UNSUPPORTED_REASON
-                ) from error
-            raise
+        _openai_check(config(), request, default_openai_base_url)
 
     def intervals() -> None:
-        athlete = quote(str(config().intervals_athlete_id).strip(), safe="")
-        try:
-            intervals_get(f"/athlete/{athlete}")
-        except AppError as error:
-            if error.upstream_status == 404:
-                raise AppError(
-                    400, "Ungültige Konfiguration.", reason=MISCONFIGURED_REASON
-                ) from error
-            raise
+        _intervals_check(config(), intervals_get)
 
     def weather() -> None:
         request(
