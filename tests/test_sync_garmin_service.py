@@ -909,10 +909,6 @@ class GarminMorningRemoteReaderTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GarminCheckFixtureTests(unittest.TestCase):
     def test_fixture_mode_never_reaches_the_sdk(self):
         from backend.sync.garmin_assembly import GarminAssembly
@@ -924,3 +920,7 @@ class GarminCheckFixtureTests(unittest.TestCase):
         with self.assertRaises(AppError) as context:
             assembly.check_stored_login()
         self.assertEqual(context.exception.reason, "check_unsupported")
+
+
+if __name__ == "__main__":
+    unittest.main()
