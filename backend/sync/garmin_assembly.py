@@ -177,6 +177,13 @@ class GarminAssembly:
             ),
         )
 
+    def body_export(self, profile: Any) -> Any:
+        from backend.sync.garmin_profile_body_export import GarminProfileBodyExport
+
+        return GarminProfileBodyExport(
+            profile, self.remote_reader(), self.fixture_loader(), self._garmin_tokens
+        )
+
     def remote_reader(self) -> GarminRemoteReader:
         """Compose authenticated Garmin SDK reads without contacting Garmin."""
         return GarminRemoteReader(

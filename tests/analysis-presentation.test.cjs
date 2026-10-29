@@ -144,3 +144,44 @@ test("a filled analysis chart is kept and is not listed as missing", () => {
   assert.equal(collectAnalysisChart(missing, "Körperfett", []), null);
   assert.deepEqual(Array.from(missing), ["Körperfett"], "only the empty chart is listed");
 });
+
+test("body overview uses profile body fat without creating a dated measurement", () => {
+  const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
+  const root = makeNode("div");
+  const state = { data: { profile: { body_fat_pct: "18.5" } } };
+  const { bodyProfileFat, renderBodyAnalysis } = loadFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
+    state, document: { getElementById: () => root }, reportNode: makeNode,
+    isPreferredSource: () => true, analysisValidPoint: (p) => p.value != null,
+    dateLabel: (v) => v, analysisValue: (v, unit) => `${v} ${unit}`,
+    analysisPeriodControls: () => makeNode("nav"), bodyHistoryPeriod: "twelveWeeks",
+  });
+  const body = { windows: {} };
+  renderBodyAnalysis(body);
+  const rows = root.children[0].children[0].children[1].children;
+  assert.equal(rows[1].children[0].children[0].text, "Profil");
+  assert.equal(rows[1].children[1].text, "18.5 %");
+  assert.equal(bodyProfileFat({ body_fat_pct: "" }), null);
+  assert.equal(bodyProfileFat({ body_fat_pct: "18,5" }), 18.5);
+  assert.equal(bodyProfileFat({ body_fat_pct: 71 }), null);
+});
+
+
+test("body overview falls back to Garmin when the profile fat is absent", () => {
+  const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
+  const root = makeNode("div");
+  const state = { data: { profile: { body_fat_pct: "" } } };
+  const { renderBodyAnalysis } = loadFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
+    state, document: { getElementById: () => root }, reportNode: makeNode,
+    isPreferredSource: (item, preferred) => item.source_provider === preferred,
+    analysisValidPoint: (point) => point.value != null, dateLabel: (v) => v,
+    analysisValue: (v, unit) => `${v} ${unit}`, analysisPeriodControls: () => makeNode("nav"),
+    bodyHistoryPeriod: "twelveWeeks", bodyMetricChart: () => null, analysisMissingDataNote: () => makeNode("p"),
+  });
+  const point = { date: "2026-10-10", value: 16 };
+  const body = { preferred_providers: { body_fat_pct: "garmin" }, windows: { "12w": { start: "2026-10-01", end: "2026-10-15", metrics: { body_fat_pct: [{ source_provider: "garmin", points: [point] }] } } } };
+  renderBodyAnalysis(body);
+  const row = root.children[0].children[0].children[1].children[1];
+  assert.equal(row.children[0].children[0].text, "2026-10-10");
+  assert.equal(row.children[1].text, "16 %");
+  assert.deepEqual(point, { date: "2026-10-10", value: 16 });
+});

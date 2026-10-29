@@ -31,7 +31,10 @@ class HistoryUndoService:
         planning_revision_service: Any,
         zone_service: Any | None = None,
         feedback_service: Any | None = None,
+        *,
+        profile_mutation_coordinator: Any,
     ):
+        self._profile_mutation_coordinator = profile_mutation_coordinator
         self._database_manager = database_manager
         self._history_service = history_service
         self._profile_service = profile_service
@@ -42,6 +45,10 @@ class HistoryUndoService:
         self._planning_revision_service = planning_revision_service
         self._zone_service = zone_service
         self._feedback_service = feedback_service
+
+    @property
+    def profile_mutation_coordinator(self) -> Any:
+        return self._profile_mutation_coordinator
 
     def preview(self, change_id: Any) -> dict[str, Any]:
         with self._database_manager.unit_of_work() as db:
@@ -81,7 +88,10 @@ class HistoryUndoService:
             if isinstance(payload, dict)
             else ""
         )
-        with self._database_manager.unit_of_work() as db:
+        with (
+            self._profile_mutation_coordinator,
+            self._database_manager.unit_of_work() as db,
+        ):
             return self._apply_one(db, change_id, expected_hash)
 
     def apply_many(

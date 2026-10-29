@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -152,6 +153,7 @@ class WeatherServiceTests(unittest.TestCase):
             self.manager,
             ProfileRepository(self.key_values),
             self.key_values,
+            mutation_coordinator=threading.RLock(),
             on_location_changed=cache.invalidate_for_location_change,
         )
         self.profile.save({"weather_location": "Berlin"})

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 import unittest
 from contextlib import contextmanager
 
@@ -44,6 +45,7 @@ class ProfileServiceTests(unittest.TestCase):
             _Manager(self.db),
             ProfileRepository(self.key_values),
             self.key_values,
+            mutation_coordinator=threading.RLock(),
             on_location_changed=weather_cache.invalidate_for_location_change,
         )
 

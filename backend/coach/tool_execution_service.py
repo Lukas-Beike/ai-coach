@@ -14,6 +14,8 @@ from backend.coach.training_patch import CoachTrainingPatchService
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 
+PROFILE_MUTATING_COACH_TOOLS = frozenset({"update_profile", "undo_training_change"})
+
 COACH_EXTERNAL_FOOD_LOOKUP_TOOLS = frozenset(
     {
         "lookup_food",
@@ -37,7 +39,9 @@ class CoachStructuredToolExecutionService:
         duplicate_inspector: DuplicateInspector,
         proposal_creation: CoachProposalCreationService,
         tool_dispatch: CoachToolDispatchService,
+        profile_mutation_coordinator: Any,
     ) -> None:
+        self._profile_mutation_coordinator = profile_mutation_coordinator
         self._database_manager = database_manager
         self._database_lock = database_lock
         self._key_values = key_values
@@ -73,7 +77,12 @@ class CoachStructuredToolExecutionService:
             if local_transaction
             else nullcontext()
         )
-        with lock, transaction as db:
+        coordinator = (
+            self._profile_mutation_coordinator
+            if name in PROFILE_MUTATING_COACH_TOOLS
+            else nullcontext()
+        )
+        with coordinator, lock, transaction as db:
             if name == "clarify_coach_request":
                 return self._clarification.save_question(arguments, context)
             if name == "cancel_coach_request":

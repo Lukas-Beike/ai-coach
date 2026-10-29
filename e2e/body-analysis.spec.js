@@ -64,6 +64,14 @@ test("@responsive Body plots measurements and W/kg appears only in the cycling t
   await expect(root.locator("circle[data-series='1']")).toHaveCount(0);
   await expect(overview.locator("[data-metric='weight_kg'] td")).toHaveText("71,8 kg");
   await page.evaluate(() => {
+    state.data.profile.body_fat_pct = "17.5";
+    renderBodyAnalysis(state.data.performance.history.body);
+  });
+  await expect(root.locator("[data-body-overview] [data-metric='body_fat_pct'] td")).toHaveText("17,5 %");
+  await expect(root.locator("[data-body-overview] [data-metric='body_fat_pct'] th small")).toHaveText("Profil");
+  await expect(root.locator("[data-body-metric='body_fat_pct'] circle[data-series='0']")).toHaveCount(14);
+  await page.evaluate(() => { state.data.profile.body_fat_pct = ""; });
+  await page.evaluate(() => {
     const body = structuredClone(state.data.performance.history.body);
     for (const window of Object.values(body.windows)) {
       for (const metric of ["weight_kg", "body_fat_pct"]) {
@@ -105,11 +113,33 @@ test("@responsive Body keeps old measurements dated and long gaps empty", async 
   });
   await page.goto("/#nutrition/body");
   const root = page.locator("#bodyAnalysisCharts");
-  await expect(root.locator("[data-body-overview] caption")).toHaveText("Zuletzt gemessene Körperwerte");
+  await expect(root.locator("[data-body-overview] caption")).toHaveText("Körperwerte");
   await expect(root.locator("[data-body-overview] th small")).toHaveText(["14.08.2026", "14.08.2026"]);
   await expect(root.locator("[data-body-metric='weight_kg'] circle[data-series='0']")).toHaveCount(2);
   await root.getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await expect(root.locator("[data-body-metric]")).toHaveCount(0);
   await expect(root.locator("p.empty")).toHaveText("Keine Daten: Gewicht, Körperfett");
   await expect(root.locator("[data-body-overview] th small")).toHaveText(["14.08.2026", "14.08.2026"]);
+});
+
+
+test("@responsive profile body save offers explicit retry after a known Garmin failure", async ({ page }) => {
+  const requests = [];
+  await page.route("**/api/profile", async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    const body = route.request().postDataJSON();
+    requests.push(body);
+    await route.fulfill({ json: { ...body, garmin_body_export: body.retry_body_to_garmin ? "success" : "unavailable" } });
+  });
+  await page.goto("/#more/profile");
+  const form = page.locator("#profileForm");
+  await expect(form).toBeVisible();
+  await form.locator('[name="weight_kg"]').fill("72");
+  await form.getByRole("button", { name: "Athletenkontext speichern" }).click();
+  const retry = page.locator("#retryBodyGarmin");
+  await expect(retry).toBeVisible();
+  expect(requests[0].sync_body_to_garmin).toBe(true);
+  await retry.click();
+  await expect(retry).toBeHidden();
+  expect(requests[1].retry_body_to_garmin).toBe(true);
 });

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +32,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
             planning_revision_service=Mock(),
             openai_client=Mock(),
             logger=Mock(),
+            profile_mutation_coordinator=threading.RLock(),
             diagnostics_suspended=MagicMock(),
         )
         return PrivacyDeleteService(PrivacyDeleteDependencies(**vars(mocks))), mocks
@@ -108,6 +110,7 @@ class PrivacyDeleteConfirmationTests(unittest.TestCase):
         key_values.get.return_value = ""
         service = PrivacyDeleteService(
             PrivacyDeleteDependencies(
+                profile_mutation_coordinator=threading.RLock(),
                 database_manager=database_manager,
                 database_lock=MagicMock(),
                 key_value_repository=key_values,

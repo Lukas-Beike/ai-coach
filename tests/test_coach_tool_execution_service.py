@@ -86,6 +86,7 @@ class StructuredToolExecutionTests(unittest.TestCase):
             self.inspector,
             self.proposal_creation,
             self.tool_dispatch,
+            threading.RLock(),
         )
 
     @staticmethod

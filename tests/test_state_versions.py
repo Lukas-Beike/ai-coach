@@ -4,6 +4,7 @@ import hashlib
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -54,6 +55,7 @@ class StateVersionServiceTests(unittest.TestCase):
             self.manager,
             ProfileRepository(self.key_values),
             self.key_values,
+            mutation_coordinator=threading.RLock(),
             on_location_changed=lambda *args, **kwargs: None,
         )
         self.service = StateVersionService(

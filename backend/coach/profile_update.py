@@ -42,7 +42,11 @@ class CoachProfileUpdateService:
                 "Die Profiländerung benötigt gültige Felder.",
                 reason="tool_arguments_invalid",
             )
-        with self._database_lock, self._database_manager.unit_of_work():
+        with (
+            self._profile.mutation_coordinator,
+            self._database_lock,
+            self._database_manager.unit_of_work(),
+        ):
             current = self._profile.get()
             updated = dict(current)
             seen: set[str] = set()
