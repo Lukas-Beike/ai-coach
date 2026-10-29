@@ -15,11 +15,16 @@ from urllib.error import HTTPError
 from backend.config import load_config
 from backend.errors import AppError
 from backend.nutrition.food_database import FoodDatabaseService
-from backend.providers.yazio import YazioClient, project_product
+from backend.providers.yazio import (
+    CLIENT_ID,
+    CLIENT_SECRET,
+    YazioClient,
+    project_product,
+)
 
 PRODUCT_ID = "11111111-2222-3333-4444-555555555555"
 OTHER_ID = "66666666-7777-8888-9999-000000000000"
-SECRETS = ("synthetic@example.test", "pw-synthetic", "client-id-x", "client-secret-x")
+SECRETS = ("synthetic@example.test", "pw-synthetic")
 
 
 def config(**changes):
@@ -27,8 +32,6 @@ def config(**changes):
     values = {
         "yazio_email": SECRETS[0],
         "yazio_password": SECRETS[1],
-        "yazio_client_id": SECRETS[2],
-        "yazio_client_secret": SECRETS[3],
         **changes,
     }
     return replace(base, **values)
@@ -382,6 +385,8 @@ class YazioClientTests(unittest.TestCase):
         login = script.bodies()[0]
         self.assertEqual(login["grant_type"], "password")
         self.assertEqual(login["username"], SECRETS[0])
+        self.assertEqual(login["client_id"], CLIENT_ID)
+        self.assertEqual(login["client_secret"], CLIENT_SECRET)
         search = script.requests[1]
         self.assertTrue(search.full_url.startswith("https://yzapi.yazio.com/v22/"))
         self.assertEqual(search.get_header("Authorization"), "Bearer access-1")

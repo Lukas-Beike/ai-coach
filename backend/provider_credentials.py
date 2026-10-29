@@ -50,8 +50,6 @@ SECRET_FIELDS = frozenset(
         "intervals_api_key",
         "wahoo_client_secret",
         "yazio_password",
-        "yazio_client_id",
-        "yazio_client_secret",
     }
 )
 # Non-secret values that the PWA may display.
@@ -296,8 +294,6 @@ class ProviderCredentialService:
                     for field in (
                         "yazio_email",
                         "yazio_password",
-                        "yazio_client_id",
-                        "yazio_client_secret",
                     )
                 ):
                     effective = dataclasses.replace(
