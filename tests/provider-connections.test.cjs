@@ -30,6 +30,7 @@ function loadProviderConnections() {
   const confirmations = [];
   const toasts = [];
   let invalidated = 0;
+  const providerCheckCalls = [];
   let apiHandler = async () => ({});
   let loadedData = {};
   const context = {
@@ -50,6 +51,8 @@ function loadProviderConnections() {
     },
     confirmAnswer: true,
     invalidateContextPreview: () => { invalidated += 1; },
+    invalidateProviderChecks: () => { providerCheckCalls.push("invalidate"); },
+    loadProviderChecks: async () => { providerCheckCalls.push("load"); },
   };
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -63,6 +66,7 @@ function loadProviderConnections() {
     elements,
     fn,
     invalidatedCount: () => invalidated,
+    providerCheckCalls,
     setApi(handler) { apiHandler = handler; },
     setData(data) {
       loadedData = data;

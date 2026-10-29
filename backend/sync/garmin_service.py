@@ -338,6 +338,41 @@ class GarminRemoteReader:
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 
+    def check_stored_login(self) -> None:
+        """Verify the stored tokens only; never fall back to a credential login.
+
+        The SDK reports every rejection as one generic failure, so a failure is
+        raised as ``reconnect_required`` without claiming the exact cause.
+        """
+        tokens = self._garmin_tokens
+        if tokens is None or not tokens.connected():
+            raise AppError(
+                401, "Garmin ist nicht angemeldet.", reason="reconnect_required"
+            )
+        if not self._client_factory.available():
+            raise AppError(
+                503, "Der Garmin-Client ist nicht verfügbar.", reason="check_unreadable"
+            )
+        login_argument = tokens.login_argument()
+        try:
+            client, mfa_status = garmin_adapter.authenticate_client(
+                self._client_factory,
+                None,
+                None,
+                login_argument,
+                external_call=self._external_call(None),
+                tokenstore_exists=True,
+            )
+        except Exception as exc:
+            raise AppError(
+                401, "Garmin-Anmeldung fehlgeschlagen.", reason="reconnect_required"
+            ) from exc
+        _persist_garmin_tokens(tokens, client, login_argument)
+        if mfa_status:
+            raise AppError(
+                401, GARMIN_MFA_REQUIRED_MESSAGE, reason="reconnect_required"
+            )
+
     def _external_call(self, cancel_event: threading.Event | None) -> ExternalCall:
         """Wrap SDK calls with the provider transport and cancellation checks."""
 

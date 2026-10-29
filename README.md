@@ -432,6 +432,21 @@ Intervals.icu, OpenAI and Wahoo credentials can be entered under **Mehr > Anbind
 - **Timing:** changes apply without a container restart.
 - **Privacy delete:** the local data purge removes stored credentials and Garmin tokens. A legacy token file at `/data/garmin_tokens` stays on disk, as every token store is preserved, but it is no longer used; delete it on the host if it should go too. It does not change the external Garmin, Intervals.icu or Wahoo accounts.
 
+### Connection checks
+
+Each provider card under **Mehr > Anbindungen** shows its configuration or sync state, and a separate "Verbindung" line with the last explicit check. "Verbindung prüfen" performs one bounded read-only request and never writes remotely or starts a sync. The OpenAI check does not change the OpenAI status shown elsewhere in the app. The result shows the check time and one of: successful, rejected credentials, rate limited, service unreachable, check not supported, invalid configuration, missing Wahoo permission (reconnect), check still running, or local state unreadable. A check that outlives 45 seconds is shown as still running and picked up when it finishes; the card reads again when it becomes visible. A repeat check within 10 seconds returns the stored result, except after a transient failure (unreachable or local read error), which is retried. It lives in memory only: it resets on restart and when the matching credentials change, and loading or polling the screen never contacts a provider.
+
+| Card | Check | Limit |
+| --- | --- | --- |
+| OpenAI | `GET {OPENAI_BASE_URL}/models` | Compatible endpoints without a model listing (404, 405, 501) report "not supported"; 401 and 403 count as rejected. |
+| Intervals.icu | `GET /athlete/{id}` | Confirms key and athlete ID, not data freshness. |
+| Garmin | Login with the stored tokens only | Needs a connection made in the app; `GARMIN_EMAIL` without tokens or a preserved token file shows "nicht konfiguriert". Never falls back to e-mail and password, and waits for no running sync (reports "busy"). The SDK does not distinguish causes, so any failure (including an outage) asks to retry or sign in again, and a success may only show that the tokens are accepted locally. A reconnect or any other change of the stored login drops the earlier result. Fixture mode (`GARMIN_FIXTURE_PATH`) reports not supported. The check is skipped while a Garmin sync runs.  |
+| Wahoo | `GET /v1/user` with the stored token | Needs a completed Wahoo connection with the `user_read` scope; without it the card asks to reconnect Wahoo. Uses the same client as the sync, so it may refresh the token, and a rejected refresh disconnects Wahoo as it does for a sync. |
+| Open-Meteo | Forecast for fixed public coordinates | Needs no key; never sends the profile location. |
+| Yazio | Authentication only | See below. |
+
+The shared calendar and Open Food Facts have no check: a calendar check would be the full feed fetch, which "Synchronisieren" already performs, and Open Food Facts needs no credentials.
+
 ### Garmin Authentication & MFA Setup
 
 Garmin Connect enforces Multi-Factor Authentication (MFA). The primary way to connect is the UI:

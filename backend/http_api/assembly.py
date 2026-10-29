@@ -47,6 +47,10 @@ from backend.http_api.post_dispatch import (
 from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.privacy_get import PrivacyGetRoutes
 from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
+from backend.http_api.provider_connections import (
+    ProviderConnectionGetRoutes,
+    ProviderConnectionPostRoutes,
+)
 from backend.http_api.public_get import PublicGetRoutes
 from backend.http_api.readiness import ReadinessService
 from backend.http_api.response_transport import HttpResponseTransport
@@ -273,6 +277,24 @@ class HttpDomainRouteServices:
     metric_export: Callable[[], Any] | None = None
     provider_credentials: Any | None = None
     garmin_login: Callable[[], Any] | None = None
+    connection_checks: Callable[[], Any] | None = None
+
+
+def _present(route: Any) -> tuple[Any, ...]:
+    return (route,) if route is not None else ()
+
+
+def _provider_connection_routes(
+    session_auth_service: Callable[[], Any],
+    checks: Callable[[], Any] | None,
+) -> tuple[Any, Any]:
+    """Build the optional provider connection routes as a GET and POST pair."""
+    if checks is None:
+        return None, None
+    return (
+        ProviderConnectionGetRoutes(session_auth_service, checks),
+        ProviderConnectionPostRoutes(checks),
+    )
 
 
 class HttpApiAssembly:
@@ -588,6 +610,10 @@ class HttpApiAssembly:
         self.nutrition_put_routes = NutritionPutRoutes(
             diary_service, meal_library_service
         )
+        connection_checks = dependencies.domains.connection_checks
+        self.provider_connection_get_routes, self.provider_connection_post_routes = (
+            _provider_connection_routes(session_auth_service, connection_checks)
+        )
         self.wahoo_get_routes = (
             WahooGetRoutes(wahoo_connection_service, maintenance_gate)
             if wahoo_connection_service
@@ -621,6 +647,7 @@ class HttpApiAssembly:
                 self.nutrition_get_routes,
                 self.analysis_routes,
                 *((self.wahoo_get_routes,) if self.wahoo_get_routes else ()),
+                *_present(self.provider_connection_get_routes),
             ),
             (
                 self.settings_put_routes,
@@ -653,6 +680,7 @@ class HttpApiAssembly:
             self.wahoo_post_routes,
             self.metric_export_post_routes,
             self.garmin_post_routes,
+            self.provider_connection_post_routes,
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

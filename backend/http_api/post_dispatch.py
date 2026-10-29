@@ -22,6 +22,7 @@ from backend.http_api.nutrition import NutritionPostRoutes
 from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
+from backend.http_api.provider_connections import ProviderConnectionPostRoutes
 from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.transcribe_post import TranscribePostRoutes
 from backend.http_api.wahoo import WahooPostRoutes
@@ -47,6 +48,7 @@ class HttpAuthenticatedPostRoutes:
     wahoo: WahooPostRoutes | None = None
     metric_export: MetricExportPostRoutes | None = None
     garmin: GarminPostRoutes | None = None
+    provider_connections: ProviderConnectionPostRoutes | None = None
 
 
 class HttpPostDispatcher:
@@ -78,6 +80,7 @@ class HttpPostDispatcher:
         self._wahoo = authenticated_routes.wahoo
         self._metric_export = authenticated_routes.metric_export
         self._garmin = authenticated_routes.garmin
+        self._provider_connections = authenticated_routes.provider_connections
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
         return self._auth_routes.handle(handler, path) or self._restore_route.handle(
@@ -129,6 +132,7 @@ class HttpPostDispatcher:
                 self._wahoo,
                 self._metric_export,
                 self._garmin,
+                self._provider_connections,
             )
             if route is not None
         )

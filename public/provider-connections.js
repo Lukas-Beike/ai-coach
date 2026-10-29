@@ -240,6 +240,7 @@ async function saveProviderCredentials(event, provider) {
   }
   setCredentialError(errorId, "");
   if (provider === "yazio") invalidateYazioStatus();
+  else invalidateProviderChecks(provider);
   try {
     await runCredentialRequest(provider, async () => {
       await api("/api/settings/credentials", { method: "PUT", body: JSON.stringify(payload) });
@@ -251,6 +252,7 @@ async function saveProviderCredentials(event, provider) {
     setCredentialError(errorId, error.message);
   } finally {
     if (provider === "yazio") await loadYazioStatus();
+    else await loadProviderChecks();
   }
 }
 
@@ -263,6 +265,7 @@ async function clearProviderCredential(field, provider) {
   );
   if (!confirmed) return;
   if (provider === "yazio") invalidateYazioStatus();
+  else invalidateProviderChecks(provider);
   try {
     await runCredentialRequest(provider, async () => {
       await api("/api/settings/credentials", { method: "PUT", body: JSON.stringify({ [field]: null }) });
@@ -274,6 +277,7 @@ async function clearProviderCredential(field, provider) {
     setCredentialError(credentialFormIds(provider).error, error.message);
   } finally {
     if (provider === "yazio") await loadYazioStatus();
+    else await loadProviderChecks();
   }
 }
 
@@ -301,6 +305,8 @@ async function submitGarminLogin(event) {
       });
       garminMfaHint = result?.status === "mfa_required";
       toast(garminMfaHint ? "Bitte den Bestätigungscode von Garmin eingeben" : "Garmin verbunden");
+      invalidateProviderChecks(GARMIN_CARD);
+      void loadProviderChecks();
       await load();
     });
   } catch (error) {
@@ -329,6 +335,8 @@ async function submitGarminMfa(event) {
       });
       garminMfaHint = false;
       toast("Garmin verbunden");
+      invalidateProviderChecks(GARMIN_CARD);
+      void loadProviderChecks();
       await load();
     });
   } catch (error) {
@@ -367,6 +375,8 @@ async function disconnectGarmin() {
       garminMfaHint = false;
       garminLoginRestarted = false;
       toast("Garmin getrennt");
+      invalidateProviderChecks(GARMIN_CARD);
+      void loadProviderChecks();
       await load();
     });
   } catch (error) {

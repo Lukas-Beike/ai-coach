@@ -94,6 +94,7 @@ async function restoreDatabaseBackup() {
       headers: { "Content-Type": "application/octet-stream" }, body: file,
     }, () => { if (generation === state.sessionGeneration) showLogin(); });
     toast("Backup wiederhergestellt. Bitte erneut anmelden.");
+    invalidateProviderChecks();
     showLogin();
   } catch (error) {
     toast(error?.name === "AbortError"
@@ -230,6 +231,8 @@ async function deletePrivacyData() {
     toast("Lokale Daten gelöscht");
     // Deleted records must neither stay on screen nor reach the session snapshot.
     clearStateSnapshot();
+    invalidateProviderChecks();
+    void loadProviderChecks();
     // Loads that started before the deletion are dropped instead of rendered.
     state.loadSequence += 1;
     state.replaceDataOnLoad = true;
