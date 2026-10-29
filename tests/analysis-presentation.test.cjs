@@ -149,7 +149,7 @@ test("body overview uses profile body fat without creating a dated measurement",
   const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
   const root = makeNode("div");
   const state = { data: { profile: { body_fat_pct: "18.5" } } };
-  const { bodyProfileFat, renderBodyAnalysis } = loadFunctions("analysis.js", ["bodyProfileFat", "renderBodyAnalysis"], {
+  const { bodyProfileFat, renderBodyAnalysis } = loadFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
     state, document: { getElementById: () => root }, reportNode: makeNode,
     isPreferredSource: () => true, analysisValidPoint: (p) => p.value != null,
     dateLabel: (v) => v, analysisValue: (v, unit) => `${v} ${unit}`,
@@ -170,7 +170,7 @@ test("body overview falls back to Garmin when the profile fat is absent", () => 
   const makeNode = (tag, text) => ({ tag, text, dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, querySelectorAll() { return []; } });
   const root = makeNode("div");
   const state = { data: { profile: { body_fat_pct: "" } } };
-  const { renderBodyAnalysis } = loadFunctions("analysis.js", ["bodyProfileFat", "renderBodyAnalysis"], {
+  const { renderBodyAnalysis } = loadFunctions("analysis.js", ["bodyProfileFat", "bodyOverviewDisplayValue", "renderBodyOverviewRow", "renderBodyAnalysis"], {
     state, document: { getElementById: () => root }, reportNode: makeNode,
     isPreferredSource: (item, preferred) => item.source_provider === preferred,
     analysisValidPoint: (point) => point.value != null, dateLabel: (v) => v,

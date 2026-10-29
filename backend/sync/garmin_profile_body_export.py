@@ -19,75 +19,92 @@ class GarminProfileBodyExport:
         self._fixture_loader = fixture_loader
         self._tokens = tokens
 
+    def _acquire_locks(self, stack: ExitStack, deadline: float) -> bool:
+        for lock in (shared_garmin_sync_lock(), self._profile.mutation_coordinator):
+            if not lock.acquire(timeout=max(0.0, deadline - monotonic())):
+                return False
+            stack.callback(lock.release)
+        return monotonic() < deadline
+
+    def _authenticate(self) -> tuple[Any, Any] | None:
+        if self._fixture_loader.path() is not None or not self._reader.configured():
+            return None
+        try:
+            return self._reader._authenticated_client(
+                lambda _service, _operation, call, _details: call()
+            )
+        except Exception:  # noqa: BLE001 - provider authentication is an external boundary
+            return None
+
+    def _upload_and_persist(
+        self,
+        client: Any,
+        login_argument: Any,
+        tz_name: str | None,
+        weight: float,
+        fat: float,
+        deadline: float,
+    ) -> str:
+        try:
+            if monotonic() >= deadline:
+                return "unavailable"
+            timestamp = datetime.now(ZoneInfo(timezone_name(tz_name))).isoformat()
+            response = _upload_with_deadline(client, timestamp, weight, fat, deadline)
+            return _outcome(response)
+        except Exception as exc:  # noqa: BLE001 - remote outcome may be ambiguous
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            return (
+                "rejected"
+                if isinstance(status, int)
+                and 400 <= status < 500
+                and status not in (408, 429)
+                else "uncertain"
+            )
+        finally:
+            try:
+                _persist_garmin_tokens(self._tokens, client, login_argument)
+            except Exception:  # noqa: BLE001 - preserve the determined remote outcome
+                logging.getLogger(__name__).warning("Garmin token persistence failed")
+
     def export(
         self, saved: dict[str, str], revision: str | None, deadline: float | None = None
     ) -> str:
         deadline = monotonic() + 10.0 if deadline is None else deadline
         with ExitStack() as locks:
-            for lock in (shared_garmin_sync_lock(), self._profile.mutation_coordinator):
-                if not lock.acquire(timeout=max(0.0, deadline - monotonic())):
-                    return "unavailable"
-                locks.callback(lock.release)
-            if monotonic() >= deadline:
+            if not self._acquire_locks(locks, deadline):
                 return "unavailable"
-            current = (
-                self._profile.get()
-            )  # reader closes before authentication or upload
+            current = self._profile.get()  # reader closes before authentication or upload
             if self._profile.revision() != revision or any(
                 current.get(k) != saved.get(k) for k in ("weight_kg", "body_fat_pct")
             ):
                 return "superseded"
-            try:
-                weight, fat = (
-                    float(current["weight_kg"]),
-                    float(current["body_fat_pct"]),
-                )
-            except KeyError, TypeError, ValueError:
+            body = _parse_body_measurements(current)
+            if body is None:
                 return "invalid"
-            if not (
-                math.isfinite(weight)
-                and 20 <= weight <= 300
-                and math.isfinite(fat)
-                and 1 <= fat <= 70
-            ):
-                return "invalid"
-            try:
-                if (
-                    self._fixture_loader.path() is not None
-                    or not self._reader.configured()
-                ):
-                    return "unavailable"
-                client, login_argument = self._reader._authenticated_client(
-                    lambda _service, _operation, call, _details: call()
-                )
-            except Exception:  # noqa: BLE001 - provider authentication is an external boundary
+            auth = self._authenticate()
+            if auth is None:
                 return "unavailable"
-            try:
-                if monotonic() >= deadline:
-                    return "unavailable"
-                timestamp = datetime.now(
-                    ZoneInfo(timezone_name(current.get("timezone")))
-                ).isoformat()
-                response = _upload_with_deadline(
-                    client, timestamp, weight, fat, deadline
-                )
-                return _outcome(response)
-            except Exception as exc:  # noqa: BLE001 - remote outcome may be ambiguous
-                status = getattr(getattr(exc, "response", None), "status_code", None)
-                return (
-                    "rejected"
-                    if isinstance(status, int)
-                    and 400 <= status < 500
-                    and status not in (408, 429)
-                    else "uncertain"
-                )
-            finally:
-                try:
-                    _persist_garmin_tokens(self._tokens, client, login_argument)
-                except Exception:  # noqa: BLE001 - preserve the determined remote outcome
-                    logging.getLogger(__name__).warning(
-                        "Garmin token persistence failed"
-                    )
+            client, login_argument = auth
+            weight, fat = body
+            return self._upload_and_persist(
+                client, login_argument, current.get("timezone"), weight, fat, deadline
+            )
+
+
+def _parse_body_measurements(current: dict[str, Any]) -> tuple[float, float] | None:
+    try:
+        weight = float(current["weight_kg"])
+        fat = float(current["body_fat_pct"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (
+        math.isfinite(weight)
+        and 20 <= weight <= 300
+        and math.isfinite(fat)
+        and 1 <= fat <= 70
+    ):
+        return None
+    return weight, fat
 
 
 def _upload_with_deadline(

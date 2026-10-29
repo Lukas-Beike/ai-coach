@@ -31,65 +31,66 @@ class AthletePutRoutes:
     def handle(self, handler: Any, path: str) -> bool:
         if path in {"/api/zones", "/api/zones/remove"}:
             return self._handle_zones(handler, path)
-        if path not in {"/api/athlete-context", "/api/profile"}:
-            return False
+        if path == "/api/athlete-context":
+            return self._handle_athlete_context(handler)
+        if path == "/api/profile":
+            return self._handle_profile(handler)
+        return False
 
-        deadline = monotonic() + 10.0
+    def _handle_athlete_context(self, handler: Any) -> bool:
         payload = handler.read_json()
-        context = (
-            self._athlete_context_service() if path == "/api/athlete-context" else None
-        )
-        profile = (
-            context.profile_service if context is not None else self._profile_service()
-        )
-        before = None
-        retry_export = False
-        revision = None
-        with profile.mutation_coordinator, self._database_lock or nullcontext():
-            if context is not None:
-                result = context.save(
-                    payload.get("profile"), payload.get("competitions")
-                )
-            else:
-                opted_in = (
-                    isinstance(payload, dict)
-                    and payload.get("sync_body_to_garmin") is True
-                )
-                retry_export = opted_in and payload.get("retry_body_to_garmin") is True
-                changes = (
-                    {
-                        k: v
-                        for k, v in payload.items()
-                        if k not in {"sync_body_to_garmin", "retry_body_to_garmin"}
-                    }
-                    if isinstance(payload, dict)
-                    else payload
-                )
-                before = profile.get() if opted_in and self._body_export else None
-                result = profile.patch(changes)
-                if before is not None:
-                    revision = profile.revision()
-
-        if (
-            self._body_export is not None
-            and before is not None
-            and (
-                retry_export
-                or any(
-                    before.get(k) != result.get(k)
-                    for k in ("weight_kg", "body_fat_pct")
-                )
-            )
-        ):
-            try:
-                status = self._body_export(result, revision, deadline)
-            except Exception:  # noqa: BLE001 - local profile was already committed
-                status = "uncertain"
-            result = {**result, "garmin_body_export": status}
-        elif before is not None:
-            result = {**result, "garmin_body_export": "unchanged"}
+        context = self._athlete_context_service()
+        with context.profile_service.mutation_coordinator, self._database_lock or nullcontext():
+            result = context.save(payload.get("profile"), payload.get("competitions"))
         handler.send_json(200, result)
         return True
+
+    def _handle_profile(self, handler: Any) -> bool:
+        deadline = monotonic() + 10.0
+        payload = handler.read_json()
+        profile = self._profile_service()
+        opted_in = isinstance(payload, dict) and payload.get("sync_body_to_garmin") is True
+        retry_export = opted_in and payload.get("retry_body_to_garmin") is True
+        changes = (
+            {
+                k: v
+                for k, v in payload.items()
+                if k not in {"sync_body_to_garmin", "retry_body_to_garmin"}
+            }
+            if isinstance(payload, dict)
+            else payload
+        )
+        with profile.mutation_coordinator, self._database_lock or nullcontext():
+            before = profile.get() if opted_in and self._body_export else None
+            result = profile.patch(changes)
+            revision = profile.revision() if before is not None else None
+
+        result = self._export_body_if_needed(result, before, retry_export, revision, deadline)
+        handler.send_json(200, result)
+        return True
+
+    def _export_body_if_needed(
+        self,
+        result: dict[str, Any],
+        before: dict[str, str] | None,
+        retry_export: bool,
+        revision: str | None,
+        deadline: float,
+    ) -> dict[str, Any]:
+        if before is None:
+            return result
+        if not self._body_export:
+            return {**result, "garmin_body_export": "unchanged"}
+        body_changed = any(
+            before.get(k) != result.get(k) for k in ("weight_kg", "body_fat_pct")
+        )
+        if not (retry_export or body_changed):
+            return {**result, "garmin_body_export": "unchanged"}
+        try:
+            status = self._body_export(result, revision, deadline)
+        except Exception:  # noqa: BLE001 - local profile was already committed
+            status = "uncertain"
+        return {**result, "garmin_body_export": status}
 
     def _handle_zones(self, handler: Any, path: str) -> bool:
         """Save one local zone configuration or remove one after confirmation."""
