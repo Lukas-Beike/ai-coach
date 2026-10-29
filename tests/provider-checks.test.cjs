@@ -21,6 +21,7 @@ function loadChecks(apiHandler) {
   const toasts = [];
   const context = {
     document: {
+      addEventListener: () => {},
       querySelectorAll: () => [...buttons.values()],
       querySelector: (selector) => {
         const id = /"(\w+)"/.exec(selector)[1];

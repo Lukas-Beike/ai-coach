@@ -40,7 +40,7 @@ const PROVIDER_CHECK_POLL_MS = 3000;
 // One pending poll at a time, however many loads complete meanwhile.
 let providerCheckPoll = null;
 let providerCheckPolls = 0;
-const PROVIDER_CHECK_MAX_POLLS = 60;
+const PROVIDER_CHECK_MAX_POLLS = 200;
 
 function connectionsVisible() {
   return document.visibilityState !== "hidden"
@@ -74,8 +74,14 @@ function renderProviderChecks() {
   for (const provider of providerCheckIds()) renderProviderCheck(provider);
 }
 
+// Explicit loads start a fresh poll budget; timers use readProviderChecks.
+function loadProviderChecks() {
+  providerCheckPolls = 0;
+  return readProviderChecks();
+}
+
 // Reads local state only. A response that arrives after a newer load is ignored.
-async function loadProviderChecks() {
+async function readProviderChecks() {
   const load = ++providerCheckLoad;
   const epoch = providerCheckEpoch;
   const stamps = new Map(providerCheckStamp);
@@ -98,7 +104,7 @@ async function loadProviderChecks() {
   // Poll only while someone can see the card, and for a bounded time.
   if (running && providerCheckPolls < PROVIDER_CHECK_MAX_POLLS && connectionsVisible()) {
     providerCheckPolls += 1;
-    providerCheckPoll = setTimeout(() => void loadProviderChecks(), PROVIDER_CHECK_POLL_MS);
+    providerCheckPoll = setTimeout(() => void readProviderChecks(), PROVIDER_CHECK_POLL_MS);
   } else if (!running) {
     providerCheckPolls = 0;
   }
@@ -152,6 +158,9 @@ function refreshOpenProviderChecks() {
 }
 
 function bindProviderChecks() {
+  document.addEventListener("visibilitychange", () => {
+    if (connectionsVisible()) void loadProviderChecks();
+  });
   for (const button of document.querySelectorAll("[data-check-button]")) {
     button.addEventListener("click", () => checkProviderConnection(button.dataset.checkButton));
   }
