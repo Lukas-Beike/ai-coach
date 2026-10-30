@@ -216,9 +216,11 @@
 
   // Before the document loads, the list row's summary values stand in under the document's metric keys.
   function rowMetrics(row) {
-    const keys = { distance_m: "distance_m", moving_duration_s: "moving_duration_s", elapsed_duration_s: "elapsed_duration_s", avg_speed_mps: "avg_speed_mps", max_speed_mps: "max_speed_mps", avg_hr: "avg_hr", max_hr: "max_hr", avg_power: "avg_power", normalized_power: "normalized_power", elevation_gain_m: "elevation_gain_m", training_load: "load", intensity: "intensity" };
+    const keys = ["distance_m", "moving_duration_s", "elapsed_duration_s", "avg_speed_mps", "max_speed_mps", "avg_hr", "max_hr", "avg_power", "normalized_power", "elevation_gain_m", "intensity"];
     const metrics = {};
-    for (const [rowKey, key] of Object.entries(keys)) if (row?.[rowKey] != null) metrics[key] = row[rowKey];
+    for (const key of keys) if (row?.[key] != null) metrics[key] = row[key];
+    // The list row names its load like planned units do (training_load); the document calls it load.
+    if (row?.training_load != null) metrics.load = row.training_load;
     return metrics;
   }
 

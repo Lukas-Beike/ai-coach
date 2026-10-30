@@ -191,40 +191,149 @@ _PLANNING_RECORDS = (
     "planning-records: local planned units and library entries keep stored keys "
     "until they move (#1507)"
 )
-_FIELD_MODULE_OWNERS: Mapping[str, str] = {
-    "backend/activities/calendar_projection.py": _ACTIVITY_ROWS,
-    "backend/activities/detail_projection.py": _ACTIVITY_ROWS,
-    "backend/activities/detail_store.py": _DEAD_LEGACY,
-    "backend/activities/duplicates.py": _ACTIVITY_ROWS,
-    "backend/athlete/equipment.py": _LEGACY_FALLBACK,
-    "backend/coach/context.py": _ACTIVITY_ROWS,
-    "backend/nutrition/sync_status.py": _LEGACY_FALLBACK,
-    "backend/performance/activity_validation.py": _ACTIVITY_ROWS,
-    "backend/performance/body.py": _LEGACY_FALLBACK,
-    "backend/performance/canonical_sections.py": _ACTIVITY_ROWS,
-    "backend/performance/chart_history.py": _LEGACY_FALLBACK,
-    "backend/performance/current_metrics.py": _LEGACY_FALLBACK,
-    "backend/performance/daily_health.py": _LEGACY_FALLBACK,
-    "backend/performance/eftp.py": _ACTIVITY_ROWS,
-    "backend/performance/garmin_metric_history.py": _LEGACY_FALLBACK,
-    "backend/performance/garmin_metrics.py": _LEGACY_FALLBACK,
-    "backend/performance/garmin_observations.py": _LEGACY_FALLBACK,
-    "backend/performance/garmin_projection.py": _LEGACY_FALLBACK,
-    "backend/performance/garmin_weight.py": _LEGACY_FALLBACK,
-    "backend/performance/load.py": _ACTIVITY_ROWS,
-    "backend/performance/planning_recovery.py": _DEAD_LEGACY,
-    "backend/performance/recovery.py": _LEGACY_FALLBACK,
-    "backend/performance/report_service.py": _ACTIVITY_ROWS,
-    "backend/performance/session_analysis.py": _ACTIVITY_ROWS,
-    "backend/performance/tag_impact.py": _ACTIVITY_ROWS,
-    "backend/performance/training_focus.py": _ACTIVITY_ROWS,
-    "backend/performance/training_report.py": _ACTIVITY_ROWS,
-    "backend/performance/wellness.py": _LEGACY_FALLBACK,
-    "backend/planning/context.py": _PLANNING_RECORDS,
-    "backend/planning/library.py": _PLANNING_RECORDS,
-    "backend/planning/season_preparation.py": _ACTIVITY_ROWS,
-    "backend/planning/target_snapshot.py": _PLANNING_RECORDS,
+# repository-relative path -> (reason, field-name modules it may still import).
+# A new module in an allowlisted file fails the guard as well.
+_FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
+    "backend/activities/calendar_projection.py": (
+        _ACTIVITY_ROWS,
+        ("intervals_performance_fields",),
+    ),
+    "backend/activities/detail_projection.py": (
+        _ACTIVITY_ROWS,
+        ("intervals_performance_fields",),
+    ),
+    "backend/activities/detail_store.py": (
+        _DEAD_LEGACY,
+        ("intervals_performance_fields",),
+    ),
+    "backend/activities/duplicates.py": (_ACTIVITY_ROWS, ("garmin_gear_fields",)),
+    "backend/athlete/equipment.py": (_LEGACY_FALLBACK, ("garmin_gear_fields",)),
+    "backend/coach/context.py": (_ACTIVITY_ROWS, ("intervals_performance_fields",)),
+    "backend/nutrition/sync_status.py": (_LEGACY_FALLBACK, ("garmin_fields",)),
+    "backend/performance/activity_validation.py": (
+        _ACTIVITY_ROWS,
+        (
+            "garmin_performance_fields",
+            "intervals_performance_fields",
+        ),
+    ),
+    "backend/performance/body.py": (_LEGACY_FALLBACK, ("garmin_performance_fields",)),
+    "backend/performance/canonical_sections.py": (
+        _ACTIVITY_ROWS,
+        ("intervals_activity_fields",),
+    ),
+    "backend/performance/chart_history.py": (
+        _LEGACY_FALLBACK,
+        ("garmin_performance_fields",),
+    ),
+    "backend/performance/current_metrics.py": (
+        _LEGACY_FALLBACK,
+        ("intervals_performance_fields",),
+    ),
+    "backend/performance/daily_health.py": (_LEGACY_FALLBACK, ("garmin_fields",)),
+    "backend/performance/eftp.py": (
+        _ACTIVITY_ROWS,
+        (
+            "garmin_fields",
+            "intervals_performance_fields",
+        ),
+    ),
+    "backend/performance/garmin_metric_history.py": (
+        _LEGACY_FALLBACK,
+        ("garmin_performance_fields",),
+    ),
+    "backend/performance/garmin_metrics.py": (
+        _LEGACY_FALLBACK,
+        (
+            "garmin_fields",
+            "garmin_performance_fields",
+        ),
+    ),
+    "backend/performance/garmin_observations.py": (
+        _LEGACY_FALLBACK,
+        ("garmin_performance_fields",),
+    ),
+    "backend/performance/garmin_projection.py": (
+        _LEGACY_FALLBACK,
+        (
+            "garmin_fields",
+            "garmin_performance_fields",
+        ),
+    ),
+    "backend/performance/garmin_weight.py": (
+        _LEGACY_FALLBACK,
+        (
+            "garmin_fields",
+            "garmin_performance_fields",
+        ),
+    ),
+    "backend/performance/load.py": (_ACTIVITY_ROWS, ("intervals_performance_fields",)),
+    "backend/performance/planning_recovery.py": (
+        _DEAD_LEGACY,
+        (
+            "garmin_fields",
+            "garmin_performance_fields",
+        ),
+    ),
+    "backend/performance/recovery.py": (
+        _LEGACY_FALLBACK,
+        (
+            "garmin_fields",
+            "garmin_performance_fields",
+        ),
+    ),
+    "backend/performance/report_service.py": (
+        _ACTIVITY_ROWS,
+        ("intervals_activity_fields",),
+    ),
+    "backend/performance/session_analysis.py": (
+        _ACTIVITY_ROWS,
+        ("intervals_performance_fields",),
+    ),
+    "backend/performance/tag_impact.py": (
+        _ACTIVITY_ROWS,
+        ("intervals_performance_fields",),
+    ),
+    "backend/performance/training_focus.py": (
+        _ACTIVITY_ROWS,
+        ("garmin_performance_fields",),
+    ),
+    "backend/performance/training_report.py": (
+        _ACTIVITY_ROWS,
+        (
+            "intervals_activity_fields",
+            "intervals_performance_fields",
+        ),
+    ),
+    "backend/performance/wellness.py": (
+        _LEGACY_FALLBACK,
+        ("garmin_performance_fields",),
+    ),
+    "backend/planning/context.py": (
+        _PLANNING_RECORDS,
+        (
+            "intervals_activity_fields",
+            "intervals_performance_fields",
+        ),
+    ),
+    "backend/planning/library.py": (
+        _PLANNING_RECORDS,
+        ("intervals_performance_fields",),
+    ),
+    "backend/planning/season_preparation.py": (
+        _ACTIVITY_ROWS,
+        ("intervals_performance_fields",),
+    ),
+    "backend/planning/target_snapshot.py": (
+        _PLANNING_RECORDS,
+        ("intervals_performance_fields",),
+    ),
 }
+FIELD_MODULE_IMPORTS_ALLOWED = frozenset(
+    (file_path, module)
+    for file_path, (_reason, allowed) in _FIELD_MODULE_OWNERS.items()
+    for module in allowed
+)
 
 # (rule, repository-relative path) -> reason. Only the files the rules actually
 # fire on are listed; a stale entry fails the guard. Remove an awaiting-kind entry
@@ -278,7 +387,7 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     },
     **{
         (RULE_FIELD_MODULE_IMPORT, path): reason
-        for path, reason in _FIELD_MODULE_OWNERS.items()
+        for path, (reason, _modules) in _FIELD_MODULE_OWNERS.items()
     },
 }
 
@@ -361,14 +470,29 @@ def _string_literals(path: Path, text: str) -> list[str]:
     return _javascript_string_literals(text)
 
 
-def _field_module_imports(text: str) -> list[str]:
-    """Return the provider field-name modules a Python source imports."""
+def _import_base(node: ast.ImportFrom, relative_path: str) -> str:
+    """Return the absolute module an ``ImportFrom`` names, resolving relative ones."""
+    if not node.level:
+        return node.module or ""
+    package = relative_path.split("/")[:-1]
+    if node.level > 1:
+        package = package[: len(package) - (node.level - 1)]
+    return ".".join([*package, *([node.module] if node.module else [])])
+
+
+def _field_module_imports(text: str, relative_path: str = "") -> list[str]:
+    """Return the provider field-name modules a Python source imports.
+
+    Absolute and relative imports count, including a field-name module imported
+    as a name of its package (``from backend.providers import garmin_fields``).
+    """
     modules: list[str] = []
     for node in ast.walk(ast.parse(text)):
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            names = [node.module, *(f"{node.module}.{a.name}" for a in node.names)]
+        elif isinstance(node, ast.ImportFrom):
+            base = _import_base(node, relative_path)
+            names = [base, *(f"{base}.{alias.name}" for alias in node.names)]
         else:
             continue
         found = {
@@ -468,7 +592,7 @@ def scan_owner_reads(root: Path = SOURCE_ROOT) -> list[CouplingEntry]:
             for token in _snapshot_key_tokens(text):
                 findings[(RULE_SNAPSHOT_KEY, relative_path, token)] += 1
             if not relative_path.startswith(FIELD_MODULE_IMPORT_ALLOWED_PREFIXES):
-                for module in _field_module_imports(text):
+                for module in _field_module_imports(text, relative_path):
                     findings[(RULE_FIELD_MODULE_IMPORT, relative_path, module)] += 1
         if relative_path.startswith(SOURCE_LABEL_SCOPES):
             for literal in _string_literals(path, text):
@@ -483,17 +607,38 @@ def scan_owner_reads(root: Path = SOURCE_ROOT) -> list[CouplingEntry]:
 def unallowed_owner_reads(
     entries: Sequence[CouplingEntry],
     allowlist: Mapping[tuple[str, str], str] = OWNER_READ_ALLOWLIST,
+    field_imports: frozenset[tuple[str, str]] = FIELD_MODULE_IMPORTS_ALLOWED,
 ) -> list[CouplingEntry]:
-    return [entry for entry in entries if (entry.rule, entry.path) not in allowlist]
+    """Findings outside the allowlist; field-module imports also match the module."""
+    return [
+        entry
+        for entry in entries
+        if (entry.rule, entry.path) not in allowlist
+        or (
+            entry.rule == RULE_FIELD_MODULE_IMPORT
+            and (entry.path, entry.token) not in field_imports
+        )
+    ]
 
 
 def stale_owner_allowlist(
     entries: Sequence[CouplingEntry],
     allowlist: Mapping[tuple[str, str], str] = OWNER_READ_ALLOWLIST,
+    field_imports: frozenset[tuple[str, str]] = FIELD_MODULE_IMPORTS_ALLOWED,
 ) -> list[tuple[str, str]]:
-    """Allowlist entries whose file no longer triggers the rule."""
+    """Allowlist entries whose file, or field-name module, no longer triggers."""
     observed = {(entry.rule, entry.path) for entry in entries}
-    return sorted(set(allowlist) - observed)
+    imported = {
+        (entry.path, entry.token)
+        for entry in entries
+        if entry.rule == RULE_FIELD_MODULE_IMPORT
+    }
+    stale_modules = [
+        (RULE_FIELD_MODULE_IMPORT, f"{file_path}: {module}")
+        for file_path, module in sorted(field_imports - imported)
+        if (RULE_FIELD_MODULE_IMPORT, file_path) in allowlist
+    ]
+    return sorted(set(allowlist) - observed) + stale_modules
 
 
 def load_baseline(path: Path = BASELINE_PATH) -> list[CouplingEntry]:

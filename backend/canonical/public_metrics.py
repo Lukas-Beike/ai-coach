@@ -42,7 +42,7 @@ _NEUTRAL_ACTIVITY_KEYS = (
     ("average_speed", "avg_speed_mps"),
     ("max_speed", "max_speed_mps"),
     ("icu_weighted_avg_speed", "weighted_avg_speed_mps"),
-    ("icu_pace", "threshold_pace_mps"),
+    ("icu_pace", "pace_mps"),
     ("icu_ctl", "ctl"),
     ("icu_atl", "atl"),
     ("icu_ftp", "ftp_w"),
@@ -69,8 +69,7 @@ def _renamed(
     laps = translated.get("laps")
     if isinstance(laps, list):
         translated["laps"] = [
-            neutral_activity_metrics(lap) if isinstance(lap, Mapping) else lap
-            for lap in laps
+            _renamed(lap, keys) if isinstance(lap, Mapping) else lap for lap in laps
         ]
     return translated
 

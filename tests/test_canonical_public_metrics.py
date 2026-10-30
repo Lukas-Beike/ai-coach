@@ -192,7 +192,7 @@ class NeutralPublicMetricsTests(unittest.TestCase):
                 "avg_speed_mps": 8.3,
                 "max_speed_mps": 14.2,
                 "weighted_avg_speed_mps": 8.4,
-                "threshold_pace_mps": 4.1,
+                "pace_mps": 4.1,
                 "vo2max": 58,
                 "feel": 3,
                 "rpe": 6,

@@ -447,6 +447,58 @@ class OwnerReadGuardTests(unittest.TestCase):
             entries,
         )
 
+    def test_relative_field_module_imports_are_resolved(self) -> None:
+        entries = _owner_reads(
+            {
+                "backend/performance/consumer.py": (
+                    "from ..providers import garmin_fields\n"
+                    "from ..providers.intervals_activity_fields import ACTIVITY_FIELDS\n"
+                    "from . import load\n"
+                ),
+            }
+        )
+        self.assertEqual(
+            [
+                (
+                    "field_module_import",
+                    "backend/performance/consumer.py",
+                    "garmin_fields",
+                    1,
+                ),
+                (
+                    "field_module_import",
+                    "backend/performance/consumer.py",
+                    "intervals_activity_fields",
+                    1,
+                ),
+            ],
+            entries,
+        )
+
+    def test_an_allowlisted_file_cannot_import_another_field_module(self) -> None:
+        path = "backend/performance/consumer.py"
+        allowlist = {("field_module_import", path): "owner"}
+        allowed = frozenset({(path, "garmin_fields")})
+        entries = [
+            _entry("field_module_import", path, "garmin_fields", 1),
+            _entry("field_module_import", path, "intervals_activity_fields", 1),
+        ]
+        self.assertEqual(
+            [("field_module_import", path, "intervals_activity_fields")],
+            [
+                (entry.rule, entry.path, entry.token)
+                for entry in unallowed_owner_reads(entries, allowlist, allowed)
+            ],
+        )
+        self.assertEqual(
+            [("field_module_import", f"{path}: intervals_activity_fields")],
+            stale_owner_allowlist(
+                entries[:1],
+                allowlist,
+                frozenset({*allowed, (path, "intervals_activity_fields")}),
+            ),
+        )
+
     def test_consumers_cannot_read_raw_snapshots(self) -> None:
         entries = _owner_reads(
             {

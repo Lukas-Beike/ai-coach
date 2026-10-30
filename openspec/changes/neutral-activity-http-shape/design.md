@@ -22,7 +22,7 @@ A completed-activity calendar entry carries `is_completed_activity: true`; plann
 - `average_heartrate` becomes `avg_hr`, and `max_heartrate` becomes `max_hr`.
 - `average_watts` becomes `avg_power`, and `weighted_average_watts` becomes `weighted_avg_power`.
 - `average_speed` becomes `avg_speed_mps`, `max_speed` becomes `max_speed_mps`, and `icu_weighted_avg_speed` becomes `weighted_avg_speed_mps`.
-- `icu_pace` becomes `threshold_pace_mps`.
+- `icu_pace` becomes `pace_mps` (the activity pace that `activity_pace_seconds_per_km` reads).
 - `icu_ctl` becomes `ctl`, `icu_atl` becomes `atl`, `icu_ftp` becomes `ftp_w`, and `icu_eftp` becomes `eftp_w`.
 - `vo2max`, `vo2_max`, `vO2MaxValue`, `vo2MaxValue` and `icu_vo2max` become `vo2max`; the first one present wins.
 - The six existing metric renames stay as they are: `training_load`, `intensity`, `rpe`, `normalized_power` and the two zone-time keys.
