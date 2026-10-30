@@ -32,6 +32,7 @@ rules:
     - Include relevant failure, authorization, persistence and provenance scenarios.
     - Cite current implementation and test paths; label missing evidence explicitly.
     - Keep unresolved intent and known defects separate from accepted requirements.
+    - Keep each requirement's text at or below 500 characters after merging into the main spec; put further detail in scenarios or a "Detailed contract" paragraph.
   tasks:
     - Include scoped evidence review and strict OpenSpec validation before completion.
     - List only work the agent completes before merge. Phrase environment-dependent checks as "run X where available and record unavailable checks as gaps", never as a task that waits for a later or manual run.
