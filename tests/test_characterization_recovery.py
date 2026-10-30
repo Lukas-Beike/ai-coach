@@ -436,7 +436,7 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
 
                 self.assertEqual(baseline["status"], status)
                 self.assertEqual(baseline["nights"], nights)
-                self.assertEqual(baseline["measurement"], "restingHeartRate")
+                self.assertEqual(baseline["measurement"], "resting")
                 self.assertEqual(baseline["unit"], "bpm")
                 self.assertEqual(baseline["value"], 100)
                 if status == "insufficient_data":
@@ -470,7 +470,7 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
 
                 self.assertEqual(baseline["status"], status)
                 self.assertEqual(baseline["nights"], nights)
-                self.assertEqual(baseline["measurement"], "sleepTimeSeconds")
+                self.assertEqual(baseline["measurement"], "duration")
                 self.assertEqual(baseline["unit"], "h")
                 self.assertEqual(baseline["value"], 6.0)
                 if status != "insufficient_data":
@@ -551,7 +551,7 @@ class PersonalRecoveryGarminTests(unittest.TestCase):
             [
                 {
                     "source": GARMIN,
-                    "measurement": "sleepTimeSeconds",
+                    "measurement": "duration",
                     "known_nights": 7,
                     "target_hours": 8.0,
                     "deficit_hours": 14.0,

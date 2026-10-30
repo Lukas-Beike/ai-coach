@@ -308,18 +308,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/performance/current_metrics.py",
-      "code": "arg-type",
-      "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/performance/current_metrics.py",
-      "code": "arg-type",
-      "message_sha256": "80a710915d9ce4bb19eb469b1d03f4800d43502276dfd6243d31257e1828f427"
-    },
-    {
-      "tool": "mypy",
       "path": "server.py",
       "code": "arg-type",
       "message_sha256": "8201b28533baa9af4e40901aafd403409021ccf3e9391330974505c193ecfc6a"
@@ -1328,12 +1316,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/performance/current_metrics.py",
-      "code": "return-value",
-      "message_sha256": "d2d361e1e19a2a5feedd3f4f61895c083eb513533d6fff273ee9cb1e7758c57b"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/sync/selected.py",
       "code": "union-attr",
       "message_sha256": "1b9a8564ffe7d40a0499a1125643d1b92afcb5b89007886080f0976dfbfff5b1"
@@ -1385,18 +1367,6 @@
       "path": "tests/test_activity_identity.py",
       "code": "union-attr",
       "message_sha256": "8435f119d100d91aabdaf273fac7ed99826ca4c2c44a0d4c528a067d931093f5"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/performance/current_metrics.py",
-      "code": "union-attr",
-      "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/performance/trends.py",
-      "code": "union-attr",
-      "message_sha256": "b72d81662001bf746c8c4ec5862275ad129abe90e9f2404f488de0fb289d0584"
     },
     {
       "tool": "mypy",

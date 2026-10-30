@@ -74,7 +74,6 @@ class ActivityAnalysisReadService(ActivityReadService):
             canonical = read_performance_inputs(
                 source.observation_reader(),
                 db,
-                snapshot,
                 activity_reader=reader,
                 as_of=as_of,
             )

@@ -2,6 +2,8 @@ import copy
 import unittest
 from datetime import date
 
+from performance_day_support import current_days
+
 from backend.performance.comparisons import (
     performance_comparisons,
     performance_trend_average,
@@ -31,13 +33,11 @@ class PerformanceTrendAverageTests(unittest.TestCase):
         }
 
         self.assertEqual(
-            performance_trend_average({}, garmin, metrics, "weight_kg", 7, TODAY),
+            performance_trend_average(garmin, metrics, "weight_kg", 7, TODAY),
             71.0,
         )
         self.assertEqual(
-            performance_trend_average(
-                {}, garmin, metrics, "cycling_ftp_watts", 7, TODAY
-            ),
+            performance_trend_average(garmin, metrics, "cycling_ftp_watts", 7, TODAY),
             290.0,
         )
 
@@ -52,14 +52,17 @@ class PerformanceTrendAverageTests(unittest.TestCase):
         metrics = {"readiness": {"source": "Intervals.icu Wellness"}}
 
         self.assertEqual(
-            performance_trend_average(snapshot, {}, metrics, "readiness", 7, TODAY),
+            performance_trend_average(
+                {},
+                metrics,
+                "readiness",
+                7,
+                TODAY,
+                wellness_days=current_days(snapshot["recent_wellness"]),
+            ),
             75.0,
         )
-        self.assertIsNone(
-            performance_trend_average(
-                {"recent_wellness": []}, {}, metrics, "readiness", 7, TODAY
-            )
-        )
+        self.assertIsNone(performance_trend_average({}, metrics, "readiness", 7, TODAY))
 
 
 class PerformanceComparisonsTests(unittest.TestCase):
@@ -138,7 +141,6 @@ class PerformanceComparisonsTests(unittest.TestCase):
                 "sportInfo": [{"types": ["Ride"], "eFTP": 290}],
             },
         ]
-        snapshot = {"recent_wellness": wellness_rows}
         recovery = {
             "sleep_hours": 8,
             "sleep_average": 7,
@@ -162,12 +164,11 @@ class PerformanceComparisonsTests(unittest.TestCase):
             {"start_date_local": "2026-09-07T08:00:00", "type": "Ride", "icu_eftp": 290}
         ]
         return (
-            snapshot,
             garmin,
             metrics,
             recovery,
             load_context,
-            wellness_rows,
+            current_days(wellness_rows),
             activities,
         )
 
@@ -179,7 +180,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
         self.assertEqual(result["sleep_hours"]["unit"], "h")
         self.assertEqual(result["sleep_hours"]["days"], 7)
         self.assertEqual(result["sleep_hours"]["color"], "good")
-        self.assertEqual(result["restingHR"]["color"], "good")
+        self.assertEqual(result["resting_hr_bpm"]["color"], "good")
         self.assertEqual(result["fatigue_atl"]["color"], "bad")
         self.assertEqual(result["weight_kg_30d"]["color"], "neutral")
         self.assertEqual(result["training_load_7d"]["label"], "vorherigen 7 Tagen")
@@ -221,8 +222,8 @@ class PerformanceComparisonsTests(unittest.TestCase):
     def test_missing_values_return_none_without_mutation(self):
         values = self._inputs()
         values = list(values)
-        values[2] = {"cycling_eftp_watts": {"value": None, "source": None}}
-        values[3] = {
+        values[1] = {"cycling_eftp_watts": {"value": None, "source": None}}
+        values[2] = {
             "sleep_hours": None,
             "sleep_average": None,
             "readiness": None,

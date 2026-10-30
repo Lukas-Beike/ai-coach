@@ -1,4 +1,4 @@
-"""Stateless composition of the current performance context."""
+"""Compose the current performance context from canonical daily wellness values."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
+from backend.canonical.vocabulary import MetricKind
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import comparisons as performance_comparisons
 from backend.performance import current_metrics as performance_current_metrics
@@ -18,7 +19,14 @@ from backend.performance import recovery_context as performance_recovery_context
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
-from backend.providers import intervals_performance_fields as intervals_perf_fields
+from backend.performance.wellness_days import WellnessDay, latest
+
+_SUBJECTIVE_RATINGS = (
+    ("fatigue", MetricKind.SUBJECTIVE_FATIGUE),
+    ("soreness", MetricKind.SUBJECTIVE_SORENESS),
+    ("stress", MetricKind.SUBJECTIVE_STRESS),
+    ("mood", MetricKind.SUBJECTIVE_MOOD),
+)
 
 # Recovery sources whose freshness comes from the Garmin view, including the
 # labelled weekly HRV fallback.
@@ -30,38 +38,42 @@ _GARMIN_RECOVERY_SOURCES = frozenset(
 )
 
 
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
-
-
-def _activities_and_wellness(
+def _activities(
     snapshot: dict[str, Any], canonical: CanonicalPerformanceInputs | None
-) -> tuple[list[Any], list[dict[str, Any]]]:
-    """Return the compact activities and wellness rows of the performance context.
-
-    Canonical inputs hold the rows rebuilt from the canonical read ports; without
-    them the snapshot sections are read as before.
-    """
+) -> list[Any]:
+    """Return canonical compact activities or the stored activity projection."""
     if canonical is not None and canonical.activities is not None:
         activities: list[Any] = list(canonical.activities)
     else:
         raw_activities = snapshot.get("recent_activities")
         activities = raw_activities if isinstance(raw_activities, list) else []
-    if canonical is not None and canonical.wellness_rows is not None:
-        return activities, list(canonical.wellness_rows)
-    raw_wellness = snapshot.get("recent_wellness")
-    wellness_rows = (
-        [row for row in raw_wellness if isinstance(row, dict)]
-        if isinstance(raw_wellness, list)
-        else []
-    )
-    return activities, wellness_rows
+    return activities
+
+
+def _wellness_days(
+    canonical: CanonicalPerformanceInputs | None,
+) -> tuple[WellnessDay, ...]:
+    """The current wellness days; none without canonical inputs."""
+    return () if canonical is None else canonical.wellness_days or ()
+
+
+def _sleep_timing_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Stored wellness rows for the pre-sleep-period timing fallback only (D7)."""
+    stored = snapshot.get("recent_wellness")
+    if not isinstance(stored, list):
+        return []
+    return [row for row in stored if isinstance(row, dict)]
+
+
+def _day_id(day: WellnessDay | None) -> str | None:
+    return None if day is None else day.day.isoformat()
+
+
+def _subjective_ratings(day: WellnessDay | None) -> dict[str, float | None]:
+    return {
+        key: None if day is None else day.value(kind)
+        for key, kind in _SUBJECTIVE_RATINGS
+    }
 
 
 def _canonical_day_series(
@@ -69,8 +81,12 @@ def _canonical_day_series(
 ) -> dict[str, Mapping[date, float] | None]:
     """The canonical eFTP and form day series; both absent without canonical inputs."""
     if canonical is None:
-        return {"eftp_by_day": None, "form_by_day": None}
-    return {"eftp_by_day": canonical.eftp_by_day, "form_by_day": canonical.form_by_day}
+        return {"eftp_by_day": None, "form_by_day": None, "run_eftp_by_day": None}
+    return {
+        "eftp_by_day": canonical.eftp_by_day,
+        "form_by_day": canonical.form_by_day,
+        "run_eftp_by_day": canonical.run_eftp_by_day,
+    }
 
 
 def _activity_rows(canonical: CanonicalPerformanceInputs | None) -> Sequence[Any]:
@@ -124,22 +140,18 @@ def current_performance_context(
 ) -> dict[str, Any]:
     """Compose the current performance projection from explicit inputs.
 
-    ``canonical`` replaces CTL and ATL in the load context, the sport thresholds and
-    VO2max, the Garmin performance values and the daily totals, when given. The
-    recovery values and personal baselines come only from its recovery
-    observations; without them they are absent.
+    Canonical days supply wellness, load and body values. The stored snapshot
+    remains the source for athlete settings, activities without a row reader and
+    the pre-sleep-period timing fallback.
     """
     if not snapshot:
         return _unavailable_context(garmin, profile, today, canonical)
 
     athlete_value = snapshot.get("athlete")
     athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
-    activities, wellness_rows = _activities_and_wellness(snapshot, canonical)
-    latest_wellness = max(
-        wellness_rows,
-        key=lambda row: str(row.get("id") or ""),
-        default={},
-    )
+    activities = _activities(snapshot, canonical)
+    days = _wellness_days(canonical)
+    latest_wellness = latest(days)
 
     recovery = performance_recovery_context.performance_recovery_context(
         None if canonical is None else canonical.recovery, today
@@ -163,10 +175,10 @@ def current_performance_context(
         ),
         canonical=None if canonical is None else canonical.current,
         activities=activities,
-        wellness_rows=wellness_rows,
+        latest_wellness=latest_wellness,
     )
     load_context = performance_load_context.performance_load_context(
-        activities, wellness_rows, latest_wellness, today, canonical=canonical
+        activities, days, today, canonical=canonical
     )
     load = load_context["load"]
     last_7 = load_context["last_7"]
@@ -186,12 +198,11 @@ def current_performance_context(
         )
     )
     comparisons = performance_comparisons.performance_comparisons(
-        snapshot,
         garmin,
         metrics,
         recovery,
         load_context,
-        wellness_rows,
+        days,
         activities,
         today,
         garmin_history=None
@@ -205,7 +216,7 @@ def current_performance_context(
     return {
         "available": True,
         "personal_recovery": personal_recovery(
-            wellness_rows,
+            _sleep_timing_rows(snapshot),
             garmin,
             profile,
             today,
@@ -224,8 +235,8 @@ def current_performance_context(
         "as_of": snapshot.get("synced_at"),
         "metrics": metrics,
         "thresholds": {
-            intervals_perf_fields.CONFIGURED_FTP: metrics["cycling_ftp_watts"]["value"],
-            intervals_perf_fields.W_PRIME: athlete.get(intervals_perf_fields.W_PRIME),
+            "ftp_w": metrics["cycling_ftp_watts"]["value"],
+            "w_prime_j": performance_current_metrics.athlete_w_prime(athlete),
             "max_hr": athlete.get("max_hr"),
             "lthr": athlete.get("lthr"),
             "weight": metrics["weight_kg"]["value"],
@@ -240,17 +251,14 @@ def current_performance_context(
             "id": recovery["sleep_date"]
             or recovery["resting_hr_date"]
             or recovery["hrv_date"]
-            or latest_wellness.get("id"),
-            "restingHR": resting_hr,
-            "restingHR_source": resting_hr_source,
-            "hrv": hrv,
-            "hrv_source": hrv_source,
-            "sleepScore": sleep_score,
-            "sleepScore_source": sleep_score_source,
-            "fatigue": _first_present(latest_wellness, ("fatigue",)),
-            "soreness": _first_present(latest_wellness, ("soreness",)),
-            "stress": _first_present(latest_wellness, ("stress",)),
-            "mood": _first_present(latest_wellness, ("mood",)),
+            or _day_id(latest_wellness),
+            "resting_hr_bpm": resting_hr,
+            "resting_hr_bpm_source": resting_hr_source,
+            "hrv_ms": hrv,
+            "hrv_ms_source": hrv_source,
+            "sleep_score": sleep_score,
+            "sleep_score_source": sleep_score_source,
+            **_subjective_ratings(latest_wellness),
             "readiness": readiness_current,
             "readiness_source": readiness_source,
             "sleep_hours": sleep_hours,
@@ -262,9 +270,9 @@ def current_performance_context(
                 for key, section, value, source in (
                     ("readiness", "readiness", readiness_current, readiness_source),
                     ("sleep_hours", "sleep", sleep_hours, sleep_source),
-                    ("sleepScore", "sleep", sleep_score, sleep_score_source),
-                    ("restingHR", "resting_hr", resting_hr, resting_hr_source),
-                    ("hrv", "hrv", hrv, hrv_source),
+                    ("sleep_score", "sleep", sleep_score, sleep_score_source),
+                    ("resting_hr_bpm", "resting_hr", resting_hr, resting_hr_source),
+                    ("hrv_ms", "hrv", hrv, hrv_source),
                 )
                 if source in _GARMIN_RECOVERY_SOURCES
             },

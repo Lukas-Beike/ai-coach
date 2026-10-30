@@ -7,6 +7,7 @@ from canonical_recovery_support import (
     recovery_observation,
     recovery_only_inputs,
 )
+from performance_day_support import canonical_from_snapshot
 
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
@@ -104,12 +105,12 @@ class PerformanceContextTests(unittest.TestCase):
             result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
         )
         self.assertEqual(result["as_of"], snapshot["synced_at"])
-        self.assertEqual(result["thresholds"]["icu_ftp"], 300)
+        self.assertEqual(result["thresholds"]["ftp_w"], 300)
         # Form and ramp rate come from canonical observations only (#1412): the
         # row's tsb is a carrier field and is not read without canonical inputs.
         self.assertIsNone(result["current_load"]["tsb"])
-        self.assertIsNone(result["current_load"]["rampRate"])
-        self.assertIsNone(result["current_load"]["rampRate_source"])
+        self.assertIsNone(result["current_load"]["ramp_rate"])
+        self.assertIsNone(result["current_load"]["ramp_rate_source"])
         self.assertEqual(
             result["rolling_training"]["last_7_days"]["training_load"], 110.0
         )
@@ -186,7 +187,13 @@ class PerformanceContextTests(unittest.TestCase):
             copy.deepcopy(profile),
         )
 
-        result = current_performance_context(snapshot, garmin, profile, today)
+        result = current_performance_context(
+            snapshot,
+            garmin,
+            profile,
+            today,
+            canonical=canonical_from_snapshot(snapshot, today),
+        )
 
         self.assertEqual(result["actual_load"]["as_of"], today.isoformat())
         self.assertEqual(
@@ -257,8 +264,46 @@ class PerformanceContextTests(unittest.TestCase):
             snapshot, garmin, {}, today, canonical=recovery_only_inputs(garmin)
         )["recovery"]
 
-        self.assertEqual(recovery["hrv_source"], "Garmin Connect (Wochenmittel)")
-        self.assertEqual(recovery["source_freshness"]["hrv"]["freshness"], "stale")
+        self.assertEqual(recovery["hrv_ms_source"], "Garmin Connect (Wochenmittel)")
+        self.assertEqual(recovery["source_freshness"]["hrv_ms"]["freshness"], "stale")
+
+    def test_composed_context_has_only_neutral_performance_keys(self):
+        today = date(2026, 9, 20)
+        snapshot = {
+            "athlete": {"icu_ftp": 300, "icu_w_prime": 20},
+            "recent_wellness": [
+                {
+                    "id": today.isoformat(),
+                    "ctl": 50,
+                    "atl": 40,
+                    "restingHR": 52,
+                    "hrv": 45,
+                    "sleepScore": 80,
+                }
+            ],
+        }
+        result = current_performance_context(
+            snapshot, {}, {}, today, canonical=canonical_from_snapshot(snapshot, today)
+        )
+
+        def keys(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    yield key
+                    yield from keys(child)
+            elif isinstance(value, list):
+                for child in value:
+                    yield from keys(child)
+
+        self.assertFalse(
+            set(keys(result))
+            & {"restingHR", "sleepScore", "rampRate", "icu_ftp", "icu_w_prime"}
+        )
+        self.assertNotIn("hrv", result["recovery"])
+        self.assertNotIn("hrv", result["comparisons"])
+        self.assertEqual(result["thresholds"]["ftp_w"], 300)
+        self.assertEqual(result["thresholds"]["w_prime_j"], 20)
+        self.assertEqual(result["current_load"]["ctl"], 50)
 
 
 if __name__ == "__main__":

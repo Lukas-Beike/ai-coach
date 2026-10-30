@@ -10,7 +10,7 @@ from typing import Any
 
 from backend.athlete.local_date import LocalDate
 from backend.canonical.decimal_text import comma_decimal_float
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import (
     activity_validation,
     eftp,
@@ -23,6 +23,7 @@ from backend.performance.canonical_body import (
     CanonicalBodyInputs,
 )
 from backend.performance.display_sources import preferred_providers
+from backend.performance.wellness_days import WellnessDay
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -66,24 +67,12 @@ def _rows(value: Any) -> list[dict[str, Any]]:
 
 
 def _bounded_weight(value: Any) -> float | None:
-    if isinstance(value, dict):
-        unit = value.get("unit") or value.get("unitKey")
-        if unit and "kg" not in str(unit).casefold():
-            return None
-        value = value.get(
-            "value", value.get(garmin_perf_fields.WEIGHT_KG, value.get("weight"))
-        )
     number = _number(value)
     lower, upper = WEIGHT_BOUNDS
     return round(number, 2) if number is not None and lower <= number <= upper else None
 
 
 def _bounded_body_fat(value: Any) -> float | None:
-    if isinstance(value, dict):
-        unit = value.get("unit") or value.get("unitKey")
-        if unit and "%" not in str(unit) and "percent" not in str(unit).casefold():
-            return None
-        value = value.get("value", value.get("percent", value.get("bodyFat")))
     number = _number(value)
     lower, upper = BODY_FAT_BOUNDS
     return round(number, 2) if number is not None and lower <= number <= upper else None
@@ -102,13 +91,6 @@ def _sync_timestamp(payload: dict[str, Any], source: str) -> Any:
     return payload.get("synced_at") or payload.get("fetched_at")
 
 
-def _wellness_records(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    raw = snapshot.get("raw_provider_data")
-    raw_rows = raw.get("wellness") if isinstance(raw, dict) else []
-    # Compact rows follow raw rows so the saved compact projection wins on duplicates.
-    return _rows(raw_rows) + _rows(snapshot.get("recent_wellness"))
-
-
 def _snapshot_activity_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     raw = snapshot.get("raw_provider_data")
     raw_rows = raw.get("activities") if isinstance(raw, dict) else []
@@ -116,30 +98,29 @@ def _snapshot_activity_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _intervals_measurements(
-    snapshot: dict[str, Any],
     today: date,
-    wellness: Sequence[dict[str, Any]] | None = None,
+    days: Sequence[WellnessDay],
 ) -> dict[str, dict[date, tuple[float, str, Any]]]:
     values: dict[str, dict[date, tuple[float, str, Any]]] = {
         "weight_kg": {},
         "body_fat_pct": {},
     }
-    synced_at = snapshot.get("synced_at")
-    for row in _wellness_records(snapshot) if wellness is None else wellness:
-        observed = _day(row.get("id") or row.get("date"))
-        if observed is None or observed > today:
+    for item in days:
+        if item.day > today:
             continue
-        weight = _bounded_weight(row.get("weight"))
-        body_fat = _bounded_body_fat(
-            row.get("bodyFat", row.get("body_fat", row.get("body_fat_pct")))
-        )
-        if weight is not None:
-            values["weight_kg"][observed] = (weight, observed.isoformat(), synced_at)
-        if body_fat is not None:
-            values["body_fat_pct"][observed] = (
-                body_fat,
-                observed.isoformat(),
-                synced_at,
+        for key, kind, bounded in (
+            ("weight_kg", MetricKind.WEIGHT, _bounded_weight),
+            ("body_fat_pct", MetricKind.BODY_FAT, _bounded_body_fat),
+        ):
+            observation = item.observations.get(kind)
+            value = None if observation is None else bounded(item.value(kind))
+            if observation is None or value is None:
+                continue
+            retrieved_at = observation.provenance.retrieved_at
+            values[key][item.day] = (
+                value,
+                item.day.isoformat(),
+                None if retrieved_at is None else retrieved_at.isoformat(),
             )
     return values
 
@@ -442,7 +423,7 @@ def body_history(
     today: date,
     *,
     canonical: CanonicalBodyInputs | None = None,
-    wellness_rows: Sequence[dict[str, Any]] | None = None,
+    wellness_days: Sequence[WellnessDay] | None = None,
     activity_rows: Sequence[dict[str, Any]] | None = None,
     garmin_ftp: Mapping[date, float] | None = None,
     eftp_by_day: Mapping[date, float] | None = None,
@@ -453,28 +434,15 @@ def body_history(
     to-weight points also retain separate FTP and weight dates, sync times, and
     weight age. Missing dates stay null; profile values are never observations.
 
-    ``canonical`` overrides only the weight and body-fat days it holds. Days it lacks
-    keep the legacy value, so values the canonical mapper does not store are not
-    dropped. When None, the legacy wellness and Garmin readers are used, as before.
-
-    ``wellness_rows`` and ``activity_rows`` are the rows rebuilt from the canonical
-    read ports; without them the snapshot sections are read. ``eftp_by_day`` is the
-    canonical wellness-day eFTP; without it only activity eFTP contributes.
+    Wellness measurements come solely from canonical days. Other canonical body
+    inputs retain their source precedence. Activity eFTP remains a separate step.
     """
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     garmin = garmin if isinstance(garmin, dict) else {}
-    intervals = _intervals_measurements(snapshot, today, wellness_rows)
+    intervals = _intervals_measurements(today, wellness_days or ())
     garmin_values = _garmin_measurements(garmin, today)
     if canonical is not None:
         garmin_synced_at = _sync_timestamp(garmin, "weight")
-        intervals["weight_kg"] = {
-            **intervals["weight_kg"],
-            **_stamped(canonical.intervals_weight_kg, snapshot.get("synced_at")),
-        }
-        intervals["body_fat_pct"] = {
-            **intervals["body_fat_pct"],
-            **_stamped(canonical.intervals_body_fat_pct, snapshot.get("synced_at")),
-        }
         garmin_values["weight_kg"] = {
             **garmin_values["weight_kg"],
             **_stamped(canonical.garmin_weight_kg, garmin_synced_at),

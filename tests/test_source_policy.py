@@ -16,6 +16,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import recovery_inputs
+from performance_day_support import latest_day
 
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
@@ -25,7 +26,9 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
-from backend.performance.current_metrics import current_performance_metrics
+from backend.performance.current_metrics import (
+    current_performance_metrics as _current_performance_metrics,
+)
 from backend.performance.garmin_metrics import garmin_performance_metrics
 from backend.performance.load_context import performance_load_context
 from backend.performance.planning_recovery import planning_recovery_by_date
@@ -43,6 +46,15 @@ from backend.providers.intervals_wellness_mapping import (
 )
 
 GARMIN = ProviderId.GARMIN
+
+
+def current_performance_metrics(snapshot, profile, garmin, **kwargs):
+    kwargs.setdefault(
+        "latest_wellness", latest_day(snapshot.get("recent_wellness", []))
+    )
+    return _current_performance_metrics(snapshot, profile, garmin, **kwargs)
+
+
 INTERVALS = ProviderId.INTERVALS
 BERLIN = ZoneInfo("Europe/Berlin")
 TODAY = date(2026, 5, 4)
@@ -1041,8 +1053,18 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         self.assertEqual(self.pick(MetricKind.MAX_HR, Sport.RIDE), 185)
 
     def test_load_is_the_latest_intervals_row(self) -> None:
+        from performance_day_support import current_days
+
+        from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+
+        days = current_days(WELLNESS_ROWS)
         load = performance_load_context(
-            [], WELLNESS_ROWS, _latest_row(WELLNESS_ROWS), TODAY
+            [],
+            days,
+            TODAY,
+            canonical=CanonicalPerformanceInputs(
+                wellness_day=LATEST_DAY, ctl=60.0, atl=55.0
+            ),
         )["load"]
         self.assertEqual(load["ctl"], 60.0)
         self.assertEqual(load["atl"], 55.0)

@@ -82,26 +82,19 @@ class PerformanceLoadTests(unittest.TestCase):
             signature(actual_atl_series).parameters["end_date"].default,
             signature(actual_atl_series).empty,
         )
-        self.assertEqual(actual_atl_series([], [], end_date), {})
         self.assertEqual(
             actual_atl_series(
-                [
-                    {"id": "not-a-date", "atl": 10},
-                    {"id": end_date.isoformat(), "atl": "invalid"},
-                    "not-a-row",
-                ],
-                [],
+                {},
+                [{"start_date_local": end_date.isoformat(), "icu_training_load": 20}],
                 end_date,
             ),
             {},
         )
+        self.assertEqual(actual_atl_series({}, [], end_date), {})
 
     def test_actual_atl_uses_completed_load_only_and_sums_same_day(self):
         end_date = date(2026, 9, 12)
-        wellness = [
-            {"id": "2026-09-10", "atl": 10},
-            {"id": "2026-09-12", "atl": 20},
-        ]
+        wellness = {date(2026, 9, 10): 10.0, date(2026, 9, 12): 20.0}
         activities = [
             {"start_date_local": "2026-09-12T08:00:00", "icu_training_load": 50},
             {"start_date_local": "2026-09-12T18:00:00", "icu_training_load": 20},
@@ -121,10 +114,7 @@ class PerformanceLoadTests(unittest.TestCase):
 
     def test_actual_atl_applies_load_from_days_without_wellness_rows(self):
         end_date = date(2026, 9, 12)
-        wellness = [
-            {"id": "2026-09-01", "atl": 10},
-            {"id": "2026-09-04", "atl": 10},
-        ]
+        wellness = {date(2026, 9, 1): 10.0, date(2026, 9, 4): 10.0}
         activities = [{"start_date_local": "2026-09-02", "icu_training_load": 100}]
         retention = math.exp(-1 / 7)
         decay = 1 - retention
@@ -138,11 +128,11 @@ class PerformanceLoadTests(unittest.TestCase):
 
     def test_actual_atl_decays_across_missing_days_and_is_sorted(self):
         end_date = date(2026, 9, 12)
-        wellness = [
-            {"id": "2026-09-12", "atl": 40},
-            {"id": "2026-09-01", "atl": 10},
-            {"id": "2026-09-08", "atl": 20},
-        ]
+        wellness = {
+            date(2026, 9, 12): 40.0,
+            date(2026, 9, 1): 10.0,
+            date(2026, 9, 8): 20.0,
+        }
         series = actual_atl_series(wellness, [], end_date)
         self.assertEqual(
             list(series), [date(2026, 9, 1), date(2026, 9, 8), date(2026, 9, 12)]
@@ -152,11 +142,7 @@ class PerformanceLoadTests(unittest.TestCase):
         self.assertEqual(series[date(2026, 9, 12)], round(10 * retention**11, 2))
         self.assertEqual(
             wellness,
-            [
-                {"id": "2026-09-12", "atl": 40},
-                {"id": "2026-09-01", "atl": 10},
-                {"id": "2026-09-08", "atl": 20},
-            ],
+            {date(2026, 9, 12): 40.0, date(2026, 9, 1): 10.0, date(2026, 9, 8): 20.0},
         )
 
 

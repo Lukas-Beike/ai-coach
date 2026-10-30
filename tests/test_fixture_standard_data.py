@@ -14,6 +14,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+from performance_day_support import days_from_rows
+
 # Safe server setup first: temporary DATA_DIR, fake configuration, and no read of a real .env.
 from server_test_support import server
 
@@ -27,10 +29,10 @@ from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
-from backend.performance.canonical_sections import wellness_day_values
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.daily_health import daily_energy_expenditure
 from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.performance.wellness_days import wellness_day_values
 from backend.providers.calendar import parse_ical_calendar
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 
@@ -51,6 +53,7 @@ with ExitStack() as stack:
     stack.enter_context(patch.dict(os.environ))
     stack.enter_context(patch.object(sys, "path", list(sys.path)))
     from e2e import fixture_runtime
+
     _FIXTURE_HOOKS = [getattr(target, attribute) for target, attribute in _SERVER_HOOKS]
 
 V6_UNIT_NAMES = {
@@ -262,7 +265,13 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         eftp_by_day = wellness_day_values(
             (r for r in mapped.records if r.kind is MetricKind.EFTP), sport=Sport.RIDE
         )
-        result = body_history(snapshot, garmin, self.today, eftp_by_day=eftp_by_day)
+        result = body_history(
+            snapshot,
+            garmin,
+            self.today,
+            eftp_by_day=eftp_by_day,
+            wellness_days=days_from_rows(wellness),
+        )
         window = result["windows"]["12w"]
         self.assertEqual(window["days"], 84)
         self.assertEqual(len(window["metrics"]["weight_kg"][0]["points"]), 84)

@@ -3,27 +3,17 @@
 from datetime import date, timedelta
 from typing import Any
 
-from backend.canonical.decimal_text import provider_number
+from backend.canonical.vocabulary import MetricKind
 from backend.performance import load as performance_load
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.wellness_days import WellnessDay, latest, series
 
 RAMP_RATE_SOURCE = "Intervals.icu CTL (berechnet)"
 
 
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
-
-
 def performance_load_context(
     activities: list[Any],
-    wellness_rows: list[dict[str, Any]],
-    latest_wellness: dict[str, Any],
+    days: tuple[WellnessDay, ...],
     today: date,
     *,
     canonical: CanonicalPerformanceInputs | None = None,
@@ -36,7 +26,9 @@ def performance_load_context(
     previous_30 = performance_load.activity_rollup(
         activities, 30, today - timedelta(days=30)
     )
-    actual_atl = performance_load.actual_atl_series(wellness_rows, activities, today)
+    actual_atl = performance_load.actual_atl_series(
+        series(days, MetricKind.ATL), activities, today
+    )
     actual_atl_date = max(
         (row_date for row_date in actual_atl if row_date <= today), default=None
     )
@@ -51,29 +43,21 @@ def performance_load_context(
         if actual_atl_values
         else None
     )
+    latest_day = latest(days)
     load = {
-        "id": latest_wellness.get("id"),
-        "ctl": _first_present(latest_wellness, ("ctl", "ctLoad")),
-        "atl": _first_present(latest_wellness, ("atl", "atlLoad")),
+        "id": latest_day.day.isoformat() if latest_day else None,
+        "ctl": None if canonical is None else canonical.ctl,
+        "atl": None if canonical is None else canonical.atl,
         "tsb": None,
-        "rampRate": None,
-        "rampRate_source": None,
+        "ramp_rate": None,
+        "ramp_rate_source": None,
     }
     if canonical is not None and canonical.wellness_day is not None:
-        # Only CTL and ATL come from canonical observations; the rest of the
-        # latest wellness row stays on the legacy path. An observation that is
-        # missing does not erase a valid number of the latest row; both come from
-        # the same Intervals.icu wellness day, so the load block's source holds.
-        for key, observed in (("ctl", canonical.ctl), ("atl", canonical.atl)):
-            load[key] = observed if observed is not None else provider_number(load[key])
-        # Form and ramp rate come from canonical observations only; the form of
-        # the latest wellness day is that day's form observation, and the ramp rate
-        # is the derived CTL change over seven days (None when a day is missing).
         form_by_day = canonical.form_by_day or {}
         load["tsb"] = form_by_day.get(canonical.wellness_day)
-        load["rampRate"] = canonical.ramp_rate
+        load["ramp_rate"] = canonical.ramp_rate
         if canonical.ramp_rate is not None:
-            load["rampRate_source"] = RAMP_RATE_SOURCE
+            load["ramp_rate_source"] = RAMP_RATE_SOURCE
     return {
         "load": load,
         "last_7": last_7,

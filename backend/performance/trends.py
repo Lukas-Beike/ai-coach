@@ -1,24 +1,16 @@
-"""Pure historical performance trend projections."""
+"""Historical performance averages from canonical days and Garmin history."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
-from backend.performance import activity_validation, wellness
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
+from backend.canonical.vocabulary import MetricKind
+from backend.performance import activity_validation
+from backend.performance.wellness_days import WellnessDay
 
 
 def garmin_history_average(
@@ -28,11 +20,7 @@ def garmin_history_average(
     end_date: date,
     history: Mapping[str, Mapping[date, float]] | None = None,
 ) -> float | None:
-    """Average a Garmin metric over ``days``.
-
-    ``history`` is the canonical per-day history of each metric key; without it
-    the snapshot's accumulated performance history is read.
-    """
+    """Average a Garmin metric over ``days`` using canonical history when given."""
     cutoff = end_date - timedelta(days=days - 1)
     if history is not None:
         numbers = [
@@ -62,108 +50,30 @@ def garmin_history_average(
     return round(sum(values) / len(values), 2) if values else None
 
 
-def _sport_info_setting(wellness_row: dict[str, Any], sport: str) -> dict[str, Any]:
-    match_terms = (
-        ("run", "lauf")
-        if sport == "run"
-        else (
-            "ride",
-            "bike",
-            "rad",
-            "cycling",
-        )
-    )
-    sport_info = wellness_row.get("sport_info", wellness_row.get("sportInfo", []))
-    if not isinstance(sport_info, list):
-        return {}
-    for info in sport_info:
-        if not isinstance(info, dict):
-            continue
-        raw_types = (
-            info.get("types")
-            if isinstance(info.get("types"), list)
-            else [info.get("type"), info.get("sport"), info.get("sport_type")]
-        )
-        if any(
-            any(term in str(activity_type or "").casefold() for term in match_terms)
-            for activity_type in raw_types
-        ):
-            return info
-    return {}
-
-
-def _threshold_pace_seconds(value: Any) -> float | int | None:
-    number = _as_number(value)
-    if number is None or number <= 0:
-        return None
-    return round(1000 / number) if number < 20 else number
-
-
-def _zone2_pace_seconds(value: Any) -> float | int | None:
-    pace = _threshold_pace_seconds(value)
-    return pace if pace is not None and 120 <= float(pace) <= 1800 else None
-
-
 def intervals_performance_average(
-    rows: list[dict[str, Any]], key: str, days: int, end_date: date
+    days_view: tuple[WellnessDay, ...],
+    run_eftp_by_day: Mapping[date, float] | None,
+    key: str,
+    days: int,
+    end_date: date,
 ) -> float | None:
+    """Average supported Intervals metrics over an inclusive calendar window."""
     cutoff = end_date - timedelta(days=days - 1)
-    values: list[float] = []
-    for row in rows:
-        try:
-            row_date = date.fromisoformat(
-                iso_date_prefix(str(row.get("id") or row.get("date") or ""))
-            )
-        except TypeError, ValueError:
-            continue
-        if not cutoff <= row_date <= end_date:
-            continue
-        ride = _sport_info_setting(row, "ride")
-        run = _sport_info_setting(row, "run")
-        candidates: dict[str, Any] = {
-            "cycling_ftp_watts": _first_present(ride, ("ftp", "indoor_ftp")),
-            "bike_threshold_hr_bpm": _first_present(ride, ("lthr",)),
-            "cycling_vo2max_ml_kg_min": _first_present(
-                ride, ("vo2max", "vo2_max", "cycling_vo2max")
-            ),
-            "run_threshold_watts": _first_present(
-                run, ("ftp", "indoor_ftp", "eftp", "eFTP")
-            ),
-            "run_threshold_pace_seconds_per_km": _threshold_pace_seconds(
-                _first_present(run, ("threshold_pace",))
-            ),
-            "run_zone2_pace_seconds_per_km": _zone2_pace_seconds(
-                _first_present(
-                    run,
-                    (
-                        "zone2_pace",
-                        "zone_2_pace",
-                        "z2_pace",
-                        "pace_zone2",
-                        "paceZone2",
-                        "zone2Pace",
-                    ),
-                )
-            ),
-            "run_threshold_hr_bpm": _first_present(run, ("lthr",)),
-            "running_vo2max_ml_kg_min": _first_present(
-                run, ("vo2max", "vo2_max", "running_vo2max")
-            ),
-            "weight_kg": _first_present(row, ("weight",)),
-            "readiness": wellness.readiness_score_value(
-                _first_present(
-                    row,
-                    (
-                        "readiness",
-                        "readinessScore",
-                        "readiness_score",
-                        "trainingReadiness",
-                        "training_readiness",
-                    ),
-                )
-            ),
-        }
-        value = activity_validation.bounded_performance_metric(key, candidates.get(key))
-        if value is not None:
-            values.append(float(value))
+    candidates: Iterable[tuple[date, float | None]]
+    if key == "run_threshold_watts":
+        candidates = (run_eftp_by_day or {}).items()
+    else:
+        kind = {"weight_kg": MetricKind.WEIGHT, "readiness": MetricKind.READINESS}.get(
+            key
+        )
+        if kind is None:
+            return None
+        candidates = ((item.day, item.value(kind)) for item in days_view)
+    values = [
+        float(bounded)
+        for day, value in candidates
+        if cutoff <= day <= end_date
+        if (bounded := activity_validation.bounded_performance_metric(key, value))
+        is not None
+    ]
     return round(sum(values) / len(values), 2) if values else None

@@ -4,6 +4,7 @@ import unittest
 from datetime import date
 
 from canonical_recovery_support import mapped_personal_recovery
+from performance_day_support import days_from_rows
 
 from backend.coach.context import coach_performance_projection
 from backend.performance.body import body_history
@@ -61,7 +62,9 @@ class ProviderIdPayloadTests(unittest.TestCase):
         self.assertEqual(eftp["source_provider"], "intervals")
         self.assertEqual(ftp["source"], "Garmin Connect")
         self.assertEqual(ftp["source_provider"], "garmin")
-        self.assertEqual(result["preferred_providers"]["cycling_eftp_watts"], "intervals")
+        self.assertEqual(
+            result["preferred_providers"]["cycling_eftp_watts"], "intervals"
+        )
         self.assertEqual(result["preferred_providers"]["cycling_ftp_watts"], "garmin")
 
     def test_body_history_series_and_policy_carry_provider_ids(self):
@@ -74,7 +77,12 @@ class ProviderIdPayloadTests(unittest.TestCase):
                 {"date": "2026-10-10", "metrics": {"cycling_ftp_watts": 250}}
             ]
         }
-        result = body_history(snapshot, garmin, TODAY)
+        result = body_history(
+            snapshot,
+            garmin,
+            TODAY,
+            wellness_days=days_from_rows(snapshot["recent_wellness"]),
+        )
         metrics = result["windows"]["14d"]["metrics"]
 
         weight = metrics["weight_kg"][0]
@@ -84,7 +92,9 @@ class ProviderIdPayloadTests(unittest.TestCase):
         self.assertEqual(body_fat["source_provider"], "intervals")
         self.assertEqual(metrics["body_fat_pct"][1]["source_provider"], "garmin")
 
-        ftp_series = {item["source_provider"]: item for item in metrics["cycling_w_per_kg"]}
+        ftp_series = {
+            item["source_provider"]: item for item in metrics["cycling_w_per_kg"]
+        }
         self.assertEqual(ftp_series["garmin"]["source"], "Garmin Connect")
         self.assertEqual(ftp_series["garmin"]["power_method"], "FTP")
         self.assertEqual(ftp_series["intervals"]["source"], "Intervals.icu")

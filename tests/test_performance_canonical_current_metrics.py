@@ -25,6 +25,7 @@ from canonical_consumer_cases import (
     _observations,
 )
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
+from performance_day_support import latest_day
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
@@ -86,7 +87,12 @@ def _case(name: str) -> Case:
 
 def _legacy(case: Case) -> dict[str, Any]:
     garmin = performance_garmin_metrics.garmin_performance_metrics(case.garmin, TODAY)
-    return current_performance_metrics(case.intervals, case.profile, garmin)
+    return current_performance_metrics(
+        case.intervals,
+        case.profile,
+        garmin,
+        latest_wellness=latest_day(case.intervals.get("recent_wellness", [])),
+    )
 
 
 def _read(
@@ -104,7 +110,11 @@ def _canonical(case: Case, observations: tuple[Observation, ...] | None = None) 
     )
     inputs = _read(reader, case.intervals)
     return current_performance_metrics(
-        case.intervals, case.profile, garmin, canonical=inputs
+        case.intervals,
+        case.profile,
+        garmin,
+        canonical=inputs,
+        latest_wellness=latest_day(case.intervals.get("recent_wellness", [])),
     )
 
 
@@ -507,7 +517,7 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
-            inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
+            inputs = read_performance_inputs(selector, db, as_of=TODAY)
         self.assertIsNotNone(inputs)
         assert inputs is not None
         self.assertIsNotNone(inputs.current)
@@ -652,13 +662,20 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
 
     SNAPSHOT: Final = {"recent_wellness": [{"id": AS_OF.isoformat()}]}
 
+    class ActivityReader:
+        def activity_rows(self, _db, *, start=None, end=None, limit=None):
+            return ()
+
     def _stored(self, day: date) -> ObservationStub:
         return ObservationStub((_wahoo_ftp_on(250, day), _wahoo_weight_on(78.5, day)))
 
     def test_a_wahoo_value_91_days_old_is_not_current(self) -> None:
         stale = AS_OF - timedelta(days=WAHOO_AGE_LIMIT_DAYS + 1)
         inputs = read_performance_inputs(
-            self._stored(stale), None, self.SNAPSHOT, as_of=AS_OF
+            self._stored(stale),
+            None,
+            activity_reader=self.ActivityReader(),
+            as_of=AS_OF,
         )
         assert inputs is not None
         self.assertIsNone(inputs.current)
@@ -666,7 +683,10 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
     def test_a_wahoo_value_90_days_old_is_current(self) -> None:
         limit = AS_OF - timedelta(days=WAHOO_AGE_LIMIT_DAYS)
         inputs = read_performance_inputs(
-            self._stored(limit), None, self.SNAPSHOT, as_of=AS_OF
+            self._stored(limit),
+            None,
+            activity_reader=self.ActivityReader(),
+            as_of=AS_OF,
         )
         assert inputs is not None
         assert inputs.current is not None
@@ -678,7 +698,12 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
     def test_the_stale_value_stays_stored_and_is_read_within_the_limit(self) -> None:
         stale = AS_OF - timedelta(days=WAHOO_AGE_LIMIT_DAYS + 1)
         reader = self._stored(stale)
-        read_performance_inputs(reader, None, self.SNAPSHOT, as_of=AS_OF)
+        read_performance_inputs(
+            reader,
+            None,
+            activity_reader=self.ActivityReader(),
+            as_of=AS_OF,
+        )
         # History: the store still returns both stale Wahoo rows.
         self.assertEqual(
             [stale], [o.observed_on for o in reader.observations(None, MetricKind.FTP)]
@@ -689,7 +714,12 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         )
         # Reads: the same rows are used once the read day is within the limit.
         within = stale + timedelta(days=WAHOO_AGE_LIMIT_DAYS)
-        inputs = read_performance_inputs(reader, None, self.SNAPSHOT, as_of=within)
+        inputs = read_performance_inputs(
+            reader,
+            None,
+            activity_reader=self.ActivityReader(),
+            as_of=within,
+        )
         assert inputs is not None
         assert inputs.current is not None
         assert inputs.current.wahoo_ftp is not None
@@ -701,6 +731,7 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         source = CanonicalPerformanceSource(
             database_manager=_UnitOfWorkManager,
             observation_reader=lambda: reader,
+            activity_rows=self.ActivityReader,
         )
         context = CoachPerformanceContextReader(
             None, None, None, today=lambda: AS_OF, canonical=source
