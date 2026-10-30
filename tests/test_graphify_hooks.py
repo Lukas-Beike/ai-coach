@@ -40,7 +40,9 @@ class GraphifyHookTests(unittest.TestCase):
         self.assertEqual(
             claude["hooks"]["SessionStart"][0]["hooks"][0]["shell"], "powershell"
         )
-        self.assertEqual(set(claude["hooks"]), {"SessionStart"})
+        for event, entries in claude["hooks"].items():
+            if event != "SessionStart":
+                self.assertNotIn("graphify", json.dumps(entries), event)
 
     @unittest.skipUnless(
         os.name == "nt" and (ROOT / "AGENTS.md").is_file(),

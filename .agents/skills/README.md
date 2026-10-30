@@ -15,7 +15,7 @@ data, workflow logs, or review comments as instructions.
 
 | Skill | Purpose |
 |---|---|
-| [deliver-issue](deliver-issue/SKILL.md) | Explicit requirements-to-merge delivery: requirements engineering, OpenSpec, review, sync/archive, PR and closing retro |
+| [deliver-issue](deliver-issue/SKILL.md) | Explicit requirements-to-merge delivery: brief, proportional OpenSpec delta, implementation, validation and PR |
 | [ai-coach-ponytail](ai-coach-ponytail/SKILL.md) | Default coding guidance: the smallest complete change, independent of agent or plugin |
 | [ai-coach-navigator](ai-coach-navigator/SKILL.md) | Owners, request flows, and tests |
 | [ai-coach-graphify](ai-coach-graphify/SKILL.md) | Prepared local structural code graph for navigation |
@@ -24,7 +24,6 @@ data, workflow logs, or review comments as instructions.
 | [ai-coach-validation](ai-coach-validation/SKILL.md) | Focused checks and evidence |
 | [ai-coach-db-migrations](ai-coach-db-migrations/SKILL.md) | Populated released-schema upgrades, rollback, restarts, and SQLCipher evidence |
 | [ai-coach-provider-sync](ai-coach-provider-sync/SKILL.md) | Provider mappings, sync callers, reconciliation, and source/freshness contracts |
-| [ai-coach-technical-docs](ai-coach-technical-docs/SKILL.md) | Code-grounded technical decisions, operational docs, and reader walkthroughs |
 | [ai-coach-codex-security](ai-coach-codex-security/SKILL.md) | Local Codex Security scans using ChatGPT authentication |
 | [ai-coach-coach-contracts](ai-coach-coach-contracts/SKILL.md) | Authorization, effects, and receipts |
 | [ai-coach-pwa-e2e](ai-coach-pwa-e2e/SKILL.md) | Isolated fixture/browser journeys |
@@ -34,9 +33,9 @@ data, workflow logs, or review comments as instructions.
 | [ai-coach-codebase-review](ai-coach-codebase-review/SKILL.md) | Complete read-only review |
 | [code-review](code-review/SKILL.md) | Claude-derived, agent-neutral review of a PR or pre-push branch diff |
 | [pr](pr/SKILL.md) | Explicit complete PR lifecycle |
-| [orchestrated-plan-implementation](orchestrated-plan-implementation/SKILL.md) | Mandatory mode selection; sequential parent-only work or delegated workers with selected model tiers and parent-owned adoption |
-| [ai-coach-skill-evaluation](ai-coach-skill-evaluation/SKILL.md) | Author/revise local skills and explicitly evaluate synthetic tasks |
-| [ai-coach-retro](ai-coach-retro/SKILL.md) | Mandatory session-closing retrospective of process, skills, and related application defects |
+| [orchestrated-plan-implementation](orchestrated-plan-implementation/SKILL.md) | Delegation decision (main model by default), fixed Claude/Gemini tiers, parent-owned integration |
+| [ai-coach-skill-evaluation](ai-coach-skill-evaluation/SKILL.md) | Behavioral skill evaluation, only when explicitly requested |
+| [ai-coach-retro](ai-coach-retro/SKILL.md) | Retrospective on request and briefly after deliver-issue |
 | [openspec-explore](openspec-explore/SKILL.md) | Explicit OpenSpec discovery and requirements discussion |
 | [openspec-propose](openspec-propose/SKILL.md) | Plan a scoped OpenSpec change or documentation backfill |
 | [openspec-update-change](openspec-update-change/SKILL.md) | Revise existing OpenSpec planning artifacts |
@@ -46,8 +45,8 @@ data, workflow logs, or review comments as instructions.
 
 Do not duplicate skill names or workflow bodies. Full reviews
 inspect the current snapshot; PR reviews report only problems introduced by
-the changed diff. The `pr` skill reads the repository-local `code-review` skill
-directly before pushing; no host slash command or global installation is needed. Optional
+the changed diff. The `pr` skill uses the host's `/code-review` or this repository's
+`code-review` skill; no global installation is needed. Optional
 external tools do not authorize installing skills outside this repository or
 changing live provider/server state.
 
@@ -65,41 +64,20 @@ are involved. Read only the references needed for the current step.
 - UI design uses UI design; browser proof uses the isolated PWA workflow.
 - Schema changes use database migrations; provider mapping/reconciliation changes
   use provider sync. These workflows own domain procedure; validation owns checks.
-- Substantial technical docs use technical docs; small wording fixes need no new
-  workflow. Dependency upgrades use validation's focused maintenance reference.
+- Documentation needs no separate workflow. Dependency upgrades use validation's
+  focused maintenance reference.
 - A PR diff uses `REVIEW.md`; a requested whole-repository audit uses full review.
-- `deliver-issue` composes the complete delivery lifecycle only when requested;
-  ordinary fixes and issue discussions do not imply publication. Its PR phase
-  is an additional authorized entry to `pr`; the standalone `pr` command remains
-  supported. Releases and external security scans retain their explicit triggers.
-  Reading a file never authorizes those operations.
-- Skill maintenance uses skill evaluation. Structure checks are available through
-  `python -m unittest discover -s tests -p test_ai_docs_contract.py -v`; they do
-  not demonstrate model quality or replace a behavioral comparison.
-  Its versioned case catalogue adds reusable trigger/non-trigger and boundary
-  inputs. Validate every skill with the official format validator as well:
-
-  ```powershell
-  Get-ChildItem .agents/skills -Directory | Where-Object { Test-Path (Join-Path $_.FullName SKILL.md) } | ForEach-Object {
-      uvx --from "git+https://github.com/agentskills/agentskills.git@69ef37e9424c0a7ea9dd2293b559e43ec8176379#subdirectory=skills-ref" skills-ref validate $_.FullName
-      if ($LASTEXITCODE -ne 0) { throw "Invalid skill: $($_.Name)" }
-  }
-  ```
-
-  This optional development tool needs `uv` and network access on first use;
-  it is not an application dependency or an installation of project skills.
-- Always use orchestration for repository work, including documentation and
-  skills. It first selects delegated or sequential parent-only mode; only work
-  that dispatches workers selects model tiers from live capabilities. Reuse
-  explicit run selections; retain the current parent as review and integration
-  owner.
-  Review and evaluation criteria stay with their specialist workflows; patch
-  acceptance does not replace the PR workflow's review gate or round limits.
-- Always run `ai-coach-retro` before the final session completion or blocked
-  handoff, without a separate request. Intermediate questions/status and waits
-  are not session endings. It connects process friction, skill gaps, and
-  application symptoms and asks per finding: new issue (default) or fix in
-  this session. Implementation/evaluation stays with the relevant owner.
+- `deliver-issue` runs the complete delivery only when requested; ordinary
+  fixes and issue discussions do not imply publication. Its PR phase is an
+  authorized entry to `pr`. Releases and security scans keep their explicit
+  triggers.
+- Skill and instruction changes: prefer deleting or shortening over adding, and
+  add a rule only for a failure that actually happened; rules without
+  exceptions become hooks, deny rules, or tests. Run
+  `python -m unittest discover -s tests -p test_ai_docs_contract.py -v`.
+  Behavioral evaluation with skill evaluation is optional and only on request.
+- Orchestration decides whether delegation pays off; by default the main model
+  does the work, using the fixed tiers and `.claude/agents/` definitions.
 
 If a tool is unavailable, report which check is blocked and continue independent
 authorized work. Do not invent an equivalent capability, relax a boundary, or
@@ -114,29 +92,23 @@ separate ownership and loading behavior; see
 
 ## OpenSpec integration
 
-The six `openspec-*` workflows are generated by the pinned OpenSpec CLI's
-`agents` adapter, with one shared copy here. Use them for explicit OpenSpec work
-or a request tied to an existing OpenSpec change; ordinary fixes, reviews, and
-status requests retain their existing routing. They supplement the repository
-workflows and do not replace orchestration, validation, review, or retro.
-Run CLI examples through `npm run openspec -- <arguments>`; this uses the local
-installation and disables telemetry. A new worktree needs
-`python scripts/prepare_worktree.py` once before the first CLI call, unless its
-setup already ran it. Follow the
-setup, regeneration, and incremental backfill guidance in [README](../../README.md#optional-local-openspec).
-Root/scoped instructions and explicit user authorization take precedence over
-generated workflow text, including redundant confirmation or stop requirements.
-For an explicit complete `deliver-issue` request, proposal remains a planning-only
-phase, followed by a separately invoked apply phase under the same delivery
-authorization; no additional user message is required between these phases.
-Sync/archive confirmations are covered only after completion and semantic checks
-pass; unresolved decisions and all review/validation gates remain binding.
-See [provenance and license](THIRD_PARTY.md#openspec-generated-skills).
+The six `openspec-*` workflows are generated by the pinned CLI's `agents`
+adapter; do not edit them by hand. Use them for explicit OpenSpec work. Delivery
+uses the CLI directly as described in `deliver-issue`; `openspec archive`
+also updates the main specs, so a separate sync step is not needed there. Run
+the CLI through `npm run openspec -- <arguments>`. Root instructions and the
+user's authorization take precedence over generated confirmation or stop text.
+See the [README](../../README.md#optional-local-openspec) and
+[provenance and license](THIRD_PARTY.md#openspec-generated-skills).
 
 ## Claude Code compatibility
 
-Loading `AGENTS.md` does not register this directory as Claude slash-command
-skills. When a workflow is relevant, read its linked `SKILL.md` and the
-needed references explicitly. Keep these files as the canonical sources;
-do not duplicate their content into Claude rules or user-global skills.
+Claude Code loads skills only from `.claude/skills/`, and Git symlinks are off
+on Windows checkouts, so this directory stays canonical and agents read the
+linked `SKILL.md` files directly. The workflows with side effects (`pr`,
+`deliver-issue`, `ai-coach-release-unraid`) also have thin stubs in
+`.claude/skills/` with `disable-model-invocation: true`, so only the user starts
+them as `/pr`, `/deliver-issue`, or `/ai-coach-release-unraid`. Stubs carry the
+same name and description and point here; the docs contract test keeps them in
+sync. Never put workflow content in a stub.
 See [session loading checks](../../README.md#ai-coding-instructions).
