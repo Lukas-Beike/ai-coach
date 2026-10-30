@@ -2523,7 +2523,7 @@ class ServerSyncTests(ServerTestCase):
             ],
         }
         performance = _current_performance_context(snapshot)
-        self.assertEqual(performance["thresholds"]["icu_ftp"], 300)
+        self.assertEqual(performance["thresholds"]["ftp_w"], 300)
         self.assertEqual(performance["current_load"]["tsb"], -6)
         self.assertEqual(performance["recovery"]["sleep_hours"], 7.5)
         self.assertEqual(

@@ -30,61 +30,34 @@ from backend.performance.canonical_inputs import (
     ReadOnceObservationReader,
     read_performance_inputs,
 )
-from backend.performance.canonical_sections import (
-    compact_activity_rows,
-    read_wellness_observations,
-    row_day,
-    wellness_day_values,
-    wellness_rows,
-)
+from backend.performance.canonical_sections import compact_activity_rows
 from backend.performance.context import current_performance_context
 from backend.performance.garmin_canonical import read_garmin_state
 from backend.performance.training_report import training_report
+from backend.performance.wellness_days import read_wellness_days, wellness_day_values
 
 TODAY = date(2026, 10, 12)
 REPORT_START = date(2026, 9, 1)
-# Wellness fields without a canonical observation; they stay on the snapshot rows.
-SNAPSHOT_ONLY_WELLNESS = (
-    "id",
-    "tsb",
-    "rampRate",
-    "sportInfo",
-    "sport_info",
-)
 
 
 def _stripped(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """The snapshot without the values now served by the canonical ports.
-
-    The activity sections go entirely. The wellness rows keep only the fields that
-    have no canonical observation, as the carrier of those fields.
-    """
+    """Strip activity and wellness sections served by canonical ports."""
     stripped = {
         key: copy.deepcopy(value)
         for key, value in snapshot.items()
         if key != "recent_activities"
     }
-    stripped["recent_wellness"] = [
-        {k: v for k, v in row.items() if k in SNAPSHOT_ONLY_WELLNESS}
-        for row in snapshot["recent_wellness"]
-    ]
+    stripped["recent_wellness"] = []
     raw = dict(stripped.get("raw_provider_data") or {})
     raw.pop("activities", None)
-    raw["wellness"] = [
-        {k: v for k, v in row.items() if k in SNAPSHOT_ONLY_WELLNESS}
-        for row in raw.get("wellness") or ()
-    ]
+    raw.pop("wellness", None)
     stripped["raw_provider_data"] = raw
     return stripped
 
 
 class SectionHelperTests(unittest.TestCase):
-    def test_row_day_accepts_only_strict_iso_dates(self) -> None:
-        self.assertEqual(row_day({"id": "2026-10-12"}), TODAY)
-        for value in ("2026-10-12T00:00", "20261012", "2026-02-30", 5, None):
-            with self.subTest(value=value):
-                self.assertIsNone(row_day({"id": value}))
-        self.assertIsNone(row_day({}))
+    def test_empty_observations_have_no_wellness_days(self) -> None:
+        self.assertEqual(read_wellness_days(_NoObservations(), object()), ())
 
     def test_compact_activity_rows_keep_the_planning_fields_only(self) -> None:
         compacted = compact_activity_rows(
@@ -93,8 +66,14 @@ class SectionHelperTests(unittest.TestCase):
         self.assertEqual(compacted[0]["id"], "a1")
         self.assertNotIn("private_note", compacted[0])
 
-    def test_wellness_rows_without_carrier_or_observations_are_empty(self) -> None:
-        self.assertEqual(wellness_rows([], {}), [])
+    def test_wellness_days_keep_observation_provenance(self) -> None:
+        observation = _observation(MetricKind.CTL, TODAY, 55, record=TODAY.isoformat())
+        reader = Mock(spec=["observations"])
+        reader.observations.side_effect = lambda _db, kind: (
+            (observation,) if kind is MetricKind.CTL else ()
+        )
+        (day,) = read_wellness_days(reader, object())
+        self.assertIs(day.observations[MetricKind.CTL], observation)
 
     def test_subjective_ratings_are_rebuilt_from_their_observations(self) -> None:
         provenance = Provenance(
@@ -122,25 +101,17 @@ class SectionHelperTests(unittest.TestCase):
                 (MetricKind.SUBJECTIVE_MOOD, 4.0),
             )
         }
-        self.assertEqual(
-            wellness_rows([{"id": TODAY.isoformat(), "stress": 4}], observed),
-            [
-                {
-                    "id": TODAY.isoformat(),
-                    "stress": 2,
-                    "fatigue": 3,
-                    "soreness": 1,
-                    "mood": 4,
-                }
-            ],
-        )
+        reader = Mock(spec=["observations"])
+        reader.observations.side_effect = lambda _db, kind: observed.get(kind, ())
+        (day,) = read_wellness_days(reader, object())
+        self.assertEqual([day.value(kind) for kind in observed], [3, 1, 2, 4])
 
-    def test_carrier_rows_keep_non_canonical_fields_and_unmapped_rows(self) -> None:
+    def test_snapshot_carrier_fields_do_not_create_wellness_days(self) -> None:
         carrier: list[dict[str, Any]] = [
             {"id": "2026-10-12", "fatigue": 3, "ctl": 1},
             {"id": "later"},
         ]
-        self.assertEqual(wellness_rows(carrier, {}), carrier)
+        self.assertEqual(read_wellness_days(_NoObservations(), carrier), ())
 
     def test_wellness_day_values_keep_wellness_days_of_one_scope_only(self) -> None:
         wellness_form = _observation(
@@ -215,7 +186,7 @@ class ActivityWindowTests(unittest.TestCase):
         db = object()
 
         read_performance_inputs(
-            reader, db, {}, activity_reader=_StartRecorder(), as_of=TODAY
+            reader, db, activity_reader=_StartRecorder(), as_of=TODAY
         )
         reads = source.observations.call_count
         read_garmin_state(reader, db)
@@ -227,21 +198,18 @@ class ActivityWindowTests(unittest.TestCase):
         kinds = [call.args[1] for call in source.observations.call_args_list]
         self.assertEqual(len(kinds), len(set(kinds)))
 
-    def _start(self, wellness_days: list[str]) -> date | None:
+    def _start(self) -> date | None:
         rows = _StartRecorder()
-        snapshot = {"recent_wellness": [{"id": day} for day in wellness_days]}
         read_performance_inputs(
-            _NoObservations(), object(), snapshot, activity_reader=rows, as_of=TODAY
+            _NoObservations(), object(), activity_reader=rows, as_of=TODAY
         )
         (start,) = rows.starts
         return start
 
-    def test_activities_cover_the_year_before_as_of(self) -> None:
-        self.assertEqual(self._start(["2026-09-01"]), TODAY - timedelta(days=364))
-        self.assertEqual(self._start([]), TODAY - timedelta(days=364))
-
-    def test_activities_reach_back_to_the_oldest_wellness_row(self) -> None:
-        self.assertEqual(self._start(["2025-06-01", "2026-10-12"]), date(2025, 6, 1))
+    def test_activities_cover_the_year_before_as_of_without_wellness_days(
+        self,
+    ) -> None:
+        self.assertEqual(self._start(), TODAY - timedelta(days=364))
 
 
 class SectionReadTests(CanonicalReadFixture):
@@ -251,7 +219,7 @@ class SectionReadTests(CanonicalReadFixture):
         selector = make_selector(self)
         with self.manager.reader() as db:
             inputs = read_performance_inputs(
-                selector, db, snapshot, activity_reader=selector, as_of=TODAY
+                selector, db, activity_reader=selector, as_of=TODAY
             )
         self.assertIsNotNone(inputs)
         assert inputs is not None
@@ -272,7 +240,9 @@ class SectionReadTests(CanonicalReadFixture):
         snapshot, inputs = self._legacy()
         self.assertEqual(list(inputs.activities or ()), snapshot["recent_activities"])
         legacy_days = [row["id"] for row in snapshot["recent_wellness"]]
-        self.assertEqual([row["id"] for row in inputs.wellness_rows or ()], legacy_days)
+        self.assertEqual(
+            [day.day.isoformat() for day in inputs.wellness_days or ()], legacy_days
+        )
 
     def test_tables_serve_the_same_performance_context_without_the_sections(
         self,
@@ -318,15 +288,15 @@ class SectionReadTests(CanonicalReadFixture):
         )
         self.assertEqual(actual, expected)
 
-    def test_observation_days_appear_in_the_rows_of_a_stripped_snapshot(self) -> None:
+    def test_observation_days_appear_in_a_stripped_snapshot(self) -> None:
         _snapshot, inputs = self._tables()
         selector = make_selector(self)
         with self.manager.reader() as db:
-            observed = read_wellness_observations(selector, db)
-        self.assertTrue(observed[MetricKind.RESTING_HR])
-        days = {row["id"] for row in inputs.wellness_rows or ()}
-        for observation in observed[MetricKind.RESTING_HR]:
-            self.assertIn(observation.observed_on.isoformat(), days)
+            observed = read_wellness_days(selector, db)
+        self.assertTrue(observed)
+        days = {day.day for day in inputs.wellness_days or ()}
+        for day in observed:
+            self.assertIn(day.day, days)
 
 
 if __name__ == "__main__":

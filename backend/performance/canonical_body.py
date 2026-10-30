@@ -1,20 +1,17 @@
-"""Canonical body weight and body-fat inputs read through the observation port.
+"""Canonical Garmin body weight and body-fat inputs read through the observation port.
 
-The ``body_weight_kg_series`` and ``body_fat_pct_series`` consumers can switch to
-the tables, so both series are read here.
+Intervals.icu weight and body fat reach body history through the provider-neutral
+wellness days (``backend.performance.wellness_days``), not through this module.
 
 Reads are served only while the canonical tables serve reads (see
 ``CanonicalTableServing``). Otherwise ``read_body_inputs`` returns None and the
-caller keeps the legacy values. The legacy projection holds only the compact
-wellness rows, so switching without this gate would drop older raw-only days.
+caller keeps the legacy Garmin values.
 
 ``body_history`` overrides only the days this module returns. Days it lacks keep
 the legacy value, so a value the canonical mapper does not store is never dropped.
 
-Per provider and day, the last observation inside the legacy plausibility bounds
-wins, as the legacy body history does. Intervals athlete-record observations,
-whose record id is not the observation's own ISO day, are excluded because the
-legacy body history reads wellness rows only.
+Per day, the last observation inside the legacy plausibility bounds wins, as the
+legacy body history does.
 """
 
 from __future__ import annotations
@@ -39,10 +36,8 @@ BODY_FAT_BOUNDS = (2.0, 70.0)
 
 @dataclass(frozen=True, slots=True)
 class CanonicalBodyInputs:
-    """Per-day weight and body-fat values for each provider, bounded and rounded."""
+    """Per-day Garmin weight and body-fat values, bounded and rounded."""
 
-    intervals_weight_kg: dict[date, float]
-    intervals_body_fat_pct: dict[date, float]
     garmin_weight_kg: dict[date, float]
     garmin_body_fat_pct: dict[date, float]
 
@@ -69,10 +64,6 @@ def read_body_inputs(
         end=today,
     )
     return CanonicalBodyInputs(
-        intervals_weight_kg=_daily(weights, ProviderId.INTERVALS, today, WEIGHT_BOUNDS),
-        intervals_body_fat_pct=_daily(
-            body_fat, ProviderId.INTERVALS, today, BODY_FAT_BOUNDS
-        ),
         garmin_weight_kg=_daily(weights, ProviderId.GARMIN, today, WEIGHT_BOUNDS),
         garmin_body_fat_pct=_daily(body_fat, ProviderId.GARMIN, today, BODY_FAT_BOUNDS),
     )
@@ -89,7 +80,7 @@ def _daily(
     for observation in sorted(observations, key=_recency_key):
         if observation.provenance.provider is not provider:
             continue
-        if observation.observed_on > today or _athlete_level(observation):
+        if observation.observed_on > today:
             continue
         value = float(observation.value.value)
         if lower <= value <= upper:
@@ -114,13 +105,4 @@ def _recency_key(observation: Observation) -> tuple[Any, ...]:
         True,
         aware.timestamp(),
         observation_order(observation),
-    )
-
-
-def _athlete_level(observation: Observation) -> bool:
-    """Return True for Intervals athlete-record values, which body history skips."""
-    if observation.provenance.provider is not ProviderId.INTERVALS:
-        return False
-    return (
-        observation.provenance.source_record_id != observation.observed_on.isoformat()
     )

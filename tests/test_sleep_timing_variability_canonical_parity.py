@@ -187,7 +187,6 @@ class ReadPathTests(unittest.TestCase):
         inputs = read_performance_inputs(
             PeriodReader(periods),
             None,
-            None,
             activity_reader=NoActivities(),
             as_of=TODAY,
         )

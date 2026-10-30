@@ -26,14 +26,13 @@ Code review preserves the original command as a provenance reference and adapts
 its five perspectives and confidence scoring for explicit branch ranges,
 report-only execution, sequential review, and `REVIEW.md` evidence/severity rules.
 It removes automatic model-specific delegation, trivial/bot skips, and PR writes.
-Orchestration adapts asynchronous lifecycle/briefs and objective/phase handoffs
-to live provider discovery, three user-selected complexity tiers, isolated
-worktrees, and the existing parent-only adoption gate. Fixed vendor roles,
-nested delegation, automatic setup, and blanket human approval are excluded.
-[The source assessment](orchestrated-plan-implementation/SKILL.md#source-assessment)
-also evaluates eddiearc/dev-orchestrator-skill at revision
-`300e9ade5161e27916159f178112c4cfc9300c33`; no license was found there, so its
-text/templates are not copied or redistributed.
+Orchestration keeps the upstream ideas of complete briefs, objective-first
+handoffs, and asynchronous dispatch. It replaces unconditional delegation with a
+cost-benefit decision, uses a fixed repository tier mapping, isolated worker
+worktrees, and parent-only integration, and excludes nested delegation,
+account or tool installation, and blanket human approval. eddiearc/dev-orchestrator-skill was
+also assessed at revision `300e9ade5161e27916159f178112c4cfc9300c33`; no license
+was found there, so its text/templates are not copied or redistributed.
 
 Review later upstream changes deliberately against code and project contracts;
 do not synchronize bundles or install global copies. App-supplied materials have
@@ -51,18 +50,6 @@ MIT, copyright (c) 2024 OpenSpec Contributors. The complete
 [MIT notice](licenses/OpenSpec-MIT.txt) is retained with these generated files.
 Repository integration adds index routing, local CLI invocation, project context,
 and the incremental backfill runbook; it does not modify the generated bodies.
-
-## Technical documentation source assessment
-
-Reviewed Anthropic's [doc-coauthoring](https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/doc-coauthoring)
-at `dbd4588f9e1033efb41dad4bef2f7947c8993d44`. The directory contains only
-`SKILL.md`, with no license field or bundled license; the repository's general
-README statement that many skills use Apache 2.0 does not establish this file's
-terms. No upstream text, scripts, or templates are copied or redistributed.
-The project-authored `ai-coach-technical-docs` applies reader-oriented verification
-to this repository's existing code-first evidence, README-owned commands, and
-authorization rules, without a mandatory interview or automatic independent
-workers/publication.
 
 ## Orchestration MIT notices
 

@@ -76,7 +76,6 @@ def _inputs(
     inputs = read_performance_inputs(
         FilteringReader(_observations(snapshot)),
         None,
-        _stripped(snapshot) if carrier is None else carrier,
         as_of=DAY,
     )
     assert inputs is not None
@@ -138,11 +137,10 @@ class FormTests(unittest.TestCase):
         load = _context(_snapshot([_row(_day(), ctl=50, atl=60, tsb="fresh")]))
         self.assertIsNone(load["current_load"]["tsb"])
 
-    def test_a_latest_day_without_form_is_unknown(self) -> None:
-        # The carrier row keeps today the latest wellness day; it holds no form.
+    def test_snapshot_only_latest_day_does_not_displace_observed_form(self) -> None:
         snapshot = _snapshot([_row(_day(1), ctl=50, atl=60), _row(_day())])
         load = _context(snapshot, copy.deepcopy(snapshot))["current_load"]
-        self.assertIsNone(load["tsb"])
+        self.assertEqual(load["tsb"], -10.0)
 
     def test_the_seven_day_comparison_averages_the_canonical_form_days(self) -> None:
         rows = [
@@ -162,8 +160,8 @@ class RampRateTests(unittest.TestCase):
         snapshot = _snapshot(rows)
         self.assertEqual(_inputs(snapshot).ramp_rate, 4.3)
         load = _context(snapshot)["current_load"]
-        self.assertEqual(load["rampRate"], 4.3)
-        self.assertEqual(load["rampRate_source"], RAMP_LABEL)
+        self.assertEqual(load["ramp_rate"], 4.3)
+        self.assertEqual(load["ramp_rate_source"], RAMP_LABEL)
 
     def test_ramp_rate_may_be_negative_and_is_rounded_to_two_decimals(self) -> None:
         rows = [_row(_day(7), ctl=60.333), _row(_day(), ctl=58.1)]
@@ -176,8 +174,8 @@ class RampRateTests(unittest.TestCase):
             _row(_day(), ctl=58),
         ]
         load = _context(_snapshot(rows))["current_load"]
-        self.assertIsNone(load["rampRate"])
-        self.assertIsNone(load["rampRate_source"])
+        self.assertIsNone(load["ramp_rate"])
+        self.assertIsNone(load["ramp_rate_source"])
 
     def test_eight_days_apart_is_not_a_ramp_rate(self) -> None:
         rows = [_row(_day(8), ctl=50), _row(_day(), ctl=58)]
@@ -191,18 +189,22 @@ class RampRateTests(unittest.TestCase):
 
     def test_no_wellness_day_gives_no_ramp_rate(self) -> None:
         # The only wellness row has an unusable id, so there is no wellness day.
-        inputs = _inputs(_snapshot([]), _snapshot([_row("not-a-date", ctl=58)]))
-        self.assertIsNone(inputs.wellness_day)
-        self.assertIsNone(inputs.ramp_rate)
+        self.assertIsNone(
+            read_performance_inputs(
+                FilteringReader(()),
+                None,
+                as_of=DAY,
+            )
+        )
 
     def test_the_carrier_ramp_rate_is_never_read(self) -> None:
         rows = [_row(_day(7), ctl=54.1), _row(_day(), ctl=58.4, rampRate=9.9)]
         mapped = _snapshot(rows)
         load = _context(mapped, copy.deepcopy(mapped))["current_load"]
-        self.assertEqual(load["rampRate"], 4.3)
+        self.assertEqual(load["ramp_rate"], 4.3)
         lone = _snapshot([_row(_day(), ctl=58.4, rampRate=9.9)])
         self.assertIsNone(
-            _context(lone, copy.deepcopy(lone))["current_load"]["rampRate"]
+            _context(lone, copy.deepcopy(lone))["current_load"]["ramp_rate"]
         )
 
 
@@ -321,7 +323,6 @@ class EftpTests(unittest.TestCase):
         inputs = read_performance_inputs(
             FilteringReader(_observations(snapshot)),
             None,
-            snapshot,
             activity_reader=NoActivityRows(),
             as_of=DAY,
         )
@@ -346,7 +347,6 @@ class EftpTests(unittest.TestCase):
         inputs = read_performance_inputs(
             FilteringReader(_observations(snapshot)),
             None,
-            snapshot,
             activity_reader=NoActivityRows(),
             as_of=DAY,
         )

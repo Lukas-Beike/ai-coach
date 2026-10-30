@@ -9,7 +9,9 @@ from datetime import UTC, date, datetime, timedelta
 from datetime import datetime as _local_datetime
 from unittest.mock import patch
 
-from server_test_support import ServerTestCase, _current_performance_context, server
+from garmin_support import read_garmin
+from performance_day_support import canonical_from_snapshot
+from server_test_support import ServerTestCase, server
 from support import (
     IntervalsRequestRecorder,
     RecordedIntervalsClient,
@@ -21,6 +23,7 @@ from backend.activities import calendar_projection as activity_calendar_projecti
 from backend.coach import context as coach_context
 from backend.coach import limits as coach_limits
 from backend.coach.response_transport import raise_if_chat_cancelled
+from backend.performance.context import current_performance_context
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import (
     adaptive_preview_service,
@@ -3436,10 +3439,16 @@ class ServerPlanningTests(ServerTestCase):
             "recent_wellness": wellness,
             "recent_activities": [],
         }
-        comparisons = _current_performance_context(snapshot)["comparisons"]
+        comparisons = current_performance_context(
+            snapshot,
+            read_garmin(),
+            server.ATHLETE_DATA.profile().get(),
+            today,
+            canonical=canonical_from_snapshot(snapshot, today),
+        )["comparisons"]
         self.assertEqual(comparisons["sleep_hours"]["days"], 7)
         self.assertEqual(comparisons["sleep_hours"]["color"], "good")
-        self.assertEqual(comparisons["restingHR"]["color"], "good")
+        self.assertEqual(comparisons["resting_hr_bpm"]["color"], "good")
         self.assertEqual(comparisons["fitness_ctl"]["color"], "neutral")
 
     def test_adaptive_planning_is_only_actionable_through_the_coach(self):

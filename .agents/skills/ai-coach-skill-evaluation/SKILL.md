@@ -1,6 +1,6 @@
 ---
 name: ai-coach-skill-evaluation
-description: Create, revise, or explicitly evaluate repository-owned Intervals Coach skills, including trigger quality and workflow usefulness. Do not use for ordinary application changes, general benchmarks, or installing app plugins.
+description: Use only when the user explicitly asks to evaluate repository skills behaviorally (trigger quality, workflow usefulness) or to create a new skill. Ordinary skill edits do not need it. Do not use for application changes, general benchmarks, or installing app plugins.
 license: Apache-2.0 adaptation; see ../THIRD_PARTY.md.
 ---
 
@@ -10,6 +10,9 @@ Adapted from Anthropic skill-creator's task comparison and evaluation workflow.
 Modified to keep skills local, preserve project boundaries, and use the default
 repository orchestration workflow without authorizing external writes; see
 [provenance](../THIRD_PARTY.md).
+
+Paused by default (2026-10-30): ordinary skill and instruction edits need only
+the docs contract test and a diff review. Run evaluations only on request.
 
 ## Author the smallest useful workflow
 
@@ -59,8 +62,8 @@ as a manual exercise rather than a controlled benchmark.
   tracked source; never include real accounts, credentials, athlete data, or live
   deployment. Do not push, publish, merge, or send messages for a test scenario.
 - Follow the default
-  [the orchestration skill](../orchestrated-plan-implementation/SKILL.md) and the
-  user's model choices; the parent reviews results and any proposed patches.
+  [the orchestration skill](../orchestrated-plan-implementation/SKILL.md); the
+  parent reviews results and any proposed patches.
 - Check artifacts and observable behavior against predefined expectations. When
   useful, compare anonymized outputs without knowing which skill produced them.
   Record pass/fail with evidence, boundary violations, unnecessary steps, elapsed
@@ -70,10 +73,11 @@ as a manual exercise rather than a controlled benchmark.
   affected cases and at least one retained case. Favor the shorter workflow when
   outcomes are equivalent; do not broaden triggers to win a narrow test set.
 - Manual walkthroughs of synthetic cases and static checks are not independent
-  model benchmarks. For orchestration revisions, include sequential hosted and
-  noninteractive reviews, interactive supplied mappings, unanswered choices
-  with explicitly requested workers, an unsupported exact-worker requirement,
-  active worker-candidate adoption, and sequential closing retro as boundaries.
+  model benchmarks. For orchestration revisions, include small sequential tasks
+  that must stay with the main model, a genuinely parallel task that should
+  delegate, tier assignment (Sonnet default, Opus only for real risk, L1
+  alternation), an unsupported exact-worker requirement, and worker-branch
+  integration as boundaries.
 - Validate frontmatter, unique names, local links, and `git diff --check`; run
   `python -m unittest discover -s tests -p test_ai_docs_contract.py -v` for
   the Markdown it reads. Static validation is not behavioral evaluation. Report

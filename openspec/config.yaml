@@ -20,18 +20,8 @@ context: |
   observed behavior, intended requirements, and known defects; do not bless a bug
   as a requirement. Preserve all athlete data and never inspect live credentials,
   databases, backups, or provider payloads for a backfill.
-  During apply, MUST execute .agents/skills/orchestrated-plan-implementation/SKILL.md
-  before implementing tasks, reusing the session's authorized model choices.
-  During archive, MUST execute .agents/skills/ai-coach-retro/SKILL.md before
-  completing archival and the final handoff. Scan each skill before reading it.
-
-operations:
-  apply:
-    guidance:
-      - Execute the repository-local orchestrated-plan-implementation skill before implementing tasks; retain parent-owned review and integration.
-  archive:
-    guidance:
-      - Execute the repository-local ai-coach-retro skill before completing archival; report evidence-backed conclusions and limits.
+  Keep changes proportional: proposal, spec delta and tasks; add a design only
+  for real design choices. Archive with the implementation in the same branch.
 
 rules:
   proposal:
@@ -44,4 +34,6 @@ rules:
     - Keep unresolved intent and known defects separate from accepted requirements.
   tasks:
     - Include scoped evidence review and strict OpenSpec validation before completion.
+    - List only work the agent completes before merge. Phrase environment-dependent checks as "run X where available and record unavailable checks as gaps", never as a task that waits for a later or manual run.
+    - Post-merge measurements and follow-up work belong in an issue, not in tasks.
     - Documentation backfills must not change application behavior or live data.

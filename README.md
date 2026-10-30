@@ -634,38 +634,47 @@ criteria in [REVIEW.md](REVIEW.md), and task workflows in the
 [repository skill index](.agents/skills/README.md). Load relevant workflows on
 demand; keep deployment commands here. All project skills have one canonical
 root, `.agents/skills/`; full review and `pr` were moved from the legacy `.codex/`
-root without duplicate copies. No duplicate `CLAUDE.md` or app-specific rules
-layer is needed.
+root without duplicate copies. No duplicate `CLAUDE.md` is needed.
+
+Rules without exceptions are enforced, not just written down:
+[`.claude/settings.json`](.claude/settings.json) denies agent file access to any
+`.env`/`.env.local` and to the `data/` directory of this checkout and the
+primary `ai-coach` checkout. Before every shell command it runs
+`scripts/hooks/guard_private_paths.py`, a tested text-matching safety net (not
+a sandbox) that blocks clear `.env`, `data`, and Garmin token path forms with no
+exceptions, so you run the Docker runbook commands that pass `.env` or mount
+`data` yourself. It also blocks commands that merely mention such a path, such
+as a commit message; pass that text through a file.
+`.claude/agents/` defines the `explorer` (Haiku, low effort, read-only),
+`implementer` (Sonnet, medium), and `reviewer` (Sonnet, medium, read-only)
+subagents.
+
+Sessions default to `medium` effort (`effortLevel` in `.claude/settings.json`);
+raise it with `/effort high` for tricky work. Agents may not go above `high`
+without your approval. `/pr`, `/deliver-issue`, and `/ai-coach-release-unraid`
+are user-only Claude Code commands (`disable-model-invocation: true`) that load
+the canonical workflows in `.agents/skills/`.
+
+To keep usage down, start a fresh session (`/clear`) for each unrelated task;
+every turn re-sends the whole conversation. Check `/usage` occasionally to see
+which skills and subagents earn their cost, and delete skills nobody loads.
 
 The local [code-review skill](.agents/skills/code-review/SKILL.md) adapts
 Claude's review workflow for PRs and pre-push branch diffs. Agents read it
 directly; the `pr` workflow requires no host-specific slash command.
 
 The [orchestration skill](.agents/skills/orchestrated-plan-implementation/SKILL.md)
-is the mandatory default for repository work, including documentation/skill
-changes, implementation, reviews, evaluations, and retrospectives. It starts by
-choosing delegated or sequential parent-only mode. Only work that will dispatch
-workers proposes live model tiers and asks for missing selections; hosted or
-noninteractive read-only reviews can complete sequentially without prompts or
-child tasks. Explicit worker requirements remain binding. Explicit session
-choices are reused across phases; status answers do not launch new workers.
-Workers use isolated source trees;
-the current parent reviews and
-verifies results and alone adopts authorized source patches. Review/evaluation
-criteria and PR gates remain with their owning workflows; review-only work does
-not implement fixes. T3 and native-host adapters use the capabilities actually
-available, without requiring a particular provider CLI or global installation.
+decides per task whether delegating to subagents pays off; by default the main
+model does the work. Delegated tasks use fixed tiers without a model question:
+Claude Haiku alternating with Gemini Flash for easy tasks, Claude Sonnet for
+standard work, and Claude Opus only for genuinely hard or risky tasks, each at
+its newest available version. Writers use isolated worktrees; the main model
+reviews and integrates their branches.
 
-The [retro skill](.agents/skills/ai-coach-retro/SKILL.md) must run before every
-final session completion or blocked handoff, without a separate request,
-including documentation-only sessions. It examines process friction,
-skill/instruction gaps, and related application defects, using concrete evidence
-and scoped synthetic checks. It proposes prioritized improvements, distinguishes
-open defects from repaired issues and hypotheses, and preserves existing action
-authorization; a retro alone does not apply fixes or update global memories.
-Intermediate questions/status and waits are not session endings. These are
-agent instructions; an abrupt host shutdown cannot execute a retro, so a missed
-one is completed on resumption before final handoff.
+The [retro skill](.agents/skills/ai-coach-retro/SKILL.md) runs on request and
+briefly after a `deliver-issue` run. It prefers removing or shortening
+instructions; a new rule needs an observed failure that a hook or test cannot
+prevent.
 
 Coding tasks default to the repository's [Ponytail workflow](.agents/skills/ai-coach-ponytail/SKILL.md)
 in `full` mode: the smallest complete change, reusing existing code before adding
@@ -727,48 +736,27 @@ AGENTS boundaries and authorization take precedence over generated workflows;
 OpenSpec does not replace repository review, orchestration, or validation.
 
 **Application specifications.** The [OpenSpec baseline](openspec/README.md)
-documents the existing application through 30 capabilities. Its
-[coverage and evidence ledger](openspec/COVERAGE.md) distinguishes inspected
-source/tests, executed checks, implementation boundaries and unresolved gaps.
-The [surface inventory](openspec/coverage.json) and
-[Coach tool map](openspec/COACH_TOOLS.md) make ownership and affected contracts
-discoverable. A valid document is not proof of complete runtime conformance.
+documents the application's behavior by capability. Its
+[coverage ledger](openspec/COVERAGE.md), [surface inventory](openspec/coverage.json)
+and [Coach tool map](openspec/COACH_TOOLS.md) are frozen snapshots of the
+baseline revision and are not maintained further. A valid document is not proof
+of runtime conformance.
 
-Maintain and extend one cohesive capability at a time, prioritizing:
-
-1. SQLCipher migrations, restart, backup/restore, and preservation of athlete data.
-2. Coach write authorization, durable effects, receipts, undo, and provenance.
-3. Provider startup/daily/manual sync, freshness, conflicts, and explicit remote writes.
-4. Login/session/CSRF, PWA/offline behavior, and failure/recovery states.
-5. Planning, activities, nutrition, performance, and the remaining athlete flows.
-
-For each slice, record the inspected Git revision and scope, then inspect its
-current owner, callers, tests, and existing contracts. Write observable
-requirements with concrete `WHEN`/`THEN` scenarios, citing source and test paths.
-Distinguish observed behavior, intended requirements, known defects, and missing
-evidence; do not turn a discovered bug into an accepted requirement or quietly
-fix application behavior during a documentation backfill. Include negative,
-authorization, persistence, provenance, and recovery cases where applicable.
-Use synthetic fixtures only.
-
-Reviewed current-behavior baselines live in
-`openspec/specs/<capability>/spec.md` with `## Purpose` and `## Requirements`.
-Create change plans with the CLI rather than hand-making change metadata:
+OpenSpec is optional. Most changes put their acceptance criteria in the PR body,
+but a behavior change still updates the affected main specs in `openspec/specs/`
+directly; the `pr` workflow finds them by the changed files they cite.
+Use an OpenSpec change for a larger feature (a new capability or a behavior change
+across several flows) or when asked, created with the CLI:
 
 ```powershell
-npm.cmd run openspec -- new change backfill-coach-write-authorization
-npm.cmd run openspec -- status --change backfill-coach-write-authorization --json
-npm.cmd run openspec -- instructions proposal --change backfill-coach-write-authorization --json
+npm.cmd run openspec -- new change add-example-capability
+npm.cmd run openspec -- instructions proposal --change add-example-capability --json
+npm.cmd run openspec -- archive add-example-capability --yes
 ```
 
-Read the schema instructions for subsequent artifacts. For backfills, `ADDED`
-means newly documented requirements, not newly implemented app behavior. Review
-the evidence, run strict validation, complete the documented scope, then sync
-and archive the change. Track uncovered scenarios and domains explicitly in
-each slice; task completion and format validation alone do not prove that the
-application satisfies the spec. Later behavior changes update the affected
-spec and tests in the same change. Keep small fixes proportional; a repository-wide
-backfill is not a prerequisite for normal maintenance.
+Keep it to a proposal, the spec delta, and tasks finished before merge. Archive
+it in the same branch as the implementation; `archive` also updates the main
+specs, and the `pr` workflow blocks a push while a touched change is still active.
 
 #### Local code graph
 

@@ -2,7 +2,8 @@
 
 This baseline backfills the existing application at
 `b8c911c9dda83a7920171916ace32681c0c38ba0` (version 1.13.22, schema v13).
-The 30 capabilities contain 272 observable requirements and 759 scenarios.
+The baseline's 30 capabilities contained 272 observable requirements and 759 scenarios;
+later changes extend them, and the index below is current.
 Each requirement cites current code and existing tests; citations alone do not
 mean every scenario was executed. Read the [coverage and evidence ledger](COVERAGE.md)
 for executed checks, boundaries, discrepancies and source identity.
@@ -28,6 +29,7 @@ remain in the repository README.
 | [model-selection-and-usage](specs/model-selection-and-usage/spec.md) | Selected model/thinking/speed, Responses lifecycle and daily token counts |
 | [sync-jobs-and-scheduling](specs/sync-jobs-and-scheduling/spec.md) | Queue, provider cadence/windows, retries and historical work |
 | [provider-connections](specs/provider-connections/spec.md) | Intervals, Garmin, Wahoo, credential lifecycle and explicit metric/library export |
+| [garmin-profile-body-export](specs/garmin-profile-body-export/spec.md) | Profile weight/body-fat changes sent to Garmin as dated body-composition entries |
 | [provider-normalization-and-provenance](specs/provider-normalization-and-provenance/spec.md) | Canonical fields/units/dates, per-metric source rules and reprojection |
 | [activity-ingestion-and-storage](specs/activity-ingestion-and-storage/spec.md) | Provider identity, session copies, detail acquisition and deletion |
 | [activity-analysis-and-feedback](specs/activity-analysis-and-feedback/spec.md) | Measured streams/laps/zones, conservative analysis and local feedback |
@@ -53,6 +55,9 @@ remain in the repository README.
 - [Coverage, executed checks and explicit gaps](COVERAGE.md)
 - [Complete Coach tool-to-requirement map](COACH_TOOLS.md)
 - [Machine-readable source/HTTP/tool ownership inventory](coverage.json)
+- The coverage ledger and inventory are snapshots of the baseline revision.
+  Capabilities added later, such as `garmin-profile-body-export`, appear in the
+  index above and cite their own evidence, not in these snapshots.
 - [Completed baseline change](changes/archive/2026-10-23-backfill-application-specs/proposal.md)
 - Change artifacts live under `changes/`; completed changes move to
   `changes/archive/` after reviewed specs are synchronized. The archived baseline

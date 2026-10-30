@@ -21,6 +21,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import mapped_recovery_inputs
+from performance_day_support import current_days, latest_day
 
 from backend.activities.identity import activity_kind
 from backend.athlete.local_date import iso_date_prefix
@@ -28,6 +29,7 @@ from backend.canonical.mapping import IssueReason, MappingResult
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import MetricKind, Sport
+from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.current_metrics import current_performance_metrics
 from backend.performance.load import activity_rollup
 from backend.performance.load_context import performance_load_context
@@ -164,7 +166,12 @@ def empty_garmin_metrics() -> dict[str, dict[str, Any]]:
 
 
 def legacy_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return current_performance_metrics(snapshot, {}, empty_garmin_metrics())
+    return current_performance_metrics(
+        snapshot,
+        {},
+        empty_garmin_metrics(),
+        latest_wellness=latest_day(snapshot.get("recent_wellness", [])),
+    )
 
 
 def map_activities(rows: object) -> MappingResult[ActivityRecord]:
@@ -406,8 +413,16 @@ class WellnessParityTests(unittest.TestCase):
         result = map_wellness(self.rows)
         for row in self.rows:
             with self.subTest(day=row["id"]):
+                day = date.fromisoformat(row["id"])
+                ctl = expect_value(result, MetricKind.CTL, day=row["id"])
+                atl = expect_value(result, MetricKind.ATL, day=row["id"])
                 load = performance_load_context(
-                    self.snapshot["recent_activities"], self.rows, row, TODAY
+                    self.snapshot["recent_activities"],
+                    current_days([row]),
+                    TODAY,
+                    canonical=CanonicalPerformanceInputs(
+                        wellness_day=day, ctl=ctl, atl=atl
+                    ),
                 )["load"]
                 self.assertEqual(
                     expect_value(result, MetricKind.CTL, day=row["id"]), load["ctl"]

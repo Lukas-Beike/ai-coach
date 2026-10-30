@@ -202,7 +202,6 @@ def recovery_only_inputs(
     full = read_performance_inputs(
         FilteringReader(tuple(mapped.records)),
         None,
-        snapshot,
         activity_reader=NoActivityRows(),
         as_of=RETRIEVED.date(),
     )

@@ -12,7 +12,6 @@ feedback.
 from __future__ import annotations
 
 import builtins
-import math
 from collections.abc import Iterable
 from typing import Any, Final
 
@@ -80,11 +79,9 @@ def normalize_activity_feedback(activity_id: Any, value: Any) -> dict[str, Any]:
     }
     if "session_rpe" in value:
         rpe = value["session_rpe"]
-        if rpe is not None and (
-            type(rpe) not in {int, float}
-            or not math.isfinite(rpe)
-            or not 0 <= rpe <= 10
-        ):
+        # The range test alone rejects NaN and infinity and, unlike
+        # math.isfinite, accepts any int, however large.
+        if rpe is not None and (type(rpe) not in {int, float} or not 0 <= rpe <= 10):
             raise AppError(400, "Der Aktivitäts-RPE muss zwischen 0 und 10 liegen.")
         normalized["session_rpe"] = rpe
     if "deviation_reason" in value:

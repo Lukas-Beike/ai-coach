@@ -135,7 +135,7 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
-            inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
+            inputs = read_performance_inputs(selector, db, as_of=TODAY)
         assert inputs is not None and inputs.recovery is not None
         return inputs
 
@@ -156,8 +156,8 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
 
         recovery = served["recovery"]
         self.assertIsNotNone(recovery["sleep_hours"])
-        self.assertIsNotNone(recovery["restingHR"])
-        self.assertIsNotNone(recovery["hrv"])
+        self.assertIsNotNone(recovery["resting_hr_bpm"])
+        self.assertIsNotNone(recovery["hrv_ms"])
         self.assertEqual(
             _dump(served["personal_recovery"]["baselines"]),
             _dump(expected["baselines"]),
@@ -167,7 +167,13 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
         result = current_performance_context(self.intervals, self.garmin, {}, TODAY)
 
         recovery = result["recovery"]
-        for key in ("restingHR", "hrv", "sleepScore", "readiness", "sleep_hours"):
+        for key in (
+            "resting_hr_bpm",
+            "hrv_ms",
+            "sleep_score",
+            "readiness",
+            "sleep_hours",
+        ):
             self.assertIsNone(recovery[key], key)
         self.assertEqual(result["personal_recovery"]["baselines"], [])
 
@@ -178,7 +184,7 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
             patch.object(selector, "reader_for", wraps=selector.reader_for) as resolved,
             self.manager.reader() as db,
         ):
-            inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
+            inputs = read_performance_inputs(selector, db, as_of=TODAY)
         resolved.assert_called_once()
         self.assertIsNotNone(inputs)
 
