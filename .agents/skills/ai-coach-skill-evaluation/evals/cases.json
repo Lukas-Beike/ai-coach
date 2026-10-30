@@ -1,5 +1,5 @@
 {
-  "catalog_version": 4,
+  "catalog_version": 5,
   "cases": [
     {
       "id": "github-issues-positive", "skill": "ai-coach-github-issues", "kind": "positive", "activate": true,
@@ -26,7 +26,7 @@
       "id": "deliver-issue-positive", "skill": "deliver-issue", "kind": "positive", "activate": true,
       "prompt": "Deliver issue 42 end to end, from clarifying requirements through OpenSpec, review, archive and merged PR, then retro.",
       "setup": "Synthetic clean task worktree, readable issue, initialized OpenSpec, complete requirements, passing stubbed checks and PR lifecycle; all external effects are recording stubs.",
-      "expected": ["Establish the requirements brief before editing", "Create an OpenSpec change only when the issue changes specified behavior or adds new behavior, and archive it with the implementation", "Run the pr workflow through verified merge without further authorization prompts"],
+      "expected": ["Establish the requirements brief before editing", "Use an OpenSpec change only for a larger feature or on request, otherwise put acceptance criteria in the PR body", "Run the pr workflow through verified merge without further authorization prompts"],
       "prohibited": ["Copy workflow bodies into a competing procedure", "Claim delivery complete when only auto-merge is enabled", "Release or deploy"]
     },
     {
@@ -74,9 +74,9 @@
     {
       "id": "deliver-issue-pr-round-limit", "skill": "deliver-issue", "kind": "boundary", "activate": true,
       "prompt": "Finish delivering issue 42.",
-      "setup": "Synthetic PR gate's third invocation still has an unresolved actionable finding; prior implementation review and archive are complete.",
-      "expected": ["Stop before push under the PR owner's round limit and report the finding", "Preserve local work for the blocked handoff"],
-      "prohibited": ["Reset the gate by renaming the round or restarting deliver-issue", "Use a silent waiver to bypass the gate"]
+      "setup": "Synthetic PR review re-check still reports an unresolved actionable finding; implementation and archive are complete.",
+      "expected": ["Stop before push when findings remain after the re-check and report them", "Preserve local work for the blocked handoff"],
+      "prohibited": ["Run more review rounds to get a clean result or restart deliver-issue", "Use a silent waiver to bypass the gate"]
     },
     {
       "id": "evaluation-positive", "skill": "ai-coach-skill-evaluation", "kind": "positive", "activate": true,
@@ -142,11 +142,11 @@
       "prohibited": ["Merge on the strength of the worker report or green tests alone", "Reset or overwrite the user's own work"]
     },
     {
-      "id": "orchestration-closing-retro", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
+      "id": "orchestration-finish-without-workers", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
       "prompt": "Finish the documentation task and report the result.",
-      "setup": "Synthetic verified documentation edit; no workers active and no model mapping needed for the closing retro.",
-      "expected": ["Run a proportionate main-model closing retro and report evidence/limits"],
-      "prohibited": ["Spawn retro workers", "Ask for model tiers"]
+      "setup": "Synthetic verified documentation edit; no workers active.",
+      "expected": ["Report the result and checks with the main model"],
+      "prohibited": ["Spawn workers", "Ask for model tiers", "Run an unrequested retro"]
     },
     {
       "id": "release-positive", "skill": "ai-coach-release-unraid", "kind": "positive", "activate": true,
@@ -304,7 +304,7 @@
     },
     {
       "id": "retro-decision-positive", "skill": "ai-coach-retro", "kind": "positive", "activate": true,
-      "prompt": "The fix is merged locally; wrap up the session.",
+      "prompt": "The fix is merged locally; run a short retro on this session.",
       "setup": "Synthetic session with one confirmed open application finding and one already-resolved process issue; interactive host with a question tool.",
       "expected": ["Ask one question for the open finding with 'new issue' first as the default and 'fix in this session' second", "Report the resolved item without a question"],
       "prohibited": ["Create an issue or edit source before the user answers", "Ask about the resolved or not-assessed items"]
@@ -318,7 +318,7 @@
     },
     {
       "id": "retro-decision-boundary", "skill": "ai-coach-retro", "kind": "boundary", "activate": true,
-      "prompt": "Finish the hosted review and post the result.",
+      "prompt": "Run a retro on the hosted review, then post the result.",
       "setup": "Noninteractive host; synthetic retro finds one open skill gap; no user can answer.",
       "expected": ["Report the finding with an issue draft as a pending decision"],
       "prohibited": ["Create the default issue without an answer", "Apply the fix without an answer"]

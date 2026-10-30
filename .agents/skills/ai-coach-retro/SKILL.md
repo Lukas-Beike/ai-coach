@@ -1,6 +1,6 @@
 ---
 name: ai-coach-retro
-description: Always run at the end of every repository work session before final completion or blocked handoff, including documentation, skill, review, and evaluation sessions. Also use for requested retrospectives or lessons learned. Find process friction, skill improvements, and application defects from evidence; intermediate status/questions are not session endings.
+description: Use when the user asks for a retrospective or lessons learned, and briefly at the end of a deliver-issue run. Find process friction, skill improvements, and application defects from evidence.
 ---
 
 # Development retrospective
@@ -10,16 +10,15 @@ application. Examine process, skills/instructions, and product behavior together
 do not assume every failure needs another instruction. Preserve practices that
 worked. The outcome is an evidence-backed, prioritized improvement plan.
 
-## Mandatory session close
+## When to run
 
-Run before every final completion or blocked handoff without a separate user
-request, including sessions that changed only documentation or skills. Scale
-depth to the work; a short session may need only a concise evidence-backed result.
-Do not treat intermediate answers, clarifications, or waits for active work as
-session endings. Do not recursively review the retro itself; revisit it only
-after substantive additional work. If the host stops abruptly, complete a missed
-retro on resumption before the next final handoff; this instruction is not a
-claim that code can execute after the host has closed.
+Run when the user asks, and briefly at the end of a `deliver-issue` run. Scale
+depth to the work; a short run needs only a few evidence-backed lines, or "no
+actionable findings". Do not review the retro itself.
+
+Prefer removing or shortening an instruction over adding one. Propose a new
+rule only for a failure that actually happened and that a shorter existing rule,
+a hook, or a test cannot prevent.
 
 ## Establish the evidence boundary
 
@@ -96,7 +95,7 @@ application fix from a prevention measure; a skill edit does not fix runtime cod
   results still need review and integration under
   [orchestration](../orchestrated-plan-implementation/SKILL.md).
 
-A requested or mandatory closing retro authorizes analysis and safe, scoped
+A retro authorizes analysis and safe, scoped
 reproduction, not automatic source/skill edits or new global memories. Continue improvements already expressly
 authorized in the session; otherwise ask per finding as described below. Do not repeatedly
 ask permission for authorized work. Store temporary evidence outside tracked

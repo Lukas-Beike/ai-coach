@@ -1,6 +1,6 @@
 ---
 name: ai-coach-skill-evaluation
-description: Create, revise, or explicitly evaluate repository-owned Intervals Coach skills, including trigger quality and workflow usefulness. Do not use for ordinary application changes, general benchmarks, or installing app plugins.
+description: Use only when the user explicitly asks to evaluate repository skills behaviorally (trigger quality, workflow usefulness) or to create a new skill. Ordinary skill edits do not need it. Do not use for application changes, general benchmarks, or installing app plugins.
 license: Apache-2.0 adaptation; see ../THIRD_PARTY.md.
 ---
 
@@ -10,6 +10,9 @@ Adapted from Anthropic skill-creator's task comparison and evaluation workflow.
 Modified to keep skills local, preserve project boundaries, and use the default
 repository orchestration workflow without authorizing external writes; see
 [provenance](../THIRD_PARTY.md).
+
+Paused by default (2026-10-30): ordinary skill and instruction edits need only
+the docs contract test and a diff review. Run evaluations only on request.
 
 ## Author the smallest useful workflow
 
