@@ -34,6 +34,10 @@ ROOT = Path(__file__).resolve().parents[1]
 LABEL = "io.ai-coach.browser-run"
 FAKE_PASSWORD = "e2e-fixture-password-1234"
 MAX_JOBS = 2
+# Chromium network errors that mean the host ran out of sockets or buffers. A child
+# that fails with one hit the machine's limits (seen on Windows Docker hosts), not a
+# test assertion; it is reported as an infrastructure error with a rerun hint.
+HOST_NETWORK_ERRORS = ("net::ERR_NO_BUFFER_SPACE", "net::ERR_INSUFFICIENT_RESOURCES")
 
 
 class RunnerError(Exception):
@@ -42,6 +46,22 @@ class RunnerError(Exception):
 
 def stamp():
     return datetime.now(UTC).isoformat()
+
+
+def host_network_error(output):
+    """Return the host network error a failed child's Playwright report names, if any.
+
+    Only the fixed error names are returned, never report text.
+    """
+    for report in sorted(Path(output).rglob("error-context.md")):
+        try:
+            text = report.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for marker in HOST_NETWORK_ERRORS:
+            if marker in text:
+                return marker
+    return None
 
 
 def atomic_json(path, value):
@@ -833,6 +853,14 @@ class Execution:
                 f"Playwright child exit code: {code}\n", encoding="utf-8"
             )
             if code:
+                marker = host_network_error(output)
+                if marker:
+                    evidence.child(child, infrastructure_error=marker)
+                    raise RunnerError(
+                        f"Playwright child failed on a host network error ({marker}), "
+                        "not a test assertion; rerun the affected project with "
+                        "--project <name> --jobs 1"
+                    )
                 raise RunnerError(f"Playwright child failed (exit {code})")
             self.containers.remove(fixture)
         except BaseException as error:

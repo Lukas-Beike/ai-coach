@@ -300,6 +300,36 @@ class BrowserRunnerTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, text)
 
+    def test_host_network_error_is_read_from_the_child_report_only_by_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            self.assertIsNone(runner.host_network_error(output))
+            report = output / "artifacts" / "case" / "error-context.md"
+            report.parent.mkdir(parents=True)
+            report.write_text("expect(received).toEqual(expected)\n", encoding="utf-8")
+            self.assertIsNone(runner.host_network_error(output))
+            report.write_text(
+                '"console: Failed to load resource: net::ERR_NO_BUFFER_SPACE"\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                "net::ERR_NO_BUFFER_SPACE", runner.host_network_error(output)
+            )
+
+    def test_host_network_failure_is_reported_as_infrastructure(self):
+        fake = FakeProcesses(fail_browser=True)
+        with mock.patch.object(
+            runner, "host_network_error", return_value="net::ERR_NO_BUFFER_SPACE"
+        ):
+            code, value, _path = self.run_main(fake)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(value["status"], "failed")
+        self.assertEqual(
+            value["children"][0]["infrastructure_error"], "net::ERR_NO_BUFFER_SPACE"
+        )
+        self.assertIn("host network error", value["error"])
+        self.assertIn("--jobs 1", value["error"])
+
     def run_with_cleanup_exception(self, fake):
         snapshots = []
         write = runner.atomic_json
