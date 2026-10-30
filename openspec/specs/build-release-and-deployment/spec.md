@@ -12,7 +12,6 @@ Documents checked-in delivery behavior and operational boundaries, not the curre
 
 The Docker build SHALL use the pinned Python 3.14 base, hash-locked binary Python dependencies and explicit application inputs, run as the non-root app user, and use writable persistent /data outside read-only application code.
 
-
 #### Scenario: Container build
 - **WHEN** the maintained Dockerfile builds the application
 - **THEN** only explicit server/backend/public/runtime inputs and locked dependencies enter the runtime image
@@ -30,7 +29,6 @@ Evidence: `Dockerfile`; `requirements.in`; `requirements.txt`; `.dockerignore`. 
 ### Requirement: Private deployment and transport prerequisites
 
 The supported application deployment SHALL remain a standalone single-athlete service on a trusted LAN/private VPN, with APP_PASSWORD-protected UI/API and trusted HTTPS where browser secure-context features are required.
-
 
 #### Scenario: Private service deployment
 - **WHEN** the application is deployed using the maintained runtime instructions
@@ -50,7 +48,6 @@ Evidence: `README.md`; `AGENTS.md`; `Dockerfile`; `server.py::main`; `backend/co
 
 The checked-in CI validation SHALL check the event source with read-only checkout permissions, run Python shards/syntax/container/browser/quality evidence, and fail required aggregate jobs when any required component is not successful.
 
-
 #### Scenario: Pull-request source validation
 - **WHEN** an ordinary pull request runs validation
 - **THEN** its code is checked without persisted checkout credentials or privileged publication credentials
@@ -68,7 +65,6 @@ Evidence: `.github/workflows/publish-container.yml`; `.github/workflows/validate
 ### Requirement: Immutable release source and version agreement
 
 Release publication SHALL resolve immutable tested source, require a release tag matching APP_VERSION on protected-main ancestry, and verify the source/version contract again before building the published image.
-
 
 #### Scenario: Version or tag mismatch
 - **WHEN** a requested release tag, tested source and APP_VERSION do not identify the required release
@@ -88,7 +84,6 @@ Evidence: `.github/scripts/release_source.py::resolve`; `.github/scripts/release
 
 The daily-release workflow SHALL prepare version changes through release-version pull requests and continue promotion from verified merged/tested state; it SHALL avoid duplicate release-test dispatch when the relevant test is already present.
 
-
 #### Scenario: New releasable changes
 - **WHEN** the scheduled/manual release process needs a new version
 - **THEN** it prepares a Conventional Commit version PR rather than directly editing protected main
@@ -106,7 +101,6 @@ Evidence: `.github/workflows/daily-release.yml`. Tests: `tests/test_release_even
 ### Requirement: Signed digest publication
 
 The publication workflow SHALL sign and verify the built image digest, attach configured provenance/SBOM, promote latest only for the current latest release, and verify release/latest tag digest parity.
-
 
 #### Scenario: Verified image built
 - **WHEN** all required source/tests/quality/browser conditions succeed
@@ -126,7 +120,6 @@ Evidence: `.github/workflows/publish-container.yml`. Tests: `tests/test_ci_contr
 
 Privileged PR automation SHALL execute trusted workflow/branch code, treat PR data as untrusted input, validate Conventional Commit title/subjects fail-closed, and preserve protected review/merge gates.
 
-
 #### Scenario: Commit API fails or returns no subjects
 - **WHEN** the conventions workflow cannot obtain the expected commit list
 - **THEN** validation fails rather than accepting an empty result
@@ -145,7 +138,6 @@ Evidence: `.github/workflows/validate-conventions.yml`; `.github/workflows/depen
 
 The Pages workflow SHALL publish only the checked-in site directory through its GitHub Pages environment; the public marketing artifact SHALL not be treated as the authenticated athlete application.
 
-
 #### Scenario: Site deployment triggered
 - **WHEN** a matching site/workflow change on develop/main or manual dispatch runs Pages
 - **THEN** the Pages artifact is built from site/ and deployed through github-pages
@@ -155,3 +147,37 @@ The Pages workflow SHALL publish only the checked-in site directory through its 
 - **THEN** the athlete API/data remains part of the private standalone runtime rather than the static Pages artifact
 
 Evidence: `.github/workflows/pages.yml`; `site/index.html`; `Dockerfile`. Tests: `tests/test_container_delivery.py`. See source inspection of `Dockerfile`/`.github/workflows/pages.yml`; the fixture module is related operational evidence and does not test Pages deployment. Hosted deployment was not executed.
+
+### Requirement: Protected bot merges
+
+Eligible Dependabot and release pull requests SHALL be eligible for direct squash merge without Gitar, while all other applicable protections remain enforced. Human pull requests SHALL remain subject to Gitar.
+
+#### Scenario: Eligible dependency update
+- **WHEN** a same-repository Dependabot pull request targets develop with auto-merge enabled and all applicable non-Gitar protections pass
+- **THEN** the automation can request a squash merge without a Gitar check
+
+#### Scenario: Release pull request
+- **WHEN** the release app opens an expected version or promotion branch for its protected target and release testing is satisfied
+- **THEN** the automation can request a squash merge without Gitar
+
+#### Scenario: Untrusted metadata
+- **WHEN** a human pull request imitates a bot branch, title, label, or commit author
+- **THEN** it is ineligible for this automation
+
+#### Scenario: Unsatisfied protection
+- **WHEN** a required non-Gitar check is missing, failing, pending, or stale, or a review thread is unresolved
+- **THEN** the pull request remains unmerged
+
+#### Scenario: Changed head
+- **WHEN** the pull request head changes after evaluation
+- **THEN** the attempted merge cannot merge the new revision
+
+#### Scenario: Missed event
+- **WHEN** an eligible pull request becomes mergeable without an observed event
+- **THEN** a bounded recovery run can retry it
+
+#### Scenario: Deployment gate
+- **WHEN** the deployment gate is disabled
+- **THEN** the automation remains disabled
+
+Evidence: `.github/workflows/bot-merge.yml`; `tools/bot_merge.py`; `tests/test_bot_merge.py`. On 2026-10-30 the release app was removed from the Default ruleset bypass list; the isolated Gitar exemption and normal checks were verified by reading the live rulesets. The app directly squash-merged Dependabot PR #1502 at its checked head in Actions run 41124099781 with non-Gitar checks passing and no unresolved threads. Rule suite 4824127971 recorded Default status checks, pull-request rules and code scanning passing and Gitar skipped. Earlier rule suites 4355093065 and 4355238064 rejected unresolved conversation and failing or pending check cases for the repository owner; equivalent negative attempts by the release app remain unverified.
