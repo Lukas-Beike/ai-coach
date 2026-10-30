@@ -539,13 +539,13 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
     state.data.training_calendar = [
       { id: "agenda-run", date, start_date_local: `${date}T18:30:00`, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
       { id: "agenda-strength", date, name: "Mobilität und Rumpfstabilität", type: "WeightTraining", duration_minutes: 20 },
-      { id: "agenda-completed", date: addDateKey(date, 1), start_date_local: `${addDateKey(date, 1)}T07:15:00`, name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_time: 3600, distance: 28000, training_load: 42, rpe: 3 },
-      { id: "agenda-completed-run", date: addDateKey(date, 1), name: "Absolvierte Laufeinheit", type: "Run", is_completed_activity: true, moving_time: 2700, distance: 7000 },
-      { id: "agenda-completed-swim", date: addDateKey(date, 1), name: "Absolvierte Schwimmeinheit", type: "Swim", is_completed_activity: true, moving_time: 1800, distance: 1500 },
-      { id: "agenda-completed-strength", date: addDateKey(date, 1), name: "Absolvierte Krafteinheit", type: "WeightTraining", is_completed_activity: true, moving_time: 1800 },
-      { id: "agenda-completed-other", date: addDateKey(date, 1), name: "Absolvierte sonstige Einheit", type: "Hike", is_completed_activity: true, moving_time: 1800 },
+      { id: "agenda-completed", date: addDateKey(date, 1), started_at_local: `${addDateKey(date, 1)}T07:15:00`, name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_duration_s: 3600, distance_m: 28000, training_load: 42, rpe: 3 },
+      { id: "agenda-completed-run", date: addDateKey(date, 1), name: "Absolvierte Laufeinheit", type: "Run", is_completed_activity: true, moving_duration_s: 2700, distance_m: 7000 },
+      { id: "agenda-completed-swim", date: addDateKey(date, 1), name: "Absolvierte Schwimmeinheit", type: "Swim", is_completed_activity: true, moving_duration_s: 1800, distance_m: 1500 },
+      { id: "agenda-completed-strength", date: addDateKey(date, 1), name: "Absolvierte Krafteinheit", type: "WeightTraining", is_completed_activity: true, moving_duration_s: 1800 },
+      { id: "agenda-completed-other", date: addDateKey(date, 1), name: "Absolvierte sonstige Einheit", type: "Hike", is_completed_activity: true, moving_duration_s: 1800 },
       { id: "agenda-matched", date: addDateKey(date, -2), name: "Aktivierung", type: "Ride", duration_minutes: 45, training_load: 25,
-        compliance: { status: "completed", percentage: 136, basis: "training_load", actual_activity: { name: "Aktivierung absolviert", type: "Ride", moving_time: 3600, distance: 24000, training_load: 34, average_heartrate: 125, average_watts: 201 } } },
+        compliance: { status: "completed", percentage: 136, basis: "training_load", actual_activity: { name: "Aktivierung absolviert", type: "Ride", moving_duration_s: 3600, distance_m: 24000, training_load: 34, avg_hr: 125, avg_power: 201 } } },
       { id: "agenda-missed", date: addDateKey(date, -3), name: "Ausgefallene Einheit", type: "Ride", duration_minutes: 45, compliance: { status: "missed", percentage: 0 } },
     ];
     renderPlanned(state.data.training_calendar);

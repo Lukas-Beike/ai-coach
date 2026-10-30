@@ -122,14 +122,16 @@ class PublicBootstrapService:
                 "activities": [],
                 "planned": neutral_calendar_entries(local_planned),
                 "training_calendar": neutral_calendar_entries(local_planned),
-                "calendar": deps.local_calendar_events(
-                    local_planned, competitions, relevant_external
+                "calendar": neutral_calendar_entries(
+                    deps.local_calendar_events(
+                        local_planned, competitions, relevant_external
+                    )
                 ),
                 "planning_view": {
                     "source": "local",
                     "local_count": len(local_planned),
                     "remote_count": 0,
-                    "items": local_planned,
+                    "items": neutral_calendar_entries(local_planned),
                     "provider_window": {},
                 },
                 "planning_compliance": [],

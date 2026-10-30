@@ -13,7 +13,8 @@ seen while comments are ignored. JavaScript literals come from a small lexer
 that consumes comments before strings, so comment text cannot hide later
 literals.
 
-Two owner-read rules, ``snapshot_key`` and ``source_label``, are checked apart
+Three owner-read rules, ``snapshot_key``, ``source_label`` and
+``field_module_import``, are checked apart
 from the baseline against ``OWNER_READ_ALLOWLIST``: raw snapshot reads and provider
 display-name literals belong to the sync/provider owners, not to consumers.
 
@@ -114,6 +115,7 @@ PROVIDER_LITERAL_ALLOWED_FILES = frozenset({"backend/db/migrations.py"})
 
 RULE_SNAPSHOT_KEY = "snapshot_key"
 RULE_SOURCE_LABEL = "source_label"
+RULE_FIELD_MODULE_IMPORT = "field_module_import"
 
 # Owner-read rules. Unlike the ratchet rules above they are checked against an
 # explicit per-file allowlist and never enter the baseline, which stays empty.
@@ -146,6 +148,21 @@ SOURCE_LABEL_SCOPES = (
     "public/performance-view.js",
 )
 
+# ``field_module_import`` flags, in backend/**/*.py outside the adapters and
+# backend/sync/, an import of a provider field-name module (``FIELD_NAME_MODULES``).
+# A consumer that names provider fields through those constants is still
+# provider-shaped (#1413); it reads the canonical model or a neutral shape instead.
+FIELD_NAME_MODULES = frozenset(
+    {
+        "garmin_fields",
+        "garmin_gear_fields",
+        "garmin_performance_fields",
+        "intervals_activity_fields",
+        "intervals_performance_fields",
+    }
+)
+FIELD_MODULE_IMPORT_ALLOWED_PREFIXES = (*ADAPTER_PREFIXES, "backend/sync/")
+
 _SYNC_WRITER = "writer: persists or ingests the raw provider snapshot"
 _BACKUP = "export: backup/privacy export serializes the stored raw snapshot"
 _SYNC_STATUS = "sync-status: reads synced_at/freshness, not metric values"
@@ -158,6 +175,56 @@ _LEGACY_LABEL = (
     "legacy-label: view still emits or compares the label itself; move it to "
     "backend/providers/source_labels.py"
 )
+
+_ACTIVITY_ROWS = (
+    "activity-rows: reads Intervals-shaped activity rows or the Coach activity "
+    "allowlist; moves to the neutral activity summary (#1510)"
+)
+_LEGACY_FALLBACK = (
+    "legacy-fallback: Garmin view, snapshot athlete or legacy wellness fallback "
+    "removed when the canonical record wins (#1415)"
+)
+_DEAD_LEGACY = (
+    "dead-legacy: no production caller; deleted with the read selector (#1416)"
+)
+_PLANNING_RECORDS = (
+    "planning-records: local planned units and library entries keep stored keys "
+    "until they move (#1507)"
+)
+_FIELD_MODULE_OWNERS: Mapping[str, str] = {
+    "backend/activities/calendar_projection.py": _ACTIVITY_ROWS,
+    "backend/activities/detail_projection.py": _ACTIVITY_ROWS,
+    "backend/activities/detail_store.py": _DEAD_LEGACY,
+    "backend/activities/duplicates.py": _ACTIVITY_ROWS,
+    "backend/athlete/equipment.py": _LEGACY_FALLBACK,
+    "backend/coach/context.py": _ACTIVITY_ROWS,
+    "backend/nutrition/sync_status.py": _LEGACY_FALLBACK,
+    "backend/performance/activity_validation.py": _ACTIVITY_ROWS,
+    "backend/performance/body.py": _LEGACY_FALLBACK,
+    "backend/performance/canonical_sections.py": _ACTIVITY_ROWS,
+    "backend/performance/chart_history.py": _LEGACY_FALLBACK,
+    "backend/performance/current_metrics.py": _LEGACY_FALLBACK,
+    "backend/performance/daily_health.py": _LEGACY_FALLBACK,
+    "backend/performance/eftp.py": _ACTIVITY_ROWS,
+    "backend/performance/garmin_metric_history.py": _LEGACY_FALLBACK,
+    "backend/performance/garmin_metrics.py": _LEGACY_FALLBACK,
+    "backend/performance/garmin_observations.py": _LEGACY_FALLBACK,
+    "backend/performance/garmin_projection.py": _LEGACY_FALLBACK,
+    "backend/performance/garmin_weight.py": _LEGACY_FALLBACK,
+    "backend/performance/load.py": _ACTIVITY_ROWS,
+    "backend/performance/planning_recovery.py": _DEAD_LEGACY,
+    "backend/performance/recovery.py": _LEGACY_FALLBACK,
+    "backend/performance/report_service.py": _ACTIVITY_ROWS,
+    "backend/performance/session_analysis.py": _ACTIVITY_ROWS,
+    "backend/performance/tag_impact.py": _ACTIVITY_ROWS,
+    "backend/performance/training_focus.py": _ACTIVITY_ROWS,
+    "backend/performance/training_report.py": _ACTIVITY_ROWS,
+    "backend/performance/wellness.py": _LEGACY_FALLBACK,
+    "backend/planning/context.py": _PLANNING_RECORDS,
+    "backend/planning/library.py": _PLANNING_RECORDS,
+    "backend/planning/season_preparation.py": _ACTIVITY_ROWS,
+    "backend/planning/target_snapshot.py": _PLANNING_RECORDS,
+}
 
 # (rule, repository-relative path) -> reason. Only the files the rules actually
 # fire on are listed; a stale entry fails the guard. Remove an awaiting-kind entry
@@ -208,6 +275,10 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
             "backend/performance/training_focus.py",
             "backend/performance/training_report.py",
         )
+    },
+    **{
+        (RULE_FIELD_MODULE_IMPORT, path): reason
+        for path, reason in _FIELD_MODULE_OWNERS.items()
     },
 }
 
@@ -290,6 +361,26 @@ def _string_literals(path: Path, text: str) -> list[str]:
     return _javascript_string_literals(text)
 
 
+def _field_module_imports(text: str) -> list[str]:
+    """Return the provider field-name modules a Python source imports."""
+    modules: list[str] = []
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names = [node.module, *(f"{node.module}.{a.name}" for a in node.names)]
+        else:
+            continue
+        found = {
+            name.rsplit(".", 1)[-1]
+            for name in names
+            if name.startswith("backend.providers.")
+            and name.rsplit(".", 1)[-1] in FIELD_NAME_MODULES
+        }
+        modules.extend(sorted(found))
+    return modules
+
+
 def _findings_for_file(
     relative_path: str, text: str, literals: Sequence[str]
 ) -> Counter[FindingKey]:
@@ -368,7 +459,7 @@ def _snapshot_key_tokens(text: str) -> list[str]:
 
 
 def scan_owner_reads(root: Path = SOURCE_ROOT) -> list[CouplingEntry]:
-    """Count raw snapshot reads and provider source-label literals per file."""
+    """Count raw snapshot reads, source-label literals and field-module imports."""
     findings: Counter[FindingKey] = Counter()
     for path in scanned_paths(root):
         relative_path = path.relative_to(root).as_posix()
@@ -376,6 +467,9 @@ def scan_owner_reads(root: Path = SOURCE_ROOT) -> list[CouplingEntry]:
         if path.suffix == ".py":
             for token in _snapshot_key_tokens(text):
                 findings[(RULE_SNAPSHOT_KEY, relative_path, token)] += 1
+            if not relative_path.startswith(FIELD_MODULE_IMPORT_ALLOWED_PREFIXES):
+                for module in _field_module_imports(text):
+                    findings[(RULE_FIELD_MODULE_IMPORT, relative_path, module)] += 1
         if relative_path.startswith(SOURCE_LABEL_SCOPES):
             for literal in _string_literals(path, text):
                 if literal in SOURCE_LABEL_LITERALS:

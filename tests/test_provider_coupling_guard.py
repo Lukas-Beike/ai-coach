@@ -415,6 +415,38 @@ def _owner_reads(files: Mapping[str, str]) -> list[tuple[str, str, str, int]]:
 
 
 class OwnerReadGuardTests(unittest.TestCase):
+    def test_consumers_cannot_import_provider_field_name_modules(self) -> None:
+        importer = (
+            "from backend.providers.intervals_activity_fields import ACTIVITY_FIELDS\n"
+            "from backend.providers import garmin_fields as fields\n"
+            "import backend.providers.intervals_performance_fields\n"
+            "from backend.providers.source_labels import provider_label\n"
+        )
+        entries = _owner_reads(
+            {
+                "backend/performance/consumer.py": importer,
+                "backend/sync/ingest.py": importer,
+                "backend/providers/mapper.py": importer,
+                "backend/canonical/mapping.py": importer,
+            }
+        )
+        self.assertEqual(
+            [
+                (
+                    "field_module_import",
+                    "backend/performance/consumer.py",
+                    module,
+                    1,
+                )
+                for module in (
+                    "garmin_fields",
+                    "intervals_activity_fields",
+                    "intervals_performance_fields",
+                )
+            ],
+            entries,
+        )
+
     def test_consumers_cannot_read_raw_snapshots(self) -> None:
         entries = _owner_reads(
             {

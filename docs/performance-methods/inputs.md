@@ -25,7 +25,7 @@ Provenance has three separate parts. Fixtures check them separately:
 | --- | --- | --- |
 | Elapsed duration | Intervals: `elapsed_duration_s` in the record details JSON; `duration_s` is moving time when present. Garmin: `duration_s` is elapsed (`duration`), else `movingTime`; `moving_duration_s` separate. Wahoo: `duration_s` is the active duration, else the total; the total is dropped when both exist, so no elapsed field. | `backend/providers/intervals_activity_mapping.py:427-446`, `backend/providers/garmin_activity_mapping.py:87-88`, `backend/providers/wahoo_activity_mapping.py:265-274`, `backend/db/canonical_store.py:34` |
 | Local session RPE | `activity_feedback.session_rpe` (0–10), keyed by the provider activity id plus `provider`; no link to `activity_sessions` | `backend/db/schema.py:662-673`, `backend/activities/feedback.py:43` |
-| Intervals `icu_rpe` | No canonical field. Kept in the stored provider activity row; the browser contract renames it to `rpe` | `backend/providers/intervals_activity_fields.py:47`, `backend/canonical/public_metrics.py:17` |
+| Intervals `icu_rpe` | No canonical field. Kept in the stored provider activity row; the browser contract renames it to `rpe` | `backend/providers/intervals_activity_fields.py:47`, `backend/canonical/public_metrics.py:24` |
 | One session per ride | `bundle_sessions` groups records; `link_activity_sessions` marks the younger session `duplicate` with `merged_into` | `backend/activities/canonical_sessions.py:97`, `backend/activities/session_linking.py:47` |
 
 Consumer trace (no M1 method exists yet):

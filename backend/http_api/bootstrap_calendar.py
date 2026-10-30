@@ -10,7 +10,7 @@ from typing import Any
 from backend.athlete.checkins import CheckinService
 from backend.calendar.external import ExternalCalendarReader
 from backend.canonical.domain_records import ZoneConfiguration
-from backend.canonical.public_metrics import neutral_calendar_entries
+from backend.canonical.public_metrics import neutral_calendar_state
 from backend.planning import calendar_read_model
 from backend.planning.competition_service import CompetitionService
 from backend.planning.daily_context_service import DailyPlanningContextService
@@ -96,11 +96,7 @@ class PublicStateCalendarProjection:
             sport_settings=calendar_read_model.snapshot_sport_settings(snapshot),
             zone_configurations=self._zone_configurations(),
         )
-        for key in ("training_calendar", "planned"):
-            if key in calendar_projection:
-                calendar_projection[key] = neutral_calendar_entries(
-                    calendar_projection[key]
-                )
+        neutral_calendar_state(calendar_projection)
         return PublicStateCalendarData(
             checkins,
             competitions,

@@ -283,7 +283,7 @@ function addDateKey(value, days) {
 }
 
 function plannedEventDate(event) {
-  return String(event?.start_date_local || event?.date || "").slice(0, 10);
+  return String(event?.start_date_local || event?.started_at_local || event?.date || "").slice(0, 10);
 }
 
 function weatherIcon(code) {
