@@ -2,7 +2,7 @@
   "schema": 1,
   "base": "2becf69249e9d0aa85d34ed52176e90299e2aa6c",
   "versions": {
-    "ruff": "0.17.2",
+    "ruff": "0.17.3",
     "mypy": "2.4.0"
   },
   "diagnostics": [
