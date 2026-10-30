@@ -25,7 +25,16 @@ class ActivityFeedbackNormalizationTests(unittest.TestCase):
         self.assertEqual(
             0, normalize_activity_feedback("one", {"session_rpe": 0})["session_rpe"]
         )
-        for value in (-1, 11, float("nan"), float("inf"), True, "5"):
+        for value in (
+            -1,
+            11,
+            float("nan"),
+            float("inf"),
+            10**400,
+            -(10**400),
+            True,
+            "5",
+        ):
             with self.subTest(value=value), self.assertRaises(AppError):
                 normalize_activity_feedback("one", {"session_rpe": value})
 
