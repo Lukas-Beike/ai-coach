@@ -34,10 +34,10 @@ ROOT = Path(__file__).resolve().parents[1]
 LABEL = "io.ai-coach.browser-run"
 FAKE_PASSWORD = "e2e-fixture-password-1234"
 MAX_JOBS = 2
-# Chromium network errors that mean the host ran out of sockets or buffers. A child
-# that fails with one hit the machine's limits (seen on Windows Docker hosts), not a
+# Chromium's error when the host ran out of socket buffers (seen on Windows Docker
+# hosts). A child whose every failing test names it hit the machine's limits, not a
 # test assertion; it is reported as an infrastructure error with a rerun hint.
-HOST_NETWORK_ERRORS = ("net::ERR_NO_BUFFER_SPACE", "net::ERR_INSUFFICIENT_RESOURCES")
+HOST_NETWORK_ERROR = "net::ERR_NO_BUFFER_SPACE"
 
 
 class RunnerError(Exception):
@@ -49,19 +49,27 @@ def stamp():
 
 
 def host_network_error(output):
-    """Return the host network error a failed child's Playwright report names, if any.
+    """Return the host network error when every failing test of a child names it.
 
-    Only the fixed error names are returned, never report text.
+    Only the per-test ``artifacts/*/error-context.md`` reports are read, symlinks
+    are skipped, and only the fixed error name is returned, never report text. A
+    child with any report that does not name the error failed an assertion.
     """
-    for report in sorted(Path(output).rglob("error-context.md")):
+    reports = [
+        report
+        for report in sorted((Path(output) / "artifacts").glob("*/error-context.md"))
+        if not report.is_symlink() and not report.parent.is_symlink()
+    ]
+    if not reports:
+        return None
+    for report in reports:
         try:
             text = report.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            continue
-        for marker in HOST_NETWORK_ERRORS:
-            if marker in text:
-                return marker
-    return None
+            return None
+        if HOST_NETWORK_ERROR not in text:
+            return None
+    return HOST_NETWORK_ERROR
 
 
 def atomic_json(path, value):
@@ -858,8 +866,8 @@ class Execution:
                     evidence.child(child, infrastructure_error=marker)
                     raise RunnerError(
                         f"Playwright child failed on a host network error ({marker}), "
-                        "not a test assertion; rerun the affected project with "
-                        "--project <name> --jobs 1"
+                        "not a test assertion; rerun it with "
+                        f"--project {child['project']} --spec {child['file']}"
                     )
                 raise RunnerError(f"Playwright child failed (exit {code})")
             self.containers.remove(fixture)
@@ -1024,7 +1032,7 @@ def main(argv=None):
     started = time.monotonic()
     old_handlers = {}
 
-    def interrupt(signum, frame):
+    def interrupt(_signum, _frame):
         processes.stop.set()
         raise KeyboardInterrupt
 

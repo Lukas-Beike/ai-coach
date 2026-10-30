@@ -300,21 +300,40 @@ class BrowserRunnerTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, text)
 
-    def test_host_network_error_is_read_from_the_child_report_only_by_name(self):
+    def test_host_network_error_needs_every_failing_test_to_name_it(self):
+        marker = '"console: Failed to load resource: net::ERR_NO_BUFFER_SPACE"\n'
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             self.assertIsNone(runner.host_network_error(output))
-            report = output / "artifacts" / "case" / "error-context.md"
-            report.parent.mkdir(parents=True)
-            report.write_text("expect(received).toEqual(expected)\n", encoding="utf-8")
-            self.assertIsNone(runner.host_network_error(output))
-            report.write_text(
-                '"console: Failed to load resource: net::ERR_NO_BUFFER_SPACE"\n',
-                encoding="utf-8",
-            )
+
+            def report(name, text):
+                path = output / "artifacts" / name / "error-context.md"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+
+            report("first", marker)
             self.assertEqual(
                 "net::ERR_NO_BUFFER_SPACE", runner.host_network_error(output)
             )
+            report("second", "expect(received).toEqual(expected)\n")
+            self.assertIsNone(runner.host_network_error(output))
+
+    def test_host_network_error_reads_only_per_test_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            nested = output / "report" / "data" / "error-context.md"
+            nested.parent.mkdir(parents=True)
+            nested.write_text("net::ERR_NO_BUFFER_SPACE\n", encoding="utf-8")
+            self.assertIsNone(runner.host_network_error(output))
+            outside = output / "outside.md"
+            outside.write_text("net::ERR_NO_BUFFER_SPACE\n", encoding="utf-8")
+            link = output / "artifacts" / "case" / "error-context.md"
+            link.parent.mkdir(parents=True)
+            try:
+                link.symlink_to(outside)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            self.assertIsNone(runner.host_network_error(output))
 
     def test_host_network_failure_is_reported_as_infrastructure(self):
         fake = FakeProcesses(fail_browser=True)
@@ -328,7 +347,7 @@ class BrowserRunnerTests(unittest.TestCase):
             value["children"][0]["infrastructure_error"], "net::ERR_NO_BUFFER_SPACE"
         )
         self.assertIn("host network error", value["error"])
-        self.assertIn("--jobs 1", value["error"])
+        self.assertIn("--project desktop", value["error"])
 
     def run_with_cleanup_exception(self, fake):
         snapshots = []

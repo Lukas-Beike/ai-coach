@@ -121,6 +121,18 @@
       "message_sha256": "fd930adc3e1456837a2cba88df9d5847a87027f961bd785c5ef57dca05f8d5f6"
     },
     {
+      "tool": "ruff",
+      "path": "backend/planning/changes.py",
+      "code": "ARG004",
+      "message_sha256": "61f2717a36264a60482c405b8d23f3fc95ebf303b527b34989f83d856d9fdb9f"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/planning/changes.py",
+      "code": "ARG004",
+      "message_sha256": "65500c398a77984b1b392abcf3776c894b2035811a4d00dfe7b8fe59b4a931e3"
+    },
+    {
       "tool": "mypy",
       "path": "tests/test_sync_selected.py",
       "code": "arg-type",
