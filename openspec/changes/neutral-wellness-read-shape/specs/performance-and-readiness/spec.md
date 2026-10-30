@@ -21,13 +21,13 @@ The system SHALL read every daily wellness value of the performance projection f
 
 Detailed contract: the daily wellness values are CTL, ATL, form, weight, body fat, readiness, the subjective fatigue, soreness, stress and mood ratings, and the run eFTP of the trend averages. The snapshot rows not read are `recent_wellness` and `raw_provider_data.wellness`. The current-day window is the 90 days ending on the latest wellness day. The history view covers every stored wellness day.
 
-Evidence: to be recorded at implementation (`backend/performance/canonical_inputs.py:read_performance_inputs`, the new day-view module, `tests/test_performance_canonical_parity.py`, `tests/test_performance_canonical_sections.py` successor tests).
+Evidence: `backend/performance/wellness_days.py:read_wellness_days`, `backend/performance/canonical_inputs.py:read_performance_inputs`; `tests/test_performance_wellness_days.py:WellnessDayTests`, `tests/test_performance_canonical_sections.py:SectionHelperTests` and `SectionReadTests`, `tests/test_performance_canonical_parity.py:CanonicalLoadEdgeTests`, `tests/test_performance_context.py:PerformanceContextTests`, and `tests/test_performance_canonical_body_history.py:CanonicalBodyLedgerCaseTests`.
 
 ### Requirement: Wellness `sportInfo` threshold fallbacks are not read
-The system SHALL NOT read cycling or running FTP, LTHR, VO2max, threshold pace or Zone-2 pace from Intervals.icu wellness `sportInfo` entries. These values SHALL come only from their remaining sources: Garmin, athlete sport settings, the athlete record, Wahoo and the manual profile. The 30-day `run_threshold_watts` average SHALL read the run-scoped wellness-day eFTP observations, bounded as before.
+The system SHALL NOT read cycling or running FTP, LTHR, maximum heart rate, VO2max, threshold pace or Zone-2 pace from Intervals.icu wellness `sportInfo` entries. These values SHALL come only from their remaining sources: Garmin, athlete sport settings, the athlete record, Wahoo and the manual profile. The 30-day `run_threshold_watts` average SHALL read the run-scoped wellness-day eFTP observations, bounded as before.
 
 #### Scenario: `sportInfo` carries threshold keys
-- **WHEN** a stored wellness row's `sportInfo` entry carries `ftp`, `lthr`, `vo2max`, `threshold_pace` or a Zone-2 pace
+- **WHEN** a stored wellness row's `sportInfo` entry carries `ftp`, `lthr`, a maximum heart rate, `vo2max`, `threshold_pace` or a Zone-2 pace
 - **THEN** none of them supplies a current metric or a 30-day average.
 
 #### Scenario: Run eFTP average
@@ -35,6 +35,8 @@ The system SHALL NOT read cycling or running FTP, LTHR, VO2max, threshold pace o
 - **THEN** `comparisons.run_threshold_watts_30d` averages those observations as the snapshot `sportInfo` run eFTP average did; days without an observation are not filled.
 
 Detailed contract: the Intervals.icu wellness `sportInfo` entry provides the sport type, CTL, ATL, eFTP, W′ and Pmax (`tests/fixtures/providers/intervals/wellness.json`); the removed keys are not part of it. No live payload was inspected (evidence gap).
+
+Evidence: `backend/performance/current_metrics.py:current_performance_metrics`, `backend/performance/trends.py:intervals_performance_average`; `tests/test_characterization_current_metrics.py:CurrentThresholdTests.test_wellness_sport_info_ftp_does_not_supply_cycling_ftp`, `tests/test_characterization_current_metrics.py:CurrentMaxHrTests.test_out_of_range_setting_does_not_read_wellness_sport_info`, `tests/test_performance_trends.py:IntervalsPerformanceAverageTests.test_wellness_values_and_run_eftp_are_bounded_and_sport_info_thresholds_absent`, `tests/test_performance_wellness_days.py:WellnessDayTests.test_run_eftp_is_a_separate_sparse_series`.
 
 ### Requirement: Performance context output keys are provider-neutral
 The current performance context returned to the Coach and through HTTP SHALL name its recovery, comparison, load and threshold values with provider-neutral keys and SHALL NOT emit the former provider-shaped keys. Values, units and source labels SHALL stay unchanged.
@@ -55,6 +57,7 @@ Detailed contract: the neutral keys are
 
 They replace `restingHR`, `hrv`, `sleepScore`, `rampRate`, `rampRate_source`, `icu_ftp` and `icu_w_prime`.
 
+Evidence: `backend/performance/context.py:current_performance_context`, `backend/performance/comparisons.py:performance_comparisons`, `backend/performance/load_context.py:performance_load_context`; `tests/test_performance_context.py:PerformanceContextTests.test_composed_context_has_only_neutral_performance_keys`, `tests/test_characterization_coach_context.py`, `tests/test_server_performance.py`.
 
 ### Requirement: Personal recovery measurement labels name the method
 Personal recovery baselines, sleep goal shortfalls and tag-impact reports SHALL label their measurement with a provider-neutral method name: `duration` for sleep duration, `resting` for resting heart rate, and `RMSSD` or `SDNN` for HRV. They SHALL NOT use a provider field name such as `lastNightAvg`, `sleepSecs`, `sleepTimeSeconds`, `restingHR` or `restingHeartRate`. Series SHALL remain separated by provider and method, and RMSSD and SDNN SHALL not be pooled.
@@ -62,6 +65,8 @@ Personal recovery baselines, sleep goal shortfalls and tag-impact reports SHALL 
 #### Scenario: Garmin and Intervals.icu HRV
 - **WHEN** Garmin nightly HRV and Intervals.icu RMSSD observations both exist
 - **THEN** both baselines are labelled `RMSSD`, stay two series distinguished by their source label, and the HRV chart heading shows `RMSSD` after the source.
+
+Evidence: `backend/performance/personal_recovery.py:personal_recovery`, `backend/performance/tag_impact.py:tag_impact`; `tests/test_personal_recovery.py:PersonalRecoveryTests`, `tests/test_characterization_recovery.py`, `tests/test_training_record_features.py`, `e2e/analysis-info.spec.js`.
 
 ## MODIFIED Requirements
 
