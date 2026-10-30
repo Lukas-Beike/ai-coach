@@ -218,6 +218,10 @@ class _Collector:
     def reject(self, record_ref: str | None, name: str, reason: IssueReason) -> None:
         self.issues.append(MappingIssue(record_ref, name, reason))
 
+    def drop_repeats_since(self, start: int) -> None:
+        """Keep one of each issue added since ``start``, e.g. one entry's sports."""
+        self.issues[start:] = dict.fromkeys(self.issues[start:])
+
     def result(self) -> MappingResult[Observation]:
         return MappingResult(records=tuple(self.records), issues=tuple(self.issues))
 
@@ -255,10 +259,12 @@ def map_intervals_athlete_thresholds(
     collector = _Collector()
     seen: set[Sport] = set()
     for entry in _sport_settings(athlete, scope, collector):
+        start = len(collector.issues)
         for sport in _entry_sports(entry, scope, collector):
             if sport not in seen:
                 seen.add(sport)
                 _map_sport_setting(entry, scope, collector, sport)
+        collector.drop_repeats_since(start)
     for kind, aliases in _ATHLETE_FIELDS:
         _add_field(collector, scope, athlete, kind, aliases)
     if not _has_ride_ftp(collector.records):
@@ -356,10 +362,12 @@ def _map_sport_info(row: dict[Any, Any], scope: _Scope, collector: _Collector) -
             if isinstance(types, list)
             else [entry.get(key) for key in _SPORT_INFO_TYPE_KEYS]
         )
+        start = len(collector.issues)
         for sport in _texts_sports(texts):
             if sport not in seen:
                 seen.add(sport)
                 _add_eftp(collector, scope, entry, sport)
+        collector.drop_repeats_since(start)
 
 
 def _texts_sports(texts: list[Any]) -> list[Sport]:

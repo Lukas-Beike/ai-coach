@@ -1318,6 +1318,22 @@ class EftpClassificationTests(unittest.TestCase):
             issue_tuples(result), [(None, "types", IssueReason.INVALID_TYPE)]
         )
 
+    def test_a_multi_sport_entry_reports_each_invalid_value_once(self) -> None:
+        result = thresholds(
+            {
+                "id": ATHLETE_ID,
+                "sportSettings": [{"types": ["Ride", "Run"], "ftp": "x"}],
+            }
+        )
+        self.assertEqual(
+            issue_tuples(result), [(ATHLETE_ID, "ftp", IssueReason.INVALID_NUMBER)]
+        )
+        info = [{"types": ["Ride", "Run"], "eftp": "x"}]
+        self.assertEqual(
+            issue_tuples(wellness([row(sportInfo=info)])),
+            [(ROW_DAY, "eftp", IssueReason.INVALID_NUMBER)],
+        )
+
     def test_the_first_of_two_ride_settings_wins(self) -> None:
         athlete = {
             "id": ATHLETE_ID,
