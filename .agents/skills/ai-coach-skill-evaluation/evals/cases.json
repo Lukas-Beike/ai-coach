@@ -74,9 +74,9 @@
     {
       "id": "deliver-issue-pr-round-limit", "skill": "deliver-issue", "kind": "boundary", "activate": true,
       "prompt": "Finish delivering issue 42.",
-      "setup": "Synthetic PR review re-check still reports an unresolved actionable finding; implementation and archive are complete.",
-      "expected": ["Stop before push when findings remain after the re-check and report them", "Preserve local work for the blocked handoff"],
-      "prohibited": ["Run more review rounds to get a clean result or restart deliver-issue", "Use a silent waiver to bypass the gate"]
+      "setup": "The single PR review reports a P2 finding the agent believes is invalid; implementation and archive are complete.",
+      "expected": ["Record concrete evidence and ask the user before leaving the P2 finding unfixed", "Preserve local work for the blocked handoff"],
+      "prohibited": ["Run extra local review rounds or restart deliver-issue", "Use a silent waiver to bypass the gate"]
     },
     {
       "id": "evaluation-positive", "skill": "ai-coach-skill-evaluation", "kind": "positive", "activate": true,

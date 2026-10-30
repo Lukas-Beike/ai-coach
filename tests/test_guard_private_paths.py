@@ -27,16 +27,20 @@ class GuardPrivatePathsTests(unittest.TestCase):
         bare = DATA.rstrip("/")
         for command in (
             f"cat {ENV}",
+            f"cat -v {ENV}",
+            f"cat *{ENV}",
             f"type {ENV}.local",
             f"cat {ENV}.production.local",
-            f"ls {bare}",
+            f"docker run --rm --env-file {ENV} alpine env",
             f"ls {DATA}",
+            f"ls ./{bare}",
             f"Get-Content ./{DATA}coach.db",
             f"cat ../{DATA}coach.db",
             f"Get-Content C:\\Users\\x\\ai-coach\\{bare}\\coach.db",
             f"docker exec ai-coach ls /{bare}",
             f"docker exec ai-coach ls /{DATA}backups",
             f"type C:\\x\\{bare}\\{TOKENS}",
+            f"cat {TOKENS}/oauth1_token.json",
             f"cat /srv/{TOKENS}/oauth2_token.json",
         ):
             with self.subTest(command=command):
@@ -49,9 +53,10 @@ class GuardPrivatePathsTests(unittest.TestCase):
             f"cat {ENV}.example",
             "git status",
             "grep -rn metadata backend",
+            f'rg -n "{bare}" backend',
+            f"git commit -m 'fix {bare} import'",
+            f"cat tests/{DATA}fixture.json",
             f"grep -r {TOKENS} backend",
-            f'docker run -d -v "${{PWD}}\\{bare}:/{bare}" --env-file {ENV} ai-coach:local',
-            f"docker run --rm --env-file /mnt/appdata/{ENV} -v /mnt/appdata/{bare}:/{bare} img",
         ):
             with self.subTest(command=command):
                 self.assertEqual(run_hook(command), 0)

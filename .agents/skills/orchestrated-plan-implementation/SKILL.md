@@ -31,8 +31,8 @@ exceeds `high`.
 | L3 | Only genuinely hard or risky work: migrations, auth/privacy, data integrity, hard diagnosis | Opus (high) | `implementer`/`reviewer` with `model: "opus"` |
 
 The definitions in `.claude/agents/` pin model and effort and, for `explorer`
-and `reviewer`, read-only tools; give `reviewer` a diff file, since it cannot
-run git. Gemini Flash runs through T3 `delegate_task`; see
+and `reviewer`, read-only tools; put the diff in the `reviewer` brief, since it
+cannot run git. Gemini Flash runs through T3 `delegate_task`; see
 [runtime binding](references/runtime-binding.md). If a tier is unavailable, use
 the other L1 model or stay with the main model and say so.
 

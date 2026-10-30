@@ -641,9 +641,10 @@ Rules without exceptions are enforced, not just written down:
 `.env`/`.env.local` and to the `data/` directory of this checkout and the
 primary `ai-coach` checkout. Before every shell command it runs
 `scripts/hooks/guard_private_paths.py`, a tested text-matching safety net (not
-a sandbox) that blocks `.env`, `data`, and Garmin token paths but lets Docker
-`--env-file` and volume arguments through. It also blocks commands that merely
-mention those paths, such as a commit message; pass such text through a file.
+a sandbox) that blocks clear `.env`, `data`, and Garmin token path forms with no
+exceptions, so you run the Docker runbook commands that pass `.env` or mount
+`data` yourself. It also blocks commands that merely mention such a path, such
+as a commit message; pass that text through a file.
 `.claude/agents/` defines the `explorer` (Haiku, low effort, read-only),
 `implementer` (Sonnet, medium), and `reviewer` (Sonnet, medium, read-only)
 subagents.
