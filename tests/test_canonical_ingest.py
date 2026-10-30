@@ -211,6 +211,30 @@ class IntervalsIngestTests(IngestFixture):
         )
         self.assertEqual((counters.written, counters.skipped_invalid), (1, 1))
 
+    def test_athlete_and_wellness_body_fat_and_vo2max_are_both_kept(self) -> None:
+        day = TODAY.isoformat()
+        snapshot = {
+            "synced_at": NOW,
+            "raw_provider_data": {
+                "athlete": {"id": "athlete-1", "bodyFat": 18, "vo2max": 54},
+                "wellness": [{"id": day, "bodyFat": 19, "vo2max": 52}],
+            },
+        }
+        self.ingest(snapshot, None)
+        rows = self.db.execute(
+            "SELECT metric, value FROM observations "
+            "WHERE metric IN ('body_fat', 'vo2max') ORDER BY metric, value"
+        ).fetchall()
+        self.assertEqual(
+            [tuple(row) for row in rows],
+            [
+                ("body_fat", 18.0),
+                ("body_fat", 19.0),
+                ("vo2max", 52.0),
+                ("vo2max", 54.0),
+            ],
+        )
+
     def test_chunked_historical_ingest_matches_one_full_ingest(self) -> None:
         def snapshot(activities: list[str], wellness: list[str]) -> dict[str, Any]:
             return {

@@ -365,12 +365,39 @@ class ObservationStoreTests(StoreFixture):
         self.assertIs(self.write(athlete), WriteOutcome.WRITTEN)
         self.assertEqual(self.count("observations"), 2)
 
+    def test_athlete_body_fat_and_sportless_vo2max_have_their_own_series(
+        self,
+    ) -> None:
+        for kind, sport, series in (
+            (MetricKind.BODY_FAT, None, "athlete"),
+            (MetricKind.VO2MAX, None, "athlete"),
+            (MetricKind.VO2MAX, Sport.RIDE, ""),
+        ):
+            with self.subTest(kind=kind, sport=sport):
+                self.db.execute("DELETE FROM observations")
+                wellness = observation(
+                    20.0, kind=kind, sport=sport, source_record_id="2026-10-01"
+                )
+                athlete = observation(
+                    21.0, kind=kind, sport=sport, source_record_id="i12345"
+                )
+                self.assertEqual(
+                    canonical_store.observation_natural_key(athlete),
+                    f"intervals|{kind.value}|{sport.value if sport else ''}"
+                    f"|{series}|2026-10-01",
+                )
+                self.assertIs(self.write(wellness), WriteOutcome.WRITTEN)
+                expected = 2 if series else 1
+                self.write(athlete)
+                self.assertEqual(self.count("observations"), expected)
+
     def test_other_athlete_profile_kinds_share_the_daily_key(self) -> None:
         ftp = observation(
             260.0, kind=MetricKind.FTP, sport=Sport.RIDE, source_record_id="i12345"
         )
         self.assertEqual(
-            canonical_store.observation_natural_key(ftp), "intervals|ftp|ride||2026-10-01"
+            canonical_store.observation_natural_key(ftp),
+            "intervals|ftp|ride||2026-10-01",
         )
 
     def test_insert_unchanged_and_update_by_natural_key(self) -> None:
