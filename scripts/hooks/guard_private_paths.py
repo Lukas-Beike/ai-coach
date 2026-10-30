@@ -11,15 +11,20 @@ import json
 import re
 import sys
 
-PRIVATE = re.compile(
-    r"""(?ix)
-    (?:^|[\s"'=:/\\*])\.env(?:\.(?!example\b)[\w-]+)*(?![\w.-])  # .env, *.env, .env.local
-    | (?:^|[\s"'=:])(?:\.{1,2}[/\\]|/)data(?=$|[\s"'/\\;|&)])    # ./data, ../data, /data
-    | (?:^|[\s"'=:])data[/\\]                                     # data/... relative to the repo
-    | [/\\]ai-coach[/\\]data(?=$|[\s"'/\\;|&)])                   # primary checkout data dir
-    | [/\\]garmin_tokens | garmin_tokens[/\\]                     # Garmin token store as a path
-    """
+START = r"(?:^|[\s\"'=:])"  # start of a shell word or assignment value
+END = r"(?=$|[\s\"'/\\;|&)])"  # end of a path segment
+
+PRIVATE = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"(?:^|[\s\"'=:/\\*])\.env(?:\.[\w-]+)*(?![\w.-])",  # .env, *.env, .env.local
+        START + r"(?:\.{1,2}[/\\]|/)data" + END,  # ./data, ../data, /data
+        START + r"data[/\\]",  # data/... relative to the repo
+        r"[/\\]ai-coach[/\\]data" + END,  # primary checkout data dir
+        r"[/\\]garmin_tokens|garmin_tokens[/\\]",  # Garmin token store as a path
+    )
 )
+TEMPLATE = re.compile(r"\.env\.example(?![\w.-])", re.IGNORECASE)
 
 
 def main() -> int:
@@ -29,7 +34,8 @@ def main() -> int:
         print("Blocked: unreadable hook input.", file=sys.stderr)
         return 2
     command = str((payload.get("tool_input") or {}).get("command") or "")
-    if PRIVATE.search(command):
+    command = TEMPLATE.sub(" ", command)
+    if any(pattern.search(command) for pattern in PRIVATE):
         print(
             "Blocked: the command touches .env, the data directory, or Garmin tokens. "
             "These hold live secrets and athlete data; use temporary test data instead. "
