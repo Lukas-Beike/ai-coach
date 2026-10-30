@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.canonical.local_time import local_date
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_inputs import read_performance_inputs
@@ -84,8 +85,14 @@ def garmin_metrics_from_payload(payload: dict[str, Any]) -> GarminCanonicalMetri
         def observations(self, _db, kind, *, start=None, end=None, sport=None):
             return tuple(item for item in observations if item.kind is kind)
 
-        def activities(self, _db, *, start=None, end=None):
-            return tuple(activities)
+        def activity_max_hr(self, _db, provider, *, low, high):
+            best: dict[Any, tuple[float, date]] = {}
+            for record in activities:
+                value = record.max_hr
+                if value is None or not low <= value <= high:
+                    continue
+                candidate = (value, local_date(record.started_at, zone))
+                best[record.sport] = max(best.get(record.sport, candidate), candidate)
+            return tuple((sport, *best[sport]) for sport in best)
 
-    reader = Reader()
-    return read_garmin_state(reader, object(), activities=reader).metrics
+    return read_garmin_state(Reader(), object()).metrics

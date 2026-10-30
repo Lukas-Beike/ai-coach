@@ -13,7 +13,11 @@ from backend.performance import freshness as performance_freshness
 from backend.performance import garmin_observations, garmin_weight
 from backend.performance.current_metrics import as_number as _as_number
 from backend.performance.current_metrics import metric as _metric
-from backend.performance.garmin_canonical import GarminCanonicalMetrics
+from backend.performance.garmin_canonical import (
+    ACTIVITY_MAX_HR_CATEGORIES,
+    GarminCanonicalMetrics,
+    profile_max_hr_for,
+)
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.garmin_fields import colon_time_parts
 from backend.providers.garmin_fields import first_present as _first_present
@@ -408,7 +412,7 @@ def _garmin_payload_max_hr_samples(
     if not isinstance(activities, list):
         activities = []
     for kind, samples in values.items():
-        profile_value = profile_max_hr.get(kind) or profile_max_hr.get("generic")
+        profile_value = profile_max_hr_for(profile_max_hr, kind)
         if profile_value is not None:
             samples.append(profile_value)
             continue
@@ -431,7 +435,7 @@ def _garmin_canonical_max_hr_samples(
     values: dict[str, list[float | int]] = {"cycling": [], "running": []}
     observed_at: dict[str, str | None] = {}
     for kind, samples in values.items():
-        profile_value = profile_max_hr.get(kind) or profile_max_hr.get("generic")
+        profile_value = profile_max_hr_for(profile_max_hr, kind)
         derived = canonical.activity_max_hr.get(kind)
         if profile_value is not None:
             samples.append(profile_value)
@@ -463,14 +467,14 @@ def _garmin_performance_units(
             max(max_hr_values["cycling"], default=None),
             "bpm",
             "Garmin Connect Herzfrequenzzonen"
-            if profile_max_hr
+            if profile_max_hr_for(profile_max_hr, "cycling") is not None
             else "Garmin Connect Radaktivitäten",
         ),
         "running_max_hr_bpm": (
             max(max_hr_values["running"], default=None),
             "bpm",
             "Garmin Connect Herzfrequenzzonen"
-            if profile_max_hr
+            if profile_max_hr_for(profile_max_hr, "running") is not None
             else "Garmin Connect Laufaktivitäten",
         ),
         "cycling_vo2max_ml_kg_min": (
@@ -533,16 +537,14 @@ def _garmin_performance_source_keys(
     return {
         "weight_kg": "weight",
         "cycling_ftp_watts": "cycling_ftp",
-        "cycling_max_hr_bpm": (
-            "heart_rate_zones"
-            if profile_max_hr.get("cycling") or profile_max_hr.get("generic")
-            else "activities"
-        ),
-        "running_max_hr_bpm": (
-            "heart_rate_zones"
-            if profile_max_hr.get("running") or profile_max_hr.get("generic")
-            else "activities"
-        ),
+        **{
+            f"{kind}_max_hr_bpm": (
+                "heart_rate_zones"
+                if profile_max_hr_for(profile_max_hr, kind) is not None
+                else "activities"
+            )
+            for kind in ACTIVITY_MAX_HR_CATEGORIES
+        },
     }
 
 

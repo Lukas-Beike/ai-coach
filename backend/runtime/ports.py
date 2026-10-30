@@ -8,7 +8,7 @@ from typing import Any, Protocol, runtime_checkable
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import ActivityRecord, Observation
-from backend.canonical.vocabulary import MetricKind, Sport
+from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 
 
 class ProviderSnapshotReader(Protocol):
@@ -23,7 +23,6 @@ class AudioTranscriber(Protocol):
     def transcribe(self, audio: bytes, content_type: str) -> dict[str, str]: ...
 
 
-@runtime_checkable
 class ActivityReader(Protocol):
     """Reads canonical activity records.
 
@@ -97,7 +96,27 @@ class SleepPeriodReader(Protocol):
     ) -> tuple[SleepPeriod, ...]: ...
 
 
-class CanonicalReader(ActivityReader, ActivityRowReader, ObservationReader, Protocol):
+@runtime_checkable
+class ActivityMaxHrReader(Protocol):
+    """Reads each sport's highest stored activity max heart rate of one provider.
+
+    Each entry is the sport, its highest max heart rate within ``low``..``high``
+    bpm, and the newest athlete-local start day with that value. Only active
+    records of sessions that are not deleted count.
+    """
+
+    def activity_max_hr(
+        self, db: Any, provider: ProviderId, *, low: float, high: float
+    ) -> tuple[tuple[Sport, float, date], ...]: ...
+
+
+class CanonicalReader(
+    ActivityReader,
+    ActivityMaxHrReader,
+    ActivityRowReader,
+    ObservationReader,
+    Protocol,
+):
     """The reads a canonical source serves: activities, raw rows and observations.
 
     Every source also reports its per-metric windows, so the selector can delegate

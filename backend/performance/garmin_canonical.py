@@ -22,11 +22,11 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
 
-from backend.canonical.records import ActivityRecord, Observation
+from backend.canonical.records import Observation
 from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.runtime.ports import (
-    ActivityReader,
+    ActivityMaxHrReader,
     ObservationReader,
     ObservationSourceSelector,
 )
@@ -78,7 +78,7 @@ _MAX_HR_CATEGORIES: Mapping[Sport | None, str] = {
     Sport.RUN: "running",
     None: "generic",
 }
-_ACTIVITY_MAX_HR_CATEGORIES = ("cycling", "running")
+ACTIVITY_MAX_HR_CATEGORIES = ("cycling", "running")
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,28 +140,26 @@ class GarminCanonicalState:
     sleep_observed_on: date | None = None
 
 
-def read_garmin_state(
-    reader: ObservationReader,
-    db: Any,
-    *,
-    activities: ActivityReader | None = None,
-) -> GarminCanonicalState:
+def read_garmin_state(reader: ObservationReader, db: Any) -> GarminCanonicalState:
     """Read the Garmin observations once, from one source, inside ``db``'s unit of work.
 
-    ``activities`` supplies the Garmin activity records for the max heart rate
-    fallback; they are read only when a category has no profile max heart rate.
+    When the source also stores activities and a category has no profile max heart
+    rate, the max heart rate fallback is read from the same source.
     """
     reader = _resolved(reader, db)
     by_kind = {kind: _garmin_only(reader, db, kind) for kind in _READ_KINDS}
     sleep = [item for kind in _SLEEP_KINDS for item in by_kind[kind]]
     metrics = _metrics(by_kind)
-    profile = metrics.profile_max_hr
-    if activities is not None and not all(
-        profile.get(category) or profile.get("generic")
-        for category in _ACTIVITY_MAX_HR_CATEGORIES
+    if isinstance(reader, ActivityMaxHrReader) and any(
+        profile_max_hr_for(metrics.profile_max_hr, category) is None
+        for category in ACTIVITY_MAX_HR_CATEGORIES
     ):
+        low, high = _MAX_HR_RANGE
         metrics = replace(
-            metrics, activity_max_hr=activity_max_hr(activities.activities(db))
+            metrics,
+            activity_max_hr=activity_max_hr(
+                reader.activity_max_hr(db, ProviderId.GARMIN, low=low, high=high)
+            ),
         )
     return GarminCanonicalState(
         metrics=metrics,
@@ -351,31 +349,26 @@ def _performance_history(
     }
 
 
-def activity_max_hr(records: Iterable[ActivityRecord]) -> dict[str, ActivityMaxHr]:
-    """Derive each category's highest Garmin activity max heart rate.
+def profile_max_hr_for(profile: Mapping[str, float], category: str) -> float | None:
+    """A category's profile max heart rate, else the generic one."""
+    return profile.get(category) or profile.get("generic")
 
-    Values outside the legacy 80–260 bpm range are ignored. On equal values the
-    newest start day is kept.
+
+def activity_max_hr(
+    by_sport: Iterable[tuple[Sport, float, date]],
+) -> dict[str, ActivityMaxHr]:
+    """Group the per-sport activity max heart rates into the legacy categories.
+
+    The highest value wins; on equal values the newest start day is kept.
     """
-    low, high = _MAX_HR_RANGE
     derived: dict[str, ActivityMaxHr] = {}
-    for record in records:
-        category = legacy_activity_family(record.sport)
-        value = record.max_hr
-        if (
-            record.provenance.provider is not ProviderId.GARMIN
-            or category not in _ACTIVITY_MAX_HR_CATEGORIES
-            or value is None
-            or not low <= value <= high
-        ):
+    for sport, value, day in by_sport:
+        category = legacy_activity_family(sport)
+        if category not in ACTIVITY_MAX_HR_CATEGORIES:
             continue
-        candidate = ActivityMaxHr(value, record.started_at.date())
         kept = derived.get(category)
-        if kept is None or (candidate.value, candidate.observed_on) > (
-            kept.value,
-            kept.observed_on,
-        ):
-            derived[category] = candidate
+        if kept is None or (value, day) > (kept.value, kept.observed_on):
+            derived[category] = ActivityMaxHr(value, day)
     return derived
 
 
@@ -386,8 +379,7 @@ def _profile_category_max_hr(
 
     The day history keeps only the profile value; the activity fallback is current only.
     """
-    values = _profile_max_hr(observations)
-    return values.get(category) or values.get("generic")
+    return profile_max_hr_for(_profile_max_hr(observations), category)
 
 
 def _daily_values(observations: Iterable[Observation]) -> dict[date, float]:

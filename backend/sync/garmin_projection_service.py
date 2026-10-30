@@ -19,7 +19,7 @@ from backend.performance.garmin_canonical import GarminCanonicalState, read_garm
 from backend.performance.morning_battery_service import MorningBodyBatteryService
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
-from backend.runtime.ports import ActivityReader, ActivityRowReader, ObservationReader
+from backend.runtime.ports import ActivityRowReader, ObservationReader
 from backend.sync.garmin import (
     RECENT_VIEW_DAYS,
     GarminPayloadService,
@@ -82,19 +82,10 @@ class GarminProjectionService:
         self._redactor = redactor
         self._local_now = local_now
 
-    def _activity_records(self) -> ActivityReader | None:
-        """The canonical activity records behind the activity rows, if served."""
-        reader = self._canonical.activity_rows()
-        return reader if isinstance(reader, ActivityReader) else None
-
     def _observation_state(self) -> GarminCanonicalState:
         """Read the Garmin observations."""
         with self._database_manager.reader() as db:
-            return read_garmin_state(
-                self._canonical.observations(),
-                db,
-                activities=self._activity_records(),
-            )
+            return read_garmin_state(self._canonical.observations(), db)
 
     def _canonical_read(
         self, observations: ObservationReader | None = None
@@ -102,11 +93,7 @@ class GarminProjectionService:
         """Read the Garmin observations and Intervals.icu rows from one source."""
         sources = self._canonical
         with self._database_manager.reader() as db:
-            state = read_garmin_state(
-                observations or sources.observations(),
-                db,
-                activities=self._activity_records(),
-            )
+            state = read_garmin_state(observations or sources.observations(), db)
             rows = list(sources.activity_rows().activity_rows(db))
         return state, rows
 

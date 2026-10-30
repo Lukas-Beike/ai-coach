@@ -15,7 +15,7 @@ from typing import Any, Final, cast
 
 from backend.activities.sync_time import activities_synced_at
 from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, Sport
+from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance import canonical_sections, wellness_days
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
@@ -34,7 +34,7 @@ from backend.performance.garmin_canonical import (
 from backend.performance.source_policy import select_current
 from backend.performance.wellness_days import WellnessDay
 from backend.runtime.ports import (
-    ActivityReader,
+    ActivityMaxHrReader,
     ActivityRowReader,
     CanonicalTableServing,
     ObservationReader,
@@ -255,6 +255,14 @@ class ReadOnceObservationReader:
         self._reader = reader
         self._rows: dict[MetricKind, tuple[Observation, ...]] = {}
 
+    def activity_max_hr(
+        self, db: Any, provider: ProviderId, *, low: float, high: float
+    ) -> tuple[tuple[Sport, float, date], ...]:
+        """Forward the activity max heart rate read; none for a source without it."""
+        if not isinstance(self._reader, ActivityMaxHrReader):
+            return ()
+        return self._reader.activity_max_hr(db, provider, low=low, high=high)
+
     def observations(
         self,
         db: Any,
@@ -376,13 +384,7 @@ def read_performance_inputs(
         activities=activities,
         wellness_days=days,
         history_wellness_days=history,
-        garmin=read_garmin_state(
-            reader,
-            db,
-            activities=activity_reader
-            if isinstance(activity_reader, ActivityReader)
-            else None,
-        ).metrics,
+        garmin=read_garmin_state(reader, db).metrics,
         daily_health=read_daily_health_by_date(
             reader, db, start=as_of - timedelta(days=DAILY_HEALTH_DAYS), end=as_of
         ),

@@ -108,6 +108,21 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
         )
         return tuple(sorted((_activity(row) for row in rows), key=activity_order))
 
+    def activity_max_hr(
+        self, db: Any, provider: ProviderId, *, low: float, high: float
+    ) -> tuple[tuple[Sport, float, date], ...]:
+        """Return each sport's highest stored max heart rate and its newest day."""
+        return tuple(
+            (
+                Sport(row["sport"]),
+                float(row["max_hr"]),
+                date.fromisoformat(row["local_date"]),
+            )
+            for row in canonical_store.activity_max_hr_rows(
+                db, provider.value, low=low, high=high
+            )
+        )
+
     def session_activities(
         self, db: Any, activity_id: str
     ) -> tuple[ActivityRecord, ...]:
