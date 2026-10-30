@@ -71,7 +71,9 @@ stays open and blocks delivery. Then confirm `completedTasks` equals
 `npm run openspec -- validate <name> --strict`, and only then
 `npm run openspec -- archive <name> --yes`, which also updates the main specs.
 `--yes` skips the CLI's incomplete-task prompt, so never run it before that
-check, and never use `--skip-specs` or `--no-validate`. Commit the
+check, and never use `--skip-specs` or `--no-validate`. Afterwards run
+`npm run openspec -- validate --specs --strict`: a delta that passed alone can
+push a merged requirement past the length limit. Commit the
 implementation, spec updates, and archive together with Conventional Commits.
 
 ## 4. PR through verified merge
