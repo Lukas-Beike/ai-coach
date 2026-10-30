@@ -39,7 +39,7 @@ from typing import Any, Final
 
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.records import ActivityRecord, Observation
-from backend.canonical.vocabulary import MetricKind, Sport
+from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.db.repositories import KeyValueRepository
 from backend.runtime.ports import (
     ActivityReader,
@@ -90,6 +90,11 @@ class CanonicalReadSelector(
         end: date | None = None,
     ) -> tuple[ActivityRecord, ...]:
         return self._source(db).activities(db, start=start, end=end)
+
+    def activity_max_hr(
+        self, db: Any, provider: ProviderId, *, low: float, high: float
+    ) -> tuple[tuple[Sport, float, date], ...]:
+        return self._source(db).activity_max_hr(db, provider, low=low, high=high)
 
     def activity_rows(
         self,

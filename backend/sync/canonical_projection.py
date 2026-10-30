@@ -122,6 +122,26 @@ class CanonicalSnapshotProjection(
             if _in_range(local_date(record.started_at, zone), start, end)
         )
 
+    def activity_max_hr(
+        self, db: Any, provider: ProviderId, *, low: float, high: float
+    ) -> tuple[tuple[Sport, float, date], ...]:
+        """Return each sport's highest projected max heart rate and its newest day."""
+        projection, zone = self._current(db)
+        best: dict[Sport, tuple[float, date]] = {}
+        for record in projection.activities:
+            value = record.max_hr
+            if (
+                record.provenance.provider is not provider
+                or value is None
+                or not low <= value <= high
+            ):
+                continue
+            candidate = (value, local_date(record.started_at, zone))
+            best[record.sport] = max(best.get(record.sport, candidate), candidate)
+        return tuple(
+            (sport, value, day) for sport, (value, day) in sorted(best.items())
+        )
+
     def activity_rows(
         self,
         db: Any,

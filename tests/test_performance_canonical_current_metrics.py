@@ -86,7 +86,9 @@ def _case(name: str) -> Case:
 
 
 def _legacy(case: Case) -> dict[str, Any]:
-    garmin = performance_garmin_metrics.garmin_performance_metrics(case.garmin, TODAY)
+    garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+        case.garmin, TODAY
+    )
     return current_performance_metrics(
         case.intervals,
         case.profile,
@@ -104,7 +106,9 @@ def _read(
 
 
 def _canonical(case: Case, observations: tuple[Observation, ...] | None = None) -> Any:
-    garmin = performance_garmin_metrics.garmin_performance_metrics(case.garmin, TODAY)
+    garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+        case.garmin, TODAY
+    )
     reader = ObservationStub(
         _observations(case) if observations is None else observations
     )
@@ -444,7 +448,9 @@ class CanonicalEftpInputTests(unittest.TestCase):
 
     def test_the_eftp_current_value_is_labelled_like_the_legacy_metric(self) -> None:
         case = _eftp_case(athlete=262, wellness=265)
-        garmin = performance_garmin_metrics.garmin_performance_metrics({}, TODAY)
+        garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+            {}, TODAY
+        )
         metrics = current_performance_metrics(
             case.intervals, {}, garmin, canonical=self._inputs(case)
         )
@@ -545,7 +551,18 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
                 "note": "",
             },
         )
-        for key in legacy["metrics"].keys() - {"cycling_eftp_watts"}:
+        # Intended difference (#1415): Garmin values are read from canonical inputs
+        # only, so the context without them has none. Their parity with the stored
+        # payload is pinned in tests/test_garmin_canonical_reads.py.
+        garmin_keys = {
+            key
+            for key, value in canonical["metrics"].items()
+            if value.get("source_provider") == "garmin"
+        }
+        self.assertTrue(garmin_keys)
+        for key in garmin_keys:
+            self.assertNotEqual(legacy["metrics"][key]["source_provider"], "garmin")
+        for key in legacy["metrics"].keys() - {"cycling_eftp_watts"} - garmin_keys:
             self.assertEqual(canonical["metrics"][key], legacy["metrics"][key], key)
 
 

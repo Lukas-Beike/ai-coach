@@ -740,14 +740,18 @@ class ServerCoachTests(ServerTestCase):
         self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
 
     def test_structured_context_keeps_garmin_value_in_performance_only(self):
-        save_garmin({
-                    "max_metrics": {"running": {"vo2MaxValue": 55}},
-                    "race_predictions": {"5k": 1320},
-                    "activities": [
-                        {"activityId": 1, "activityName": "Duplicate raw activity"}
-                    ],
-                })
-        context = server.COACH_CONTEXT.structured_context_service().build(
+        payload = {
+            "synced_at": "2026-10-11T08:00:00+00:00",
+            "max_metrics": [
+                {"calendarDate": "2026-10-10", "generic": {"vo2MaxValue": 55}}
+            ],
+            "race_predictions": {"5k": 1320},
+            "activities": [{"activityId": 1, "activityName": "Duplicate raw activity"}],
+        }
+        # Saving writes the canonical rows too; Garmin values are read only from
+        # them (#1415), so the context reads the stored snapshot as production does.
+        save_garmin(payload)
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -756,6 +760,7 @@ class ServerCoachTests(ServerTestCase):
                 "upcoming_calendar": [],
             }
         )
+        context = server.COACH_CONTEXT.structured_context_service().build()
 
         self.assertNotIn("performance", context["recovery"])
         self.assertNotIn("activities", context["recovery"])
@@ -1133,9 +1138,7 @@ class ServerCoachTests(ServerTestCase):
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(intervals_snapshot)
         save_garmin(garmin_snapshot)
         garmin_stored = read_garmin()
-        self.assertEqual(
-            garmin_stored["vendor_payload"], "kept in the full snapshot"
-        )
+        self.assertEqual(garmin_stored["vendor_payload"], "kept in the full snapshot")
 
         context = server.COACH_CONTEXT.training_context_service().build()
 

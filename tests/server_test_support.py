@@ -86,7 +86,7 @@ def _transcribe_via_http_route(audio: bytes, content_type: str) -> dict[str, str
 
 
 def _garmin_metrics(snapshot):
-    return performance_garmin_metrics.garmin_performance_metrics(
+    return performance_garmin_metrics.garmin_payload_performance_metrics(
         snapshot, server.ATHLETE_CLOCK.now().date()
     )
 

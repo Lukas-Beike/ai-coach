@@ -586,7 +586,7 @@ class ProviderReviewTests(unittest.TestCase):
         performance_history.append_garmin_performance_history(
             payload, {}, server.ATHLETE_CLOCK.now().date()
         )
-        metric = performance_garmin_metrics.garmin_performance_metrics(
+        metric = performance_garmin_metrics.garmin_payload_performance_metrics(
             payload, server.ATHLETE_CLOCK.now().date()
         )["cycling_ftp_watts"]
         self.assertEqual(metric["freshness"], "current")
@@ -624,7 +624,7 @@ class ProviderReviewTests(unittest.TestCase):
         }
         payloads.prepare_remote(second)
         save_garmin(second, replace=False)
-        metric = performance_garmin_metrics.garmin_performance_metrics(
+        metric = performance_garmin_metrics.garmin_payload_performance_metrics(
             read_garmin(), server.ATHLETE_CLOCK.now().date()
         )["cycling_max_hr_bpm"]
         self.assertEqual(metric["value"], 180)

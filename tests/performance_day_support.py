@@ -4,10 +4,17 @@ from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.canonical.local_time import local_date
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_inputs import read_performance_inputs
+from backend.performance.garmin_canonical import (
+    GarminCanonicalMetrics,
+    read_garmin_state,
+)
 from backend.performance.wellness_days import WellnessDay, current_window, latest
+from backend.providers.garmin_activity_mapping import map_garmin_activities
+from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.providers.snapshot_projection import project_intervals_snapshot
 
@@ -62,3 +69,30 @@ def canonical_from_snapshot(snapshot: dict[str, Any], as_of: date):
     return read_performance_inputs(
         Reader(), object(), activity_reader=ActivityReader(), as_of=as_of
     )
+
+
+def garmin_metrics_from_payload(payload: dict[str, Any]) -> GarminCanonicalMetrics:
+    """Map a synthetic Garmin payload and its activities through the real mappers."""
+    zone = ZoneInfo("UTC")
+    observations = map_garmin_health(
+        dict(payload), zone=zone, retrieved_at=SYNCED_AT
+    ).records
+    activities = map_garmin_activities(
+        payload.get("activities") or [], zone=zone, retrieved_at=SYNCED_AT
+    ).records
+
+    class Reader:
+        def observations(self, _db, kind, *, start=None, end=None, sport=None):
+            return tuple(item for item in observations if item.kind is kind)
+
+        def activity_max_hr(self, _db, provider, *, low, high):
+            best: dict[Any, tuple[float, date]] = {}
+            for record in activities:
+                value = record.max_hr
+                if value is None or not low <= value <= high:
+                    continue
+                candidate = (value, local_date(record.started_at, zone))
+                best[record.sport] = max(best.get(record.sport, candidate), candidate)
+            return tuple((sport, *best[sport]) for sport in best)
+
+    return read_garmin_state(Reader(), object()).metrics

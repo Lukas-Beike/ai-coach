@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import FixedActivityRows, NoObservations
 from canonical_recovery_support import recovery_only_inputs
-from performance_day_support import canonical_from_snapshot
+from performance_day_support import canonical_from_snapshot, garmin_metrics_from_payload
 
 from backend.coach.context import (
     COACH_CONTEXT_SECTION_LIMITS,
@@ -134,7 +134,9 @@ def _context(
         profile,
         today,
         canonical=replace(
-            canonical, recovery=_recovery(garmin, snapshot).recovery, garmin=None
+            canonical,
+            recovery=_recovery(garmin, snapshot).recovery,
+            garmin=garmin_metrics_from_payload(garmin),
         )
         if canonical is not None
         else _recovery(garmin, snapshot),

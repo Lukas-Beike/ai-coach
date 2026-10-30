@@ -14,7 +14,7 @@ from performance_day_support import latest_day
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_current import CanonicalCurrentInputs
 from backend.performance.current_metrics import current_performance_metrics
-from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
@@ -36,7 +36,7 @@ RACE_KEYS = (
 
 
 def _garmin(raw: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    return garmin_performance_metrics(raw or {}, TODAY)
+    return garmin_payload_performance_metrics(raw or {}, TODAY)
 
 
 def _snapshot(

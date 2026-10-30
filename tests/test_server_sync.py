@@ -990,7 +990,9 @@ class ServerSyncTests(ServerTestCase):
         comparison = _current_performance_context(snapshot)["comparisons"][
             "cycling_ftp_watts_30d"
         ]
-        self.assertIsNone(comparison)
+        # The Garmin FTP is compared with its own canonical history only, never
+        # with the Intervals.icu 280 W.
+        self.assertEqual(comparison["average"], 300)
 
     def test_existing_snapshot_uses_configured_intervals_window(self):
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(

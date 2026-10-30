@@ -250,7 +250,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         garmin_sync.merge_sources(snapshot, {}, frozenset())
         original = json.dumps(snapshot, sort_keys=True)
         save_garmin(snapshot)
-        metric = performance_garmin_metrics.garmin_performance_metrics(
+        metric = performance_garmin_metrics.garmin_payload_performance_metrics(
             snapshot, server.ATHLETE_CLOCK.now().date()
         )["weight_kg"]
         self.assertEqual(metric["freshness"], "current")
@@ -350,7 +350,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 if stored_maximum:
                     snapshot["sport_max_hr"] = {"cycling": stored_maximum}
                 original = json.dumps(snapshot, sort_keys=True)
-                metric = performance_garmin_metrics.garmin_performance_metrics(
+                metric = performance_garmin_metrics.garmin_payload_performance_metrics(
                     snapshot, server.ATHLETE_CLOCK.now().date()
                 )["cycling_max_hr_bpm"]
                 self.assertEqual(metric["value"], stored_maximum or 190)
