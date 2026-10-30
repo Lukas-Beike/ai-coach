@@ -290,7 +290,9 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
         self.context = recovery_context.performance_recovery_context(
             mapped_recovery_inputs(self.snapshot), TODAY
         )
-        self.metrics = garmin_metrics.garmin_performance_metrics(self.snapshot, TODAY)
+        self.metrics = garmin_metrics.garmin_payload_performance_metrics(
+            self.snapshot, TODAY
+        )
 
     def test_resting_heart_rate_matches_legacy_value_and_date(self) -> None:
         day, value = _latest_value(self.result, MetricKind.RESTING_HR)

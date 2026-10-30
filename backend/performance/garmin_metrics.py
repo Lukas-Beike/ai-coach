@@ -295,13 +295,9 @@ def _garmin_race_predictions(value: Any) -> dict[str, float | int | None]:
     return races
 
 
-def _garmin_race_values(
-    snapshot: dict[str, Any], canonical: GarminCanonicalMetrics | None
+def _garmin_payload_race_values(
+    snapshot: dict[str, Any],
 ) -> dict[str, float | int | None]:
-    if canonical is not None:
-        races = _garmin_race_predictions(None)
-        races.update(canonical.race_predictions)
-        return races
     race_predictions = snapshot.get("race_predictions")
     return _garmin_race_predictions(
         race_predictions if isinstance(race_predictions, (dict, list)) else {}
@@ -327,9 +323,8 @@ def _garmin_canonical_thresholds(
     )
 
 
-def _garmin_threshold_metrics(
+def _garmin_payload_thresholds(
     snapshot: dict[str, Any],
-    canonical: GarminCanonicalMetrics | None = None,
 ) -> tuple[
     float | int | None,
     float | int | None,
@@ -337,8 +332,6 @@ def _garmin_threshold_metrics(
     float | int | None,
     float | int | None,
 ]:
-    if canonical is not None:
-        return _garmin_canonical_thresholds(canonical)
     running_threshold = snapshot.get("running_threshold")
     cycling_ftp = garmin_bounded_metric(
         _garmin_last_numeric(
@@ -402,15 +395,11 @@ def _garmin_activity_max_hr_samples(
     return values
 
 
-def _garmin_max_hr_samples(
+def _garmin_payload_max_hr_samples(
     snapshot: dict[str, Any],
-    canonical: GarminCanonicalMetrics | None = None,
-) -> tuple[dict[str, float | int], dict[str, list[float | int]], list[Any]]:
-    profile_max_hr: dict[str, float | int] = (
-        garmin_profile_max_hr(snapshot)
-        if canonical is None
-        else dict(canonical.profile_max_hr)
-    )
+) -> tuple[dict[str, float | int], dict[str, list[float | int]], dict[str, str | None]]:
+    """Profile max HR, else the stored sport max HR and the payload's activities."""
+    profile_max_hr = garmin_profile_max_hr(snapshot)
     values: dict[str, list[float | int]] = {"cycling": [], "running": []}
     stored = snapshot.get("sport_max_hr")
     if not isinstance(stored, dict):
@@ -427,7 +416,29 @@ def _garmin_max_hr_samples(
         if stored_value is not None and 80 <= float(stored_value) <= 260:
             samples.append(stored_value)
         samples.extend(_garmin_activity_max_hr_samples(activities, kind))
-    return profile_max_hr, values, activities
+    observed_at = {
+        kind: _garmin_activity_observed_at(activities, kind, max(samples, default=None))
+        for kind, samples in values.items()
+    }
+    return profile_max_hr, values, observed_at
+
+
+def _garmin_canonical_max_hr_samples(
+    canonical: GarminCanonicalMetrics,
+) -> tuple[dict[str, float | int], dict[str, list[float | int]], dict[str, str | None]]:
+    """Profile max HR, else the max HR derived from the Garmin activity records."""
+    profile_max_hr: dict[str, float | int] = dict(canonical.profile_max_hr)
+    values: dict[str, list[float | int]] = {"cycling": [], "running": []}
+    observed_at: dict[str, str | None] = {}
+    for kind, samples in values.items():
+        profile_value = profile_max_hr.get(kind) or profile_max_hr.get("generic")
+        derived = canonical.activity_max_hr.get(kind)
+        if profile_value is not None:
+            samples.append(profile_value)
+        elif derived is not None:
+            samples.append(derived.value)
+        observed_at[kind] = None if derived is None else derived.observed_on.isoformat()
+    return profile_max_hr, values, observed_at
 
 
 def _garmin_performance_units(
@@ -573,48 +584,30 @@ def _garmin_performance_freshness(
     return metrics
 
 
-def _garmin_snapshot_vo2(
-    snapshot: dict[str, Any], canonical: GarminCanonicalMetrics | None
-) -> tuple[float | int | None, float | int | None]:
-    if canonical is not None:
-        return canonical.cycling_vo2max, canonical.running_vo2max
-    max_metrics = snapshot.get("max_metrics")
-    return _garmin_vo2_metrics(
-        max_metrics if isinstance(max_metrics, (dict, list)) else {}
-    )
-
-
-def garmin_performance_metrics(
+def _garmin_metrics(
     snapshot: dict[str, Any],
     current_date: date,
-    canonical: GarminCanonicalMetrics | None = None,
+    weight: dict[str, Any],
+    vo2: tuple[float | int | None, float | int | None],
+    race_values: dict[str, float | int | None],
+    thresholds: tuple[
+        float | int | None,
+        float | int | None,
+        float | int | None,
+        float | int | None,
+        float | int | None,
+    ],
+    max_hr: tuple[
+        dict[str, float | int], dict[str, list[float | int]], dict[str, str | None]
+    ],
 ) -> dict[str, dict[str, Any]]:
-    """Normalize Garmin's varying max-metric and race-prediction payloads.
-
-    With ``canonical`` the weight, FTP, VO2max, thresholds, profile max heart rate
-    and race predictions come from the Garmin observations and the snapshot
-    sections behind them are not read. The max heart rate fallbacks (the stored
-    ``sport_max_hr`` and the Garmin activities) and the freshness stay on the
-    snapshot: the stored fallback has no canonical kind, and freshness is sync
-    status.
-    """
-    cycling_vo2, running_vo2 = _garmin_snapshot_vo2(snapshot, canonical)
-    race_values = _garmin_race_values(snapshot, canonical)
-    thresholds = _garmin_threshold_metrics(snapshot, canonical)
-    profile_max_hr, max_hr_values, activities = _garmin_max_hr_samples(
-        snapshot, canonical
-    )
-    weight = (
-        garmin_weight.garmin_weight_metric(snapshot)
-        if canonical is None
-        else {"value": canonical.weight_kg}
-    )
+    profile_max_hr, max_hr_values, activity_observed_at = max_hr
     units = _garmin_performance_units(
         weight,
         max_hr_values,
         profile_max_hr,
-        cycling_vo2,
-        running_vo2,
+        vo2[0],
+        vo2[1],
         race_values,
         thresholds,
     )
@@ -628,18 +621,62 @@ def garmin_performance_metrics(
     for kind in ("cycling", "running"):
         key = f"{kind}_max_hr_bpm"
         if source_keys[key] == "activities":
-            result[key]["observed_at"] = _garmin_activity_observed_at(
-                activities, kind, result[key]["value"]
-            )
+            result[key]["observed_at"] = activity_observed_at[kind]
     return _garmin_performance_freshness(
         snapshot, result, source_keys, race_values, current_date
+    )
+
+
+def garmin_performance_metrics(
+    snapshot: dict[str, Any],
+    current_date: date,
+    canonical: GarminCanonicalMetrics,
+) -> dict[str, dict[str, Any]]:
+    """Return the current Garmin performance metrics from the canonical values.
+
+    Weight, FTP, VO2max, thresholds, profile max heart rate, race predictions and
+    the activity max heart rate fallback come from ``canonical``. The snapshot is
+    read only for freshness, which is sync status.
+    """
+    races = _garmin_race_predictions(None)
+    races.update(canonical.race_predictions)
+    return _garmin_metrics(
+        snapshot,
+        current_date,
+        {"value": canonical.weight_kg},
+        (canonical.cycling_vo2max, canonical.running_vo2max),
+        races,
+        _garmin_canonical_thresholds(canonical),
+        _garmin_canonical_max_hr_samples(canonical),
+    )
+
+
+def garmin_payload_performance_metrics(
+    payload: dict[str, Any], current_date: date
+) -> dict[str, dict[str, Any]]:
+    """Normalize a fetched Garmin payload's performance sections at ingest.
+
+    Only the sync's performance-history merge uses this, before the payload is
+    stored; read paths use ``garmin_performance_metrics``.
+    """
+    max_metrics = payload.get("max_metrics")
+    return _garmin_metrics(
+        payload,
+        current_date,
+        garmin_weight.garmin_weight_metric(payload),
+        _garmin_vo2_metrics(
+            max_metrics if isinstance(max_metrics, (dict, list)) else {}
+        ),
+        _garmin_payload_race_values(payload),
+        _garmin_payload_thresholds(payload),
+        _garmin_payload_max_hr_samples(payload),
     )
 
 
 def garmin_performance_context(
     snapshot: dict[str, Any],
     current_date: date,
-    canonical: GarminCanonicalMetrics | None = None,
+    canonical: GarminCanonicalMetrics,
 ) -> dict[str, Any]:
     """Project normalized Garmin performance metrics for public contexts."""
     metrics = garmin_performance_metrics(snapshot, current_date, canonical)

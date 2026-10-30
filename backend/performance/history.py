@@ -19,7 +19,7 @@ def append_garmin_performance_history(
         payload.get("performance_history") or []
     )
     unique = _merged_history(history)
-    current = performance_garmin_metrics.garmin_performance_metrics(
+    current = performance_garmin_metrics.garmin_payload_performance_metrics(
         payload, current_date
     )
     current["readiness"] = performance_freshness.garmin_metric_freshness(

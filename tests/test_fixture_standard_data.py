@@ -31,7 +31,7 @@ from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.daily_health import daily_energy_expenditure
-from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.performance.wellness_days import wellness_day_values
 from backend.providers.calendar import parse_ical_calendar
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
@@ -140,7 +140,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         garmin = fixture_runtime._fixture_demo_garmin(
             self.today, fixture_runtime.demo_performance_history(self.today)
         )
-        metrics = garmin_performance_metrics(garmin, self.today)
+        metrics = garmin_payload_performance_metrics(garmin, self.today)
         history = analysis_history({}, garmin, self.today)
         for key, metric in metrics.items():
             with self.subTest(metric=key):
@@ -198,7 +198,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         )
         self.assertEqual(repeated, {"ready": True})
         self.assertEqual(restarted, garmin)
-        metrics = garmin_performance_metrics(garmin, today)
+        metrics = garmin_payload_performance_metrics(garmin, today)
         self.assertIsNotNone(metrics["run_marathon_seconds"]["value"])
         self.assertEqual(garmin["morning_body_battery"]["status"], "ready")
         self.assertEqual(garmin["morning_body_battery"]["before_sleep"]["value"], 24)

@@ -345,6 +345,27 @@ Affected history, recovery, nutrition and Coach reads SHALL obtain retained prov
 
 Evidence baseline: `backend/performance/personal_recovery.py`, `backend/performance/canonical_personal_recovery.py`, `backend/performance/chart_history.py`, `backend/performance/garmin_projection.py`; `tests/test_personal_recovery.py`, `tests/test_performance_chart_history.py`. Canonical-only reads and parity require new regression evidence.
 
+### Requirement: Garmin current performance metrics are read from canonical data only
+The current Garmin performance metrics (weight, thresholds, VO2max, maximum heart rate and race predictions) SHALL be read from canonical Garmin data only. The stored Garmin view SHALL supply only source freshness on these read paths. Only the sync's performance-history merge SHALL parse a fetched Garmin payload, before it is stored.
+
+#### Scenario: Activity maximum heart rate
+- **WHEN** a sport has neither its own nor a generic canonical Garmin profile maximum heart rate
+- **THEN** its maximum heart rate is the highest 80–260 bpm maximum heart rate of that sport's canonical Garmin activity records, dated on the start day of the newest activity with that value.
+
+#### Scenario: Equivalent stored payload and canonical data
+- **WHEN** a Garmin payload is stored and projected into canonical observations and activity records
+- **THEN** the Garmin performance metrics read from the canonical data equal the metrics the payload parser gives for that payload, including the activity maximum heart rate and its date.
+
+#### Scenario: No canonical Garmin data
+- **WHEN** the stored Garmin view has performance sections but no canonical Garmin observation or activity record exists
+- **THEN** the Garmin performance metrics are absent and no value is read from the view.
+
+#### Scenario: Profile maximum heart rate present
+- **WHEN** a canonical Garmin profile maximum heart rate exists for both sports or as a generic value
+- **THEN** it is shown and the activity records are not read.
+
+Evidence: `backend/performance/garmin_metrics.py:garmin_performance_metrics`, `backend/performance/garmin_metrics.py:garmin_payload_performance_metrics`, `backend/performance/garmin_canonical.py:read_garmin_state`, `backend/performance/garmin_canonical.py:activity_max_hr`; `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_state_has_the_flags_and_values_of_the_snapshot_sections`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_activity_max_hr_is_derived_from_garmin_activity_records`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_profile_max_hr_skips_the_activity_read`, `tests/test_performance_canonical_current_metrics.py:CanonicalCurrentFromTablesTests.test_populated_tables_reproduce_the_legacy_current_metrics`.
+
 ### Requirement: Ramp rate is a labelled local derivation
 The system SHALL derive the ramp rate of the current load block as the latest wellness day's CTL minus the CTL of exactly seven days earlier, rounded to two decimals, from canonical Intervals.icu wellness-day CTL observations, and SHALL label it as derived through `current_load.ramp_rate_source`. Intervals.icu's own `rampRate` is not read and can differ from the derived number.
 

@@ -26,7 +26,7 @@ from backend.performance.canonical_inputs import (
 from backend.performance.chart_history import analysis_history
 from backend.performance.context import current_performance_context
 from backend.performance.current_metrics import current_performance_metrics
-from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.providers.snapshot_projection import project_intervals_snapshot
 
 DAY = date(2026, 9, 20)
@@ -336,7 +336,7 @@ class EftpTests(unittest.TestCase):
         metrics = current_performance_metrics(
             snapshot,
             {},
-            garmin_performance_metrics({}, DAY),
+            garmin_payload_performance_metrics({}, DAY),
             canonical=inputs.current,
         )
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 262)

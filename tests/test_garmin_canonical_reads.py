@@ -42,6 +42,7 @@ from backend.performance.garmin_canonical import (
     read_garmin_sleep_day,
     read_garmin_state,
 )
+from backend.providers.garmin_activity_mapping import map_garmin_activities
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_projection_service import (
@@ -108,6 +109,18 @@ class _Observations:
         sport: Sport | None = None,
     ) -> tuple[Observation, ...]:
         return tuple(item for item in self.items if item.kind == kind)
+
+
+def _garmin_activity(
+    activity_id: int, type_key: str, max_hr: int, day: str
+) -> dict[str, Any]:
+    return {
+        "activityId": activity_id,
+        "activityType": {"typeKey": type_key},
+        "startTimeGMT": f"{day} 07:00:00",
+        "duration": 3600,
+        "maxHR": max_hr,
+    }
 
 
 class GarminReadFixture(CanonicalReadFixture):
@@ -178,8 +191,11 @@ class GarminStateEqualityTests(GarminReadFixture):
         self.assertIsNotNone(table.metrics.weight_kg)
 
     def test_state_has_the_flags_and_values_of_the_snapshot_sections(self) -> None:
-        state = self.read(lambda db: read_garmin_state(self.projection, db))
-        legacy = garmin_metrics.garmin_performance_metrics(self.garmin, TODAY)
+        populate(self)
+        state = self.read(
+            lambda db: read_garmin_state(self.table, db, activities=self.table)
+        )
+        legacy = garmin_metrics.garmin_payload_performance_metrics(self.garmin, TODAY)
         overlay = garmin_metrics.garmin_performance_metrics(
             self.garmin, TODAY, state.metrics
         )
@@ -320,9 +336,7 @@ class GarminSleepReadinessTests(GarminReadFixture):
 
         # The raw sleep section alone never makes the check-in ready (#1411).
         self.assertFalse(
-            garmin_observations.garmin_sleep_ready_for_checkin(
-                day, with_sections, None
-            )
+            garmin_observations.garmin_sleep_ready_for_checkin(day, with_sections, None)
         )
         self.assertTrue(
             garmin_observations.garmin_sleep_ready_for_checkin(
@@ -436,6 +450,53 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
     def _metrics(self, items: list[Observation]) -> GarminCanonicalMetrics:
         return read_garmin_state(_Observations(items), object()).metrics
 
+    def _activities(self, *rows: dict[str, Any]) -> Any:
+        records = map_garmin_activities(
+            list(rows), zone=UTC, retrieved_at=LOCAL_NOW
+        ).records
+
+        class Activities:
+            calls = 0
+
+            def activities(self, db: Any, *, start: Any = None, end: Any = None):
+                Activities.calls += 1
+                return records
+
+        return Activities()
+
+    def test_activity_max_hr_is_derived_from_garmin_activity_records(self) -> None:
+        activities = self._activities(
+            _garmin_activity(1, "cycling", 181, "2026-10-01"),
+            _garmin_activity(2, "cycling", 186, "2026-09-12"),
+            _garmin_activity(3, "cycling", 186, "2026-10-05"),
+            _garmin_activity(4, "running", 300, "2026-10-06"),
+            _garmin_activity(5, "running", 192, "2026-10-02"),
+        )
+        state = read_garmin_state(_Observations([]), object(), activities=activities)
+        metrics = garmin_metrics.garmin_performance_metrics({}, TODAY, state.metrics)
+
+        cycling = metrics["cycling_max_hr_bpm"]
+        self.assertEqual(cycling["value"], 186)
+        self.assertEqual(cycling["observed_at"], "2026-10-05")
+        self.assertTrue(cycling["note"].startswith("Garmin Connect Radaktivitäten"))
+        # A value outside 80–260 bpm is not a max heart rate.
+        self.assertEqual(metrics["running_max_hr_bpm"]["value"], 192)
+
+    def test_profile_max_hr_skips_the_activity_read(self) -> None:
+        activities = self._activities(_garmin_activity(1, "cycling", 199, "2026-10-01"))
+        state = read_garmin_state(
+            _Observations([self._observation(MetricKind.MAX_HR, 188.0)]),
+            object(),
+            activities=activities,
+        )
+        metrics = garmin_metrics.garmin_performance_metrics({}, TODAY, state.metrics)
+
+        self.assertEqual(type(activities).calls, 0)
+        self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
+        self.assertEqual(
+            metrics["cycling_max_hr_bpm"]["note"], "Garmin Connect Herzfrequenzzonen"
+        )
+
     def test_intervals_observations_are_ignored(self) -> None:
         metrics = self._metrics(
             [
@@ -479,7 +540,7 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
         mapped = map_garmin_health(payload, zone=UTC, retrieved_at=LOCAL_NOW)
         canonical = self._metrics(list(mapped.records))
         metrics = garmin_metrics.garmin_performance_metrics(payload, TODAY, canonical)
-        legacy = garmin_metrics.garmin_performance_metrics(payload, TODAY)
+        legacy = garmin_metrics.garmin_payload_performance_metrics(payload, TODAY)
 
         self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 279)
         self.assertEqual(

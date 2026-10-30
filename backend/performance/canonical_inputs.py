@@ -34,6 +34,7 @@ from backend.performance.garmin_canonical import (
 from backend.performance.source_policy import select_current
 from backend.performance.wellness_days import WellnessDay
 from backend.runtime.ports import (
+    ActivityReader,
     ActivityRowReader,
     CanonicalTableServing,
     ObservationReader,
@@ -375,7 +376,13 @@ def read_performance_inputs(
         activities=activities,
         wellness_days=days,
         history_wellness_days=history,
-        garmin=read_garmin_state(reader, db).metrics,
+        garmin=read_garmin_state(
+            reader,
+            db,
+            activities=activity_reader
+            if isinstance(activity_reader, ActivityReader)
+            else None,
+        ).metrics,
         daily_health=read_daily_health_by_date(
             reader, db, start=as_of - timedelta(days=DAILY_HEALTH_DAYS), end=as_of
         ),

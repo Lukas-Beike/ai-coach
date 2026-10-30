@@ -23,6 +23,7 @@ class AudioTranscriber(Protocol):
     def transcribe(self, audio: bytes, content_type: str) -> dict[str, str]: ...
 
 
+@runtime_checkable
 class ActivityReader(Protocol):
     """Reads canonical activity records.
 

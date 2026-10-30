@@ -17,6 +17,7 @@ from backend.performance import load as performance_load
 from backend.performance import load_context as performance_load_context
 from backend.performance import recovery_context as performance_recovery_context
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
 from backend.performance.wellness_days import WellnessDay, latest
@@ -87,6 +88,15 @@ def _canonical_day_series(
         "form_by_day": canonical.form_by_day,
         "run_eftp_by_day": canonical.run_eftp_by_day,
     }
+
+
+def _garmin_canonical(
+    canonical: CanonicalPerformanceInputs | None,
+) -> GarminCanonicalMetrics:
+    """The canonical Garmin values; none without canonical inputs."""
+    if canonical is None or canonical.garmin is None:
+        return GarminCanonicalMetrics()
+    return canonical.garmin
 
 
 def _activity_rows(canonical: CanonicalPerformanceInputs | None) -> Sequence[Any]:
@@ -171,7 +181,7 @@ def current_performance_context(
         snapshot,
         profile,
         performance_garmin_metrics.garmin_performance_metrics(
-            garmin, today, None if canonical is None else canonical.garmin
+            garmin, today, _garmin_canonical(canonical)
         ),
         canonical=None if canonical is None else canonical.current,
         activities=activities,

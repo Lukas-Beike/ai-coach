@@ -173,13 +173,16 @@ def recovery_only_inputs(
 ) -> Any:
     """Return performance inputs for a context test that changes only some sources.
 
-    The inputs carry the mapped recovery observations. Without a wellness day the
-    load, threshold and Garmin metric readers keep the snapshot path. With a
+    The inputs carry the mapped recovery observations and the Garmin metrics mapped
+    from ``garmin`` (#1415). Without a wellness day the load and threshold readers
+    keep the snapshot path. With a
     ``snapshot`` they also carry what the Intervals.icu observations of that
     snapshot give for form, ramp rate and eFTP (#1412), which are not read from the
     snapshot itself; ctl and atl stay on the snapshot rows.
     """
     from dataclasses import replace
+
+    from performance_day_support import garmin_metrics_from_payload
 
     from backend.performance.canonical_current import CanonicalCurrentInputs
     from backend.performance.canonical_inputs import (
@@ -193,6 +196,7 @@ def recovery_only_inputs(
         ctl=None,
         atl=None,
         recovery=mapped_recovery_inputs(garmin, wellness),
+        garmin=None if garmin is None else garmin_metrics_from_payload(dict(garmin)),
     )
     if snapshot is None:
         return inputs
