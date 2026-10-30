@@ -10,6 +10,8 @@ description: Plan, implement, or review SQLCipher schema migrations and released
    readers, writers, restore validation, and startup before choosing a migration.
    Record the current version and every supported released fixture from code;
    v9 (release 1.13.6) is the oldest supported baseline.
+   Before choosing a number, fetch `develop` and record its `CURRENT_SCHEMA_VERSION`
+   and any open schema PRs; take the next free version and rebase on conflict.
 2. Plan the before/after records, version transition, transaction boundary,
    constraints/indexes, defaults, and skipped-release paths. Preserve every
    athlete record class, snapshots, tombstones, settings, and sync state. Never
