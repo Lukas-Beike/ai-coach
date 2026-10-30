@@ -147,7 +147,7 @@ The system SHALL map dated Intervals wellness body, HRV, sleep, readiness, VO2ma
 
 #### Scenario: eFTP observations and their classification
 - **WHEN** wellness `sportInfo` entries and athlete sport settings carry eFTP
-- **THEN** each sport's first `sportInfo` entry yields one wellness-day eFTP observation, and each sport's first sport setting yields the athlete-record eFTP observation; the sport is classified from the space-joined `types` texts (or, for a `sportInfo` entry without `types`, its `type`, `sport` and `sport_type`), `mmp_model` eFTP wins over the entry's own eFTP, and zero means unset.
+- **THEN** each sport's first `sportInfo` entry yields one wellness-day eFTP observation, and each sport's first sport setting yields the athlete-record eFTP observation; every sport that a `types` text classifies to counts, as for the zone configurations (or, for a `sportInfo` entry without a `types` list, its `type`, `sport` and `sport_type`), with OTHER only when no text names a known sport, `mmp_model` eFTP wins over the entry's own eFTP, and zero means unset.
 
 Detailed contract: since mapper version 8 the classification and the first-setting rule match the legacy readers and apply to every sport-setting threshold; reprojection of stored athlete and wellness records applies them without a provider refetch. A derived form carries its method (`ctl_minus_atl`, version 1) and input fingerprint since version 7; readers use its value and unchanged DERIVED source kind only.
 

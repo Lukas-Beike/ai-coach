@@ -381,7 +381,7 @@ The system SHALL read cycling eFTP and form only from canonical Intervals.icu ob
 - **WHEN** the newest wellness day has no eFTP observation, or Run settings coexist with Ride settings
 - **THEN** the current eFTP falls to the next step of its chain and the history keeps the older dated values; Run values never feed cycling eFTP.
 
-Detailed contract: since wellness mapper version 8 the eFTP classification matches the legacy readers. The first of two ride sport settings wins, and any `types` entry, or `type`, `sport` or `sport_type` of a `sportInfo` entry without `types`, classifies the sport. Known limit, not a requirement: a reported form value that is not a number yields no form for that day.
+Detailed contract: since wellness mapper version 8 the eFTP classification follows the legacy readers. The first of two ride sport settings wins, and each `types` text, or `type`, `sport` and `sport_type` of a `sportInfo` entry without a `types` list, classifies a sport, so one setting can serve several sports. Known limits, not requirements: the canonical sport terms also match `velo`, `bicycle` and `jog`, which the legacy readers did not; a reported form value that is not a number yields no form for that day.
 
 Evidence: `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`, `backend/providers/intervals_wellness_mapping.py:map_intervals_athlete_thresholds`; `tests/test_intervals_wellness_mapping.py` (EFTP and FORM mapping), `tests/test_performance_canonical_parity.py`. The strict-read scenarios are verified by `tests/test_performance_canonical_load_metrics.py` (carrier rows are stripped or contradicting), `tests/test_performance_canonical_parity.py:_assert_load_metric_split` and `tests/test_server_performance.py`.
 

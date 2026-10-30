@@ -952,7 +952,7 @@ class SportSettingsAliasTests(unittest.TestCase):
 
 
 class SportSettingEntryTests(unittest.TestCase):
-    def test_first_types_text_selects_the_sport(self) -> None:
+    def test_types_text_selects_the_sport(self) -> None:
         cases = {
             "VirtualRide": Sport.RIDE,
             "WeightTraining": Sport.STRENGTH,
@@ -966,9 +966,12 @@ class SportSettingEntryTests(unittest.TestCase):
                 )
                 self.assertEqual(sport_records(result), {(MetricKind.FTP, sport, 100)})
 
-    def test_only_the_first_types_entry_classifies_the_sport(self) -> None:
+    def test_every_types_entry_classifies_a_sport(self) -> None:
         result = thresholds({"sportSettings": [{"types": ["Ride", "Run"], "ftp": 250}]})
-        self.assertEqual(sport_records(result), {(MetricKind.FTP, Sport.RIDE, 250)})
+        self.assertEqual(
+            sport_records(result),
+            {(MetricKind.FTP, Sport.RIDE, 250), (MetricKind.FTP, Sport.RUN, 250)},
+        )
 
     def test_missing_or_empty_types_skip_the_entry_with_an_issue(self) -> None:
         for entry in (
@@ -1288,13 +1291,23 @@ class EftpClassificationTests(unittest.TestCase):
                     [(Sport.RIDE, entry["eFTP"])],
                 )
 
-    def test_a_later_ride_type_classifies_the_entry_as_ride(self) -> None:
+    def test_each_type_text_classifies_the_entry(self) -> None:
         athlete = {"sportSettings": [{"types": ["Run", "Ride"], "eftp": 300}]}
-        self.assertEqual(self.eftp(thresholds(athlete)), [(Sport.RIDE, 300)])
-        info = [{"types": ["Velomobile", "VirtualRide"], "eftp": 290}]
+        self.assertEqual(
+            self.eftp(thresholds(athlete)), [(Sport.RUN, 300), (Sport.RIDE, 300)]
+        )
+        info = [{"types": ["Workout", "VirtualRide"], "eftp": 290}]
         self.assertEqual(
             self.eftp(wellness([row(sportInfo=info)])), [(Sport.RIDE, 290)]
         )
+
+    def test_an_empty_sport_info_types_list_is_not_replaced_by_type(self) -> None:
+        info = [{"types": [], "type": "Ride", "eftp": 280}]
+        self.assertEqual(self.eftp(wellness([row(sportInfo=info)])), [])
+
+    def test_unknown_types_only_classify_as_other(self) -> None:
+        athlete = {"sportSettings": [{"types": ["Workout"], "eftp": 210}]}
+        self.assertEqual(self.eftp(thresholds(athlete)), [(Sport.OTHER, 210)])
 
     def test_non_text_types_are_skipped(self) -> None:
         athlete = {"sportSettings": [{"types": [5, "Ride"], "eftp": 300}]}
