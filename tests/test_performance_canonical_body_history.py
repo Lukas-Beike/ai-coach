@@ -267,15 +267,15 @@ class CanonicalBodyInputTests(unittest.TestCase):
         # is in and rounds to 300.0.
         days = [TODAY - timedelta(days=offset) for offset in range(1, 6)]
         observations = (
-            _measure(MetricKind.BODY_FAT, 1.99, days[0]),
-            _measure(MetricKind.BODY_FAT, 2.0, days[1]),
-            _measure(MetricKind.BODY_FAT, 69.996, days[2]),
-            _measure(MetricKind.BODY_FAT, 70.01, days[3]),
-            _measure(MetricKind.BODY_FAT, 14.456, days[4]),
-            _measure(MetricKind.WEIGHT, 29.99, days[0]),
-            _measure(MetricKind.WEIGHT, 30.0, days[1]),
-            _measure(MetricKind.WEIGHT, 300.004, days[2]),
-            _measure(MetricKind.WEIGHT, 299.996, days[3]),
+            _measure(MetricKind.BODY_FAT, 1.99, days[0], provider=ProviderId.GARMIN),
+            _measure(MetricKind.BODY_FAT, 2.0, days[1], provider=ProviderId.GARMIN),
+            _measure(MetricKind.BODY_FAT, 69.996, days[2], provider=ProviderId.GARMIN),
+            _measure(MetricKind.BODY_FAT, 70.01, days[3], provider=ProviderId.GARMIN),
+            _measure(MetricKind.BODY_FAT, 14.456, days[4], provider=ProviderId.GARMIN),
+            _measure(MetricKind.WEIGHT, 29.99, days[0], provider=ProviderId.GARMIN),
+            _measure(MetricKind.WEIGHT, 30.0, days[1], provider=ProviderId.GARMIN),
+            _measure(MetricKind.WEIGHT, 300.004, days[2], provider=ProviderId.GARMIN),
+            _measure(MetricKind.WEIGHT, 299.996, days[3], provider=ProviderId.GARMIN),
         )
         inputs = read_body_inputs(
             BodyReader(observations), ServingGate(True), "db", TODAY
@@ -284,11 +284,11 @@ class CanonicalBodyInputTests(unittest.TestCase):
         assert inputs is not None
         self.assertEqual(
             {days[1]: 2.0, days[2]: 70.0, days[4]: 14.46},
-            inputs.intervals_body_fat_pct,
+            inputs.garmin_body_fat_pct,
         )
         self.assertEqual(
             {days[1]: 30.0, days[3]: 300.0},
-            inputs.intervals_weight_kg,
+            inputs.garmin_weight_kg,
         )
 
     def test_last_in_bounds_observation_wins_per_day(self) -> None:
@@ -399,7 +399,8 @@ class CanonicalBodyInputTests(unittest.TestCase):
         assert inputs is not None
         self.assertEqual({DAY: 80.0}, inputs.garmin_weight_kg)
 
-    def test_athlete_record_values_are_not_body_measurements(self) -> None:
+    def test_intervals_values_are_not_body_inputs(self) -> None:
+        # Intervals.icu body values reach body history through the wellness days.
         observations = (
             _measure(MetricKind.BODY_FAT, 12.0, DAY, record="athlete-42"),
             _measure(MetricKind.BODY_FAT, 14.0, DAY),
@@ -409,7 +410,9 @@ class CanonicalBodyInputTests(unittest.TestCase):
         )
         self.assertIsNotNone(inputs)
         assert inputs is not None
-        self.assertEqual({DAY: 14.0}, inputs.intervals_body_fat_pct)
+        self.assertEqual(
+            CanonicalBodyInputs(garmin_weight_kg={}, garmin_body_fat_pct={}), inputs
+        )
 
     def test_future_days_never_enter_the_inputs(self) -> None:
         tomorrow = TODAY + timedelta(days=1)
@@ -428,8 +431,6 @@ class CanonicalBodyInputTests(unittest.TestCase):
         )
         self.assertEqual(
             CanonicalBodyInputs(
-                intervals_weight_kg={},
-                intervals_body_fat_pct={},
                 garmin_weight_kg={},
                 garmin_body_fat_pct={},
             ),
@@ -589,8 +590,6 @@ class CanonicalBodyFallbackTests(unittest.TestCase):
     @staticmethod
     def _empty() -> CanonicalBodyInputs:
         return CanonicalBodyInputs(
-            intervals_weight_kg={},
-            intervals_body_fat_pct={},
             garmin_weight_kg={},
             garmin_body_fat_pct={},
         )
@@ -637,7 +636,7 @@ class CanonicalBodyFallbackTests(unittest.TestCase):
             ),
         )
 
-    def test_history_wellness_days_are_authoritative_over_other_body_inputs(
+    def test_intervals_body_values_come_from_the_history_wellness_days(
         self,
     ) -> None:
         snapshot = {
@@ -647,8 +646,6 @@ class CanonicalBodyFallbackTests(unittest.TestCase):
             },
         }
         canonical = CanonicalBodyInputs(
-            intervals_weight_kg={DAY: 71.0},
-            intervals_body_fat_pct={DAY: 15.0},
             garmin_weight_kg={},
             garmin_body_fat_pct={},
         )
@@ -656,9 +653,7 @@ class CanonicalBodyFallbackTests(unittest.TestCase):
             snapshot, None, TODAY, canonical=canonical, wellness_days=_days(snapshot)
         )
         self.assertIn(14.0, self._values(output, "body_fat_pct"))
-        self.assertNotIn(15.0, self._values(output, "body_fat_pct"))
         self.assertIn(70.0, self._values(output, "weight_kg"))
-        self.assertNotIn(71.0, self._values(output, "weight_kg"))
 
 
 class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
@@ -680,22 +675,6 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
             inputs = read_body_inputs(selector, selector, db, today)
         self.assertIsNotNone(inputs)
         assert inputs is not None
-        self.assertEqual(
-            {
-                date(2026, 10, 8): 14.0,
-                date(2026, 10, 9): 15.0,
-                date(2026, 10, 10): 16.0,
-            },
-            inputs.intervals_body_fat_pct,
-        )
-        self.assertEqual(
-            {
-                date(2026, 10, 8): 70.4,
-                date(2026, 10, 9): 70.2,
-                date(2026, 10, 10): 70.1,
-            },
-            inputs.intervals_weight_kg,
-        )
         self.assertEqual(
             body_history(
                 self.intervals, self.garmin, today, wellness_days=_days(self.intervals)

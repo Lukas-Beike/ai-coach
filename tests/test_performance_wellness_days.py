@@ -1,5 +1,6 @@
 """Canonical wellness days preserve provenance and ignore snapshot carriers."""
 
+import json
 import unittest
 from datetime import UTC, date, datetime, timedelta
 
@@ -79,6 +80,22 @@ class WellnessDayTests(unittest.TestCase):
         self.assertIsNone(day.value(MetricKind.EFTP))
         self.assertIsNone(day.value(MetricKind.CTL))
         self.assertEqual(read_wellness_days(Reader(), object()), ())
+
+    def test_integral_values_serialise_like_the_former_rows(self):
+        reader = Reader(
+            observation(MetricKind.SUBJECTIVE_FATIGUE, TODAY, 3.0),
+            observation(MetricKind.WEIGHT, TODAY, 70.5),
+        )
+        (day,) = read_wellness_days(reader, object())
+        self.assertEqual(
+            '{"fatigue": 3, "weight": 70.5}',
+            json.dumps(
+                {
+                    "fatigue": day.value(MetricKind.SUBJECTIVE_FATIGUE),
+                    "weight": day.value(MetricKind.WEIGHT),
+                }
+            ),
+        )
 
     def test_current_window_and_history(self):
         reader = Reader(

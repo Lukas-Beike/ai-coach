@@ -40,8 +40,12 @@ class WellnessDay:
     observations: Mapping[MetricKind, Observation]
 
     def value(self, kind: MetricKind) -> float | None:
+        """Return the value, integral numbers as ``int`` like the former rows."""
         observation = self.observations.get(kind)
-        return None if observation is None else observation.value.value
+        if observation is None:
+            return None
+        number = float(observation.value.value)
+        return int(number) if number.is_integer() else number
 
 
 def _is_wellness_record(observation: Observation) -> bool:

@@ -21,6 +21,13 @@ from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
 from backend.performance.wellness_days import WellnessDay, latest
 
+_SUBJECTIVE_RATINGS = (
+    ("fatigue", MetricKind.SUBJECTIVE_FATIGUE),
+    ("soreness", MetricKind.SUBJECTIVE_SORENESS),
+    ("stress", MetricKind.SUBJECTIVE_STRESS),
+    ("mood", MetricKind.SUBJECTIVE_MOOD),
+)
+
 # Recovery sources whose freshness comes from the Garmin view, including the
 # labelled weekly HRV fallback.
 _GARMIN_RECOVERY_SOURCES = frozenset(
@@ -234,18 +241,10 @@ def current_performance_context(
             "hrv_ms_source": hrv_source,
             "sleep_score": sleep_score,
             "sleep_score_source": sleep_score_source,
-            "fatigue": latest_wellness.value(MetricKind.SUBJECTIVE_FATIGUE)
-            if latest_wellness
-            else None,
-            "soreness": latest_wellness.value(MetricKind.SUBJECTIVE_SORENESS)
-            if latest_wellness
-            else None,
-            "stress": latest_wellness.value(MetricKind.SUBJECTIVE_STRESS)
-            if latest_wellness
-            else None,
-            "mood": latest_wellness.value(MetricKind.SUBJECTIVE_MOOD)
-            if latest_wellness
-            else None,
+            **{
+                key: None if latest_wellness is None else latest_wellness.value(kind)
+                for key, kind in _SUBJECTIVE_RATINGS
+            },
             "readiness": readiness_current,
             "readiness_source": readiness_source,
             "sleep_hours": sleep_hours,

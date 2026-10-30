@@ -106,34 +106,21 @@ def _intervals_measurements(
         "body_fat_pct": {},
     }
     for item in days:
-        observed = item.day
-        if observed > today:
+        if item.day > today:
             continue
-        weight_observation = item.observations.get(MetricKind.WEIGHT)
-        body_fat_observation = item.observations.get(MetricKind.BODY_FAT)
-        weight = _bounded_weight(item.value(MetricKind.WEIGHT))
-        body_fat = _bounded_body_fat(item.value(MetricKind.BODY_FAT))
-        if weight is not None:
-            synced_at = (
-                weight_observation.provenance.retrieved_at
-                if weight_observation
-                else None
-            )
-            values["weight_kg"][observed] = (
-                weight,
-                observed.isoformat(),
-                synced_at.isoformat() if synced_at else None,
-            )
-        if body_fat is not None:
-            synced_at = (
-                body_fat_observation.provenance.retrieved_at
-                if body_fat_observation
-                else None
-            )
-            values["body_fat_pct"][observed] = (
-                body_fat,
-                observed.isoformat(),
-                synced_at.isoformat() if synced_at else None,
+        for key, kind, bounded in (
+            ("weight_kg", MetricKind.WEIGHT, _bounded_weight),
+            ("body_fat_pct", MetricKind.BODY_FAT, _bounded_body_fat),
+        ):
+            observation = item.observations.get(kind)
+            value = None if observation is None else bounded(item.value(kind))
+            if observation is None or value is None:
+                continue
+            retrieved_at = observation.provenance.retrieved_at
+            values[key][item.day] = (
+                value,
+                item.day.isoformat(),
+                None if retrieved_at is None else retrieved_at.isoformat(),
             )
     return values
 
