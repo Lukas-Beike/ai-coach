@@ -48,5 +48,9 @@ the other L1 model or stay with the main model and say so.
 - The parent reads each worker's complete diff before taking it, then
   cherry-picks or rebases its commits (no merge commits). If the base moved or a
   conflict appears, review the result again or have the worker redo it.
+- A reported deviation that changes athlete-visible output or durable data
+  compared with the base branch is a regression until the athlete has accepted
+  it: fix it or ask, and never brief reviewers on it as intended. Internal
+  refactors and deviations the athlete already decided are not covered.
 - Retry a failed task at most twice, then re-scope or move up a tier.
 - Worker results never replace validation on the final tree or the PR review.
