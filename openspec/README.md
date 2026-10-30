@@ -28,6 +28,7 @@ remain in the repository README.
 | [model-selection-and-usage](specs/model-selection-and-usage/spec.md) | Selected model/thinking/speed, Responses lifecycle and daily token counts |
 | [sync-jobs-and-scheduling](specs/sync-jobs-and-scheduling/spec.md) | Queue, provider cadence/windows, retries and historical work |
 | [provider-connections](specs/provider-connections/spec.md) | Intervals, Garmin, Wahoo, credential lifecycle and explicit metric/library export |
+| [garmin-profile-body-export](specs/garmin-profile-body-export/spec.md) | Profile weight/body-fat changes sent to Garmin as dated body-composition entries |
 | [provider-normalization-and-provenance](specs/provider-normalization-and-provenance/spec.md) | Canonical fields/units/dates, per-metric source rules and reprojection |
 | [activity-ingestion-and-storage](specs/activity-ingestion-and-storage/spec.md) | Provider identity, session copies, detail acquisition and deletion |
 | [activity-analysis-and-feedback](specs/activity-analysis-and-feedback/spec.md) | Measured streams/laps/zones, conservative analysis and local feedback |
