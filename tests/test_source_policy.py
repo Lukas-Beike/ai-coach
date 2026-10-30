@@ -16,7 +16,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import recovery_inputs
-from performance_day_support import latest_day
+from performance_day_support import latest_day, snapshot_metrics
 
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
@@ -25,9 +25,6 @@ from backend.canonical.vocabulary import (
     RecordingOrigin,
     SourceKind,
     Sport,
-)
-from backend.performance.current_metrics import (
-    current_performance_metrics as _current_performance_metrics,
 )
 from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.performance.load_context import performance_load_context
@@ -52,7 +49,7 @@ def current_performance_metrics(snapshot, profile, garmin, **kwargs):
     kwargs.setdefault(
         "latest_wellness", latest_day(snapshot.get("recent_wellness", []))
     )
-    return _current_performance_metrics(snapshot, profile, garmin, **kwargs)
+    return snapshot_metrics(snapshot, profile, garmin, **kwargs)
 
 
 INTERVALS = ProviderId.INTERVALS

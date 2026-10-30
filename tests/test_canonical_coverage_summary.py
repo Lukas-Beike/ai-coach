@@ -90,7 +90,8 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
         self.assertEqual(intervals["activity_sync_time_stored"], True)
         self.assertEqual(intervals["observation_sync_time_stored"], True)
         self.assertEqual(intervals["activities"], 5)
-        self.assertEqual(intervals["observations"], 51)
+        # Mapper v9 adds the fixture athlete's W′ and height.
+        self.assertEqual(intervals["observations"], 53)
         self.assertEqual(intervals["issues"][str(IssueReason.UNSUPPORTED)], 0)
         self.assertEqual(garmin["sync_time_stored"], True)
         self.assertEqual(garmin["activity_sync_time_stored"], True)

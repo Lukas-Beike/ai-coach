@@ -174,17 +174,15 @@ def recovery_only_inputs(
     """Return performance inputs for a context test that changes only some sources.
 
     The inputs carry the mapped recovery observations and the Garmin metrics mapped
-    from ``garmin`` (#1415). Without a wellness day the load and threshold readers
-    keep the snapshot path. With a
-    ``snapshot`` they also carry what the Intervals.icu observations of that
-    snapshot give for form, ramp rate and eFTP (#1412), which are not read from the
-    snapshot itself; ctl and atl stay on the snapshot rows.
+    from ``garmin`` (#1415). With a ``snapshot`` they also carry what the
+    Intervals.icu observations of that snapshot give for form, ramp rate and the
+    current athlete settings (#1412, #1415), which are not read from the snapshot
+    itself; ctl and atl stay on the snapshot rows.
     """
     from dataclasses import replace
 
     from performance_day_support import garmin_metrics_from_payload
 
-    from backend.performance.canonical_current import CanonicalCurrentInputs
     from backend.performance.canonical_inputs import (
         CanonicalPerformanceInputs,
         read_performance_inputs,
@@ -211,26 +209,13 @@ def recovery_only_inputs(
     )
     if full is None:
         return inputs
-    current = full.current
     return replace(
         inputs,
         wellness_day=full.wellness_day,
         form_by_day=full.form_by_day,
         eftp_by_day=full.eftp_by_day,
         ramp_rate=full.ramp_rate,
-        current=None
-        if current is None
-        else CanonicalCurrentInputs(
-            bike_threshold_hr=(),
-            run_threshold_hr=(),
-            athlete_threshold_hr=None,
-            cycling_vo2max=(),
-            running_vo2max=(),
-            wellness_weight=None,
-            athlete_weight=None,
-            athlete_eftp=current.athlete_eftp,
-            wellness_eftp=current.wellness_eftp,
-        ),
+        current=full.current,
     )
 
 

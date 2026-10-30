@@ -98,7 +98,17 @@ class PerformanceContextTests(unittest.TestCase):
             },
         }
 
-        result = current_performance_context(snapshot, garmin, {}, today)
+        # Athlete settings, recovery and Garmin values come only from canonical
+        # observations (#1411, #1415); map the fixtures.
+        result = current_performance_context(
+            snapshot,
+            garmin,
+            {},
+            today,
+            canonical=recovery_only_inputs(
+                garmin, snapshot["recent_wellness"], snapshot=snapshot
+            ),
+        )
 
         self.assertTrue(result["available"])
         self.assertEqual(
@@ -107,8 +117,9 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual(result["as_of"], snapshot["synced_at"])
         self.assertEqual(result["thresholds"]["ftp_w"], 300)
         # Form and ramp rate come from canonical observations only (#1412): the
-        # row's tsb is a carrier field and is not read without canonical inputs.
-        self.assertIsNone(result["current_load"]["tsb"])
+        # mapped row's form is shown; without a CTL seven days earlier there is no
+        # ramp rate.
+        self.assertEqual(result["current_load"]["tsb"], -6)
         self.assertIsNone(result["current_load"]["ramp_rate"])
         self.assertIsNone(result["current_load"]["ramp_rate_source"])
         self.assertEqual(

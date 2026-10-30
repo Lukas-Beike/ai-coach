@@ -90,7 +90,7 @@ def sport_records(
 
 class ModuleContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 8)
+        self.assertEqual(MAPPER_VERSION, 9)
 
     def test_naive_retrieved_at_is_a_programming_error_for_both_mappers(self) -> None:
         naive_time = naive("2026-10-11T08:00:00")
@@ -681,6 +681,63 @@ class WellnessProvenanceTests(unittest.TestCase):
         )
 
 
+class AthleteSettingsV9Tests(unittest.TestCase):
+    """Athlete settings mapped since version 9 for the current metrics (#1415)."""
+
+    def test_body_fat_height_and_w_prime_are_athlete_wide(self) -> None:
+        result = thresholds(
+            {"id": "athlete-1", "bodyFat": 18, "height": 1.8, "icu_w_prime": 20000}
+        )
+        self.assertEqual(
+            sport_records(result),
+            {
+                (MetricKind.BODY_FAT, None, 18.0),
+                (MetricKind.HEIGHT, None, 180.0),
+                (MetricKind.W_PRIME, None, 20000.0),
+            },
+        )
+
+    def test_height_cm_wins_and_out_of_bounds_height_is_an_issue(self) -> None:
+        result = thresholds({"height_cm": 172, "height": 1.8})
+        self.assertEqual(sport_records(result), {(MetricKind.HEIGHT, None, 172.0)})
+        result = thresholds({"height": 2.6})
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            [issue.reason for issue in result.issues], [IssueReason.OUT_OF_RANGE]
+        )
+
+    def test_run_zone2_pace_is_metres_per_second(self) -> None:
+        for raw, expected in ((3.2, 3.2), (400, 2.5)):
+            with self.subTest(raw=raw):
+                result = thresholds(
+                    {"sportSettings": [{"types": ["Run"], "z2_pace": raw}]}
+                )
+                self.assertEqual(
+                    sport_records(result),
+                    {(MetricKind.ZONE2_PACE, Sport.RUN, expected)},
+                )
+
+    def test_athlete_vo2max_fills_only_a_sport_without_a_setting_value(self) -> None:
+        result = thresholds(
+            {
+                "running_vo2max": 55,
+                "cycling_vo2max": 51,
+                "sportSettings": [{"types": ["Ride"], "vo2max": 53}],
+            }
+        )
+        self.assertEqual(
+            sport_records(result),
+            {
+                (MetricKind.VO2MAX, Sport.RIDE, 53.0),
+                (MetricKind.VO2MAX, Sport.RUN, 55.0),
+            },
+        )
+
+    def test_generic_athlete_vo2max_stays_without_a_sport(self) -> None:
+        result = thresholds({"vo2max": 54})
+        self.assertEqual(sport_records(result), {(MetricKind.VO2MAX, None, 54.0)})
+
+
 class AthleteFixtureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.result = thresholds(load_fixture("athlete.json"))
@@ -701,6 +758,8 @@ class AthleteFixtureTests(unittest.TestCase):
                 (MetricKind.MAX_HR, Sport.RUN, 192),
                 (MetricKind.THRESHOLD_PACE, Sport.RUN, 4.2),
                 (MetricKind.WEIGHT, None, 70.0),
+                (MetricKind.HEIGHT, None, 180.0),
+                (MetricKind.W_PRIME, None, 18000.0),
             },
         )
 
@@ -732,6 +791,8 @@ class AthleteFixtureTests(unittest.TestCase):
                 MetricKind.THRESHOLD_PACE,
                 MetricKind.WEIGHT,
                 MetricKind.EFTP,
+                MetricKind.HEIGHT,
+                MetricKind.W_PRIME,
             },
         )
 

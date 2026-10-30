@@ -4,12 +4,11 @@ import unittest
 from datetime import date
 
 from canonical_recovery_support import mapped_personal_recovery
-from performance_day_support import days_from_rows
+from performance_day_support import days_from_rows, snapshot_metrics
 
 from backend.coach.context import coach_performance_projection
 from backend.performance.body import body_history
 from backend.performance.chart_history import analysis_history
-from backend.performance.current_metrics import current_performance_metrics
 
 TODAY = date(2026, 10, 12)
 CURRENT_KEYS = (
@@ -116,7 +115,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
             "recent_wellness": [],
             "recent_activities": [],
         }
-        result = current_performance_metrics(
+        result = snapshot_metrics(
             snapshot,
             {"weight_kg": 81},
             _empty_garmin_metrics(cycling_ftp_watts=260),
@@ -132,7 +131,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
         self.assertEqual(result["height_cm"]["source_provider"], None)
 
     def test_manual_profile_weight_has_no_provider_id(self):
-        result = current_performance_metrics(
+        result = snapshot_metrics(
             {"recent_wellness": [], "recent_activities": []},
             {"weight_kg": 81},
             _empty_garmin_metrics(),

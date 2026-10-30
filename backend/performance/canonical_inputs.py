@@ -18,9 +18,9 @@ from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance import canonical_sections, wellness_days
 from backend.performance.canonical_current import (
+    NO_CURRENT_INPUTS,
     CanonicalCurrentInputs,
     read_current_inputs,
-    read_wahoo_fallbacks,
 )
 from backend.performance.canonical_recovery import (
     CanonicalRecoveryInputs,
@@ -49,8 +49,8 @@ class CanonicalPerformanceInputs:
     """CTL and ATL for the wellness day that the legacy load context reads.
 
     ``wellness_day`` is None when there is no usable wellness day. ``current`` holds
-    the sport thresholds and VO2max of the latest sync, or None when they were not
-    read. ``recovery`` holds the recovery observations of the current context and
+    the athlete settings, weights and Wahoo fallbacks of the latest sync; it is
+    empty when they were not read. ``recovery`` holds the recovery observations of the current context and
     the personal baselines, or None when they were not read.
 
     ``activity_rows`` are raw activity rows and ``activities`` their compact
@@ -70,7 +70,7 @@ class CanonicalPerformanceInputs:
     wellness_day: date | None
     ctl: float | None
     atl: float | None
-    current: CanonicalCurrentInputs | None = None
+    current: CanonicalCurrentInputs = NO_CURRENT_INPUTS
     recovery: CanonicalRecoveryInputs | None = None
     activity_rows: tuple[dict[str, Any], ...] | None = None
     activities: tuple[dict[str, Any], ...] | None = None
@@ -324,7 +324,7 @@ class _CarriedRows:
         wellness_day: date | None,
         ctl: float | None,
         atl: float | None,
-        current: CanonicalCurrentInputs | None = None,
+        current: CanonicalCurrentInputs,
         ramp_rate: float | None = None,
     ) -> CanonicalPerformanceInputs:
         return CanonicalPerformanceInputs(
@@ -406,7 +406,7 @@ def read_performance_inputs(
             wellness_day=None,
             ctl=None,
             atl=None,
-            current=read_wahoo_fallbacks(reader, db, as_of=as_of),
+            current=read_current_inputs(reader, db, as_of=as_of),
         )
     start = days[0].day
     loaded = _load_resolved(

@@ -1,4 +1,9 @@
-"""Current performance metric composition from explicit normalized inputs."""
+"""Current performance metric composition from canonical inputs.
+
+Intervals.icu athlete settings come from the canonical observations of the latest
+sync, Garmin values from the Garmin metrics, and activity values from the
+canonical activity rows. No snapshot section is read.
+"""
 
 import math
 from typing import Any
@@ -6,7 +11,7 @@ from typing import Any
 from backend.activities.identity import activity_kind
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.canonical_current import CanonicalCurrentInputs
 from backend.performance.wellness_days import WellnessDay
 from backend.providers import intervals_performance_fields as intervals_perf_fields
@@ -25,9 +30,17 @@ GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.CURRENT
 VO2MAX_UNIT = "ml/kg/min"
 
 
-def athlete_w_prime(athlete: dict[str, Any]) -> Any:
-    """Return the Intervals athlete record's W′ value for threshold context."""
-    return athlete.get(intervals_perf_fields.W_PRIME)
+def athlete_thresholds(canonical: CanonicalCurrentInputs) -> dict[str, Any]:
+    """Return the athlete record's W′, max heart rate and LTHR for threshold context."""
+    return {
+        "w_prime_j": _observation_number(canonical.athlete_value(MetricKind.W_PRIME)),
+        "max_hr": _observation_number(canonical.athlete_value(MetricKind.MAX_HR)),
+        "lthr": _observation_number(canonical.athlete_threshold_hr),
+    }
+
+
+def _observation_number(observation: Observation | None) -> float | int | None:
+    return None if observation is None else as_number(observation.value.value)
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -81,95 +94,27 @@ def _canonical_metric(observation: Observation, unit: str) -> dict[str, Any]:
     )
 
 
-def _matching_observation(
-    candidates: tuple[Observation, ...], legacy_value: Any
-) -> Observation | None:
-    """Return the sport candidate whose value equals the legacy-selected value.
+def _observation_metric(observation: Observation | None, unit: str) -> dict[str, Any]:
+    """Return the canonical metric of an observation, or an empty metric."""
+    if observation is None:
+        return metric(None, unit, None)
+    return _canonical_metric(observation, unit)
 
-    The legacy reader takes the first matching sport setting, which is not known
-    here, so any candidate with that same number carries the same value and label.
-    Without a legacy value, or without a matching candidate, the caller keeps the
-    legacy path.
-    """
-    if not legacy_value:
-        return None
-    number = as_number(legacy_value)
-    if number is None:
-        return None
-    return next(
-        (
-            candidate
-            for candidate in candidates
-            if as_number(candidate.value.value) == number
-        ),
-        None,
-    )
+
+def _first(candidates: tuple[Observation, ...]) -> Observation | None:
+    """Return the first sport candidate; the mapper keeps one setting per sport."""
+    return next(iter(candidates), None)
 
 
 def _threshold_hr_metric(
-    canonical_sport: tuple[Observation, ...],
-    sport_value: Any,
-    canonical_athlete: Observation | None,
-    athlete_value: Any,
+    canonical_sport: tuple[Observation, ...], canonical_athlete: Observation | None
 ) -> dict[str, Any]:
-    """Sport threshold HR, then the athlete-wide value, canonical before legacy.
-
-    A canonical sport candidate is used only when its value equals the legacy sport
-    value (sport setting). The athlete-wide value is a single
-    athlete field, so its canonical row is unambiguous.
-    """
-    matched = _matching_observation(canonical_sport, sport_value)
-    if matched is not None:
-        return _canonical_metric(matched, "bpm")
-    if sport_value:
-        return metric(
-            sport_value, "bpm", PROVIDER_INTERVALS_NAME, provider=ProviderId.INTERVALS
-        )
-    if canonical_athlete is not None:
-        return _canonical_metric(canonical_athlete, "bpm")
-    return metric(
-        athlete_value,
-        "bpm",
-        "Intervals.icu (allgemein)",
-        provider=ProviderId.INTERVALS,
-    )
+    """Sport threshold HR, then the athlete-wide value."""
+    return _observation_metric(_first(canonical_sport) or canonical_athlete, "bpm")
 
 
-def _vo2max_metric(
-    canonical_sport: tuple[Observation, ...], sport_value: Any, athlete_value: Any
-) -> dict[str, Any]:
-    """Sport VO2max: a canonical candidate matching the legacy sport value, else legacy."""
-    matched = _matching_observation(canonical_sport, sport_value)
-    if matched is not None:
-        return _canonical_metric(matched, VO2MAX_UNIT)
-    return metric(
-        sport_value or athlete_value,
-        VO2MAX_UNIT,
-        PROVIDER_INTERVALS_NAME,
-        provider=ProviderId.INTERVALS,
-    )
-
-
-def _sport_setting(athlete: dict[str, Any], sport: str) -> dict[str, Any]:
-    match_terms = (
-        ("run", "lauf") if sport == "run" else ("ride", "bike", "rad", "cycling")
-    )
-    for setting in athlete.get("sport_settings", []):
-        if not isinstance(setting, dict):
-            continue
-        types = setting.get("types") if isinstance(setting.get("types"), list) else []
-        if any(
-            any(term in str(activity_type).casefold() for term in match_terms)
-            for activity_type in types
-        ):
-            return setting
-    return {}
-
-
-def _canonical_eftp_value(canonical: CanonicalCurrentInputs | None) -> float | None:
+def _canonical_eftp_value(canonical: CanonicalCurrentInputs) -> float | None:
     """Return the athlete-record ride eFTP, else the latest wellness day's."""
-    if canonical is None:
-        return None
     for observation in (canonical.athlete_eftp, canonical.wellness_eftp):
         if observation is not None:
             return observation.value.value
@@ -177,42 +122,41 @@ def _canonical_eftp_value(canonical: CanonicalCurrentInputs | None) -> float | N
 
 
 def _intervals_max_hr_metric(
-    sport: str,
-    setting: dict[str, Any],
+    category: str,
+    sport: Sport,
     activities: list[Any],
-    athlete: dict[str, Any],
+    canonical: CanonicalCurrentInputs,
 ) -> dict[str, Any]:
-    """Return sport-specific max HR with an explicit source."""
+    """Return sport max HR: setting, then activities, then the athlete record."""
     max_hr_keys = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
-    candidates: list[tuple[Any, str]] = [
-        (_first_present(setting, max_hr_keys), PROVIDER_INTERVALS_NAME),
-    ]
     activity_values: list[float | int] = []
     for activity in activities:
-        if activity_kind(activity) != sport:
+        if activity_kind(activity) != category:
             continue
         value = as_number(_first_present(activity, max_hr_keys))
         if value is not None and 80 <= float(value) <= 260:
             activity_values.append(value)
-    if activity_values:
-        candidates.append((max(activity_values), PROVIDER_INTERVALS_NAME))
-    candidates.extend([(_first_present(athlete, max_hr_keys), PROVIDER_INTERVALS_NAME)])
-    for value, source in candidates:
-        number = as_number(value)
+    candidates = (
+        _observation_number(canonical.athlete_value(MetricKind.MAX_HR, sport)),
+        max(activity_values, default=None),
+        _observation_number(canonical.athlete_value(MetricKind.MAX_HR)),
+    )
+    for number in candidates:
         if number is not None and 80 <= float(number) <= 260:
-            return metric(number, "bpm", source, provider=ProviderId.INTERVALS)
+            return metric(
+                number, "bpm", PROVIDER_INTERVALS_NAME, provider=ProviderId.INTERVALS
+            )
     return metric(None, "bpm", None)
 
 
-def _threshold_pace_seconds(value: Any) -> float | int | None:
-    number = as_number(value)
-    if number is None or number <= 0:
-        return None
-    return round(1000 / number) if number < 20 else number
+def _pace_seconds(observation: Observation | None) -> float | int | None:
+    """Return a canonical pace in metres per second as seconds per kilometre."""
+    speed = None if observation is None else observation.value.value
+    return None if not speed or speed <= 0 else round(1000 / speed)
 
 
-def _zone2_pace_seconds(value: Any) -> float | int | None:
-    pace = _threshold_pace_seconds(value)
+def _zone2_pace_seconds(observation: Observation | None) -> float | int | None:
+    pace = _pace_seconds(observation)
     return pace if pace is not None and 120 <= float(pace) <= 1800 else None
 
 
@@ -221,27 +165,6 @@ def _height_in_cm(value: Any) -> float | int | None:
     if number is not None and 1.2 <= float(number) <= 2.5:
         return round(float(number) * 100, 1)
     return number
-
-
-def _performance_snapshot_inputs(
-    snapshot: dict[str, Any],
-    activities_override: list[Any] | None = None,
-) -> tuple[
-    dict[str, Any],
-    list[Any],
-    dict[str, Any],
-    dict[str, Any],
-]:
-    athlete_value = snapshot.get("athlete")
-    athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
-    activities: list[Any] = []
-    if activities_override is not None:
-        activities = activities_override
-    elif isinstance(snapshot.get("recent_activities"), list):
-        activities = snapshot["recent_activities"]
-    ride = _sport_setting(athlete, "ride")
-    run = _sport_setting(athlete, "run")
-    return athlete, activities, ride, run
 
 
 def _latest_ride_activity(activities: list[Any]) -> dict[str, Any]:
@@ -275,7 +198,7 @@ def _latest_ride_activity(activities: list[Any]) -> dict[str, Any]:
 
 
 def _first_performance_source(
-    sources: tuple[tuple[Any, str, ProviderId | None], ...],
+    sources: tuple[tuple[Any, str | None, ProviderId | None], ...],
 ) -> tuple[Any, str | None, ProviderId | None]:
     return next(
         (
@@ -287,15 +210,12 @@ def _first_performance_source(
     )
 
 
-def _canonical_or_legacy(
+def _observation_source(
     observation: Observation | None,
-    legacy_value: Any,
-    legacy_source: str,
-    legacy_provider: ProviderId | None,
-) -> tuple[Any, str, ProviderId | None]:
-    """Return a canonical observation's value, label and provider, else the legacy triple."""
+) -> tuple[Any, str | None, ProviderId | None]:
+    """Return a canonical observation's value, label and provider, else empties."""
     if observation is None:
-        return legacy_value, legacy_source, legacy_provider
+        return None, None, None
     return (
         observation.value.value,
         observation_source_label(observation, SourceView.CURRENT_METRIC),
@@ -303,12 +223,26 @@ def _canonical_or_legacy(
     )
 
 
+def _wellness_source(
+    observation: Observation | None,
+    latest_wellness: WellnessDay | None,
+    kind: MetricKind,
+) -> tuple[Any, str | None, ProviderId | None]:
+    """Return this sync's wellness-row value, else the latest wellness day's."""
+    if observation is not None:
+        return _observation_source(observation)
+    return (
+        None if latest_wellness is None else latest_wellness.value(kind),
+        PROVIDER_INTERVALS_WELLNESS_NAME,
+        ProviderId.INTERVALS,
+    )
+
+
 def _performance_body_metrics(
-    athlete: dict[str, Any],
     latest_wellness: WellnessDay | None,
     profile: dict[str, Any],
     garmin_metrics: dict[str, dict[str, Any]],
-    canonical: CanonicalCurrentInputs | None,
+    canonical: CanonicalCurrentInputs,
 ) -> dict[str, dict[str, Any]]:
     weight_value, weight_source, weight_provider = _first_performance_source(
         (
@@ -317,54 +251,26 @@ def _performance_body_metrics(
                 GARMIN_PERFORMANCE_SOURCE,
                 ProviderId.GARMIN,
             ),
-            _canonical_or_legacy(
-                None if canonical is None else canonical.wellness_weight,
-                None
-                if latest_wellness is None
-                else latest_wellness.value(MetricKind.WEIGHT),
-                PROVIDER_INTERVALS_WELLNESS_NAME,
-                ProviderId.INTERVALS,
+            _wellness_source(
+                canonical.wellness_weight, latest_wellness, MetricKind.WEIGHT
             ),
-            _canonical_or_legacy(
-                None if canonical is None else canonical.athlete_weight,
-                _first_present(athlete, ("weight",)),
-                PROVIDER_INTERVALS_NAME,
-                ProviderId.INTERVALS,
-            ),
+            _observation_source(canonical.athlete_weight),
             (profile.get("weight_kg"), "Manuell", None),
-            _canonical_or_legacy(
-                None if canonical is None else canonical.wahoo_weight,
-                None,
-                "",
-                ProviderId.WAHOO,
-            ),
+            _observation_source(canonical.wahoo_weight),
         )
     )
     body_fat_value, body_fat_source, body_fat_provider = _first_performance_source(
         (
-            (
-                None
-                if latest_wellness is None
-                else latest_wellness.value(MetricKind.BODY_FAT),
-                PROVIDER_INTERVALS_WELLNESS_NAME,
-                ProviderId.INTERVALS,
-            ),
-            (
-                _first_present(athlete, ("bodyFat", "body_fat")),
-                PROVIDER_INTERVALS_NAME,
-                ProviderId.INTERVALS,
-            ),
+            _wellness_source(None, latest_wellness, MetricKind.BODY_FAT),
+            _observation_source(canonical.athlete_value(MetricKind.BODY_FAT)),
             (profile.get("body_fat_pct"), "Manuell", None),
         )
     )
     height_value, height_source, height_provider = _first_performance_source(
         (
-            (
-                _first_present(athlete, ("height_cm", "height")),
-                PROVIDER_INTERVALS_NAME,
-                ProviderId.INTERVALS,
-            ),
-            (profile.get("height_cm"), "Manuell", None),
+            _observation_source(canonical.athlete_value(MetricKind.HEIGHT)),
+            # The canonical height is in cm; only the profile may hold metres.
+            (_height_in_cm(profile.get("height_cm")), "Manuell", None),
         )
     )
     weight_metric = (
@@ -378,7 +284,7 @@ def _performance_body_metrics(
             body_fat_value, "%", body_fat_source, provider=body_fat_provider
         ),
         "height_cm": metric(
-            _height_in_cm(height_value),
+            height_value,
             "cm",
             height_source,
             provider=height_provider,
@@ -393,140 +299,80 @@ def _preferred_performance_metric(
     return current if current["value"] is not None else fallback
 
 
-def _cycling_ftp_fallback(
-    intervals: dict[str, Any], canonical: CanonicalCurrentInputs | None
-) -> dict[str, Any]:
-    """Return the Intervals cycling FTP, else the stored Wahoo FTP, labelled as Wahoo."""
-    if (
-        intervals["value"] is not None
-        or canonical is None
-        or canonical.wahoo_ftp is None
-    ):
-        return intervals
-    return _canonical_metric(canonical.wahoo_ftp, "W")
+def _intervals_metric(value: Any, unit: str) -> dict[str, Any]:
+    return metric(value, unit, PROVIDER_INTERVALS_NAME, provider=ProviderId.INTERVALS)
 
 
 def _performance_threshold_metrics(
-    athlete: dict[str, Any],
-    ride: dict[str, Any],
-    run: dict[str, Any],
-    garmin_metrics: dict[str, dict[str, Any]],
-    canonical: CanonicalCurrentInputs | None,
+    garmin_metrics: dict[str, dict[str, Any]], canonical: CanonicalCurrentInputs
 ) -> dict[str, dict[str, Any]]:
-    generic_lthr = _first_present(athlete, ("lthr",))
-    bike_lthr = _first_present(ride, ("lthr",))
-    run_lthr = _first_present(run, ("lthr",))
-    canonical_athlete = None if canonical is None else canonical.athlete_threshold_hr
-    run_zone2_pace = _first_present(
-        run,
-        (
-            "zone2_pace",
-            "zone_2_pace",
-            "z2_pace",
-            "pace_zone2",
-            "paceZone2",
-            "zone2Pace",
-        ),
-    )
+    run_pace = canonical.athlete_value(MetricKind.THRESHOLD_PACE, Sport.RUN)
+    run_zone2_pace = canonical.athlete_value(MetricKind.ZONE2_PACE, Sport.RUN)
     return {
         "cycling_ftp_watts": _preferred_performance_metric(
             garmin_metrics,
             "cycling_ftp_watts",
-            _cycling_ftp_fallback(
-                metric(
-                    _first_present(ride, ("ftp", "indoor_ftp"))
-                    or _first_present(
-                        athlete, intervals_perf_fields.CONFIGURED_FTP_ALIASES
-                    ),
-                    "W",
-                    PROVIDER_INTERVALS_NAME,
-                    provider=ProviderId.INTERVALS,
-                ),
-                canonical,
+            _observation_metric(
+                canonical.athlete_value(MetricKind.FTP, Sport.RIDE)
+                or canonical.wahoo_ftp,
+                "W",
             ),
         ),
         "run_threshold_watts": _preferred_performance_metric(
             garmin_metrics,
             "run_threshold_watts",
-            metric(
-                _first_present(run, ("ftp", "indoor_ftp")),
-                "W",
-                PROVIDER_INTERVALS_NAME,
-                provider=ProviderId.INTERVALS,
+            _observation_metric(
+                canonical.athlete_value(MetricKind.FTP, Sport.RUN), "W"
             ),
         ),
         "run_threshold_pace_seconds_per_km": _preferred_performance_metric(
             garmin_metrics,
             "run_threshold_pace_seconds_per_km",
-            metric(
-                _threshold_pace_seconds(_first_present(run, ("threshold_pace",))),
-                "s/km",
-                PROVIDER_INTERVALS_NAME,
-                provider=ProviderId.INTERVALS,
-            ),
+            _intervals_metric(_pace_seconds(run_pace), "s/km"),
         ),
-        "run_zone2_pace_seconds_per_km": metric(
-            _zone2_pace_seconds(run_zone2_pace),
-            "s/km",
-            PROVIDER_INTERVALS_NAME,
-            provider=ProviderId.INTERVALS,
+        "run_zone2_pace_seconds_per_km": _intervals_metric(
+            _zone2_pace_seconds(run_zone2_pace), "s/km"
         ),
         "bike_threshold_hr_bpm": _preferred_performance_metric(
             garmin_metrics,
             "bike_threshold_hr_bpm",
             _threshold_hr_metric(
-                () if canonical is None else canonical.bike_threshold_hr,
-                bike_lthr,
-                canonical_athlete,
-                generic_lthr,
+                canonical.bike_threshold_hr, canonical.athlete_threshold_hr
             ),
         ),
         "run_threshold_hr_bpm": _preferred_performance_metric(
             garmin_metrics,
             "run_threshold_hr_bpm",
             _threshold_hr_metric(
-                () if canonical is None else canonical.run_threshold_hr,
-                run_lthr,
-                canonical_athlete,
-                generic_lthr,
+                canonical.run_threshold_hr, canonical.athlete_threshold_hr
             ),
         ),
     }
 
 
+def _sport_vo2max(
+    canonical: CanonicalCurrentInputs, sport: Sport
+) -> Observation | None:
+    """The sport's VO2max (setting, then athlete sport field), else the athlete-wide one."""
+    candidates = (
+        canonical.cycling_vo2max if sport is Sport.RIDE else canonical.running_vo2max
+    )
+    return _first(candidates) or canonical.athlete_value(MetricKind.VO2MAX)
+
+
 def _performance_vo2_and_prediction_metrics(
-    athlete: dict[str, Any],
-    ride: dict[str, Any],
-    run: dict[str, Any],
-    garmin_metrics: dict[str, dict[str, Any]],
-    canonical: CanonicalCurrentInputs | None,
+    garmin_metrics: dict[str, dict[str, Any]], canonical: CanonicalCurrentInputs
 ) -> dict[str, dict[str, Any]]:
-    cycling_sport_vo2 = _first_present(ride, ("vo2max", "vo2_max", "cycling_vo2max"))
-    running_sport_vo2 = _first_present(run, ("vo2max", "vo2_max", "running_vo2max"))
-    cycling_athlete_vo2 = _first_present(
-        athlete, ("cycling_vo2max", "vo2max", "vo2_max")
-    )
-    running_athlete_vo2 = _first_present(
-        athlete, ("running_vo2max", "vo2max", "vo2_max")
-    )
     return {
         "cycling_vo2max_ml_kg_min": _preferred_performance_metric(
             garmin_metrics,
             "cycling_vo2max_ml_kg_min",
-            _vo2max_metric(
-                () if canonical is None else canonical.cycling_vo2max,
-                cycling_sport_vo2,
-                cycling_athlete_vo2,
-            ),
+            _observation_metric(_sport_vo2max(canonical, Sport.RIDE), VO2MAX_UNIT),
         ),
         "running_vo2max_ml_kg_min": _preferred_performance_metric(
             garmin_metrics,
             "running_vo2max_ml_kg_min",
-            _vo2max_metric(
-                () if canonical is None else canonical.running_vo2max,
-                running_sport_vo2,
-                running_athlete_vo2,
-            ),
+            _observation_metric(_sport_vo2max(canonical, Sport.RUN), VO2MAX_UNIT),
         ),
         **{
             key: _preferred_performance_metric(
@@ -543,23 +389,25 @@ def _performance_vo2_and_prediction_metrics(
 
 
 def current_performance_metrics(
-    snapshot: dict[str, Any],
     profile: dict[str, Any],
     garmin_metrics: dict[str, dict[str, Any]],
     *,
-    canonical: CanonicalCurrentInputs | None = None,
-    activities: list[Any] | None = None,
+    canonical: CanonicalCurrentInputs,
+    activities: list[Any],
     latest_wellness: WellnessDay | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Compose current metrics using canonical wellness values and other sources."""
-    athlete, activities, ride, run = _performance_snapshot_inputs(snapshot, activities)
+    """Compose current metrics from canonical inputs, Garmin metrics and the profile."""
     latest_ride_activity = _latest_ride_activity(activities)
     latest_ride_eftp = _first_present(
         latest_ride_activity, intervals_perf_fields.ESTIMATED_FTP_ALIASES
     )
     current_ride_eftp = _canonical_eftp_value(canonical)
-    cycling_max_hr = _intervals_max_hr_metric("cycling", ride, activities, athlete)
-    running_max_hr = _intervals_max_hr_metric("running", run, activities, athlete)
+    cycling_max_hr = _intervals_max_hr_metric(
+        "cycling", Sport.RIDE, activities, canonical
+    )
+    running_max_hr = _intervals_max_hr_metric(
+        "running", Sport.RUN, activities, canonical
+    )
     if garmin_metrics["cycling_max_hr_bpm"]["value"] is not None:
         cycling_max_hr = garmin_metrics["cycling_max_hr_bpm"]
     if garmin_metrics["running_max_hr_bpm"]["value"] is not None:
@@ -579,26 +427,16 @@ def current_performance_metrics(
         key=lambda item: item["value"],
         default=metric(None, "bpm", None),
     )
-    body_metrics = _performance_body_metrics(
-        athlete, latest_wellness, profile, garmin_metrics, canonical
-    )
-    threshold_metrics = _performance_threshold_metrics(
-        athlete, ride, run, garmin_metrics, canonical
-    )
-    vo2_and_predictions = _performance_vo2_and_prediction_metrics(
-        athlete, ride, run, garmin_metrics, canonical
-    )
     return {
-        **body_metrics,
-        **threshold_metrics,
-        "cycling_eftp_watts": metric(
-            current_ride_eftp or latest_ride_eftp,
-            "W",
-            PROVIDER_INTERVALS_NAME,
-            provider=ProviderId.INTERVALS,
+        **_performance_body_metrics(
+            latest_wellness, profile, garmin_metrics, canonical
+        ),
+        **_performance_threshold_metrics(garmin_metrics, canonical),
+        "cycling_eftp_watts": _intervals_metric(
+            current_ride_eftp or latest_ride_eftp, "W"
         ),
         "cycling_max_hr_bpm": cycling_max_hr,
         "running_max_hr_bpm": running_max_hr,
         "max_hr_bpm": max_hr,
-        **vo2_and_predictions,
+        **_performance_vo2_and_prediction_metrics(garmin_metrics, canonical),
     }

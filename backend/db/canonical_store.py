@@ -34,7 +34,12 @@ from backend.canonical.vocabulary import (
 
 ACTIVITY_ID_PREFIX: Final = "act_"
 ATHLETE_SERIES: Final = "athlete"
-_ATHLETE_SERIES_KINDS: Final = frozenset({MetricKind.WEIGHT, MetricKind.EFTP})
+_ATHLETE_SERIES_KINDS: Final = frozenset(
+    {MetricKind.WEIGHT, MetricKind.EFTP, MetricKind.BODY_FAT}
+)
+# Kinds whose athlete value collides with a wellness value only without a sport:
+# the athlete's sport VO2max keeps the daily key it had before mapper version 9.
+_ATHLETE_SPORTLESS_SERIES_KINDS: Final = frozenset({MetricKind.VO2MAX})
 OBSERVATION_DETAILS: Final = "{}"
 ACTIVITY_DETAILS: Final = "{}"
 _ELAPSED_DURATION_KEY: Final = "elapsed_duration_s"
@@ -825,17 +830,21 @@ def observation_natural_key(observation: Observation) -> str:
 def _observation_series(observation: Observation) -> str:
     """Return ``athlete`` for an Intervals.icu athlete-profile value, else empty.
 
-    Only weight and eFTP come from both records. A wellness row is identified by
-    its ISO day, so such a value whose source record is anything else comes from
-    the athlete record. The consumers tell the two apart by the same rule. Both
-    values are kept: the current-metrics reader shows the wellness weight first
-    and the athlete weight as its fallback, and the athlete eFTP before the
-    wellness eFTP.
+    Weight, eFTP, body fat and the sport-less VO2max come from both records. A
+    wellness row is identified by its ISO day, so such a value whose source record
+    is anything else comes from the athlete record. The consumers tell the two
+    apart by the same rule. Both values are kept: the current-metrics reader shows
+    the wellness weight and body fat first and the athlete values as their
+    fallbacks, and the athlete eFTP before the wellness eFTP.
     """
     provenance = observation.provenance
+    shared = observation.kind in _ATHLETE_SERIES_KINDS or (
+        observation.kind in _ATHLETE_SPORTLESS_SERIES_KINDS
+        and observation.sport is None
+    )
     if (
         provenance.provider is ProviderId.INTERVALS
-        and observation.kind in _ATHLETE_SERIES_KINDS
+        and shared
         and provenance.source_record_id != observation.observed_on.isoformat()
     ):
         return ATHLETE_SERIES

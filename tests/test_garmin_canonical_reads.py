@@ -21,6 +21,7 @@ from canonical_read_support import (
     populate,
     store_garmin,
 )
+from performance_day_support import snapshot_metrics
 from support import make_config
 
 from backend.canonical.records import MetricValue, Observation, Provenance
@@ -36,7 +37,6 @@ from backend.db.garmin_store import prune_section
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance import garmin_metrics, garmin_observations
-from backend.performance.current_metrics import current_performance_metrics
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     read_garmin_sleep_day,
@@ -576,7 +576,7 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
         self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 161)
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 306)
 
-        current = current_performance_metrics(
+        current = snapshot_metrics(
             {
                 "athlete": {
                     "sport_settings": [
