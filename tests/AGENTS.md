@@ -7,6 +7,9 @@
   python -m compileall -q server.py backend tests
   ```
 
+- Helpers shared by several `TestCase` subclasses are module-level functions
+  taking the case or its fixtures as arguments, not methods of a base `TestCase`
+  (Sonar python:S5899 flags those as unused).
 - Every test must use temporary `DATA_DIR`/database state or isolated patches.
   Never read or modify the real `.env`, `/data`, production database, Garmin
   token store, or runtime logs.
