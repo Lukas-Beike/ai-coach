@@ -742,7 +742,9 @@ and [Coach tool map](openspec/COACH_TOOLS.md) are frozen snapshots of the
 baseline revision and are not maintained further. A valid document is not proof
 of runtime conformance.
 
-OpenSpec is optional. Most changes put their acceptance criteria in the PR body.
+OpenSpec is optional. Most changes put their acceptance criteria in the PR body,
+but a behavior change still updates the affected main specs in `openspec/specs/`
+directly; the `pr` workflow finds them by the changed files they cite.
 Use an OpenSpec change for a larger feature (a new capability or a behavior change
 across several flows) or when asked, created with the CLI:
 
