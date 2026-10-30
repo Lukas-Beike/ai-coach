@@ -15,12 +15,10 @@ model names do not authorize delegation or GitHub comments.
 
 ## Scope and execution
 
-- Review sequentially by default when no workers are dispatched. Follow the
-  orchestration skill's sequential parent-only mode for hosted/noninteractive
-  read-only reviews; do not require prompts or child tasks to complete them.
-  If delegation is explicitly required, preserve that requirement and report
-  unavailable choices/capability as a blocker. Sequential review does not waive
-  this workflow's evidence bar or any invoking PR workflow's review gate.
+- Review with the main model by default; hosted and noninteractive reviews need
+  no prompts or child tasks. If delegation is explicitly required, preserve that
+  requirement and report missing capability as a blocker. Working alone does not
+  waive this workflow's evidence bar or any invoking PR workflow's review gate.
 
 - Accept a PR URL/number or an explicit Git range such as
   `origin/develop...HEAD`. Resolve and record the base and head SHAs. Before a
@@ -35,8 +33,8 @@ model names do not authorize delegation or GitHub comments.
   review depth: complete all five perspectives below and trace affected
   callers, consumers, and state boundaries. These are review parameters,
   not shell flags or a claim about the host model's reasoning settings.
-- Use the default repository orchestration workflow and the user's session model
-  selections for delegation; the parent retains review accountability.
+- Delegate only under the repository orchestration workflow and its tiers; the
+  parent retains review accountability.
   Do not silently replace missing agents with invented results.
 - Report-only is the default: do not edit, commit, push, resolve threads, or
   post comments. A request to review alone does not authorize GitHub writes.

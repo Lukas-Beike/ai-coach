@@ -642,19 +642,12 @@ Claude's review workflow for PRs and pre-push branch diffs. Agents read it
 directly; the `pr` workflow requires no host-specific slash command.
 
 The [orchestration skill](.agents/skills/orchestrated-plan-implementation/SKILL.md)
-is the mandatory default for repository work, including documentation/skill
-changes, implementation, reviews, evaluations, and retrospectives. It starts by
-choosing delegated or sequential parent-only mode. Only work that will dispatch
-workers proposes live model tiers and asks for missing selections; hosted or
-noninteractive read-only reviews can complete sequentially without prompts or
-child tasks. Explicit worker requirements remain binding. Explicit session
-choices are reused across phases; status answers do not launch new workers.
-Workers use isolated source trees;
-the current parent reviews and
-verifies results and alone adopts authorized source patches. Review/evaluation
-criteria and PR gates remain with their owning workflows; review-only work does
-not implement fixes. T3 and native-host adapters use the capabilities actually
-available, without requiring a particular provider CLI or global installation.
+decides per task whether delegating to subagents pays off; by default the main
+model does the work. Delegated tasks use fixed tiers without a model question:
+Claude Haiku alternating with Gemini Flash for easy tasks, Claude Sonnet for
+standard work, and Claude Opus only for genuinely hard or risky tasks, each at
+its newest available version. Writers use isolated worktrees; the main model
+reviews and integrates their branches. PR review gates are unchanged.
 
 The [retro skill](.agents/skills/ai-coach-retro/SKILL.md) must run before every
 final session completion or blocked handoff, without a separate request,

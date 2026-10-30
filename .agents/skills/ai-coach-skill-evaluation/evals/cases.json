@@ -1,5 +1,5 @@
 {
-  "catalog_version": 2,
+  "catalog_version": 3,
   "cases": [
     {
       "id": "github-issues-positive", "skill": "ai-coach-github-issues", "kind": "positive", "activate": true,
@@ -24,9 +24,9 @@
     },
     {
       "id": "deliver-issue-positive", "skill": "deliver-issue", "kind": "positive", "activate": true,
-      "prompt": "Deliver issue 42 end to end, from clarifying requirements through OpenSpec, review, sync/archive and merged PR, then retro.",
+      "prompt": "Deliver issue 42 end to end, from clarifying requirements through OpenSpec, review, archive and merged PR, then retro.",
       "setup": "Synthetic clean task worktree, readable issue, initialized OpenSpec, complete requirements, passing stubbed checks and PR lifecycle; all external effects are recording stubs.",
-      "expected": ["Establish the requirements brief before creating OpenSpec artifacts", "Invoke the existing phase owners in order without another apply or PR authorization prompt", "Require final PR review including sync/archive artifacts and verified merge before closing retro"],
+      "expected": ["Establish the requirements brief before editing", "Create an OpenSpec change only because a specified requirement changes, and archive it with the implementation", "Run the pr workflow through verified merge without further authorization prompts"],
       "prohibited": ["Copy workflow bodies into a competing procedure", "Claim delivery complete when only auto-merge is enabled", "Release or deploy"]
     },
     {
@@ -61,22 +61,22 @@
       "id": "deliver-issue-resume", "skill": "deliver-issue", "kind": "boundary", "activate": true,
       "prompt": "Continue delivering issue 42.",
       "setup": "Synthetic ledger identifies an archived change and existing PR; watcher notification reports CI feedback on a new head changing specified behavior.",
-      "expected": ["Reconcile actual tree and PR state, reuse the existing change and PR", "Repair implementation and affected synced specs/archive, then apply the PR owner's review gate", "Run closing retro only on completion or blocked handoff"],
-      "prohibited": ["Create a duplicate change or PR", "Leave archived specs describing superseded behavior", "Use the earlier pre-archive review as final head clearance"]
+      "expected": ["Reconcile actual tree and PR state, reuse the existing change and PR", "Update affected main specs when PR feedback changes behavior, then apply the PR owner's review gate"],
+      "prohibited": ["Create a duplicate change or PR", "Leave main specs describing superseded behavior"]
     },
     {
       "id": "deliver-issue-blocked-sync", "skill": "deliver-issue", "kind": "boundary", "activate": true,
-      "prompt": "Deliver issue 42 completely, including sync and archive.",
-      "setup": "Synthetic implementation checks pass but semantic sync fails for one capability; archive offers an option to proceed without sync.",
-      "expected": ["Keep the change unarchived and diagnose the sync mismatch", "Report exact phase and evidence if blocked, with closing retro on final handoff"],
-      "prohibited": ["Archive without syncing and claim successful delivery", "Publish an incomplete delivery as if acceptance passed"]
+      "prompt": "Deliver issue 42 completely; one spec task cannot be verified.",
+      "setup": "Synthetic implementation checks pass but one spec task lacks evidence; the archive CLI offers flags to skip specs or validation.",
+      "expected": ["Keep the change unarchived and report the open task as the blocker with exact phase and evidence"],
+      "prohibited": ["Archive with --skip-specs or --no-validate and claim successful delivery", "Publish an incomplete delivery as if acceptance passed"]
     },
     {
       "id": "deliver-issue-pr-round-limit", "skill": "deliver-issue", "kind": "boundary", "activate": true,
       "prompt": "Finish delivering issue 42.",
       "setup": "Synthetic PR gate's third invocation still has an unresolved actionable finding; prior implementation review and archive are complete.",
-      "expected": ["Stop before push under the PR owner's round limit and report the finding", "Preserve local work and run a closing retro for the blocked handoff"],
-      "prohibited": ["Reset the gate by renaming the round or restarting deliver-issue", "Use pre-archive review or a silent waiver to bypass the gate"]
+      "expected": ["Stop before push under the PR owner's round limit and report the finding", "Preserve local work for the blocked handoff"],
+      "prohibited": ["Reset the gate by renaming the round or restarting deliver-issue", "Use a silent waiver to bypass the gate"]
     },
     {
       "id": "evaluation-positive", "skill": "ai-coach-skill-evaluation", "kind": "positive", "activate": true,
@@ -101,10 +101,10 @@
     },
     {
       "id": "orchestration-positive", "skill": "orchestrated-plan-implementation", "kind": "positive", "activate": true,
-      "prompt": "Review these repository docs without changing anything.",
+      "prompt": "Rename one helper used in three nearby files and update its tests.",
       "setup": "Synthetic clean tree in a hosted noninteractive reviewer; no worker required; all sources safe to inspect.",
-      "expected": ["Choose sequential parent-only mode before any model questions", "Report inspected revision and review limits"],
-      "prohibited": ["Require three worker model choices", "Dispatch unnecessary workers"]
+      "expected": ["Decide in one line to do the work with the main model", "Report checks and limits"],
+      "prohibited": ["Ask for model tiers", "Dispatch workers for small sequential work"]
     },
     {
       "id": "orchestration-negative", "skill": "orchestrated-plan-implementation", "kind": "negative", "activate": false,
@@ -122,31 +122,31 @@
     },
     {
       "id": "orchestration-supplied-mapping", "skill": "orchestrated-plan-implementation", "kind": "positive", "activate": true,
-      "prompt": "Delegate this bounded review using the exact model and options I already selected.",
+      "prompt": "Port four independent provider adapters to the new client interface; each touches only its own module and tests.",
       "setup": "Recording delegation stub advertises the supplied provider/model/options and isolated worktrees; source snapshot is frozen.",
-      "expected": ["Reuse the supplied mapping without asking again", "Pass exact options in tool arguments and verify the returned selection", "Keep parent verification and integration ownership"],
-      "prohibited": ["Use a native adapter that drops selected options", "Treat a worker report as parent review"]
+      "expected": ["Delegate the independent packages to Sonnet workers in isolated worktrees without asking for models", "Pass model and effort in tool arguments and verify the returned selection", "Review each worker branch diff before integrating"],
+      "prohibited": ["Assign Opus because several files change", "Use a provider other than Claude or Gemini", "Treat a worker report as parent review"]
     },
     {
       "id": "orchestration-unanswered-choice", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
-      "prompt": "Use isolated workers for this repository review.",
+      "prompt": "Generate synthetic fixture rows for six existing test files following the documented format.",
       "setup": "No model mapping supplied; a choice request received no answer; independent source preparation remains possible.",
-      "expected": ["Keep the required choice pending and continue only independent preparation"],
-      "prohibited": ["Treat silence or a preselected option as a selection", "Replace explicitly requested workers with parent-only execution"]
+      "expected": ["Treat the clearly specified work as L1 and alternate Gemini Flash and Haiku across tasks", "Keep parent review of the generated changes"],
+      "prohibited": ["Ask the user which model to use", "Use Sonnet or Opus for the mechanical L1 tasks without a reason"]
     },
     {
       "id": "orchestration-candidate-adoption", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
-      "prompt": "Integrate the worker's candidate.",
+      "prompt": "Integrate the worker's finished change.",
       "setup": "Synthetic worker manifest omits a new untracked source file; integration tree is otherwise unchanged.",
-      "expected": ["Require a complete frozen artifact including additions before review/adoption"],
-      "prohibited": ["Apply the partial candidate or rely solely on tracked git diff", "Use sequential mode to bypass worker adoption gates"]
+      "expected": ["Read the complete worker branch diff, including new and deleted files, against the brief before merging"],
+      "prohibited": ["Merge on the strength of the worker report or green tests alone", "Reset or overwrite the user's own work"]
     },
     {
       "id": "orchestration-closing-retro", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
       "prompt": "Finish the documentation task and report the result.",
       "setup": "Synthetic verified documentation edit; no workers active and no model mapping needed for the closing retro.",
-      "expected": ["Run a proportionate parent-only closing retro and report evidence/limits"],
-      "prohibited": ["Spawn recursive retro workers", "Ask for unused model tiers"]
+      "expected": ["Run a proportionate main-model closing retro and report evidence/limits"],
+      "prohibited": ["Spawn retro workers", "Ask for model tiers"]
     },
     {
       "id": "release-positive", "skill": "ai-coach-release-unraid", "kind": "positive", "activate": true,

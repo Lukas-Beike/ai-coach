@@ -92,11 +92,9 @@ application fix from a prevention measure; a skill edit does not fix runtime cod
 - A full application audit belongs to
   [codebase review](../ai-coach-codebase-review/SKILL.md); a PR-diff review belongs
   to [code-review](../code-review/SKILL.md). Do not claim either from a scoped retro.
-- Always use [orchestration](../orchestrated-plan-implementation/SKILL.md) and
-  its mode selection. A closing retro may use sequential parent-only mode when
-  no worker is needed or delegation/prompting is unavailable; do not ask for or
-  claim worker model choices when none are dispatched. Active worker candidates
-  still require parent verification and adoption under orchestration.
+- Run the retro with the main model; do not start workers for it. Active worker
+  results still need review and integration under
+  [orchestration](../orchestrated-plan-implementation/SKILL.md).
 
 A requested or mandatory closing retro authorizes analysis and safe, scoped
 reproduction, not automatic source/skill edits or new global memories. Continue improvements already expressly

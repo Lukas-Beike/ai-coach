@@ -148,16 +148,12 @@ affected checks against the final tree. Diagnose failures before retrying; never
 relax a guard to obtain success. Report behavior, evidence, and unrun checks.
 Preserve scope, decisions, changed paths, outstanding work, and validation evidence
 when handing off. Keep temporary plans/reports outside tracked source unless
-requested as deliverables. Always use the repository's
+requested as deliverables. Use the repository's
 [orchestration workflow](.agents/skills/orchestrated-plan-implementation/SKILL.md)
-for repository work, including implementation, documentation/skill changes,
-reviews, evaluations, and retrospectives. This is standing authorization for
-bounded delegation under that workflow. Choose its sequential parent-only mode
-before model questions when no worker is needed or delegation/prompting is
-unavailable; select/reuse model choices only for workers that will be dispatched.
-An explicit worker requirement remains binding. The current parent remains the
-sole review/integration owner. Status answers and coordination do not need new
-workers. External actions retain their authorization.
+to decide whether delegation pays off; by default the main model does the work.
+It is standing authorization for bounded delegation with its fixed model tiers,
+without asking for model choices. Explicit user worker requirements win. The
+main model alone reviews and integrates. External actions keep their authorization.
 
 Reasoning effort is capped at `high` for the agent itself, workers, reviews,
 and any other selected run. Never select or pass `xhigh`, `max`, or a higher
