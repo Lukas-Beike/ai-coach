@@ -352,7 +352,11 @@ class BrowserRunnerTests(unittest.TestCase):
         self.assertIn("--project desktop", value["error"])
 
     def test_failed_tests_report_location_and_first_error_line(self):
-        with tempfile.TemporaryDirectory() as directory:
+        marker = "synthetic-fixture-value"
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(runner, "FAKE_PASSWORD", marker),
+        ):
             output = Path(directory)
             self.assertEqual([], runner.failed_tests(output))
             path = output / "artifacts" / "case" / "error-context.md"
@@ -360,7 +364,7 @@ class BrowserRunnerTests(unittest.TestCase):
             path.write_text(
                 "# Test info\n\n- Name: login >> opens chat\n"
                 "- Location: e2e/login.spec.js:12:3\n\n# Error details\n\n```\n"
-                f"Error: fill {runner.FAKE_PASSWORD} failed\n"
+                f"Error: fill {marker} failed\n"
                 "second line stays out\n```\n",
                 encoding="utf-8",
             )
