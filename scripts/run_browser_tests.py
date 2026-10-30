@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -41,25 +42,34 @@ HOST_NETWORK_ERROR = "net::ERR_NO_BUFFER_SPACE"
 
 
 class RunnerError(Exception):
-    """Safe diagnostics never contain child stdout or provider/environment text."""
+    """Safe diagnostics never contain child stdout or provider/environment text.
+
+    The only report text is a failing test's bounded first error line, which CI
+    already publishes with the failure artifacts.
+    """
 
 
 def stamp():
     return datetime.now(UTC).isoformat()
 
 
-def host_network_error(output):
-    """Return the host network error when every failing test of a child names it.
-
-    Only the per-test ``artifacts/*/error-context.md`` reports are read, symlinks
-    are skipped, and only the fixed error name is returned, never report text. A
-    child with any report that does not name the error failed an assertion.
-    """
-    reports = [
+def error_reports(output):
+    """Per-test ``artifacts/*/error-context.md`` reports; symlinks are skipped."""
+    return [
         report
         for report in sorted((Path(output) / "artifacts").glob("*/error-context.md"))
         if not report.is_symlink() and not report.parent.is_symlink()
     ]
+
+
+def host_network_error(output):
+    """Return the host network error when every failing test of a child names it.
+
+    Only the per-test reports are read, and only the fixed error name is returned,
+    never report text. A child with any report that does not name the error failed
+    an assertion.
+    """
+    reports = error_reports(output)
     if not reports:
         return None
     for report in reports:
@@ -70,6 +80,65 @@ def host_network_error(output):
         if HOST_NETWORK_ERROR not in text:
             return None
     return HOST_NETWORK_ERROR
+
+
+def first_error_line(lines):
+    """First line of the report's error block; empty when the block is empty."""
+    if "# Error details" not in lines:
+        return ""
+    fenced = False
+    for line in lines[lines.index("# Error details") + 1 :]:
+        if line.startswith("```"):
+            if fenced:
+                return ""
+            fenced = True
+        elif line.startswith("# "):
+            return ""
+        elif line.strip():
+            return line.strip()
+    return ""
+
+
+def failed_tests(output):
+    """Location and first error line of each failing test's per-test report.
+
+    The line comes from a disposable-fixture run; it is bounded and the fixture
+    password is redacted. Raw child output is still never read. Retry reports of
+    the same test and error are listed once.
+    """
+    failures = []
+    for report in error_reports(output):
+        try:
+            lines = report.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        location = next(
+            (line[12:].strip() for line in lines if line.startswith("- Location: ")),
+            "",
+        )
+        failure = {
+            "location": location[:200],
+            "error": first_error_line(lines).replace(FAKE_PASSWORD, "[redacted]")[:300],
+        }
+        if failure not in failures:
+            failures.append(failure)
+    return failures
+
+
+def failure_message(child, code, failures):
+    message = (
+        f"Playwright child failed (exit {code}): {child['project']} {child['file']}"
+    )
+    if not failures:
+        return (
+            message + "; no test report, so the run failed before or outside a test "
+            "(configuration, setup or authentication)"
+        )
+    first = failures[0]
+    message += f": {first['location']}: {first['error']}"
+    if len(failures) > 1:
+        message += f" (+{len(failures) - 1} more failing tests in the manifest)"
+    return message
 
 
 def atomic_json(path, value):
@@ -472,6 +541,63 @@ def image_identity(processes, image):
     return info["Id"]
 
 
+# Dockerfile COPY inputs of the application image, compared by content.
+APPLICATION_SOURCES = (
+    "requirements.txt",
+    "server.py",
+    "garmin-login.py",
+    "backend",
+    "public",
+)
+
+
+def source_digest(root, names):
+    """Hash of the application files below ``root``; also runs inside the image."""
+    import hashlib
+    import json
+    from pathlib import Path
+
+    files = {}
+    for name in names:
+        path = Path(root) / name
+        for item in sorted(path.rglob("*")) if path.is_dir() else [path]:
+            if item.is_file() and "__pycache__" not in item.parts:
+                relative = item.relative_to(root).as_posix()
+                files[relative] = hashlib.sha256(item.read_bytes()).hexdigest()
+    return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
+
+
+def image_matches_source(processes, containers, image_id, root):
+    """Compare the image's /app copy with the working tree; None when unknown."""
+    script = (
+        inspect.getsource(source_digest)
+        + f"print(source_digest('/app', {list(APPLICATION_SOURCES)!r}))"
+    )
+    try:
+        cid = containers.create(
+            "acb-" + containers.run_id + "-source",
+            [
+                "--network",
+                "none",
+                "--read-only",
+                "--cap-drop=ALL",
+                "--security-opt",
+                "no-new-privileges:true",
+                image_id,
+                "python",
+                "-c",
+                script,
+            ],
+        )
+        code, output = processes.run(["docker", "start", "--attach", cid])
+        containers.remove(cid)
+    except RunnerError:
+        return None
+    if code or not re.fullmatch(r"[a-f0-9]{64}", output.strip()):
+        return None
+    return output.strip() == source_digest(root, APPLICATION_SOURCES)
+
+
 def reserve_ports(count):
     reservations = []
     try:
@@ -869,7 +995,9 @@ class Execution:
                         "not a test assertion; rerun it with "
                         f"--project {child['project']} --spec {child['file']}"
                     )
-                raise RunnerError(f"Playwright child failed (exit {code})")
+                failures = failed_tests(output)
+                evidence.child(child, failures=failures)
+                raise RunnerError(failure_message(child, code, failures))
             self.containers.remove(fixture)
         except BaseException as error:
             evidence.child(
@@ -1113,11 +1241,26 @@ def main(argv=None):
                 else:
                     with evidence.phase("prerequisites"):
                         image = image_identity(processes, args.image)
+                        current = image_matches_source(
+                            processes, containers, image, ROOT
+                        )
+                        if current is False:
+                            print(
+                                f"Warning: {args.image} does not contain the current "
+                                "application source; rebuild it with "
+                                f"docker build -t {args.image} .",
+                                file=sys.stderr,
+                                flush=True,
+                            )
                         browser = verify_browser(
                             ROOT, args, node, versions, processes, containers, private
                         )
                         evidence.update(
-                            images={"application": image, "browser": browser}
+                            images={
+                                "application": image,
+                                "application_matches_source": current,
+                                "browser": browser,
+                            }
                         )
                     with evidence.phase("execution"):
                         Execution(
@@ -1172,9 +1315,11 @@ def main(argv=None):
     except KeyboardInterrupt, InterruptedError:
         code = 130
         evidence.update(status="interrupted", error="Run interrupted")
-    except RunnerError, OSError, ValueError, KeyError, TypeError:
+    except (RunnerError, OSError, ValueError, KeyError, TypeError) as error:
         code = code or 1
         evidence.update(status="failed")
+        if isinstance(error, RunnerError):
+            print("Browser run failed: " + str(error), file=sys.stderr, flush=True)
     finally:
         for number, handler in old_handlers.items():
             signal.signal(number, handler)

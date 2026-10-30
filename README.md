@@ -1027,6 +1027,12 @@ private authentication files and a unique result directory under
 `manifest.json` records selection, source, environment, phase times, child exits
 and final status. Pending or interrupted records are unverified. Keep private
 storage state and traces out of reports; the runner disables traces.
+The runner warns when the application image's copy of `requirements.txt`,
+`server.py`, `garmin-login.py`, `backend/` or `public/` differs from the working
+tree; rebuild it before trusting results. A new `public/` file also needs an
+entry in `STATIC_TARGETS` (`backend/http_api/static_assets.py`), which a unit
+test enforces. A failed child prints a failing test's location and first error
+line; its manifest entry lists all of them under `failures`.
 
 CI builds and shares the current application image once, then starts browser
 jobs beside the native suite. Its prepared browser image is pinned by exact
