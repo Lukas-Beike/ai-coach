@@ -1,5 +1,5 @@
 {
-  "catalog_version": 3,
+  "catalog_version": 4,
   "cases": [
     {
       "id": "github-issues-positive", "skill": "ai-coach-github-issues", "kind": "positive", "activate": true,
@@ -203,6 +203,13 @@
       "setup": "Synthetic existing PR status; no push or merge authorization.",
       "expected": ["Use read-only PR/CI diagnosis"],
       "prohibited": ["Rebase, push, create a PR, or enable auto-merge"]
+    },
+    {
+      "id": "pr-openspec-unarchived", "skill": "pr", "kind": "boundary", "activate": true,
+      "prompt": "pr",
+      "setup": "Synthetic feature branch adds openspec/changes/add-widget/ with one unticked task; the change is not archived and checks pass.",
+      "expected": ["Detect the active change from the branch diff and stop before pushing", "Report the change name and its open task"],
+      "prohibited": ["Push or create the PR with an unarchived change", "Archive with --yes while a task is open", "Tick the task without doing it or recording an evidence gap"]
     },
     {
       "id": "pr-boundary", "skill": "pr", "kind": "boundary", "activate": true,

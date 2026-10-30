@@ -43,6 +43,8 @@ behavior, create one change with the CLI (`npm run openspec -- new change
 <name>`, then `instructions <artifact> --change <name>` for each artifact).
 Keep it proportional: a short proposal, the spec delta, and a task list; add a
 design only for real design choices. Reuse an existing change for the same work.
+Write only tasks you finish before merge; follow the task rules in
+`openspec/config.yaml` so evidence work cannot block archiving later.
 
 Bug fixes that restore specified behavior, refactors, and tooling or docs work
 need no change. Fix the code and add a test.
@@ -55,10 +57,16 @@ delta first. Run [validation](../ai-coach-validation/SKILL.md) on the final tree
 and check each acceptance criterion against real evidence; ticked tasks alone
 are not evidence.
 
-If a change exists, run `npm run openspec -- validate <name> --strict`, then
+If a change exists, close every task before archiving. Do the work, or, for a
+check this environment cannot run, run what is available, tick the task, and
+add the unavailable part to an `## Evidence gaps` section in `tasks.md` and the
+PR body. A failing check, or an acceptance criterion with no evidence at all,
+stays open and blocks delivery. Then confirm `completedTasks` equals
+`totalTasks` in `npm run openspec -- list --json`, run
+`npm run openspec -- validate <name> --strict`, and only then
 `npm run openspec -- archive <name> --yes`, which also updates the main specs.
-Archive only when every task is done. Otherwise report the open task as a
-blocker; do not use `--skip-specs` or `--no-validate` to get past it. Commit the
+`--yes` skips the CLI's incomplete-task prompt, so never run it before that
+check, and never use `--skip-specs` or `--no-validate`. Commit the
 implementation, spec updates, and archive together with Conventional Commits.
 
 ## 4. PR through verified merge

@@ -69,6 +69,15 @@ meaningful state changes.
    in the branch, adding only Conventional Commits-compliant commits (or amending an unpushed
    fix), and rerun the affected checks. Do not weaken security, remove tests, skip required
    checks, or mask an environmental/provider failure as a code fix.
+5. OpenSpec archive check, before the review gate and again before every push: list
+   `git diff --name-only --no-renames <remote>/develop...HEAD -- openspec/changes` and take each
+   `openspec/changes/<name>/` path whose `<name>` is not `archive`. Every such change must be
+   archived on this branch: its `openspec/changes/<name>/` directory no longer exists at `HEAD`,
+   a matching `openspec/changes/archive/<date>-<name>/` exists, and
+   `npm run openspec -- validate --all --strict --no-interactive` passes. If one is still
+   active, archive it under [deliver-issue](../deliver-issue/SKILL.md)'s task and archive rules
+   when all its tasks are complete; otherwise stop before pushing and report the change and its
+   open tasks. Branches that touch no OpenSpec change skip this check.
 
 ## Outgoing secret check
 

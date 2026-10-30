@@ -34,4 +34,6 @@ rules:
     - Keep unresolved intent and known defects separate from accepted requirements.
   tasks:
     - Include scoped evidence review and strict OpenSpec validation before completion.
+    - List only work the agent completes before merge. Phrase environment-dependent checks as "run X where available and record unavailable checks as gaps", never as a task that waits for a later or manual run.
+    - Post-merge measurements and follow-up work belong in an issue, not in tasks.
     - Documentation backfills must not change application behavior or live data.
