@@ -41,7 +41,7 @@ not current. Its row stays stored and readable, so history keeps it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Final
 
@@ -129,22 +129,44 @@ def read_current_inputs(
 
     ``latest_wellness_day`` is the latest wellness day. Without it no wellness-row
     weight or eFTP is selected. ``as_of`` is the athlete-local day the Wahoo values
-    must be current on. Returns ``NO_CURRENT_INPUTS`` when nothing is stored.
+    must be current on. Without anything stored every field is empty.
     """
-    intervals = _intervals_current(reader, db) or NO_CURRENT_INPUTS
+    intervals = _intervals_current(reader, db) or _NO_SYNC
     wahoo_ftp, wahoo_weight = _wahoo_current(reader, db, as_of=as_of)
-    return replace(
-        intervals,
+    return CanonicalCurrentInputs(
+        bike_threshold_hr=intervals.bike_threshold_hr,
+        run_threshold_hr=intervals.run_threshold_hr,
+        athlete_threshold_hr=intervals.athlete_threshold_hr,
+        cycling_vo2max=intervals.cycling_vo2max,
+        running_vo2max=intervals.running_vo2max,
+        wellness_weight=_wellness_weight(reader, db, latest_wellness_day),
+        athlete_weight=intervals.athlete_weight,
         wahoo_ftp=wahoo_ftp,
         wahoo_weight=wahoo_weight,
-        wellness_weight=_wellness_weight(reader, db, latest_wellness_day),
+        athlete_eftp=intervals.athlete_eftp,
         wellness_eftp=_wellness_eftp(reader, db, latest_wellness_day),
+        athlete_record=intervals.athlete_record,
     )
 
 
-def _intervals_current(
-    reader: ObservationReader, db: Any
-) -> CanonicalCurrentInputs | None:
+@dataclass(frozen=True, slots=True)
+class _SyncValues:
+    """The athlete-record observations of one Intervals sync."""
+
+    bike_threshold_hr: tuple[Observation, ...] = ()
+    run_threshold_hr: tuple[Observation, ...] = ()
+    athlete_threshold_hr: Observation | None = None
+    cycling_vo2max: tuple[Observation, ...] = ()
+    running_vo2max: tuple[Observation, ...] = ()
+    athlete_weight: Observation | None = None
+    athlete_eftp: Observation | None = None
+    athlete_record: tuple[Observation, ...] = ()
+
+
+_NO_SYNC: Final = _SyncValues()
+
+
+def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None:
     """Return the Intervals observations of the latest sync; None without a sync."""
     synced = _latest_sync_instant(reader, db)
     if synced is None:
@@ -174,13 +196,12 @@ def _intervals_current(
         )
         if _is_athlete_record(observation)
     )
-    return CanonicalCurrentInputs(
+    return _SyncValues(
         bike_threshold_hr=_sport_candidates(thresholds, Sport.RIDE),
         run_threshold_hr=_sport_candidates(thresholds, Sport.RUN),
         athlete_threshold_hr=_athlete_observation(thresholds),
         cycling_vo2max=_sport_candidates(vo2max, Sport.RIDE),
         running_vo2max=_sport_candidates(vo2max, Sport.RUN),
-        wellness_weight=None,
         athlete_weight=_athlete_weight(weights),
         athlete_eftp=_athlete_eftp(eftps),
         athlete_record=athlete_record,
