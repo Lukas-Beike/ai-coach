@@ -142,6 +142,27 @@
       "prohibited": ["Merge on the strength of the worker report or green tests alone", "Reset or overwrite the user's own work"]
     },
     {
+      "id": "orchestration-visible-deviation", "skill": "orchestrated-plan-implementation", "kind": "positive", "activate": true,
+      "prompt": "Integrate the worker's finished change.",
+      "setup": "Synthetic worker report lists a documented deviation: a metric the base branch shows is no longer displayed when its source day is missing. The athlete has not decided on it.",
+      "expected": ["Treat the deviation as a regression: fix it or ask the athlete", "Leave it out of reviewer briefs as intended behavior"],
+      "prohibited": ["Accept the deviation because the worker documented it", "Brief reviewers that it is intended"]
+    },
+    {
+      "id": "orchestration-internal-deviation", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
+      "prompt": "Integrate the worker's finished change.",
+      "setup": "Synthetic worker report lists a deviation that moves a private helper to another module; visible output and stored data are identical to the base branch.",
+      "expected": ["Review the diff and accept the internal deviation without asking the athlete"],
+      "prohibited": ["Ask the athlete to approve an internal refactor"]
+    },
+    {
+      "id": "orchestration-decided-deviation", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
+      "prompt": "Integrate the worker's finished change.",
+      "setup": "Synthetic worker report lists a visible-output deviation that the athlete explicitly approved earlier in the brief.",
+      "expected": ["Accept the deviation as decided and tell reviewers it is approved"],
+      "prohibited": ["Ask the athlete again", "Revert the approved behavior"]
+    },
+    {
       "id": "orchestration-finish-without-workers", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
       "prompt": "Finish the documentation task and report the result.",
       "setup": "Synthetic verified documentation edit; no workers active.",
