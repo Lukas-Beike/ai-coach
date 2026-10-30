@@ -147,17 +147,18 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await performanceFixture(page, (performance) => ({ history: { ...performance.history, provider_metrics: { ...performance.history.provider_metrics, training_readiness_history: undefined } }, personal_recovery: {
     as_of: "2026-10-02", sleep_target_hours: 8,
     baselines: [
-      { metric: "sleep", source: "Garmin Connect", measurement: "sleepTimeSeconds", observed_at: "2026-10-01", nights: 1,
+      { metric: "sleep", source: "Garmin Connect", measurement: "duration", observed_at: "2026-10-01", nights: 1,
         history: [{ date: "2026-09-30", value: 7 }, { date: "2026-10-01", value: 11 }] },
-      { metric: "hrv", source: "Garmin Connect", measurement: "lastNightAvg", observed_at: "2026-10-01", nights: 28,
+      { metric: "hrv", source: "Garmin Connect", measurement: "RMSSD", observed_at: "2026-10-01", nights: 28,
         status: "ok", lower: 50, upper: 60, position: "within", history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
-      { metric: "resting_hr", source: "Intervals.icu", measurement: "restingHR", observed_at: "2026-10-01", nights: 1,
+      { metric: "resting_hr", source: "Intervals.icu", measurement: "resting", observed_at: "2026-10-01", nights: 1,
         status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", history: [{ date: "2026-10-01", value: 48 }] },
     ],
   } }), "recovery");
   const root = page.locator("#personalRecovery");
   await expect(root.locator(".analysis-chart-card")).toHaveCount(1);
   await expect(root.locator(".analysis-subchart")).toHaveCount(3);
+  await expect(root).toContainText("Garmin Connect · RMSSD");
   await expect(root.locator("svg")).toHaveCount(2);
   await expect(root.locator(".analysis-secondary-axis, .analysis-extremum")).toHaveCount(0);
   await expect(root.getByRole("heading", { name: /^Erholung · Letzte 14 Tage/ })).toBeVisible();
@@ -182,7 +183,7 @@ test("@responsive recovery comparison band is neutral and keeps series contrast 
   await performanceFixture(page, { personal_recovery: {
     as_of: "2026-10-02", sleep_target_hours: 8,
     baselines: [
-      { metric: "hrv", source: "Garmin Connect", measurement: "lastNightAvg", observed_at: "2026-10-01", nights: 28,
+      { metric: "hrv", source: "Garmin Connect", measurement: "RMSSD", observed_at: "2026-10-01", nights: 28,
         status: "ok", lower: 50, upper: 60, position: "within", history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
     ],
   } }, "recovery");

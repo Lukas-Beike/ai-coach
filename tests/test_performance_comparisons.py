@@ -2,6 +2,8 @@ import copy
 import unittest
 from datetime import date
 
+from performance_day_support import current_days
+
 from backend.performance.comparisons import (
     performance_comparisons,
     performance_trend_average,
@@ -52,7 +54,15 @@ class PerformanceTrendAverageTests(unittest.TestCase):
         metrics = {"readiness": {"source": "Intervals.icu Wellness"}}
 
         self.assertEqual(
-            performance_trend_average(snapshot, {}, metrics, "readiness", 7, TODAY),
+            performance_trend_average(
+                snapshot,
+                {},
+                metrics,
+                "readiness",
+                7,
+                TODAY,
+                wellness_days=current_days(snapshot["recent_wellness"]),
+            ),
             75.0,
         )
         self.assertIsNone(
@@ -167,7 +177,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
             metrics,
             recovery,
             load_context,
-            wellness_rows,
+            current_days(wellness_rows),
             activities,
         )
 
@@ -179,7 +189,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
         self.assertEqual(result["sleep_hours"]["unit"], "h")
         self.assertEqual(result["sleep_hours"]["days"], 7)
         self.assertEqual(result["sleep_hours"]["color"], "good")
-        self.assertEqual(result["restingHR"]["color"], "good")
+        self.assertEqual(result["resting_hr_bpm"]["color"], "good")
         self.assertEqual(result["fatigue_atl"]["color"], "bad")
         self.assertEqual(result["weight_kg_30d"]["color"], "neutral")
         self.assertEqual(result["training_load_7d"]["label"], "vorherigen 7 Tagen")

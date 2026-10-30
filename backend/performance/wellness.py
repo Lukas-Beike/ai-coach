@@ -6,9 +6,10 @@ from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any
 
-from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
+from backend.canonical.vocabulary import MetricKind
 from backend.performance.recovery import rounded_average
+from backend.performance.wellness_days import WellnessDay
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 
@@ -23,8 +24,8 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 
 def wellness_window_values(
-    rows: list[dict[str, Any]],
-    keys: tuple[str, ...],
+    days_view: tuple[WellnessDay, ...],
+    kind: MetricKind,
     days: int,
     end_date: date,
     divisor: float = 1.0,
@@ -32,30 +33,24 @@ def wellness_window_values(
     """Dated numbers of the inclusive, anchored window behind the wellness average."""
     cutoff = end_date - timedelta(days=days - 1)
     values: list[tuple[date, float]] = []
-    for row in rows:
-        try:
-            row_date = date.fromisoformat(
-                iso_date_prefix(str(row.get("id") or row.get("date") or ""))
-            )
-        except ValueError:
+    for item in days_view:
+        if item.day < cutoff or item.day > end_date:
             continue
-        if row_date < cutoff or row_date > end_date:
-            continue
-        value = _as_number(_first_present(row, keys))
+        value = item.value(kind)
         if value is not None:
-            values.append((row_date, float(value) / divisor))
+            values.append((item.day, float(value) / divisor))
     return values
 
 
 def wellness_average(
-    rows: list[dict[str, Any]],
-    keys: tuple[str, ...],
+    days_view: tuple[WellnessDay, ...],
+    kind: MetricKind,
     days: int,
     end_date: date,
     divisor: float = 1.0,
 ) -> float | None:
     """Average a wellness field over the inclusive, anchored date window."""
-    values = wellness_window_values(rows, keys, days, end_date, divisor)
+    values = wellness_window_values(days_view, kind, days, end_date, divisor)
     return rounded_average([value for _, value in values])
 
 

@@ -2,6 +2,9 @@ import copy
 import unittest
 from datetime import date
 
+from performance_day_support import current_days
+
+from backend.canonical.vocabulary import MetricKind
 from backend.performance.wellness import (
     comparison_value,
     readiness_score_value,
@@ -20,24 +23,32 @@ class WellnessAverageTests(unittest.TestCase):
             {"id": "2026-09-12", "sleepSecs": 100000},
         ]
         self.assertEqual(
-            wellness_average(rows, ("sleepSecs",), 3, date(2026, 9, 10), 3600),
+            wellness_average(
+                current_days(rows),
+                MetricKind.SLEEP_DURATION,
+                3,
+                date(2026, 9, 10),
+                3600,
+            ),
             8.0,
         )
 
     def test_invalid_dates_and_numbers_are_ignored(self):
         rows = [
-            {"id": "not-a-date", "value": 10},
-            {"date": "2026-09-09T08:00:00", "value": "bad"},
-            {"id": "2026-09-09", "value": "2,5"},
-            {"id": "2026-09-10", "value": float("nan")},
-            {"id": "2026-09-10", "value": 4},
+            {"id": "not-a-date", "ctl": 10},
+            {"id": "2026-09-09", "ctl": "2,5"},
+            {"id": "2026-09-10", "ctl": 4},
         ]
         anchor = date(2026, 9, 10)
-        self.assertEqual(wellness_average(rows, ("value",), 2, anchor, 2), 1.62)
+        self.assertEqual(
+            wellness_average(current_days(rows), MetricKind.CTL, 2, anchor, 2), 1.62
+        )
 
-    def test_zero_id_uses_date_fallback(self):
-        rows = [{"id": 0, "date": "2026-09-10", "value": 4}]
-        self.assertEqual(wellness_average(rows, ("value",), 1, date(2026, 9, 10)), 4)
+    def test_invalid_id_does_not_create_a_day(self):
+        rows = [{"id": 0, "date": "2026-09-10", "ctl": 4}]
+        self.assertIsNone(
+            wellness_average(current_days(rows), MetricKind.CTL, 1, date(2026, 9, 10))
+        )
 
 
 class WellnessFormTests(unittest.TestCase):

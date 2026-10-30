@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from datetime import date
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
@@ -24,6 +24,7 @@ from backend.errors import AppError
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.runtime.ports import ObservationSourceSelector
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -269,7 +270,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
 
     def test_detail_passes_canonical_inputs_resolved_once_per_call(self):
         selector, service = _canonical_activity_tool(
-            self, _activity_snapshot([{"id": "2026-09-22"}])
+            self, _activity_snapshot([{"id": "2026-09-22", "ctl": 45, "atl": 50}])
         )
         with patch(
             "backend.performance.activity_read_service.current_performance_context",
@@ -373,7 +374,12 @@ def _canonical_activity_tool(case: unittest.TestCase, snapshot: dict):
     """Wire the coach tool over the real activity service with a selecting source."""
     sessions = _sessions(case, *snapshot["raw_provider_data"]["activities"])
     inner = Mock()
-    inner.observations.return_value = ()
+    observations = map_intervals_wellness(
+        snapshot["recent_wellness"], retrieved_at=datetime(2026, 9, 23, tzinfo=UTC)
+    ).records
+    inner.observations.side_effect = lambda _db, kind, **_bounds: tuple(
+        item for item in observations if item.kind is kind
+    )
     selector = Mock(spec=ObservationSourceSelector)
     selector.reader_for.return_value = inner
     snapshot_reader = Mock()

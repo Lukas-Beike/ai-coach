@@ -70,26 +70,6 @@ def activity_rollup(activities: list[Any], days: int, end_date: date) -> dict[st
     }
 
 
-def _atl_wellness_rows(
-    wellness_rows: list[dict[str, Any]],
-) -> list[tuple[date, dict[str, Any]]]:
-    dated_rows: list[tuple[date, dict[str, Any]]] = []
-    for row in wellness_rows:
-        try:
-            row_date = date.fromisoformat(
-                iso_date_prefix(str(row.get("id") or row.get("date") or ""))
-            )
-        except AttributeError, TypeError, ValueError:
-            continue
-        if (
-            isinstance(row, dict)
-            and _as_number(_first_present(row, ("atl",))) is not None
-        ):
-            dated_rows.append((row_date, row))
-    dated_rows.sort(key=lambda item: item[0])
-    return dated_rows
-
-
 def _activity_load_by_date(activities: list[Any], anchor: date) -> dict[date, float]:
     load_by_date: dict[date, float] = {}
     for activity in activities:
@@ -114,16 +94,13 @@ def _activity_load_by_date(activities: list[Any], anchor: date) -> dict[date, fl
 
 
 def _atl_series_from_rows(
-    dated_wellness: list[tuple[date, dict[str, Any]]],
+    dated_wellness: list[tuple[date, float]],
     load_by_date: dict[date, float],
 ) -> dict[date, float]:
-    first_date, first_row = dated_wellness[0]
+    first_date, first_atl = dated_wellness[0]
     retention = math.exp(-1.0 / 7.0)
     decay = 1.0 - retention
-    previous = (
-        float(_as_number(_first_present(first_row, ("atl",))) or 0)
-        - load_by_date.get(first_date, 0.0) * decay
-    ) / retention
+    previous = (first_atl - load_by_date.get(first_date, 0.0) * decay) / retention
     series = {
         first_date: round(
             previous * retention + load_by_date.get(first_date, 0.0) * decay, 2
@@ -142,12 +119,12 @@ def _atl_series_from_rows(
 
 
 def actual_atl_series(
-    wellness_rows: list[dict[str, Any]],
+    atl_by_day: dict[date, float],
     activities: list[Any],
     end_date: date,
 ) -> dict[date, float]:
     """Reconstruct ATL from completed activity load only (default 7-day ATL decay)."""
-    dated_wellness = _atl_wellness_rows(wellness_rows)
+    dated_wellness = sorted(atl_by_day.items())
     if not dated_wellness:
         return {}
     return _atl_series_from_rows(

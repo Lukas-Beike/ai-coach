@@ -1022,6 +1022,7 @@ def _fixture_demo_garmin(today, history):
         "hrv": [
             {
                 "calendarDate": (today - timedelta(days=offset)).isoformat(),
+                # Provider input key; the projected measurement label is RMSSD.
                 "lastNightAvg": 46 + offset % 5,
             }
             for offset in range(90)

@@ -11,14 +11,41 @@ import unittest
 from datetime import date, timedelta
 from typing import Any
 
-from backend.performance.load import activity_rollup, actual_atl_series
-from backend.performance.load_context import performance_load_context
+from performance_day_support import current_days
+
+from backend.canonical.vocabulary import MetricKind
+from backend.performance.load import activity_rollup
+from backend.performance.load import actual_atl_series as _actual_atl_series
+from backend.performance.load_context import (
+    performance_load_context as _performance_load_context,
+)
 from backend.performance.training_focus import training_focus
 from backend.performance.training_report import deduplicated_rows
+from backend.performance.wellness_days import series
 
 TODAY = date(2026, 5, 4)
 RETENTION = math.exp(-1.0 / 7.0)
 DECAY = 1.0 - RETENTION
+
+
+def actual_atl_series(
+    rows: list[Any], activities: list[Any], end_date: date
+) -> dict[date, float]:
+    return _actual_atl_series(
+        series(
+            current_days([row for row in rows if isinstance(row, dict)]), MetricKind.ATL
+        ),
+        activities,
+        end_date,
+    )
+
+
+def performance_load_context(
+    activities: list[Any], rows: list[Any], _latest: dict[str, Any], today: date
+) -> dict[str, Any]:
+    return _performance_load_context(
+        activities, current_days([row for row in rows if isinstance(row, dict)]), today
+    )
 
 
 def _day(offset: int) -> str:
@@ -252,17 +279,13 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
             {date(2026, 5, 4): 10.0, date(2026, 5, 6): round(10 * RETENTION**2, 2)},
         )
 
-    def test_duplicate_wellness_dates_apply_the_day_load_twice(self) -> None:
-        # Quirk: each wellness row applies its day's load, so duplicate dates apply
-        # the load twice, and the last row written for that date wins.
+    def test_duplicate_wellness_dates_make_one_observed_day(self) -> None:
         series = actual_atl_series(
             [_wellness("2026-05-04", 10), _wellness("2026-05-04", 10)],
             [_activity("2026-05-04", icu_training_load=70)],
             TODAY,
         )
-        self.assertEqual(
-            series, {date(2026, 5, 4): round(10 * RETENTION + 70 * DECAY, 2)}
-        )
+        self.assertEqual(series, {date(2026, 5, 4): 10.0})
 
     def test_decimal_comma_activity_load_is_accepted_by_atl(self) -> None:
         series = actual_atl_series(
@@ -288,7 +311,7 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
         )
         self.assertEqual(series[date(2026, 5, 4)], round(10 * RETENTION, 2))
 
-    def test_row_date_prefers_id_and_does_not_fall_back_when_id_is_invalid(
+    def test_invalid_ids_do_not_create_canonical_days(
         self,
     ) -> None:
         # Quirk: an invalid id is not replaced by the date field, so that row drops.
@@ -301,15 +324,12 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
             [],
             TODAY,
         )
-        self.assertEqual(
-            series,
-            {date(2026, 5, 3): 10.0, date(2026, 5, 5): round(10 * RETENTION**2, 2)},
-        )
+        self.assertEqual(series, {})
 
-    def test_only_the_plain_atl_key_is_read_from_wellness_rows(self) -> None:
-        # Quirk: the atlLoad alias is ignored by the reconstruction.
+    def test_atl_alias_is_mapped_before_reconstruction(self) -> None:
         self.assertEqual(
-            actual_atl_series([{"id": "2026-05-04", "atlLoad": 10}], [], TODAY), {}
+            actual_atl_series([{"id": "2026-05-04", "atlLoad": 10}], [], TODAY),
+            {TODAY: 10.0},
         )
         self.assertEqual(
             actual_atl_series(
@@ -344,12 +364,12 @@ class CharacterizationLoadContextTests(unittest.TestCase):
                 "ctl": None,
                 "atl": None,
                 "tsb": None,
-                "rampRate": None,
-                "rampRate_source": None,
+                "ramp_rate": None,
+                "ramp_rate_source": None,
             },
         )
 
-    def test_load_block_takes_ctl_and_atl_from_aliases_without_normalising(
+    def test_load_block_does_not_read_snapshot_aliases_without_canonical_inputs(
         self,
     ) -> None:
         # Quirk: ctl and atl come from the latest Intervals row (with aliases) and
@@ -369,12 +389,12 @@ class CharacterizationLoadContextTests(unittest.TestCase):
         self.assertEqual(
             result["load"],
             {
-                "id": TODAY.isoformat(),
-                "ctl": "55",
-                "atl": 65,
+                "id": None,
+                "ctl": None,
+                "atl": None,
                 "tsb": None,
-                "rampRate": None,
-                "rampRate_source": None,
+                "ramp_rate": None,
+                "ramp_rate_source": None,
             },
         )
 
@@ -382,8 +402,8 @@ class CharacterizationLoadContextTests(unittest.TestCase):
         result = performance_load_context(
             [], [], {"ctl": "", "ctLoad": 55, "atl": 0}, TODAY
         )
-        self.assertEqual(result["load"]["ctl"], 55)
-        self.assertEqual(result["load"]["atl"], 0)
+        self.assertIsNone(result["load"]["ctl"])
+        self.assertIsNone(result["load"]["atl"])
 
     def test_carrier_form_fields_are_not_read_without_canonical_inputs(self) -> None:
         # Intended difference (#1412): the row's tsb/form/freshness and a derived

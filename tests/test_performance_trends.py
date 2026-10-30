@@ -2,6 +2,8 @@ import copy
 import unittest
 from datetime import date
 
+from performance_day_support import current_days
+
 from backend.performance.trends import (
     garmin_history_average,
     intervals_performance_average,
@@ -39,11 +41,13 @@ class GarminHistoryAverageTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             garmin_history_average({}, "weight_kg", 7)
         with self.assertRaises(TypeError):
-            intervals_performance_average([], "weight_kg", 7)
+            intervals_performance_average((), None, "weight_kg", 7)
 
 
 class IntervalsPerformanceAverageTests(unittest.TestCase):
-    def test_candidate_classes_sport_aliases_pace_zone2_readiness_and_bounds(self):
+    def test_wellness_values_and_run_eftp_are_bounded_and_sport_info_thresholds_absent(
+        self,
+    ):
         rows = [
             {
                 "id": "2026-09-08",
@@ -89,48 +93,36 @@ class IntervalsPerformanceAverageTests(unittest.TestCase):
             {"id": "2026-09-11", "weight": 999999},
         ]
         anchor = date(2026, 9, 10)
+        days = current_days(rows)
+        for key in (
+            "cycling_ftp_watts",
+            "bike_threshold_hr_bpm",
+            "cycling_vo2max_ml_kg_min",
+            "run_threshold_pace_seconds_per_km",
+            "run_zone2_pace_seconds_per_km",
+            "run_threshold_hr_bpm",
+            "running_vo2max_ml_kg_min",
+        ):
+            with self.subTest(key=key):
+                self.assertIsNone(
+                    intervals_performance_average(days, None, key, 3, anchor)
+                )
         self.assertEqual(
-            intervals_performance_average(rows, "cycling_ftp_watts", 3, anchor),
-            290,
-        )
-        self.assertEqual(
-            intervals_performance_average(rows, "bike_threshold_hr_bpm", 3, anchor),
-            161,
-        )
-        self.assertEqual(
-            intervals_performance_average(rows, "cycling_vo2max_ml_kg_min", 3, anchor),
-            55.5,
-        )
-        self.assertEqual(
-            intervals_performance_average(rows, "run_threshold_watts", 3, anchor),
+            intervals_performance_average(
+                days,
+                {date(2026, 9, 8): 300, date(2026, 9, 9): 310},
+                "run_threshold_watts",
+                3,
+                anchor,
+            ),
             305,
         )
         self.assertEqual(
-            intervals_performance_average(
-                rows, "run_threshold_pace_seconds_per_km", 3, anchor
-            ),
-            round((round(1000 / 3.3333) + 300) / 2, 2),
-        )
-        self.assertEqual(
-            intervals_performance_average(
-                rows, "run_zone2_pace_seconds_per_km", 3, anchor
-            ),
-            round((400) / 1, 2),
-        )
-        self.assertEqual(
-            intervals_performance_average(rows, "readiness", 3, anchor),
+            intervals_performance_average(days, None, "readiness", 3, anchor),
             82,
         )
         self.assertEqual(
-            intervals_performance_average(rows, "run_threshold_hr_bpm", 3, anchor),
-            175.5,
-        )
-        self.assertEqual(
-            intervals_performance_average(rows, "running_vo2max_ml_kg_min", 3, anchor),
-            58.5,
-        )
-        self.assertEqual(
-            intervals_performance_average(rows, "weight_kg", 3, anchor), 71
+            intervals_performance_average(days, None, "weight_kg", 3, anchor), 71
         )
 
     def test_invalid_dates_values_and_window_boundaries(self):
@@ -138,16 +130,19 @@ class IntervalsPerformanceAverageTests(unittest.TestCase):
             {"id": "2026-09-07", "weight": 60},
             {"id": "2026-09-08", "weight": "bad"},
             {"id": "2026-09-09", "weight": 70},
-            {"date": "2026-09-10", "weight": 72},
+            {"id": "2026-09-10", "weight": 72},
             {"id": "invalid", "weight": 80},
             {"id": "2026-09-11", "weight": 100},
         ]
+        days = current_days(rows)
         self.assertEqual(
-            intervals_performance_average(rows, "weight_kg", 3, date(2026, 9, 10)),
+            intervals_performance_average(
+                days, None, "weight_kg", 3, date(2026, 9, 10)
+            ),
             71,
         )
         self.assertIsNone(
-            intervals_performance_average(rows, "unknown", 3, date(2026, 9, 10))
+            intervals_performance_average(days, None, "unknown", 3, date(2026, 9, 10))
         )
 
     def test_inputs_are_not_mutated(self):
@@ -163,7 +158,11 @@ class IntervalsPerformanceAverageTests(unittest.TestCase):
         }
         before = copy.deepcopy((rows, snapshot))
         intervals_performance_average(
-            rows, "run_threshold_pace_seconds_per_km", 1, date(2026, 9, 10)
+            current_days(rows),
+            None,
+            "run_threshold_pace_seconds_per_km",
+            1,
+            date(2026, 9, 10),
         )
         garmin_history_average(snapshot, "x", 1, date(2026, 9, 10))
         self.assertEqual((rows, snapshot), before)

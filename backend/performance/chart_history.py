@@ -234,9 +234,9 @@ def analysis_history(
             garmin,
             today,
             canonical=canonical_body,
-            wellness_rows=None
+            wellness_days=None
             if canonical is None
-            else canonical.history_wellness_rows,
+            else canonical.history_wellness_days,
             activity_rows=None if canonical is None else canonical.activity_rows,
             garmin_ftp=None
             if garmin_canonical is None

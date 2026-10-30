@@ -2,7 +2,9 @@ import math
 import unittest
 from datetime import date
 
-from backend.performance.body import body_history
+from performance_day_support import SYNCED_AT, days_from_rows
+
+from backend.performance.body import body_history as _body_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.garmin_weight import (
     garmin_body_fat_daily_records,
@@ -11,6 +13,19 @@ from backend.performance.garmin_weight import (
 )
 
 TODAY = date(2026, 10, 6)
+
+
+def body_history(snapshot, garmin, today, **kwargs):
+    raw = snapshot.get("raw_provider_data") if isinstance(snapshot, dict) else None
+    rows = list(raw.get("wellness") or ()) if isinstance(raw, dict) else []
+    rows += (
+        list(snapshot.get("recent_wellness") or ())
+        if isinstance(snapshot, dict)
+        else []
+    )
+    return _body_history(
+        snapshot, garmin, today, wellness_days=days_from_rows(rows), **kwargs
+    )
 
 
 def _series(result, window, metric, source):
@@ -45,7 +60,7 @@ class BodyHistoryTests(unittest.TestCase):
             "points"
         ]
         self.assertEqual(intervals[-2]["value"], 71)
-        self.assertEqual(intervals[-2]["synced_at"], "intervals-sync")
+        self.assertEqual(intervals[-2]["synced_at"], SYNCED_AT.isoformat())
         self.assertIsNone(intervals[-1]["value"])
         self.assertEqual(
             _series(result, "14d", "body_fat_pct", "Intervals.icu Wellness")["points"][
@@ -228,6 +243,7 @@ class BodyHistoryTests(unittest.TestCase):
             ctl=None,
             atl=None,
             eftp_by_day={date(2026, 10, 5): 280.0, date(2026, 10, 6): 300.0},
+            history_wellness_days=days_from_rows(snapshot["recent_wellness"]),
         )
         result = analysis_history(snapshot, {}, TODAY, canonical=canonical)
         self.assertIn("body", result)

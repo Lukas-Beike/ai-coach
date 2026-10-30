@@ -8,7 +8,9 @@ from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
+from backend.canonical.vocabulary import MetricKind
 from backend.performance import eftp, garmin_metrics, garmin_weight, trends, wellness
+from backend.performance.wellness_days import WellnessDay
 
 VO2MAX_UNIT = "ml/kg/min"
 
@@ -59,13 +61,13 @@ def performance_trend_average(
     days: int,
     end_date: date,
     *,
-    wellness_rows: list[dict[str, Any]] | None = None,
+    wellness_days: tuple[WellnessDay, ...] = (),
+    run_eftp_by_day: Mapping[date, float] | None = None,
     garmin_history: Mapping[str, Mapping[date, float]] | None = None,
 ) -> float | None:
     """Average a metric over ``days``.
 
-    ``wellness_rows`` replace the snapshot rows and ``garmin_history`` the Garmin
-    snapshot's performance history.
+    Intervals trends read canonical days; Garmin history uses its own source.
     """
     current_source = metrics.get(key, {}).get("source")
     if current_source == garmin_metrics.GARMIN_PERFORMANCE_SOURCE:
@@ -74,11 +76,9 @@ def performance_trend_average(
         return trends.garmin_history_average(
             garmin, key, days, end_date, garmin_history
         )
-    if wellness_rows is None:
-        raw_rows = snapshot.get("recent_wellness")
-        rows = raw_rows if isinstance(raw_rows, list) else []
-        wellness_rows = [row for row in rows if isinstance(row, dict)]
-    return trends.intervals_performance_average(wellness_rows, key, days, end_date)
+    return trends.intervals_performance_average(
+        wellness_days, run_eftp_by_day, key, days, end_date
+    )
 
 
 def _performance_trend(
@@ -89,7 +89,8 @@ def _performance_trend(
     unit: str,
     today: date,
     higher_is_better: bool | None = True,
-    wellness_rows: list[dict[str, Any]] | None = None,
+    wellness_days: tuple[WellnessDay, ...] = (),
+    run_eftp_by_day: Mapping[date, float] | None = None,
     garmin_history: Mapping[str, Mapping[date, float]] | None = None,
 ) -> dict[str, Any] | None:
     return wellness.comparison_value(
@@ -101,7 +102,8 @@ def _performance_trend(
             key,
             30,
             today,
-            wellness_rows=wellness_rows,
+            wellness_days=wellness_days,
+            run_eftp_by_day=run_eftp_by_day,
             garmin_history=garmin_history,
         ),
         unit,
@@ -116,13 +118,14 @@ def performance_comparisons(
     metrics: dict[str, dict[str, Any]],
     recovery: dict[str, Any],
     load_context: dict[str, Any],
-    wellness_rows: list[dict[str, Any]],
+    wellness_days: tuple[WellnessDay, ...],
     activities: list[Any],
     today: date,
     *,
     garmin_history: Mapping[str, Mapping[date, float]] | None = None,
     eftp_by_day: Mapping[date, float] | None = None,
     form_by_day: Mapping[date, float] | None = None,
+    run_eftp_by_day: Mapping[date, float] | None = None,
 ) -> dict[str, Any]:
     load = load_context["load"]
     last_7 = load_context["last_7"]
@@ -140,7 +143,8 @@ def performance_comparisons(
             unit,
             today,
             higher_is_better,
-            wellness_rows=wellness_rows,
+            wellness_days=wellness_days,
+            run_eftp_by_day=run_eftp_by_day,
             garmin_history=garmin_history,
         )
 
@@ -153,7 +157,8 @@ def performance_comparisons(
             "readiness",
             30,
             today,
-            wellness_rows=wellness_rows,
+            wellness_days=wellness_days,
+            run_eftp_by_day=run_eftp_by_day,
             garmin_history=garmin_history,
         ),
         "",
@@ -166,14 +171,14 @@ def performance_comparisons(
         "readiness": wellness.comparison_value(
             recovery["readiness"], recovery["readiness_average"], "", 7
         ),
-        "restingHR": wellness.comparison_value(
+        "resting_hr_bpm": wellness.comparison_value(
             recovery["resting_hr"],
             recovery["resting_hr_average"],
             "bpm",
             7,
             higher_is_better=False,
         ),
-        "hrv": wellness.comparison_value(
+        "hrv_ms": wellness.comparison_value(
             recovery["hrv"], recovery["hrv_average"], "ms", 7
         ),
         "cycling_eftp_30d": wellness.comparison_value(
@@ -184,7 +189,7 @@ def performance_comparisons(
         ),
         "fitness_ctl": wellness.comparison_value(
             load["ctl"],
-            wellness.wellness_average(wellness_rows, ("ctl", "ctLoad"), 7, today),
+            wellness.wellness_average(wellness_days, MetricKind.CTL, 7, today),
             "",
             7,
         ),
@@ -193,7 +198,7 @@ def performance_comparisons(
         ),
         "fatigue_atl": wellness.comparison_value(
             load["atl"],
-            wellness.wellness_average(wellness_rows, ("atl", "atlLoad"), 7, today),
+            wellness.wellness_average(wellness_days, MetricKind.ATL, 7, today),
             "",
             7,
             higher_is_better=False,

@@ -39,6 +39,10 @@ class PersonalRecoveryTests(unittest.TestCase):
                 self.assertEqual("above", pulse["position"])
             hrv = next(row for row in result["baselines"] if row["metric"] == "hrv")
             self.assertEqual(("RMSSD", status), (hrv["measurement"], hrv["status"]))
+            self.assertEqual(
+                {"sleep": "duration", "resting_hr": "resting", "hrv": "RMSSD"},
+                {row["metric"]: row["measurement"] for row in result["baselines"]},
+            )
 
     def test_future_stale_and_separate_hrv_methods_are_not_classified(self):
         rows = self.rows(30)
@@ -91,7 +95,9 @@ class PersonalRecoveryTests(unittest.TestCase):
     def test_deficit_uses_known_nights_and_never_offsets_with_long_sleep(self):
         rows = self.rows(5)
         rows[0]["sleepSecs"] = 10 * 3600
-        result = mapped_personal_recovery(rows, {}, {"sleep_target_hours": "8"}, self.today)
+        result = mapped_personal_recovery(
+            rows, {}, {"sleep_target_hours": "8"}, self.today
+        )
         deficit = result["sleep_deficits"][0]
         self.assertEqual(
             (5, 6, "partial"),

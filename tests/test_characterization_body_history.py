@@ -9,11 +9,13 @@ import unittest
 from datetime import UTC, date, datetime
 from typing import Any
 
+from performance_day_support import SYNCED_AT, days_from_rows
+
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance import body as _body
 from backend.performance import chart_history as _chart_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
-from backend.performance.canonical_sections import wellness_day_values
+from backend.performance.wellness_days import wellness_day_values
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 
 TODAY = date(2026, 5, 4)
@@ -68,14 +70,32 @@ def _eftp_by_day(snapshot: Any) -> dict[date, float]:
 
 
 def body_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    if isinstance(snapshot, dict):
+        raw = snapshot.get("raw_provider_data")
+        rows += raw.get("wellness", []) if isinstance(raw, dict) else []
+        rows += snapshot.get("recent_wellness", [])
     return _body.body_history(
-        snapshot, garmin, today, eftp_by_day=_eftp_by_day(snapshot)
+        snapshot,
+        garmin,
+        today,
+        eftp_by_day=_eftp_by_day(snapshot),
+        wellness_days=days_from_rows(rows),
     )
 
 
 def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    if isinstance(snapshot, dict):
+        raw = snapshot.get("raw_provider_data")
+        rows += raw.get("wellness", []) if isinstance(raw, dict) else []
+        rows += snapshot.get("recent_wellness", [])
     canonical = CanonicalPerformanceInputs(
-        wellness_day=None, ctl=None, atl=None, eftp_by_day=_eftp_by_day(snapshot)
+        wellness_day=None,
+        ctl=None,
+        atl=None,
+        eftp_by_day=_eftp_by_day(snapshot),
+        history_wellness_days=days_from_rows(rows),
     )
     return _chart_history.analysis_history(snapshot, garmin, today, canonical=canonical)
 
@@ -254,7 +274,9 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
         result = body_history(snapshot, {}, TODAY)
         weights = _body_series(result, "14d", "weight_kg", INTERVALS_WELLNESS)
         self.assertEqual(_point(weights, "2026-05-03")["value"], 69)
-        self.assertEqual(_point(weights, "2026-05-03")["synced_at"], "sync")
+        self.assertEqual(
+            _point(weights, "2026-05-03")["synced_at"], SYNCED_AT.isoformat()
+        )
         # Quirk: "last valid value wins" per day, so a compact row without a
         # weight does not clear the raw weight for the same date.
         self.assertEqual(_point(weights, "2026-05-04")["value"], 71)

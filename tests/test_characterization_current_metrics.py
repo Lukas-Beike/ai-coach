@@ -9,6 +9,8 @@ import unittest
 from datetime import UTC, date, datetime
 from typing import Any
 
+from performance_day_support import latest_day
+
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_current import CanonicalCurrentInputs
 from backend.performance.current_metrics import current_performance_metrics
@@ -58,6 +60,9 @@ def _current(
         snapshot or _snapshot(),
         profile or {},
         garmin if garmin is not None else _garmin(),
+        latest_wellness=latest_day(
+            (snapshot or _snapshot()).get("recent_wellness", [])
+        ),
     )
 
 
@@ -220,7 +225,7 @@ class CurrentWeightChainTests(unittest.TestCase):
         result = _current(_snapshot(wellness=rows), {"weight_kg": 81})
         self.assertEqual(_pair(result["weight_kg"]), (78, WELLNESS))
 
-    def test_wellness_ids_compare_as_strings_so_unpadded_dates_win(self) -> None:
+    def test_unpadded_wellness_id_has_no_observation(self) -> None:
         # Quirk: "2026-5-9" > "2026-05-10" as strings, so the unpadded id is
         # treated as the latest row.
         rows = [
@@ -228,22 +233,20 @@ class CurrentWeightChainTests(unittest.TestCase):
             _wellness("2026-5-9", weight=77),
         ]
         result = _current(_snapshot(wellness=rows))
-        self.assertEqual(_pair(result["weight_kg"]), (77, WELLNESS))
+        self.assertEqual(_pair(result["weight_kg"]), (78, WELLNESS))
 
-    def test_only_latest_wellness_row_is_read_for_weight(self) -> None:
-        # Quirk: an older wellness row with a weight is not used when the newest
-        # row has none; the chain falls through to the athlete weight instead.
+    def test_snapshot_only_day_does_not_displace_an_observed_weight(self) -> None:
         rows = [_wellness("2026-05-01", weight=80), _wellness("2026-05-02")]
         result = _current(_snapshot(athlete={"weight": 79}, wellness=rows))
-        self.assertEqual(_pair(result["weight_kg"]), (79, INTERVALS))
+        self.assertEqual(_pair(result["weight_kg"]), (80, WELLNESS))
 
-    def test_zero_wellness_weight_is_a_present_value(self) -> None:
+    def test_invalid_zero_wellness_weight_has_no_observation(self) -> None:
         # Quirk: zero is accepted as a present value and beats the profile.
         result = _current(
             _snapshot(wellness=[_wellness("2026-05-03", weight=0)]),
             {"weight_kg": 81},
         )
-        self.assertEqual(_pair(result["weight_kg"]), (0, WELLNESS))
+        self.assertEqual(_pair(result["weight_kg"]), (81, PROFILE))
 
 
 class CurrentBodyMetricTests(unittest.TestCase):
@@ -357,8 +360,7 @@ class CurrentThresholdTests(unittest.TestCase):
         )
         self.assertEqual(_pair(result["cycling_ftp_watts"]), (240, INTERVALS))
 
-    def test_wellness_ftp_is_labelled_as_intervals_not_wellness_quirk(self) -> None:
-        # Quirk: a wellness-sourced FTP carries the plain "Intervals.icu" label.
+    def test_wellness_sport_info_ftp_does_not_supply_cycling_ftp(self) -> None:
         result = _current(
             _snapshot(
                 wellness=[
@@ -369,7 +371,7 @@ class CurrentThresholdTests(unittest.TestCase):
                 ]
             )
         )
-        self.assertEqual(_pair(result["cycling_ftp_watts"]), (255, INTERVALS))
+        self.assertEqual(_pair(result["cycling_ftp_watts"]), (None, None))
 
     def test_athlete_icu_ftp_is_last_cycling_fallback(self) -> None:
         result = _current(_snapshot(athlete={"icu_ftp": 240}))
@@ -405,7 +407,7 @@ class CurrentThresholdTests(unittest.TestCase):
                 ]
             )
         )
-        self.assertEqual(_pair(result["run_threshold_watts"]), (285, INTERVALS))
+        self.assertEqual(_pair(result["run_threshold_watts"]), (None, None))
 
         garmin = _garmin(
             {"running_threshold": {"power": {"functionalThresholdPower": 328}}}
@@ -462,7 +464,7 @@ class CurrentThresholdTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            _pair(result["run_threshold_pace_seconds_per_km"]), (250, INTERVALS)
+            _pair(result["run_threshold_pace_seconds_per_km"]), (None, None)
         )
 
         garmin = _garmin({"running_threshold": {"speedInMetersPerSecond": 4.0}})
@@ -506,9 +508,7 @@ class CurrentThresholdTests(unittest.TestCase):
                 ]
             )
         )
-        self.assertEqual(
-            _pair(result["run_zone2_pace_seconds_per_km"]), (300, INTERVALS)
-        )
+        self.assertEqual(_pair(result["run_zone2_pace_seconds_per_km"]), (None, None))
 
     def test_zone2_pace_inclusive_second_bounds(self) -> None:
         for value, expected in ((119, None), (120, 120), (1800, 1800), (1801, None)):
@@ -550,7 +550,7 @@ class CurrentThresholdTests(unittest.TestCase):
             )
         )
         self.assertEqual(_pair(result["bike_threshold_hr_bpm"]), (160, INTERVALS))
-        self.assertEqual(_pair(result["run_threshold_hr_bpm"]), (166, INTERVALS))
+        self.assertEqual(_pair(result["run_threshold_hr_bpm"]), (None, None))
 
         result = _current()
         self.assertEqual(_pair(result["bike_threshold_hr_bpm"]), (None, None))
@@ -586,7 +586,7 @@ class CurrentMaxHrTests(unittest.TestCase):
                 )
                 self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (190, INTERVALS))
 
-    def test_out_of_range_setting_falls_through_to_wellness(self) -> None:
+    def test_out_of_range_setting_does_not_read_wellness_sport_info(self) -> None:
         result = _current(
             _snapshot(
                 athlete={"sport_settings": [_setting("Ride", max_hr=300)]},
@@ -598,7 +598,7 @@ class CurrentMaxHrTests(unittest.TestCase):
                 ],
             )
         )
-        self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (188, WELLNESS))
+        self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (None, None))
 
     def test_activity_maximum_is_next_then_athlete_profile(self) -> None:
         activities = [
@@ -731,8 +731,7 @@ class CurrentVo2AndRacePredictionTests(unittest.TestCase):
                 ]
             )
         )
-        # Quirk: wellness-sourced VO2max carries the plain "Intervals.icu" label.
-        self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (51, INTERVALS))
+        self.assertEqual(_pair(result["cycling_vo2max_ml_kg_min"]), (None, None))
 
     def test_vo2max_running_uses_garmin_generic_then_intervals_running(self) -> None:
         # Quirk: a Garmin "generic" VO2max is reported as the running value.
@@ -754,7 +753,7 @@ class CurrentVo2AndRacePredictionTests(unittest.TestCase):
                 ]
             )
         )
-        self.assertEqual(_pair(result["running_vo2max_ml_kg_min"]), (49, INTERVALS))
+        self.assertEqual(_pair(result["running_vo2max_ml_kg_min"]), (None, None))
 
     def test_generic_athlete_vo2max_applies_to_both_sports_quirk(self) -> None:
         # Quirk: an athlete-level vo2max is used for cycling and for running.

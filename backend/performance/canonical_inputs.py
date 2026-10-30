@@ -1,41 +1,9 @@
-"""Canonical performance inputs read through the observation and activity-row ports.
+"""Read performance inputs through canonical observation and activity ports.
 
-Activities and wellness rows: the reader decides which source serves them, see
-``backend.performance.canonical_sections``. The activity rows are the raw rows of
-``ActivityRowReader`` and their compact projection; the wellness rows are rebuilt
-from the Intervals.icu wellness-day observations and carry the snapshot's
-non-canonical wellness fields. The latest wellness day is the latest day of any
-wellness row or observation.
-
-CTL and ATL: each value is selected by ``select_current`` pinned to the latest
-wellness day, which is the row the legacy load context reads. The read window spans
-the wellness rows and never extends past the latest day, so older or newer
-canonical history cannot change the current load.
-
-Form, ramp rate and eFTP: the Intervals.icu wellness-day form and ride eFTP
-observations are read as day series (``form_by_day``, ``eftp_by_day``), the only
-source of those values. The ramp rate is the latest wellness day's CTL minus the CTL
-of exactly seven days earlier, derived from the wellness-day CTL observations; it is
-None when either day is missing. The current eFTP of the sport thresholds comes from
-``backend.performance.canonical_current``.
-
-Current sport thresholds and VO2max come from the latest Intervals sync, see
-``backend.performance.canonical_current``. The recovery observations (sleep, resting
-HR, HRV, readiness) come from ``backend.performance.canonical_recovery`` and are read
-with and without a usable wellness day. The Garmin performance values come from ``backend.performance.garmin_canonical`` and
-the daily totals (steps, floors, energy) of the recent days from
-``backend.performance.daily_health``.
-
-Without a usable wellness day the inputs still carry the activities, the
-wellness rows and the recovery observations, and no load or Intervals threshold; a
-stored Wahoo cycling FTP or weight fallback and the athlete record's eFTP still
-apply. Without a canonical
-activity reader and without wellness rows there are no inputs, and the caller keeps
-the legacy values.
-
-The activities cover the year before ``as_of``, extended back to the oldest wellness
-row, which seeds the reconstructed ATL. Every activity window the performance
-projection uses is shorter, so a long synced history is not decoded on each read.
+Wellness values come only from provider-neutral ``WellnessDay`` observations.
+The current window covers 90 days ending on its latest day; history keeps every
+stored day. Snapshot wellness sections do not affect these inputs. Activities
+cover the year before ``as_of``, extended to the current window's first day.
 """
 
 from __future__ import annotations
@@ -48,7 +16,7 @@ from typing import Any, Final, cast
 from backend.activities.sync_time import activities_synced_at
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
-from backend.performance import canonical_sections
+from backend.performance import canonical_sections, wellness_days
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
     read_current_inputs,
@@ -64,6 +32,7 @@ from backend.performance.garmin_canonical import (
     read_garmin_state,
 )
 from backend.performance.source_policy import select_current
+from backend.performance.wellness_days import WellnessDay
 from backend.runtime.ports import (
     ActivityRowReader,
     CanonicalTableServing,
@@ -83,19 +52,16 @@ class CanonicalPerformanceInputs:
     read. ``recovery`` holds the recovery observations of the current context and
     the personal baselines, or None when they were not read.
 
-    ``activity_rows`` are the raw activity rows (newest first, before
-    de-duplication) and ``activities`` their compact projection, or None when no
-    activity reader was configured. ``wellness_rows`` are the wellness rows of the
-    performance context and ``history_wellness_rows`` those of the history views,
-    which also keep the raw snapshot rows as carrier. Both are None when the inputs
-    were built without wellness rows.
+    ``activity_rows`` are raw activity rows and ``activities`` their compact
+    projection. ``wellness_days`` is the current 90-day window;
+    ``history_wellness_days`` keeps all stored days and their provenance.
 
     ``garmin`` holds the Garmin performance values and ``daily_health`` the daily
     totals of the last ``DAILY_HEALTH_DAYS`` days by ISO date; both are None when
     they were not read.
 
-    ``form_by_day`` and ``eftp_by_day`` are the Intervals.icu wellness-day form and
-    ride eFTP observations by day; they are the only source of those values.
+    ``form_by_day``, ``eftp_by_day`` and ``run_eftp_by_day`` are the
+    Intervals.icu wellness-day form and sport-scoped eFTP series.
     ``ramp_rate`` is the latest wellness day's CTL minus the CTL of exactly seven
     days earlier, rounded to two decimals, or None when either day is missing.
     """
@@ -107,12 +73,13 @@ class CanonicalPerformanceInputs:
     recovery: CanonicalRecoveryInputs | None = None
     activity_rows: tuple[dict[str, Any], ...] | None = None
     activities: tuple[dict[str, Any], ...] | None = None
-    wellness_rows: tuple[dict[str, Any], ...] | None = None
-    history_wellness_rows: tuple[dict[str, Any], ...] | None = None
+    wellness_days: tuple[WellnessDay, ...] | None = None
+    history_wellness_days: tuple[WellnessDay, ...] | None = None
     garmin: GarminCanonicalMetrics | None = None
     daily_health: Mapping[str, Mapping[str, Any]] | None = None
     form_by_day: Mapping[date, float] | None = None
     eftp_by_day: Mapping[date, float] | None = None
+    run_eftp_by_day: Mapping[date, float] | None = None
     ramp_rate: float | None = None
 
 
@@ -281,7 +248,7 @@ def performance_options(
 class ReadOnceObservationReader:
     """Serve the reads of one snapshot unit from one unbounded read per kind.
 
-    The wellness rows, the current metrics and the recovery inputs all ask for
+    The wellness days, the current metrics and the recovery inputs all ask for
     overlapping observations, so each kind reaches the
     database once per call and the bounds are applied in memory.
     """
@@ -332,17 +299,18 @@ def read_once(reader: ObservationReader) -> ReadOnceObservationReader:
 
 @dataclass(frozen=True, slots=True)
 class _CarriedRows:
-    """The rows and Garmin values every canonical performance input carries."""
+    """The day views, activity rows and Garmin values carried by an input."""
 
     activity_rows: tuple[dict[str, Any], ...] | None
     activities: tuple[dict[str, Any], ...] | None
-    wellness_rows: tuple[dict[str, Any], ...]
-    history_wellness_rows: tuple[dict[str, Any], ...]
+    wellness_days: tuple[WellnessDay, ...]
+    history_wellness_days: tuple[WellnessDay, ...]
     garmin: GarminCanonicalMetrics
     daily_health: Mapping[str, Mapping[str, Any]]
     recovery: CanonicalRecoveryInputs
     form_by_day: Mapping[date, float]
     eftp_by_day: Mapping[date, float]
+    run_eftp_by_day: Mapping[date, float]
 
     def inputs(
         self,
@@ -361,12 +329,13 @@ class _CarriedRows:
             recovery=self.recovery,
             activity_rows=self.activity_rows,
             activities=self.activities,
-            wellness_rows=self.wellness_rows,
-            history_wellness_rows=self.history_wellness_rows,
+            wellness_days=self.wellness_days,
+            history_wellness_days=self.history_wellness_days,
             garmin=self.garmin,
             daily_health=self.daily_health,
             form_by_day=self.form_by_day,
             eftp_by_day=self.eftp_by_day,
+            run_eftp_by_day=self.run_eftp_by_day,
             ramp_rate=ramp_rate,
         )
 
@@ -379,47 +348,37 @@ def read_performance_inputs(
     activity_reader: ActivityRowReader | None = None,
     as_of: date,
 ) -> CanonicalPerformanceInputs | None:
-    """Read the canonical activities, wellness rows and load inputs of a snapshot.
+    """Read canonical activity rows and wellness days in one selected unit.
 
-    The snapshot only carries the wellness fields that have no observation (see
-    ``canonical_sections``); activities and wellness values come from the readers.
-    None means there is no activity reader and no wellness row, so the caller keeps
-    the legacy values. A latest row (the row the legacy reader picks) whose id is
-    not a strict ``YYYY-MM-DD`` date yields inputs without a wellness day. A
-    selecting reader chooses its source once for all reads. ``as_of`` is the
-    athlete-local day the Wahoo fallbacks must be current on.
+    Snapshot wellness sections are ignored. None means no activity reader and
+    no observed wellness day. ``as_of`` is the athlete-local day.
     """
     reader = resolve_reader(reader, db)
     if not isinstance(reader, ReadOnceObservationReader):
         reader = read_once(reader)
-    observed = canonical_sections.read_wellness_observations(reader, db)
-    compact = _snapshot_rows(snapshot, "recent_wellness")
-    rows = canonical_sections.wellness_rows(compact, observed)
-    history = canonical_sections.wellness_rows(
-        [*_raw_wellness_rows(snapshot), *compact], observed
-    )
+    history = wellness_days.read_wellness_days(reader, db)
+    days = wellness_days.current_window(history)
     activity_rows = (
         None
         if activity_reader is None
         else tuple(
-            activity_reader.activity_rows(db, start=_activity_start(rows, as_of))
+            activity_reader.activity_rows(db, start=_activity_start(days, as_of))
         )
     )
-    if activity_rows is None and not rows:
+    if activity_rows is None and not days:
         return None
     activities = (
         None
         if activity_rows is None
         else tuple(canonical_sections.compact_activity_rows(activity_rows))
     )
-    latest_day = (
-        canonical_sections.row_day(max(rows, key=_row_id_text)) if rows else None
-    )
+    latest_view = wellness_days.latest(days)
+    latest_day = None if latest_view is None else latest_view.day
     carried = _CarriedRows(
         activity_rows=activity_rows,
         activities=activities,
-        wellness_rows=tuple(rows),
-        history_wellness_rows=tuple(history),
+        wellness_days=days,
+        history_wellness_days=history,
         garmin=read_garmin_state(reader, db).metrics,
         daily_health=read_daily_health_by_date(
             reader, db, start=as_of - timedelta(days=DAILY_HEALTH_DAYS), end=as_of
@@ -427,12 +386,14 @@ def read_performance_inputs(
         recovery=read_recovery_inputs(
             reader, db, as_of=as_of, latest_wellness_day=latest_day
         ),
-        form_by_day=canonical_sections.wellness_day_values(
-            reader.observations(db, MetricKind.FORM)
-        ),
-        eftp_by_day=canonical_sections.wellness_day_values(
+        form_by_day=wellness_days.series(history, MetricKind.FORM),
+        eftp_by_day=wellness_days.wellness_day_values(
             reader.observations(db, MetricKind.EFTP, sport=Sport.RIDE),
             sport=Sport.RIDE,
+        ),
+        run_eftp_by_day=wellness_days.wellness_day_values(
+            reader.observations(db, MetricKind.EFTP, sport=Sport.RUN),
+            sport=Sport.RUN,
         ),
     )
     if latest_day is None:
@@ -442,7 +403,7 @@ def read_performance_inputs(
             atl=None,
             current=read_wahoo_fallbacks(reader, db, as_of=as_of),
         )
-    start = min(day for day in map(canonical_sections.row_day, rows) if day is not None)
+    start = days[0].day
     loaded = _load_resolved(
         reader, db, latest_wellness_day=latest_day, start=start, end=latest_day
     )
@@ -454,7 +415,7 @@ def read_performance_inputs(
             reader, db, latest_wellness_day=latest_day, as_of=as_of
         ),
         ramp_rate=_ramp_rate(
-            canonical_sections.wellness_day_values(observed[MetricKind.CTL]),
+            wellness_days.series(days, MetricKind.CTL),
             latest_day,
         ),
     )
@@ -469,10 +430,13 @@ def _ramp_rate(ctl_by_day: Mapping[date, float], day: date) -> float | None:
     return round(current - earlier, 2)
 
 
-def _activity_start(rows: list[dict[str, Any]], as_of: date) -> date:
+def _activity_start(days: tuple[WellnessDay, ...], as_of: date) -> date:
     """Return the first day of activities the performance inputs read."""
-    days = [day for day in map(canonical_sections.row_day, rows) if day is not None]
-    return min([as_of - timedelta(days=ACTIVITY_HISTORY_DAYS - 1), *days])
+    return (
+        min(as_of - timedelta(days=ACTIVITY_HISTORY_DAYS - 1), days[0].day)
+        if days
+        else as_of - timedelta(days=ACTIVITY_HISTORY_DAYS - 1)
+    )
 
 
 def _current_value(
@@ -489,24 +453,3 @@ def _current_value(
         observations, kind, latest_wellness_day=latest_wellness_day
     )
     return None if observation is None else observation.value.value
-
-
-def _snapshot_rows(
-    snapshot: Mapping[str, Any] | None, key: str
-) -> list[dict[str, Any]]:
-    raw = snapshot.get(key) if snapshot else None
-    if not isinstance(raw, list):
-        return []
-    return [row for row in raw if isinstance(row, dict)]
-
-
-def _raw_wellness_rows(snapshot: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    raw = snapshot.get("raw_provider_data") if snapshot else None
-    if not isinstance(raw, dict):
-        return []
-    return _snapshot_rows(raw, "wellness")
-
-
-def _row_id_text(row: Mapping[str, Any]) -> str:
-    """Order rows as the legacy latest-row selection does."""
-    return str(row.get("id") or "")

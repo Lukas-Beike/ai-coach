@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import FixedActivityRows, NoObservations
 from canonical_recovery_support import recovery_only_inputs
+from performance_day_support import canonical_from_snapshot
 
 from backend.coach.context import (
     COACH_CONTEXT_SECTION_LIMITS,
@@ -125,12 +127,17 @@ def _context(
     today: date,
 ) -> dict[str, Any]:
     """Current performance with recovery observations mapped from the fixtures."""
+    canonical = canonical_from_snapshot(snapshot, today) if snapshot else None
     return current_performance_context(
         snapshot,
         garmin,
         profile,
         today,
-        canonical=_recovery(garmin, snapshot),
+        canonical=replace(
+            canonical, recovery=_recovery(garmin, snapshot).recovery, garmin=None
+        )
+        if canonical is not None
+        else _recovery(garmin, snapshot),
     )
 
 
@@ -288,7 +295,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         self.assertEqual(result["as_of"], "2026-05-04T05:00:00Z")
         self.assertEqual(
             set(result["thresholds"]),
-            {"icu_ftp", "icu_w_prime", "max_hr", "lthr", "weight"},
+            {"ftp_w", "w_prime_j", "max_hr", "lthr", "weight"},
         )
 
     def test_athlete_icu_ftp_is_the_labelled_intervals_fallback(self) -> None:
@@ -298,7 +305,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         self.assertEqual(
             result["metrics"]["cycling_ftp_watts"]["source"], INTERVALS_SOURCE
         )
-        self.assertEqual(result["thresholds"]["icu_ftp"], 250)
+        self.assertEqual(result["thresholds"]["ftp_w"], 250)
 
     def test_generic_lthr_is_labelled_as_allgemein_not_as_intervals(self) -> None:
         result = _context(_intervals_snapshot(), {}, {}, TODAY)
@@ -320,8 +327,8 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         self.assertEqual(ftp["freshness"], "partial")
         self.assertEqual(ftp["measurement_age_days"], 3)
         # Quirk: thresholds carry bare values; provenance lives in metrics only.
-        self.assertEqual(result["thresholds"]["icu_ftp"], 265)
-        self.assertNotIsInstance(result["thresholds"]["icu_ftp"], dict)
+        self.assertEqual(result["thresholds"]["ftp_w"], 265)
+        self.assertNotIsInstance(result["thresholds"]["ftp_w"], dict)
 
     def test_recovery_id_follows_sleep_then_resting_hr_then_hrv_then_wellness(
         self,
@@ -367,20 +374,21 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         result = _context(_intervals_snapshot(), _garmin_payload(), {}, TODAY)
 
         recovery = result["recovery"]
-        self.assertEqual(recovery["restingHR_source"], GARMIN_SOURCE)
-        self.assertEqual(recovery["sleepScore"], 84)
-        self.assertEqual(recovery["sleepScore_source"], GARMIN_SOURCE)
+        self.assertEqual(recovery["resting_hr_bpm_source"], GARMIN_SOURCE)
+        self.assertEqual(recovery["sleep_score"], 84)
+        self.assertEqual(recovery["sleep_score_source"], GARMIN_SOURCE)
         self.assertEqual(recovery["sleep_hours"], 7.5)
         self.assertEqual(recovery["sleep_source"], GARMIN_SOURCE)
         self.assertEqual(
             set(recovery["source_freshness"]),
-            {"restingHR", "hrv", "sleepScore", "sleep_hours"},
+            {"resting_hr_bpm", "hrv_ms", "sleep_score", "sleep_hours"},
         )
         self.assertEqual(
-            recovery["source_freshness"]["restingHR"]["freshness"], "current"
+            recovery["source_freshness"]["resting_hr_bpm"]["freshness"], "current"
         )
         self.assertEqual(
-            recovery["source_freshness"]["restingHR"]["measurement_status"], "today"
+            recovery["source_freshness"]["resting_hr_bpm"]["measurement_status"],
+            "today",
         )
 
     def test_intervals_wellness_fallback_is_labelled_without_garmin_freshness(
@@ -398,9 +406,9 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         result = _context(_intervals_snapshot(recent_wellness=wellness), {}, {}, TODAY)
 
         recovery = result["recovery"]
-        self.assertEqual(recovery["restingHR"], 52)
-        self.assertEqual(recovery["restingHR_source"], WELLNESS_SOURCE)
-        self.assertEqual(recovery["sleepScore_source"], WELLNESS_SOURCE)
+        self.assertEqual(recovery["resting_hr_bpm"], 52)
+        self.assertEqual(recovery["resting_hr_bpm_source"], WELLNESS_SOURCE)
+        self.assertEqual(recovery["sleep_score_source"], WELLNESS_SOURCE)
         self.assertEqual(recovery["sleep_hours"], 6.5)
         self.assertEqual(recovery["sleep_source"], WELLNESS_SOURCE)
         self.assertEqual(recovery["source_freshness"], {})
@@ -423,9 +431,9 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
         self.assertEqual(
             result["metrics"]["bike_threshold_hr_bpm"]["source"], GENERIC_LTHR_SOURCE
         )
-        self.assertEqual(result["recovery"]["restingHR_source"], GARMIN_SOURCE)
-        self.assertEqual(result["recovery"]["hrv_source"], GARMIN_SOURCE)
-        self.assertEqual(result["recovery"]["sleepScore_source"], GARMIN_SOURCE)
+        self.assertEqual(result["recovery"]["resting_hr_bpm_source"], GARMIN_SOURCE)
+        self.assertEqual(result["recovery"]["hrv_ms_source"], GARMIN_SOURCE)
+        self.assertEqual(result["recovery"]["sleep_score_source"], GARMIN_SOURCE)
         self.assertEqual(
             result["garmin_training_load"]["four_week_balance"]["source"],
             GARMIN_SOURCE,

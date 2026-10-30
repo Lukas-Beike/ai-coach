@@ -959,7 +959,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                     {
                         "metric": "sleep",
                         "source": "Intervals.icu",
-                        "measurement": "sleepSecs",
+                        "measurement": "duration",
                         "unit": "hours",
                         "history": [
                             {"date": key, "value": value}
@@ -972,6 +972,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             activity_rows=[],
         )
         report = next(row for row in result["reports"] if row["tag"] == "travel")
+        self.assertEqual(report["measurement"], "duration")
         self.assertEqual(report["status"], "observed_association")
         self.assertEqual(report["groups"]["with"]["days"], 10)
         self.assertEqual(report["groups"]["without"]["days"], 10)

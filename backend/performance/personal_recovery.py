@@ -1,4 +1,4 @@
-"""Personal recovery distributions, separated by provider and measurement field.
+"""Personal recovery distributions, separated by provider and measurement method.
 
 The comparisons and sleep goal shortfalls read the daily canonical observations of
 each provider. Sleep timing variability reads the canonical sleep periods when the
@@ -19,30 +19,29 @@ from backend.canonical.sleep_bounds import bounds_fields, sleep_intervals
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.canonical_recovery import CanonicalRecoveryInputs
 from backend.performance.display_sources import preferred_providers
-from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.source_labels import SourceView, provider_label
 
 # Each provider's series: (provider, kind) -> (metric, measurement label, scale).
-# The measurement is fixed by the provider field, so RMSSD and SDNN form separate,
+# The measurement is the method, so RMSSD and SDNN form separate,
 # never mixed, baselines.
 _SERIES: Final = {
-    (ProviderId.INTERVALS, MetricKind.SLEEP_DURATION): ("sleep", "sleepSecs", 3600),
-    (ProviderId.INTERVALS, MetricKind.RESTING_HR): ("resting_hr", "restingHR", 1),
+    (ProviderId.INTERVALS, MetricKind.SLEEP_DURATION): ("sleep", "duration", 3600),
+    (ProviderId.INTERVALS, MetricKind.RESTING_HR): ("resting_hr", "resting", 1),
     (ProviderId.INTERVALS, MetricKind.HRV_RMSSD): ("hrv", "RMSSD", 1),
     (ProviderId.INTERVALS, MetricKind.HRV_SDNN): ("hrv", "SDNN", 1),
     (ProviderId.GARMIN, MetricKind.SLEEP_DURATION): (
         "sleep",
-        garmin_perf_fields.SLEEP_SECONDS,
+        "duration",
         3600,
     ),
     (ProviderId.GARMIN, MetricKind.RESTING_HR): (
         "resting_hr",
-        garmin_perf_fields.RESTING_HEART_RATE,
+        "resting",
         1,
     ),
     (ProviderId.GARMIN, MetricKind.HRV_RMSSD): (
         "hrv",
-        garmin_perf_fields.HRV_NIGHT_AVERAGE,
+        "RMSSD",
         1,
     ),
 }
