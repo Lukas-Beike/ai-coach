@@ -269,7 +269,8 @@ def _performance_body_metrics(
     height_value, height_source, height_provider = _first_performance_source(
         (
             _observation_source(canonical.athlete_value(MetricKind.HEIGHT)),
-            (profile.get("height_cm"), "Manuell", None),
+            # The canonical height is in cm; only the profile may hold metres.
+            (_height_in_cm(profile.get("height_cm")), "Manuell", None),
         )
     )
     weight_metric = (
@@ -283,7 +284,7 @@ def _performance_body_metrics(
             body_fat_value, "%", body_fat_source, provider=body_fat_provider
         ),
         "height_cm": metric(
-            _height_in_cm(height_value),
+            height_value,
             "cm",
             height_source,
             provider=height_provider,
@@ -349,6 +350,16 @@ def _performance_threshold_metrics(
     }
 
 
+def _sport_vo2max(
+    canonical: CanonicalCurrentInputs, sport: Sport
+) -> Observation | None:
+    """The sport's VO2max (setting, then athlete sport field), else the athlete-wide one."""
+    candidates = (
+        canonical.cycling_vo2max if sport is Sport.RIDE else canonical.running_vo2max
+    )
+    return _first(candidates) or canonical.athlete_value(MetricKind.VO2MAX)
+
+
 def _performance_vo2_and_prediction_metrics(
     garmin_metrics: dict[str, dict[str, Any]], canonical: CanonicalCurrentInputs
 ) -> dict[str, dict[str, Any]]:
@@ -356,12 +367,12 @@ def _performance_vo2_and_prediction_metrics(
         "cycling_vo2max_ml_kg_min": _preferred_performance_metric(
             garmin_metrics,
             "cycling_vo2max_ml_kg_min",
-            _observation_metric(_first(canonical.cycling_vo2max), VO2MAX_UNIT),
+            _observation_metric(_sport_vo2max(canonical, Sport.RIDE), VO2MAX_UNIT),
         ),
         "running_vo2max_ml_kg_min": _preferred_performance_metric(
             garmin_metrics,
             "running_vo2max_ml_kg_min",
-            _observation_metric(_first(canonical.running_vo2max), VO2MAX_UNIT),
+            _observation_metric(_sport_vo2max(canonical, Sport.RUN), VO2MAX_UNIT),
         ),
         **{
             key: _preferred_performance_metric(

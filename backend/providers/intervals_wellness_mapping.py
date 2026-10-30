@@ -111,6 +111,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.providers.intervals_performance_fields import CONFIGURED_FTP, W_PRIME
 from backend.providers.intervals_zone_mapping import type_sports
 
 # Version 4: the athlete-profile weight has its own observation key, so it no
@@ -120,9 +121,10 @@ from backend.providers.intervals_zone_mapping import type_sports
 # athlete record its zone configurations. Version 8: sport settings and sportInfo
 # entries are classified by each of their type texts, and only the first sport
 # setting of each sport is mapped. Re-projection rewrites rows written at older
-# versions. Version 9: the athlete record's W′, height and body fat, the Run
-# setting's Zone-2 pace, and the athlete-wide VO2max of a sport without a
-# setting value are mapped, so current metrics need no snapshot section.
+# versions. Version 9: the athlete record's W′, height, body fat and generic
+# VO2max, the Run setting's Zone-2 pace, and the athlete's sport VO2max field of
+# a sport without a setting value are mapped, so current metrics need no snapshot
+# section.
 MAPPER_VERSION: Final = 9
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
@@ -207,11 +209,12 @@ _RUN_ZONE2_PACE_ALIASES: Final = (
     "paceZone2",
     "zone2Pace",
 )
-_TOP_LEVEL_RIDE_FTP_ALIASES: Final = ("icu_ftp",)
-# Athlete-wide VO2max of a sport whose setting has none, as current_metrics read it.
+_TOP_LEVEL_RIDE_FTP_ALIASES: Final = (CONFIGURED_FTP,)
+# The athlete record's sport VO2max field, mapped for a sport whose setting has
+# none; the generic athlete VO2max stays sport-less in ``_ATHLETE_FIELDS``.
 _ATHLETE_VO2MAX_ALIASES_BY_SPORT: Final[Mapping[Sport, tuple[str, ...]]] = {
-    Sport.RIDE: ("cycling_vo2max", "vo2max", "vo2_max"),
-    Sport.RUN: ("running_vo2max", "vo2max", "vo2_max"),
+    Sport.RIDE: ("cycling_vo2max",),
+    Sport.RUN: ("running_vo2max",),
 }
 # Athlete-wide values: sport None, read after the sport entries.
 _ATHLETE_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
@@ -220,7 +223,8 @@ _ATHLETE_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
     (MetricKind.MAX_HR, _MAX_HR_ALIASES),
     (MetricKind.BODY_FAT, ("bodyFat", "body_fat")),
     (MetricKind.HEIGHT, ("height_cm", "height")),
-    (MetricKind.W_PRIME, ("icu_w_prime",)),
+    (MetricKind.W_PRIME, (W_PRIME,)),
+    (MetricKind.VO2MAX, ("vo2max", "vo2_max")),
 )
 
 

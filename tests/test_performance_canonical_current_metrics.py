@@ -53,6 +53,7 @@ SYNC_DAY = date(2026, 10, 12)
 SENSOR_KINDS = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX)
 SYNC_KINDS = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX, MetricKind.WEIGHT)
 ATHLETE_RECORD_KINDS = (
+    MetricKind.VO2MAX,
     MetricKind.FTP,
     MetricKind.MAX_HR,
     MetricKind.THRESHOLD_PACE,
@@ -60,6 +61,9 @@ ATHLETE_RECORD_KINDS = (
     MetricKind.BODY_FAT,
     MetricKind.HEIGHT,
     MetricKind.W_PRIME,
+)
+INSTANT_KINDS = tuple(
+    dict.fromkeys((*SYNC_KINDS, MetricKind.EFTP, *ATHLETE_RECORD_KINDS))
 )
 
 
@@ -301,15 +305,15 @@ class CanonicalCurrentInputTests(unittest.TestCase):
         reader = ObservationStub(_observations(case))
         _read(reader, case.intervals)
         window = (SYNC_DAY - timedelta(days=1), SYNC_DAY + timedelta(days=1))
-        # The sync instant is found by one unbounded read per current-metric kind,
-        # the athlete record's eFTP and its other settings.
-        instant_kinds = (*SYNC_KINDS, MetricKind.EFTP, *ATHLETE_RECORD_KINDS)
+        # The sync instant is found by one unbounded read per kind whose athlete
+        # record rows define it.
+        instant_kinds = INSTANT_KINDS
         self.assertEqual(
             reader.calls[: len(instant_kinds)],
             [(kind, None, None, None) for kind in instant_kinds],
         )
         # The Wahoo fallbacks follow, unwindowed: stored FTP, then weight. The
-        # wellness-day eFTP is read last, for the latest wellness day only.
+        # wellness-day weight and eFTP are read last, for the latest wellness day.
         latest = _latest_wellness_day(_latest_wellness(case.intervals))
         self.assertEqual(
             reader.calls[len(instant_kinds) :],
@@ -321,21 +325,43 @@ class CanonicalCurrentInputTests(unittest.TestCase):
                 *((kind, *window, None) for kind in ATHLETE_RECORD_KINDS),
                 (MetricKind.FTP, None, None, None),
                 (MetricKind.WEIGHT, None, None, None),
+                (MetricKind.WEIGHT, latest, latest, None),
                 (MetricKind.EFTP, latest, latest, Sport.RIDE),
             ],
         )
 
-    def test_weight_window_extends_to_an_older_latest_wellness_day(self) -> None:
+    def test_wellness_weight_is_read_for_an_older_latest_wellness_day(self) -> None:
         case = _case("intervals_only")
         reader = ObservationStub(_observations(case))
         read_current_inputs(
             reader, None, latest_wellness_day=date(2026, 10, 1), as_of=TODAY
         )
-        # The Intervals weight read is windowed; the Wahoo weight read follows it.
+        # The wellness weight is read for that day alone, not the sync window.
         self.assertIn(
-            (MetricKind.WEIGHT, date(2026, 10, 1), SYNC_DAY + timedelta(days=1), None),
+            (MetricKind.WEIGHT, date(2026, 10, 1), date(2026, 10, 1), None),
             reader.calls,
         )
+
+    def test_a_later_wellness_only_write_keeps_the_athlete_settings(self) -> None:
+        case = _case("intervals_only")
+        observations = _observations(case)
+        later = max(
+            item.provenance.retrieved_at
+            for item in observations
+            if item.provenance.retrieved_at is not None
+        ) + timedelta(hours=1)
+        wellness_only = tuple(
+            replace(item, provenance=replace(item.provenance, retrieved_at=later))
+            for item in observations
+            if item.provenance.source_record_id == item.observed_on.isoformat()
+        )
+        before = read_current_inputs(ObservationStub(observations), None, as_of=TODAY)
+        after = read_current_inputs(
+            ObservationStub((*observations, *wellness_only)), None, as_of=TODAY
+        )
+
+        self.assertTrue(before.athlete_record)
+        self.assertEqual(after.athlete_record, before.athlete_record)
 
     def test_observations_without_an_intervals_sync_instant_yield_empty_inputs(
         self,

@@ -733,6 +733,10 @@ class AthleteSettingsV9Tests(unittest.TestCase):
             },
         )
 
+    def test_generic_athlete_vo2max_stays_without_a_sport(self) -> None:
+        result = thresholds({"vo2max": 54})
+        self.assertEqual(sport_records(result), {(MetricKind.VO2MAX, None, 54.0)})
+
 
 class AthleteFixtureTests(unittest.TestCase):
     def setUp(self) -> None:
