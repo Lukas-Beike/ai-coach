@@ -51,22 +51,22 @@ Implement in order. Each task names its tier (L1 simple, L2 standard, L3 complex
 
 ## 5. Validation
 
-- [ ] 5.1 [L1] Run the focused modules above, then:
+- [x] 5.1 [L1] Run the focused modules above, then:
   - `python -m unittest discover -s tests -v`
   - `python -m compileall -q server.py backend tests`
   - `ruff check`
-  - repository-wide mypy, or the quality ratchet `python scripts/quality_baseline.py` if that is the repository's entry point
+  - repository-wide mypy, or the quality ratchet `python scripts/quality_baseline.py` if that is the repository's entry point Done: on the final tree `python -m unittest discover -s tests` ran 7718 tests OK (36 skipped). `compileall` passes. The quality ratchet reports 262 existing, 0 new and 0 obsolete. Ruff passes; `ruff format --check` flags only one line in `e2e/fixture_runtime.py` that already exists on develop. `git diff 3a5547be` has no changes under `backend/providers/`, `backend/sync/`, `public/` or migrations.
 
   Verify that all pass on the final tree, and that `git diff` shows no change under `backend/providers/`, `backend/sync/`, `public/` or the database schema.
-- [ ] 5.2 [L1] Run `node --test tests/*.cjs` and the affected Playwright projects for `e2e/analysis-info.spec.js` (mobile-small, mobile, tablet, tablet-landscape, desktop). Verify with the command output.
+- [x] 5.2 [L1] Run `node --test tests/*.cjs` and the affected Playwright projects for `e2e/analysis-info.spec.js` (mobile-small, mobile, tablet, tablet-landscape, desktop). Verify with the command output. Done: `node --test tests/*.cjs` passes 301/301. `scripts/run_browser_tests.py --project all --spec e2e/analysis-info.spec.js` passes on mobile-small, mobile, tablet, tablet-landscape and desktop.
 
 ## 6. OpenSpec and acceptance
 
-- [ ] 6.1 [L1] Run the review gate per `deliver-issue` step 3 (repository `code-review`, depth=max, all findings) on the task commits and resolve the findings. Verify with the recorded review result.
-- [ ] 6.2 [L1] Reconcile the #1413 slice-1 acceptance with evidence in the PR description:
+- [x] 6.1 [L1] Run the review gate per `deliver-issue` step 3 (repository `code-review`, depth=max, all findings) on the task commits and resolve the findings. Verify with the recorded review result. Done: independent review of `3a5547be..dc764f1e` by Claude Sonnet 5.5 at medium effort (the user's choice; Codex L3 was rate-limited). Result: 0 Important, 0 Nit.
+- [x] 6.2 [L1] Reconcile the #1413 slice-1 acceptance with evidence in the PR description:
   - Coach, API and UI show the same values and labels for synthetic data: parity tests from 1.2, 2.x and 3.1;
   - no performance reader reads wellness provider keys: tasks 1.2, 2.2, 2.3 and 2.4, plus a grep over `backend/performance` for `recent_wellness`, `sportInfo`, `restingHR`, `sleepSecs`, `ctLoad` and `bodyFat` (only `context.py`'s sleep-timing hand-off of `recent_wellness` remains, design D7);
-  - the slice-2 items (guard, activity shape, PWA views) are named as pending in #1413.
+  - the slice-2 items (guard, activity shape, PWA views) are named as pending in #1413. Done: recorded in the PR description. Remaining grep hits in `backend/performance`, none of them wellness-day readers: `planning_recovery.py` (dead legacy, #1416), `garmin_projection.py` and `garmin_weight.py` (Garmin views, #1415), the athlete-record `bodyFat` in `current_metrics.py` (#1415), and the `recent_wellness` hand-off in `context.py` for sleep timing (D7, #1416).
 
 ## Workflow follow-up
 
