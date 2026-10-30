@@ -13,7 +13,7 @@
 
 ## 2. PWA
 
-- [ ] 2.1 Move `public/activity-analysis.js` (the list item and `rowMetrics`) and `public/plan-views.js` to the neutral keys, on activity objects only (D3). In `plan-views.js` this covers the actual-activity duration, pace, facts, start time, week totals and sort. Bump the `public/index.html` query versions and the `public/service-worker.js` cache name and assets together. Verify with `node --test tests/*.cjs` and with the e2e fixtures and specs updated to the neutral keys.
+- [x] 2.1 Move `public/activity-analysis.js` (the list item and `rowMetrics`) and `public/plan-views.js` to the neutral keys, on activity objects only (D3). In `plan-views.js` this covers the actual-activity duration, pace, facts, start time, week totals and sort. Bump the `public/index.html` query versions and the `public/service-worker.js` cache name and assets together. Verify with `node --test tests/*.cjs` and with the e2e fixtures and specs updated to the neutral keys. Done: node 302/302; the device-snapshot contract (`STATE_SNAPSHOT_CONTRACT`) keeps an older-shape snapshot from being shown (review finding).
 
 ## 3. Guard
 
@@ -22,4 +22,4 @@
 ## 4. Validation and follow-up
 
 - [x] 4.1 File the follow-up issue for the backend activity consumers and the Coach context activity keys, and cite it in the baseline description and the PR. Verify that the issue URL is recorded. Done: https://github.com/Lukas-Beike/ai-coach/issues/1510 is cited in `tests/provider_coupling.py` (`_ACTIVITY_ROWS`).
-- [ ] 4.2 Run the full unit suite, `compileall`, the quality ratchet, `node --test tests/*.cjs`, `npm run openspec -- validate --all --strict --no-interactive`, and Playwright on all five projects for the analysis, activity-details, contracts and plan/calendar specs. Verify with the command output in the PR body.
+- [x] 4.2 Run the full unit suite, `compileall`, the quality ratchet, `node --test tests/*.cjs`, `npm run openspec -- validate --all --strict --no-interactive`, and Playwright on all five projects for the analysis, activity-details, contracts and plan/calendar specs. Verify with the command output in the PR body. Done on head c8d531e7: unit suite 7734 OK (36 skipped), compileall, quality ratchet 0 new, node 302/302, Playwright on all five projects for analysis-info, activity-details, contracts, coach, competitions, calendar-contrast, training-feature-panels, text-reflow and css-cascade (pre-review-fix head) and for activity-details, contracts, update-start, startup-area-cache and coach-message-cache (final head).
