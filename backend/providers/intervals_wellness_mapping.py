@@ -29,7 +29,8 @@ Wellness rows
     for every consumer instead of each one deriving it again.
 
     Each ``sportInfo`` (or ``sport_info``) entry yields an EFTP observation with
-    the sport that its first ``types`` text, or else its ``type``, classifies to.
+    the sport that the space-joined texts of its ``types`` list, or else of its
+    ``type``, ``sport`` and ``sport_type``, classify to.
     The value is ``mmp_model``'s ``ftp``, ``eftp`` or ``eFTP``, else the entry's
     ``eftp`` or ``eFTP``, as ``performance.eftp`` reads it. Only the first entry
     of each sport is mapped.
@@ -37,9 +38,9 @@ Wellness rows
 Athlete thresholds
     ``sportSettings`` (with the snake_case alias ``sport_settings`` as the
     fallback, the same rule as ``backend.planning.context``) yields observations
-    tagged with the sport that the first text in each entry's ``types`` list
-    classifies to. Entries are mapped in input order, so two entries for one
-    sport both yield observations. ``current_metrics`` uses the first entry.
+    tagged with the sport that the space-joined texts of each entry's ``types``
+    list classify to. Only the first entry of each sport is mapped, as the
+    legacy readers took the first matching setting.
     Athlete ids that are not short ASCII identifiers are not echoed and yield
     ``source_record_id`` None.
 
@@ -114,9 +115,11 @@ from backend.canonical.vocabulary import (
 # longer overwrites the wellness weight of the same day. Version 6: wellness rows
 # add FORM and the sportInfo EFTP; sport settings add EFTP. Version 7: wellness
 # rows also project canonical sleep periods and the subjective ratings, and the
-# athlete record its zone configurations. Re-projection
-# rewrites rows written at older versions.
-MAPPER_VERSION: Final = 7
+# athlete record its zone configurations. Version 8: sport settings and sportInfo
+# entries are classified by all their type texts, and only the first sport
+# setting of each sport is mapped. Re-projection rewrites rows written at older
+# versions.
+MAPPER_VERSION: Final = 8
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
@@ -172,6 +175,7 @@ _SPORT_INFO_KEYS: Final = ("sport_info", "sportInfo")
 _MMP_MODEL_KEY: Final = "mmp_model"
 _EFTP_MODEL_ALIASES: Final = ("ftp", "eftp", "eFTP")
 _EFTP_ALIASES: Final = ("eftp", "eFTP")
+_SPORT_INFO_TYPE_KEYS: Final = ("type", "sport", "sport_type")
 _LTHR_ALIASES: Final = ("lthr",)
 _MAX_HR_ALIASES: Final = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
 _SPORT_SETTING_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
@@ -247,8 +251,9 @@ def map_intervals_athlete_thresholds(
         provenance=_provenance(record_id, retrieved_at),
     )
     collector = _Collector()
+    seen: set[Sport] = set()
     for entry in _sport_settings(athlete, scope, collector):
-        _map_sport_setting(entry, scope, collector)
+        _map_sport_setting(entry, scope, collector, seen)
     for kind, aliases in _ATHLETE_FIELDS:
         _add_field(collector, scope, athlete, kind, aliases)
     if not _has_ride_ftp(collector.records):
@@ -349,8 +354,18 @@ def _map_sport_info(row: dict[Any, Any], scope: _Scope, collector: _Collector) -
 
 def _sport_info_sport(entry: dict[Any, Any]) -> Sport | None:
     types = entry.get("types")
-    text = types[0] if isinstance(types, list) and types else entry.get("type")
-    return classify_sport_text(text) if isinstance(text, str) else None
+    texts = (
+        types
+        if isinstance(types, list) and types
+        else [entry.get(key) for key in _SPORT_INFO_TYPE_KEYS]
+    )
+    return _classify_texts(texts)
+
+
+def _classify_texts(texts: list[Any]) -> Sport | None:
+    """Classify the space-joined texts, as ``backend.canonical.sports`` requires."""
+    strings = [text for text in texts if isinstance(text, str)]
+    return classify_sport_text(" ".join(strings)) if strings else None
 
 
 def _add_eftp(
@@ -431,13 +446,16 @@ def _sport_settings(
     return raw
 
 
-def _map_sport_setting(entry: object, scope: _Scope, collector: _Collector) -> None:
+def _map_sport_setting(
+    entry: object, scope: _Scope, collector: _Collector, seen: set[Sport]
+) -> None:
     if not isinstance(entry, dict):
         collector.reject(scope.record_ref, "sportSettings", IssueReason.INVALID_TYPE)
         return
     sport = _entry_sport(entry, scope, collector)
-    if sport is None:
+    if sport is None or sport in seen:
         return
+    seen.add(sport)
     for kind, aliases in _SPORT_SETTING_FIELDS:
         _add_field(collector, scope, entry, kind, aliases, sport=sport)
     _add_eftp(collector, scope, entry, sport)
@@ -460,7 +478,7 @@ def _map_sport_setting(entry: object, scope: _Scope, collector: _Collector) -> N
 def _entry_sport(
     entry: dict[Any, Any], scope: _Scope, collector: _Collector
 ) -> Sport | None:
-    """Classify the first ``types`` text; a missing or malformed list is an issue."""
+    """Classify all ``types`` texts; a missing or textless list is an issue."""
     types = entry.get("types")
     if types is None:
         reason = IssueReason.MISSING
@@ -468,10 +486,11 @@ def _entry_sport(
         reason = IssueReason.INVALID_TYPE
     elif not types:
         reason = IssueReason.MISSING
-    elif not isinstance(types[0], str):
-        reason = IssueReason.INVALID_TYPE
     else:
-        return classify_sport_text(types[0])
+        sport = _classify_texts(types)
+        if sport is not None:
+            return sport
+        reason = IssueReason.INVALID_TYPE
     collector.reject(scope.record_ref, "types", reason)
     return None
 
