@@ -51,3 +51,4 @@ Planned-entry reads stay as they are. Where code is shared by planned and comple
 
 - [A PWA reader of a renamed key is missed] → The renames were mapped by a grep over `public/`. The e2e specs for analysis, activity details, contracts and the plan run on all projects, and a unit test pins the map.
 - [An installed PWA keeps a cached app shell against a new server] → Query versions and the service-worker cache are bumped together, and the existing safe-reload update applies.
+- [A device snapshot stored by the previous version still holds the old activity keys] → The state snapshot carries a contract number (`STATE_SNAPSHOT_CONTRACT = 2` in `public/state-loader.js`). A snapshot of an older contract is neither shown at start-up nor reused for a failed area, so the app loads fresh data once instead of rendering blank metrics.
