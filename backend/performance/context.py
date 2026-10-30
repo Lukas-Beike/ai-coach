@@ -16,6 +16,7 @@ from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import load as performance_load
 from backend.performance import load_context as performance_load_context
 from backend.performance import recovery_context as performance_recovery_context
+from backend.performance.canonical_current import NO_CURRENT_INPUTS
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.personal_recovery import personal_recovery
@@ -150,15 +151,13 @@ def current_performance_context(
 ) -> dict[str, Any]:
     """Compose the current performance projection from explicit inputs.
 
-    Canonical days supply wellness, load and body values. The stored snapshot
-    remains the source for athlete settings, activities without a row reader and
-    the pre-sleep-period timing fallback.
+    Canonical days supply wellness, load and body values, and the canonical
+    current inputs the athlete settings. The stored snapshot remains the source for
+    activities without a row reader and the pre-sleep-period timing fallback.
     """
     if not snapshot:
         return _unavailable_context(garmin, profile, today, canonical)
 
-    athlete_value = snapshot.get("athlete")
-    athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
     activities = _activities(snapshot, canonical)
     days = _wellness_days(canonical)
     latest_wellness = latest(days)
@@ -177,13 +176,13 @@ def current_performance_context(
     readiness_current = recovery["readiness"]
     readiness_source = recovery["readiness_source"]
 
+    current = NO_CURRENT_INPUTS if canonical is None else canonical.current
     metrics = performance_current_metrics.current_performance_metrics(
-        snapshot,
         profile,
         performance_garmin_metrics.garmin_performance_metrics(
             garmin, today, _garmin_canonical(canonical)
         ),
-        canonical=None if canonical is None else canonical.current,
+        canonical=current,
         activities=activities,
         latest_wellness=latest_wellness,
     )
@@ -246,9 +245,7 @@ def current_performance_context(
         "metrics": metrics,
         "thresholds": {
             "ftp_w": metrics["cycling_ftp_watts"]["value"],
-            "w_prime_j": performance_current_metrics.athlete_w_prime(athlete),
-            "max_hr": athlete.get("max_hr"),
-            "lthr": athlete.get("lthr"),
+            **performance_current_metrics.athlete_thresholds(current),
             "weight": metrics["weight_kg"]["value"],
         },
         "current_load": load,

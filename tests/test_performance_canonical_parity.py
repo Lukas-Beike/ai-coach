@@ -42,6 +42,7 @@ from backend.http_api.state_prelude import (
     PublicStateLocalPrelude,
 )
 from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.canonical_current import NO_CURRENT_INPUTS
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
@@ -71,8 +72,9 @@ _NO_RECOVERY = CanonicalRecoveryInputs(
 # subjective ratings), then the Garmin performance kinds (with the twelve training
 # load and load balance kinds and the four history-chart kinds), the daily totals
 # (with resting energy) and the recovery kinds not read before (the weekly HRV
-# average), and the form and eFTP kinds (#1412).
-_UNIT_READS = 48
+# average), the form and eFTP kinds (#1412), and the athlete-record kinds without
+# an earlier read (zone-2 pace, height and W′, #1415).
+_UNIT_READS = 51
 
 
 class StubObservationReader(ObservationReader):
@@ -182,7 +184,7 @@ def _assert_load_inputs(
     case.assertEqual(
         replace(
             _present(inputs),
-            current=None,
+            current=NO_CURRENT_INPUTS,
             wellness_days=None,
             history_wellness_days=None,
             form_by_day=None,

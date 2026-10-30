@@ -144,10 +144,10 @@ def _context(
 
 
 def _recovery(garmin: dict[str, Any], snapshot: dict[str, Any] | None) -> Any:
-    """Recovery values come only from observations (#1411); map the fixtures."""
+    """Recovery values and athlete settings come only from observations; map them."""
     wellness = (snapshot or {}).get("recent_wellness")
     return recovery_only_inputs(
-        garmin, wellness if isinstance(wellness, list) else None
+        garmin, wellness if isinstance(wellness, list) else None, snapshot=snapshot
     )
 
 

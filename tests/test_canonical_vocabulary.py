@@ -129,6 +129,9 @@ class CanonicalVocabularyTests(unittest.TestCase):
                 "subjective_soreness": "rating",
                 "subjective_stress": "rating",
                 "subjective_mood": "rating",
+                "w_prime": "J",
+                "height": "cm",
+                "zone2_pace": "m/s",
             },
             {kind.value: kind.unit for kind in MetricKind},
         )

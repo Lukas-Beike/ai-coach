@@ -120,8 +120,10 @@ from backend.providers.intervals_zone_mapping import type_sports
 # athlete record its zone configurations. Version 8: sport settings and sportInfo
 # entries are classified by each of their type texts, and only the first sport
 # setting of each sport is mapped. Re-projection rewrites rows written at older
-# versions.
-MAPPER_VERSION: Final = 8
+# versions. Version 9: the athlete record's W′, height and body fat, the Run
+# setting's Zone-2 pace, and the athlete-wide VO2max of a sport without a
+# setting value are mapped, so current metrics need no snapshot section.
+MAPPER_VERSION: Final = 9
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
@@ -136,10 +138,15 @@ _UNSET_WHEN_ZERO: Final = frozenset(
         MetricKind.THRESHOLD_HR,
         MetricKind.MAX_HR,
         MetricKind.THRESHOLD_PACE,
+        MetricKind.ZONE2_PACE,
         MetricKind.VO2MAX,
         MetricKind.EFTP,
     }
 )
+# Kinds stored as metres per second; larger values are seconds per kilometre.
+_PACE_KINDS: Final = frozenset({MetricKind.THRESHOLD_PACE, MetricKind.ZONE2_PACE})
+# Heights in this range are metres; the canonical unit is centimetres.
+_HEIGHT_METRES: Final = (1.2, 2.5)
 
 # (canonical kind, provider aliases in precedence order)
 _WELLNESS_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
@@ -192,12 +199,28 @@ _VO2MAX_ALIASES_BY_SPORT: Final[Mapping[Sport, tuple[str, ...]]] = {
     Sport.RUN: ("vo2max", "vo2_max", "running_vo2max"),
 }
 _RUN_PACE_ALIASES: Final = ("threshold_pace",)
+_RUN_ZONE2_PACE_ALIASES: Final = (
+    "zone2_pace",
+    "zone_2_pace",
+    "z2_pace",
+    "pace_zone2",
+    "paceZone2",
+    "zone2Pace",
+)
 _TOP_LEVEL_RIDE_FTP_ALIASES: Final = ("icu_ftp",)
+# Athlete-wide VO2max of a sport whose setting has none, as current_metrics read it.
+_ATHLETE_VO2MAX_ALIASES_BY_SPORT: Final[Mapping[Sport, tuple[str, ...]]] = {
+    Sport.RIDE: ("cycling_vo2max", "vo2max", "vo2_max"),
+    Sport.RUN: ("running_vo2max", "vo2max", "vo2_max"),
+}
 # Athlete-wide values: sport None, read after the sport entries.
 _ATHLETE_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
     (MetricKind.WEIGHT, ("weight",)),
     (MetricKind.THRESHOLD_HR, _LTHR_ALIASES),
     (MetricKind.MAX_HR, _MAX_HR_ALIASES),
+    (MetricKind.BODY_FAT, ("bodyFat", "body_fat")),
+    (MetricKind.HEIGHT, ("height_cm", "height")),
+    (MetricKind.W_PRIME, ("icu_w_prime",)),
 )
 
 
@@ -267,6 +290,11 @@ def map_intervals_athlete_thresholds(
         collector.drop_repeats_since(start)
     for kind, aliases in _ATHLETE_FIELDS:
         _add_field(collector, scope, athlete, kind, aliases)
+    for sport, aliases in _ATHLETE_VO2MAX_ALIASES_BY_SPORT.items():
+        if not _has_sport_kind(collector.records, MetricKind.VO2MAX, sport):
+            _add_field(
+                collector, scope, athlete, MetricKind.VO2MAX, aliases, sport=sport
+            )
     if not _has_ride_ftp(collector.records):
         _add_field(
             collector,
@@ -476,6 +504,14 @@ def _map_sport_setting(
             _RUN_PACE_ALIASES,
             sport=sport,
         )
+        _add_field(
+            collector,
+            scope,
+            entry,
+            MetricKind.ZONE2_PACE,
+            _RUN_ZONE2_PACE_ALIASES,
+            sport=sport,
+        )
 
 
 def _entry_sports(entry: object, scope: _Scope, collector: _Collector) -> list[Sport]:
@@ -500,8 +536,12 @@ def _entry_sports(entry: object, scope: _Scope, collector: _Collector) -> list[S
 
 
 def _has_ride_ftp(records: list[Observation]) -> bool:
+    return _has_sport_kind(records, MetricKind.FTP, Sport.RIDE)
+
+
+def _has_sport_kind(records: list[Observation], kind: MetricKind, sport: Sport) -> bool:
     return any(
-        observation.kind is MetricKind.FTP and observation.sport is Sport.RIDE
+        observation.kind is kind and observation.sport is sport
         for observation in records
     )
 
@@ -551,8 +591,10 @@ def _canonical_number(kind: MetricKind, value: object) -> float | IssueReason:
     number = _raw_number(value)
     if isinstance(number, IssueReason):
         return number
-    if kind is MetricKind.THRESHOLD_PACE:
-        return _pace_metres_per_second(number)
+    if kind in _PACE_KINDS:
+        return _pace_metres_per_second(kind, number)
+    if kind is MetricKind.HEIGHT and _HEIGHT_METRES[0] <= number <= _HEIGHT_METRES[1]:
+        return _within_bounds(kind, round(number * 100, 1))
     return _within_bounds(kind, number)
 
 
@@ -563,13 +605,13 @@ def _raw_number(value: object) -> float | IssueReason:
     return IssueReason.INVALID_NUMBER if number is None else number
 
 
-def _pace_metres_per_second(number: float) -> float | IssueReason:
+def _pace_metres_per_second(kind: MetricKind, number: float) -> float | IssueReason:
     if number <= 0:
         return IssueReason.OUT_OF_RANGE
     if number < _PACE_M_PER_S_LIMIT:
-        return _within_bounds(MetricKind.THRESHOLD_PACE, number)
+        return _within_bounds(kind, number)
     speed = _PACE_METRES_PER_KM / number
-    return _within_bounds(MetricKind.THRESHOLD_PACE, speed)
+    return _within_bounds(kind, speed)
 
 
 def _within_bounds(kind: MetricKind, number: float) -> float | IssueReason:

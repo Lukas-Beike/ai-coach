@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
 from garmin_support import read_garmin, save_garmin
+from performance_day_support import snapshot_metrics
 from server_test_support import (
     ServerTestCase,
     _current_performance_context,
@@ -35,7 +36,6 @@ from backend.activities.duplicates import (
 )
 from backend.http_api import server as http_server_module
 from backend.http_api.static_assets import StaticAssetService
-from backend.performance import current_metrics as performance_current_metrics
 from backend.performance import garmin_observations
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
@@ -905,7 +905,7 @@ class ServerSyncTests(ServerTestCase):
             "recent_activities": [],
             "recent_wellness": [],
         }
-        metrics = performance_current_metrics.current_performance_metrics(
+        metrics = snapshot_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),

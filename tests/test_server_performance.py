@@ -16,6 +16,7 @@ from performance_day_support import (
     canonical_from_snapshot,
     current_days,
     garmin_metrics_from_payload,
+    snapshot_metrics,
 )
 from server_test_support import (
     ServerTestCase,
@@ -31,7 +32,6 @@ from backend.activities.duplicates import (
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import context as performance_context
-from backend.performance import current_metrics as performance_current_metrics
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import load as performance_load
 from backend.performance import max_hr as performance_max_hr
@@ -260,7 +260,7 @@ class ServerPerformanceTests(ServerTestCase):
             "recent_activities": [],
             "recent_wellness": [],
         }
-        metrics = performance_current_metrics.current_performance_metrics(
+        metrics = snapshot_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),
@@ -405,7 +405,7 @@ class ServerPerformanceTests(ServerTestCase):
                 {"id": _local_datetime.now().astimezone().date().isoformat()}
             ],
         }
-        metrics = performance_current_metrics.current_performance_metrics(
+        metrics = snapshot_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),
