@@ -24,12 +24,19 @@ def run_hook(command: str, *, bom: bool = False) -> int:
 
 class GuardPrivatePathsTests(unittest.TestCase):
     def test_private_paths_are_blocked(self) -> None:
+        bare = DATA.rstrip("/")
         for command in (
             f"cat {ENV}",
             f"type {ENV}.local",
+            f"cat {ENV}.production.local",
+            f"ls {bare}",
             f"ls {DATA}",
             f"Get-Content ./{DATA}coach.db",
+            f"cat ../{DATA}coach.db",
+            f"Get-Content C:\\Users\\x\\ai-coach\\{bare}\\coach.db",
+            f"docker exec ai-coach ls /{bare}",
             f"docker exec ai-coach ls /{DATA}backups",
+            f"type C:\\x\\{bare}\\{TOKENS}",
             f"cat /srv/{TOKENS}/oauth2_token.json",
         ):
             with self.subTest(command=command):
@@ -37,12 +44,14 @@ class GuardPrivatePathsTests(unittest.TestCase):
         self.assertEqual(run_hook(f"cat {ENV}", bom=True), 2)
 
     def test_ordinary_commands_pass(self) -> None:
+        bare = DATA.rstrip("/")
         for command in (
             f"cat {ENV}.example",
             "git status",
-            f"cat tests/{DATA}fixture.json",
+            "grep -rn metadata backend",
             f"grep -r {TOKENS} backend",
-            "docker run -v C:\\repo\\data:/data ai-coach:local",
+            f'docker run -d -v "${{PWD}}\\{bare}:/{bare}" --env-file {ENV} ai-coach:local',
+            f"docker run --rm --env-file /mnt/appdata/{ENV} -v /mnt/appdata/{bare}:/{bare} img",
         ):
             with self.subTest(command=command):
                 self.assertEqual(run_hook(command), 0)

@@ -39,7 +39,9 @@ conflicts, CI failures, and review feedback through the merge.
 Run one fresh-context review of `origin/develop...HEAD`: the host's
 `/code-review` at `high` when available, otherwise the repository
 [code-review skill](../code-review/SKILL.md) with `depth=high`,
-`max-findings=all`, `report-only`, or the `reviewer` subagent.
+`max-findings=all`, `report-only`, or the `reviewer` subagent given a diff
+file written with `git diff --find-renames origin/develop...HEAD` outside the
+repository (it cannot run git itself).
 
 Fix valid findings with new commits and rerun the affected checks. Then run one
 focused re-check of the fixes. If findings remain after that, stop before
@@ -69,10 +71,14 @@ yield; otherwise poll about every 30 seconds. On each wake:
   (with `isResolved`) and top-level comments. For each open item: fix it if
   valid, run the affected checks, reply with the result, then resolve the
   thread; if not actionable, reply with the concrete reason before resolving.
-  Disable auto-merge while repairs are in progress.
+  Disable auto-merge while repairs are in progress, and re-enable it once the
+  current head has no open feedback and its review is done.
 - A change to the feature diff (feedback fix, CI fix, conflict resolution) gets
   a focused review of that change before it is pushed. A clean replay onto a
-  newer `develop` needs no new review, only validation.
+  newer `develop`, including one by the auto-rebase workflow, needs only
+  validation unless `git diff --name-only --no-renames <old-base> origin/develop`
+  touches a file the feature changes or a module it calls; then review the
+  feature against the new base and disable auto-merge until that is done.
 - If the branch falls behind or conflicts, rebase (never a merge-style "Update
   branch") and push with `--force-with-lease`.
 - If checks fail, read the logs, fix the cause, and push. The `Gitar` check is

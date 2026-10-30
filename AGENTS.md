@@ -116,7 +116,9 @@ for anything without exceptions. `.claude/settings.json` blocks agent access to
 `.env`, `data/`, and the Garmin token store, and `.githooks/pre-push` scans
 outgoing commits for secrets; never bypass either.
 
-- Work in a dedicated task worktree; leave the primary checkout unchanged.
+- Work in a dedicated task worktree; leave the primary checkout unchanged. Check
+  the branch and existing diff before editing and preserve prior work; keep
+  runtime files and worktrees out of commits.
   `python scripts/prepare_worktree.py` installs Node dependencies and Graphify;
   the SessionStart hook keeps the graph current. Verify graph results in source.
 - Skills live only in [`.agents/skills/`](.agents/skills/README.md); read the
@@ -154,8 +156,10 @@ check login, fresh PWA install/offline assets, safe Markdown, Enter versus
 Shift+Enter, microphone, notifications, and the changed flow.
 
 Small synthetic provider probes may use the existing local CLIProxyAPI under the
-[proxy runbook](README.md#optional-local-cliproxyapi-probes): subscription/OAuth
-upstreams only, no athlete data, no routing or provider changes.
+[proxy runbook](README.md#optional-local-cliproxyapi-probes): confirmed
+subscription/OAuth upstreams with paid API-key fallbacks disabled, no athlete
+data, never read the proxy's credential files, and no routing, provider, or
+billing changes. Normal tests stay mocked.
 
 CI and Docker use Python 3.14; change toolchain and CI together. Direct pins live
 in `requirements.in`/`requirements-dev.in`; regenerate the hash-locked `.txt`

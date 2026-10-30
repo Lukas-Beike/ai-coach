@@ -637,11 +637,16 @@ root, `.agents/skills/`; full review and `pr` were moved from the legacy `.codex
 root without duplicate copies. No duplicate `CLAUDE.md` is needed.
 
 Rules without exceptions are enforced, not just written down:
-[`.claude/settings.json`](.claude/settings.json) denies agent file access to
-`.env` and `data/` and runs `scripts/hooks/guard_private_paths.py` before every
-shell command to block `.env`, `data/`, and Garmin token paths. `.claude/agents/`
-defines the `explorer` (Haiku, read-only), `implementer` (Sonnet), and
-`reviewer` (Sonnet, read-only) subagents with pinned models.
+[`.claude/settings.json`](.claude/settings.json) denies agent file access to any
+`.env`/`.env.local` and to the `data/` directory of this checkout and the
+primary `ai-coach` checkout. Before every shell command it runs
+`scripts/hooks/guard_private_paths.py`, a tested text-matching safety net (not
+a sandbox) that blocks `.env`, `data`, and Garmin token paths but lets Docker
+`--env-file` and volume arguments through. It also blocks commands that merely
+mention those paths, such as a commit message; pass such text through a file.
+`.claude/agents/` defines the `explorer` (Haiku, low effort, read-only),
+`implementer` (Sonnet, medium), and `reviewer` (Sonnet, medium, read-only)
+subagents.
 
 The local [code-review skill](.agents/skills/code-review/SKILL.md) adapts
 Claude's review workflow for PRs and pre-push branch diffs. Agents read it

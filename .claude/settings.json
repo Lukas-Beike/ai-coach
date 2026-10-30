@@ -1,12 +1,16 @@
 {
   "permissions": {
     "deny": [
-      "Read(./.env)",
-      "Read(./.env.local)",
+      "Read(//**/.env)",
+      "Read(//**/.env.local)",
+      "Read(//**/.env.*.local)",
       "Read(./data/**)",
-      "Edit(./.env)",
-      "Edit(./.env.local)",
-      "Edit(./data/**)"
+      "Read(//**/ai-coach/data/**)",
+      "Edit(//**/.env)",
+      "Edit(//**/.env.local)",
+      "Edit(//**/.env.*.local)",
+      "Edit(./data/**)",
+      "Edit(//**/ai-coach/data/**)"
     ]
   },
   "hooks": {
@@ -28,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python (Join-Path (git rev-parse --show-toplevel) 'scripts/hooks/guard_private_paths.py')",
+            "command": "python \"$env:CLAUDE_PROJECT_DIR/scripts/hooks/guard_private_paths.py\"",
             "shell": "powershell",
             "timeout": 10,
             "onFailure": "block"

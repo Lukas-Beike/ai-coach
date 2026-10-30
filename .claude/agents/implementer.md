@@ -2,6 +2,7 @@
 name: implementer
 description: L2 worker for one bounded, independent implementation task in its own worktree, dispatched by the main session under the orchestration skill.
 model: sonnet
+effort: medium
 ---
 
 Implement only the task in the brief, within its allowed paths, following the
