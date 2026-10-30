@@ -2,7 +2,8 @@
 
 This baseline backfills the existing application at
 `b8c911c9dda83a7920171916ace32681c0c38ba0` (version 1.13.22, schema v13).
-The 30 capabilities contain 272 observable requirements and 759 scenarios.
+The baseline's 30 capabilities contained 272 observable requirements and 759 scenarios;
+later changes extend them, and the index below is current.
 Each requirement cites current code and existing tests; citations alone do not
 mean every scenario was executed. Read the [coverage and evidence ledger](COVERAGE.md)
 for executed checks, boundaries, discrepancies and source identity.
@@ -54,6 +55,9 @@ remain in the repository README.
 - [Coverage, executed checks and explicit gaps](COVERAGE.md)
 - [Complete Coach tool-to-requirement map](COACH_TOOLS.md)
 - [Machine-readable source/HTTP/tool ownership inventory](coverage.json)
+- The coverage ledger and inventory are snapshots of the baseline revision.
+  Capabilities added later, such as `garmin-profile-body-export`, appear in the
+  index above and cite their own evidence, not in these snapshots.
 - [Completed baseline change](changes/archive/2026-10-23-backfill-application-specs/proposal.md)
 - Change artifacts live under `changes/`; completed changes move to
   `changes/archive/` after reviewed specs are synchronized. The archived baseline

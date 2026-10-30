@@ -436,4 +436,4 @@ The Body overview SHALL show a valid saved body-fat profile value labelled as pr
 - **WHEN** the profile has no valid body-fat value
 - **THEN** the overview shows the latest eligible Garmin body-fat reading when available.
 
-Evidence: `public/analysis.js`; focused synthetic presentation test is required.
+Evidence: `public/analysis.js`; `tests/analysis-presentation.test.cjs::body overview uses profile body fat without creating a dated measurement`, `tests/analysis-presentation.test.cjs::body overview falls back to Garmin when the profile fat is absent`.

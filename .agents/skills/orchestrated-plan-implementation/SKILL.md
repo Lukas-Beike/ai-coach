@@ -38,7 +38,7 @@ native tool's model list); never another provider.
 
 | Tier | Tasks | Model | Effort |
 | --- | --- | --- | --- |
-| L1 easy | Clear target and instructions, cheap acceptance check | Claude Haiku and Gemini Flash, alternating | low (Gemini: `-low` variant) |
+| L1 easy | Clear target and instructions, cheap acceptance check, read-only exploration | Claude Haiku and Gemini Flash, alternating | low (Gemini: `-low` variant) |
 | L2 standard | Almost everything: features, multi-file fixes, tests, routine review | Claude Sonnet | medium |
 | L3 hard | Only genuinely hard or risky work: migrations, auth/privacy, data integrity, hard diagnosis, critical review | Claude Opus | high |
 
@@ -53,11 +53,18 @@ native tool's model list); never another provider.
 
 ## 3. Dispatch
 
-- **Claude workers:** native `Agent` tool with `model` and `effort`, foreground
-  unless parallel; `isolation: "worktree"` for writers. Read-only exploration
-  uses the `Explore` agent type.
+- **Claude workers:** native `Agent` tool with `model` and `effort`. It runs in
+  the background by default; pass `run_in_background: false` unless several
+  workers run in parallel. Use `isolation: "worktree"` for writers. Read-only
+  exploration uses the `Explore` agent type as an L1 task (`model: "haiku"`).
 - **Gemini workers, or background work:** T3 `delegate_task` with
   `isolation: "worktree"`; see [runtime binding](references/runtime-binding.md).
+- **Other hosts** (for example Codex): use the host's isolated worker facility
+  with an explicit model from the tiers; if it cannot run them, stay with the
+  main model and say so.
+- Worktrees start from the parent's last commit. Commit everything a worker or
+  reviewer must see before dispatch and record that commit in the brief; a
+  reviewer must review exactly the candidate commit.
 - At most three concurrent workers. Serialize tasks that touch shared files or a
   producer/consumer contract.
 
@@ -67,15 +74,19 @@ run, open issues). Never include secrets, athlete data, or runtime state.
 
 Workers do not push, open PRs, merge, deploy, message externally, touch live
 providers or data, or start nested agents. Writers commit only on their own
-worktree branch.
+worktree branch, using Conventional Commit subjects.
 
 ## 4. Review and integrate
 
+- Confirm the worker has stopped before reviewing, integrating, or cleaning up.
 - The parent reads the worker's complete diff on its branch, including new and
   deleted files, and checks it against the brief. Worker reports and green tests
   do not replace this.
-- Accept by merging or cherry-picking the worker branch into the task branch,
-  or reject with reasons. Never overwrite or reset the user's own work.
+- Accept by cherry-picking or rebasing the worker's commits onto the task branch,
+  never with a merge commit; fix non-conventional subjects before pushing. If
+  the task branch moved since dispatch, or a conflict appears, do not resolve it
+  blindly: review the result again, or have the worker redo it on the new base.
+  Otherwise reject with reasons. Never overwrite or reset the user's own work.
 - For L3 changes, get an independent fresh-context review (Opus) of the diff
   without the author's reasoning, and resolve findings by evidence.
 - Retry a failed task at most twice, diagnosing before each retry; then re-scope

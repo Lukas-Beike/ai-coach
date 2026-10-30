@@ -60,4 +60,4 @@ When an athlete saves a changed weight or body-fat value in the profile, the sys
 - **WHEN** a Coach, undo, import, or unrelated API action changes a profile value
 - **THEN** it does not implicitly write to Garmin.
 
-Evidence baseline: `backend/http_api/athlete_put.py`, `backend/athlete/profile.py`, `backend/sync/garmin_service.py`. Remote write tests and live compatibility are not yet established.
+Evidence: `backend/http_api/athlete_put.py`, `backend/athlete/profile.py`, `backend/sync/garmin_service.py`; `tests/test_garmin_profile_body_export.py::BodyExportTests`, `tests/test_garmin_profile_body_export.py::BodyExportMockTests`, `tests/test_garmin_sdk_body_transport.py::GarminSdkBodyTransportTests` (synthetic, mocked Garmin). Gap: live Garmin Connect compatibility is not established.

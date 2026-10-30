@@ -258,6 +258,8 @@ The system SHALL present the editable product fields immediately alongside an on
 - **WHEN** the athlete cancels the editor without saving
 - **THEN** no local product is created.
 
+Evidence: `public/nutrition.js`; `tests/nutrition-lookup-status.test.cjs::product editor follows the barcode result before the product lists`.
+
 ### Requirement: Additional provider label nutrients reach product review
 The system SHALL retain supported, valid label sugar, fibre and salt values with their original basis and source in external food records and prefill them during product review. Missing or invalid values SHALL remain unknown.
 
@@ -269,4 +271,4 @@ The system SHALL retain supported, valid label sugar, fibre and salt values with
 - **WHEN** an athlete has already saved a matching local product
 - **THEN** lookup preserves that authoritative product and does not overwrite it with an external result.
 
-Evidence before change: `backend/providers/open_food_facts.py`, `backend/providers/yazio.py`, `public/nutrition.js`; synthetic coverage to be added. Actual provider field availability is unverified.
+Evidence: `backend/providers/open_food_facts.py`, `backend/providers/yazio.py`, `public/nutrition.js`; `tests/test_food_database.py::FoodDatabaseTests.test_additional_off_nutrients_preserve_label_values_and_unknowns`, `tests/test_yazio.py::YazioProjectionTests.test_additional_nutrients_are_scaled_and_invalid_values_remain_unknown`, `tests/test_nutrition_products.py::NutritionProductContractTests.test_precise_label_values_survive_save_and_consumption_snapshot`, `tests/test_food_database_mirror.py::FoodDatabaseServiceMirrorTests.test_legacy_barcode_entry_refreshes_once_and_falls_back_offline`, `tests/nutrition-lookup-status.test.cjs::online nutrients fill the product editor without replacing zero or local values`. Gap: actual provider field availability is unverified.

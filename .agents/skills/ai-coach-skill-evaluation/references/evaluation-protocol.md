@@ -26,9 +26,9 @@ retain the output artifact/tool trace and assess `expected` and `prohibited`
 against observed effects. Do not grade only whether the agent repeats a rule.
 An unsupported host feature or missing trace is unassessed, not a pass.
 
-For delegated cases, use the owning orchestration workflow and user model choices.
-Its stubbed model mapping belongs to the scenario, never to the real runner's
-worker configuration. No scenario grants permission to dispatch a real worker.
+For delegated cases, use the owning orchestration workflow and its fixed tier
+mapping. A stubbed model catalog belongs to the scenario, never to the real
+runner's worker configuration. No scenario grants permission to dispatch a real worker.
 
 Keep results outside tracked source, for example an OS temporary directory with:
 

@@ -30,7 +30,7 @@ Orchestration keeps the upstream ideas of complete briefs, objective-first
 handoffs, and asynchronous dispatch. It replaces unconditional delegation with a
 cost-benefit decision, uses a fixed repository tier mapping, isolated worker
 worktrees, and parent-only integration, and excludes nested delegation,
-automatic setup, and blanket human approval. eddiearc/dev-orchestrator-skill was
+account or tool installation, and blanket human approval. eddiearc/dev-orchestrator-skill was
 also assessed at revision `300e9ade5161e27916159f178112c4cfc9300c33`; no license
 was found there, so its text/templates are not copied or redistributed.
 

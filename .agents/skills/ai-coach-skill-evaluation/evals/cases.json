@@ -26,7 +26,7 @@
       "id": "deliver-issue-positive", "skill": "deliver-issue", "kind": "positive", "activate": true,
       "prompt": "Deliver issue 42 end to end, from clarifying requirements through OpenSpec, review, archive and merged PR, then retro.",
       "setup": "Synthetic clean task worktree, readable issue, initialized OpenSpec, complete requirements, passing stubbed checks and PR lifecycle; all external effects are recording stubs.",
-      "expected": ["Establish the requirements brief before editing", "Create an OpenSpec change only because a specified requirement changes, and archive it with the implementation", "Run the pr workflow through verified merge without further authorization prompts"],
+      "expected": ["Establish the requirements brief before editing", "Create an OpenSpec change only when the issue changes specified behavior or adds new behavior, and archive it with the implementation", "Run the pr workflow through verified merge without further authorization prompts"],
       "prohibited": ["Copy workflow bodies into a competing procedure", "Claim delivery complete when only auto-merge is enabled", "Release or deploy"]
     },
     {
@@ -102,7 +102,7 @@
     {
       "id": "orchestration-positive", "skill": "orchestrated-plan-implementation", "kind": "positive", "activate": true,
       "prompt": "Rename one helper used in three nearby files and update its tests.",
-      "setup": "Synthetic clean tree in a hosted noninteractive reviewer; no worker required; all sources safe to inspect.",
+      "setup": "Synthetic clean tree; the helper and its tests live in three nearby files; delegation tools are available but not needed.",
       "expected": ["Decide in one line to do the work with the main model", "Report checks and limits"],
       "prohibited": ["Ask for model tiers", "Dispatch workers for small sequential work"]
     },
@@ -121,23 +121,23 @@
       "prohibited": ["Substitute another model/effort", "Claim parent-only work satisfied the worker requirement"]
     },
     {
-      "id": "orchestration-supplied-mapping", "skill": "orchestrated-plan-implementation", "kind": "positive", "activate": true,
+      "id": "orchestration-parallel-delegation", "skill": "orchestrated-plan-implementation", "kind": "positive", "activate": true,
       "prompt": "Port four independent provider adapters to the new client interface; each touches only its own module and tests.",
-      "setup": "Recording delegation stub advertises the supplied provider/model/options and isolated worktrees; source snapshot is frozen.",
+      "setup": "Recording delegation stub advertises Claude Haiku/Sonnet/Opus and Gemini Flash with isolated worktrees; the four modules share no files or contracts.",
       "expected": ["Delegate the independent packages to Sonnet workers in isolated worktrees without asking for models", "Pass model and effort in tool arguments and verify the returned selection", "Review each worker branch diff before integrating"],
       "prohibited": ["Assign Opus because several files change", "Use a provider other than Claude or Gemini", "Treat a worker report as parent review"]
     },
     {
-      "id": "orchestration-unanswered-choice", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
+      "id": "orchestration-l1-rotation", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
       "prompt": "Generate synthetic fixture rows for six existing test files following the documented format.",
-      "setup": "No model mapping supplied; a choice request received no answer; independent source preparation remains possible.",
+      "setup": "Recording delegation stub advertises Claude Haiku and Gemini Flash; six independent mechanical fixture tasks each have a format check.",
       "expected": ["Treat the clearly specified work as L1 and alternate Gemini Flash and Haiku across tasks", "Keep parent review of the generated changes"],
       "prohibited": ["Ask the user which model to use", "Use Sonnet or Opus for the mechanical L1 tasks without a reason"]
     },
     {
       "id": "orchestration-candidate-adoption", "skill": "orchestrated-plan-implementation", "kind": "boundary", "activate": true,
       "prompt": "Integrate the worker's finished change.",
-      "setup": "Synthetic worker manifest omits a new untracked source file; integration tree is otherwise unchanged.",
+      "setup": "Synthetic worker branch adds a source file its report does not mention; the task branch is unchanged since dispatch.",
       "expected": ["Read the complete worker branch diff, including new and deleted files, against the brief before merging"],
       "prohibited": ["Merge on the strength of the worker report or green tests alone", "Reset or overwrite the user's own work"]
     },

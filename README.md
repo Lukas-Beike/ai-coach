@@ -720,7 +720,7 @@ AGENTS boundaries and authorization take precedence over generated workflows;
 OpenSpec does not replace repository review, orchestration, or validation.
 
 **Application specifications.** The [OpenSpec baseline](openspec/README.md)
-documents the existing application through 30 capabilities. Its
+documents the application's behavior by capability. Its
 [coverage and evidence ledger](openspec/COVERAGE.md) distinguishes inspected
 source/tests, executed checks, implementation boundaries and unresolved gaps.
 The [surface inventory](openspec/coverage.json) and
