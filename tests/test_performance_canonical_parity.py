@@ -233,7 +233,6 @@ def _load_pair(
     canonical = read_performance_inputs(
         StubObservationReader(_observations(snapshot)),
         None,
-        snapshot,
         as_of=PARITY_TODAY,
     )
     days = current_days(rows)
@@ -342,7 +341,6 @@ class CanonicalLoadParityTests(unittest.TestCase):
         canonical = read_performance_inputs(
             StubObservationReader(_observations(_snapshot(canonical_rows))),
             None,
-            _snapshot(canonical_rows),
             as_of=PARITY_TODAY,
         )
         self.assertIsNone(legacy["ctl"])
@@ -385,7 +383,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         ]
         snapshot = _snapshot(rows)
         reader = StubObservationReader(_observations(snapshot))
-        inputs = read_performance_inputs(reader, "db", snapshot, as_of=PARITY_TODAY)
+        inputs = read_performance_inputs(reader, "db", as_of=PARITY_TODAY)
         kinds = [kind for kind, _start, _end in reader.calls]
         # Wellness fields and the current-metric kinds, each read once and unbounded.
         self.assertEqual(len(kinds), len(set(kinds)))
@@ -399,25 +397,17 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
     def test_without_rows_activities_or_observations_there_are_no_inputs(
         self,
     ) -> None:
-        for snapshot in (_snapshot([]), None):
-            with self.subTest(snapshot=snapshot is None):
-                self.assertIsNone(
-                    read_performance_inputs(
-                        StubObservationReader(), "db", snapshot, as_of=PARITY_TODAY
-                    )
-                )
+        self.assertIsNone(
+            read_performance_inputs(StubObservationReader(), "db", as_of=PARITY_TODAY)
+        )
 
     def test_a_snapshot_without_wellness_rows_is_rebuilt_from_observations(
         self,
     ) -> None:
         source = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
-        stripped = {
-            key: value for key, value in source.items() if key != "recent_wellness"
-        }
         inputs = read_performance_inputs(
             StubObservationReader(_observations(source)),
             "db",
-            stripped,
             as_of=PARITY_TODAY,
         )
         self.assertEqual(_present(inputs).wellness_day, PARITY_TODAY)
@@ -426,23 +416,6 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
             [day.day.isoformat() for day in _present(inputs).wellness_days or ()],
             [PARITY_DAY],
         )
-
-    def test_invalid_snapshot_days_do_not_create_inputs(self) -> None:
-        for rows in (
-            [{"id": "2026-01-01", "ctl": 50}, {"id": "latest", "ctl": 1}],
-            [{"id": "2026-01-01", "ctl": 50}, {"id": "2026-02-30", "ctl": 1}],
-            [{"id": "2026-01-01", "ctl": 50}, {"id": "2026-13-01", "ctl": 1}],
-            [{"id": "2026-01-01", "ctl": 50}, {"id": "20260920", "ctl": 1}],
-        ):
-            with self.subTest(rows=rows):
-                self.assertIsNone(
-                    read_performance_inputs(
-                        StubObservationReader(),
-                        "db",
-                        _snapshot(rows),
-                        as_of=PARITY_TODAY,
-                    )
-                )
 
     def test_unusable_ids_outside_the_latest_row_are_ignored_for_the_window(
         self,
@@ -454,18 +427,16 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         snapshot = _snapshot(rows)
         reader = StubObservationReader(_observations(snapshot))
         _assert_load_inputs(
-            self, read_performance_inputs(reader, "db", snapshot, as_of=PARITY_TODAY)
+            self, read_performance_inputs(reader, "db", as_of=PARITY_TODAY)
         )
 
     def test_non_mapping_wellness_entries_and_non_list_fields_are_ignored(
         self,
     ) -> None:
         rows = ["not-a-row", {"id": PARITY_DAY, "ctl": 50, "atl": 60}]
-        snapshot = _snapshot(rows)
         inputs = read_performance_inputs(
             StubObservationReader(_observations(_snapshot([rows[1]]))),
             "db",
-            snapshot,
             as_of=PARITY_TODAY,
         )
         self.assertIsNotNone(inputs)
@@ -474,7 +445,6 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
             read_performance_inputs(
                 StubObservationReader(),
                 "db",
-                {"recent_wellness": "text"},
                 as_of=PARITY_TODAY,
             )
         )
@@ -590,7 +560,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 if observation.kind is MetricKind.ATL
             )
         )
-        canonical = read_performance_inputs(reader, "db", snapshot, as_of=PARITY_TODAY)
+        canonical = read_performance_inputs(reader, "db", as_of=PARITY_TODAY)
         load = performance_load_context(
             [], current_days(rows), PARITY_TODAY, canonical=canonical
         )["load"]
@@ -606,7 +576,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 if observation.kind is MetricKind.ATL
             )
         )
-        inputs = read_performance_inputs(reader, "db", snapshot, as_of=PARITY_TODAY)
+        inputs = read_performance_inputs(reader, "db", as_of=PARITY_TODAY)
         self.assertIsNotNone(inputs)
         self.assertIsNone(_present(inputs).ctl)
         self.assertEqual(_present(inputs).atl, 60.0)
@@ -817,7 +787,7 @@ class CanonicalWiringTests(unittest.TestCase):
         self.assertIsNone(
             _prelude(snapshot, manager, None).read(True).performance_inputs
         )
-        self.assertIsNone(_service(snapshot, None).canonical_inputs("db", snapshot))
+        self.assertIsNone(_service(snapshot, None).canonical_inputs("db"))
         with patch(
             "backend.http_api.public_performance.performance_context.current_performance_context",
             return_value={},

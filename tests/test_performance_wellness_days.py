@@ -118,19 +118,10 @@ class WellnessDayTests(unittest.TestCase):
             observation(MetricKind.CTL, TODAY, 58.4),
             observation(MetricKind.ATL, TODAY, 40),
         )
-        plain = read_performance_inputs(reader, object(), {}, as_of=TODAY)
+        plain = read_performance_inputs(reader, object(), as_of=TODAY)
         contradiction = read_performance_inputs(
             reader,
             object(),
-            {
-                "recent_wellness": [
-                    {"id": TODAY.isoformat(), "ctl": 999, "atl": 999},
-                    {"id": (TODAY + timedelta(days=1)).isoformat(), "ctl": 1000},
-                ],
-                "raw_provider_data": {
-                    "wellness": [{"id": TODAY.isoformat(), "weight": 1}]
-                },
-            },
             as_of=TODAY,
         )
         self.assertEqual(plain, contradiction)
@@ -144,7 +135,7 @@ class WellnessDayTests(unittest.TestCase):
             observation(MetricKind.EFTP, TODAY, 250, sport=Sport.RIDE),
             observation(MetricKind.EFTP, TODAY, 999, sport=Sport.RUN, record="athlete"),
         )
-        inputs = read_performance_inputs(reader, object(), {}, as_of=TODAY)
+        inputs = read_performance_inputs(reader, object(), as_of=TODAY)
         assert inputs is not None and inputs.wellness_days is not None
         self.assertEqual(inputs.run_eftp_by_day, {yesterday: 310})
         self.assertEqual(inputs.eftp_by_day, {TODAY: 250})

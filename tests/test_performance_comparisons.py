@@ -33,13 +33,11 @@ class PerformanceTrendAverageTests(unittest.TestCase):
         }
 
         self.assertEqual(
-            performance_trend_average({}, garmin, metrics, "weight_kg", 7, TODAY),
+            performance_trend_average(garmin, metrics, "weight_kg", 7, TODAY),
             71.0,
         )
         self.assertEqual(
-            performance_trend_average(
-                {}, garmin, metrics, "cycling_ftp_watts", 7, TODAY
-            ),
+            performance_trend_average(garmin, metrics, "cycling_ftp_watts", 7, TODAY),
             290.0,
         )
 
@@ -55,7 +53,6 @@ class PerformanceTrendAverageTests(unittest.TestCase):
 
         self.assertEqual(
             performance_trend_average(
-                snapshot,
                 {},
                 metrics,
                 "readiness",
@@ -65,11 +62,7 @@ class PerformanceTrendAverageTests(unittest.TestCase):
             ),
             75.0,
         )
-        self.assertIsNone(
-            performance_trend_average(
-                {"recent_wellness": []}, {}, metrics, "readiness", 7, TODAY
-            )
-        )
+        self.assertIsNone(performance_trend_average({}, metrics, "readiness", 7, TODAY))
 
 
 class PerformanceComparisonsTests(unittest.TestCase):
@@ -148,7 +141,6 @@ class PerformanceComparisonsTests(unittest.TestCase):
                 "sportInfo": [{"types": ["Ride"], "eFTP": 290}],
             },
         ]
-        snapshot = {"recent_wellness": wellness_rows}
         recovery = {
             "sleep_hours": 8,
             "sleep_average": 7,
@@ -172,7 +164,6 @@ class PerformanceComparisonsTests(unittest.TestCase):
             {"start_date_local": "2026-09-07T08:00:00", "type": "Ride", "icu_eftp": 290}
         ]
         return (
-            snapshot,
             garmin,
             metrics,
             recovery,
@@ -231,8 +222,8 @@ class PerformanceComparisonsTests(unittest.TestCase):
     def test_missing_values_return_none_without_mutation(self):
         values = self._inputs()
         values = list(values)
-        values[2] = {"cycling_eftp_watts": {"value": None, "source": None}}
-        values[3] = {
+        values[1] = {"cycling_eftp_watts": {"value": None, "source": None}}
+        values[2] = {
             "sleep_hours": None,
             "sleep_average": None,
             "readiness": None,

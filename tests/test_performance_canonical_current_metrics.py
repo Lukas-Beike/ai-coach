@@ -517,7 +517,7 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
         with self.manager.reader() as db:
-            inputs = read_performance_inputs(selector, db, self.intervals, as_of=TODAY)
+            inputs = read_performance_inputs(selector, db, as_of=TODAY)
         self.assertIsNotNone(inputs)
         assert inputs is not None
         self.assertIsNotNone(inputs.current)
@@ -674,7 +674,6 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         inputs = read_performance_inputs(
             self._stored(stale),
             None,
-            self.SNAPSHOT,
             activity_reader=self.ActivityReader(),
             as_of=AS_OF,
         )
@@ -686,7 +685,6 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         inputs = read_performance_inputs(
             self._stored(limit),
             None,
-            self.SNAPSHOT,
             activity_reader=self.ActivityReader(),
             as_of=AS_OF,
         )
@@ -703,7 +701,6 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         read_performance_inputs(
             reader,
             None,
-            self.SNAPSHOT,
             activity_reader=self.ActivityReader(),
             as_of=AS_OF,
         )
@@ -720,7 +717,6 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         inputs = read_performance_inputs(
             reader,
             None,
-            self.SNAPSHOT,
             activity_reader=self.ActivityReader(),
             as_of=within,
         )

@@ -54,7 +54,6 @@ def recurring_training_comparisons(
 
 
 def performance_trend_average(
-    snapshot: dict[str, Any],
     garmin: dict[str, Any],
     metrics: dict[str, dict[str, Any]],
     key: str,
@@ -82,7 +81,6 @@ def performance_trend_average(
 
 
 def _performance_trend(
-    snapshot: dict[str, Any],
     garmin: dict[str, Any],
     metrics: dict[str, dict[str, Any]],
     key: str,
@@ -96,7 +94,6 @@ def _performance_trend(
     return wellness.comparison_value(
         metrics.get(key, {}).get("value"),
         performance_trend_average(
-            snapshot,
             garmin,
             metrics,
             key,
@@ -113,7 +110,6 @@ def _performance_trend(
 
 
 def performance_comparisons(
-    snapshot: dict[str, Any],
     garmin: dict[str, Any],
     metrics: dict[str, dict[str, Any]],
     recovery: dict[str, Any],
@@ -136,7 +132,6 @@ def performance_comparisons(
         key: str, unit: str = "", higher_is_better: bool | None = True
     ) -> dict[str, Any] | None:
         return _performance_trend(
-            snapshot,
             garmin,
             metrics,
             key,
@@ -151,7 +146,6 @@ def performance_comparisons(
     readiness_trend = wellness.comparison_value(
         recovery["readiness"],
         performance_trend_average(
-            snapshot,
             garmin,
             {"readiness": {"source": recovery["readiness_source"]}},
             "readiness",

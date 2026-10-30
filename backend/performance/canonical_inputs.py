@@ -131,7 +131,6 @@ def snapshot_with_inputs(
         return snapshot, read_performance_inputs(
             source.observation_reader(),
             db,
-            snapshot,
             activity_reader=source.activity_row_reader(),
             as_of=as_of,
         )
@@ -161,7 +160,6 @@ def activity_rows_for(source: CanonicalPerformanceSource) -> tuple[dict[str, Any
 def inputs_for_snapshot(
     source: CanonicalPerformanceSource | None,
     db: Any,
-    snapshot: Any,
     *,
     as_of: date,
 ) -> CanonicalPerformanceInputs | None:
@@ -171,7 +169,6 @@ def inputs_for_snapshot(
     return read_performance_inputs(
         source.observation_reader(),
         db,
-        snapshot,
         activity_reader=source.activity_row_reader(),
         as_of=as_of,
     )
@@ -343,14 +340,13 @@ class _CarriedRows:
 def read_performance_inputs(
     reader: ObservationReader,
     db: Any,
-    snapshot: Mapping[str, Any] | None,
     *,
     activity_reader: ActivityRowReader | None = None,
     as_of: date,
 ) -> CanonicalPerformanceInputs | None:
     """Read canonical activity rows and wellness days in one selected unit.
 
-    Snapshot wellness sections are ignored. None means no activity reader and
+    No snapshot section is read. None means no activity reader and
     no observed wellness day. ``as_of`` is the athlete-local day.
     """
     reader = resolve_reader(reader, db)

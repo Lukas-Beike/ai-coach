@@ -50,6 +50,32 @@ def _activities(
     return activities
 
 
+def _wellness_days(
+    canonical: CanonicalPerformanceInputs | None,
+) -> tuple[WellnessDay, ...]:
+    """The current wellness days; none without canonical inputs."""
+    return () if canonical is None else canonical.wellness_days or ()
+
+
+def _sleep_timing_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Stored wellness rows for the pre-sleep-period timing fallback only (D7)."""
+    stored = snapshot.get("recent_wellness")
+    if not isinstance(stored, list):
+        return []
+    return [row for row in stored if isinstance(row, dict)]
+
+
+def _day_id(day: WellnessDay | None) -> str | None:
+    return None if day is None else day.day.isoformat()
+
+
+def _subjective_ratings(day: WellnessDay | None) -> dict[str, float | None]:
+    return {
+        key: None if day is None else day.value(kind)
+        for key, kind in _SUBJECTIVE_RATINGS
+    }
+
+
 def _canonical_day_series(
     canonical: CanonicalPerformanceInputs | None,
 ) -> dict[str, Mapping[date, float] | None]:
@@ -124,16 +150,8 @@ def current_performance_context(
     athlete_value = snapshot.get("athlete")
     athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
     activities = _activities(snapshot, canonical)
-    days: tuple[WellnessDay, ...] = (
-        () if canonical is None else canonical.wellness_days or ()
-    )
+    days = _wellness_days(canonical)
     latest_wellness = latest(days)
-    stored_wellness = snapshot.get("recent_wellness")
-    sleep_timing_rows = (
-        [row for row in stored_wellness if isinstance(row, dict)]
-        if isinstance(stored_wellness, list)
-        else []
-    )
 
     recovery = performance_recovery_context.performance_recovery_context(
         None if canonical is None else canonical.recovery, today
@@ -180,7 +198,6 @@ def current_performance_context(
         )
     )
     comparisons = performance_comparisons.performance_comparisons(
-        snapshot,
         garmin,
         metrics,
         recovery,
@@ -199,7 +216,7 @@ def current_performance_context(
     return {
         "available": True,
         "personal_recovery": personal_recovery(
-            sleep_timing_rows,
+            _sleep_timing_rows(snapshot),
             garmin,
             profile,
             today,
@@ -234,17 +251,14 @@ def current_performance_context(
             "id": recovery["sleep_date"]
             or recovery["resting_hr_date"]
             or recovery["hrv_date"]
-            or (latest_wellness.day.isoformat() if latest_wellness else None),
+            or _day_id(latest_wellness),
             "resting_hr_bpm": resting_hr,
             "resting_hr_bpm_source": resting_hr_source,
             "hrv_ms": hrv,
             "hrv_ms_source": hrv_source,
             "sleep_score": sleep_score,
             "sleep_score_source": sleep_score_source,
-            **{
-                key: None if latest_wellness is None else latest_wellness.value(kind)
-                for key, kind in _SUBJECTIVE_RATINGS
-            },
+            **_subjective_ratings(latest_wellness),
             "readiness": readiness_current,
             "readiness_source": readiness_source,
             "sleep_hours": sleep_hours,

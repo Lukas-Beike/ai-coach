@@ -47,7 +47,7 @@ class PublicStateLocalPrelude:
         database_manager: DatabaseManager,
         today: Callable[[], date],
         window: CalendarWindowRange,
-        performance_inputs: Callable[[Any, Any], CanonicalPerformanceInputs | None]
+        performance_inputs: Callable[[Any], CanonicalPerformanceInputs | None]
         | None = None,
         activity_rows: ActivityRowSource | None = None,
     ) -> None:
@@ -66,7 +66,7 @@ class PublicStateLocalPrelude:
         with self._database_manager.read_snapshot() as db:
             snapshot = self._sync_state.latest_snapshot()
             performance_inputs = (
-                self._performance_inputs(db, snapshot)
+                self._performance_inputs(db)
                 if self._performance_inputs is not None
                 else None
             )

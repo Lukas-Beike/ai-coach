@@ -186,7 +186,7 @@ class ActivityWindowTests(unittest.TestCase):
         db = object()
 
         read_performance_inputs(
-            reader, db, {}, activity_reader=_StartRecorder(), as_of=TODAY
+            reader, db, activity_reader=_StartRecorder(), as_of=TODAY
         )
         reads = source.observations.call_count
         read_garmin_state(reader, db)
@@ -198,23 +198,18 @@ class ActivityWindowTests(unittest.TestCase):
         kinds = [call.args[1] for call in source.observations.call_args_list]
         self.assertEqual(len(kinds), len(set(kinds)))
 
-    def _start(self, wellness_days: list[str]) -> date | None:
+    def _start(self) -> date | None:
         rows = _StartRecorder()
-        snapshot = {"recent_wellness": [{"id": day} for day in wellness_days]}
         read_performance_inputs(
-            _NoObservations(), object(), snapshot, activity_reader=rows, as_of=TODAY
+            _NoObservations(), object(), activity_reader=rows, as_of=TODAY
         )
         (start,) = rows.starts
         return start
 
-    def test_activities_cover_the_year_before_as_of(self) -> None:
-        self.assertEqual(self._start(["2026-09-01"]), TODAY - timedelta(days=364))
-        self.assertEqual(self._start([]), TODAY - timedelta(days=364))
-
-    def test_snapshot_only_wellness_rows_do_not_extend_activity_window(self) -> None:
-        self.assertEqual(
-            self._start(["2025-06-01", "2026-10-12"]), TODAY - timedelta(days=364)
-        )
+    def test_activities_cover_the_year_before_as_of_without_wellness_days(
+        self,
+    ) -> None:
+        self.assertEqual(self._start(), TODAY - timedelta(days=364))
 
 
 class SectionReadTests(CanonicalReadFixture):
@@ -224,7 +219,7 @@ class SectionReadTests(CanonicalReadFixture):
         selector = make_selector(self)
         with self.manager.reader() as db:
             inputs = read_performance_inputs(
-                selector, db, snapshot, activity_reader=selector, as_of=TODAY
+                selector, db, activity_reader=selector, as_of=TODAY
             )
         self.assertIsNotNone(inputs)
         assert inputs is not None

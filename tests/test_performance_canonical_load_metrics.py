@@ -76,7 +76,6 @@ def _inputs(
     inputs = read_performance_inputs(
         FilteringReader(_observations(snapshot)),
         None,
-        _stripped(snapshot) if carrier is None else carrier,
         as_of=DAY,
     )
     assert inputs is not None
@@ -194,7 +193,6 @@ class RampRateTests(unittest.TestCase):
             read_performance_inputs(
                 FilteringReader(()),
                 None,
-                _snapshot([_row("not-a-date", ctl=58)]),
                 as_of=DAY,
             )
         )
@@ -325,7 +323,6 @@ class EftpTests(unittest.TestCase):
         inputs = read_performance_inputs(
             FilteringReader(_observations(snapshot)),
             None,
-            snapshot,
             activity_reader=NoActivityRows(),
             as_of=DAY,
         )
@@ -350,7 +347,6 @@ class EftpTests(unittest.TestCase):
         inputs = read_performance_inputs(
             FilteringReader(_observations(snapshot)),
             None,
-            snapshot,
             activity_reader=NoActivityRows(),
             as_of=DAY,
         )

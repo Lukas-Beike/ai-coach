@@ -59,7 +59,6 @@ class PublicPerformanceStateService:
             canonical = read_performance_inputs(
                 reader,
                 db,
-                snapshot,
                 activity_reader=source.activity_row_reader(),
                 as_of=today,
             )
@@ -68,11 +67,9 @@ class PublicPerformanceStateService:
                 snapshot, garmin, canonical, body, today, observations=reader
             )
 
-    def canonical_inputs(
-        self, db: Any, snapshot: Any
-    ) -> CanonicalPerformanceInputs | None:
-        """Read the load inputs inside the transaction that read ``snapshot``."""
-        return inputs_for_snapshot(self._canonical, db, snapshot, as_of=self._today())
+    def canonical_inputs(self, db: Any) -> CanonicalPerformanceInputs | None:
+        """Read the load inputs inside the caller's snapshot transaction."""
+        return inputs_for_snapshot(self._canonical, db, as_of=self._today())
 
     def from_snapshot(
         self,

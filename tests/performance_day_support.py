@@ -60,5 +60,5 @@ def canonical_from_snapshot(snapshot: dict[str, Any], as_of: date):
             return tuple(snapshot.get("recent_activities") or ())
 
     return read_performance_inputs(
-        Reader(), object(), snapshot, activity_reader=ActivityReader(), as_of=as_of
+        Reader(), object(), activity_reader=ActivityReader(), as_of=as_of
     )
