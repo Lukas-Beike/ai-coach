@@ -1027,6 +1027,12 @@ private authentication files and a unique result directory under
 `manifest.json` records selection, source, environment, phase times, child exits
 and final status. Pending or interrupted records are unverified. Keep private
 storage state and traces out of reports; the runner disables traces.
+The runner warns when the application image is older than `Dockerfile`,
+`requirements.txt`, `server.py`, `garmin-login.py`, `backend/` or `public/`;
+rebuild it before trusting results. A failed child prints its first failing
+test location and error line (each child's manifest entry lists all failing tests in
+`failures`); a failure without a test report means setup or authentication
+failed, typically a stale image or an unserved new public asset.
 
 CI builds and shares the current application image once, then starts browser
 jobs beside the native suite. Its prepared browser image is pinned by exact

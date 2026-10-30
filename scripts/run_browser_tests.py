@@ -48,18 +48,23 @@ def stamp():
     return datetime.now(UTC).isoformat()
 
 
-def host_network_error(output):
-    """Return the host network error when every failing test of a child names it.
-
-    Only the per-test ``artifacts/*/error-context.md`` reports are read, symlinks
-    are skipped, and only the fixed error name is returned, never report text. A
-    child with any report that does not name the error failed an assertion.
-    """
-    reports = [
+def error_reports(output):
+    """Per-test ``artifacts/*/error-context.md`` reports; symlinks are skipped."""
+    return [
         report
         for report in sorted((Path(output) / "artifacts").glob("*/error-context.md"))
         if not report.is_symlink() and not report.parent.is_symlink()
     ]
+
+
+def host_network_error(output):
+    """Return the host network error when every failing test of a child names it.
+
+    Only the per-test reports are read, and only the fixed error name is returned,
+    never report text. A child with any report that does not name the error failed
+    an assertion.
+    """
+    reports = error_reports(output)
     if not reports:
         return None
     for report in reports:
@@ -70,6 +75,56 @@ def host_network_error(output):
         if HOST_NETWORK_ERROR not in text:
             return None
     return HOST_NETWORK_ERROR
+
+
+def failed_tests(output):
+    """Location and first error line of each failing test's per-test report.
+
+    The line comes from a disposable-fixture run; it is bounded and the fixture
+    password is redacted. Raw child output is still never read.
+    """
+    failures = []
+    for report in error_reports(output):
+        try:
+            lines = report.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        location = next(
+            (line[12:].strip() for line in lines if line.startswith("- Location: ")),
+            "",
+        )
+        details = lines.index("# Error details") if "# Error details" in lines else -1
+        error = next(
+            (
+                line.strip()
+                for line in lines[details + 1 :]
+                if details >= 0 and line.strip() and not line.startswith("```")
+            ),
+            "",
+        )
+        failures.append(
+            {
+                "location": location[:200],
+                "error": error.replace(FAKE_PASSWORD, "[redacted]")[:300],
+            }
+        )
+    return failures
+
+
+def failure_message(child, code, failures):
+    message = (
+        f"Playwright child failed (exit {code}): {child['project']} {child['file']}"
+    )
+    if not failures:
+        return (
+            message + "; no test report, so setup or authentication failed: rebuild "
+            "the application image and check that new public assets are allowlisted"
+        )
+    first = failures[0]
+    message += f": {first['location']}: {first['error']}"
+    if len(failures) > 1:
+        message += f" (+{len(failures) - 1} more failing tests in the manifest)"
+    return message
 
 
 def atomic_json(path, value):
@@ -472,6 +527,34 @@ def image_identity(processes, image):
     return info["Id"]
 
 
+# Dockerfile inputs of the application image; mtimes newer than the image mean
+# the image does not run the current working tree.
+APPLICATION_SOURCES = (
+    "Dockerfile",
+    "requirements.txt",
+    "server.py",
+    "garmin-login.py",
+    "backend",
+    "public",
+)
+
+
+def image_predates_source(processes, image, root):
+    created = json.loads(checked(processes, ["docker", "image", "inspect", image]))[0][
+        "Created"
+    ]
+    # Docker reports nanoseconds; fromisoformat accepts at most microseconds.
+    built = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", created))
+    newest = 0.0
+    for name in APPLICATION_SOURCES:
+        path = root / name
+        files = path.rglob("*") if path.is_dir() else [path]
+        for item in files:
+            if item.is_file() and "__pycache__" not in item.parts:
+                newest = max(newest, item.stat().st_mtime)
+    return newest > built.timestamp()
+
+
 def reserve_ports(count):
     reservations = []
     try:
@@ -869,7 +952,9 @@ class Execution:
                         "not a test assertion; rerun it with "
                         f"--project {child['project']} --spec {child['file']}"
                     )
-                raise RunnerError(f"Playwright child failed (exit {code})")
+                failures = failed_tests(output)
+                evidence.child(child, failures=failures)
+                raise RunnerError(failure_message(child, code, failures))
             self.containers.remove(fixture)
         except BaseException as error:
             evidence.child(
@@ -1113,11 +1198,23 @@ def main(argv=None):
                 else:
                     with evidence.phase("prerequisites"):
                         image = image_identity(processes, args.image)
+                        stale = image_predates_source(processes, args.image, ROOT)
+                        if stale:
+                            print(
+                                f"Warning: {args.image} is older than the application "
+                                f"source; rebuild it with docker build -t {args.image} .",
+                                file=sys.stderr,
+                                flush=True,
+                            )
                         browser = verify_browser(
                             ROOT, args, node, versions, processes, containers, private
                         )
                         evidence.update(
-                            images={"application": image, "browser": browser}
+                            images={
+                                "application": image,
+                                "application_predates_source": stale,
+                                "browser": browser,
+                            }
                         )
                     with evidence.phase("execution"):
                         Execution(
@@ -1172,9 +1269,11 @@ def main(argv=None):
     except KeyboardInterrupt, InterruptedError:
         code = 130
         evidence.update(status="interrupted", error="Run interrupted")
-    except RunnerError, OSError, ValueError, KeyError, TypeError:
+    except (RunnerError, OSError, ValueError, KeyError, TypeError) as error:
         code = code or 1
         evidence.update(status="failed")
+        if isinstance(error, RunnerError):
+            print("Browser run failed: " + str(error), file=sys.stderr, flush=True)
     finally:
         for number, handler in old_handlers.items():
             signal.signal(number, handler)

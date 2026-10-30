@@ -53,7 +53,7 @@ def frontend_source():
 
 
 from backend.http_api import state_events_get
-from backend.http_api.static_assets import StaticAssetService
+from backend.http_api.static_assets import STATIC_TARGETS, StaticAssetService
 from backend.sync.adaptive import ILLNESS_CALENDAR_CATEGORY
 
 
@@ -1230,6 +1230,16 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIn('"/apple-touch-icon.png?v=1"', precache.group(1))
         self.assertTrue((server.PUBLIC_DIR / "logo.png").is_file())
         self.assertTrue((server.PUBLIC_DIR / "apple-touch-icon.png").is_file())
+
+    def test_every_public_asset_is_served(self):
+        # A public file missing from the allowlist returns 404 and breaks every
+        # browser spec at authentication.
+        files = {
+            path.name
+            for path in server.PUBLIC_DIR.iterdir()
+            if path.is_file() and path.name != "AGENTS.md"
+        }
+        self.assertEqual(set(), files - set(STATIC_TARGETS))
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")
