@@ -3,7 +3,14 @@ line-length = 88
 target-version = "py314"
 
 [tool.ruff.lint]
-extend-select = ["DTZ"]
+# ARG001-ARG004 match SonarCloud's unused-parameter rule (python:S1172), which
+# failed the quality gate of #1505 after push; existing cases are ratchet debt.
+extend-select = ["DTZ", "ARG001", "ARG002", "ARG003", "ARG004"]
+
+[tool.ruff.lint.per-file-ignores]
+# SonarCloud excludes tests/** and e2e/** from its sources (sonar-project.properties).
+"tests/**" = ["ARG001", "ARG002", "ARG003", "ARG004"]
+"e2e/**" = ["ARG001", "ARG002", "ARG003", "ARG004"]
 
 [tool.mypy]
 python_version = "3.14"

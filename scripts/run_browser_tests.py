@@ -34,6 +34,10 @@ ROOT = Path(__file__).resolve().parents[1]
 LABEL = "io.ai-coach.browser-run"
 FAKE_PASSWORD = "e2e-fixture-password-1234"
 MAX_JOBS = 2
+# Chromium's error when the host ran out of socket buffers (seen on Windows Docker
+# hosts). A child whose every failing test names it hit the machine's limits, not a
+# test assertion; it is reported as an infrastructure error with a rerun hint.
+HOST_NETWORK_ERROR = "net::ERR_NO_BUFFER_SPACE"
 
 
 class RunnerError(Exception):
@@ -42,6 +46,30 @@ class RunnerError(Exception):
 
 def stamp():
     return datetime.now(UTC).isoformat()
+
+
+def host_network_error(output):
+    """Return the host network error when every failing test of a child names it.
+
+    Only the per-test ``artifacts/*/error-context.md`` reports are read, symlinks
+    are skipped, and only the fixed error name is returned, never report text. A
+    child with any report that does not name the error failed an assertion.
+    """
+    reports = [
+        report
+        for report in sorted((Path(output) / "artifacts").glob("*/error-context.md"))
+        if not report.is_symlink() and not report.parent.is_symlink()
+    ]
+    if not reports:
+        return None
+    for report in reports:
+        try:
+            text = report.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        if HOST_NETWORK_ERROR not in text:
+            return None
+    return HOST_NETWORK_ERROR
 
 
 def atomic_json(path, value):
@@ -833,6 +861,14 @@ class Execution:
                 f"Playwright child exit code: {code}\n", encoding="utf-8"
             )
             if code:
+                marker = host_network_error(output)
+                if marker:
+                    evidence.child(child, infrastructure_error=marker)
+                    raise RunnerError(
+                        f"Playwright child failed on a host network error ({marker}), "
+                        "not a test assertion; rerun it with "
+                        f"--project {child['project']} --spec {child['file']}"
+                    )
                 raise RunnerError(f"Playwright child failed (exit {code})")
             self.containers.remove(fixture)
         except BaseException as error:
@@ -996,7 +1032,7 @@ def main(argv=None):
     started = time.monotonic()
     old_handlers = {}
 
-    def interrupt(signum, frame):
+    def interrupt(_signum, _frame):
         processes.stop.set()
         raise KeyboardInterrupt
 
