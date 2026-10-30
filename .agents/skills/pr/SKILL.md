@@ -33,9 +33,10 @@ conflicts, CI failures, and review feedback through the merge.
   `npm run openspec -- validate --all --strict --no-interactive` passes.
   Archive it under deliver-issue's rules if all tasks are done; otherwise stop
   and report the open tasks.
-- **Spec drift:** when the branch changes `server.py`, `backend/`, or `public/`
-  and archives no OpenSpec change, list the main specs that cite each changed
-  file: `grep -l -F <path> openspec/specs/*/spec.md`. Read their requirements
+- **Spec drift:** when the branch archives no OpenSpec change, list the main
+  specs that cite each changed file outside `tests/` and `openspec/`
+  (application code, `Dockerfile`, `scripts/`, `.github/`, and so on):
+  `grep -l -F <path> openspec/specs/*/spec.md`. Files no spec cites need nothing. Read their requirements
   for the changed behavior. If described behavior changed, or the change adds
   behavior to that capability, update the requirement, its scenarios, and its
   `Evidence` line directly in `openspec/specs/` on this branch and run
