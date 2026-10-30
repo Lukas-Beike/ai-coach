@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -41,7 +42,11 @@ HOST_NETWORK_ERROR = "net::ERR_NO_BUFFER_SPACE"
 
 
 class RunnerError(Exception):
-    """Safe diagnostics never contain child stdout or provider/environment text."""
+    """Safe diagnostics never contain child stdout or provider/environment text.
+
+    The only report text is a failing test's bounded first error line, which CI
+    already publishes with the failure artifacts.
+    """
 
 
 def stamp():
@@ -77,11 +82,29 @@ def host_network_error(output):
     return HOST_NETWORK_ERROR
 
 
+def first_error_line(lines):
+    """First line of the report's error block; empty when the block is empty."""
+    if "# Error details" not in lines:
+        return ""
+    fenced = False
+    for line in lines[lines.index("# Error details") + 1 :]:
+        if line.startswith("```"):
+            if fenced:
+                return ""
+            fenced = True
+        elif line.startswith("# "):
+            return ""
+        elif line.strip():
+            return line.strip()
+    return ""
+
+
 def failed_tests(output):
     """Location and first error line of each failing test's per-test report.
 
     The line comes from a disposable-fixture run; it is bounded and the fixture
-    password is redacted. Raw child output is still never read.
+    password is redacted. Raw child output is still never read. Retry reports of
+    the same test and error are listed once.
     """
     failures = []
     for report in error_reports(output):
@@ -93,21 +116,12 @@ def failed_tests(output):
             (line[12:].strip() for line in lines if line.startswith("- Location: ")),
             "",
         )
-        details = lines.index("# Error details") if "# Error details" in lines else -1
-        error = next(
-            (
-                line.strip()
-                for line in lines[details + 1 :]
-                if details >= 0 and line.strip() and not line.startswith("```")
-            ),
-            "",
-        )
-        failures.append(
-            {
-                "location": location[:200],
-                "error": error.replace(FAKE_PASSWORD, "[redacted]")[:300],
-            }
-        )
+        failure = {
+            "location": location[:200],
+            "error": first_error_line(lines).replace(FAKE_PASSWORD, "[redacted]")[:300],
+        }
+        if failure not in failures:
+            failures.append(failure)
     return failures
 
 
@@ -117,8 +131,8 @@ def failure_message(child, code, failures):
     )
     if not failures:
         return (
-            message + "; no test report, so setup or authentication failed: rebuild "
-            "the application image and check that new public assets are allowlisted"
+            message + "; no test report, so the run failed before or outside a test "
+            "(configuration, setup or authentication)"
         )
     first = failures[0]
     message += f": {first['location']}: {first['error']}"
@@ -527,10 +541,8 @@ def image_identity(processes, image):
     return info["Id"]
 
 
-# Dockerfile inputs of the application image; mtimes newer than the image mean
-# the image does not run the current working tree.
+# Dockerfile COPY inputs of the application image, compared by content.
 APPLICATION_SOURCES = (
-    "Dockerfile",
     "requirements.txt",
     "server.py",
     "garmin-login.py",
@@ -539,20 +551,51 @@ APPLICATION_SOURCES = (
 )
 
 
-def image_predates_source(processes, image, root):
-    created = json.loads(checked(processes, ["docker", "image", "inspect", image]))[0][
-        "Created"
-    ]
-    # Docker reports nanoseconds; fromisoformat accepts at most microseconds.
-    built = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", created))
-    newest = 0.0
-    for name in APPLICATION_SOURCES:
-        path = root / name
-        files = path.rglob("*") if path.is_dir() else [path]
-        for item in files:
+def source_digest(root, names):
+    """Hash of the application files below ``root``; also runs inside the image."""
+    import hashlib
+    import json
+    from pathlib import Path
+
+    files = {}
+    for name in names:
+        path = Path(root) / name
+        for item in sorted(path.rglob("*")) if path.is_dir() else [path]:
             if item.is_file() and "__pycache__" not in item.parts:
-                newest = max(newest, item.stat().st_mtime)
-    return newest > built.timestamp()
+                relative = item.relative_to(root).as_posix()
+                files[relative] = hashlib.sha256(item.read_bytes()).hexdigest()
+    return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
+
+
+def image_matches_source(processes, containers, image_id, root):
+    """Compare the image's /app copy with the working tree; None when unknown."""
+    script = (
+        inspect.getsource(source_digest)
+        + f"print(source_digest('/app', {list(APPLICATION_SOURCES)!r}))"
+    )
+    try:
+        cid = containers.create(
+            "acb-" + containers.run_id + "-source",
+            [
+                "--network",
+                "none",
+                "--read-only",
+                "--cap-drop=ALL",
+                "--security-opt",
+                "no-new-privileges:true",
+                image_id,
+                "python",
+                "-c",
+                script,
+            ],
+        )
+        code, output = processes.run(["docker", "start", "--attach", cid])
+        containers.remove(cid)
+    except RunnerError:
+        return None
+    if code or not re.fullmatch(r"[a-f0-9]{64}", output.strip()):
+        return None
+    return output.strip() == source_digest(root, APPLICATION_SOURCES)
 
 
 def reserve_ports(count):
@@ -1198,11 +1241,14 @@ def main(argv=None):
                 else:
                     with evidence.phase("prerequisites"):
                         image = image_identity(processes, args.image)
-                        stale = image_predates_source(processes, args.image, ROOT)
-                        if stale:
+                        current = image_matches_source(
+                            processes, containers, image, ROOT
+                        )
+                        if current is False:
                             print(
-                                f"Warning: {args.image} is older than the application "
-                                f"source; rebuild it with docker build -t {args.image} .",
+                                f"Warning: {args.image} does not contain the current "
+                                "application source; rebuild it with "
+                                f"docker build -t {args.image} .",
                                 file=sys.stderr,
                                 flush=True,
                             )
@@ -1212,7 +1258,7 @@ def main(argv=None):
                         evidence.update(
                             images={
                                 "application": image,
-                                "application_predates_source": stale,
+                                "application_matches_source": current,
                                 "browser": browser,
                             }
                         )

@@ -4,7 +4,6 @@ import hashlib
 import importlib.util
 import io
 import json
-import os
 import re
 import socket
 import subprocess
@@ -196,7 +195,7 @@ class BrowserRunnerTests(unittest.TestCase):
             for sock in first + second:
                 sock.close()
 
-    def run_main(self, fake, jobs=1, list_only=False, extra_args=(), stale=False):
+    def run_main(self, fake, jobs=1, list_only=False, extra_args=(), current=True):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         args = [
@@ -220,7 +219,7 @@ class BrowserRunnerTests(unittest.TestCase):
             mock.patch.object(
                 runner, "image_identity", return_value="sha256:" + "a" * 64
             ),
-            mock.patch.object(runner, "image_predates_source", return_value=stale),
+            mock.patch.object(runner, "image_matches_source", return_value=current),
             mock.patch.object(
                 runner, "verify_browser", return_value={"mode": "native"}
             ),
@@ -387,38 +386,72 @@ class BrowserRunnerTests(unittest.TestCase):
         self.assertIn("Browser run failed: " + value["error"], self.stderr)
         self.assertNotIn("session-bearing", self.stderr)
 
-    def test_child_without_test_report_points_at_setup(self):
+    def test_first_error_line_stays_inside_the_error_block(self):
+        self.assertEqual("", runner.first_error_line(["# Test info"]))
+        for block in (
+            ["# Error details", "", "```", "```", "# Page snapshot", "- generic"],
+            ["# Error details", "", "# Page snapshot", "- generic"],
+        ):
+            self.assertEqual("", runner.first_error_line(block))
+
+    def test_retry_reports_of_one_failure_are_listed_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            for name in ("case", "case-retry1"):
+                path = output / "artifacts" / name / "error-context.md"
+                path.parent.mkdir(parents=True)
+                path.write_text(
+                    "- Location: e2e/a.spec.js:3:1\n# Error details\n```\nError: x\n",
+                    encoding="utf-8",
+                )
+            self.assertEqual(1, len(runner.failed_tests(output)))
+
+    def test_child_without_test_report_says_it_failed_outside_a_test(self):
         code, value, _path = self.run_main(FakeProcesses(fail_browser=True))
         self.assertNotEqual(code, 0)
         self.assertEqual([], value["children"][0]["failures"])
-        self.assertIn("setup or authentication failed", self.stderr)
+        self.assertIn("no test report", self.stderr)
 
-    def test_stale_application_image_warns_and_is_recorded(self):
-        code, value, _path = self.run_main(FakeProcesses(), stale=True)
+    def test_outdated_application_image_warns_and_is_recorded(self):
+        code, value, _path = self.run_main(FakeProcesses(), current=False)
         self.assertEqual(code, 0)
-        self.assertTrue(value["images"]["application_predates_source"])
+        self.assertIs(False, value["images"]["application_matches_source"])
         self.assertIn("docker build -t ai-coach:e2e .", self.stderr)
-        self.run_main(FakeProcesses())
-        self.assertNotIn("Warning", self.stderr)
+        for current in (True, None):
+            self.run_main(FakeProcesses(), current=current)
+            self.assertNotIn("Warning", self.stderr)
 
-    def test_image_predates_source_compares_build_time_with_source_mtimes(self):
+    def test_image_source_comparison_hashes_content_and_ignores_bytecode(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "backend" / "__pycache__").mkdir(parents=True)
             source = root / "backend" / "module.py"
-            source.write_text("", encoding="utf-8")
-            cache = root / "backend" / "__pycache__" / "module.pyc"
-            cache.write_text("", encoding="utf-8")
-            os.utime(source, (1_000_000_000, 1_000_000_000))  # 2001-09-09
-            os.utime(cache, (2_000_000_000, 2_000_000_000))  # 2033, ignored
-            fake = mock.Mock()
-            fake.run.return_value = (
-                0,
-                json.dumps([{"Created": "2020-01-01T00:00:00.123456789Z"}]),
+            source.write_text("one", encoding="utf-8")
+            digest = runner.source_digest(root, runner.APPLICATION_SOURCES)
+            (root / "backend" / "__pycache__" / "module.pyc").write_text("x")
+            self.assertEqual(
+                digest, runner.source_digest(root, runner.APPLICATION_SOURCES)
             )
-            self.assertFalse(runner.image_predates_source(fake, "image", root))
-            os.utime(source, (1_700_000_000, 1_700_000_000))  # 2023
-            self.assertTrue(runner.image_predates_source(fake, "image", root))
+            containers = mock.Mock(run_id="run")
+            processes = mock.Mock()
+            processes.run.return_value = (0, digest + "\n")
+            self.assertTrue(
+                runner.image_matches_source(processes, containers, "image", root)
+            )
+            script = containers.create.call_args.args[1][-1]
+            self.assertIn("def source_digest", script)
+            source.write_text("two", encoding="utf-8")
+            self.assertFalse(
+                runner.image_matches_source(processes, containers, "image", root)
+            )
+            processes.run.return_value = (1, "")
+            self.assertIsNone(
+                runner.image_matches_source(processes, containers, "image", root)
+            )
+            containers.create.side_effect = runner.RunnerError("unavailable")
+            self.assertIsNone(
+                runner.image_matches_source(processes, containers, "image", root)
+            )
 
     def run_with_cleanup_exception(self, fake):
         snapshots = []

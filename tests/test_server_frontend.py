@@ -1232,14 +1232,18 @@ class ServerFrontendTests(ServerTestCase):
         self.assertTrue((server.PUBLIC_DIR / "apple-touch-icon.png").is_file())
 
     def test_every_public_asset_is_served(self):
-        # A public file missing from the allowlist returns 404 and breaks every
-        # browser spec at authentication.
+        # An unlisted public file is answered with index.html, so the browser
+        # rejects it and every browser spec fails.
         files = {
             path.name
             for path in server.PUBLIC_DIR.iterdir()
             if path.is_file() and path.name != "AGENTS.md"
         }
-        self.assertEqual(set(), files - set(STATIC_TARGETS))
+        self.assertEqual(
+            set(),
+            files - set(STATIC_TARGETS),
+            "add new public files to STATIC_TARGETS in backend/http_api/static_assets.py",
+        )
 
     def test_service_worker_caches_only_versioned_static_assets_and_not_api(self):
         source = (server.PUBLIC_DIR / "service-worker.js").read_text(encoding="utf-8")

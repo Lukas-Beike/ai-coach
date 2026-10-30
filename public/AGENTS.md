@@ -21,10 +21,6 @@
   the asset query version in `index.html` and the cache name/asset URLs in
   `service-worker.js` so a fresh installation receives a consistent current asset set. Do not add
   interactive application update dialogs, cache conversion or earlier-client support.
-- A new public file also needs an entry in `STATIC_TARGETS` in
-  `backend/http_api/static_assets.py` (otherwise it is served as 404 and every
-  browser spec fails at authentication), its `index.html` and service-worker
-  references, and a rebuilt `ai-coach:e2e` image before browser runs.
 - The last loaded state and recent view reads are stored on the device, so a
   start or view shows them at once while fresh data loads. The latest 20 Coach
   messages are stored separately as soon as they are shown and take precedence
