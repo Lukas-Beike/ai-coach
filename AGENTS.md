@@ -126,9 +126,10 @@ outgoing commits for secrets; never bypass either.
   [Ponytail](.agents/skills/ai-coach-ponytail/SKILL.md) smallest-complete-change
   approach. Subagents follow [orchestration](.agents/skills/orchestrated-plan-implementation/SKILL.md):
   main model by default, fixed model tiers, no model questions.
-- Reasoning effort is capped at `high` for the agent, subagents, and reviews.
-  Never select `xhigh`, `max`, or higher, or inherit such a setting, without the
-  user's explicit approval for the current task.
+- Default effort is `medium` (`effortLevel` in `.claude/settings.json`); use
+  `high` for tricky diagnosis, migrations, or security work. Effort is capped at
+  `high` for the agent, subagents, and reviews: never select `xhigh`, `max`, or
+  higher, or inherit such a setting, without the user's explicit approval.
 - Never relax a guard, test, or check to make something pass. Report behavior,
   evidence, and unrun checks. Keep temporary plans and reports out of tracked
   source.

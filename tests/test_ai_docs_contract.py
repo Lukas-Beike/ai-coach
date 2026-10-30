@@ -138,6 +138,27 @@ class AiDocsContractTests(unittest.TestCase):
         self.assertNotIn("tests/test_server.py", validation)
         self.assertTrue((ROOT / "tests" / "run_tests.py").is_file())
 
+    def test_claude_skill_stubs_point_to_canonical_skills(self) -> None:
+        stubs = sorted((ROOT / ".claude" / "skills").glob("*/SKILL.md"))
+        self.assertTrue(stubs)
+        for stub in stubs:
+            with self.subTest(stub=stub.parent.name):
+                name = stub.parent.name
+                canonical = SKILL_ROOT / name / "SKILL.md"
+                self.assertTrue(canonical.is_file())
+                content = stub.read_text(encoding="utf-8")
+                description = re.compile(r"(?m)^description:.*$")
+                self.assertIn(f"\nname: {name}\n", content)
+                self.assertIn("\ndisable-model-invocation: true\n", content)
+                self.assertIn(f"`.agents/skills/{name}/SKILL.md`", content)
+                self.assertEqual(
+                    description.findall(content),
+                    description.findall(canonical.read_text(encoding="utf-8")),
+                )
+                self.assertLess(
+                    len(content.splitlines()), 15, "Stub holds workflow text"
+                )
+
     def test_skills_stay_repository_local(self) -> None:
         self.assertTrue(SKILL_ROOT.is_dir(), SKILL_ROOT)
         self.assertTrue(SKILL_ROOT.resolve().is_relative_to(ROOT))

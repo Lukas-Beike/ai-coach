@@ -649,6 +649,16 @@ as a commit message; pass that text through a file.
 `implementer` (Sonnet, medium), and `reviewer` (Sonnet, medium, read-only)
 subagents.
 
+Sessions default to `medium` effort (`effortLevel` in `.claude/settings.json`);
+raise it with `/effort high` for tricky work. Agents may not go above `high`
+without your approval. `/pr`, `/deliver-issue`, and `/ai-coach-release-unraid`
+are user-only Claude Code commands (`disable-model-invocation: true`) that load
+the canonical workflows in `.agents/skills/`.
+
+To keep usage down, start a fresh session (`/clear`) for each unrelated task;
+every turn re-sends the whole conversation. Check `/usage` occasionally to see
+which skills and subagents earn their cost, and delete skills nobody loads.
+
 The local [code-review skill](.agents/skills/code-review/SKILL.md) adapts
 Claude's review workflow for PRs and pre-push branch diffs. Agents read it
 directly; the `pr` workflow requires no host-specific slash command.

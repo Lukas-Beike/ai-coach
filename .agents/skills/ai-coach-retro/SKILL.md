@@ -43,6 +43,13 @@ Reconcile status with current code and decisive checks before recommending work.
 If old evidence or conversations are unavailable, mark the gap rather than
 reconstructing unseen events or claiming no problems exist.
 
+## Check against Claude Code best practices
+
+Compare the session with the [best-practice checklist](references/claude-code-best-practices.md)
+without web research. Report deviations as findings, mostly as something to
+remove or move. If the checklist's review date is more than 90 days old,
+propose its refresh as a separate task.
+
 ## Examine three connected areas
 
 1. **Development process:** Trace consequential decisions and their outcomes:

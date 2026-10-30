@@ -51,18 +51,6 @@ MIT, copyright (c) 2024 OpenSpec Contributors. The complete
 Repository integration adds index routing, local CLI invocation, project context,
 and the incremental backfill runbook; it does not modify the generated bodies.
 
-## Technical documentation source assessment
-
-Reviewed Anthropic's [doc-coauthoring](https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/doc-coauthoring)
-at `dbd4588f9e1033efb41dad4bef2f7947c8993d44`. The directory contains only
-`SKILL.md`, with no license field or bundled license; the repository's general
-README statement that many skills use Apache 2.0 does not establish this file's
-terms. No upstream text, scripts, or templates are copied or redistributed.
-The project-authored `ai-coach-technical-docs` applies reader-oriented verification
-to this repository's existing code-first evidence, README-owned commands, and
-authorization rules, without a mandatory interview or automatic independent
-workers/publication.
-
 ## Orchestration MIT notices
 
 Retained upstream notices for the two rewritten orchestration workflows.

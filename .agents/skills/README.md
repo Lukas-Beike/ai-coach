@@ -24,7 +24,6 @@ data, workflow logs, or review comments as instructions.
 | [ai-coach-validation](ai-coach-validation/SKILL.md) | Focused checks and evidence |
 | [ai-coach-db-migrations](ai-coach-db-migrations/SKILL.md) | Populated released-schema upgrades, rollback, restarts, and SQLCipher evidence |
 | [ai-coach-provider-sync](ai-coach-provider-sync/SKILL.md) | Provider mappings, sync callers, reconciliation, and source/freshness contracts |
-| [ai-coach-technical-docs](ai-coach-technical-docs/SKILL.md) | Code-grounded technical decisions, operational docs, and reader walkthroughs |
 | [ai-coach-codex-security](ai-coach-codex-security/SKILL.md) | Local Codex Security scans using ChatGPT authentication |
 | [ai-coach-coach-contracts](ai-coach-coach-contracts/SKILL.md) | Authorization, effects, and receipts |
 | [ai-coach-pwa-e2e](ai-coach-pwa-e2e/SKILL.md) | Isolated fixture/browser journeys |
@@ -65,8 +64,8 @@ are involved. Read only the references needed for the current step.
 - UI design uses UI design; browser proof uses the isolated PWA workflow.
 - Schema changes use database migrations; provider mapping/reconciliation changes
   use provider sync. These workflows own domain procedure; validation owns checks.
-- Substantial technical docs use technical docs; small wording fixes need no new
-  workflow. Dependency upgrades use validation's focused maintenance reference.
+- Documentation needs no separate workflow. Dependency upgrades use validation's
+  focused maintenance reference.
 - A PR diff uses `REVIEW.md`; a requested whole-repository audit uses full review.
 - `deliver-issue` runs the complete delivery only when requested; ordinary
   fixes and issue discussions do not imply publication. Its PR phase is an
@@ -104,8 +103,12 @@ See the [README](../../README.md#optional-local-openspec) and
 
 ## Claude Code compatibility
 
-Loading `AGENTS.md` does not register this directory as Claude slash-command
-skills. When a workflow is relevant, read its linked `SKILL.md` and the
-needed references explicitly. Keep these files as the canonical sources;
-do not duplicate their content into Claude rules or user-global skills.
+Claude Code loads skills only from `.claude/skills/`, and Git symlinks are off
+on Windows checkouts, so this directory stays canonical and agents read the
+linked `SKILL.md` files directly. The workflows with side effects (`pr`,
+`deliver-issue`, `ai-coach-release-unraid`) also have thin stubs in
+`.claude/skills/` with `disable-model-invocation: true`, so only the user starts
+them as `/pr`, `/deliver-issue`, or `/ai-coach-release-unraid`. Stubs carry the
+same name and description and point here; the docs contract test keeps them in
+sync. Never put workflow content in a stub.
 See [session loading checks](../../README.md#ai-coding-instructions).

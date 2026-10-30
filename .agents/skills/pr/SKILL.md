@@ -40,7 +40,10 @@ Run exactly one fresh-context review of `origin/develop...HEAD`: the host's
 `/code-review` at `high` when available, otherwise the repository
 [code-review skill](../code-review/SKILL.md) with `depth=high` and
 `report-only`. Sonar and Gitar review every head in CI, so there is no local
-re-check and no further local review round.
+re-check and no further local review round. When the diff changes only
+Markdown instructions, skills, or docs, ask the review for P0/P1 findings and
+real security gaps only; guidelines may have exceptions, and hypothetical edge
+cases in prose are not findings.
 
 Fix valid findings with new commits and rerun the affected checks, then push. A
 finding you consider invalid needs concrete evidence (file and line, or the
