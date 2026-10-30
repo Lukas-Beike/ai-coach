@@ -600,6 +600,14 @@ class ThresholdParityTests(unittest.TestCase):
         self.assertIsNone(self.legacy["cycling_eftp_watts"]["value"])
         self.assertEqual(first_value(result, MetricKind.EFTP, sport=Sport.RIDE), 258)
 
+    def test_any_type_entry_classifies_a_sport_setting(self) -> None:
+        athlete = {"sportSettings": [{"types": ["Workout", "Ride"], "ftp": 255}]}
+        legacy = legacy_metrics(compact_form(athlete, [], []))
+        result = map_thresholds(athlete)
+        self.assertEqual(legacy["cycling_ftp_watts"]["value"], 255)
+        self.assertEqual(first_value(result, MetricKind.FTP, sport=Sport.RIDE), 255)
+        self.assertIsNone(first_value(result, MetricKind.FTP, sport=Sport.OTHER))
+
     def test_zero_values_mean_unset_in_both_readers(self) -> None:
         athlete = {
             "icu_ftp": 250,
@@ -625,16 +633,6 @@ class ThresholdParityTests(unittest.TestCase):
         )
 
     # Known deviations, named so that each one stays visible.
-
-    def test_sport_setting_is_classified_by_its_first_type_only(self) -> None:
-        # Deviation: current_metrics matches any entry in ``types``. The mapper
-        # classifies the first text only, as its module docstring documents.
-        athlete = {"sportSettings": [{"types": ["Workout", "Ride"], "ftp": 255}]}
-        legacy = legacy_metrics(compact_form(athlete, [], []))
-        result = map_thresholds(athlete)
-        self.assertEqual(legacy["cycling_ftp_watts"]["value"], 255)
-        self.assertIsNone(first_value(result, MetricKind.FTP, sport=Sport.RIDE))
-        self.assertEqual(first_value(result, MetricKind.FTP, sport=Sport.OTHER), 255)
 
     def test_threshold_pace_bound_rejects_paces_the_legacy_reader_accepts(
         self,

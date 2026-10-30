@@ -12,7 +12,7 @@ import unittest
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
@@ -30,6 +30,9 @@ from backend.providers import canonical_plans
 from backend.providers.canonical_plans import (
     intervals_snapshot_ingest_plan,
     wahoo_ingest_plan,
+)
+from backend.providers.intervals_wellness_mapping import (
+    map_intervals_athlete_thresholds,
 )
 from backend.providers.snapshot_projection import strip_intervals_activity_sections
 from backend.runtime.maintenance import MaintenanceGate
@@ -979,6 +982,53 @@ class ReprojectionTests(BackfillFixture):
                     (MetricKind.EFTP, 258.0, "provider_reported", "ride"),
                     (MetricKind.FORM, 10.0, "derived", None),
                 )
+            ],
+        )
+
+    def test_athlete_stored_at_the_previous_version_keeps_its_first_ride_setting(
+        self,
+    ) -> None:
+        # The previous mapper wrote both ride settings to one key and kept the last.
+        current = canonical_plans.current_mapper_versions()[
+            f"{INTERVALS}.{canonical_plans.ATHLETE_RECORD_KIND}"
+        ]
+        settings = [
+            {"types": ["Ride"], "eftp": 250},
+            {"types": ["VirtualRide"], "eftp": 262},
+        ]
+        fetched = datetime.fromisoformat(NOW)
+        (stale,) = map_intervals_athlete_thresholds(
+            {"sportSettings": settings[1:]},
+            observed_on=date(2026, 9, 20),
+            retrieved_at=fetched,
+        ).records
+        with self.manager.unit_of_work() as db:
+            canonical_store.upsert_provider_record(
+                db,
+                provider=INTERVALS,
+                record_kind=canonical_plans.ATHLETE_RECORD_KIND,
+                source_record_id=canonical_plans.ATHLETE_RECORD_ID,
+                payload={"sportSettings": settings},
+                mapper_version=current - 1,
+                fetched_at=NOW,
+                now=NOW,
+            )
+            canonical_store.upsert_observation(
+                db, stale, mapper_version=current - 1, now=NOW
+            )
+
+        backfill = self.make_backfill()
+        self.run_to_completion(backfill)
+
+        self.assertEqual(
+            self.rows("SELECT metric, value, sport, mapper_version FROM observations"),
+            [
+                {
+                    "metric": MetricKind.EFTP.value,
+                    "value": 250.0,
+                    "sport": "ride",
+                    "mapper_version": current,
+                }
             ],
         )
 

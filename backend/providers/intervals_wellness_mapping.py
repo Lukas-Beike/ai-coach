@@ -28,8 +28,10 @@ Wellness rows
     DERIVED observation. Storing the derived value keeps one form series per day
     for every consumer instead of each one deriving it again.
 
-    Each ``sportInfo`` (or ``sport_info``) entry yields an EFTP observation with
-    the sport that its first ``types`` text, or else its ``type``, classifies to.
+    Each ``sportInfo`` (or ``sport_info``) entry yields an EFTP observation for
+    every sport that a text of its ``types`` list, or else of its ``type``,
+    ``sport`` and ``sport_type``, classifies to (OTHER only when no text names a
+    known sport).
     The value is ``mmp_model``'s ``ftp``, ``eftp`` or ``eFTP``, else the entry's
     ``eftp`` or ``eFTP``, as ``performance.eftp`` reads it. Only the first entry
     of each sport is mapped.
@@ -37,9 +39,10 @@ Wellness rows
 Athlete thresholds
     ``sportSettings`` (with the snake_case alias ``sport_settings`` as the
     fallback, the same rule as ``backend.planning.context``) yields observations
-    tagged with the sport that the first text in each entry's ``types`` list
-    classifies to. Entries are mapped in input order, so two entries for one
-    sport both yield observations. ``current_metrics`` uses the first entry.
+    for every sport that a text of the entry's ``types`` list classifies to
+    (OTHER only when no text names a known sport), as the zone configurations
+    classify settings. Only the first entry of each sport is mapped, as the
+    legacy readers took the first matching setting.
     Athlete ids that are not short ASCII identifiers are not echoed and yield
     ``source_record_id`` None.
 
@@ -100,7 +103,6 @@ from backend.canonical.records import (
     Provenance,
     fingerprint_inputs,
 )
-from backend.canonical.sports import classify_sport_text
 from backend.canonical.validation import METRIC_BOUNDS, require_aware_datetime
 from backend.canonical.vocabulary import (
     MetricKind,
@@ -109,14 +111,17 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.providers.intervals_zone_mapping import type_sports
 
 # Version 4: the athlete-profile weight has its own observation key, so it no
 # longer overwrites the wellness weight of the same day. Version 6: wellness rows
 # add FORM and the sportInfo EFTP; sport settings add EFTP. Version 7: wellness
 # rows also project canonical sleep periods and the subjective ratings, and the
-# athlete record its zone configurations. Re-projection
-# rewrites rows written at older versions.
-MAPPER_VERSION: Final = 7
+# athlete record its zone configurations. Version 8: sport settings and sportInfo
+# entries are classified by each of their type texts, and only the first sport
+# setting of each sport is mapped. Re-projection rewrites rows written at older
+# versions.
+MAPPER_VERSION: Final = 8
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
@@ -172,6 +177,7 @@ _SPORT_INFO_KEYS: Final = ("sport_info", "sportInfo")
 _MMP_MODEL_KEY: Final = "mmp_model"
 _EFTP_MODEL_ALIASES: Final = ("ftp", "eftp", "eFTP")
 _EFTP_ALIASES: Final = ("eftp", "eFTP")
+_SPORT_INFO_TYPE_KEYS: Final = ("type", "sport", "sport_type")
 _LTHR_ALIASES: Final = ("lthr",)
 _MAX_HR_ALIASES: Final = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
 _SPORT_SETTING_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
@@ -212,6 +218,10 @@ class _Collector:
     def reject(self, record_ref: str | None, name: str, reason: IssueReason) -> None:
         self.issues.append(MappingIssue(record_ref, name, reason))
 
+    def drop_repeats_since(self, start: int) -> None:
+        """Keep one of each issue added since ``start``, e.g. one entry's sports."""
+        self.issues[start:] = dict.fromkeys(self.issues[start:])
+
     def result(self) -> MappingResult[Observation]:
         return MappingResult(records=tuple(self.records), issues=tuple(self.issues))
 
@@ -247,8 +257,14 @@ def map_intervals_athlete_thresholds(
         provenance=_provenance(record_id, retrieved_at),
     )
     collector = _Collector()
+    seen: set[Sport] = set()
     for entry in _sport_settings(athlete, scope, collector):
-        _map_sport_setting(entry, scope, collector)
+        start = len(collector.issues)
+        for sport in _entry_sports(entry, scope, collector):
+            if sport not in seen:
+                seen.add(sport)
+                _map_sport_setting(entry, scope, collector, sport)
+        collector.drop_repeats_since(start)
     for kind, aliases in _ATHLETE_FIELDS:
         _add_field(collector, scope, athlete, kind, aliases)
     if not _has_ride_ftp(collector.records):
@@ -340,17 +356,26 @@ def _map_sport_info(row: dict[Any, Any], scope: _Scope, collector: _Collector) -
         if not isinstance(entry, dict):
             collector.reject(scope.record_ref, name, IssueReason.INVALID_TYPE)
             continue
-        sport = _sport_info_sport(entry)
-        if sport is None or sport in seen:
-            continue
-        seen.add(sport)
-        _add_eftp(collector, scope, entry, sport)
+        types = entry.get("types")
+        texts = (
+            types
+            if isinstance(types, list)
+            else [entry.get(key) for key in _SPORT_INFO_TYPE_KEYS]
+        )
+        start = len(collector.issues)
+        for sport in _texts_sports(texts):
+            if sport not in seen:
+                seen.add(sport)
+                _add_eftp(collector, scope, entry, sport)
+        collector.drop_repeats_since(start)
 
 
-def _sport_info_sport(entry: dict[Any, Any]) -> Sport | None:
-    types = entry.get("types")
-    text = types[0] if isinstance(types, list) and types else entry.get("type")
-    return classify_sport_text(text) if isinstance(text, str) else None
+def _texts_sports(texts: list[Any]) -> list[Sport]:
+    """Return each text's known sport, or OTHER when only unknown texts exist."""
+    sports = list(type_sports(texts))
+    if sports:
+        return sports
+    return [Sport.OTHER] if any(isinstance(text, str) for text in texts) else []
 
 
 def _add_eftp(
@@ -431,13 +456,9 @@ def _sport_settings(
     return raw
 
 
-def _map_sport_setting(entry: object, scope: _Scope, collector: _Collector) -> None:
-    if not isinstance(entry, dict):
-        collector.reject(scope.record_ref, "sportSettings", IssueReason.INVALID_TYPE)
-        return
-    sport = _entry_sport(entry, scope, collector)
-    if sport is None:
-        return
+def _map_sport_setting(
+    entry: dict[Any, Any], scope: _Scope, collector: _Collector, sport: Sport
+) -> None:
     for kind, aliases in _SPORT_SETTING_FIELDS:
         _add_field(collector, scope, entry, kind, aliases, sport=sport)
     _add_eftp(collector, scope, entry, sport)
@@ -457,10 +478,11 @@ def _map_sport_setting(entry: object, scope: _Scope, collector: _Collector) -> N
         )
 
 
-def _entry_sport(
-    entry: dict[Any, Any], scope: _Scope, collector: _Collector
-) -> Sport | None:
-    """Classify the first ``types`` text; a missing or malformed list is an issue."""
+def _entry_sports(entry: object, scope: _Scope, collector: _Collector) -> list[Sport]:
+    """Classify each ``types`` text; a malformed entry or textless list is an issue."""
+    if not isinstance(entry, dict):
+        collector.reject(scope.record_ref, "sportSettings", IssueReason.INVALID_TYPE)
+        return []
     types = entry.get("types")
     if types is None:
         reason = IssueReason.MISSING
@@ -468,12 +490,13 @@ def _entry_sport(
         reason = IssueReason.INVALID_TYPE
     elif not types:
         reason = IssueReason.MISSING
-    elif not isinstance(types[0], str):
-        reason = IssueReason.INVALID_TYPE
     else:
-        return classify_sport_text(types[0])
+        sports = _texts_sports(types)
+        if sports:
+            return sports
+        reason = IssueReason.INVALID_TYPE
     collector.reject(scope.record_ref, "types", reason)
-    return None
+    return []
 
 
 def _has_ride_ftp(records: list[Observation]) -> bool:

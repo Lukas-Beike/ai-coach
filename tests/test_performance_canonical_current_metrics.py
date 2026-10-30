@@ -263,9 +263,8 @@ class CanonicalSportMatchTests(unittest.TestCase):
                 self.assertEqual(metrics, _legacy(case))
                 self.assertEqual(metrics[key]["value"], first)
                 self.assertEqual(metrics[key]["source"], "Intervals.icu")
-                self.assertEqual(
-                    sorted(_sync_sport_values(case, sport, kind)), [first, second]
-                )
+                # Only the first setting of a sport is mapped (#1473).
+                self.assertEqual(_sync_sport_values(case, sport, kind), [first])
 
     def test_single_entry_takes_the_canonical_label_and_value(self) -> None:
         for sport, sport_type, key, field, kind, value in SPORT_METRICS:
