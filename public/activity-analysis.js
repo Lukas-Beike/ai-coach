@@ -216,9 +216,11 @@
 
   // Before the document loads, the list row's summary values stand in under the document's metric keys.
   function rowMetrics(row) {
-    const keys = { distance: "distance_m", moving_time: "moving_duration_s", elapsed_time: "elapsed_duration_s", average_speed: "avg_speed_mps", max_speed: "max_speed_mps", average_heartrate: "avg_hr", max_heartrate: "max_hr", average_watts: "avg_power", normalized_power: "normalized_power", total_elevation_gain: "elevation_gain_m", training_load: "load", intensity: "intensity" };
+    const keys = ["distance_m", "moving_duration_s", "elapsed_duration_s", "avg_speed_mps", "max_speed_mps", "avg_hr", "max_hr", "avg_power", "normalized_power", "elevation_gain_m", "intensity"];
     const metrics = {};
-    for (const [rowKey, key] of Object.entries(keys)) if (row?.[rowKey] != null) metrics[key] = row[rowKey];
+    for (const key of keys) if (row?.[key] != null) metrics[key] = row[key];
+    // The list row names its load like planned units do (training_load); the document calls it load.
+    if (row?.training_load != null) metrics.load = row.training_load;
     return metrics;
   }
 
@@ -364,8 +366,8 @@
     const text = node("span", null, "activity-analysis-title");
     text.append(node("strong", activity.name || sportLabel(activity)));
     // Local start dates are already day keys; reparsing them as UTC instants could shift the day.
-    const day = String(activity.start_date_local || activity.start_date || "").slice(0, 10);
-    const facts = [day ? dateLabel(day) : null, sportLabel(activity), finite(activity.moving_time) ? AppFormat.duration(activity.moving_time) : null, AppFormat.distance(activity.distance)].filter(Boolean);
+    const day = String(activity.started_at_local || activity.started_at || "").slice(0, 10);
+    const facts = [day ? dateLabel(day) : null, sportLabel(activity), finite(activity.moving_duration_s) ? AppFormat.duration(activity.moving_duration_s) : null, AppFormat.distance(activity.distance_m)].filter(Boolean);
     text.append(node("span", facts.join(" · "), "muted"));
     summary.append(text);
     if (activity.detail_error) {

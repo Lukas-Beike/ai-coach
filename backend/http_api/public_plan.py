@@ -11,7 +11,7 @@ from backend.activities.detail_analysis_reads import calendar_profiles
 from backend.activities.detail_store import summary_fingerprint
 from backend.calendar import canonical as calendar_canonical
 from backend.canonical.domain_records import ZoneConfiguration
-from backend.canonical.public_metrics import neutral_calendar_entries
+from backend.canonical.public_metrics import neutral_calendar_state
 from backend.db.manager import DatabaseManager
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
@@ -79,11 +79,7 @@ class PublicPlanStateService:
         ``read`` keeps the stored metric keys because the training report and
         season scenarios consume them internally.
         """
-        state = self.read(local_only=local_only)
-        for key in ("training_calendar", "planned"):
-            if key in state:
-                state[key] = neutral_calendar_entries(state[key])
-        return state
+        return neutral_calendar_state(self.read(local_only=local_only))
 
     def read(self, local_only: bool = False) -> dict[str, Any]:
         manager = self._database_manager_factory()

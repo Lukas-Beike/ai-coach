@@ -39,6 +39,9 @@ const STATE_SNAPSHOT_KEY = "coach-state-snapshot";
 const VIEW_CACHE_KEY = "coach-view-cache";
 const VIEW_CACHE_LIMIT = 24;
 const STATE_SNAPSHOT_SAVE_DELAY_MS = 1000;
+// Bump when the key shape of a stored area changes, so a snapshot of the older
+// shape is not shown or reused for a failed area (2: neutral activity keys, #1413).
+const STATE_SNAPSHOT_CONTRACT = 2;
 const STATE_SNAPSHOT_ASSET = Array.from(document.scripts || [], (script) => script.src).join(" ") || document.currentScript?.src || "";
 let stateSnapshotSaveTimer = null;
 // Changes when the device data is cleared, so a view read that started before
@@ -76,8 +79,12 @@ function areaSnapshotKeys(area) {
 function previousSnapshotData() {
   try {
     const snapshot = JSON.parse(localStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
-    return snapshot?.data && typeof snapshot.data === "object" ? snapshot.data : {};
+    return snapshot?.data && typeof snapshot.data === "object" && snapshotContractFits(snapshot) ? snapshot.data : {};
   } catch { return {}; }
+}
+
+function snapshotContractFits(snapshot) {
+  return (snapshot.contract ?? 1) === STATE_SNAPSHOT_CONTRACT;
 }
 
 function snapshotValueShape(value) {
@@ -111,7 +118,7 @@ function saveStateSnapshot() {
   clearTimeout(stateSnapshotSaveTimer);
   stateSnapshotSaveTimer = null;
   if (!(state.initialStateLoaded || stateSnapshotReady) || !state.data || state.replaceDataOnLoad) return;
-  writeStateSnapshot(JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, data: stateSnapshotData() }));
+  writeStateSnapshot(JSON.stringify({ asset: STATE_SNAPSHOT_ASSET, contract: STATE_SNAPSHOT_CONTRACT, data: stateSnapshotData() }));
 }
 
 function writeStateSnapshot(snapshot) {
@@ -177,7 +184,7 @@ function readChatCache() {
 function readStateSnapshot() {
   try {
     const snapshot = JSON.parse(localStorage.getItem(STATE_SNAPSHOT_KEY) || "null");
-    if (!snapshot?.data || typeof snapshot.data !== "object") return null;
+    if (!snapshot?.data || typeof snapshot.data !== "object" || !snapshotContractFits(snapshot)) return null;
     const chat = readChatCache();
     const data = chat ? { ...snapshot.data, messages: chat.messages, messages_next_cursor: chat.next_cursor, messages_generation: chat.generation } : snapshot.data;
     return { data, updated: snapshot.asset !== STATE_SNAPSHOT_ASSET };

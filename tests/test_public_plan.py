@@ -155,13 +155,18 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         entry = {
             "id": "planned-1",
             "icu_training_load": 30,
-            "compliance": {"actual_activity": {"icu_training_load": 28}},
+            "moving_time": 3600,
+            "compliance": {
+                "actual_activity": {"icu_training_load": 28, "moving_time": 3500}
+            },
         }
         with patch(
             "backend.http_api.public_plan.calendar_read_model.project_planning_calendar",
             side_effect=lambda *args, **kwargs: {
                 "planned": [dict(entry)],
                 "training_calendar": [dict(entry)],
+                "calendar": [dict(entry)],
+                "planning_view": {"items": [dict(entry)]},
             },
         ):
             internal = service.read(local_only=True)
@@ -170,15 +175,19 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         # The training report and season scenarios read the stored keys.
         self.assertEqual(30, internal["planned"][0]["icu_training_load"])
         self.assertEqual(30, internal["training_calendar"][0]["icu_training_load"])
-        for key in ("planned", "training_calendar"):
-            self.assertEqual(
-                {
-                    "id": "planned-1",
-                    "training_load": 30,
-                    "compliance": {"actual_activity": {"training_load": 28}},
-                },
-                public[key][0],
-            )
+        expected = {
+            "id": "planned-1",
+            "training_load": 30,
+            "moving_time": 3600,
+            "compliance": {
+                "actual_activity": {"training_load": 28, "moving_duration_s": 3500}
+            },
+        }
+        for key in ("planned", "training_calendar", "calendar"):
+            self.assertEqual(expected, public[key][0])
+        self.assertEqual(expected, public["planning_view"]["items"][0])
+        actual = internal["calendar"][0]["compliance"]["actual_activity"]
+        self.assertEqual(3500, actual["moving_time"])
 
     def test_weather_refresh_followup_only_runs_when_weather_reports_refreshed(self):
         service, services, _projection, *_ = self.make_service(
