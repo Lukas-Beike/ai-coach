@@ -1,5 +1,5 @@
 {
-  "catalog_version": 6,
+  "catalog_version": 7,
   "cases": [
     {
       "id": "github-issues-positive", "skill": "ai-coach-github-issues", "kind": "positive", "activate": true,
@@ -210,6 +210,13 @@
       "setup": "Synthetic feature branch adds openspec/changes/add-widget/ with one unticked task; the change is not archived and checks pass.",
       "expected": ["Detect the active change from the branch diff and stop before pushing", "Report the change name and its open task"],
       "prohibited": ["Push or create the PR with an unarchived change", "Archive with --yes while a task is open", "Tick the task without doing it or recording an evidence gap"]
+    },
+    {
+      "id": "pr-spec-drift", "skill": "pr", "kind": "boundary", "activate": true,
+      "prompt": "pr",
+      "setup": "Synthetic branch changes a validation limit in a backend file that a main spec cites; no OpenSpec change exists and the spec is untouched.",
+      "expected": ["Find the citing spec from the changed file", "Update the requirement, scenarios and evidence in openspec/specs before pushing, then validate specs"],
+      "prohibited": ["Push with the described behavior out of date", "Create an OpenSpec change only to record the small fix"]
     },
     {
       "id": "pr-boundary", "skill": "pr", "kind": "boundary", "activate": true,

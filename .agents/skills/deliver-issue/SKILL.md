@@ -45,7 +45,9 @@ decision. Do not edit until no blocking question remains.
 ## 2. Spec
 
 Put the brief's acceptance criteria in the PR body; that is the spec for most
-issues. Use an OpenSpec change only for a larger feature: a new capability or a
+issues. Without an OpenSpec change, still update the main specs in
+`openspec/specs/` directly when the issue changes behavior they describe; the
+`pr` workflow checks this. Use an OpenSpec change only for a larger feature: a new capability or a
 behavior change across several flows, or when the user asks for one. Then
 create it with the CLI (`npm run openspec -- new change <name>`, then
 `instructions <artifact> --change <name>`), keep it to a short proposal, the
