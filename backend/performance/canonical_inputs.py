@@ -175,7 +175,10 @@ def with_read_status(
     if not status.serves_tables(db):
         return PENDING_PERFORMANCE_INPUTS
     if status.activities_need_refresh(db):
-        return replace(inputs or EMPTY_PERFORMANCE_INPUTS, activities_need_refresh=True)
+        marked: CanonicalPerformanceInputs = replace(
+            inputs or EMPTY_PERFORMANCE_INPUTS, activities_need_refresh=True
+        )
+        return marked
     return inputs
 
 

@@ -119,7 +119,7 @@ class _PendingReader:
     def sleep_periods(
         self, db: Any, *, start: date | None = None, end: date | None = None
     ) -> tuple[SleepPeriod, ...]:
-        del db, start, end
+        del start, end, db
         return ()
 
     def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
