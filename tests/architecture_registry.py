@@ -1223,7 +1223,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "_garmin_record_date",
             "garmin_weight_records",
             "garmin_weight_metric",
-            "garmin_weight_average",
         ),
     ),
     (
