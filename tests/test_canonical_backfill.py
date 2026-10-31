@@ -1224,7 +1224,25 @@ class ReprojectionTests(BackfillFixture):
     def test_reprojection_from_stored_raw_rebuilds_the_original_canonical_rows(
         self,
     ) -> None:
-        self.insert_snapshot(self.manager, intervals_fixture_snapshot())
+        snapshot = intervals_fixture_snapshot()
+        # Every Intervals.icu record kind with a mapper, the power curve included.
+        snapshot["cycling_power_profile"] = {
+            "status": "ok",
+            "start": "2026-07-01",
+            "end": "2026-09-28",
+            "synced_at": snapshot["synced_at"],
+            "points": [
+                {
+                    "duration_seconds": 300,
+                    "watts": 320,
+                    "date": "2026-09-10",
+                    "activity_id": "i1",
+                    "source": "Intervals.icu gemessene Leistungskurve",
+                    "status": "ok",
+                }
+            ],
+        }
+        self.insert_snapshot(self.manager, snapshot)
         self.set_garmin(
             self.manager,
             garmin_payload(

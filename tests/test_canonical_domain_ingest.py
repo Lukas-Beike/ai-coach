@@ -161,8 +161,8 @@ def with_batches(code: str) -> Any:
     """Patch the snapshot plan so each wellness record also emits one status."""
     real = canonical_plans.intervals_snapshot_ingest_plan
 
-    def plan(snapshot: Mapping[str, Any], *, zone: Any) -> IngestPlan:
-        result = real(snapshot, zone=zone)
+    def plan(snapshot: Mapping[str, Any], *, zone: Any, **options: Any) -> IngestPlan:
+        result = real(snapshot, zone=zone, **options)
         return replace(
             result,
             domain_batches=tuple(

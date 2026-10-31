@@ -22,8 +22,8 @@ Results use inclusive bounds and the canonical total order
 (``backend.canonical.ordering``). Activity bounds filter the stored athlete-local
 date, which the ingest computed with the athlete's zone at write time.
 
-Sleep periods, zone configurations, provider statuses and gear are served from
-their active rows; rows a re-projection retired are not served.
+Sleep periods, zone configurations, provider statuses, gear and the power curve
+are served from their active rows; rows a re-projection retired are not served.
 
 Mapping issue counts are not stored in the tables, so this reader does not
 implement ``coverage``. It serves ``metric_windows`` from the same rows as
@@ -43,6 +43,9 @@ from backend.canonical.domain_records import (
     CategoricalObservation,
     GearActivityLink,
     GearItem,
+    PowerCurve,
+    PowerCurveFetch,
+    PowerCurvePoint,
     SleepPeriod,
     ZoneConfiguration,
 )
@@ -83,6 +86,7 @@ from backend.runtime.ports import (
     ActivityRowReader,
     ActivitySessionReader,
     ObservationReader,
+    PowerCurveReader,
     SessionRecords,
 )
 
@@ -94,7 +98,11 @@ _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
 
 
 class CanonicalTableReader(
-    ActivityReader, ActivityRowReader, ActivitySessionReader, ObservationReader
+    ActivityReader,
+    ActivityRowReader,
+    ActivitySessionReader,
+    ObservationReader,
+    PowerCurveReader,
 ):
     """Serves canonical activities, raw activity rows and observations from the tables."""
 
@@ -287,6 +295,19 @@ class CanonicalTableReader(
     def gear_activity_links(self, db: Any) -> tuple[GearActivityLink, ...]:
         rows = canonical_domain_store.active_gear_link_rows(db)
         return tuple(_gear_activity_link(row) for row in rows)
+
+    def power_curve(self, db: Any) -> PowerCurve:
+        """Return each provider's latest power curve fetch and its best efforts."""
+        return PowerCurve(
+            fetches=tuple(
+                _power_curve_fetch(row)
+                for row in canonical_domain_store.active_power_curve_fetch_rows(db)
+            ),
+            points=tuple(
+                _power_curve_point(row)
+                for row in canonical_domain_store.active_power_curve_rows(db)
+            ),
+        )
 
 
 def _payload_object(text: str) -> dict[str, Any] | None:
@@ -500,5 +521,24 @@ def _gear_activity_link(row: Mapping[str, Any]) -> GearActivityLink:
     return GearActivityLink(
         gear_id=row["gear_id"],
         provider_activity_id=row["provider_activity_id"],
+        provenance=_domain_provenance(row),
+    )
+
+
+def _power_curve_point(row: Mapping[str, Any]) -> PowerCurvePoint:
+    return PowerCurvePoint(
+        duration_s=int(row["duration_s"]),
+        watts=row["watts"],
+        observed_on=date.fromisoformat(str(row["observed_on"])),
+        provider_activity_id=row["provider_activity_id"],
+        provenance=_domain_provenance(row),
+    )
+
+
+def _power_curve_fetch(row: Mapping[str, Any]) -> PowerCurveFetch:
+    return PowerCurveFetch(
+        fetch_status=row["fetch_status"],
+        window_start=_optional_date(row["window_start"]),
+        window_end=_optional_date(row["window_end"]),
         provenance=_domain_provenance(row),
     )

@@ -64,6 +64,7 @@ class PublicPerformanceStateService:
                     db,
                     activity_reader=source.activity_summary_reader(),
                     as_of=today,
+                    include_power_curve=True,
                 ),
             )
             return self._project(
@@ -72,7 +73,9 @@ class PublicPerformanceStateService:
 
     def canonical_inputs(self, db: Any) -> CanonicalPerformanceInputs | None:
         """Read the load inputs inside the caller's snapshot transaction."""
-        return inputs_for_snapshot(self._canonical, db, as_of=self._today())
+        return inputs_for_snapshot(
+            self._canonical, db, as_of=self._today(), include_power_curve=True
+        )
 
     def from_snapshot(
         self,

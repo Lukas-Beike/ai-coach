@@ -6,6 +6,7 @@ from typing import Any, Final
 
 from backend.activities.activity_summary import summary_duration_s
 from backend.athlete.local_date import LocalDate
+from backend.canonical.domain_records import PowerCurve
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
@@ -34,12 +35,38 @@ def _day(value: Any) -> date | None:
         return None
 
 
-def _rows(value: Any) -> list[dict[str, Any]]:
-    return (
-        [row for row in value if isinstance(row, dict)]
-        if isinstance(value, list)
-        else []
-    )
+# Every stored power curve point is a measured best effort.
+_POWER_POINT_STATUS: Final = "ok"
+
+
+def _power_curve(curve: PowerCurve, start: date, today: date) -> dict[str, Any]:
+    """The canonical power curve in the stored fetch envelope shape.
+
+    The status, window and fetch time are those of the latest fetch, also when
+    it delivered no points; only best efforts of the chart's days are listed.
+    """
+    envelope: dict[str, Any] = {}
+    if curve.fetches:
+        fetch = curve.fetches[0]
+        envelope["status"] = fetch.fetch_status
+        if fetch.window_start is not None and fetch.window_end is not None:
+            envelope["start"] = fetch.window_start.isoformat()
+            envelope["end"] = fetch.window_end.isoformat()
+        if fetch.provenance.retrieved_at is not None:
+            envelope["synced_at"] = fetch.provenance.retrieved_at.isoformat()
+    envelope["points"] = [
+        {
+            "duration_seconds": point.duration_s,
+            "watts": _number(point.watts),
+            "date": point.observed_on.isoformat(),
+            "activity_id": point.provider_activity_id or "",
+            "source": point.provenance.label,
+            "status": _POWER_POINT_STATUS,
+        }
+        for point in curve.points
+        if start <= point.observed_on <= today
+    ]
+    return envelope
 
 
 def _load_history(
@@ -123,9 +150,9 @@ def analysis_history(
 ) -> dict[str, Any]:
     """Use dated provider history, never backfill today's settings into the past.
 
-    ``canonical`` supplies the activity summaries, wellness days and Garmin history read
-    through the canonical ports. The snapshot supplies sync times and the power
-    curve, which has no metric kind yet.
+    ``canonical`` supplies the activity summaries, wellness days, Garmin history
+    and the power curve read through the canonical ports. The snapshot supplies
+    sync times.
     """
     snapshot = snapshot or {}
     start = today - timedelta(days=89)
@@ -173,18 +200,7 @@ def analysis_history(
             ),
             eftp_by_day=eftp_by_day,
         ),
-        # Remaining snapshot read: the power curve has no metric kind.
-        "cycling_power_profile": {
-            **(snapshot.get("cycling_power_profile") or {}),
-            "points": [
-                point
-                for point in _rows(
-                    (snapshot.get("cycling_power_profile") or {}).get("points")
-                )
-                if (day := _day(point.get("date"))) is not None
-                and start <= day <= today
-            ],
-        },
+        "cycling_power_profile": _power_curve(canonical.power_curve, start, today),
         "provider_metrics": _canonical_provider_metrics(
             garmin, start, today, garmin_canonical
         ),

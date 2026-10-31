@@ -15,6 +15,7 @@ from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.sync_time import activities_synced_at
+from backend.canonical.domain_records import EMPTY_POWER_CURVE, PowerCurve
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance import wellness_days
@@ -46,6 +47,7 @@ from backend.runtime.ports import (
     CanonicalReadStatus,
     ObservationReader,
     ObservationSourceSelector,
+    PowerCurveReader,
     ProviderCoverageReader,
     SleepPeriodReader,
 )
@@ -72,6 +74,9 @@ class CanonicalPerformanceInputs:
     Intervals.icu wellness-day form and sport-scoped eFTP series.
     ``ramp_rate`` is the latest wellness day's CTL minus the CTL of exactly seven
     days earlier, rounded to two decimals, or None when either day is missing.
+    ``power_curve`` holds the stored power curve fetches and best power per
+    duration; it is empty when none is stored or it was not read (only the
+    analysis view asks for it).
 
     ``pending`` is True while the canonical source serves nothing yet (the first
     backfill has not completed); every value is then empty.
@@ -95,6 +100,7 @@ class CanonicalPerformanceInputs:
     run_eftp_by_day: Mapping[date, float] | None = None
     ramp_rate: float | None = None
     body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
+    power_curve: PowerCurve = EMPTY_POWER_CURVE
     pending: bool = False
     activities_need_refresh: bool = False
 
@@ -224,8 +230,13 @@ def inputs_for_snapshot(
     db: Any,
     *,
     as_of: date,
+    include_power_curve: bool = False,
 ) -> CanonicalPerformanceInputs | None:
-    """Read canonical load inputs inside the caller's snapshot transaction."""
+    """Read canonical load inputs inside the caller's snapshot transaction.
+
+    ``include_power_curve`` also reads the stored power curve, which only the
+    analysis view shows.
+    """
     if source is None:
         return None
     return with_read_status(
@@ -236,6 +247,7 @@ def inputs_for_snapshot(
             db,
             activity_reader=source.activity_summary_reader(),
             as_of=as_of,
+            include_power_curve=include_power_curve,
         ),
     )
 
@@ -318,6 +330,12 @@ class ReadOnceObservationReader:
             return ()
         return self._reader.activity_max_hr(db, provider, low=low, high=high)
 
+    def power_curve(self, db: Any) -> PowerCurve:
+        """Forward the power curve read; none for a source without it."""
+        if not isinstance(self._reader, PowerCurveReader):
+            return EMPTY_POWER_CURVE
+        return self._reader.power_curve(db)
+
     def observations(
         self,
         db: Any,
@@ -372,6 +390,7 @@ class _CarriedRows:
     form_by_day: Mapping[date, float]
     eftp_by_day: Mapping[date, float]
     run_eftp_by_day: Mapping[date, float]
+    power_curve: PowerCurve
 
     def inputs(
         self,
@@ -398,6 +417,7 @@ class _CarriedRows:
             eftp_by_day=self.eftp_by_day,
             run_eftp_by_day=self.run_eftp_by_day,
             ramp_rate=ramp_rate,
+            power_curve=self.power_curve,
         )
 
 
@@ -407,11 +427,14 @@ def read_performance_inputs(
     *,
     activity_reader: ActivitySummaryReader | None = None,
     as_of: date,
+    include_power_curve: bool = False,
 ) -> CanonicalPerformanceInputs | None:
     """Read canonical activity summaries and wellness days in one selected unit.
 
-    No snapshot section is read. None means no activity reader and
-    no observed wellness day. ``as_of`` is the athlete-local day.
+    No snapshot section is read. None means no activity reader, no observed
+    wellness day and no stored power curve. ``as_of`` is the athlete-local day.
+    ``include_power_curve`` also reads the stored power curve; otherwise it
+    stays empty.
     """
     reader = resolve_reader(reader, db)
     if not isinstance(reader, ReadOnceObservationReader):
@@ -423,7 +446,8 @@ def read_performance_inputs(
         if activity_reader is None
         else activity_reader.activity_summaries(db, start=_activity_start(days, as_of))
     )
-    if activities is None and not days:
+    power_curve = reader.power_curve(db) if include_power_curve else EMPTY_POWER_CURVE
+    if activities is None and not days and power_curve.is_empty:
         return None
     latest_view = wellness_days.latest(days)
     latest_day = None if latest_view is None else latest_view.day
@@ -448,6 +472,7 @@ def read_performance_inputs(
             reader.observations(db, MetricKind.EFTP, sport=Sport.RUN),
             sport=Sport.RUN,
         ),
+        power_curve=power_curve,
     )
     if latest_day is None:
         return carried.inputs(

@@ -31,6 +31,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V13,
     SHAPE_SCHEMA_V14,
     SHAPE_SCHEMA_V15,
+    SHAPE_SCHEMA_V16,
     released_shape,
 )
 
@@ -48,6 +49,8 @@ V13_FIXTURE = FIXTURES / "schema_v13.sql.txt"
 V14_FIXTURE = FIXTURES / "schema_v14.sql.txt"
 # Release schema 15: canonical extensions; version 16 renames planning fields.
 V15_FIXTURE = FIXTURES / "schema_v15.sql.txt"
+# Release schema 16: planning field names; version 17 adds the power curve.
+V16_FIXTURE = FIXTURES / "schema_v16.sql.txt"
 RELEASED_FIXTURES = (
     OLDEST_SUPPORTED_FIXTURE,
     V10_FIXTURE,
@@ -56,6 +59,7 @@ RELEASED_FIXTURES = (
     V13_FIXTURE,
     V14_FIXTURE,
     V15_FIXTURE,
+    V16_FIXTURE,
 )
 # Columns an upgrade renamed: (table, released name) -> current name. Rows read
 # with the columns of a released schema compare the same values afterwards.
@@ -79,6 +83,9 @@ EXTENSION_TABLES = {
     "gear_items",
     "gear_activity_links",
 }
+# Schema version 17: the canonical power curve; added empty by every upgrade
+# whose newest snapshot stores no power curve.
+POWER_CURVE_TABLES = {"power_curve_points", "power_curve_fetches"}
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -262,7 +269,13 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         )
         for table in sorted(set(self.user_tables(db)) - set(v9_tables)):
             with self.subTest(table=table):
-                self.assertIn(table, DETAIL_TABLES | MIRROR_TABLES | EXTENSION_TABLES)
+                self.assertIn(
+                    table,
+                    DETAIL_TABLES
+                    | MIRROR_TABLES
+                    | EXTENSION_TABLES
+                    | POWER_CURVE_TABLES,
+                )
                 self.assertEqual(
                     db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
                 )
@@ -310,7 +323,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         )
         self.assertEqual(
             set(self.user_tables(db)) - set(v10_tables),
-            MIRROR_TABLES | EXTENSION_TABLES,
+            MIRROR_TABLES | EXTENSION_TABLES | POWER_CURVE_TABLES,
         )
         self.assertEqual(
             db.execute("SELECT COUNT(*) FROM food_database_entries").fetchone()[0], 0
@@ -578,7 +591,10 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         lap = db.execute("SELECT * FROM activity_laps").fetchone()
         self.assertIsNone(lap["max_speed_mps"])
         self.assertEqual(lap["intensity_pct"], 80)
-        self.assertEqual(set(self.user_tables(db)) - set(tables), EXTENSION_TABLES)
+        self.assertEqual(
+            set(self.user_tables(db)) - set(tables),
+            EXTENSION_TABLES | POWER_CURVE_TABLES,
+        )
         self.assertTrue(database_schema_is_current(db))
         self.assertEqual(
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
@@ -756,6 +772,13 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             )
         }
 
+    def test_frozen_v16_fixture_is_the_recorded_released_shape(self):
+        db = self.connect()
+        db.executescript(V16_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V16
+        )
+
     def test_frozen_v15_fixture_is_the_recorded_released_shape(self):
         db = self.connect()
         db.executescript(V15_FIXTURE.read_text(encoding="utf-8"))
@@ -804,8 +827,11 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             ).fetchone()[0],
             0,
         )
-        self.assertEqual(set(self.user_tables(db)) - set(tables), EXTENSION_TABLES)
-        for table in sorted(EXTENSION_TABLES):
+        self.assertEqual(
+            set(self.user_tables(db)) - set(tables),
+            EXTENSION_TABLES | POWER_CURVE_TABLES,
+        )
+        for table in sorted(EXTENSION_TABLES | POWER_CURVE_TABLES):
             with self.subTest(table=table):
                 self.assertEqual(
                     db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
