@@ -54,6 +54,11 @@ def release_test_passed(pr, repository, token):
     for revision in dict.fromkeys(revisions):
         if not revision:
             continue
+        if revision != pr["head"]["sha"]:
+            commit = request(f"repos/{repository}/git/commits/{revision}", token)
+            parents = [parent.get("sha") for parent in commit.get("parents", [])]
+            if parents != [pr["base"]["sha"], pr["head"]["sha"]]:
+                continue
         checks = request(
             f"repos/{repository}/commits/{revision}/check-runs?check_name=test&per_page=100",
             token,

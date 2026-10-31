@@ -157,7 +157,7 @@ Eligible Dependabot and release pull requests SHALL be eligible for direct squas
 - **THEN** the automation can request a squash merge without a Gitar check
 
 #### Scenario: Release pull request
-- **WHEN** the release app opens an expected version or promotion branch for its protected target and release testing is satisfied
+- **WHEN** the release app opens an expected version or promotion branch for its protected target and a successful GitHub Actions test exists on the current head or on a test-merge commit whose parents are the current base and head
 - **THEN** the automation can request a squash merge without Gitar
 
 #### Scenario: Untrusted metadata
@@ -180,4 +180,4 @@ Eligible Dependabot and release pull requests SHALL be eligible for direct squas
 - **WHEN** the deployment gate is disabled
 - **THEN** the automation remains disabled
 
-Evidence: `.github/workflows/bot-merge.yml`; `tools/bot_merge.py`; `tests/test_bot_merge.py`. On 2026-10-30 the release app was removed from the Default ruleset bypass list; the isolated Gitar exemption and normal checks were verified by reading the live rulesets. The app directly squash-merged Dependabot PR #1502 at its checked head in Actions run 41124099781 with non-Gitar checks passing and no unresolved threads. Rule suite 4824127971 recorded Default status checks, pull-request rules and code scanning passing and Gitar skipped. Earlier rule suites 4355093065 and 4355238064 rejected unresolved conversation and failing or pending check cases for the repository owner; equivalent negative attempts by the release app remain unverified.
+Evidence: `.github/workflows/bot-merge.yml`; `tools/bot_merge.py`; `tests/test_bot_merge.py::test_release_rejects_stale_test_merge_commit`. On 2026-10-30 the release app was removed from the Default ruleset bypass list; the isolated Gitar exemption and normal checks were verified by reading the live rulesets. The app directly squash-merged Dependabot PR #1502 at its checked head in Actions run 41124099781 with non-Gitar checks passing and no unresolved threads. Rule suite 4824127971 recorded Default status checks, pull-request rules and code scanning passing and Gitar skipped. Earlier rule suites 4355093065 and 4355238064 rejected unresolved conversation and failing or pending check cases for the repository owner; equivalent negative attempts by the release app remain unverified.

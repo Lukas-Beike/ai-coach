@@ -14,7 +14,7 @@ def pull(author="dependabot[bot]", base="develop", branch="deps", sha="a" * 40):
         "state": "open",
         "draft": False,
         "user": {"login": author},
-        "base": {"ref": base},
+        "base": {"ref": base, "sha": "c" * 40},
         "head": {"repo": {"full_name": "owner/repo"}, "ref": branch, "sha": sha},
         "auto_merge": {"enabled_by": {"login": "app"}},
     }
@@ -139,6 +139,8 @@ class BotMergeTests(unittest.TestCase):
         def api(path, token, payload=None):
             if "pulls?" in path:
                 return [{"number": 1}] if path.endswith("&page=1") else []
+            if "/git/commits/" in path:
+                return {"parents": [{"sha": "c" * 40}, {"sha": "a" * 40}]}
             if "check-runs" in path:
                 if "b" * 40 in path:
                     return {
@@ -160,6 +162,27 @@ class BotMergeTests(unittest.TestCase):
         with patch.object(bot_merge, "request", side_effect=api):
             bot_merge.run("owner/repo", "fake")
         self.assertEqual(merges, [{"sha": "a" * 40, "merge_method": "squash"}])
+
+    def test_release_rejects_stale_test_merge_commit(self):
+        pr = pull("ai-coach-release-bot[bot]", "develop", "chore/release-version-1.2.3")
+        pr["merge_commit_sha"] = "b" * 40
+        merges = []
+
+        def api(path, token, payload=None):
+            if "pulls?" in path:
+                return [{"number": 1}] if path.endswith("&page=1") else []
+            if "/git/commits/" in path:
+                return {"parents": [{"sha": "c" * 40}, {"sha": "d" * 40}]}
+            if "check-runs" in path:
+                return {"check_runs": []}
+            if path.endswith("/merge"):
+                merges.append(payload)
+                return {"merged": True}
+            return pr
+
+        with patch.object(bot_merge, "request", side_effect=api):
+            bot_merge.run("owner/repo", "fake")
+        self.assertEqual(merges, [])
 
     def test_closed_pr_is_not_merged(self):
         pr = pull()

@@ -15,7 +15,7 @@ The release app is integration 4772643. It is exempt from both the isolated Gita
 - Identify PRs by GitHub-controlled author, same-repository head, and target branch; require expected release branch names only as an additional restriction.
 - Attempt a direct squash merge with the evaluated head SHA. GitHub's protected-branch enforcement remains the final authority. An explicit repository variable keeps the workflow disabled until an administrator has removed and verified any non-Gitar bypass.
 - Run trusted automation on relevant PR, check, and review-thread state changes, with scheduled recovery. Serialize merge attempts and re-read current PR state before each attempt.
-- Preserve the release workflow's explicit test dispatch and require a successful GitHub Actions test on the current head or GitHub's current test-merge commit before a release merge attempt. GitHub enforces the applicable current required checks at merge time.
+- Preserve the release workflow's explicit test dispatch and require a successful GitHub Actions test on the current head or GitHub's current test-merge commit before a release merge attempt. A test-merge commit must have the current base and head as its parents. GitHub enforces the applicable current required checks at merge time.
 
 ## Risks / Trade-offs
 
