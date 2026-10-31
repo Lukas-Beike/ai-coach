@@ -6,8 +6,10 @@ import math
 import re
 from typing import Any
 
-from backend.providers import intervals_performance_fields as intervals_perf_fields
-from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
+from backend.providers.intervals_activity_mapping import (
+    INTERVALS_LABEL,
+    target_basis_ftp,
+)
 
 METHOD = "time-weighted-session-analysis-v1"
 
@@ -108,6 +110,19 @@ def interval_quality(
     }
 
 
+def _aerobic_sensor(activity: dict[str, Any]) -> str | None:
+    """Return the output stream of a ride or a road run, from the canonical sport.
+
+    Trail runs, whose pace is not comparable, are not analysed, as before.
+    """
+    sport = activity.get("sport")
+    if sport == "ride":
+        return "watts"
+    if sport == "run" and not activity.get("trail"):
+        return "velocity_smooth"
+    return None
+
+
 def aerobic_analysis(
     activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
 ) -> dict[str, Any]:
@@ -123,13 +138,7 @@ def aerobic_analysis(
         "warmup_excluded_seconds": 600,
         "eligibility": "At least 20 minutes after a 10-minute warm-up; >=85% paired data coverage; output variation <=15%; gaps >5 seconds, stops and non-positive output excluded. No universal fitness cutoff.",
     }
-    kind = str(activity.get("type") or activity.get("sport") or "")
-    sensor = {
-        "Ride": "watts",
-        "VirtualRide": "watts",
-        "Run": "velocity_smooth",
-        "VirtualRun": "velocity_smooth",
-    }.get(kind)
+    sensor = _aerobic_sensor(activity)
     times = (activity.get("streams") or {}).get("time") or []
     if sensor is None or len(times) < 2 or times[-1] - times[0] < 1800:
         return {
@@ -214,7 +223,7 @@ def _numeric_target(
     if step.get("kind") == "power":
         sensor, unit = "watts", "W"
         if "%" in text:
-            ftp = _number(basis.get(intervals_perf_fields.CONFIGURED_FTP))
+            ftp = _number(target_basis_ftp(basis))
             if ftp is None or ftp <= 0:
                 return None
             values = [value * ftp / 100 for value in values]

@@ -7,6 +7,8 @@ from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from activity_row_support import summaries_of_rows
+
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
     MetricKind,
@@ -220,7 +222,6 @@ def recovery_only_inputs(
         ramp_rate=full.ramp_rate,
         current=full.current,
         activities=full.activities,
-        activity_rows=full.activity_rows,
     )
 
 
@@ -230,14 +231,14 @@ class SnapshotActivityRows:
     def __init__(self, snapshot: Mapping[str, Any]) -> None:
         self._rows = tuple(snapshot.get("recent_activities") or ())
 
-    def activity_rows(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
-        return self._rows
+    def activity_summaries(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
+        return summaries_of_rows(self._rows)
 
 
 class NoActivityRows:
     """An activity row reader without rows: the activities stay on the snapshot."""
 
-    def activity_rows(self, db: Any, **bounds: Any) -> tuple[dict[str, Any], ...]:
+    def activity_summaries(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
         return ()
 
 

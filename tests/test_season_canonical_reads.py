@@ -8,9 +8,10 @@ from typing import Any
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
+from backend.activities.activity_summary import stored_activity_key
 from backend.performance.season_inputs import (
     SeasonSource,
-    read_activity_rows,
+    read_activity_summaries,
     read_season_load_inputs,
 )
 from backend.planning.season_preparation import load_scenarios, season_preparation
@@ -33,7 +34,7 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
         return SeasonSource(
             database_manager=lambda: self.manager,
             observation_reader=lambda: selector,
-            activity_rows=lambda: selector,
+            activity_summaries=lambda: selector,
         )
 
     def _season(self, selector: Any, snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -44,7 +45,7 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
                 [EVENT],
                 TODAY,
                 ZONE,
-                activity_rows=lambda start, end: read_activity_rows(
+                activity_summaries=lambda start, end: read_activity_summaries(
                     source, db, start, end
                 ),
             )
@@ -59,6 +60,15 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
                 snapshot, {}, today, {"end": "2026-10-20"}, inputs=inputs
             )
 
+    def _legacy_ids(self, selector: Any, value: Any) -> Any:
+        """Replace table session ids by the provider ids the legacy source names."""
+        with self.manager.reader() as db:
+            keys = {
+                summary["id"]: stored_activity_key(summary)
+                for summary in selector.activity_summaries(db)
+            }
+        return _replaced(value, keys)
+
     def _tables(self) -> Any:
         populate(self)
         selector = make_selector(self)
@@ -69,10 +79,10 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
         legacy_selector = make_selector(self)
         self.assertFalse(self.write(legacy_selector.serves_tables))
         legacy = self._season(legacy_selector, self.intervals)
-        served = self._season(self._tables(), self.intervals)
-        self.assertEqual(served, legacy)
-        preparation = served["events"][0]["preparation"]
-        self.assertEqual("observations", preparation["status"])
+        selector = self._tables()
+        served = self._season(selector, self.intervals)
+        self.assertEqual(self._legacy_ids(selector, served), legacy)
+        self.assertEqual("observations", served["events"][0]["preparation"]["status"])
 
     def test_season_does_not_need_the_snapshot_activity_sections(self) -> None:
         selector = self._tables()
@@ -89,8 +99,12 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
         selector = self._tables()
         for today, expected in zip(days, legacy, strict=True):
             with self.subTest(today=today):
+                served = self._legacy_ids(
+                    selector, self._scenarios(selector, self.intervals, today)
+                )
+                # The input hash covers the session ids, which differ per source.
                 self.assertEqual(
-                    self._scenarios(selector, self.intervals, today), expected
+                    {**served, "input_sha256": None}, {**expected, "input_sha256": None}
                 )
         basis = legacy[0]["basis"]
         self.assertEqual(
@@ -114,7 +128,17 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
             inputs = read_season_load_inputs(
                 source, db, today=ACTIVITY_DAY, timezone=ZONE
             )
-        self.assertEqual(["i-act-001"], [row["id"] for row in inputs.completed_today])
+        self.assertEqual(
+            ["i-act-001"], [stored_activity_key(row) for row in inputs.completed_today]
+        )
+
+
+def _replaced(value: Any, keys: dict[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {key: _replaced(item, keys) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replaced(item, keys) for item in value]
+    return keys.get(value, value) if isinstance(value, str) else value
 
 
 if __name__ == "__main__":

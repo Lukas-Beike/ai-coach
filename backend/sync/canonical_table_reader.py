@@ -79,7 +79,13 @@ from backend.providers.canonical_plans import (
 from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
-from backend.runtime.ports import ActivityReader, ActivityRowReader, ObservationReader
+from backend.runtime.ports import (
+    ActivityReader,
+    ActivityRowReader,
+    ActivitySessionReader,
+    ObservationReader,
+    SessionRecords,
+)
 
 _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
     ProviderId.INTERVALS: INTERVALS_LABEL,
@@ -88,7 +94,9 @@ _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
 }
 
 
-class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader):
+class CanonicalTableReader(
+    ActivityReader, ActivityRowReader, ActivitySessionReader, ObservationReader
+):
     """Serves canonical activities, raw activity rows and observations from the tables."""
 
     def __init__(
@@ -132,6 +140,30 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
         """
         rows = canonical_store.session_activity_rows(db, activity_id)
         return tuple(sorted((_activity(row) for row in rows), key=activity_order))
+
+    def activity_sessions(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> tuple[SessionRecords, ...]:
+        """Return each live session's id and its active records of every provider.
+
+        Records of sessions merged into another are listed under the survivor.
+        Records are in ``activity_order``; sessions in order of first record.
+        Records of a provider that is not a known ``ProviderId`` are skipped.
+        """
+        grouped: dict[str, list[ActivityRecord]] = {}
+        for session_id, row in canonical_store.active_session_activity_rows(
+            db, start=_iso(start), end=_iso(end)
+        ):
+            if _provider_or_none(row["provider"]) is not None:
+                grouped.setdefault(session_id, []).append(_activity(row))
+        return tuple(
+            (session_id, tuple(sorted(records, key=activity_order)))
+            for session_id, records in grouped.items()
+        )
 
     def activity_rows(
         self,
@@ -291,6 +323,7 @@ def _activity(row: Mapping[str, Any]) -> ActivityRecord:
         elevation_low_m=canonical_store.activity_elevation_low(row["details"]),
         steps=canonical_store.activity_steps(row["details"]),
         device_type=canonical_store.activity_device_type(row["details"]),
+        **canonical_store.activity_summary_values(row["details"]),
     )
 
 

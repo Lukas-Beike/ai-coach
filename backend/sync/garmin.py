@@ -8,10 +8,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from backend.activities.duplicates import (
-    deduplicate_api_records,
-    garmin_activity_duplicates_intervals,
-)
+from backend.activities.duplicates import deduplicate_api_records
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.garmin_payload import (
     MERGE_SECTIONS,
@@ -33,6 +30,7 @@ from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
 from backend.providers.garmin_gear_fields import garmin_gear_id
 from backend.runtime.ports import ActivityRowReader
 from backend.sync.daily import DailySyncMarkerService
+from backend.sync.garmin_activity_duplicates import garmin_activity_duplicates_intervals
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.state import SyncStateRepository

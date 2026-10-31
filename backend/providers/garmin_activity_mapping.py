@@ -33,6 +33,9 @@ the same moment.
   ``performance.max_hr`` reads first.
 * ``maxSpeed`` (m/s) -> ``max_speed_mps``, and ``maxPower`` (watts) -> ``max_power_w``.
 * ``steps`` (count) -> ``steps``.
+* ``averageSpeed`` (m/s), ``elevationGain`` (m), ``normPower`` (W) and
+  ``vO2MaxValue`` -> ``avg_speed_mps``, ``elevation_gain_m``,
+  ``normalized_power`` and ``vo2max``.
 * ``activityName`` (text, stripped and truncated to 200 characters).
 
 Sport and environment. A known ``typeKey`` uses ``GARMIN_ACTIVITY_TYPES``. An
@@ -62,6 +65,7 @@ from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
     MAX_ACTIVITY_DISTANCE_M,
     MAX_ACTIVITY_DURATION_S,
+    MAX_ACTIVITY_ELEVATION_M,
     MAX_ACTIVITY_LOAD,
     MAX_ACTIVITY_POWER_W,
     MAX_ACTIVITY_SPEED_MPS,
@@ -80,7 +84,8 @@ from backend.canonical.vocabulary import (
 # Version 5: maps the maximum speed, maximum power and step count.
 # Version 4: a row with manualActivity exactly True is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 6
+# Version 7: maps average speed, elevation gain, normalized power and VO2max.
+MAPPER_VERSION: Final = 7
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -93,6 +98,10 @@ _MAX_HR_KEYS: Final = ("maxHR", "maxHeartRate")
 _MAX_SPEED_KEYS: Final = ("maxSpeed",)
 _MAX_POWER_KEYS: Final = ("maxPower",)
 _STEPS_KEYS: Final = ("steps",)
+_AVERAGE_SPEED_KEYS: Final = ("averageSpeed",)
+_ELEVATION_GAIN_KEYS: Final = ("elevationGain",)
+_NORMALIZED_POWER_KEYS: Final = ("normPower",)
+_VO2MAX_KEYS: Final = ("vO2MaxValue",)
 
 # Exact Garmin activityType.typeKey values. The environment is set only where the
 # key names it; otherwise UNKNOWN, which the activity name may still refine.
@@ -196,6 +205,16 @@ def _map_row(
     avg_power = _optional_number(
         row, _POWER_KEYS, (0.0, MAX_ACTIVITY_POWER_W), ref, issues
     )
+    avg_speed = _optional_number(
+        row, _AVERAGE_SPEED_KEYS, (0.0, MAX_ACTIVITY_SPEED_MPS), ref, issues
+    )
+    elevation_gain = _optional_number(
+        row, _ELEVATION_GAIN_KEYS, (0.0, MAX_ACTIVITY_ELEVATION_M), ref, issues
+    )
+    normalized_power = _optional_number(
+        row, _NORMALIZED_POWER_KEYS, (0.0, MAX_ACTIVITY_POWER_W), ref, issues
+    )
+    vo2max = _optional_number(row, _VO2MAX_KEYS, (0.0, 100.0), ref, issues)
     if activity_id is None or started_at is None:
         return None
     return ActivityRecord(
@@ -219,6 +238,10 @@ def _map_row(
         max_speed_mps=max_speed,
         max_power_w=max_power,
         steps=steps,
+        avg_speed_mps=avg_speed,
+        elevation_gain_m=elevation_gain,
+        normalized_power=normalized_power,
+        vo2max=vo2max,
     )
 
 

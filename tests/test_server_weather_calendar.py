@@ -25,7 +25,7 @@ from backend.planning import adaptive_preview_service
 from backend.planning import planned_unit_service as planning_planned_unit_service
 from backend.planning import planned_units as planning_planned_units
 from backend.planning import workouts as planning_workouts
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.providers import calendar as calendar_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.providers import weather as weather_provider
@@ -854,24 +854,24 @@ class ServerWeatherCalendarTests(ServerTestCase):
         activities = [
             {
                 "id": "matched",
-                "paired_event_id": "event-1",
-                "type": "Ride",
+                "planned_event_id": "event-1",
+                "sport": "ride",
                 "name": "Plan gefahren",
-                "start_date_local": f"{today.isoformat()}T07:00:00",
-                "moving_time": 3500,
-                "distance": 30000,
-                "icu_training_load": 45,
-                "icu_rpe": 5,
+                "started_at_local": f"{today.isoformat()}T07:00:00",
+                "moving_duration_s": 3500,
+                "distance_m": 30000,
+                "training_load": 45,
+                "rpe": 5,
             },
             {
                 "id": "extra",
-                "type": "Run",
+                "sport": "run",
                 "name": "Zusätzlicher Lauf",
-                "start_date_local": f"{today.isoformat()}T18:00:00",
-                "moving_time": 1800,
-                "distance": 5000,
-                "icu_training_load": 30,
-                "icu_rpe": 7,
+                "started_at_local": f"{today.isoformat()}T18:00:00",
+                "moving_duration_s": 1800,
+                "distance_m": 5000,
+                "training_load": 30,
+                "rpe": 7,
             },
         ]
 
@@ -893,7 +893,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(calendar[1]["id"], "extra")
         self.assertTrue(calendar[1]["is_completed_activity"])
         self.assertEqual(calendar[1]["calendar_entry_type"], "completed_activity")
-        self.assertEqual(calendar[1]["icu_rpe"], 7)
+        self.assertEqual(calendar[1]["rpe"], 7)
 
     def test_plan_state_returns_enriched_training_calendar(self):
         today = date(2026, 8, 26)
@@ -912,14 +912,14 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "recent_activities": [
                 {
                     "id": "activity-1",
-                    "paired_event_id": "event-1",
-                    "type": "Run",
+                    "planned_event_id": "event-1",
+                    "sport": "run",
                     "name": "Tempolauf erledigt",
-                    "start_date_local": f"{today.isoformat()}T07:00:00",
-                    "moving_time": 2280,
-                    "distance": 7000,
-                    "icu_training_load": 55,
-                    "icu_rpe": 8,
+                    "started_at_local": f"{today.isoformat()}T07:00:00",
+                    "moving_duration_s": 2280,
+                    "distance_m": 7000,
+                    "training_load": 55,
+                    "rpe": 8,
                 }
             ],
         }
@@ -935,7 +935,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 return_value=planned,
             ),
             patch.object(
-                ActivityRowSource,
+                ActivitySummarySource,
                 "compact",
                 return_value=snapshot["recent_activities"],
             ),
@@ -952,7 +952,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
 
         self.assertEqual(result["planned"][0]["compliance"]["status"], "completed")
         self.assertEqual(
-            result["training_calendar"][0]["compliance"]["actual_activity"]["icu_rpe"],
+            result["training_calendar"][0]["compliance"]["actual_activity"]["rpe"],
             8,
         )
         self.assertIsInstance(result["planning_compliance"], list)
@@ -1416,21 +1416,21 @@ class ServerWeatherCalendarTests(ServerTestCase):
         activities = [
             {
                 "id": f"ride-{index}",
-                "type": "Ride",
+                "sport": "ride",
                 "name": f"Ride {index}",
-                "start_date_local": (today - timedelta(days=index)).isoformat(),
-                "moving_time": 3600,
-                "icu_training_load": 50,
+                "started_at_local": (today - timedelta(days=index)).isoformat(),
+                "moving_duration_s": 3600,
+                "training_load": 50,
             }
             for index in range(7)
         ] + [
             {
                 "id": f"run-{index}",
-                "type": "Run",
+                "sport": "run",
                 "name": f"Run {index}",
-                "start_date_local": (today - timedelta(days=index)).isoformat(),
-                "moving_time": 1800,
-                "icu_training_load": 25,
+                "started_at_local": (today - timedelta(days=index)).isoformat(),
+                "moving_duration_s": 1800,
+                "training_load": 25,
             }
             for index in range(6)
         ]

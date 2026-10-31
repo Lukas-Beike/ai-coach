@@ -116,7 +116,7 @@ class GarminNutritionRefreshTests(unittest.TestCase):
             today,
             canonical=garmin_body_from_payload(garmin, today),
             wellness_days=(),
-            activity_rows=(),
+            activities=(),
             garmin_ftp={},
         )
         metrics = projection["windows"]["14d"]["metrics"]

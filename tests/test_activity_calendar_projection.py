@@ -28,12 +28,11 @@ class CalendarActivityPayloadTests(unittest.TestCase):
     def test_allowlist_dates_and_completed_activity_markers(self):
         activity = {
             "id": "activity-1",
-            "external_id": "external-1",
-            "start_date_local": "2026-09-07T06:30:00+02:00",
+            "started_at_local": "2026-09-07T06:30:00+02:00",
             "name": "Morning Ride",
-            "type": "Ride",
-            "moving_time": 3600,
-            "distance": 30_000,
+            "sport": "ride",
+            "moving_duration_s": 3600,
+            "distance_m": 30_000,
             "source": "Garmin",
             "private_note": "must not leak",
             "raw_payload": {"secret": True},
@@ -42,7 +41,7 @@ class CalendarActivityPayloadTests(unittest.TestCase):
         result = calendar_activity_payload(activity)
 
         self.assertEqual(result["date"], "2026-09-07")
-        self.assertEqual(result["start_date_local"], activity["start_date_local"])
+        self.assertEqual(result["started_at_local"], activity["started_at_local"])
         self.assertEqual(result["category"], "ACTIVITY")
         self.assertEqual(result["calendar_entry_type"], "completed_activity")
         self.assertTrue(result["is_completed_activity"])
@@ -60,7 +59,7 @@ class CalendarActivityPayloadTests(unittest.TestCase):
             "2026-09-07",
         )
         self.assertEqual(
-            calendar_activity_payload({"start_date": "not-a-date"})["date"],
+            calendar_activity_payload({"started_at_local": "not-a-date"})["date"],
             "not-a-date",
         )
         self.assertEqual(calendar_activity_payload({})["date"], "")
@@ -68,42 +67,36 @@ class CalendarActivityPayloadTests(unittest.TestCase):
 
 
 class CalendarActivityIdentityTests(unittest.TestCase):
-    def test_id_alias_priority(self):
+    def test_session_id_is_the_identity(self):
         self.assertEqual(
-            calendar_activity_identity(
-                {"id": 0, "activityId": "provider-1", "external_id": "external-1"}
-            ),
+            calendar_activity_identity({"id": 0, "external_id": "external-1"}),
             ("id", "0", "", "", ""),
         )
         self.assertEqual(
-            calendar_activity_identity({"activityId": 42}),
-            ("id", "42", "", "", ""),
-        )
-        self.assertEqual(
-            calendar_activity_identity({"external_id": "external-1"}),
-            ("id", "external-1", "", "", ""),
+            calendar_activity_identity({"id": "act_1", "started_at_local": "x"}),
+            ("id", "act_1", "", "", ""),
         )
 
     def test_fallback_identity_and_missing_start(self):
         activity = {
-            "start_date": "2026-09-07T10:00:00Z",
+            "started_at_local": "2026-09-07T10:00:00",
             "sport": "RUN",
-            "elapsed_time": "1800",
-            "distance": "5.5",
+            "elapsed_duration_s": "1800",
+            "distance_m": "5.5",
         }
         self.assertEqual(
             calendar_activity_identity(activity),
-            ("fallback", "2026-09-07T10:00:00Z", "run", 1800, 5.5),
+            ("fallback", "2026-09-07T10:00:00", "run", 1800, 5.5),
         )
-        self.assertIsNone(calendar_activity_identity({"type": "Run"}))
+        self.assertIsNone(calendar_activity_identity({"sport": "run"}))
         self.assertIsNone(calendar_activity_identity("not-an-activity"))
 
     def test_identity_and_payload_do_not_mutate_input(self):
         activity = {
             "date": "2026-09-07",
-            "type": "Ride",
-            "moving_time": "3600",
-            "distance": 20_000,
+            "sport": "ride",
+            "moving_duration_s": "3600",
+            "distance_m": 20_000,
             "extra": {"keep": True},
         }
         original = copy.deepcopy(activity)
@@ -138,11 +131,11 @@ class PlanningComplianceTests(unittest.TestCase):
         activities = [
             {
                 "id": "activity",
-                "paired_event_id": "done",
-                "type": "Ride",
-                "start_date_local": f"{today.isoformat()}T07:00:00",
-                "moving_time": 3300,
-                "icu_training_load": 40,
+                "planned_event_id": "done",
+                "sport": "ride",
+                "started_at_local": f"{today.isoformat()}T07:00:00",
+                "moving_duration_s": 3300,
+                "training_load": 40,
                 "private_note": "hidden",
             }
         ]
@@ -158,8 +151,8 @@ class PlanningComplianceTests(unittest.TestCase):
         today = date(2026, 9, 12)
         activity = {
             "id": "done",
-            "start_date_local": today.isoformat(),
-            "moving_time": 2700,
+            "started_at_local": today.isoformat(),
+            "moving_duration_s": 2700,
         }
 
         duration = workout_compliance(
@@ -186,8 +179,8 @@ class PlanningComplianceTests(unittest.TestCase):
                     "actual_activity": calendar_activity_payload(
                         {
                             "id": "matched",
-                            "type": "Ride",
-                            "start_date_local": "2026-08-26T07:00:00",
+                            "sport": "ride",
+                            "started_at_local": "2026-08-26T07:00:00",
                         }
                     )
                 },
@@ -196,13 +189,13 @@ class PlanningComplianceTests(unittest.TestCase):
         activities = [
             {
                 "id": "matched",
-                "type": "Ride",
-                "start_date_local": "2026-08-26T07:00:00",
+                "sport": "ride",
+                "started_at_local": "2026-08-26T07:00:00",
             },
             {
                 "id": "extra",
-                "type": "Run",
-                "start_date_local": "2026-08-26T18:00:00",
+                "sport": "run",
+                "started_at_local": "2026-08-26T18:00:00",
             },
         ]
 
@@ -224,9 +217,9 @@ class PlanningComplianceTests(unittest.TestCase):
         activities = [
             {
                 "id": "walk",
-                "type": "Walk",
-                "start_date_local": f"{today.isoformat()}T07:00:00",
-                "moving_time": 3300,
+                "sport": "walk",
+                "started_at_local": f"{today.isoformat()}T07:00:00",
+                "moving_duration_s": 3300,
             }
         ]
 

@@ -1,7 +1,7 @@
 const ANALYSIS_SVG_NS = "http://www.w3.org/2000/svg";
 
 const KIND_LABELS = { bike: "Fahrrad", component: "Komponente", shoes: "Schuhe", other: "Sonstiges" };
-const SPORT_LABELS = { Ride: "Rad", VirtualRide: "Indoor-Rad", WeightTraining: "Kraft", Run: "Laufen", Swim: "Schwimmen", Walk: "Gehen", ride: "Rad", run: "Laufen", swim: "Schwimmen", walk: "Gehen", strength: "Kraft", other: "Andere" };
+const SPORT_LABELS = { Ride: "Rad", VirtualRide: "Indoor-Rad", WeightTraining: "Kraft", Run: "Laufen", Swim: "Schwimmen", Walk: "Gehen", ride: "Rad", run: "Laufen", swim: "Schwimmen", walk: "Gehen", hike: "Wandern", strength: "Kraft", row: "Rudern", nordic_ski: "Langlauf", alpine_ski: "Alpinski", yoga: "Yoga", other: "Andere" };
 const equipmentSportLabel = (item) => (item.sport === "ride" && item.environment === "virtual" ? "Indoor-Rad" : SPORT_LABELS[item.sport] || item.sport);
 const isRideEquipment = (item) => ["Ride", "VirtualRide", "ride"].includes(item.sport);
 const isRunEquipment = (item) => ["Run", "run"].includes(item.sport);

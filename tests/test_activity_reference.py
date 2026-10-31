@@ -164,6 +164,7 @@ class ActivityReferenceResolverTests(_Fixture):
             read_equipment=lambda reference: {},
             references=ActivityReferences(self.manager),
             performance=dict,
+            summary=lambda: None,
         )
         with self.manager.reader() as db:
             block = envelope(db, garmin, "ride-merged", None)

@@ -117,7 +117,7 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         self.seed_activity()
         before = self.athlete_state()
         result = self.run_tool(
-            "get_training_report", {"start": "2026-09-01", "days": 7, "sport": "Run"}
+            "get_training_report", {"start": "2026-09-01", "days": 7, "sport": "run"}
         )
         self.assertEqual(1, result["report"]["totals"]["sessions"])
         self.assertEqual(before, self.athlete_state())

@@ -35,7 +35,7 @@ def body_history(snapshot, garmin, today, **kwargs):
             "cycling_ftp_watts", {}
         ),
     )
-    kwargs.setdefault("activity_rows", ())
+    kwargs.setdefault("activities", ())
     return _body_history(
         snapshot, garmin, today, wellness_days=days_from_rows(rows), **kwargs
     )

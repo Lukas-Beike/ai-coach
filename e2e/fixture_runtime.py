@@ -593,7 +593,9 @@ def _save_activity_detail(activity_id, record):
             db, record=record, now=server.runtime_clock.utc_now()
         )
     if result.outcome not in (DetailWriteOutcome.WRITTEN, DetailWriteOutcome.UNCHANGED):
-        raise RuntimeError(f"Fixture detail for {activity_id} not stored: {result.outcome}")
+        raise RuntimeError(
+            f"Fixture detail for {activity_id} not stored: {result.outcome}"
+        )
 
 
 def _fixture_seed_fueling_ride(today):
@@ -623,6 +625,9 @@ def seed_training_features():
     from backend.activities.detail_store import summary_fingerprint
     from backend.performance.power_profile import power_profile
     from backend.performance.session_analysis import aerobic_analysis, interval_quality
+    from backend.providers.intervals_activity_mapping import (
+        intervals_analysis_sport,
+    )
 
     now = server.ATHLETE_CLOCK.now()
     rows = [
@@ -770,6 +775,7 @@ def seed_training_features():
             },
             "laps": [{"start_time": 0, "end_time": 3600}],
         }
+        analysed = {**detailed, **intervals_analysis_sport(detailed)}
         _save_activity_detail(
             activity["id"],
             {
@@ -778,9 +784,9 @@ def seed_training_features():
                 "summary_sha256": summary_fingerprint(activity),
                 "target_snapshot": targets,
                 "session_analysis": {
-                    "aerobic": aerobic_analysis(detailed),
+                    "aerobic": aerobic_analysis(analysed),
                     "interval_quality": interval_quality(detailed, targets),
-                    "power_profile": power_profile(detailed),
+                    "power_profile": power_profile(analysed),
                 },
                 "source": "Intervals.icu synthetic fixture",
                 "observed_at": server.runtime_clock.utc_now(),
@@ -1658,6 +1664,9 @@ def _fixture_wave2_details(by_id):
     from backend.activities.detail_store import summary_fingerprint
     from backend.performance.power_profile import power_profile, running_profile
     from backend.performance.session_analysis import aerobic_analysis, interval_quality
+    from backend.providers.intervals_activity_mapping import (
+        intervals_analysis_sport,
+    )
 
     targets = {
         "steps": [{"duration": 300, "target": "200W", "kind": "power"}],
@@ -1706,6 +1715,7 @@ def _fixture_wave2_details(by_id):
             "streams": streams,
             "laps": [{"start_time": 0, "end_time": n - 1}],
         }
+        analysed = {**detailed, **intervals_analysis_sport(detailed)}
         _save_activity_detail(
             activity["id"],
             {
@@ -1714,10 +1724,10 @@ def _fixture_wave2_details(by_id):
                 "summary_sha256": summary_fingerprint(activity),
                 "target_snapshot": targets,
                 "session_analysis": {
-                    "aerobic": aerobic_analysis(detailed),
+                    "aerobic": aerobic_analysis(analysed),
                     "interval_quality": interval_quality(detailed, targets),
-                    "power_profile": power_profile(detailed),
-                    "running_profile": running_profile(detailed),
+                    "power_profile": power_profile(analysed),
+                    "running_profile": running_profile(analysed),
                 },
                 "source": FIXTURE_SOURCE,
                 "observed_at": server.runtime_clock.utc_now(),
@@ -2137,6 +2147,9 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 aerobic_analysis,
                 interval_quality,
             )
+            from backend.providers.intervals_activity_mapping import (
+                intervals_analysis_sport,
+            )
 
             today = server.ATHLETE_CLOCK.now().date().isoformat()
             activity = {
@@ -2171,7 +2184,9 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                     "activity": detailed,
                     "summary_sha256": summary_fingerprint(activity),
                     "session_analysis": {
-                        "aerobic": aerobic_analysis(detailed),
+                        "aerobic": aerobic_analysis(
+                            {**detailed, **intervals_analysis_sport(detailed)}
+                        ),
                         "interval_quality": interval_quality(detailed, None),
                     },
                     "source": "Intervals.icu",

@@ -14,6 +14,7 @@ from backend.activities.zone_settings import effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.zones import EDITABLE_SPORTS, public_configuration
 from backend.calendar import local as calendar_local
+from backend.canonical.activity_summary import ActivitySummary
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.vocabulary import ProviderId, ZoneConfigurationMetric
 from backend.coach.context_selection import (
@@ -39,19 +40,14 @@ from backend.planning import context as planning_context
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.library_service import WorkoutLibraryService
-from backend.providers.intervals_performance_fields import (
-    INTENSITY,
-    PACE,
-    RPE,
-    TRAINING_LOAD,
-    WEIGHTED_AVG_SPEED,
-    WEIGHTED_AVG_WATTS,
-)
+from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 from backend.providers.source_labels import SourceView, provider_label
 from backend.sync.state import SyncStateRepository
 
+# INTENSITY and TRAINING_LOAD name the stored keys of planned units and library
+# entries; activities use summary keys.
 COACH_RECENT_ACTIVITIES_PER_SPORT = 5
 COACH_PLANNED_EVENT_LIMIT = 50
 COACH_LOCAL_PLANNED_LIMIT = 50
@@ -74,7 +70,7 @@ COACH_CONTEXT_SECTION_LIMITS = {
 LOGGER = logging.getLogger("intervals_coach")
 
 # Compact recent activities with the sync time of the activities.
-type RecentActivities = tuple[list[dict[str, Any]], str | None]
+type RecentActivities = tuple[list[ActivitySummary], str | None]
 
 
 def _source_label(provider: ProviderId) -> str:
@@ -99,25 +95,26 @@ PLANNED_WORKOUTS_SOURCE = {
 
 COACH_ACTIVITY_FIELDS = (
     "id",
-    "start_date_local",
+    "started_at_local",
     "name",
-    "type",
-    "moving_time",
-    "distance",
-    "total_elevation_gain",
-    TRAINING_LOAD,
-    INTENSITY,
-    "average_heartrate",
-    "max_heartrate",
-    "average_watts",
-    "weighted_average_watts",
-    WEIGHTED_AVG_WATTS,
+    "sport",
+    "environment",
+    "moving_duration_s",
+    "distance_m",
+    "elevation_gain_m",
+    "training_load",
+    "load_model",
+    "intensity",
+    "avg_hr",
+    "max_hr",
+    "avg_power",
     "normalized_power",
-    "average_speed",
-    WEIGHTED_AVG_SPEED,
-    PACE,
-    RPE,
+    "avg_speed_mps",
+    "weighted_avg_speed_mps",
+    "pace_mps",
+    "rpe",
     "feel",
+    "source",
 )
 COACH_LIBRARY_FIELDS = (
     "id",
@@ -203,7 +200,7 @@ def compact_coach_activity(
 ) -> dict[str, Any]:
     return _truncate_values(
         select(activity, COACH_ACTIVITY_FIELDS),
-        {"id": 200, "name": 200, "type": 80, "feel": 120},
+        {"id": 200, "name": 200, "sport": 80},
     )
 
 
@@ -274,13 +271,15 @@ class CoachIntervalsContextService:
         self,
         planned_units: list[dict[str, Any]] | None,
         today: date,
-        activities: list[dict[str, Any]] | None = None,
+        activities: Sequence[Mapping[str, Any]] | None = None,
         *,
         synced_at: str | None = None,
     ) -> dict[str, Any]:
-        activities = [item for item in activities or [] if isinstance(item, dict)]
+        summaries: list[dict[str, Any]] = [
+            dict(item) for item in activities or [] if isinstance(item, Mapping)
+        ]
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for activity in activities:
+        for activity in summaries:
             grouped.setdefault(activity_validation.activity_sport(activity), []).append(
                 activity
             )
@@ -291,8 +290,8 @@ class CoachIntervalsContextService:
                 for activity in sorted(
                     rows,
                     key=lambda item: (
-                        str(item.get("start_date_local") or ""),
-                        str(item.get("id") or item.get("activityId") or ""),
+                        str(item.get("started_at_local") or ""),
+                        str(item.get("id") or ""),
                         str(item.get("name") or ""),
                     ),
                     reverse=True,
@@ -471,7 +470,7 @@ class CoachPerformanceContextReader:
         garmin_projection_service: Any,
         today: Callable[[], date],
         canonical: CanonicalPerformanceSource | None = None,
-        activity_rows: ActivityRowSource | None = None,
+        activity_rows: ActivitySummarySource | None = None,
     ) -> None:
         self._profile_service = profile_service
         self._garmin_payload_service = garmin_payload_service

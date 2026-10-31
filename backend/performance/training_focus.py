@@ -4,13 +4,10 @@ from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import Any
 
+from backend.activities.activity_summary import summary_duration_s, summary_local_date
+from backend.athlete.local_date import iso_date_prefix
 from backend.performance import freshness as performance_freshness
 from backend.performance.activity_validation import bounded_activity_metric
-from backend.performance.training_report import (
-    activity_day,
-    deduplicated_rows,
-    zone_distribution,
-)
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 _CATEGORIES = {
@@ -29,19 +26,85 @@ _CATEGORIES = {
 }
 
 
+_ZONE_SENSORS = (
+    ("power_zone_times", "power"),
+    ("heart_rate_zone_times", "heart_rate"),
+)
+
+
+def _zone_distribution(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sum the recorded power and heart-rate zone seconds per canonical sport."""
+    reports = []
+    for sport in sorted({str(row.get("sport") or "other") for row in summaries}):
+        if sport == "strength":
+            continue
+        sport_rows = [
+            row for row in summaries if (row.get("sport") or "other") == sport
+        ]
+        duration = sum(summary_duration_s(row) or 0 for row in sport_rows)
+        for key, sensor in _ZONE_SENSORS:
+            seconds: dict[str, float] = {}
+            measured_sessions = 0
+            sources: set[str] = set()
+            for row in sport_rows:
+                valid = _valid_zones(row.get(key))
+                if not valid:
+                    continue
+                measured_sessions += 1
+                label = (row.get("sources") or {}).get(key)
+                if label:
+                    sources.add(str(label))
+                for zone in valid:
+                    zone_id = str(zone["id"])[:20]
+                    seconds[zone_id] = seconds.get(zone_id, 0.0) + float(zone["secs"])
+            if seconds:
+                reports.append(
+                    {
+                        "sport": sport,
+                        "sensor": sensor,
+                        "seconds": seconds,
+                        "measured_seconds": sum(seconds.values()),
+                        "training_seconds": duration,
+                        "measured_sessions": measured_sessions,
+                        "total_sessions": len(sport_rows),
+                        "source": ", ".join(sorted(sources)),
+                        "method": "Provider zones recorded for each activity; no recalculation using current thresholds",
+                    }
+                )
+    return reports
+
+
+def _valid_zones(values: Any) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    return [
+        zone
+        for zone in values
+        if isinstance(zone, dict)
+        and isinstance(zone.get("secs"), int | float)
+        and not isinstance(zone.get("secs"), bool)
+        and zone["secs"] >= 0
+        and str(zone.get("id", "")).startswith("Z")
+    ]
+
+
 def training_focus(
     garmin: dict[str, Any],
     today: date,
     timezone: str = "UTC",
     *,
-    activity_rows: Sequence[Any],
+    activities: Sequence[Any],
     days: int = 28,
 ) -> dict[str, Any]:
     start = (today - timedelta(days=days - 1)).isoformat()
     end = today.isoformat()
-    activities, _ = deduplicated_rows(activity_rows)
-    zones = zone_distribution(
-        [row for row in activities if start <= activity_day(row, timezone) <= end]
+    zones = _zone_distribution(
+        [
+            row
+            for row in activities
+            if isinstance(row, dict)
+            and start <= summary_local_date(row, timezone) <= end
+        ]
     )
     categories = {
         key: {"load": 0.0, "sessions": 0}
@@ -54,7 +117,7 @@ def training_focus(
         "training_load_activities+activities" if has_dedicated_loads else "activities"
     )
     seen, unknown, observed_dates = _garmin_activity_coverage(
-        garmin, start, end, timezone, categories
+        garmin, start, end, categories
     )
     freshness = performance_freshness.garmin_source_freshness(garmin, today)
     activity_freshness = {
@@ -94,7 +157,6 @@ def _garmin_activity_coverage(
     garmin: dict[str, Any],
     start: str,
     end: str,
-    timezone: str,
     categories: dict[str, dict[str, float | int]],
 ) -> tuple[set[str], int, list[str]]:
     seen: set[str] = set()
@@ -104,7 +166,7 @@ def _garmin_activity_coverage(
     activities = activities if isinstance(activities, list) else []
     loads_by_id = _training_load_by_id(garmin.get("training_load_activities"))
     for index, activity in enumerate(activities[:1000]):
-        row_data = _coverage_row(activity, index, loads_by_id, start, end, timezone)
+        row_data = _coverage_row(activity, index, loads_by_id, start, end)
         if row_data is None:
             continue
         identity, dedupe_key, day, row = row_data
@@ -145,7 +207,6 @@ def _coverage_row(
     loads_by_id: dict[str, dict[str, Any]],
     start: str,
     end: str,
-    timezone: str,
 ) -> tuple[str, str, str, dict[str, Any]] | None:
     if not isinstance(activity, dict):
         return None
@@ -156,12 +217,12 @@ def _coverage_row(
         for key in ("activityTrainingLoad", "trainingEffectLabel"):
             if load_record.get(key) is not None:
                 row[key] = load_record[key]
-    day = activity_day(
-        {
-            "start_date_local": row.get(garmin_perf_fields.ACTIVITY_START_LOCAL)
+    day = iso_date_prefix(
+        str(
+            row.get(garmin_perf_fields.ACTIVITY_START_LOCAL)
             or row.get("start_date_local")
-        },
-        timezone,
+            or ""
+        )
     )
     if not day or not start <= day <= end:
         return None

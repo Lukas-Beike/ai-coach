@@ -7,7 +7,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from backend.activities.detail_projection import detailed_activity
+from backend.providers.intervals_activity_detail_projection import detailed_activity
 from backend.providers.intervals_activity_keys import LACTATE_THRESHOLD_HR
 from backend.providers.intervals_performance_fields import (
     HEART_RATE_ZONE_TIMES,

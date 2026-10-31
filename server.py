@@ -255,7 +255,7 @@ from backend.planning.assembly import (
 from backend.planning.assembly import (
     PlanningRuntime as PlanningDataRuntime,
 )
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -1439,10 +1439,10 @@ COACH_CONTEXT = CoachContextAssembly(
                 database_manager=lambda: database_manager(),
                 observation_reader=lambda: CANONICAL_READ,
                 serving=lambda: CANONICAL_READ,
-                activity_rows=lambda: CANONICAL_READ,
+                activity_summaries=lambda: CANONICAL_READ,
                 coverage=lambda: CANONICAL_READ,
             ),
-            activity_rows=ActivityRowSource(
+            activity_rows=ActivitySummarySource(
                 database_manager=lambda: database_manager(),
                 reader=lambda: CANONICAL_READ,
                 coverage=lambda: CANONICAL_READ,
@@ -1922,7 +1922,7 @@ PUBLIC_STATE = PublicStateAssembly(
             key_value_service=key_value_service,
             observation_reader=lambda: CANONICAL_READ,
             canonical_serving=lambda: CANONICAL_READ,
-            activity_row_reader=lambda: CANONICAL_READ,
+            activity_summary_reader=lambda: CANONICAL_READ,
             coverage=lambda: CANONICAL_READ,
         ),
         owners=PublicStateOwnerAssemblies(

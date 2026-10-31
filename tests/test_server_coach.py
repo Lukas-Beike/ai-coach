@@ -594,11 +594,13 @@ class ServerCoachTests(ServerTestCase):
         )
 
     def test_coach_projection_helpers_are_dependency_light_and_bounded(self):
-        from backend.activities.detail_projection import detailed_activity
         from backend.coach.context import (
             bounded_coach_context_value,
             compact_coach_activity,
             compact_coach_local_planned_workouts,
+        )
+        from backend.providers.intervals_activity_detail_projection import (
+            detailed_activity,
         )
 
         select = lambda value, fields: {
@@ -1025,20 +1027,21 @@ class ServerCoachTests(ServerTestCase):
             "recent_activities": [
                 {
                     "id": "b",
-                    "type": "Ride",
+                    "sport": "ride",
                     "name": "B",
-                    "start_date_local": today.isoformat(),
+                    "started_at_local": today.isoformat(),
                 },
                 {
                     "id": "a",
-                    "type": "Ride",
+                    "sport": "ride",
                     "name": "A",
-                    "start_date_local": today.isoformat(),
+                    "started_at_local": today.isoformat(),
                 },
                 {
                     "id": "other",
                     "name": "Unclassified",
-                    "start_date_local": today.isoformat(),
+                    "sport": "other",
+                    "started_at_local": today.isoformat(),
                 },
             ],
             "upcoming_calendar": [],
@@ -1059,7 +1062,7 @@ class ServerCoachTests(ServerTestCase):
         )
         self.assertIn(
             "Unclassified",
-            first["recent_activities_by_sport"]["Unclassified"][0]["name"],
+            first["recent_activities_by_sport"]["Sonstiges"][0]["name"],
         )
 
     def test_coach_planned_projection_omits_long_description_and_keeps_relevant_fields(

@@ -261,7 +261,7 @@ def body_history(
     *,
     canonical: CanonicalBodyInputs,
     wellness_days: Sequence[WellnessDay],
-    activity_rows: Sequence[dict[str, Any]],
+    activities: Sequence[Mapping[str, Any]],
     garmin_ftp: Mapping[date, float],
     eftp_by_day: Mapping[date, float] | None = None,
 ) -> dict[str, Any]:
@@ -273,7 +273,7 @@ def body_history(
 
     Wellness measurements come solely from canonical days, Garmin weight, body fat
     and FTP solely from canonical observations, and activity eFTP from the canonical
-    activity rows. The stored views supply only sync times.
+    activity summaries. The stored views supply only sync times.
     """
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     garmin = garmin if isinstance(garmin, dict) else {}
@@ -290,7 +290,7 @@ def body_history(
     intervals_ftp: dict[date, tuple[float, str, Any]] = {}
     for observed_at, value in eftp.eftp_daily_values(
         eftp_by_day,
-        list(activity_rows),
+        list(activities),
         today - timedelta(days=83),
         today,
     ).items():

@@ -21,8 +21,8 @@ from backend.performance.load_context import (
     performance_load_context as _performance_load_context,
 )
 from backend.performance.training_focus import training_focus
-from backend.performance.training_report import deduplicated_rows
 from backend.performance.wellness_days import series
+from backend.sync.garmin_activity_duplicates import deduplicated_rows
 
 TODAY = date(2026, 5, 4)
 RETENTION = math.exp(-1.0 / 7.0)
@@ -57,7 +57,7 @@ def _day(offset: int) -> str:
 
 
 def _activity(day: str, **fields: Any) -> dict[str, Any]:
-    return {"start_date_local": day, "moving_time": 3600, **fields}
+    return {"started_at_local": day, "moving_duration_s": 3600, **fields}
 
 
 def _wellness(day: str, atl: Any, **fields: Any) -> dict[str, Any]:
@@ -65,6 +65,19 @@ def _wellness(day: str, atl: Any, **fields: Any) -> dict[str, Any]:
 
 
 def _ride(
+    activity_id: str, start: str = "2026-05-04T08:00:00", **fields: Any
+) -> dict[str, Any]:
+    return {
+        "id": activity_id,
+        "sport": "ride",
+        "started_at_local": start,
+        "moving_duration_s": 3600,
+        "distance_m": 30000,
+        **fields,
+    }
+
+
+def _raw_ride(
     activity_id: str, start: str = "2026-05-04T08:00:00", **fields: Any
 ) -> dict[str, Any]:
     return {
@@ -91,6 +104,10 @@ def _garmin(
     }
 
 
+def _hr(seconds: int) -> list[dict[str, Any]]:
+    return [{"id": "Z1", "secs": seconds}]
+
+
 def _ids(rows: list[dict[str, Any]]) -> list[str]:
     return [str(row["id"]) for row in rows]
 
@@ -103,9 +120,9 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         result = activity_rollup(
             [
                 {
-                    "start_date": "2026-05-04T08:00:00Z",
-                    "moving_time": 60,
-                    "icu_training_load": 5,
+                    "started_at": "2026-05-04T08:00:00Z",
+                    "moving_duration_s": 60,
+                    "training_load": 5,
                 }
             ],
             1,
@@ -116,14 +133,12 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
             {"days": 1, "sessions": 0, "duration_hours": 0.0, "training_load": 0.0},
         )
 
-    def test_rollup_ignores_alias_keys_for_duration_and_load(self) -> None:
-        # Quirk: only moving_time and icu_training_load are read; elapsed_time and
-        # training_load are not aliases here, although the row still counts.
+    def test_rollup_falls_back_to_the_elapsed_duration(self) -> None:
         result = activity_rollup(
             [
                 {
-                    "start_date_local": "2026-05-04",
-                    "elapsed_time": 3600,
+                    "started_at_local": "2026-05-04",
+                    "elapsed_duration_s": 3600,
                     "training_load": 50,
                 }
             ],
@@ -131,21 +146,21 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
             TODAY,
         )
         self.assertEqual(result["sessions"], 1)
-        self.assertEqual(result["duration_hours"], 0.0)
-        self.assertEqual(result["training_load"], 0.0)
+        self.assertEqual(result["duration_hours"], 1.0)
+        self.assertEqual(result["training_load"], 50.0)
 
     def test_rollup_parses_numeric_strings_and_zeroes_structured_values(self) -> None:
         result = activity_rollup(
             [
                 {
-                    "start_date_local": "2026-05-04",
-                    "moving_time": "5400",
-                    "icu_training_load": "12.5",
+                    "started_at_local": "2026-05-04",
+                    "moving_duration_s": "5400",
+                    "training_load": "12.5",
                 },
                 {
-                    "start_date_local": "2026-05-04",
-                    "moving_time": ["3600"],
-                    "icu_training_load": {"value": 9},
+                    "started_at_local": "2026-05-04",
+                    "moving_duration_s": ["3600"],
+                    "training_load": {"value": 9},
                 },
             ],
             1,
@@ -162,9 +177,9 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         result = activity_rollup(
             [
                 {
-                    "start_date_local": "2026-05-04",
-                    "moving_time": "1800",
-                    "icu_training_load": "42,5",
+                    "started_at_local": "2026-05-04",
+                    "moving_duration_s": "1800",
+                    "training_load": "42,5",
                 }
             ],
             1,
@@ -178,8 +193,8 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         # Quirk: the rollup has no lower bound, so negative loads reduce totals.
         result = activity_rollup(
             [
-                {"start_date_local": "2026-05-04", "icu_training_load": 20},
-                {"start_date_local": "2026-05-04", "icu_training_load": -5},
+                {"started_at_local": "2026-05-04", "training_load": 20},
+                {"started_at_local": "2026-05-04", "training_load": -5},
             ],
             1,
             TODAY,
@@ -190,9 +205,9 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         result = activity_rollup(
             [
                 {
-                    "start_date_local": "2026-05-04",
-                    "moving_time": 1000,
-                    "icu_training_load": 10.06,
+                    "started_at_local": "2026-05-04",
+                    "moving_duration_s": 1000,
+                    "training_load": 10.06,
                 }
             ],
             1,
@@ -206,8 +221,8 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
     ) -> None:
         result = activity_rollup(
             [
-                {"start_date_local": "2026-05-04T23:59:59", "moving_time": 60},
-                {"start_date_local": _day(1), "moving_time": 60},
+                {"started_at_local": "2026-05-04T23:59:59", "moving_duration_s": 60},
+                {"started_at_local": _day(1), "moving_duration_s": 60},
             ],
             1,
             TODAY,
@@ -224,7 +239,7 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
         wellness = [_wellness("2026-05-03", 10), _wellness("2026-05-04", 20)]
         with_load = actual_atl_series(
             wellness,
-            [_activity("2026-05-03", icu_training_load=70)],
+            [_activity("2026-05-03", training_load=70)],
             TODAY,
         )
         without_load = actual_atl_series(wellness, [], TODAY)
@@ -247,7 +262,7 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
         # load, so the next wellness day reflects the completed activity.
         wellness = [_wellness("2026-05-01", 10), _wellness("2026-05-04", 10)]
         with_gap_load = actual_atl_series(
-            wellness, [_activity("2026-05-02", icu_training_load=100)], TODAY
+            wellness, [_activity("2026-05-02", training_load=100)], TODAY
         )
         self.assertEqual(
             with_gap_load,
@@ -263,7 +278,7 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
     def test_activity_load_before_first_wellness_row_is_ignored(self) -> None:
         series = actual_atl_series(
             [_wellness("2026-05-04", 10)],
-            [_activity("2026-04-30", icu_training_load=70)],
+            [_activity("2026-04-30", training_load=70)],
             TODAY,
         )
         self.assertEqual(series, {date(2026, 5, 4): 10.0})
@@ -275,7 +290,7 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
         # only the context layer filters them out (see the context tests).
         series = actual_atl_series(
             [_wellness("2026-05-04", 10), _wellness("2026-05-06", 10)],
-            [_activity("2026-05-05", icu_training_load=999)],
+            [_activity("2026-05-05", training_load=999)],
             TODAY,
         )
         self.assertEqual(
@@ -286,7 +301,7 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
     def test_duplicate_wellness_dates_make_one_observed_day(self) -> None:
         series = actual_atl_series(
             [_wellness("2026-05-04", 10), _wellness("2026-05-04", 10)],
-            [_activity("2026-05-04", icu_training_load=70)],
+            [_activity("2026-05-04", training_load=70)],
             TODAY,
         )
         self.assertEqual(series, {date(2026, 5, 4): 10.0})
@@ -294,7 +309,7 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
     def test_decimal_comma_activity_load_is_accepted_by_atl(self) -> None:
         series = actual_atl_series(
             [_wellness("2026-05-03", 10), _wellness("2026-05-04", 10)],
-            [_activity("2026-05-04", icu_training_load="42,5")],
+            [_activity("2026-05-04", training_load="42,5")],
             TODAY,
         )
         self.assertEqual(
@@ -308,8 +323,8 @@ class CharacterizationAtlSeriesTests(unittest.TestCase):
             [_wellness("2026-05-03", 10), _wellness("2026-05-04", 10)],
             [
                 "junk",
-                _activity("2026-05-04", icu_training_load="n/a"),
-                {"start_date_local": None, "icu_training_load": 50},
+                _activity("2026-05-04", training_load="n/a"),
+                {"started_at_local": None, "training_load": 50},
             ],
             TODAY,
         )
@@ -460,9 +475,9 @@ class CharacterizationLoadContextTests(unittest.TestCase):
             _ride(
                 "w",
                 source="WAHOO ELEMNT",
-                icu_training_load=40,
+                training_load=40,
             ),
-            _ride("g", source="garmin", icu_training_load=40),
+            _ride("g", source="garmin", training_load=40),
         ]
         result = performance_load_context(activities, [], {}, TODAY)
         self.assertEqual(result["last_7"]["sessions"], 2)
@@ -478,20 +493,20 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
             "recent_activities": [
                 _ride(
                     "r",
-                    icu_hr_zone_times=[600],
-                    icu_zone_times=[{"id": "Z1", "secs": 300}],
+                    heart_rate_zone_times=_hr(600),
+                    power_zone_times=[{"id": "Z1", "secs": 300}],
                     pace_zone_times=[{"id": "Z1", "secs": 900}],
                 ),
                 {
                     "id": "s",
-                    "type": "WeightTraining",
-                    "start_date_local": "2026-05-04T08:00:00",
-                    "moving_time": 3600,
-                    "icu_hr_zone_times": [1800],
+                    "sport": "strength",
+                    "started_at_local": "2026-05-04T08:00:00",
+                    "moving_duration_s": 3600,
+                    "heart_rate_zone_times": _hr(1800),
                 },
             ]
         }
-        result = training_focus({}, TODAY, activity_rows=snapshot["recent_activities"])
+        result = training_focus({}, TODAY, activities=snapshot["recent_activities"])
         self.assertEqual(
             sorted({row["sensor"] for row in result["zones"]}),
             ["heart_rate", "power"],
@@ -500,40 +515,48 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         self.assertEqual(zones["heart_rate"], {"Z1": 600.0})
         self.assertEqual(zones["power"], {"Z1": 300.0})
 
-    def test_zones_are_built_from_deduplicated_rows_so_garmin_copies_are_excluded(
-        self,
-    ) -> None:
-        snapshot = {
-            "recent_activities": [
-                _ride("w", source="wahoo", icu_hr_zone_times=[600]),
-                _ride("g", source="garmin", icu_hr_zone_times=[600]),
-            ]
-        }
-        result = training_focus({}, TODAY, activity_rows=snapshot["recent_activities"])
-        self.assertEqual(result["zones"][0]["seconds"], {"Z1": 600.0})
-
     def test_zone_window_includes_today_minus_27_and_today_only(self) -> None:
         snapshot = {
             "recent_activities": [
-                _ride("before", start=f"{_day(-28)}T08:00:00", icu_hr_zone_times=[900]),
-                _ride("first", start=f"{_day(-27)}T08:00:00", icu_hr_zone_times=[300]),
-                _ride("today", start=f"{_day(0)}T08:00:00", icu_hr_zone_times=[300]),
-                _ride("after", start=f"{_day(1)}T08:00:00", icu_hr_zone_times=[900]),
+                _ride(
+                    "before",
+                    start=f"{_day(-28)}T08:00:00",
+                    heart_rate_zone_times=_hr(900),
+                ),
+                _ride(
+                    "first",
+                    start=f"{_day(-27)}T08:00:00",
+                    heart_rate_zone_times=_hr(300),
+                ),
+                _ride(
+                    "today", start=f"{_day(0)}T08:00:00", heart_rate_zone_times=_hr(300)
+                ),
+                _ride(
+                    "after", start=f"{_day(1)}T08:00:00", heart_rate_zone_times=_hr(900)
+                ),
             ]
         }
-        result = training_focus({}, TODAY, activity_rows=snapshot["recent_activities"])
+        result = training_focus({}, TODAY, activities=snapshot["recent_activities"])
         self.assertEqual(result["zones"][0]["seconds"], {"Z1": 600.0})
         self.assertEqual(result["zones"][0]["training_seconds"], 7200)
 
     def test_days_argument_sets_the_window_start(self) -> None:
         snapshot = {
             "recent_activities": [
-                _ride("before", start=f"{_day(-14)}T08:00:00", icu_hr_zone_times=[900]),
-                _ride("first", start=f"{_day(-13)}T08:00:00", icu_hr_zone_times=[300]),
+                _ride(
+                    "before",
+                    start=f"{_day(-14)}T08:00:00",
+                    heart_rate_zone_times=_hr(900),
+                ),
+                _ride(
+                    "first",
+                    start=f"{_day(-13)}T08:00:00",
+                    heart_rate_zone_times=_hr(300),
+                ),
             ]
         }
         result = training_focus(
-            {}, TODAY, activity_rows=snapshot["recent_activities"], days=14
+            {}, TODAY, activities=snapshot["recent_activities"], days=14
         )
         self.assertEqual(result["start"], _day(-13))
         self.assertEqual(result["zones"][0]["seconds"], {"Z1": 300.0})
@@ -542,11 +565,11 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         ride = _ride(
             "r",
             start="2026-05-04T22:30:00",
-            start_date="2026-05-04T22:30:00Z",
-            icu_hr_zone_times=[600],
+            started_at="2026-05-04T22:30:00+00:00",
+            heart_rate_zone_times=_hr(600),
         )
-        utc = training_focus({}, TODAY, "UTC", activity_rows=[ride])
-        berlin = training_focus({}, TODAY, "Europe/Berlin", activity_rows=[ride])
+        utc = training_focus({}, TODAY, "UTC", activities=[ride])
+        berlin = training_focus({}, TODAY, "Europe/Berlin", activities=[ride])
         self.assertEqual(utc["zones"][0]["seconds"], {"Z1": 600.0})
         # 22:30 UTC is 00:30 on 2026-05-05 in Berlin, after the window end.
         self.assertEqual(berlin["zones"], [])
@@ -555,10 +578,10 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         ride = _ride(
             "r",
             start="2026-05-04T22:30:00",
-            start_date="2026-05-04T22:30:00Z",
-            icu_hr_zone_times=[600],
+            started_at="2026-05-04T22:30:00+00:00",
+            heart_rate_zone_times=_hr(600),
         )
-        result = training_focus({}, TODAY, "Mars/Olympus", activity_rows=[ride])
+        result = training_focus({}, TODAY, "Mars/Olympus", activities=[ride])
         self.assertEqual(result["zones"][0]["seconds"], {"Z1": 600.0})
 
     def test_garmin_coverage_uses_local_start_time_and_ignores_timezone(self) -> None:
@@ -572,7 +595,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         }
         for timezone in ("UTC", "Europe/Berlin"):
             with self.subTest(timezone=timezone):
-                result = training_focus(garmin, TODAY, timezone, activity_rows=())
+                result = training_focus(garmin, TODAY, timezone, activities=())
                 self.assertEqual(result["coverage"]["known_sessions"], 1)
                 self.assertEqual(result["coverage"]["observed_end"], "2026-05-04")
 
@@ -590,7 +613,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 ]
             },
             TODAY,
-            activity_rows=(),
+            activities=(),
         )
         self.assertEqual(result["coverage"]["known_sessions"], 1)
         self.assertEqual(result["classified_sessions"], 0)
@@ -610,7 +633,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 _garmin("f", "TEMPO", "9" * 33),
             ]
         }
-        result = training_focus(garmin, TODAY, activity_rows=())
+        result = training_focus(garmin, TODAY, activities=())
         self.assertEqual(result["classified_sessions"], 3)
         self.assertEqual(result["unclassified_sessions"], 3)
         self.assertEqual(
@@ -635,7 +658,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 _garmin("j", None, 5),
             ]
         }
-        result = training_focus(garmin, TODAY, activity_rows=())
+        result = training_focus(garmin, TODAY, activities=())
         categories = result["categories"]
         self.assertEqual(categories["high_aerobic"], {"load": 20.0, "sessions": 4})
         self.assertEqual(categories["low_aerobic"], {"load": 5.0, "sessions": 1})
@@ -660,7 +683,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         for label, category in expected.items():
             with self.subTest(label=label):
                 result = training_focus(
-                    {"activities": [_garmin("a", label, 5)]}, TODAY, activity_rows=()
+                    {"activities": [_garmin("a", label, 5)]}, TODAY, activities=()
                 )
                 self.assertEqual(result["categories"][category]["sessions"], 1)
                 self.assertEqual(result["classified_sessions"], 1)
@@ -678,7 +701,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 }
             ],
         }
-        result = training_focus(garmin, TODAY, activity_rows=())
+        result = training_focus(garmin, TODAY, activities=())
         self.assertEqual(
             result["categories"]["anaerobic"], {"load": 40.0, "sessions": 1}
         )
@@ -695,7 +718,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 "training_load_activities": {"freshness": "current"},
             },
         }
-        result = training_focus(garmin, TODAY, activity_rows=())
+        result = training_focus(garmin, TODAY, activities=())
         self.assertEqual(result["category_source_key"], "activities")
         self.assertEqual(set(result["category_freshness"]), {"activities"})
 
@@ -715,7 +738,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
                 }
             },
         }
-        result = training_focus(garmin, TODAY, activity_rows=())
+        result = training_focus(garmin, TODAY, activities=())
         self.assertEqual(
             result["category_freshness"]["activities"],
             {
@@ -739,7 +762,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
 
     def test_missing_source_freshness_defaults_the_activities_source(self) -> None:
         result = training_focus(
-            {"activities": [_garmin("a", "TEMPO", 40)]}, TODAY, activity_rows=()
+            {"activities": [_garmin("a", "TEMPO", 40)]}, TODAY, activities=()
         )
         self.assertEqual(
             result["category_freshness"],
@@ -759,10 +782,10 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
     ) -> None:
         snapshot = {
             "recent_activities": [
-                _ride("r", icu_training_load=99, start="2026-05-04T08:00:00")
+                _ride("r", training_load=99, start="2026-05-04T08:00:00")
             ]
         }
-        result = training_focus({}, TODAY, activity_rows=snapshot["recent_activities"])
+        result = training_focus({}, TODAY, activities=snapshot["recent_activities"])
         self.assertEqual(result["classified_sessions"], 0)
         self.assertEqual(result["unclassified_sessions"], 0)
         self.assertEqual(
@@ -779,7 +802,7 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         garmin = {
             "activities": [_garmin(str(index), "TEMPO", 1) for index in range(1002)]
         }
-        result = training_focus(garmin, TODAY, activity_rows=())
+        result = training_focus(garmin, TODAY, activities=())
         self.assertEqual(result["coverage"]["known_sessions"], 1000)
         self.assertEqual(result["categories"]["high_aerobic"]["sessions"], 1000)
 
@@ -796,8 +819,8 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
             with self.subTest(field=field):
                 rows, duplicates = deduplicated_rows(
                     [
-                        _ride("w", **{field: value}),
-                        _ride("g", source="garmin"),
+                        _raw_ride("w", **{field: value}),
+                        _raw_ride("g", source="garmin"),
                     ]
                 )
                 self.assertEqual(_ids(rows), ["w"])
@@ -806,17 +829,17 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
     def test_garmin_ride_is_removed_at_exactly_thirty_minutes_not_thirty_one(
         self,
     ) -> None:
-        wahoo = _ride("w", source="wahoo")
+        wahoo = _raw_ride("w", source="wahoo")
         at_limit = deduplicated_rows(
             [
                 wahoo,
-                _ride("g", start="2026-05-04T08:30:00", source="garmin"),
+                _raw_ride("g", start="2026-05-04T08:30:00", source="garmin"),
             ]
         )
         past_limit = deduplicated_rows(
             [
                 wahoo,
-                _ride("g", start="2026-05-04T08:31:00", source="garmin"),
+                _raw_ride("g", start="2026-05-04T08:31:00", source="garmin"),
             ]
         )
         self.assertEqual(_ids(at_limit[0]), ["w"])
@@ -841,8 +864,8 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
             with self.subTest(wahoo=wahoo_fields, garmin=garmin_fields):
                 rows, duplicates = deduplicated_rows(
                     [
-                        _ride("w", source="wahoo", **wahoo_fields),
-                        _ride("g", source="garmin", **garmin_fields),
+                        _raw_ride("w", source="wahoo", **wahoo_fields),
+                        _raw_ride("g", source="garmin", **garmin_fields),
                     ]
                 )
                 self.assertEqual(_ids(rows), ["w"] if matches else ["w", "g"])
@@ -853,11 +876,11 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
     ) -> None:
         # Quirk: a Garmin row without a type is treated as cycling from its name
         # ("Morning Ride") and removed; a Garmin Run copy is not matched at all.
-        wahoo = _ride("w", source="wahoo")
+        wahoo = _raw_ride("w", source="wahoo")
         run_copy = deduplicated_rows(
             [
                 wahoo,
-                _ride("g", source="garmin", type="Run"),
+                _raw_ride("g", source="garmin", type="Run"),
             ]
         )
         name_only = deduplicated_rows(
@@ -881,8 +904,8 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
             with self.subTest(distance=distance):
                 rows, duplicates = deduplicated_rows(
                     [
-                        _ride("w", source="wahoo", distance=distance),
-                        _ride("g", source="garmin"),
+                        _raw_ride("w", source="wahoo", distance=distance),
+                        _raw_ride("g", source="garmin"),
                     ]
                 )
                 self.assertEqual(_ids(rows), ["w", "g"])
@@ -892,8 +915,8 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
         # Quirk: the duplicate matcher parses decimal strings, unlike training totals.
         rows, duplicates = deduplicated_rows(
             [
-                _ride("w", source="wahoo"),
-                _ride("g", source="garmin", distance="30000"),
+                _raw_ride("w", source="wahoo"),
+                _raw_ride("g", source="garmin", distance="30000"),
             ]
         )
         self.assertEqual(_ids(rows), ["w"])
@@ -902,14 +925,14 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
     def test_garmin_only_and_wahoo_only_pairs_are_not_collapsed(self) -> None:
         garmin_pair = deduplicated_rows(
             [
-                _ride("g1", source="garmin"),
-                _ride("g2", source="garmin"),
+                _raw_ride("g1", source="garmin"),
+                _raw_ride("g2", source="garmin"),
             ]
         )
         wahoo_pair = deduplicated_rows(
             [
-                _ride("w1", source="wahoo"),
-                _ride("w2", source="wahoo"),
+                _raw_ride("w1", source="wahoo"),
+                _raw_ride("w2", source="wahoo"),
             ]
         )
         self.assertEqual((_ids(garmin_pair[0]), garmin_pair[1]), (["g1", "g2"], 0))
@@ -918,20 +941,20 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
     def test_identical_id_duplicates_are_dropped_but_not_counted(self) -> None:
         # Quirk: excluded_duplicates only counts Wahoo/Garmin removals, because the
         # identical-id duplicates are dropped before the count is taken.
-        wahoo = _ride("w", source="wahoo")
+        wahoo = _raw_ride("w", source="wahoo")
         rows, duplicates = deduplicated_rows([wahoo, dict(wahoo)])
         self.assertEqual(_ids(rows), ["w"])
         self.assertEqual(duplicates, 0)
 
     def test_numeric_and_string_ids_are_the_same_identity(self) -> None:
         rows, duplicates = deduplicated_rows(
-            [_ride(5), _ride("5")]  # type: ignore[arg-type]
+            [_raw_ride(5), _raw_ride("5")]  # type: ignore[arg-type]
         )
         self.assertEqual(len(rows), 1)
         self.assertEqual(duplicates, 0)
 
     def test_non_dict_records_are_dropped_and_not_counted(self) -> None:
-        rows, duplicates = deduplicated_rows(["junk", None, _ride("a")])
+        rows, duplicates = deduplicated_rows(["junk", None, _raw_ride("a")])
         self.assertEqual(_ids(rows), ["a"])
         self.assertEqual(duplicates, 0)
 
@@ -941,9 +964,9 @@ class CharacterizationCanonicalRowsTests(unittest.TestCase):
     def test_output_keeps_input_order_and_first_occurrence(self) -> None:
         rows, _ = deduplicated_rows(
             [
-                _ride("b"),
-                _ride("a", moving_time=1),
-                _ride("a", moving_time=2),
+                _raw_ride("b"),
+                _raw_ride("a", moving_time=1),
+                _raw_ride("a", moving_time=2),
             ]
         )
         self.assertEqual(_ids(rows), ["b", "a"])

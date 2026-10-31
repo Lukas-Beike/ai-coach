@@ -144,7 +144,7 @@
       "evidence_level": "surface-mapped; see requirement citations for inspected assertions"
     },
     {
-      "path": "backend/activities/detail_projection.py",
+      "path": "backend/providers/intervals_activity_detail_projection.py",
       "capabilities": [
         "activity-ingestion-and-storage",
         "activity-analysis-and-feedback"

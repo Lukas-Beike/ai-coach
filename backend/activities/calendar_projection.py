@@ -5,41 +5,35 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+from backend.activities.activity_summary import summary_duration_s
 from backend.activities.identity import activity_datetime
-from backend.activities.matching import is_planned_workout_event, match_planned_workouts
+from backend.activities.matching import (
+    PLANNED_LOAD_FIELDS,
+    is_planned_workout_event,
+    match_planned_workouts,
+)
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
-from backend.providers.intervals_activity_keys import (
-    INTENSITY,
-    PACE,
-    RPE,
-    TRAINING_LOAD_LOOKUP,
-    WEIGHTED_AVG_SPEED,
-    WEIGHTED_AVG_WATTS,
-)
-from backend.providers.intervals_performance_fields import TRAINING_LOAD
 
 CALENDAR_ACTIVITY_FIELDS = (
     "id",
-    "external_id",
-    "start_date_local",
+    "started_at_local",
     "name",
-    "type",
-    "moving_time",
-    "elapsed_time",
-    "distance",
-    "total_elevation_gain",
-    TRAINING_LOAD,
-    INTENSITY,
-    "average_heartrate",
-    "max_heartrate",
-    "average_watts",
-    "weighted_average_watts",
-    WEIGHTED_AVG_WATTS,
+    "sport",
+    "environment",
+    "moving_duration_s",
+    "elapsed_duration_s",
+    "distance_m",
+    "elevation_gain_m",
+    "training_load",
+    "intensity",
+    "avg_hr",
+    "max_hr",
+    "avg_power",
     "normalized_power",
-    WEIGHTED_AVG_SPEED,
-    PACE,
-    RPE,
+    "weighted_avg_speed_mps",
+    "pace_mps",
+    "rpe",
     "feel",
     "source",
     "workout_profile",
@@ -77,13 +71,11 @@ def calendar_activity_payload(activity: Any) -> dict[str, Any]:
     if not isinstance(activity, dict):
         return {}
     payload = _selected(activity, CALENDAR_ACTIVITY_FIELDS)
-    activity_start = _first_present(
-        activity, ("start_date_local", "start_date", "date")
-    )
+    activity_start = _first_present(activity, ("started_at_local", "date"))
     payload.update(
         {
             "date": _record_date(activity_start),
-            "start_date_local": activity_start,
+            "started_at_local": activity_start,
             "category": "ACTIVITY",
             "calendar_entry_type": "completed_activity",
             "is_completed_activity": True,
@@ -96,23 +88,26 @@ def calendar_activity_identity(activity: Any) -> tuple[Any, ...] | None:
     """Build a stable identity for matching calendar activity projections."""
     if not isinstance(activity, dict):
         return None
-    activity_id = _first_present(activity, ("id", "activityId", "external_id"))
+    activity_id = _first_present(activity, ("id",))
     if activity_id not in (None, ""):
         return ("id", str(activity_id), "", "", "")
-    start = _first_present(activity, ("start_date_local", "start_date", "date"))
+    start = _first_present(activity, ("started_at_local", "date"))
     if start in (None, ""):
         return None
     return (
         "fallback",
         str(start),
-        str(activity.get("type") or activity.get("sport") or "").casefold(),
-        activity_metric(activity, ("moving_time", "elapsed_time")),
-        activity_metric(activity, ("distance",)),
+        str(activity.get("sport") or "").casefold(),
+        _workout_duration(activity),
+        activity_metric(activity, ("distance_m",)),
     )
 
 
 def _workout_duration(record: Any) -> float | int | None:
-    return activity_metric(record, ("moving_time", "elapsed_time"))
+    if not isinstance(record, dict):
+        return None
+    duration = summary_duration_s(record)
+    return duration if duration is not None and duration >= 0 else None
 
 
 def _planned_duration(record: Any) -> float | int | None:
@@ -120,8 +115,8 @@ def _planned_duration(record: Any) -> float | int | None:
     return activity_metric(record, ("planned_duration_s", "elapsed_time"))
 
 
-def _workout_load(record: Any) -> float | int | None:
-    return activity_metric(record, TRAINING_LOAD_LOOKUP)
+def _workout_load(record: Any, keys: tuple[str, ...]) -> float | int | None:
+    return activity_metric(record, keys)
 
 
 def _workout_compliance_basis(
@@ -174,8 +169,8 @@ def workout_compliance(
         status = "missed"
     else:
         status = "planned"
-    planned_load = _workout_load(event)
-    actual_load = _workout_load(activity)
+    planned_load = _workout_load(event, PLANNED_LOAD_FIELDS)
+    actual_load = _workout_load(activity, ("training_load",))
     planned_duration = _planned_duration(event)
     actual_duration = _workout_duration(activity)
     basis, planned_value, actual_value = _workout_compliance_basis(
@@ -202,13 +197,11 @@ def workout_compliance(
     if activity is not None:
         result.update(
             {
-                "activity_id": _first_present(activity, ("id", "activityId")),
+                "activity_id": _first_present(activity, ("id",)),
                 "activity_name": str(activity.get("name") or "Absolvierte Einheit")[
                     :200
                 ],
-                "activity_start": _first_present(
-                    activity, ("start_date_local", "start_date", "start")
-                ),
+                "activity_start": _first_present(activity, ("started_at_local",)),
                 "actual_activity": calendar_activity_payload(activity),
             }
         )
@@ -345,10 +338,10 @@ def training_calendar_items(
     combined.sort(
         key=lambda item: (
             # Planned entries start at starts_at_local, completed activities
-            # keep their stored start_date_local.
+            # at started_at_local.
             str(
                 item.get("starts_at_local")
-                or item.get("start_date_local")
+                or item.get("started_at_local")
                 or item.get("date")
                 or "9999-12-31"
             ),

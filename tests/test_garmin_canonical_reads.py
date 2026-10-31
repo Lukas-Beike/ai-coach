@@ -209,7 +209,8 @@ class GarminStateEqualityTests(GarminReadFixture):
         self.assertIn(Sport.RIDE, before)
         self.write(
             lambda db: db.execute(
-                "UPDATE activity_sessions SET state = 'deleted' WHERE activity_id IN "
+                "UPDATE activity_sessions SET state = 'deleted', merged_into = NULL "
+                "WHERE activity_id IN "
                 "(SELECT activity_id FROM activity_records "
                 "WHERE provider = 'garmin' AND sport = 'ride')"
             )

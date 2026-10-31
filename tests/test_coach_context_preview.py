@@ -17,10 +17,10 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
             "recent_activities": [
                 {
                     "id": 7,
-                    "start_date_local": "2026-09-22T07:00:00",
+                    "started_at_local": "2026-09-22T07:00:00",
                     "name": "Easy run",
-                    "type": "Run",
-                    "distance": 5000,
+                    "sport": "run",
+                    "distance_m": 5000,
                     "private_note": "must-not-be-projected",
                 }
             ],
@@ -130,15 +130,13 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
         projected_plan = preview["projection"]
         self.assertGreaterEqual(len(projected_plan["truncated_sections"]), 1)
         self.assertEqual(
-            preview["latest_activities"]["recent_activities_by_sport"][
-                "Laufen"
-            ][0],
+            preview["latest_activities"]["recent_activities_by_sport"]["Laufen"][0],
             {
                 "id": "7",
-                "start_date_local": "2026-09-22T07:00:00",
+                "started_at_local": "2026-09-22T07:00:00",
                 "name": "Easy run",
-                "type": "Run",
-                "distance": 5000,
+                "sport": "run",
+                "distance_m": 5000,
             },
         )
         serialized = str(preview)

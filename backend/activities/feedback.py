@@ -21,6 +21,7 @@ from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
 )
+from backend.activities.activity_summary import stored_activity_key
 from backend.db import canonical_store
 from backend.errors import AppError
 from backend.runtime.ports import ActivityRowReader
@@ -99,6 +100,13 @@ def _activity_id(activity: Any) -> Any:
         if value not in (None, ""):
             return value
     return None
+
+
+def _feedback_key(activity: Any) -> Any:
+    """The key an activity's feedback is stored under."""
+    if not isinstance(activity, dict):
+        return None
+    return stored_activity_key(activity) or _activity_id(activity)
 
 
 def _group_key(row: dict[str, Any], effective: dict[str, str]) -> tuple[str, str]:
@@ -417,7 +425,7 @@ class ActivityFeedbackService:
         activity_items = activities if isinstance(activities, list) else []
         activity_ids: builtins.list[str] = []
         for activity in activity_items:
-            activity_id = _activity_id(activity)
+            activity_id = _feedback_key(activity)
             if activity_id not in (None, ""):
                 activity_ids.append(str(activity_id))
         feedback_by_activity = {
@@ -428,7 +436,7 @@ class ActivityFeedbackService:
             if not isinstance(activity, dict):
                 continue
             activity_copy = dict(activity)
-            activity_id = _activity_id(activity)
+            activity_id = _feedback_key(activity)
             if (
                 activity_id not in (None, "")
                 and str(activity_id) in feedback_by_activity

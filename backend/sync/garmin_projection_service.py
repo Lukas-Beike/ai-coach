@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from backend.activities.duplicates import filter_garmin_activities
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -25,6 +24,7 @@ from backend.sync.garmin import (
     GarminPayloadService,
     GarminSyncStateService,
 )
+from backend.sync.garmin_activity_duplicates import filter_garmin_activities
 from backend.sync.garmin_service import GarminSyncService
 
 # The recovery context shows the latest record; two weeks cover a missed sync.

@@ -4,20 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.activities.activity_summary import summary_duration_s
 from backend.activities.identity import activity_datetime
 from backend.canonical.decimal_text import provider_number as _as_number
-from backend.providers import garmin_performance_fields as garmin_perf_fields
-from backend.providers import intervals_performance_fields as intervals_perf_fields
+from backend.canonical.labels import sport_label_de
 
 
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
+def _present(item: Any, key: str) -> Any:
     if not isinstance(item, dict):
         return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
+    value = item.get(key)
+    return None if value in (None, "") else value
 
 
 def _threshold_pace_seconds(value: Any) -> float | int | None:
@@ -27,14 +24,14 @@ def _threshold_pace_seconds(value: Any) -> float | int | None:
     return round(1000 / number) if number < 20 else number
 
 
-def activity_pace_seconds_per_km(activity: dict[str, Any]) -> float | int | None:
-    """Normalize an activity pace or speed into seconds per kilometre."""
-    pace = _first_present(activity, intervals_perf_fields.PACE_ALIASES)
-    if pace not in (None, ""):
+def activity_pace_seconds_per_km(summary: dict[str, Any]) -> float | int | None:
+    """Normalize a summary pace or speed into seconds per kilometre."""
+    pace = _present(summary, "pace_mps")
+    if pace is not None:
         normalized = _threshold_pace_seconds(pace)
         if normalized is not None and 120 <= float(normalized) <= 1800:
             return normalized
-    speed = _as_number(_first_present(activity, intervals_perf_fields.SPEED_ALIASES))
+    speed = _as_number(_present(summary, "avg_speed_mps"))
     if speed is None or speed <= 0:
         return None
     normalized = round(1000 / float(speed)) if float(speed) < 20 else float(speed)
@@ -42,19 +39,19 @@ def activity_pace_seconds_per_km(activity: dict[str, Any]) -> float | int | None
 
 
 def latest_activity_for_validation(activities: list[Any]) -> dict[str, Any] | None:
-    """Return the newest activity with a usable timestamp."""
+    """Return the newest activity summary with a usable timestamp."""
     dated = [
         item
         for item in (activities if isinstance(activities, list) else ())
         if isinstance(item, dict)
-        and activity_datetime(item.get("start_date_local") or item.get("start_date"))
+        and activity_datetime(item.get("started_at_local") or item.get("started_at"))
         is not None
     ]
     return max(
         dated,
         key=lambda item: (
-            activity_datetime(item.get("start_date_local") or item.get("start_date")),
-            str(item.get("id") or item.get("activityId") or ""),
+            activity_datetime(item.get("started_at_local") or item.get("started_at")),
+            str(item.get("id") or ""),
         ),
         default=None,
     )
@@ -81,41 +78,38 @@ def activity_intensity(value: Any) -> float | int | None:
 
 
 def activity_validation_evidence(latest: dict[str, Any], sport: str) -> dict[str, Any]:
-    """Return bounded measured evidence from one untrusted activity record."""
-    activity_id = _first_present(latest, ("id", "activityId"))
+    """Return bounded measured evidence from one untrusted activity summary."""
+    activity_id = _present(latest, "id")
     evidence: dict[str, Any] = {
-        "activity_id": str(activity_id)[:200]
-        if activity_id not in (None, "")
-        else None,
+        "activity_id": str(activity_id)[:200] if activity_id is not None else None,
         "date": str(
-            _first_present(latest, ("start_date_local", "start_date", "date")) or ""
+            _present(latest, "started_at_local") or _present(latest, "started_at") or ""
         )[:40],
         "name": str(latest.get("name") or "")[:200],
         "sport": sport,
     }
-    for key, aliases, minimum, maximum in (
-        ("duration_seconds", ("moving_time", "elapsed_time"), 1, 604800),
-        ("distance", ("distance",), 0, 1_000_000),
-        ("elevation_gain", ("total_elevation_gain",), 0, 100_000),
-        ("training_load", intervals_perf_fields.TRAINING_LOAD_ALIASES, 0, 100_000),
-        ("intensity", intervals_perf_fields.INTENSITY_ALIASES, 0, 1_000),
-        ("average_heart_rate_bpm", ("average_heartrate", "averageHR"), 30, 230),
-        ("max_heart_rate_bpm", ("max_heartrate", "maxHR"), 30, 230),
-        ("average_power_watts", ("average_watts", "average_power"), 0, 5_000),
+    duration = summary_duration_s(latest)
+    for key, value, minimum, maximum in (
+        ("duration_seconds", duration, 1, 604800),
+        ("distance", latest.get("distance_m"), 0, 1_000_000),
+        ("elevation_gain", latest.get("elevation_gain_m"), 0, 100_000),
+        ("training_load", latest.get("training_load"), 0, 100_000),
+        ("intensity", latest.get("intensity"), 0, 1_000),
+        ("average_heart_rate_bpm", latest.get("avg_hr"), 30, 230),
+        ("max_heart_rate_bpm", latest.get("max_hr"), 30, 230),
+        ("average_power_watts", latest.get("avg_power"), 0, 5_000),
         (
             "weighted_power_watts",
-            intervals_perf_fields.WEIGHTED_POWER_ALIASES,
+            latest.get("normalized_power"),
             0,
             5_000,
         ),
-        ("rpe", intervals_perf_fields.RPE_ALIASES, 0, 10),
+        ("rpe", latest.get("rpe"), 0, 10),
     ):
         value = (
-            activity_intensity(_first_present(latest, aliases))
+            activity_intensity(value)
             if key == "intensity"
-            else bounded_activity_metric(
-                _first_present(latest, aliases), minimum, maximum
-            )
+            else bounded_activity_metric(value, minimum, maximum)
         )
         if value is not None:
             evidence[key] = value
@@ -125,30 +119,12 @@ def activity_validation_evidence(latest: dict[str, Any], sport: str) -> dict[str
 def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
     """Return only bounded numeric estimates explicitly attached to an activity."""
     estimates: dict[str, float | int] = {}
-    for key, aliases, minimum, maximum in (
-        (
-            "activity_vo2max",
-            intervals_perf_fields.VO2_MAX_ALIASES,
-            10,
-            100,
-        ),
-        ("activity_ftp_watts", garmin_perf_fields.ACTIVITY_FTP_ALIASES, 20, 2000),
-        (
-            "activity_eftp_watts",
-            intervals_perf_fields.DIRECT_ESTIMATED_FTP_ALIASES,
-            20,
-            2000,
-        ),
-        (
-            "activity_configured_ftp_watts",
-            intervals_perf_fields.CONFIGURED_FTP_ALIASES,
-            20,
-            2000,
-        ),
+    for key, summary_key, minimum, maximum in (
+        ("activity_vo2max", "vo2max", 10, 100),
+        ("activity_eftp_watts", "eftp_w", 20, 2000),
+        ("activity_configured_ftp_watts", "ftp_w", 20, 2000),
     ):
-        value = bounded_activity_metric(
-            _first_present(latest, aliases), minimum, maximum
-        )
+        value = bounded_activity_metric(_present(latest, summary_key), minimum, maximum)
         if value is not None:
             estimates[key] = value
     return estimates
@@ -303,25 +279,9 @@ def activity_performance_validation(
     }
 
 
-def activity_sport(activity: dict[str, Any]) -> str:
-    raw = str(
-        _first_present(
-            activity, ("type", "sport", "sport_type", "activity_type", "name")
-        )
-        or "Andere Sportart"
-    )
-    folded = raw.casefold()
-    if "run" in folded or "lauf" in folded:
-        return "Laufen"
-    if "ride" in folded or "rad" in folded or "cycling" in folded or "bike" in folded:
-        return "Radfahren"
-    if "swim" in folded or "schwimm" in folded:
-        return "Schwimmen"
-    if (
-        "strength" in folded
-        or "kraft" in folded
-        or "weight" in folded
-        or "gym" in folded
-    ):
-        return "Krafttraining"
-    return raw[:80]
+def activity_sport(summary: dict[str, Any]) -> str:
+    """Return the German label of the canonical sport of an activity summary."""
+    try:
+        return sport_label_de(str(summary.get("sport") or "other"))
+    except ValueError:
+        return sport_label_de("other")

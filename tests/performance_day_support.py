@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.canonical.local_time import local_date
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind
@@ -25,9 +26,11 @@ from backend.performance.garmin_canonical import (
 from backend.performance.wellness_days import WellnessDay, current_window, latest
 from backend.providers.garmin_activity_mapping import map_garmin_activities
 from backend.providers.garmin_health_mapping import map_garmin_health
+from backend.providers.intervals_activity_mapping import map_intervals_activities
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.providers.snapshot_projection import project_intervals_snapshot
 
+UTC_ZONE = ZoneInfo("UTC")
 SYNCED_AT = datetime(2026, 10, 12, 8, tzinfo=UTC)
 
 
@@ -101,12 +104,12 @@ def snapshot_metrics(
 ) -> dict[str, dict[str, Any]]:
     """Current metrics of a synthetic snapshot: mapper, canonical read, composition.
 
-    Without ``activities`` the snapshot's ``recent_activities`` stand in for the
-    canonical activity rows. A given ``canonical`` replaces the snapshot's read.
+    Without ``activities`` the summaries of the snapshot's ``recent_activities``
+    stand in for the canonical activity summaries. A given ``canonical`` replaces
+    the snapshot's read.
     """
     if activities is None:
-        stored = snapshot.get("recent_activities")
-        activities = stored if isinstance(stored, list) else []
+        activities = list(snapshot_activity_summaries(snapshot))
     return current_performance_metrics(
         profile,
         garmin,
@@ -134,6 +137,23 @@ def _overlaid(
     return replace(read, **values)
 
 
+def intervals_activity_summaries(
+    rows: list[dict[str, Any]], zone: ZoneInfo = UTC_ZONE
+) -> tuple[ActivitySummary, ...]:
+    """Summaries of synthetic Intervals.icu rows, mapped like production."""
+    mapped = map_intervals_activities(rows, zone=zone, retrieved_at=SYNCED_AT)
+    return activity_summaries(
+        ((f"act_{record.activity_id}", [record]) for record in mapped.records), zone
+    )
+
+
+def snapshot_activity_summaries(
+    snapshot: dict[str, Any],
+) -> tuple[ActivitySummary, ...]:
+    """Summaries of a synthetic snapshot's compact activity rows."""
+    return intervals_activity_summaries(snapshot.get("recent_activities") or [])
+
+
 def canonical_from_snapshot(snapshot: dict[str, Any], as_of: date):
     """Map synthetic snapshot rows through the production mapper and read ports."""
     _, mapped = project_intervals_snapshot(
@@ -141,8 +161,8 @@ def canonical_from_snapshot(snapshot: dict[str, Any], as_of: date):
     )
 
     class ActivityReader:
-        def activity_rows(self, _db, *, start=None, end=None, limit=None):
-            return tuple(snapshot.get("recent_activities") or ())
+        def activity_summaries(self, _db, *, start=None, end=None, limit=None):
+            return snapshot_activity_summaries(snapshot)
 
     return read_performance_inputs(
         StubReader(tuple(mapped.records)),

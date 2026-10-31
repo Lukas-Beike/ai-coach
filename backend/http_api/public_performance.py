@@ -58,7 +58,7 @@ class PublicPerformanceStateService:
             canonical = read_performance_inputs(
                 reader,
                 db,
-                activity_reader=source.activity_row_reader(),
+                activity_reader=source.activity_summary_reader(),
                 as_of=today,
             )
             return self._project(
@@ -110,7 +110,7 @@ class PublicPerformanceStateService:
                     garmin,
                     today,
                     timezone,
-                    activity_rows=inputs.activity_rows or (),
+                    activities=inputs.activities or (),
                     days=days,
                 )
                 for period, days in (("fortnight", 14), ("twelveWeeks", 84))

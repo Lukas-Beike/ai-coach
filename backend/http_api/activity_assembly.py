@@ -11,7 +11,7 @@ from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.runtime.ports import (
-    ActivityRowReader,
+    ActivityRowAndSummaryReader,
     ObservationReader,
     ProviderCoverageReader,
     ProviderSnapshotReader,
@@ -26,7 +26,7 @@ class ActivityReadSources:
     """Where the activity reads get their sync time, rows and observations."""
 
     snapshot_reader: ProviderSnapshotReader
-    row_reader: Callable[[], ActivityRowReader]
+    row_reader: Callable[[], ActivityRowAndSummaryReader]
     observation_reader: Callable[[], ObservationReader]
     coverage: Callable[[], ProviderCoverageReader]
 
@@ -78,6 +78,6 @@ class ActivityReadAssembly:
         return CanonicalPerformanceSource(
             self._database_manager,
             self._observation_reader,
-            activity_rows=self._row_reader,
+            activity_summaries=self._row_reader,
             coverage=self._coverage,
         )

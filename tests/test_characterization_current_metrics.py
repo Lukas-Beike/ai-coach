@@ -604,10 +604,30 @@ class CurrentMaxHrTests(unittest.TestCase):
 
     def test_activity_maximum_is_next_then_athlete_profile(self) -> None:
         activities = [
-            {"type": "Ride", "start_date_local": "2026-05-01", "maxHR": 181},
-            {"type": "Ride", "start_date_local": "2026-05-02", "maxHR": 195},
-            {"type": "Ride", "start_date_local": "2026-05-03", "maxHR": 400},
-            {"type": "Run", "start_date_local": "2026-05-03", "maxHR": 210},
+            {
+                "id": "ride-1",
+                "type": "Ride",
+                "start_date_local": "2026-05-01T07:00:00",
+                "maxHR": 181,
+            },
+            {
+                "id": "ride-2",
+                "type": "Ride",
+                "start_date_local": "2026-05-02T07:00:00",
+                "maxHR": 195,
+            },
+            {
+                "id": "ride-3",
+                "type": "Ride",
+                "start_date_local": "2026-05-03T07:00:00",
+                "maxHR": 400,
+            },
+            {
+                "id": "run-1",
+                "type": "Run",
+                "start_date_local": "2026-05-03T08:00:00",
+                "maxHR": 210,
+            },
         ]
         result = _current(
             _snapshot(athlete={"max_hr": 200}, activities=activities),
@@ -642,7 +662,12 @@ class CurrentEftpTests(unittest.TestCase):
         # The athlete setting and the wellness sportInfo eFTP are canonical
         # observations (#1412); the snapshot's setting has none, so each case
         # supplies them.
-        activity = {"type": "Ride", "start_date_local": "2026-05-03", "icu_eftp": 270}
+        activity = {
+            "id": "ride-1",
+            "type": "Ride",
+            "start_date_local": "2026-05-03T07:00:00",
+            "icu_eftp": 270,
+        }
         wellness = [
             _wellness("2026-05-03", sport_info=[{"types": ["Ride"], "eFTP": 265}])
         ]
@@ -665,8 +690,18 @@ class CurrentEftpTests(unittest.TestCase):
 
     def test_latest_ride_is_chosen_by_start_date_not_list_order(self) -> None:
         activities = [
-            {"type": "Ride", "start_date_local": "2026-05-03", "icu_eftp": 275},
-            {"type": "Ride", "start_date_local": "2026-05-01", "icu_eftp": 270},
+            {
+                "id": "ride-2",
+                "type": "Ride",
+                "start_date_local": "2026-05-03T07:00:00",
+                "icu_eftp": 275,
+            },
+            {
+                "id": "ride-1",
+                "type": "Ride",
+                "start_date_local": "2026-05-01T07:00:00",
+                "icu_eftp": 270,
+            },
         ]
         result = _current(_snapshot(activities=list(reversed(activities))))
         self.assertEqual(_pair(result["cycling_eftp_watts"]), (275, INTERVALS))
@@ -675,31 +710,45 @@ class CurrentEftpTests(unittest.TestCase):
         # Quirk: the newest ride is selected first; if it has no eFTP, an older
         # ride's eFTP is not used.
         activities: list[dict[str, Any]] = [
-            {"type": "Ride", "start_date_local": "2026-05-03"},
-            {"type": "Ride", "start_date_local": "2026-05-01", "icu_eftp": 270},
+            {"id": "ride-2", "type": "Ride", "start_date_local": "2026-05-03T07:00:00"},
+            {
+                "id": "ride-1",
+                "type": "Ride",
+                "start_date_local": "2026-05-01T07:00:00",
+                "icu_eftp": 270,
+            },
         ]
         result = _current(_snapshot(activities=activities))
         self.assertEqual(_pair(result["cycling_eftp_watts"]), (None, None))
 
-    def test_first_present_activity_type_decides_ride_quirk(self) -> None:
-        # Quirk: only the first present field among type/sport/name is classified,
-        # so a Run typed activity named "Morning Ride" is not a ride.
+    def test_the_summary_sport_decides_ride(self) -> None:
+        # Canonical: the mapper classifies the Intervals.icu type into the summary
+        # sport, so a Run typed activity named "Morning Ride" is a run and its eFTP
+        # is not the ride eFTP (the former raw type-key quirk no longer applies).
         activities = [
             {
+                "id": "run-1",
                 "type": "Run",
                 "name": "Morning Ride",
-                "start_date_local": "2026-05-03",
+                "start_date_local": "2026-05-03T07:00:00",
                 "icu_eftp": 300,
             },
-            {"type": "Ride", "start_date_local": "2026-05-01", "icu_eftp": 270},
+            {
+                "id": "ride-1",
+                "type": "Ride",
+                "start_date_local": "2026-05-01T07:00:00",
+                "icu_eftp": 270,
+            },
         ]
         result = _current(_snapshot(activities=activities))
         self.assertEqual(_pair(result["cycling_eftp_watts"]), (270, INTERVALS))
 
     def test_activity_icu_eftp_key_precedes_eftp(self) -> None:
+        # Canonical: the mapper reads icu_eftp first; the summary carries it as eftp_w.
         activity = {
+            "id": "ride-1",
             "type": "Ride",
-            "start_date_local": "2026-05-03",
+            "start_date_local": "2026-05-03T07:00:00",
             "icu_eftp": 275,
             "eftp": 999,
         }

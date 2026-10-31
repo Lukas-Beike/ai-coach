@@ -20,7 +20,6 @@ from test_activity_detail_retirement import (
 )
 
 from backend.activities.detail_contract import ACTIVITY_DETAIL_CONTRACT
-from backend.activities.detail_projection import _downsample_series
 from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.vocabulary import LapKind, ProviderId
 from backend.db import DatabaseManager, row_factory
@@ -29,6 +28,7 @@ from backend.db.migrations import migrate_schema
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import CURRENT_SCHEMA_VERSION, configure_cipher
 from backend.performance.canonical_detail import CanonicalDetailReader
+from backend.providers.intervals_activity_detail_projection import _downsample_series
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import activity_detail_retirement
 from backend.sync.activity_detail_retirement import STATE_KEY

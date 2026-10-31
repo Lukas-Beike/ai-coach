@@ -7,6 +7,7 @@ from backend.canonical.public_metrics import (
     neutral_activity_metrics,
     neutral_activity_records,
     neutral_calendar_entries,
+    neutral_calendar_entry,
     neutral_calendar_state,
 )
 from backend.providers.intervals_activity_fields import ACTIVITY_FIELDS
@@ -295,6 +296,32 @@ class NeutralPublicMetricsTests(unittest.TestCase):
             {"source": "local", "items": [expected]}, translated["planning_view"]
         )
         self.assertEqual([{"moving_time": 1}], translated["plans"])
+
+
+class ActivitySummaryTranslationTests(unittest.TestCase):
+    def test_translating_a_summary_changes_nothing(self):
+        summary = {
+            "id": "act_1",
+            "started_at": "2026-09-22T06:30:00+00:00",
+            "started_at_local": "2026-09-22T08:30:00",
+            "sport": "ride",
+            "environment": "indoor",
+            "moving_duration_s": 3600,
+            "distance_m": 30000.0,
+            "avg_power": 180.0,
+            "normalized_power": 200.0,
+            "training_load": 70.0,
+            "intensity": 70.0,
+            "rpe": 5.0,
+            "power_zone_times": [{"id": "Z1", "secs": 600.0}],
+            "heart_rate_zone_times": [{"id": "Z2", "secs": 300.0}],
+            "record_ids": {"intervals": "i1"},
+            "sources": {"training_load": "Intervals.icu"},
+        }
+        self.assertEqual(neutral_activity(summary), summary)
+        self.assertEqual(neutral_activity_records([summary]), [summary])
+        entry = {"is_completed_activity": True, **summary}
+        self.assertEqual(neutral_calendar_entry(entry), entry)
 
 
 if __name__ == "__main__":

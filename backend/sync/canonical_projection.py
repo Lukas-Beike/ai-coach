@@ -22,6 +22,7 @@ from datetime import date, datetime, tzinfo
 from itertools import chain
 from typing import Any
 
+from backend.activities.canonical_sessions import bundle_sessions
 from backend.canonical.coverage import (
     MetricWindow,
     ProviderCoverage,
@@ -43,8 +44,10 @@ from backend.providers.snapshot_projection import (
 from backend.runtime.ports import (
     ActivityReader,
     ActivityRowReader,
+    ActivitySessionReader,
     ObservationReader,
     ProviderCoverageReader,
+    SessionRecords,
 )
 
 type _CacheKey = tuple[str, str, str]
@@ -72,7 +75,11 @@ class _Projection:
 
 
 class CanonicalSnapshotProjection(
-    ActivityReader, ActivityRowReader, ObservationReader, ProviderCoverageReader
+    ActivityReader,
+    ActivityRowReader,
+    ActivitySessionReader,
+    ObservationReader,
+    ProviderCoverageReader,
 ):
     """Serves canonical activities, observations and coverage from snapshots.
 
@@ -120,6 +127,26 @@ class CanonicalSnapshotProjection(
             record
             for record in projection.activities
             if _in_range(local_date(record.started_at, zone), start, end)
+        )
+
+    def activity_sessions(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> tuple[SessionRecords, ...]:
+        """Bundle the projected records into sessions with the duplicate rules.
+
+        The projection has no local session ids, so a session is named by its
+        primary record's provider activity id.
+        """
+        zone = self._zone(db)
+        return tuple(
+            (session.primary.activity_id, (session.primary, *session.duplicates))
+            for session in bundle_sessions(
+                self.activities(db, start=start, end=end), zone=zone
+            )
         )
 
     def activity_max_hr(

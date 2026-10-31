@@ -59,7 +59,10 @@ def _activity_details_not_configured() -> None:
     service = ActivityDetailRefreshService(
         api_client=Mock(),
         database_manager=MagicMock(),
-        row_reader=Mock(activity_rows=Mock(return_value=({"id": "a1"},))),
+        row_reader=Mock(
+            activity_rows=Mock(return_value=({"id": "a1"},)),
+            activity_summaries=Mock(return_value=()),
+        ),
         store=Mock(),
         utc_now=Mock(return_value="2026-10-09T12:00:00+00:00"),
         configured=False,

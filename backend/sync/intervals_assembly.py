@@ -15,7 +15,7 @@ from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.providers.intervals import IntervalsApiClient
-from backend.runtime.ports import ActivityRowReader, CanonicalTableServing
+from backend.runtime.ports import ActivityRowAndSummaryReader, CanonicalTableServing
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.analysis_sessions import AnalysisSessionsRefreshService
@@ -56,7 +56,7 @@ class IntervalsPersistenceDependencies:
     event_buffer: Any
     redact_text: Callable[[str], str]
     logger: logging.Logger
-    activity_rows: Callable[[], ActivityRowReader]
+    activity_rows: Callable[[], ActivityRowAndSummaryReader]
     # Decides per write whether the snapshot is stored without the activity
     # sections the canonical tables serve. None stores every snapshot in full.
     table_serving: Callable[[], CanonicalTableServing] | None = None

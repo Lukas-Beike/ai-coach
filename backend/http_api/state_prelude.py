@@ -11,7 +11,7 @@ from backend.activities.feedback import ActivityFeedbackService
 from backend.calendar import canonical as calendar_canonical
 from backend.db.manager import DatabaseManager
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.sync.adaptive import AdaptivePreviewFollowupService
 from backend.sync.state import SyncStateRepository
@@ -49,7 +49,7 @@ class PublicStateLocalPrelude:
         window: CalendarWindowRange,
         performance_inputs: Callable[[Any], CanonicalPerformanceInputs | None]
         | None = None,
-        activity_rows: ActivityRowSource | None = None,
+        activity_rows: ActivitySummarySource | None = None,
     ) -> None:
         self._sync_state = sync_state
         self._activity_feedback = activity_feedback

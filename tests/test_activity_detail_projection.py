@@ -1,8 +1,8 @@
 import copy
 import unittest
 
-from backend.activities.detail_projection import detailed_activity
 from backend.activities.workout_profile import recorded_profile
+from backend.providers.intervals_activity_detail_projection import detailed_activity
 
 
 class ActivityDetailProjectionTests(unittest.TestCase):

@@ -12,7 +12,6 @@ from backend.http_api.athlete_assembly import (
     AthleteRepositories,
     AthleteRuntime,
 )
-from backend.performance.training_report import deduplicated_rows
 from backend.planning.assembly import (
     PlanningDataAssembly,
     PlanningMutations,
@@ -20,6 +19,7 @@ from backend.planning.assembly import (
     PlanningRuntime,
 )
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.garmin_activity_duplicates import deduplicated_rows
 from backend.weather.cache import invalidate_for_location_change
 
 

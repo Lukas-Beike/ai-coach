@@ -21,11 +21,6 @@ from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
 )
-from backend.activities.detail_projection import (
-    COACH_ACTIVITY_DETAIL_STREAM_FIELDS,
-    DETAIL_PROJECTION_VERSION,
-    detailed_activity,
-)
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.workout_profile import recorded_profile
 from backend.canonical.activity_detail import MAX_STREAM_POINTS
@@ -36,13 +31,19 @@ from backend.errors import AppError, public_error_contract
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.planning.target_snapshot import freeze_targets
+from backend.providers.intervals_activity_detail_projection import (
+    COACH_ACTIVITY_DETAIL_STREAM_FIELDS,
+    DETAIL_PROJECTION_VERSION,
+    detailed_activity,
+)
 from backend.providers.intervals_activity_fields import (
     ACTIVITY_DETAIL_PARAMS,
     ACTIVITY_DETAIL_STREAM_ALIASES,
     ACTIVITY_DETAIL_STREAM_TYPES,
     activity_detail_laps,
 )
-from backend.runtime.ports import ActivityRowReader
+from backend.providers.intervals_activity_mapping import intervals_analysis_sport
+from backend.runtime.ports import ActivityRowAndSummaryReader
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,
@@ -92,7 +93,7 @@ class ActivityDetailRefreshService:
         *,
         api_client: Any,
         database_manager: Any,
-        row_reader: ActivityRowReader,
+        row_reader: ActivityRowAndSummaryReader,
         store: ActivityDetailStore,
         utc_now: Callable[[], str],
         configured: bool,
@@ -120,6 +121,7 @@ class ActivityDetailRefreshService:
         )
         with self._database_manager.unit_of_work() as db:
             rows = self._row_reader.activity_rows(db)
+            summaries = list(self._row_reader.activity_summaries(db))
         summary = next(
             (row for row in rows if str(row.get("id")) == activity_id),
             None,
@@ -146,9 +148,10 @@ class ActivityDetailRefreshService:
         )
         projected = detailed_activity({**detail, "laps": activity_detail_laps(detail)})
         projected["streams"] = streams
+        analysed = {**projected, **intervals_analysis_sport(projected)}
         observed_at = self._utc_now()
         targets = self._stored_targets(activity_id) or freeze_targets(
-            self._read_planned_units(), rows, activity_id, projected, observed_at
+            self._read_planned_units(), summaries, activity_id, projected, observed_at
         )
         record = {
             "activity_id": activity_id,
@@ -159,9 +162,9 @@ class ActivityDetailRefreshService:
             "target_snapshot": targets,
             "session_analysis": {
                 "interval_quality": interval_quality(projected, targets),
-                "aerobic": aerobic_analysis(projected),
-                "power_profile": power_profile(projected),
-                "running_profile": running_profile(projected),
+                "aerobic": aerobic_analysis(analysed),
+                "power_profile": power_profile(analysed),
+                "running_profile": running_profile(analysed),
             },
             "full_resolution": True,
             "available_streams": sorted(streams),

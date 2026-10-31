@@ -16,9 +16,9 @@ class PerformanceLoadContextTests(unittest.TestCase):
         today = date(2026, 9, 30)
         activities = [
             {
-                "start_date_local": (today - timedelta(days=offset)).isoformat(),
-                "moving_time": 3600,
-                "icu_training_load": 10,
+                "started_at_local": (today - timedelta(days=offset)).isoformat(),
+                "moving_duration_s": 3600,
+                "training_load": 10,
             }
             for offset in (0, 6, 7, 29, 30, 36)
         ]
@@ -147,7 +147,7 @@ class PerformanceLoadContextTests(unittest.TestCase):
 
     def test_input_data_is_not_mutated(self):
         today = date(2026, 9, 30)
-        activities = [{"start_date_local": today.isoformat(), "icu_training_load": 20}]
+        activities = [{"started_at_local": today.isoformat(), "training_load": 20}]
         days = current_days([{"id": today.isoformat(), "atl": 20, "ctl": 30}])
         before = copy.deepcopy((activities, days))
         performance_load_context(

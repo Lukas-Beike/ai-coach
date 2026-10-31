@@ -4,7 +4,11 @@ import unittest
 from contextlib import contextmanager
 from datetime import date
 
-from activity_row_support import SnapshotActivityRows, canonical_source
+from activity_row_support import (
+    SnapshotActivityRows,
+    canonical_source,
+    summaries_of_rows,
+)
 from canonical_detail_support import add_session_record, open_manager
 
 from backend.activities.activity_reference import ActivityReferences
@@ -84,9 +88,12 @@ class _DatedRows:
         self.units = []
 
     def activity_rows(self, db, *, start=None, end=None, limit=None):
+        return tuple(self.rows)
+
+    def activity_summaries(self, db, *, start=None, end=None, limit=None):
         self.starts.append(start)
         self.units.append(db)
-        return tuple(
+        return summaries_of_rows(
             row
             for row in self.rows
             if start is None or row["start_date_local"][:10] >= start.isoformat()
@@ -116,6 +123,7 @@ class ActivityReadServiceTests(unittest.TestCase):
         """Serve details from the canonical sessions stored in ``setUp``."""
         rows = SnapshotActivityRows(_Snapshots(snapshot))
         kwargs.setdefault("canonical", canonical_source(rows, lambda: self.manager))
+        kwargs.setdefault("summary_rows", rows)
         return ActivityAnalysisReadService(
             self.manager,
             _Snapshots(snapshot),
@@ -227,8 +235,9 @@ class ActivityReadServiceTests(unittest.TestCase):
             canonical=CanonicalPerformanceSource(
                 database_manager=_Manager,
                 observation_reader=_NoObservations,
-                activity_rows=lambda: rows,
+                activity_summaries=lambda: rows,
             ),
+            summary_rows=rows,
         )
         today = date(2026, 9, 20)
         recent = service.detail("new", garmin_snapshot={}, profile={}, today=today)
@@ -311,7 +320,7 @@ class ActivityReadServiceTests(unittest.TestCase):
             ]
         )
         service = self.detail_service(
-            snapshot, canonical=canonical_source(rows, _Manager)
+            snapshot, canonical=canonical_source(rows, _Manager), summary_rows=rows
         )
 
         result = service.detail(

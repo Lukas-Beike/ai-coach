@@ -31,11 +31,6 @@ from backend.activities.canonical_sessions import (
     wahoo_garmin_copy_match,
 )
 from backend.activities.duplicate_inspection import latest_wahoo_garmin_duplicate
-from backend.activities.duplicates import (
-    filter_garmin_activities,
-    garmin_activity_duplicates_intervals,
-    intervals_cycling_activities_match,
-)
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import (
@@ -48,6 +43,11 @@ from backend.canonical.vocabulary import (
 )
 from backend.providers.garmin_activity_mapping import map_garmin_activities
 from backend.providers.intervals_activity_mapping import map_intervals_activities
+from backend.sync.garmin_activity_duplicates import (
+    filter_garmin_activities,
+    garmin_activity_duplicates_intervals,
+    intervals_cycling_activities_match,
+)
 
 BERLIN = ZoneInfo("Europe/Berlin")
 RETRIEVED_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)

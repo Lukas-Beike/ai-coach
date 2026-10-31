@@ -17,13 +17,13 @@ from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
-from backend.performance.training_report import deduplicated_rows
 from backend.runtime.ports import (
     ActivityRowReader,
     CanonicalTableServing,
     ProviderSnapshotReader,
 )
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.garmin_activity_duplicates import deduplicated_rows
 from backend.weather.cache import invalidate_for_location_change
 
 

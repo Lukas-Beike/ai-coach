@@ -1619,7 +1619,14 @@ class ServerHttpTests(ServerTestCase):
         snapshot = {
             "synced_at": "now",
             "athlete": {},
-            "recent_activities": [{"name": "Morgenlauf"}],
+            "recent_activities": [
+                {
+                    "id": "run-1",
+                    "name": "Morgenlauf",
+                    "type": "Run",
+                    "start_date_local": "2026-08-25T07:00:00",
+                }
+            ],
             "recent_wellness": [],
             "upcoming_calendar": [],
         }

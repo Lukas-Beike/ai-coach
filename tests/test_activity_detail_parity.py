@@ -18,7 +18,6 @@ from canonical_detail_support import (
     seed_intervals_activity,
 )
 
-from backend.activities.detail_projection import detailed_activity
 from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, SourceKind
@@ -29,6 +28,7 @@ from backend.providers.garmin_activity_detail_mapping import (
     map_garmin_activity_detail,
 )
 from backend.providers.intervals_activity_detail_mapping import STREAM_KEY_CHANNELS
+from backend.providers.intervals_activity_detail_projection import detailed_activity
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from tests import test_fit_file as fit_builder
 

@@ -3,29 +3,42 @@
 import hashlib
 import json
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
+from backend.activities.activity_summary import (
+    ActivitySummary,
+    stored_activity_key,
+    summary_is_indoor,
+    summary_local_date,
+)
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.stored_sports import resolve_competition_sport
+from backend.canonical.vocabulary import Environment, ProviderId
 from backend.errors import AppError
 from backend.performance.season_inputs import SeasonLoadInputs
-from backend.performance.training_report import activity_day
-from backend.planning.competitions import supported_competition_sport
 from backend.planning.season import season_plan_summary
-from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
+
+# Local planned units keep their stored planning keys.
+from backend.providers.intervals_performance_fields import (
+    INTENSITY as PLANNED_INTENSITY_KEY,
+)
+from backend.providers.intervals_performance_fields import (
+    TRAINING_LOAD as PLANNED_LOAD_KEY,
+)
 from backend.providers.source_labels import SourceView, provider_label
 
-ActivityRowsBetween = Callable[[date, date], Sequence[dict[str, Any]]]
+ActivitySummariesBetween = Callable[[date, date], Sequence[ActivitySummary]]
+
 
 ACTIVITY_SOURCE = provider_label(
     ProviderId.INTERVALS, SourceView.SEASON_PREPARATION_ACTIVITY
 )
 PREPARATION_WEEKS = 12
 PLANNED_LOAD_ESTIMATE_SOURCE = (
-    f"estimated from planned duration and {INTENSITY} (hours x IF^2 x 100)"
+    f"estimated from planned duration and {PLANNED_INTENSITY_KEY} (hours x IF^2 x 100)"
 )
 
 
@@ -36,19 +49,19 @@ def season_preparation(
     timezone: str = "UTC",
     observations: list[dict[str, Any]] | None = None,
     *,
-    activity_rows: ActivityRowsBetween,
+    activity_summaries: ActivitySummariesBetween,
 ) -> dict[str, Any]:
     """Summarise the preparation evidence of every season event.
 
-    ``activity_rows`` returns de-duplicated activity rows around the given inclusive
-    local dates; it is called once for the span of all event windows. The snapshot
-    only supplies its sync time.
+    ``activity_summaries`` returns the activity summaries around the given
+    inclusive local dates; it is called once for the span of all event windows.
+    The snapshot only supplies its sync time.
     """
     result = season_plan_summary(competitions, today)
     windows = [_evidence_window(event, today) for event in result["events"]]
     rows = (
         list(
-            activity_rows(
+            activity_summaries(
                 min(start for start, _ in windows), max(end for _, end in windows)
             )
         )
@@ -56,20 +69,20 @@ def season_preparation(
         else []
     )
     for event, (window_start, window_end) in zip(result["events"], windows):
-        sport = supported_competition_sport(
-            event.get("sport"), event.get("environment")
-        )
+        sport = _competition_sport(event)
+        indoor = _competition_indoor(event)
         eligible = [
             row
             for row in rows
-            if row.get("type") == sport
+            if row.get("sport") == sport
+            and summary_is_indoor(row) == indoor
             and window_start.isoformat()
-            <= activity_day(row, timezone)
+            <= summary_local_date(row, timezone)
             <= window_end.isoformat()
         ]
         longest = sorted(
-            [row for row in eligible if number(row.get("moving_time"))],
-            key=lambda row: number(row.get("moving_time")) or -1,
+            [row for row in eligible if number(row.get("moving_duration_s"))],
+            key=lambda row: number(row.get("moving_duration_s")) or -1,
             reverse=True,
         )[:3]
         weeks = _preparation_weeks(eligible, window_start, timezone)
@@ -95,17 +108,19 @@ def season_preparation(
             "source_counts": {
                 ACTIVITY_SOURCE: len(eligible),
                 "cached activity analyses": len(
-                    [row for row in eligible if str(row.get("id")) in analyses]
+                    [row for row in eligible if stored_activity_key(row) in analyses]
                 ),
             },
             "long_sessions": [
                 {
-                    "activity_id": str(row.get("id")),
-                    "date": activity_day(row, timezone),
-                    "duration_seconds": number(row.get("moving_time")),
-                    "distance_meters": number(row.get("distance")),
+                    "activity_id": row["id"],
+                    "date": summary_local_date(row, timezone),
+                    "duration_seconds": number(row.get("moving_duration_s")),
+                    "distance_meters": number(row.get("distance_m")),
                     "name": str(row.get("name") or "Training")[:200],
-                    "aerobic": (analyses.get(str(row.get("id"))) or {}).get("aerobic"),
+                    "aerobic": (analyses.get(stored_activity_key(row)) or {}).get(
+                        "aerobic"
+                    ),
                 }
                 for row in longest
             ],
@@ -116,6 +131,21 @@ def season_preparation(
         "method": "season-observed-training-v1",
         "observed_at": snapshot.get("synced_at"),
         "timezone": timezone,
+    }
+
+
+def _competition_sport(event: dict[str, Any]) -> str | None:
+    """Return the canonical sport of a supported competition, else None."""
+    stored = resolve_competition_sport(event.get("sport"), event.get("environment"))
+    return None if stored is None else stored.sport.value
+
+
+def _competition_indoor(event: dict[str, Any]) -> bool:
+    """Return True when the competition is indoor or virtual."""
+    stored = resolve_competition_sport(event.get("sport"), event.get("environment"))
+    return stored is not None and stored.environment in {
+        Environment.INDOOR,
+        Environment.VIRTUAL,
     }
 
 
@@ -132,9 +162,7 @@ def _target_context(event: dict[str, Any]) -> dict[str, Any]:
         pass
     target = str(event.get("target") or "").strip()
     return {
-        "sport": supported_competition_sport(
-            event.get("sport"), event.get("environment")
-        ),
+        "sport": _competition_sport(event),
         "distance_meters": int(distance)
         if distance is not None and distance.is_integer()
         else distance,
@@ -166,14 +194,16 @@ def _weekly_volume(weeks: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _long_session_evidence(sessions: list[dict[str, Any]]) -> dict[str, Any]:
+def _long_session_evidence(sessions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     durations = [
         value
         for row in sessions
-        if (value := number(row.get("moving_time"))) is not None
+        if (value := number(row.get("moving_duration_s"))) is not None
     ]
     distances = [
-        value for row in sessions if (value := number(row.get("distance"))) is not None
+        value
+        for row in sessions
+        if (value := number(row.get("distance_m"))) is not None
     ]
     return {
         "status": "observations" if sessions else "insufficient_data",
@@ -187,11 +217,13 @@ def _long_session_evidence(sessions: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _target_distance_comparison(
-    target_context: dict[str, Any], sessions: list[dict[str, Any]]
+    target_context: dict[str, Any], sessions: Sequence[Mapping[str, Any]]
 ) -> dict[str, Any]:
     target = target_context.get("distance_meters")
     distances = [
-        value for row in sessions if (value := number(row.get("distance"))) is not None
+        value
+        for row in sessions
+        if (value := number(row.get("distance_m"))) is not None
     ]
     if target is None or not distances:
         return {
@@ -211,12 +243,12 @@ def _target_distance_comparison(
 
 
 def _specificity_evidence(
-    eligible: list[dict[str, Any]], analyses: dict[str, dict[str, Any]]
+    eligible: Sequence[Mapping[str, Any]], analyses: dict[str, dict[str, Any]]
 ) -> dict[str, Any]:
     cached = [
-        analyses[str(row.get("id"))]
+        analyses[stored_activity_key(row)]
         for row in eligible
-        if str(row.get("id")) in analyses
+        if stored_activity_key(row) in analyses
     ]
     return {
         "status": "observations" if cached else "insufficient_data",
@@ -298,13 +330,13 @@ def load_scenarios(
             "planned_load_estimated": bool(estimated),
             "estimated_planned_units": estimated,
         }
-    if any(number(row.get(TRAINING_LOAD)) is None for row in completed_today):
+    if any(number(row.get("training_load")) is None for row in completed_today):
         return {
             **base,
             "status": "insufficient_data",
             "reason": "Eine heute absolvierte Einheit hat keine bekannte Belastung.",
         }
-    actual_today_load = sum(float(row[TRAINING_LOAD]) for row in completed_today)
+    actual_today_load = sum(float(row["training_load"]) for row in completed_today)
     curves = [
         _scenario_curve(
             planned_loads,
@@ -346,7 +378,7 @@ def _week_start(day: date) -> date:
 
 
 def _preparation_weeks(
-    eligible: list[dict], window_start: date, timezone: str
+    eligible: Sequence[Mapping[str, Any]], window_start: date, timezone: str
 ) -> list[dict]:
     weeks = []
     for offset in range(PREPARATION_WEEKS):
@@ -355,17 +387,17 @@ def _preparation_weeks(
         measured = [
             row
             for row in eligible
-            if start.isoformat() <= activity_day(row, timezone) <= end.isoformat()
+            if start.isoformat() <= summary_local_date(row, timezone) <= end.isoformat()
         ]
         durations = [
             value
             for row in measured
-            if (value := number(row.get("moving_time"))) is not None
+            if (value := number(row.get("moving_duration_s"))) is not None
         ]
         distances = [
             value
             for row in measured
-            if (value := number(row.get("distance"))) is not None
+            if (value := number(row.get("distance_m"))) is not None
         ]
         weeks.append(
             {
@@ -421,7 +453,7 @@ def _planned_loads(
         key = str(row.get("starts_at_local") or row.get("date") or "")
         day = iso_date_prefix(key)
         name = str(row.get("name") or "Training")[:200]
-        load = number(row.get(TRAINING_LOAD))
+        load = number(row.get(PLANNED_LOAD_KEY))
         if load is None:
             load = _estimated_load(row)
             if load is None:
@@ -442,7 +474,7 @@ def _planned_loads(
 def _estimated_load(row: dict[str, Any]) -> float | None:
     """TSS-like estimate: hours x IF^2 x 100, from planned duration and the activity intensity."""
     seconds = number(row.get("planned_duration_s"))
-    intensity = number(row.get(INTENSITY))
+    intensity = number(row.get(PLANNED_INTENSITY_KEY))
     if not seconds or seconds <= 0 or intensity is None:
         return None
     # Intervals.icu reports intensity in percent; plain intensity factors are accepted too.

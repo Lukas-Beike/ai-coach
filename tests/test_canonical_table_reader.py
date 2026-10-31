@@ -6,6 +6,7 @@ from datetime import date
 
 from canonical_read_support import (
     CanonicalReadFixture,
+    make_selector,
     populate,
 )
 
@@ -98,7 +99,9 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
         )
         self.assertEqual(len(self.read(self.table.activities)), before - 1)
 
-        self.execute("UPDATE activity_sessions SET state = 'deleted'")
+        self.execute(
+            "UPDATE activity_sessions SET state = 'deleted', merged_into = NULL"
+        )
         self.assertEqual(self.read(self.table.activities), ())
 
     def test_observations_from_a_superseded_mapper_version_are_not_served(self) -> None:
@@ -123,3 +126,62 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
         self.assertTrue(stored)
         for row in stored:
             self.assertEqual(versions[row["provider"]], row["mapper_version"])
+
+
+class ActivitySessionReadTests(CanonicalReadFixture):
+    def test_backfilled_copies_are_summarised_once_like_the_legacy_bundles(
+        self,
+    ) -> None:
+        legacy = self.read(self.projection.activity_sessions)
+        populate(self)
+        grouped = self.read(self.table.activity_sessions)
+        summaries = self.read(make_selector(self).activity_summaries)
+
+        self.assertEqual(len(legacy), len(grouped))
+        self.assertEqual(len(legacy), len(summaries))
+        self.assertEqual(
+            sorted(
+                sorted(record.activity_id for record in records)
+                for _id, records in legacy
+            ),
+            sorted(
+                sorted(record.activity_id for record in records)
+                for _id, records in grouped
+            ),
+        )
+        merged = [s for s in summaries if len(s["record_ids"]) > 1]
+        self.assertEqual(1, len(merged))
+        self.assertEqual({"intervals", "garmin"}, set(merged[0]["record_ids"]))
+        self.assertEqual(
+            sorted(summaries, key=lambda s: s["started_at"], reverse=True),
+            list(summaries),
+        )
+        self.assertTrue(all(summary["id"].startswith("act_") for summary in summaries))
+
+    def test_deleted_sessions_are_not_summarised(self) -> None:
+        populate(self)
+        # The survivor of the merged ride: its merged Garmin copy must go with it.
+        session_id = self.rows(
+            "SELECT merged_into FROM activity_sessions WHERE state = 'duplicate'"
+        )[0]["merged_into"]
+        self.execute(
+            "UPDATE activity_sessions SET state = 'deleted' WHERE activity_id = ?",
+            (session_id,),
+        )
+
+        summaries = self.read(make_selector(self).activity_summaries)
+
+        self.assertNotIn(session_id, [summary["id"] for summary in summaries])
+        self.assertFalse(any(len(s["record_ids"]) > 1 for s in summaries))
+
+    def test_records_of_an_unknown_provider_are_skipped(self) -> None:
+        populate(self)
+        before = self.read(make_selector(self).activity_summaries)
+        self.execute(
+            "UPDATE activity_records SET provider = 'retired-provider' "
+            "WHERE provider_activity_id = 'i-act-002'"
+        )
+
+        after = self.read(make_selector(self).activity_summaries)
+
+        self.assertEqual(len(before) - 1, len(after))

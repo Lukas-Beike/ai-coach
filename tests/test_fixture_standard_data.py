@@ -285,7 +285,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             eftp_by_day=eftp_by_day,
             wellness_days=days_from_rows(wellness),
             canonical=garmin_body_from_payload(garmin, self.today),
-            activity_rows=(),
+            activities=(),
             garmin_ftp=garmin_metrics_from_payload(garmin).performance_history[
                 "cycling_ftp_watts"
             ],

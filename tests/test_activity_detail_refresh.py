@@ -13,7 +13,6 @@ from activity_row_support import FixedActivityRows
 from canonical_detail_support import INTERVALS, open_manager, seed_intervals_activity
 
 from backend.activities.detail_analysis_reads import calendar_profiles
-from backend.activities.detail_projection import DETAIL_PROJECTION_VERSION
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.canonical.vocabulary import (
     ActivityDetailKind,
@@ -25,6 +24,9 @@ from backend.canonical.vocabulary import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
 from backend.errors import AppError, ProviderErrorClassifier, provider_error
+from backend.providers.intervals_activity_detail_projection import (
+    DETAIL_PROJECTION_VERSION,
+)
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,

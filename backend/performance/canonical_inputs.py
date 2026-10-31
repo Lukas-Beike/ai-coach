@@ -13,10 +13,11 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final, cast
 
+from backend.activities.activity_summary import ActivitySummary
 from backend.activities.sync_time import activities_synced_at
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
-from backend.performance import canonical_sections, wellness_days
+from backend.performance import wellness_days
 from backend.performance.canonical_body import (
     EMPTY_BODY_INPUTS,
     CanonicalBodyInputs,
@@ -40,7 +41,7 @@ from backend.performance.source_policy import select_current
 from backend.performance.wellness_days import WellnessDay
 from backend.runtime.ports import (
     ActivityMaxHrReader,
-    ActivityRowReader,
+    ActivitySummaryReader,
     CanonicalTableServing,
     ObservationReader,
     ObservationSourceSelector,
@@ -58,8 +59,7 @@ class CanonicalPerformanceInputs:
     empty when they were not read. ``recovery`` holds the recovery observations of the current context and
     the personal baselines, or None when they were not read.
 
-    ``activity_rows`` are raw activity rows and ``activities`` their compact
-    projection. ``wellness_days`` is the current 90-day window;
+    ``activities`` are the neutral activity summaries, one per session. ``wellness_days`` is the current 90-day window;
     ``history_wellness_days`` keeps all stored days and their provenance.
 
     ``garmin`` holds the Garmin performance values and ``daily_health`` the daily
@@ -78,8 +78,7 @@ class CanonicalPerformanceInputs:
     atl: float | None
     current: CanonicalCurrentInputs = NO_CURRENT_INPUTS
     recovery: CanonicalRecoveryInputs | None = None
-    activity_rows: tuple[dict[str, Any], ...] | None = None
-    activities: tuple[dict[str, Any], ...] | None = None
+    activities: tuple[ActivitySummary, ...] | None = None
     wellness_days: tuple[WellnessDay, ...] | None = None
     history_wellness_days: tuple[WellnessDay, ...] | None = None
     garmin: GarminCanonicalMetrics | None = None
@@ -104,19 +103,19 @@ class CanonicalPerformanceSource:
     Both callables are resolved at read time, as the other assemblies do, so the
     composition root can pass ``lambda: ...`` accessors. ``serving`` is optional
     and no performance read depends on it any more.
-    ``activity_rows`` is optional; without it a consumer reads no activity rows.
+    ``activity_summaries`` is optional; without it a consumer reads no activities.
     ``coverage`` is optional; without it the activities' sync time is unknown.
     """
 
     database_manager: Callable[[], Any]
     observation_reader: Callable[[], ObservationReader]
     serving: Callable[[], CanonicalTableServing] | None = None
-    activity_rows: Callable[[], ActivityRowReader] | None = None
+    activity_summaries: Callable[[], ActivitySummaryReader] | None = None
     coverage: Callable[[], ProviderCoverageReader] | None = None
 
-    def activity_row_reader(self) -> ActivityRowReader | None:
-        """Return the configured raw activity row reader, if any."""
-        return None if self.activity_rows is None else self.activity_rows()
+    def activity_summary_reader(self) -> ActivitySummaryReader | None:
+        """Return the configured activity summary reader, if any."""
+        return None if self.activity_summaries is None else self.activity_summaries()
 
 
 # Activities older than this are not read for the performance inputs.
@@ -145,30 +144,32 @@ def snapshot_with_inputs(
         return snapshot, read_performance_inputs(
             source.observation_reader(),
             db,
-            activity_reader=source.activity_row_reader(),
+            activity_reader=source.activity_summary_reader(),
             as_of=as_of,
         )
 
 
-def activity_rows_with_sync_time(
+def activity_summaries_with_sync_time(
     source: CanonicalPerformanceSource,
-) -> tuple[tuple[dict[str, Any], ...], str | None]:
-    """Read the raw activity rows and their sync time in a read of their own.
+) -> tuple[tuple[ActivitySummary, ...], str | None]:
+    """Read the activity summaries and their sync time in a read of their own.
 
     The sync time is the canonical coverage fetch time of the Intervals.icu
     activities, None when none is stored. The read never waits for the writer.
     """
-    reader = source.activity_row_reader()
+    reader = source.activity_summary_reader()
     if reader is None:
-        raise RuntimeError("activity reads need the canonical activity row reader")
+        raise RuntimeError("activity reads need the canonical activity summary reader")
     with source.database_manager().reader() as db:
         coverage = None if source.coverage is None else source.coverage()
-        return tuple(reader.activity_rows(db)), activities_synced_at(coverage, db)
+        return reader.activity_summaries(db), activities_synced_at(coverage, db)
 
 
-def activity_rows_for(source: CanonicalPerformanceSource) -> tuple[dict[str, Any], ...]:
-    """Read the raw activity rows in a read of their own, without the writer."""
-    return activity_rows_with_sync_time(source)[0]
+def activity_summaries_for(
+    source: CanonicalPerformanceSource,
+) -> tuple[ActivitySummary, ...]:
+    """Read the activity summaries in a read of their own, without the writer."""
+    return activity_summaries_with_sync_time(source)[0]
 
 
 def inputs_for_snapshot(
@@ -183,7 +184,7 @@ def inputs_for_snapshot(
     return read_performance_inputs(
         source.observation_reader(),
         db,
-        activity_reader=source.activity_row_reader(),
+        activity_reader=source.activity_summary_reader(),
         as_of=as_of,
     )
 
@@ -310,8 +311,7 @@ def read_once(reader: ObservationReader) -> ReadOnceObservationReader:
 class _CarriedRows:
     """The day views, activity rows and Garmin values carried by an input."""
 
-    activity_rows: tuple[dict[str, Any], ...] | None
-    activities: tuple[dict[str, Any], ...] | None
+    activities: tuple[ActivitySummary, ...] | None
     wellness_days: tuple[WellnessDay, ...]
     history_wellness_days: tuple[WellnessDay, ...]
     garmin: GarminCanonicalMetrics
@@ -337,7 +337,6 @@ class _CarriedRows:
             atl=atl,
             current=current,
             recovery=self.recovery,
-            activity_rows=self.activity_rows,
             activities=self.activities,
             wellness_days=self.wellness_days,
             history_wellness_days=self.history_wellness_days,
@@ -355,10 +354,10 @@ def read_performance_inputs(
     reader: ObservationReader,
     db: Any,
     *,
-    activity_reader: ActivityRowReader | None = None,
+    activity_reader: ActivitySummaryReader | None = None,
     as_of: date,
 ) -> CanonicalPerformanceInputs | None:
-    """Read canonical activity rows and wellness days in one selected unit.
+    """Read canonical activity summaries and wellness days in one selected unit.
 
     No snapshot section is read. None means no activity reader and
     no observed wellness day. ``as_of`` is the athlete-local day.
@@ -368,24 +367,16 @@ def read_performance_inputs(
         reader = read_once(reader)
     history = wellness_days.read_wellness_days(reader, db)
     days = wellness_days.current_window(history)
-    activity_rows = (
-        None
-        if activity_reader is None
-        else tuple(
-            activity_reader.activity_rows(db, start=_activity_start(days, as_of))
-        )
-    )
-    if activity_rows is None and not days:
-        return None
     activities = (
         None
-        if activity_rows is None
-        else tuple(canonical_sections.compact_activity_rows(activity_rows))
+        if activity_reader is None
+        else activity_reader.activity_summaries(db, start=_activity_start(days, as_of))
     )
+    if activities is None and not days:
+        return None
     latest_view = wellness_days.latest(days)
     latest_day = None if latest_view is None else latest_view.day
     carried = _CarriedRows(
-        activity_rows=activity_rows,
         activities=activities,
         wellness_days=days,
         history_wellness_days=history,

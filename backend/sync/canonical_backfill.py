@@ -50,7 +50,8 @@ nothing, so the activity it owns is marked ``invalid`` as well, and a later mapp
 restores it. In the same transaction, the sessions near the re-projected activities
 are linked to duplicates from other providers (``link_activity_sessions``), so a
 mapper fix that lets two copies match merges stored history without a new provider
-refresh. Observations have no state column and no exact ownership for athlete and
+refresh. The first ingest links the same way when each source finishes, so copies
+stored by Garmin and Intervals.icu snapshots form one session. Observations have no state column and no exact ownership for athlete and
 health records, so observations that an upgraded mapper no longer emits are not retired;
 they keep their old ``mapper_version``. The table reader that follows this phase serves
 only observations whose ``mapper_version`` equals the current version of their mapper,
@@ -412,6 +413,8 @@ class CanonicalBackfill:
             written += count
             if not finished:
                 return written, False
+            # Copies another provider's source already stored join their session.
+            _link_work_sessions(db, work, zone=zone, now=now)
             _finish_source(state, current, work, counters)
 
     def _ingest_source_work(
@@ -633,6 +636,18 @@ def _complete_reprojection(
     bucket["retired"] += _retire_unemitted(db, row, work, now=now)
     bucket["retired"] += _replace_domain_rows(db, row, work, version=version, now=now)
     # After the retirement, so an activity the new projection drops is never bundled.
+    _link_work_sessions(db, work, zone=zone, now=now)
+    canonical_store.set_mapped_version(
+        db, record_id=current["id"], mapper_version=version, now=now
+    )
+    bucket["reprojected"] += 1
+    bucket["skipped_invalid"] += work.skipped_invalid
+    bucket["duplicates"] += work.duplicates
+    _leave_reprojection(state, current)
+
+
+def _link_work_sessions(db: Any, work: _Work, *, zone: tzinfo, now: str) -> None:
+    """Link the sessions near the activities of ``work`` to other providers' copies."""
     link_activity_sessions(
         db,
         touched_dates={
@@ -643,13 +658,6 @@ def _complete_reprojection(
         zone=zone,
         now=now,
     )
-    canonical_store.set_mapped_version(
-        db, record_id=current["id"], mapper_version=version, now=now
-    )
-    bucket["reprojected"] += 1
-    bucket["skipped_invalid"] += work.skipped_invalid
-    bucket["duplicates"] += work.duplicates
-    _leave_reprojection(state, current)
 
 
 def _retire_unemitted(db: Any, row: Mapping[str, Any], work: _Work, *, now: str) -> int:

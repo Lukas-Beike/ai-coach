@@ -1,4 +1,4 @@
-"""Pure detailed activity projection for Coach analysis."""
+"""Pure detailed projection of a raw Intervals.icu activity for Coach analysis."""
 
 from __future__ import annotations
 

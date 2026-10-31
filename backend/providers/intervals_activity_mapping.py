@@ -32,6 +32,11 @@ produces an issue, and the next alias is tried:
 * distance: ``distance`` in metres.
 * maximum speed and power: ``max_speed`` (m/s) -> ``max_speed_mps``, and
   ``max_watts`` -> ``max_power_w``. No other extreme is mapped.
+* summary values: ``moving_time`` -> ``moving_duration_s``, the weighted power
+  aliases (``icu_weighted_avg_watts``, ``weighted_average_watts``,
+  ``normalized_power``) -> ``normalized_power``, and intensity, RPE, feel,
+  speeds, pace, FTP, eFTP, VO2max, temperature, zone times and
+  ``paired_event_id`` in the alias order the legacy readers used.
 * recording device type: whole-word terms in ``device_name`` (see
   ``_DEVICE_TYPE_TERMS``). Bike computer terms win over watch terms. Absent or
   unmatched text is None. A non-text ``device_name`` is reported once, as the
@@ -67,12 +72,19 @@ from backend.canonical.mapping import (
     MappingResult,
     coerce_number,
 )
-from backend.canonical.records import ActivityRecord, Provenance
+from backend.canonical.records import (
+    MAX_ZONE_COUNT,
+    MAX_ZONE_ID_LENGTH,
+    ActivityRecord,
+    Provenance,
+)
 from backend.canonical.sports import classify_environment_text, classify_sport_text
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
+    MAX_ACTIVITY_CADENCE_RPM,
     MAX_ACTIVITY_DISTANCE_M,
     MAX_ACTIVITY_DURATION_S,
+    MAX_ACTIVITY_ELEVATION_M,
     MAX_ACTIVITY_LOAD,
     MAX_ACTIVITY_POWER_W,
     MAX_ACTIVITY_SPEED_MPS,
@@ -86,11 +98,15 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.providers.intervals_performance_fields import CONFIGURED_FTP
 
+# Version 6: maps moving time, elevation gain, normalized power, cadence and the
+# summary values (intensity, RPE, feel, speeds, pace, FTP, eFTP, VO2max,
+# temperature, zone times and the paired calendar event).
 # Version 5: maps the maximum speed, maximum power and recording device type.
 # Version 4: a source of exactly "manual" is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 5
+MAPPER_VERSION: Final = 6
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
 MAX_NAME_LENGTH: Final = 200
@@ -105,6 +121,28 @@ _MAX_HR_KEYS: Final = ("max_heartrate", "maxHR")
 _MAX_SPEED_KEYS: Final = ("max_speed",)
 _MAX_POWER_KEYS: Final = ("max_watts",)
 _AVERAGE_POWER_KEYS: Final = ("average_watts", "average_power")
+# Summary values, in the alias order the legacy readers used.
+_ELEVATION_GAIN_KEYS: Final = ("total_elevation_gain",)
+_NORMALIZED_POWER_KEYS: Final = (
+    "icu_weighted_avg_watts",
+    "weighted_average_watts",
+    "normalized_power",
+)
+_CADENCE_KEYS: Final = ("average_cadence",)
+_INTENSITY_KEYS: Final = ("icu_intensity",)
+_RPE_KEYS: Final = ("icu_rpe", "rpe")
+_FEEL_KEYS: Final = ("feel",)
+_AVERAGE_SPEED_KEYS: Final = ("average_speed",)
+_WEIGHTED_SPEED_KEYS: Final = ("icu_weighted_avg_speed",)
+_PACE_KEYS: Final = ("icu_pace",)
+_FTP_KEYS: Final = ("icu_ftp",)
+_EFTP_KEYS: Final = ("icu_eftp", "eftp", "eFTP")
+_VO2MAX_KEYS: Final = ("vo2max", "vo2_max", "vO2MaxValue", "vo2MaxValue", "icu_vo2max")
+_TEMPERATURE_KEYS: Final = ("average_temp",)
+_POWER_ZONES_KEY: Final = "icu_zone_times"
+_HR_ZONES_KEY: Final = "icu_hr_zone_times"
+_PACE_ZONES_KEY: Final = "pace_zone_times"
+_PAIRED_EVENT_KEY: Final = "paired_event_id"
 _IDENTITY_KEYS: Final = (
     "type",
     "sport",
@@ -379,6 +417,27 @@ def _classify(type_name: str | None, identity: str) -> tuple[Sport, Environment]
     return sport, environment
 
 
+def target_basis_ftp(basis: Mapping[str, object]) -> object:
+    """Return the FTP a frozen target basis stored under its Intervals.icu key."""
+    return basis.get(CONFIGURED_FTP)
+
+
+def intervals_analysis_sport(row: Mapping[str, object]) -> dict[str, object]:
+    """Return the canonical sport, environment and trail-run flag of a raw row.
+
+    The same classification the mapper applies; ``trail`` marks a "TrailRun".
+    """
+    type_name = row.get("type")
+    sport, environment = _classify(
+        type_name if isinstance(type_name, str) else None, _identity_text(row)
+    )
+    return {
+        "sport": sport.value,
+        "environment": environment.value,
+        "trail": type_name == "TrailRun",
+    }
+
+
 def _recording_origin(source: str | None, provenance_text: str) -> RecordingOrigin:
     # _ActivityRow.text already strips the source value.
     if source is not None and source.casefold() == "manual":
@@ -401,6 +460,45 @@ def _device_type(device_name: str | None) -> DeviceType | None:
         if any(f" {term} " in words for term in terms):
             return device_type
     return None
+
+
+def _zone_seconds(
+    value: object, *, positional: bool
+) -> tuple[tuple[str, float], ...] | None:
+    """Return the ``Z``-zones of a zone-time list as (zone id, seconds) pairs.
+
+    Items are ``{id, secs}`` objects; with ``positional`` (heart rate) a plain
+    number is the time of zone ``Z<n>`` at its position. Other items, negative or
+    non-numeric times and ids not starting with ``Z`` (such as sweet spot) are
+    skipped, as the legacy zone report skipped them.
+    """
+    if not isinstance(value, list):
+        return None
+    zones: list[tuple[str, float]] = []
+    for index, item in enumerate(value):
+        if positional and not isinstance(item, dict):
+            zone_id, seconds = f"Z{index + 1}", coerce_number(item)
+        elif isinstance(item, dict):
+            zone_id = str(item.get("id", ""))[:MAX_ZONE_ID_LENGTH]
+            seconds = coerce_number(item.get("secs"))
+        else:
+            continue
+        if (
+            zone_id.startswith("Z")
+            and seconds is not None
+            and 0 <= seconds <= MAX_ACTIVITY_DURATION_S
+        ):
+            zones.append((zone_id, seconds))
+        if len(zones) == MAX_ZONE_COUNT:
+            break
+    return tuple(zones) or None
+
+
+def _planned_event_id(value: object) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, str | int):
+        return None
+    text = str(value).strip()
+    return text if text and len(text) <= MAX_ACTIVITY_ID_LENGTH else None
 
 
 def _map_row(
@@ -457,6 +555,30 @@ def _map_row(
         max_speed_mps=reader.number(_MAX_SPEED_KEYS, 0.0, MAX_ACTIVITY_SPEED_MPS),
         max_power_w=reader.number(_MAX_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
         device_type=_device_type(provenance["device_name"]),
+        moving_duration_s=moving_time,
+        elevation_gain_m=reader.number(
+            _ELEVATION_GAIN_KEYS, 0.0, MAX_ACTIVITY_ELEVATION_M
+        ),
+        normalized_power=reader.number(
+            _NORMALIZED_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W
+        ),
+        avg_cadence=reader.number(_CADENCE_KEYS, 0.0, MAX_ACTIVITY_CADENCE_RPM),
+        intensity=reader.number(_INTENSITY_KEYS, 0.0, 1_000.0),
+        rpe=reader.number(_RPE_KEYS, 0.0, 10.0),
+        feel=reader.number(_FEEL_KEYS, 0.0, 10.0),
+        avg_speed_mps=reader.number(_AVERAGE_SPEED_KEYS, 0.0, MAX_ACTIVITY_SPEED_MPS),
+        weighted_avg_speed_mps=reader.number(
+            _WEIGHTED_SPEED_KEYS, 0.0, MAX_ACTIVITY_SPEED_MPS
+        ),
+        pace_mps=reader.number(_PACE_KEYS, 0.0, MAX_ACTIVITY_SPEED_MPS),
+        ftp_w=reader.number(_FTP_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
+        eftp_w=reader.number(_EFTP_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
+        vo2max=reader.number(_VO2MAX_KEYS, 0.0, 100.0),
+        avg_temp_c=reader.number(_TEMPERATURE_KEYS, -60.0, 70.0),
+        power_zone_times_s=_zone_seconds(row.get(_POWER_ZONES_KEY), positional=False),
+        hr_zone_times_s=_zone_seconds(row.get(_HR_ZONES_KEY), positional=True),
+        pace_zone_times_s=_zone_seconds(row.get(_PACE_ZONES_KEY), positional=False),
+        planned_event_id=_planned_event_id(row.get(_PAIRED_EVENT_KEY)),
     )
 
 
