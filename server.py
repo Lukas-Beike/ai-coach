@@ -710,6 +710,7 @@ ACTIVITY_READS = ActivityReadAssembly(
         lambda: CANONICAL_READ,
         observation_reader=lambda: CANONICAL_READ,
         coverage=lambda: CANONICAL_READ,
+        serving=lambda: CANONICAL_READ,
     ),
     ATHLETE_DATA.activity_feedback,
     lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
@@ -1976,7 +1977,7 @@ CANONICAL_READ = build_canonical_read(
     profile=ATHLETE_PROFILE_SERVICE,
     compact_only=SnapshotRepositoryReader(
         SNAPSHOT_REPOSITORY
-    ).has_only_compact_activity_rows,
+    ).has_unmatched_compact_activity_rows,
 )
 METRIC_EXPORT: MetricExportService = build_metric_export_service(
     database_manager,

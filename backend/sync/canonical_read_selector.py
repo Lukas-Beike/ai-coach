@@ -14,8 +14,9 @@ completes, only observations at the current mapper version are served.
 Raw activity rows (``activity_rows``) follow the same decision as ``activities``.
 A stored Intervals.icu snapshot that lists activities only in compact form (from a
 release before ``raw_provider_data``) cannot be backfilled; its activities stay
-missing from the tables until the athlete refetches them through the read-only
-Intervals.icu sync. ``activities_need_refresh`` reports that gap.
+missing from the tables until the full read-only Intervals.icu reload returns raw
+rows for them. An incremental sync keeps the older compact rows next to its raw
+window. ``activities_need_refresh`` reports that gap.
 
 Tables keep serving after a sync, because the ingest writes each new snapshot
 into the tables in the same transaction. While the tables serve, the stored
@@ -139,8 +140,8 @@ class CanonicalReadSelector(
     """Serves reads from the tables once the backfill completed once, else nothing.
 
     ``zone`` returns the athlete's time zone, the one the backfill stores with its
-    state. ``compact_only`` returns True when the stored Intervals.icu snapshot
-    lists activities only in compact form.
+    state. ``compact_only`` returns True when a compact activity row of the stored
+    Intervals.icu snapshot has no raw counterpart.
     """
 
     def __init__(
@@ -185,10 +186,10 @@ class CanonicalReadSelector(
         return self._source(db).activity_rows(db, start=start, end=end, limit=limit)
 
     def activities_need_refresh(self, db: Any) -> bool:
-        """Return True while the stored snapshot lists activities only in compact form.
+        """Return True while a stored compact activity row has no raw counterpart.
 
-        Those activities never reach the tables; a read-only Intervals.icu sync
-        that stores raw rows closes the gap.
+        Those activities never reach the tables; the full read-only Intervals.icu
+        reload that returns their raw rows closes the gap.
         """
         return self._compact_only(db)
 

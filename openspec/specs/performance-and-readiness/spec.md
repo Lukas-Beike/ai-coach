@@ -501,12 +501,16 @@ The system SHALL read every daily wellness value of the performance projection f
 - **THEN** only the observations decide the values and the latest wellness day; snapshot-only days and fields have no effect.
 
 #### Scenario: No canonical inputs
-- **WHEN** the performance context is composed without canonical inputs
+- **WHEN** the performance context is composed without canonical inputs, or without a stored snapshot and without any provider value in the canonical inputs (activities, wellness days, daily totals, an Intervals.icu athlete sync, Wahoo settings, Garmin or recovery observations, Garmin body values)
 - **THEN** the context is unavailable: CTL, ATL, weight and body fat from wellness, subjective ratings, wellness-based trend averages and wellness body history are unknown instead of read from the snapshot.
 
 #### Scenario: Availability follows canonical data, not the snapshot
 - **WHEN** canonical observations or activities exist without a stored Intervals.icu snapshot, for example a Garmin-only setup after the backfill completed
-- **THEN** the context is available with its full metrics, `as_of` is the canonical Intervals.icu sync instant (none without one) and the context source names the stored provider data.
+- **THEN** the context is available with its full metrics. With a stored snapshot, `as_of` is its sync time and the source names the snapshot; without one, `as_of` is the canonical Intervals.icu athlete-sync instant (none without one) and the source names the stored provider data.
+
+#### Scenario: Pending state shows no partial values
+- **WHEN** the first canonical backfill has not completed and `/api/performance` is read
+- **THEN** history and training focus are built from empty inputs, without the stored snapshot or the raw Garmin view; the Garmin connection status stays, and the server's `status` text is the only status the PWA shows.
 
 #### Scenario: Canonical data is still being prepared
 - **WHEN** the first canonical backfill has not completed

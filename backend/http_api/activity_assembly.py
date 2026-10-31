@@ -12,6 +12,7 @@ from backend.performance.activity_read_service import ActivityAnalysisReadServic
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.runtime.ports import (
     ActivityRowAndSummaryReader,
+    CanonicalReadStatus,
     ObservationReader,
     ProviderCoverageReader,
     ProviderSnapshotReader,
@@ -23,12 +24,17 @@ _PROVIDER_IDS = frozenset(provider.value for provider in ProviderId)
 
 @dataclass(frozen=True)
 class ActivityReadSources:
-    """Where the activity reads get their sync time, rows and observations."""
+    """Where the activity reads get their sync time, rows and observations.
+
+    ``serving`` reports the canonical read state, so the detail's performance
+    block is marked pending or carries the compact-only activity gap.
+    """
 
     snapshot_reader: ProviderSnapshotReader
     row_reader: Callable[[], ActivityRowAndSummaryReader]
     observation_reader: Callable[[], ObservationReader]
     coverage: Callable[[], ProviderCoverageReader]
+    serving: Callable[[], CanonicalReadStatus] | None = None
 
 
 class ActivityReadAssembly:
@@ -47,6 +53,7 @@ class ActivityReadAssembly:
         self._row_reader = sources.row_reader
         self._observation_reader = sources.observation_reader
         self._coverage = sources.coverage
+        self._serving = sources.serving
         self._feedback_service = feedback_service
         self._read_equipment = read_equipment
         self._refreshable_providers = refreshable_providers
@@ -78,6 +85,7 @@ class ActivityReadAssembly:
         return CanonicalPerformanceSource(
             self._database_manager,
             self._observation_reader,
+            serving=self._serving,
             activity_summaries=self._row_reader,
             coverage=self._coverage,
         )

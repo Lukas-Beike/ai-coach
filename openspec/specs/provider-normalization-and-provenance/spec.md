@@ -121,7 +121,7 @@ The system SHALL preserve provider raw-record identity and mapper version, inges
 
 #### Scenario: Compact-only Intervals.icu snapshot
 - **WHEN** the stored Intervals.icu snapshot lists activities only in compact form (from a release before raw provider data) and the backfill has completed
-- **THEN** activity reads come from the tables without those compact rows, the gap is reported as `activities_need_refresh` and marked in the PWA until a read-only Intervals.icu sync stores raw rows; no remote write or implicit refetch happens.
+- **THEN** activity reads come from the tables without those compact rows, and the gap is reported as `activities_need_refresh` and marked in the PWA while any stored compact row has no raw row with its id. An incremental sync keeps the older compact rows and the mark; only the full read-only Intervals.icu reload (`POST /api/intervals/full-resync`) that returns raw rows for them closes it. No remote write or implicit refetch happens.
 
 Detailed contract: No legacy snapshot projection serves reads. Reprojection SHALL preserve session ownership and mark retired or invalid mapped records without deleting original provider evidence.
 

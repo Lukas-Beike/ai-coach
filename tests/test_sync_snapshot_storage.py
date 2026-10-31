@@ -27,11 +27,12 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.planning.compact_activities import compact_activity_rows
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND, HEALTH_RECORD_KIND
 from backend.providers.snapshot_projection import (
     CANONICAL_SECTIONS_KEY,
     CANONICAL_SECTIONS_TABLES,
-    intervals_snapshot_has_only_compact_rows,
+    intervals_snapshot_has_unmatched_compact_rows,
     without_intervals_activities,
 )
 from backend.sync.canonical_backfill import STATE_KEY
@@ -128,7 +129,7 @@ class Environment:
         self.selector = build_canonical_read(
             key_values=self.key_values,
             profile=_UtcProfile(),
-            compact_only=lambda db: intervals_snapshot_has_only_compact_rows(
+            compact_only=lambda db: intervals_snapshot_has_unmatched_compact_rows(
                 self.state.latest_snapshot(db)
             ),
         )
@@ -386,6 +387,53 @@ class WriteGateTests(StorageCase):
         self.assertEqual(env.count("snapshots"), 0)
         for table in CANONICAL_TABLES:
             self.assertEqual(env.count(table), 0, table)
+
+
+class CompactOnlyGapTests(StorageCase):
+    """A compact-only snapshot from an old release stays marked until a full reload."""
+
+    def _compact_only(self) -> Environment:
+        env = self.environment(tables=True)
+        env.state.save_snapshot(
+            {
+                "synced_at": "2026-11-01T08:00:00+00:00",
+                "athlete": {},
+                RECENT: compact_activity_rows(_activities()),
+                "recent_wellness": [],
+            }
+        )
+        self.assertTrue(self.needs_refresh(env))
+        return env
+
+    @staticmethod
+    def needs_refresh(env: Environment) -> bool:
+        with env.manager.reader() as db:
+            return env.selector.activities_need_refresh(db)
+
+    def test_an_incremental_sync_keeps_the_compact_rows_and_the_mark(self) -> None:
+        env = self._compact_only()
+
+        env.sync([_activity(NEW_ID, "2026-11-09T07:00:00")], days=7, day=SECOND_DAY)
+
+        stored = env.stored()
+        # The older compact rows have no raw row, so the sections are kept.
+        self.assertNotIn(CANONICAL_SECTIONS_KEY, stored)
+        self.assertEqual(len(stored[RECENT]), 6)
+        self.assertEqual([row["id"] for row in stored[RAW]["activities"]], [NEW_ID])
+        self.assertTrue(self.needs_refresh(env))
+        self.assertEqual(env.table_activity_ids(), [NEW_ID])
+
+    def test_a_full_reload_with_the_raw_rows_closes_the_gap(self) -> None:
+        env = self._compact_only()
+        env.sync([_activity(NEW_ID, "2026-11-09T07:00:00")], days=7, day=SECOND_DAY)
+
+        env.sync(_activities(), days=ALL_DAYS, day=SECOND_DAY)
+
+        self.assertFalse(self.needs_refresh(env))
+        self.assert_stripped(env.stored())
+        self.assertEqual(
+            env.table_activity_ids(), sorted(str(row["id"]) for row in _activities())
+        )
 
 
 class MergeBaseTests(StorageCase):

@@ -211,8 +211,8 @@ class CanonicalTableServing(Protocol):
 class CanonicalReadStatus(CanonicalTableServing, Protocol):
     """Reports the read state a consumer marks: pending, or an activity gap.
 
-    ``activities_need_refresh`` is True while the stored Intervals.icu snapshot
-    lists activities only in compact form, which never reach the tables.
+    ``activities_need_refresh`` is True while a compact activity row of the stored
+    Intervals.icu snapshot has no raw counterpart; such rows never reach the tables.
     """
 
     def activities_need_refresh(self, db: Any) -> bool: ...

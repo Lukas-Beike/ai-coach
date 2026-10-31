@@ -469,6 +469,21 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             ast.unparse(provider_transport.value),
         )
 
+    def test_activity_reads_receive_the_canonical_read_state(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        activity_reads = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "ACTIVITY_READS"
+                for target in node.targets
+            )
+        )
+        self.assertIn(
+            "serving=lambda: CANONICAL_READ", ast.unparse(activity_reads.value)
+        )
+
         transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_assembly.py")
         assembly = next(
             node

@@ -46,6 +46,7 @@ from backend.performance.activity_read_service import ActivityAnalysisReadServic
 from backend.performance.canonical_current import NO_CURRENT_INPUTS
 from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
+    PENDING_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
     load_performance_inputs,
@@ -55,6 +56,7 @@ from backend.performance.canonical_recovery import (
     RECOVERY_KINDS,
     CanonicalRecoveryInputs,
 )
+from backend.performance.chart_history import analysis_history
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.load_context import performance_load_context
 from backend.providers.snapshot_projection import project_intervals_snapshot
@@ -984,6 +986,24 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
             self.assertEqual(performance["status"], "Daten werden vorbereitet")
             self.assertEqual(performance["metrics"], {})
             self.assertIsNone(performance["as_of"])
+        # Neither the stored snapshot nor the raw Garmin view feeds the charts.
+        pending = public["performance"]
+        self.assertEqual(
+            pending["history"],
+            analysis_history({}, {}, PARITY_TODAY, canonical=EMPTY_PERFORMANCE_INPUTS),
+        )
+        self.assertNotEqual(
+            pending["history"],
+            analysis_history(
+                self.intervals,
+                self.garmin,
+                PARITY_TODAY,
+                canonical=EMPTY_PERFORMANCE_INPUTS,
+            ),
+        )
+        for focus in pending["training_focus_periods"].values():
+            self.assertEqual(focus["classified_sessions"], 0)
+            self.assertEqual(focus["zones"], [])
 
         populate(self)
         served = _service(self.intervals, source, self.garmin).performance_state()
@@ -1009,3 +1029,20 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
         self.intervals = raw
         refreshed = _service(self.intervals, source, self.garmin).performance_state()
         self.assertFalse(refreshed["performance"]["activities_need_refresh"])
+
+    def test_activity_detail_inputs_carry_the_read_state(self) -> None:
+        source = self._source()
+        snapshot_reader = Mock()
+        snapshot_reader.latest_snapshot.return_value = self.intervals
+        service = ActivityAnalysisReadService(
+            self.manager, snapshot_reader, Mock(), Mock(), canonical=source
+        )
+
+        _snapshot, pending, _rows = service._performance_inputs(PARITY_TODAY)
+        self.assertIs(pending, PENDING_PERFORMANCE_INPUTS)
+
+        populate(self)
+        _snapshot, served, _rows = service._performance_inputs(PARITY_TODAY)
+        self.assertIsNotNone(served)
+        assert served is not None
+        self.assertFalse(served.pending)

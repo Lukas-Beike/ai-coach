@@ -122,8 +122,8 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual(
             result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
         )
-        # The canonical sync instant of the athlete record, not the snapshot text.
-        self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
+        # The stored snapshot's sync status names the sync time.
+        self.assertEqual(result["as_of"], snapshot["synced_at"])
         self.assertFalse(result["activities_need_refresh"])
         self.assertEqual(result["thresholds"]["ftp_w"], 300)
         # Form and ramp rate come from canonical observations only (#1412): the
@@ -345,9 +345,47 @@ class PerformanceContextTests(unittest.TestCase):
 
         self.assertTrue(result["available"])
         self.assertTrue(result["activities_need_refresh"])
-        # Inputs that only carry the gap still come from a canonical source.
-        self.assertTrue(empty["available"])
+        self.assertEqual(result["status"], "Aktivitäten: Intervals.icu neu abrufen")
+        # Inputs without any provider value stay unavailable but keep the mark.
+        self.assertFalse(empty["available"])
         self.assertTrue(empty["activities_need_refresh"])
+        self.assertEqual(empty["status"], "Aktivitäten: Intervals.icu neu abrufen")
+
+    def test_inputs_without_provider_values_are_unavailable(self):
+        today = date(2026, 9, 20)
+        nothing = CanonicalPerformanceInputs(
+            wellness_day=None, ctl=None, atl=None, activities=(), wellness_days=()
+        )
+
+        result = current_performance_context(None, {}, {}, today, canonical=nothing)
+
+        self.assertFalse(result["available"])
+        self.assertNotIn("status", result)
+
+    def test_sync_time_without_athlete_record_values_comes_from_the_snapshot(self):
+        today = date(2026, 9, 20)
+        # The athlete record has none of the sync-instant fields, so the canonical
+        # current inputs carry no sync time.
+        snapshot = {
+            "synced_at": "2026-09-20T08:00:00Z",
+            "athlete": {},
+            "recent_wellness": [{"id": today.isoformat(), "ctl": 40, "atl": 42}],
+        }
+        canonical = canonical_from_snapshot(snapshot, today)
+        self.assertIsNone(canonical.current.synced_at)
+
+        with_snapshot = current_performance_context(
+            snapshot, {}, {}, today, canonical=canonical
+        )
+        without = current_performance_context(None, {}, {}, today, canonical=canonical)
+
+        self.assertEqual(with_snapshot["as_of"], "2026-09-20T08:00:00Z")
+        self.assertEqual(
+            with_snapshot["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
+        )
+        self.assertTrue(without["available"])
+        self.assertIsNone(without["as_of"])
+        self.assertEqual(without["source"], "Gespeicherte Provider-Daten")
 
     def test_weekly_hrv_fallback_keeps_its_garmin_freshness(self):
         today = date(2026, 9, 7)

@@ -75,8 +75,9 @@ class CanonicalPerformanceInputs:
 
     ``pending`` is True while the canonical source serves nothing yet (the first
     backfill has not completed); every value is then empty.
-    ``activities_need_refresh`` is True while stored Intervals.icu activities exist
-    only in compact form and are missing from the tables until a refetch.
+    ``activities_need_refresh`` is True while stored compact Intervals.icu
+    activities have no raw counterpart and are missing from the tables until the
+    full Intervals.icu reload.
     """
 
     wellness_day: date | None

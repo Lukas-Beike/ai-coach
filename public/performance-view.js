@@ -264,10 +264,7 @@ function currentPerformanceValues(metrics, history) {
 }
 
 function performanceDataStatus(performance) {
-  return [
-    performance?.reason === "canonical_pending" ? "Daten werden vorbereitet" : null,
-    performance?.activities_need_refresh === true ? "Aktivitäten: Intervals.icu neu abrufen" : null,
-  ].filter(Boolean);
+  return typeof performance?.status === "string" && performance.status ? [performance.status] : [];
 }
 
 function renderCurrentPerformance(metrics, history, status = []) {

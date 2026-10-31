@@ -332,8 +332,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "activity_validation",
             },
         )
-        # The canonical sync instant the fixture mapping stamps on the athlete record.
-        self.assertEqual(result["as_of"], "2026-10-12T08:00:00+00:00")
+        self.assertEqual(result["as_of"], "2026-05-04T05:00:00Z")
         self.assertEqual(
             set(result["thresholds"]),
             {"ftp_w", "w_prime_j", "max_hr", "lthr", "weight"},

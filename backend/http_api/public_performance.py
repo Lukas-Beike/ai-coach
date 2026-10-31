@@ -98,6 +98,11 @@ class PublicPerformanceStateService:
     ) -> dict[str, Any]:
         profile = self._profile_service.get()
         inputs = canonical or EMPTY_PERFORMANCE_INPUTS
+        if inputs.pending:
+            # Nothing is served before the first completed backfill: no history,
+            # focus or Garmin values from the stored snapshot or the raw view. The
+            # Garmin connection status stays.
+            snapshot, garmin = {}, {}
         performance = performance_context.current_performance_context(
             snapshot,
             garmin,
