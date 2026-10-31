@@ -197,15 +197,11 @@ def _days(snapshot: dict[str, Any]):
 
 
 def _service(
-    snapshot: dict[str, Any],
     garmin: dict[str, Any],
     source: CanonicalPerformanceSource | None,
     *,
     events: list[str] | None = None,
 ) -> PublicPerformanceStateService:
-    sync_state = Mock()
-    sync_state.latest_snapshot.return_value = snapshot
-
     def capture_garmin(_db: Any) -> GarminSyncStatus:
         if events is not None:
             events.append("garmin")
@@ -225,7 +221,6 @@ def _service(
     projection = Mock()
     projection.public_state.return_value = {}
     return PublicPerformanceStateService(
-        sync_state,
         garmin_payload,
         profile,
         projection,
@@ -451,10 +446,8 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
             database_manager=lambda: RecordingManager(events),
             observation_reader=lambda: reader,
         )
-        state = _service(case.intervals, case.garmin, source).performance_state()
-        legacy = _service(case.intervals, case.garmin, None).from_inputs(
-            None, case.intervals
-        )
+        state = _service(case.garmin, source).performance_state()
+        legacy = _service(case.garmin, None).from_inputs(None)
         self.assert_wellness_boundary(legacy, state)
         # Body reads happen inside the single lease.
         enter, exit_ = events.index("enter"), events.index("exit")
@@ -476,17 +469,13 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
             observation_reader=lambda: reader,
         )
         # The Garmin re-read raises, so the projection must use the captured value.
-        state = _service(
-            case.intervals, case.garmin, source, events=events
-        ).performance_state()
+        state = _service(case.garmin, source, events=events).performance_state()
         self.assertEqual(1, events.count("enter"))
         self.assertEqual(1, events.count("exit"))
         self.assertEqual(1, events.count("garmin"))
         self.assertLess(events.index("enter"), events.index("garmin"))
         self.assertLess(events.index("garmin"), events.index("exit"))
-        legacy = _service(case.intervals, case.garmin, None).from_inputs(
-            None, case.intervals
-        )
+        legacy = _service(case.garmin, None).from_inputs(None)
         self.assert_wellness_boundary(legacy, state)
 
     def test_body_and_load_reads_share_one_selected_source(self) -> None:
@@ -498,7 +487,7 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
             database_manager=lambda: RecordingManager(events),
             observation_reader=lambda: selector,
         )
-        _service(case.intervals, case.garmin, source).performance_state()
+        _service(case.garmin, source).performance_state()
         # One choice per unit of work, made inside the lease and before any read.
         self.assertEqual(1, selector.choices)
         choose = events.index("choose")
@@ -513,9 +502,7 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
 
     def test_source_without_observations_shows_no_garmin_body_values(self) -> None:
         case = CASES[0]
-        state = _service(case.intervals, case.garmin, None).from_inputs(
-            None, case.intervals
-        )
+        state = _service(case.garmin, None).from_inputs(None)
         body = state["performance"]["history"]["body"]
         for metric in ("weight_kg", "body_fat_pct"):
             for series in body["windows"]["12w"]["metrics"][metric]:

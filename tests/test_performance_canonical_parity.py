@@ -252,12 +252,9 @@ def _load_pair(
 
 
 def _service(
-    snapshot: dict[str, Any],
     source: CanonicalPerformanceSource | None,
     garmin: dict[str, Any] | None = None,
 ) -> PublicPerformanceStateService:
-    sync_state = Mock()
-    sync_state.latest_snapshot.return_value = snapshot
     garmin_snapshot = garmin if garmin is not None else {}
     garmin_payload = Mock()
     garmin_payload.sync_status.return_value = GarminSyncStatus.from_state(
@@ -271,7 +268,6 @@ def _service(
     projection = Mock()
     projection.public_state.return_value = {}
     return PublicPerformanceStateService(
-        sync_state,
         garmin_payload,
         profile,
         projection,
@@ -613,7 +609,7 @@ class CanonicalWiringTests(unittest.TestCase):
             database_manager=lambda: manager,
             observation_reader=lambda: reader,
         )
-        service = _service(snapshot, source)
+        service = _service(source)
         with patch(
             "backend.http_api.public_performance.performance_context.current_performance_context",
             return_value={},
@@ -624,14 +620,13 @@ class CanonicalWiringTests(unittest.TestCase):
         _assert_load_inputs(self, project.call_args.kwargs["canonical"])
 
     def test_public_performance_keeps_the_legacy_call_without_wellness(self) -> None:
-        snapshot = _snapshot([])
         manager = RecordingManager()
         reader = StubObservationReader()
         source = CanonicalPerformanceSource(
             database_manager=lambda: manager,
             observation_reader=lambda: reader,
         )
-        service = _service(snapshot, source)
+        service = _service(source)
         with patch(
             "backend.http_api.public_performance.performance_context.current_performance_context",
             return_value={},
@@ -649,8 +644,7 @@ class CanonicalWiringTests(unittest.TestCase):
         self.assertEqual({(s, e) for _k, s, e in reader.calls}, {(None, None)})
 
     def test_public_performance_without_a_source_uses_no_unit_of_work(self) -> None:
-        snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
-        service = _service(snapshot, None)
+        service = _service(None)
         with patch(
             "backend.http_api.public_performance.performance_context.current_performance_context",
             return_value={},
@@ -785,7 +779,6 @@ class CanonicalWiringTests(unittest.TestCase):
         manager = RecordingManager()
         reader = StubObservationReader(_observations(snapshot), events=manager.events)
         service = _service(
-            snapshot,
             CanonicalPerformanceSource(
                 database_manager=lambda: manager,
                 observation_reader=lambda: reader,
@@ -798,7 +791,7 @@ class CanonicalWiringTests(unittest.TestCase):
             "backend.http_api.public_performance.performance_context.current_performance_context",
             return_value={},
         ) as project:
-            service.from_inputs(prelude.performance_inputs, snapshot)
+            service.from_inputs(prelude.performance_inputs)
         self.assertEqual(project.call_args.kwargs["canonical"].atl, 60.0)
 
     def test_public_state_prelude_without_inputs_keeps_the_legacy_read(self) -> None:
@@ -807,12 +800,12 @@ class CanonicalWiringTests(unittest.TestCase):
         self.assertIsNone(
             _prelude(snapshot, manager, None).read(True).performance_inputs
         )
-        self.assertIsNone(_service(snapshot, None).canonical_inputs("db"))
+        self.assertIsNone(_service(None).canonical_inputs("db"))
         with patch(
             "backend.http_api.public_performance.performance_context.current_performance_context",
             return_value={},
         ) as project:
-            _service(snapshot, None).from_inputs(None, snapshot)
+            _service(None).from_inputs(None)
         # Canonical reads (#1416): the Garmin sync status, no snapshot.
         project.assert_called_once_with(
             GarminSyncStatus(),
@@ -902,8 +895,8 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
             database_manager=lambda: self.manager,
             observation_reader=lambda: counting,
         )
-        legacy = _service(self.intervals, None, self.garmin).performance_state()
-        canonical = _service(self.intervals, source, self.garmin).performance_state()
+        legacy = _service(None, self.garmin).performance_state()
+        canonical = _service(source, self.garmin).performance_state()
         self.assertEqual(counting.calls, _UNIT_READS)
         self.assertEqual(canonical["performance"]["current_load"]["ctl"], 53.4)
         self.assertEqual(canonical["performance"]["current_load"]["atl"], 57.0)
@@ -923,11 +916,9 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         with patch.object(
             selector, "_read_state", wraps=selector._read_state
         ) as read_state:
-            canonical = _service(
-                self.intervals, source, self.garmin
-            ).performance_state()
+            canonical = _service(source, self.garmin).performance_state()
         read_state.assert_called_once()
-        legacy = _service(self.intervals, None, self.garmin).performance_state()
+        legacy = _service(None, self.garmin).performance_state()
         self.assertEqual(canonical["performance"]["current_load"]["ctl"], 53.4)
         self.assertFalse(legacy["performance"]["available"])
         _assert_load_metric_split(self, canonical, legacy)
@@ -962,7 +953,7 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
         self.write(lambda db: store_garmin(self, db, self.garmin))
         source = self._source()
 
-        service = _service(self.intervals, source, self.garmin)
+        service = _service(source, self.garmin)
         public = service.performance_state()
         coach = self._coach_performance(source)
 
@@ -983,7 +974,6 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
         self.assertEqual(
             pending["history"],
             analysis_history(
-                {},
                 GarminSyncStatus.from_state({}),
                 PARITY_TODAY,
                 canonical=EMPTY_PERFORMANCE_INPUTS,
@@ -992,7 +982,6 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
         self.assertNotEqual(
             pending["history"],
             analysis_history(
-                self.intervals,
                 GarminSyncStatus.from_state(self.garmin),
                 PARITY_TODAY,
                 canonical=EMPTY_PERFORMANCE_INPUTS,
@@ -1003,7 +992,7 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
             self.assertEqual(focus["zones"], [])
 
         populate(self)
-        served_service = _service(self.intervals, source, self.garmin)
+        served_service = _service(source, self.garmin)
         served = served_service.performance_state()
         served_projection = cast(Mock, served_service._garmin_projection_service)
         self.assertEqual(
@@ -1024,13 +1013,13 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
         populate(self)
         source = self._source()
 
-        public = _service(self.intervals, source, self.garmin).performance_state()
+        public = _service(source, self.garmin).performance_state()
         self.assertTrue(public["performance"]["available"])
         self.assertTrue(public["performance"]["activities_need_refresh"])
         self.assertTrue(self._coach_performance(source)["activities_need_refresh"])
 
         self.intervals = raw
-        refreshed = _service(self.intervals, source, self.garmin).performance_state()
+        refreshed = _service(source, self.garmin).performance_state()
         self.assertFalse(refreshed["performance"]["activities_need_refresh"])
 
     def test_activity_detail_inputs_carry_the_read_state(self) -> None:

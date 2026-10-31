@@ -166,10 +166,6 @@ FIELD_MODULE_IMPORT_ALLOWED_PREFIXES = (*ADAPTER_PREFIXES, "backend/sync/")
 _SYNC_WRITER = "writer: persists or ingests the raw provider snapshot"
 _BACKUP = "export: backup/privacy export serializes the stored raw snapshot"
 _SYNC_STATUS = "sync-status: reads synced_at/freshness, not metric values"
-_AWAITING_PERFORMANCE_KINDS = (
-    "awaiting-kind: the cycling power curve has no canonical form yet and is the "
-    "only performance value still read from the snapshot (#1416 slice 2b)"
-)
 _AWAITING_PLANNING_READS = (
     "awaiting-planning: the calendar window, snapshot sport settings and the "
     "calendar projection still read the stored snapshot"
@@ -305,10 +301,6 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,
     (RULE_SNAPSHOT_KEY, "backend/http_api/athlete_assembly.py"): _DEAD_LEGACY,
     (RULE_SNAPSHOT_KEY, "backend/http_api/bootstrap_state.py"): _SYNC_STATUS,
-    (
-        RULE_SNAPSHOT_KEY,
-        "backend/http_api/public_performance.py",
-    ): _AWAITING_PERFORMANCE_KINDS,
     (RULE_SNAPSHOT_KEY, "backend/http_api/public_plan.py"): _AWAITING_PLANNING_READS,
     (RULE_SNAPSHOT_KEY, "backend/http_api/state_prelude.py"): _AWAITING_PLANNING_READS,
     **{

@@ -183,11 +183,9 @@ class PublicStateAssembly:
         self._provider_credentials = provider_credentials
 
     def performance_state_service(self) -> PublicPerformanceStateService:
-        sync = self._sync_persistence()
         garmin = self._garmin()
         athlete = self._athlete_data()
         return PublicPerformanceStateService(
-            sync.state_repository(),
             garmin.payload_service(),
             athlete.profile(),
             garmin.projection_service(),

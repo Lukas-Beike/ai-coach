@@ -21,7 +21,6 @@ def analysis_history(snapshot, garmin, today, **overrides):
         else EMPTY_PERFORMANCE_INPUTS
     )
     return _analysis_history(
-        snapshot,
         GarminSyncStatus.from_state(garmin),
         today,
         canonical=garmin_inputs_from_payload(garmin, today, replace(base, **overrides)),

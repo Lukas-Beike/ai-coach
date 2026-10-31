@@ -63,12 +63,6 @@ def _snapshot(
     }
 
 
-def _stripped(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """The same snapshot without wellness rows and sport settings (the carriers)."""
-    athlete = {k: v for k, v in snapshot["athlete"].items() if k != "sport_settings"}
-    return {**snapshot, "athlete": athlete, "recent_wellness": []}
-
-
 def _observations(snapshot: dict[str, Any]) -> tuple[Observation, ...]:
     _activities, mapped = project_intervals_snapshot(
         snapshot, zone=ZONE, retrieved_at=RETRIEVED_AT
@@ -384,7 +378,6 @@ class EftpTests(unittest.TestCase):
         ]
         snapshot = _snapshot(rows)
         history = analysis_history(
-            _stripped(snapshot),
             GarminSyncStatus.from_state({}),
             DAY,
             canonical=_inputs(snapshot),

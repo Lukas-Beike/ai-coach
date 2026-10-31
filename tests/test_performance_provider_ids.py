@@ -61,7 +61,6 @@ def _empty_garmin_metrics(**values):
 class ProviderIdPayloadTests(unittest.TestCase):
     def test_chart_history_series_carry_provider_ids_next_to_labels(self):
         result = analysis_history(
-            None,
             GarminSyncStatus.from_state({}),
             TODAY,
             canonical=EMPTY_PERFORMANCE_INPUTS,

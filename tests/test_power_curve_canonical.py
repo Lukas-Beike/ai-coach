@@ -36,6 +36,7 @@ from backend.performance.canonical_inputs import (
     read_performance_inputs,
 )
 from backend.performance.chart_history import analysis_history
+from backend.performance.freshness import GarminSyncStatus
 from backend.providers.canonical_plans import (
     POWER_CURVE_RECORD_ID,
     POWER_CURVE_RECORD_KIND,
@@ -122,7 +123,9 @@ def chart(curve: PowerCurve) -> Any:
     inputs = CanonicalPerformanceInputs(
         wellness_day=None, ctl=None, atl=None, power_curve=curve
     )
-    return analysis_history(None, {}, TODAY, canonical=inputs)["cycling_power_profile"]
+    return analysis_history(GarminSyncStatus(), TODAY, canonical=inputs)[
+        "cycling_power_profile"
+    ]
 
 
 def provenance(source_record_id: str | None = POWER_CURVE_RECORD_ID) -> Provenance:
@@ -374,9 +377,9 @@ class PowerCurveIngestTests(IngestFixture):
             chart(EMPTY_POWER_CURVE), legacy_chart(None, CHART_START, TODAY)
         )
         self.assertEqual(
-            analysis_history(None, {}, TODAY, canonical=EMPTY_PERFORMANCE_INPUTS)[
-                "cycling_power_profile"
-            ],
+            analysis_history(
+                GarminSyncStatus(), TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
+            )["cycling_power_profile"],
             {"points": []},
         )
 

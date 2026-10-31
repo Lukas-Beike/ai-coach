@@ -29,14 +29,12 @@ class PublicPerformanceStateService:
 
     def __init__(
         self,
-        sync_state_repository: Any,
         garmin_payload_service: Any,
         profile_service: Any,
         garmin_projection_service: Any,
         today: Callable[[], date],
         canonical: CanonicalPerformanceSource | None = None,
     ) -> None:
-        self._sync_state_repository = sync_state_repository
         self._garmin_payload_service = garmin_payload_service
         self._profile_service = profile_service
         self._garmin_projection_service = garmin_projection_service
@@ -53,8 +51,6 @@ class PublicPerformanceStateService:
         # cannot mix revisions and the request never waits for the writer. The
         # chosen source serves both body and load reads.
         with source.database_manager().read_snapshot() as db:
-            # Remaining snapshot read: the power curve has no metric kind (#1416).
-            snapshot = self._sync_state_repository.latest_snapshot()
             garmin = self._garmin_payload_service.sync_status_in(db)
             reader = read_once(resolve_reader(source.observation_reader(), db))
             canonical = with_read_status(
@@ -68,9 +64,7 @@ class PublicPerformanceStateService:
                     include_power_curve=True,
                 ),
             )
-            return self._project(
-                snapshot, garmin, canonical, today, observations=reader
-            )
+            return self._project(garmin, canonical, today, observations=reader)
 
     def canonical_inputs(self, db: Any) -> CanonicalPerformanceInputs | None:
         """Read the load inputs inside the caller's snapshot transaction."""
@@ -79,19 +73,10 @@ class PublicPerformanceStateService:
         )
 
     def from_inputs(
-        self,
-        canonical: CanonicalPerformanceInputs | None,
-        snapshot: dict[str, Any] | None = None,
+        self, canonical: CanonicalPerformanceInputs | None
     ) -> dict[str, Any]:
-        """Project the inputs a larger state request read in its own transaction.
-
-        ``snapshot`` is that request's stored snapshot; it supplies only the power
-        curve and is read here when not given.
-        """
-        if snapshot is None:
-            snapshot = self._sync_state_repository.latest_snapshot()
+        """Project the inputs a larger state request read in its own transaction."""
         return self._project(
-            snapshot,
             self._garmin_payload_service.sync_status(),
             canonical,
             self._today(),
@@ -99,28 +84,27 @@ class PublicPerformanceStateService:
 
     def _project(
         self,
-        snapshot: dict[str, Any] | None,
         garmin: GarminSyncStatus,
         canonical: CanonicalPerformanceInputs | None,
         today: date,
         *,
         observations: ObservationReader | None = None,
     ) -> dict[str, Any]:
-        """Project canonical values; ``snapshot`` supplies only the power curve."""
+        """Project canonical values into the public performance state."""
         profile = self._profile_service.get()
         inputs = canonical or EMPTY_PERFORMANCE_INPUTS
         if inputs.pending:
             # Nothing is served before the first completed backfill: no history,
             # focus or Garmin values, no power curve and no Garmin freshness,
             # source or pagination. Only the Garmin connection status stays.
-            snapshot, garmin = {}, NO_GARMIN_SYNC_STATUS
+            garmin = NO_GARMIN_SYNC_STATUS
         performance = performance_context.current_performance_context(
             garmin, profile, today, canonical=inputs
         )
         timezone = str(profile.get("timezone") or "UTC")
         performance = {
             **performance,
-            "history": analysis_history(snapshot, garmin, today, canonical=inputs),
+            "history": analysis_history(garmin, today, canonical=inputs),
             # UI-only: the load tab's period selection picks the matching window.
             "training_focus_periods": {
                 period: training_focus(

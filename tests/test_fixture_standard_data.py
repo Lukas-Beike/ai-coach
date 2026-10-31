@@ -149,7 +149,6 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         )
         metrics = garmin_payload_performance_metrics(garmin, self.today)
         history = analysis_history(
-            {},
             GarminSyncStatus.from_state(garmin),
             self.today,
             canonical=garmin_inputs_from_payload(

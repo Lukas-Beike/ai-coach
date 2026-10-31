@@ -14,13 +14,10 @@ from backend.performance.training_focus import training_focus
 
 class PublicPerformanceStateTests(unittest.TestCase):
     def test_performance_state_projects_existing_snapshot_and_garmin_reads(self):
-        snapshot = {"synced_at": "2026-09-22T10:00:00Z"}
         garmin = GarminSyncStatus.from_state({"synced_at": "2026-09-22T09:00:00Z"})
         profile = {"timezone": "Europe/Berlin"}
         performance = {"available": True, "source": "Intervals.icu"}
         garmin_state = {"available": True, "has_sleep": True}
-        sync_state_repository = Mock()
-        sync_state_repository.latest_snapshot.return_value = snapshot
         garmin_payload_service = Mock()
         garmin_payload_service.sync_status.return_value = garmin
         profile_service = Mock()
@@ -29,7 +26,6 @@ class PublicPerformanceStateTests(unittest.TestCase):
         garmin_projection_service.public_state.return_value = garmin_state
         today = date(2026, 9, 23)
         service = PublicPerformanceStateService(
-            sync_state_repository,
             garmin_payload_service,
             profile_service,
             garmin_projection_service,
@@ -48,7 +44,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
                 "performance": {
                     **performance,
                     "history": analysis_history(
-                        snapshot, garmin, today, canonical=EMPTY_PERFORMANCE_INPUTS
+                        garmin, today, canonical=EMPTY_PERFORMANCE_INPUTS
                     ),
                     "training_focus_periods": {
                         "fortnight": training_focus(
@@ -71,11 +67,10 @@ class PublicPerformanceStateTests(unittest.TestCase):
             },
         )
         # Canonical reads (#1416): the context takes the Garmin sync status and
-        # no snapshot; the snapshot is read only for the power curve.
+        # no snapshot.
         project_performance.assert_called_once_with(
             garmin, profile, today, canonical=EMPTY_PERFORMANCE_INPUTS
         )
-        sync_state_repository.latest_snapshot.assert_called_once_with()
         garmin_payload_service.sync_status.assert_called_once_with()
         garmin_payload_service.recent_view.assert_not_called()
         profile_service.get.assert_called_once_with()
@@ -120,14 +115,12 @@ class PublicPerformanceStateTests(unittest.TestCase):
         self.assertIs(result["checkins"], checkins)
         checkin_service.list.assert_not_called()
 
-    def test_performance_state_reuses_snapshot_from_composite_state(self):
-        sync_state_repository = Mock()
+    def test_from_inputs_projects_the_composite_state_inputs(self):
         garmin_payload_service = Mock()
         garmin_payload_service.sync_status.return_value = GarminSyncStatus()
         profile_service = Mock()
         profile_service.get.return_value = {}
         service = PublicPerformanceStateService(
-            sync_state_repository,
             garmin_payload_service,
             profile_service,
             Mock(),
@@ -138,9 +131,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
             "backend.http_api.public_performance.performance_context.current_performance_context",
             return_value={},
         ):
-            service.from_inputs(None, {"synced_at": "synthetic"})
-
-        sync_state_repository.latest_snapshot.assert_not_called()
+            service.from_inputs(None)
 
 
 if __name__ == "__main__":

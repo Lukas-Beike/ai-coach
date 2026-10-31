@@ -142,7 +142,7 @@ def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
         body=garmin_body_from_payload(_payload(garmin), today),
     )
     return _chart_history.analysis_history(
-        snapshot, GarminSyncStatus.from_state(garmin), today, canonical=canonical
+        GarminSyncStatus.from_state(garmin), today, canonical=canonical
     )
 
 

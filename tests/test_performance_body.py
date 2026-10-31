@@ -264,7 +264,7 @@ class BodyHistoryTests(unittest.TestCase):
             history_wellness_days=days_from_rows(snapshot["recent_wellness"]),
         )
         result = analysis_history(
-            snapshot, GarminSyncStatus.from_state({}), TODAY, canonical=canonical
+            GarminSyncStatus.from_state({}), TODAY, canonical=canonical
         )
         self.assertIn("body", result)
         series = _series(result["body"], "12w", "cycling_w_per_kg", "Intervals.icu")

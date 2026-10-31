@@ -143,7 +143,6 @@ def _metric_series(
 
 
 def analysis_history(
-    snapshot: dict[str, Any] | None,
     garmin: GarminSyncStatus,
     today: date,
     *,
@@ -155,7 +154,6 @@ def analysis_history(
     the power curve and the Intervals.icu sync time read through the canonical
     ports; ``garmin`` is the Garmin sync status.
     """
-    snapshot = snapshot or {}
     start = today - timedelta(days=89)
     dates = [(start + timedelta(days=i)).isoformat() for i in range(90)]
     load_end = today
