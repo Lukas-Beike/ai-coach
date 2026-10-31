@@ -95,7 +95,7 @@ def added_content(updates: str) -> tuple[set[str], set[tuple[str, bytes]]]:
             local,
             *exclusions,
         )
-        for section in re.split(rb"(?m)^diff --git ", diff)[1:]:
+        for section in re.split(rb"(?m)^diff --(?:git|cc) ", diff)[1:]:
             suffix, blob, added = file_content(section)
             if blob:
                 whole.add(blob)

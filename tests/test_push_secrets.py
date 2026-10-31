@@ -159,6 +159,22 @@ class PushSecretTests(unittest.TestCase):
         joined = b"\n".join(self.scanned_by(self.update(tip, "f" * 40)))
         self.assertNotIn(b"synthetic flagged base line", joined)
 
+    def test_merge_resolution_content_is_scanned(self):
+        self.commit("keep\n")
+        scan.git("branch", "-m", "base")
+        scan.git("checkout", "-qb", "feature")
+        self.commit("keep\nfeature line\n")
+        scan.git("checkout", "-q", "base")
+        self.commit("keep\nbase line\n")
+        scan.git("checkout", "-q", "feature")
+        scan.git("merge", "-q", "--no-commit", "-X", "ours", "base")
+        (self.root / "fixture.py").write_text("keep\nresolution only line\n")
+        scan.git("commit", "-qam", "merge")
+        tip = scan.git("rev-parse", "HEAD").decode().strip()
+        remote = scan.git("rev-parse", "HEAD^1").decode().strip()
+        joined = b"\n".join(self.scanned_by(self.update(tip, remote)))
+        self.assertIn(b"resolution only line", joined)
+
     def test_clean_push_scans_committed_content_not_dirty_worktree(self):
         tip = self.commit("committed clean")
         (self.root / "fixture.py").write_text("uncommitted private data")
