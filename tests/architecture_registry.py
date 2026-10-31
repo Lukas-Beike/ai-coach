@@ -1178,9 +1178,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "backend.performance.daily_health",
-        (
-            "garmin_daily_health_metrics",
-        ),
+        ("garmin_daily_health_metrics",),
     ),
     (
         "backend.performance.eftp",
