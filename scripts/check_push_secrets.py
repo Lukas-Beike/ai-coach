@@ -16,8 +16,8 @@ def git(*args: str, input: bytes | None = None) -> bytes:
     ).stdout
 
 
-def outgoing_objects(updates: str) -> set[str]:
-    objects = set()
+def outgoing_revisions(updates: str) -> list[tuple[str, list[str]]]:
+    revisions = []
     for line in updates.splitlines():
         _, local, _, remote = line.split()
         if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", local):
@@ -35,12 +35,37 @@ def outgoing_objects(updates: str) -> set[str]:
             == 0
         )
         exclusions = ["^" + remote] if known_remote else ["--not", "--remotes"]
+        revisions.append((local, exclusions))
+    return revisions
+
+
+def outgoing_objects(updates: str) -> set[str]:
+    objects = set()
+    for local, exclusions in outgoing_revisions(updates):
         objects.update(
             git("rev-list", "--objects", "--no-object-names", local, *exclusions)
             .decode("ascii")
             .splitlines()
         )
     return objects
+
+
+def added_lines(updates: str) -> set[bytes]:
+    """Lines the outgoing commits add; pre-existing lines of touched files stay unscanned."""
+    lines = set()
+    for local, exclusions in outgoing_revisions(updates):
+        diff = git(
+            *("log", "--format=", "-p", "-c", "-U0", "--no-color", "--no-ext-diff"),
+            "--no-textconv",
+            local,
+            *exclusions,
+        )
+        lines.update(
+            row[1:]
+            for row in diff.split(b"\n")
+            if row.startswith(b"+") and not row.startswith(b"+++")
+        )
+    return lines
 
 
 def check(updates: str) -> int:
@@ -55,18 +80,24 @@ def check(updates: str) -> int:
         "--batch-check=%(objectname) %(objecttype)",
         input="".join(oid + "\n" for oid in sorted(objects)).encode("ascii"),
     )
-    contents = [
+    messages = [
         tuple(row.split())
         for row in metadata.decode("ascii").splitlines()
-        if row.split()[1] in {"blob", "commit", "tag"}
+        if row.split()[1] in {"commit", "tag"}
+    ]
+    sources = [(oid, git("cat-file", kind, oid)) for oid, kind in messages]
+    ordered = sorted(added_lines(updates))
+    sources += [
+        (f"added-{start}", b"\n".join(ordered[start : start + 2000]))
+        for start in range(0, len(ordered), 2000)
     ]
     with tempfile.TemporaryDirectory(prefix="ai-coach-push-scan-") as temp:
         # Scan batches to bound disk use and Windows command-line length.
-        for start in range(0, len(contents), 35):
+        for start in range(0, len(sources), 35):
             paths = []
-            for oid, kind in contents[start : start + 35]:
-                path = Path(temp) / (oid + ".txt")
-                path.write_bytes(git("cat-file", kind, oid))
+            for name, data in sources[start : start + 35]:
+                path = Path(temp) / (name + ".txt")
+                path.write_bytes(data)
                 paths.append(str(path))
             result = subprocess.run(
                 [scanner, "analyze", "secrets", *paths],

@@ -104,6 +104,27 @@ class PushSecretTests(unittest.TestCase):
             self.assertEqual(scan.check(self.update("0" * 40, tip)), 0)
             self.assertEqual(scan.check(self.update(tip, tip)), 0)
 
+    def test_untouched_lines_of_an_edited_file_are_not_rescanned(self):
+        base = self.commit("synthetic flagged line\nkept\n")
+        tip = self.commit("synthetic flagged line\nkept\nadded clean line\n")
+        run = subprocess.run
+        scanned = []
+
+        def scanner(command, **kwargs):
+            if command[0] == "synthetic-sonar":
+                scanned.extend(Path(p).read_bytes() for p in command[3:])
+                return subprocess.CompletedProcess(command, 0)
+            return run(command, **kwargs)
+
+        with (
+            patch.object(scan.shutil, "which", return_value="synthetic-sonar"),
+            patch.object(scan.subprocess, "run", side_effect=scanner),
+        ):
+            self.assertEqual(scan.check(self.update(tip, base)), 0)
+        joined = b"\n".join(scanned)
+        self.assertIn(b"added clean line", joined)
+        self.assertNotIn(b"synthetic flagged line", joined)
+
     def test_clean_push_scans_committed_content_not_dirty_worktree(self):
         tip = self.commit("committed clean")
         (self.root / "fixture.py").write_text("uncommitted private data")
