@@ -822,6 +822,58 @@ class ReprojectionTests(BackfillFixture):
             rows,
         )
 
+    def test_garmin_version_eight_reprojects_the_training_effect_label(self) -> None:
+        # #1416: rows mapped by version 7 carry no training-effect label. The
+        # stored raw row already holds the merged dedicated training-load values,
+        # so the version bump re-projects the label from it.
+        activity = {
+            **garmin_activity(1),
+            "trainingEffectLabel": "tempo",
+            "activityTrainingLoad": 55.0,
+        }
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                activities=[activity],
+                training_load_activities=[
+                    {"activityId": 1, "trainingEffectLabel": "VO2_MAX"}
+                ],
+            ),
+        )
+        backfill = self.make_backfill()
+        with patch.dict(canonical_plans._MAPPER_VERSIONS, {(GARMIN, ACTIVITY_KIND): 7}):
+            self.run_to_completion(backfill)
+        with self.manager.unit_of_work() as db:
+            # What version 7 stored: the details without the label.
+            db.execute(
+                "UPDATE activity_records SET details = '{}', mapper_version = 7 "
+                "WHERE provider = ?",
+                (GARMIN,),
+            )
+            db.execute(
+                "UPDATE provider_records SET mapped_version = 7 "
+                "WHERE provider = ? AND record_kind = ?",
+                (GARMIN, ACTIVITY_KIND),
+            )
+
+        self.run_to_completion(backfill)
+
+        rows = self.rows(
+            "SELECT details, load, mapper_version FROM activity_records "
+            "WHERE provider = ?",
+            (GARMIN,),
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            json.loads(rows[0]["details"])["training_effect_label"], "VO2_MAX"
+        )
+        self.assertEqual(rows[0]["load"], 55.0)
+        self.assertEqual(
+            rows[0]["mapper_version"],
+            canonical_plans._MAPPER_VERSIONS[(GARMIN, ACTIVITY_KIND)],
+        )
+        self.assertEqual(self.summary(backfill)["providers"][GARMIN]["reprojected"], 1)
+
     def test_higher_version_reprojects_only_that_record_kind(self) -> None:
         backfill = self.populate()
         bumped = self.bumped_activity_version()

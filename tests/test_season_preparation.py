@@ -38,7 +38,7 @@ def _inputs(ctl=50, atl=60, completed=()):
 def _season(rows, events, today, observations=None, snapshot=None):
     """Run season_preparation over fixed activity rows."""
     return season_preparation(
-        SNAPSHOT if snapshot is None else snapshot,
+        (SNAPSHOT if snapshot is None else snapshot).get("synced_at"),
         events,
         today,
         "UTC",
@@ -49,7 +49,7 @@ def _season(rows, events, today, observations=None, snapshot=None):
 
 def _scenarios(plan, values, inputs=None, snapshot=None):
     return load_scenarios(
-        SNAPSHOT if snapshot is None else snapshot,
+        (SNAPSHOT if snapshot is None else snapshot).get("synced_at"),
         plan,
         TODAY,
         values,
@@ -92,7 +92,12 @@ class SeasonPreparationTests(unittest.TestCase):
             {**ride, "id": "b", "moving_duration_s": 1800, "environment": "virtual"},
             {**ride, "id": "c", "sport": "run", "moving_duration_s": 900},
         ]
-        base = {"id": "race", "event_date": "2026-10-10", "priority": "A", "name": "Synthetic"}
+        base = {
+            "id": "race",
+            "event_date": "2026-10-10",
+            "priority": "A",
+            "name": "Synthetic",
+        }
         for event, expected in (
             ({"sport": "Cycling"}, ("ride", ["a"])),
             ({"sport": "VirtualRide"}, ("ride", ["b"])),

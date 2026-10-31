@@ -11,6 +11,7 @@ from performance_day_support import (
 
 from backend.performance.body import body_history as _body_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_weight import (
     garmin_body_fat_daily_records,
     garmin_body_fat_records,
@@ -37,7 +38,11 @@ def body_history(snapshot, garmin, today, **kwargs):
     )
     kwargs.setdefault("activities", ())
     return _body_history(
-        snapshot, garmin, today, wellness_days=days_from_rows(rows), **kwargs
+        (snapshot or {}).get("synced_at"),
+        GarminSyncStatus.from_state(garmin),
+        today,
+        wellness_days=days_from_rows(rows),
+        **kwargs,
     )
 
 
@@ -258,7 +263,9 @@ class BodyHistoryTests(unittest.TestCase):
             eftp_by_day={date(2026, 10, 5): 280.0, date(2026, 10, 6): 300.0},
             history_wellness_days=days_from_rows(snapshot["recent_wellness"]),
         )
-        result = analysis_history(snapshot, {}, TODAY, canonical=canonical)
+        result = analysis_history(
+            snapshot, GarminSyncStatus.from_state({}), TODAY, canonical=canonical
+        )
         self.assertIn("body", result)
         series = _series(result["body"], "12w", "cycling_w_per_kg", "Intervals.icu")
         self.assertEqual(len(series["weekly"]), 12)

@@ -11,6 +11,7 @@ from performance_day_support import garmin_body_from_payload
 
 from backend.errors import AppError
 from backend.performance.body import body_history
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_weight import garmin_weight_records
 from backend.providers.garmin import merge_weight_snapshots
 from backend.sync.garmin_service import (
@@ -111,8 +112,8 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         )
         garmin = {"weight": merged}
         projection = body_history(
-            {},
-            garmin,
+            None,
+            GarminSyncStatus.from_state(garmin),
             today,
             canonical=garmin_body_from_payload(garmin, today),
             wellness_days=(),

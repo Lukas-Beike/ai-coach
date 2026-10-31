@@ -1052,6 +1052,7 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
         canonical=GarminCanonicalSources(
             activity_rows=lambda: CANONICAL_READ,
             observations=lambda: CANONICAL_READ,
+            activity_summaries=lambda: CANONICAL_READ,
         ),
         tokens=GARMIN_TOKENS,
     )

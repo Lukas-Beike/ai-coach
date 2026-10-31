@@ -196,7 +196,7 @@ class CoachContextSelectionTests(unittest.TestCase):
             lambda: library,
         )
         section = service._selected_sections(
-            frozenset({"nutrition_products"}), {}, {}, [], {}, []
+            frozenset({"nutrition_products"}), {}, [], {}, []
         )["nutrition_products"]
         self.assertEqual(
             section,
@@ -225,7 +225,7 @@ class CoachContextSelectionTests(unittest.TestCase):
             Mock(), Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
         )
         section = service._selected_sections(
-            frozenset({"nutrition_products"}), {}, {}, [], {}, []
+            frozenset({"nutrition_products"}), {}, [], {}, []
         )["nutrition_products"]
         self.assertTrue(section["truncated"])
         self.assertEqual(len(section["items"]), 80)
@@ -247,7 +247,7 @@ class CoachContextSelectionTests(unittest.TestCase):
             Mock(), Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
         )
         section = service._selected_sections(
-            frozenset({"nutrition_products"}), {}, {}, [], {}, []
+            frozenset({"nutrition_products"}), {}, [], {}, []
         )["nutrition_products"]
         self.assertTrue(section["truncated"])
         self.assertLess(len(section["items"]), 80)

@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from backend.activities.sync_time import intervals_synced_at
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.diagnostics.readiness_probe import ReadinessProbeService
 from backend.http_api.analysis import AnalysisRoutes
@@ -445,7 +446,6 @@ class HttpApiAssembly:
         self.history_get_routes = HistoryGetRoutes(
             session_auth_service, change_history_service
         )
-        report_snapshot = lambda: sync_state_repository().latest_snapshot()
         report_plan = lambda: public_plan_state_service().read(local_only=True)
         report_checkins = lambda: checkin_service().list(365)
         report_feedback = lambda: (
@@ -463,6 +463,11 @@ class HttpApiAssembly:
 
         def training_report_services() -> TrainingReportServices:
             canonical = public.canonical_performance_source()
+
+            def report_synced_at(db: Any) -> str | None:
+                coverage = None if canonical.coverage is None else canonical.coverage()
+                return intervals_synced_at(coverage, db)
+
             records = TrainingRecordsService(
                 database_manager=database_manager(),
                 read_equipment=lambda: (
@@ -479,7 +484,7 @@ class HttpApiAssembly:
                 canonical=canonical,
             )
             report_read = TrainingReportReadService(
-                read_snapshot=report_snapshot,
+                read_synced_at=report_synced_at,
                 read_plan=report_plan,
                 read_checkins=report_checkins,
                 read_feedback=report_feedback,
@@ -500,7 +505,7 @@ class HttpApiAssembly:
                     canonical=canonical,
                 ),
                 season=TrainingSeasonReadService(
-                    read_snapshot=report_snapshot,
+                    read_synced_at=report_synced_at,
                     read_competitions=lambda: competition_service().list(100),
                     read_observations=records.observations,
                     today=local_today,

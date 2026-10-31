@@ -50,6 +50,7 @@ from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.detail_envelope import DetailEnvelopeReader
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -347,7 +348,10 @@ class ActivityCallerResolutionTests(_Fixture):
         for requested in (local, "ride-1"):
             with self.subTest(requested):
                 result = service.detail(
-                    requested, garmin_snapshot={}, profile={}, today=TODAY
+                    requested,
+                    garmin_status=NO_GARMIN_SYNC_STATUS,
+                    profile={},
+                    today=TODAY,
                 )
                 self.assertEqual(local, result["session"]["activity_id"])
                 self.assertEqual(3600, result["metrics"]["duration_s"]["value"])

@@ -44,7 +44,10 @@ from backend.canonical.vocabulary import ProviderId
 from backend.providers.garmin_activity_mapping import (
     MAPPER_VERSION as GARMIN_ACTIVITY_VERSION,
 )
-from backend.providers.garmin_activity_mapping import map_garmin_activities
+from backend.providers.garmin_activity_mapping import (
+    map_garmin_activities,
+    merge_training_load_rows,
+)
 from backend.providers.garmin_gear_mapping import map_garmin_gear
 from backend.providers.garmin_health_mapping import (
     GARMIN_HEALTH_SECTION_NAMES,
@@ -128,6 +131,8 @@ GARMIN_SYNCED_AT_KEY: Final = "synced_at"
 GARMIN_FRESHNESS_KEY: Final = "source_freshness"
 GARMIN_FETCHED_AT_KEY: Final = "fetched_at"
 GARMIN_ACTIVITIES_SECTION: Final = "activities"
+# Dedicated training-load rows merged into the activities before they are stored.
+GARMIN_TRAINING_LOAD_SECTION: Final = "training_load_activities"
 GARMIN_WEIGHT_SECTION: Final = "weight"
 GARMIN_BODY_BATTERY_SECTION: Final = "body_battery"
 GARMIN_MORNING_BATTERY_KEY: Final = "morning_body_battery"
@@ -486,7 +491,10 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
     )
     if activities_at is not None:
         activity_rows, raw_records, skipped, present = _activity_batch(
-            payload.get(GARMIN_ACTIVITIES_SECTION),
+            merge_training_load_rows(
+                payload.get(GARMIN_ACTIVITIES_SECTION),
+                payload.get(GARMIN_TRAINING_LOAD_SECTION),
+            ),
             id_key=GARMIN_ACTIVITY_ID_KEY,
             mapper=lambda rows: map_garmin_activities(
                 rows, zone=zone, retrieved_at=activities_at

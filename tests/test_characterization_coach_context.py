@@ -16,7 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
-from activity_row_support import FixedActivityRows, NoObservations
+from activity_row_support import FixedActivityRows
 from canonical_recovery_support import NoActivityRows, recovery_only_inputs
 from performance_day_support import (
     SYNCED_AT,
@@ -37,6 +37,7 @@ from backend.coach.context import (
 from backend.coach.context_selection import CoachContextSelection
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.context import current_performance_context
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     GarminCanonicalState,
@@ -138,8 +139,7 @@ def _context(
     """Current performance with recovery observations mapped from the fixtures."""
     canonical = canonical_from_snapshot(snapshot, today) if snapshot else None
     return current_performance_context(
-        snapshot,
-        garmin,
+        GarminSyncStatus.from_state(garmin),
         profile,
         today,
         canonical=replace(
@@ -185,7 +185,9 @@ def _performance_reader(
     profile_service = Mock()
     profile_service.get.return_value = {"name": "Athlete", "timezone": "UTC"}
     payload_service = Mock()
-    payload_service.recent_view.return_value = garmin_payload
+    payload_service.sync_status.return_value = GarminSyncStatus.from_state(
+        garmin_payload
+    )
     garmin_projection = Mock()
     garmin_projection.coach_context.return_value = {"recovery": {}}
     reader = CoachPerformanceContextReader(
@@ -249,7 +251,7 @@ def _structured_service(
 
 def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionService:
     payload_service = Mock()
-    payload_service.recent_view.return_value = snapshot
+    payload_service.sync_status.return_value = GarminSyncStatus.from_state(snapshot)
     battery_service = Mock()
     battery_service.current.return_value = None
     redactor = Mock()
@@ -267,7 +269,14 @@ def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionServ
         local_now=lambda: datetime(2026, 5, 4, 8, tzinfo=UTC),
         canonical=GarminCanonicalSources(
             activity_rows=lambda: FixedActivityRows(),
-            observations=lambda: NoObservations(),
+            observations=lambda: StubReader(
+                tuple(
+                    map_garmin_health(
+                        dict(snapshot), zone=UTC, retrieved_at=SYNCED_AT
+                    ).records
+                )
+            ),
+            activity_summaries=NoActivityRows,
         ),
     )
 
@@ -332,7 +341,8 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "activity_validation",
             },
         )
-        self.assertEqual(result["as_of"], "2026-05-04T05:00:00Z")
+        # Canonical reads (#1416): the canonical sync instant in ISO form.
+        self.assertEqual(result["as_of"], "2026-05-04T05:00:00+00:00")
         self.assertEqual(
             set(result["thresholds"]),
             {"ftp_w", "w_prime_j", "max_hr", "lthr", "weight"},
@@ -462,7 +472,7 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
         reader, _ = _performance_reader(garmin)
         snapshot = _intervals_snapshot()
 
-        result = reader.current_performance(snapshot, _recovery(garmin, snapshot))
+        result = reader.current_performance(_recovery(garmin, snapshot))
 
         self.assertEqual(
             result["metrics"]["cycling_ftp_watts"]["source"], GARMIN_SOURCE
@@ -484,7 +494,7 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
         reader, _ = _performance_reader(garmin)
         snapshot = _intervals_snapshot()
 
-        result = reader.current_performance(snapshot, _recovery(garmin, snapshot))
+        result = reader.current_performance(_recovery(garmin, snapshot))
 
         self.assertNotIn(VENDOR_SENTINEL, json.dumps(result, ensure_ascii=False))
 
@@ -495,10 +505,12 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
             _garmin_payload(), canonical=True
         )
 
-        _, inputs = reader.read_snapshot(lambda: None)
-        performance = reader.current_performance(None, inputs)
-        garmin_context = reader.recovery(None)
-        reader.recovery(_intervals_snapshot())
+        inputs = reader.read_inputs()
+        performance = reader.current_performance(inputs)
+        garmin_context = reader.recovery(inputs)
+        # Canonical reads (#1416): an Intervals.icu sync in the canonical inputs,
+        # not a stored snapshot, turns the Garmin performance fallback off.
+        reader.recovery(canonical_from_snapshot(_intervals_snapshot(), TODAY))
 
         # Canonical Garmin observations make the context available without a
         # snapshot.
@@ -650,7 +662,7 @@ class CoachStructuredContextSwitchTests(unittest.TestCase):
             "focused", frozenset({"activities", "current_performance"})
         )
 
-        result = service.build(_intervals_snapshot(), selection=selection)
+        result = service.build(selection=selection)
 
         garmin_projection.coach_context.assert_not_called()
         self.assertEqual(set(result), {"activities", "current_performance"})
@@ -685,17 +697,20 @@ class GarminCoachContextFallbackProvenanceTests(unittest.TestCase):
         result = _garmin_projection_service(_garmin_payload()).coach_context()
 
         serialized = json.dumps(result, ensure_ascii=False)
-        self.assertEqual(result["recovery"]["sleep"]["sleepScore"], 84)
+        # Canonical reads (#1416): neutral field names of the canonical record.
+        self.assertEqual(result["recovery"]["sleep"]["sleep_score"], 84)
         self.assertNotIn(VENDOR_SENTINEL, serialized)
         self.assertNotIn("vendorBlob", serialized)
 
-    def test_scalar_recovery_values_are_wrapped_with_value_key(self) -> None:
+    def test_undated_scalar_recovery_values_are_not_records(self) -> None:
+        # Canonical reads (#1416): an undated scalar maps to no canonical
+        # observation, so the section stays empty instead of {"value": ...}.
         result = _garmin_projection_service(
             {"hrv": 57, "resting_hr": 48}
         ).coach_context()
 
-        self.assertEqual(result["recovery"]["hrv"], {"value": 57})
-        self.assertEqual(result["recovery"]["resting_hr"], {"value": 48})
+        self.assertEqual(result["recovery"]["hrv"], {})
+        self.assertEqual(result["recovery"]["resting_hr"], {})
 
     def test_source_freshness_gets_measurement_age_and_drops_non_mappings(
         self,
@@ -818,7 +833,7 @@ class CoachPerformanceBudgetTests(unittest.TestCase):
         garmin = _eighty_four_day_garmin_payload()
         reader, _ = _performance_reader(garmin)
 
-        performance = reader.current_performance(snapshot, _recovery(garmin, snapshot))
+        performance = reader.current_performance(_recovery(garmin, snapshot))
         limit = COACH_CONTEXT_SECTION_LIMITS["current_performance"]
         bounded, truncations = bounded_coach_context_sections(
             {"current_performance": performance},
@@ -848,7 +863,7 @@ class CoachPerformanceBudgetTests(unittest.TestCase):
         garmin = _eighty_four_day_garmin_payload()
         reader, _ = _performance_reader(garmin)
 
-        coach = reader.current_performance(snapshot, _recovery(garmin, snapshot))
+        coach = reader.current_performance(_recovery(garmin, snapshot))
         ui = _context(snapshot, garmin, {"timezone": "UTC"}, TODAY)
 
         for row in coach["personal_recovery"]["baselines"]:

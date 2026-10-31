@@ -158,16 +158,16 @@ def _canonical_load_projection(
 
 
 def garmin_training_load_projection(
-    snapshot: dict[str, Any],
+    status: performance_freshness.GarminSyncStatus,
     current_date: date,
     canonical: GarminCanonicalMetrics,
 ) -> dict[str, Any]:
     """Project the canonical Garmin training load and load balance.
 
     The values come from the canonical training-load and load-balance
-    observations; freshness is sync status and stays on the snapshot.
+    observations; ``status`` supplies only the freshness.
     """
-    freshness = performance_freshness.garmin_source_freshness(snapshot, current_date)
+    freshness = performance_freshness.garmin_source_freshness(status, current_date)
     return _canonical_load_projection(freshness, current_date, canonical.training_load)
 
 
@@ -189,40 +189,6 @@ def _date(value: Any) -> str | None:
         return date.fromisoformat(candidate).isoformat()
     except ValueError:
         return None
-
-
-GARMIN_RECOVERY_FIELDS = (
-    "date",
-    garmin_perf_fields.CALENDAR_DATE,
-    garmin_perf_fields.SUMMARY_DATE,
-    *GARMIN_SLEEP_DURATION_ALIASES,
-    *GARMIN_SLEEP_SCORE_ALIASES,
-    "hrvStatus",
-    garmin_perf_fields.WEEKLY_HRV_AVERAGE,
-    garmin_perf_fields.WEEKLY_AVERAGE,
-    *GARMIN_HRV_LAST_NIGHT_ALIASES,
-    "bodyBattery",
-    "body_battery",
-    "charged",
-    "drained",
-    "score",
-    "status",
-    "level",
-    "qualifier",
-    "trainingReadiness",
-    garmin_perf_fields.READINESS_SCORE,
-    "trainingReadinessLevel",
-    "overallReadinessScore",
-    "overallReadinessLevel",
-    "readinessScore",
-    "recoveryTime",
-)
-
-
-def _selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:
-    if not isinstance(item, dict):
-        return {}
-    return {key: item[key] for key in fields if key in item and item[key] is not None}
 
 
 def latest_garmin_record(value: Any) -> dict[str, Any]:
@@ -259,10 +225,3 @@ def latest_garmin_record(value: Any) -> dict[str, Any]:
             default={},
         )
     return value if isinstance(value, dict) else {}
-
-
-def compact_garmin_recovery(value: Any) -> dict[str, Any]:
-    if isinstance(value, (int, float, bool)):
-        return {"value": value}
-    record = latest_garmin_record(value)
-    return _selected(record, GARMIN_RECOVERY_FIELDS)

@@ -11,10 +11,12 @@ from support import make_config
 
 from backend.observability import Redactor
 from backend.performance import garmin_metrics as performance_garmin_metrics
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     GarminCanonicalState,
 )
+from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
@@ -39,13 +41,15 @@ class _KeyValueRepository:
 
 
 class _PayloadService:
+    """Serves the stored Garmin sync status of a synthetic state."""
+
     def __init__(self, snapshot):
         self.value = snapshot
         self.reads = 0
 
-    def recent_view(self, days=None):
+    def sync_status(self):
         self.reads += 1
-        return self.value
+        return GarminSyncStatus.from_state(self.value)
 
 
 class _SyncService:
@@ -64,23 +68,39 @@ class _SyncStateService:
         return self.value
 
 
-class _Rows:
-    """The canonical Intervals.icu activity rows."""
+class _Summaries:
+    """The canonical activity summaries."""
 
-    def __init__(self, rows):
-        self.rows = tuple(rows)
+    def __init__(self, summaries):
+        self.summaries = tuple(summaries)
 
-    def activity_rows(self, _db, **_bounds):
-        return self.rows
+    def activity_summaries(self, _db, **_bounds):
+        return self.summaries
+
+
+class _MappedObservations:
+    """Serves the observations the production mapper makes of a raw Garmin payload."""
+
+    def __init__(self, payload):
+        self.records = map_garmin_health(
+            dict(payload), zone=UTC, retrieved_at=datetime(2026, 9, 20, 8, tzinfo=UTC)
+        ).records
+
+    def observations(self, _db, kind, *, start=None, end=None, sport=None):
+        return tuple(
+            item
+            for item in self.records
+            if item.kind is kind and (start is None or item.observed_on >= start)
+        )
 
 
 class _MorningBodyBatteryService:
     def __init__(self, value):
         self.value = value
-        self.snapshots = []
+        self.reads = 0
 
-    def current(self, snapshot=None):
-        self.snapshots.append(snapshot)
+    def current(self):
+        self.reads += 1
         return self.value
 
 
@@ -132,7 +152,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self,
         *,
         snapshot=None,
-        rows=(),
+        summaries=(),
         state=None,
         config=None,
         core_errors=None,
@@ -170,7 +190,9 @@ class GarminProjectionServiceTests(unittest.TestCase):
             redactor=redactor,
             local_now=lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
             canonical=GarminCanonicalSources(
-                activity_rows=lambda: _Rows(rows), observations=lambda: object()
+                activity_rows=lambda: object(),
+                observations=lambda: _MappedObservations(snapshot or {}),
+                activity_summaries=lambda: _Summaries(summaries),
             ),
         )
         return service, battery
@@ -197,20 +219,11 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self.assertIs(result["metric_export_enabled"], False)
 
     def test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors(self):
-        duplicate = {
-            "activityId": 1,
-            "startTimeLocal": "2026-09-19 08:00:00",
-            "activityType": {"typeKey": "cycling"},
-            "duration": 3600,
-            "distance": 30000,
-        }
-        unique = {
-            "activityId": 2,
-            "startTimeLocal": "2026-09-18 08:00:00",
-            "activityType": {"typeKey": "running"},
-            "duration": 1800,
-            "distance": 5000,
-        }
+        # Canonical reads (#1416): sessions replace the raw Garmin activity rows.
+        summaries = [
+            {"id": "s1", "record_ids": {"intervals": "intervals-1", "garmin": "1"}},
+            {"id": "s2", "record_ids": {"garmin": "2"}},
+        ]
         snapshot = {
             "source": "fixture",
             "synced_at": "2026-09-20T07:30:00Z",
@@ -218,22 +231,12 @@ class GarminProjectionServiceTests(unittest.TestCase):
             "source_freshness": {
                 "sleep": {"freshness": "partial", "observed_at": "2026-09-19"}
             },
-            "activities": [duplicate, unique, "invalid"],
             "sleep": [{"date": "2026-09-19"}],
             "hrv": [{"date": "2026-09-19"}],
             "resting_hr": [{"date": "2026-09-19"}],
             "readiness": {"score": 72},
             "race_predictions": {"5k": 1200},
         }
-        rows = [
-            {
-                "id": "intervals-1",
-                "start_date_local": "2026-09-19T08:00:00",
-                "type": "Ride",
-                "moving_time": 3600,
-                "distance": 30000,
-            }
-        ]
         state = GarminCanonicalState(
             metrics=GarminCanonicalMetrics(race_predictions={"run_5k_seconds": 1200}),
             has_sleep=True,
@@ -256,7 +259,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
             service, battery = self._service(
                 config=_config(tokenstore=str(Path(directory) / "tokens")),
                 snapshot=snapshot,
-                rows=rows,
+                summaries=summaries,
                 state=state,
                 core_errors=[
                     {"source": "activities", "message": "synthetic-garmin-password"}
@@ -297,7 +300,7 @@ class GarminProjectionServiceTests(unittest.TestCase):
             result["morning_body_battery"],
             {"status": "ready", "morning": {"value": 78}},
         )
-        self.assertIs(battery.snapshots[0], snapshot)
+        self.assertEqual(battery.reads, 1)
 
     def test_public_state_keeps_library_fallback_and_fixture_configuration(self):
         service, _ = self._service(
@@ -322,26 +325,20 @@ class GarminProjectionServiceTests(unittest.TestCase):
         self.assertFalse(result["has_vo2max"])
         self.assertFalse(result["has_estimated_run_times"])
 
-    def test_duplicates_are_counted_against_the_canonical_rows_only(self):
-        garmin = {
-            "activityId": 1,
-            "startTimeLocal": "2026-09-19 08:00:00",
-            "activityType": {"typeKey": "cycling"},
-            "duration": 3600,
-            "distance": 30000,
-        }
-        match = {
-            "id": "intervals-1",
-            "start_date_local": "2026-09-19T08:00:00",
-            "type": "Ride",
-            "moving_time": 3600,
-            "distance": 30000,
-        }
-        # A snapshot that still lists the activity must not influence the count.
-        snapshot = {"activities": [garmin], "recent_activities": [match]}
-        for rows, expected in (([], (1, 0)), ([match], (0, 1))):
-            with self.subTest(rows=len(rows)):
-                service, _ = self._service(snapshot=snapshot, rows=rows)
+    def test_duplicates_are_counted_against_the_canonical_sessions_only(self):
+        # Canonical reads (#1416): a Garmin record bundled with another provider's
+        # record in one session is the duplicate; the raw view is not read.
+        snapshot = {"activities": [{"activityId": 1}]}
+        alone = {"id": "s1", "record_ids": {"garmin": "1"}}
+        shared = {"id": "s1", "record_ids": {"intervals": "i1", "garmin": "1"}}
+        intervals_only = {"id": "s2", "record_ids": {"intervals": "i2"}}
+        for summaries, expected in (
+            ([], (0, 0)),
+            ([alone, intervals_only], (1, 0)),
+            ([shared], (0, 1)),
+        ):
+            with self.subTest(summaries=len(summaries)):
+                service, _ = self._service(snapshot=snapshot, summaries=summaries)
                 with patch.object(
                     performance_garmin_metrics,
                     "garmin_performance_metrics",
@@ -368,25 +365,20 @@ class GarminProjectionServiceTests(unittest.TestCase):
                 local_now=lambda: datetime(2026, 9, 20, 8, tzinfo=UTC),
             )
 
-    def test_public_state_reuses_a_snapshot_the_caller_already_read(self):
-        snapshot = {
-            "source": "fixture",
-            "sleep": [{"date": "2026-09-19"}],
-            "activities": [{"activityId": "garmin-1"}],
-        }
+    def test_public_state_reuses_a_status_the_caller_already_read(self):
+        snapshot = {"source": "fixture", "sleep": [{"date": "2026-09-19"}]}
         payload = _PayloadService(snapshot)
-        service, battery = self._service(snapshot=snapshot, payload=payload)
+        service, _battery = self._service(snapshot=snapshot, payload=payload)
         with patch.object(
             performance_garmin_metrics,
             "garmin_performance_metrics",
             return_value=_metrics(),
         ):
             expected = service.public_state()
-            result = service.public_state(snapshot)
+            result = service.public_state(GarminSyncStatus.from_state(snapshot))
 
         self.assertEqual(result, expected)
         self.assertEqual(payload.reads, 1)
-        self.assertIs(battery.snapshots[-1], snapshot)
 
     def test_coach_context_keeps_recovery_scope_error_bounds_and_performance_fallback(
         self,
@@ -436,11 +428,17 @@ class GarminProjectionServiceTests(unittest.TestCase):
         )
         self.assertEqual(result["performance"], performance)
         self.assertEqual(context_projection.call_count, 1)
+        # Canonical reads (#1416): the latest canonical record of each section,
+        # with neutral field names, replaces the raw Garmin record.
         self.assertEqual(
-            result["recovery"]["sleep"],
-            {"calendarDate": "2026-09-20", "sleepScore": 82},
+            result["recovery"]["sleep"], {"date": "2026-09-20", "sleep_score": 82}
         )
-        self.assertEqual(result["recovery"]["hrv"]["lastNightAvg"], 57)
+        self.assertEqual(result["recovery"]["hrv"]["last_night_avg_ms"], 57)
+        self.assertEqual(
+            result["recovery"]["resting_hr"],
+            {"date": "2026-09-20", "resting_hr_bpm": 48},
+        )
+        self.assertEqual(result["recovery"]["readiness"]["score"], 78)
         self.assertEqual(result["recovery"]["body_battery"], battery)
         self.assertEqual(len(result["errors"]), 20)
         self.assertTrue(all(len(error) <= 300 for error in result["errors"]))

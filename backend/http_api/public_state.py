@@ -163,8 +163,8 @@ class PublicStateService:
                 ),
                 "external_calendar": external_calendar,
                 "daily_planning_context": daily_context,
-                **deps.public_performance.from_snapshot(
-                    snapshot, getattr(prelude, "performance_inputs", None)
+                **deps.public_performance.from_inputs(
+                    getattr(prelude, "performance_inputs", None), snapshot
                 ),
                 ProviderId.INTERVALS.value: intervals_state.public_state(
                     configured=bool(deps.config.intervals_api_key),

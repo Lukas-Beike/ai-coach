@@ -37,6 +37,7 @@ from backend.db.garmin_store import prune_section
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance import garmin_metrics, garmin_observations
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     read_garmin_sleep_day,
@@ -88,7 +89,7 @@ class _LegacyActivities:
 
 
 class _Battery:
-    def current(self, snapshot: Any = None) -> dict[str, Any]:
+    def current(self) -> dict[str, Any]:
         return BODY_BATTERY
 
 
@@ -147,7 +148,9 @@ class GarminReadFixture(CanonicalReadFixture):
             redactor=Redactor(lambda: config),
             local_now=lambda: LOCAL_NOW,
             canonical=GarminCanonicalSources(
-                activity_rows=lambda: selector, observations=lambda: selector
+                activity_rows=lambda: selector,
+                observations=lambda: selector,
+                activity_summaries=lambda: selector,
             ),
         )
 
@@ -182,7 +185,7 @@ class GarminStateEqualityTests(GarminReadFixture):
         state = self.read(lambda db: read_garmin_state(self.table, db))
         legacy = garmin_metrics.garmin_payload_performance_metrics(self.garmin, TODAY)
         overlay = garmin_metrics.garmin_performance_metrics(
-            self.garmin, TODAY, state.metrics
+            GarminSyncStatus.from_state(self.garmin), TODAY, state.metrics
         )
 
         for section, flag in (
@@ -279,6 +282,30 @@ class GarminServiceEqualityTests(GarminReadFixture):
             self.assertTrue(state[key], key)
         self.assertTrue(state["has_weight"])
 
+    def test_coach_recovery_comes_from_the_canonical_records(self) -> None:
+        # Canonical reads (#1416): the Coach recovery section shows the latest
+        # canonical record of each section, its values and status codes.
+        populate(self)
+        recovery = self._projection_service().coach_context()["recovery"]
+
+        self.assertEqual(recovery["body_battery"], BODY_BATTERY)
+        self.assertEqual(
+            recovery["hrv"],
+            {
+                "date": "2026-10-10",
+                "last_night_avg_ms": 61,
+                "weekly_avg_ms": 58,
+                "status": "BALANCED",
+            },
+        )
+        self.assertEqual(
+            recovery["readiness"], {"date": "2026-10-10", "score": 75, "level": "HIGH"}
+        )
+        for section in ("sleep", "resting_hr"):
+            self.assertEqual(recovery[section]["date"], "2026-10-10", section)
+        self.assertIn("sleep_seconds", recovery["sleep"])
+        self.assertIn("resting_hr_bpm", recovery["resting_hr"])
+
     def test_sections_without_observations_are_reported_missing(self) -> None:
         self.garmin = {
             key: value
@@ -306,7 +333,9 @@ class GarminServiceEqualityTests(GarminReadFixture):
             for key, value in self.garmin.items()
             if key not in CANONICAL_SECTIONS
         }
-        self.garmin["hrv"] = {"weeklyAvg": 48}
+        # Canonical reads (#1416): the dated weekly average is a canonical
+        # observation; an undated weekly value no longer counts.
+        self.garmin["hrv"] = {"calendarDate": "2026-10-10", "weeklyAvg": 48}
         populate(self)
 
         state = self._projection_service().public_state()
@@ -481,7 +510,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
             (Sport.RUN, 192.0, date(2026, 10, 2)),
         )
         state = read_garmin_state(reader, object())
-        metrics = garmin_metrics.garmin_performance_metrics({}, TODAY, state.metrics)
+        metrics = garmin_metrics.garmin_performance_metrics(
+            GarminSyncStatus.from_state({}), TODAY, state.metrics
+        )
 
         cycling = metrics["cycling_max_hr_bpm"]
         self.assertEqual(cycling["value"], 186)
@@ -495,7 +526,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
             (Sport.RIDE, 199.0, date(2026, 10, 1)),
         )
         state = read_garmin_state(reader, object())
-        metrics = garmin_metrics.garmin_performance_metrics({}, TODAY, state.metrics)
+        metrics = garmin_metrics.garmin_performance_metrics(
+            GarminSyncStatus.from_state({}), TODAY, state.metrics
+        )
 
         self.assertEqual(type(reader).calls, 0)
         self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
@@ -511,7 +544,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
             (Sport.RIDE, 186.0, date(2026, 10, 5)),
         )
         state = read_garmin_state(reader, object())
-        metrics = garmin_metrics.garmin_performance_metrics({}, TODAY, state.metrics)
+        metrics = garmin_metrics.garmin_performance_metrics(
+            GarminSyncStatus.from_state({}), TODAY, state.metrics
+        )
 
         self.assertEqual(metrics["running_max_hr_bpm"]["value"], 188)
         self.assertEqual(
@@ -566,7 +601,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
         }
         mapped = map_garmin_health(payload, zone=UTC, retrieved_at=LOCAL_NOW)
         canonical = self._metrics(list(mapped.records))
-        metrics = garmin_metrics.garmin_performance_metrics(payload, TODAY, canonical)
+        metrics = garmin_metrics.garmin_performance_metrics(
+            GarminSyncStatus.from_state(payload), TODAY, canonical
+        )
         legacy = garmin_metrics.garmin_payload_performance_metrics(payload, TODAY)
 
         self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 279)

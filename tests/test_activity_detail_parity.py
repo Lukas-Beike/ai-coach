@@ -23,6 +23,7 @@ from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, SourceKind
 from backend.db.activity_detail_store import replace_detail_set
 from backend.http_api.activity_assembly import ActivityReadAssembly, ActivityReadSources
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.providers.fit_activity_detail_mapping import map_fit_activity_detail
 from backend.providers.garmin_activity_detail_mapping import (
     map_garmin_activity_detail,
@@ -149,7 +150,7 @@ class ActivityDetailParityTests(unittest.TestCase):
 
     def detail(self, activity_id):
         return self.assembly.activity_read().detail(
-            activity_id, garmin_snapshot={}, profile={}, today=TODAY
+            activity_id, garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=TODAY
         )
 
     def store_intervals(self, summary_sha256):

@@ -14,6 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.canonical.vocabulary import MetricKind
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import read_garmin_state
 from backend.performance.garmin_projection import (
     GARMIN_SOURCE,
@@ -81,7 +82,9 @@ class TrainingLoadParityTests(unittest.TestCase):
     def project(self, garmin: dict[str, Any]) -> dict[str, Any]:
         metrics = read_garmin_state(MappedReader(garmin), None).metrics
         # Only the sync status stays on the snapshot.
-        status_only = {"source_freshness": copy.deepcopy(garmin["source_freshness"])}
+        status_only = GarminSyncStatus.from_state(
+            {"source_freshness": copy.deepcopy(garmin["source_freshness"])}
+        )
         return garmin_training_load_projection(status_only, TODAY, metrics)
 
     def test_fresh_values_of_today(self) -> None:

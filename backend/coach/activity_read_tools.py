@@ -115,7 +115,7 @@ class CoachActivityReadToolService:
         if name == "get_activity_details":
             return self._activity_read.detail(
                 arguments.get("activity_id"),
-                garmin_snapshot=self._garmin_payload.recent_view(),
+                garmin_status=self._garmin_payload.sync_status(),
                 profile=self._profile.get(),
                 today=self._today(),
             )

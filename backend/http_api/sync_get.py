@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from backend.canonical.public_metrics import neutral_activity_records
 from backend.http_api.auth import SessionAuthService
 from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.sync.queue import SyncJobQueueService
 from backend.sync.status import SyncPublicStateService
 
@@ -51,7 +52,7 @@ class SyncGetRoutes:
         if activity_match:
             payload = self._activity_read_service().detail(
                 unquote(activity_match.group(1)),
-                garmin_snapshot={},
+                garmin_status=NO_GARMIN_SYNC_STATUS,
                 profile={},
                 today=self._local_today(),
             )

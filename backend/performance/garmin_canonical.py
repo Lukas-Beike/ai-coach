@@ -24,9 +24,15 @@ from typing import Any
 
 from backend.canonical.records import Observation
 from backend.canonical.sports import legacy_activity_family
-from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.canonical.vocabulary import (
+    CategoricalDomain,
+    MetricKind,
+    ProviderId,
+    Sport,
+)
 from backend.runtime.ports import (
     ActivityMaxHrReader,
+    CategoricalObservationReader,
     ObservationReader,
     ObservationSourceSelector,
 )
@@ -164,11 +170,77 @@ def read_garmin_state(reader: ObservationReader, db: Any) -> GarminCanonicalStat
     return GarminCanonicalState(
         metrics=metrics,
         has_sleep=bool(sleep),
-        has_hrv=bool(by_kind[MetricKind.HRV_RMSSD]),
+        has_hrv=bool(
+            by_kind[MetricKind.HRV_RMSSD] or by_kind[MetricKind.HRV_WEEKLY_AVERAGE]
+        ),
         has_resting_hr=bool(by_kind[MetricKind.RESTING_HR]),
         has_readiness=bool(by_kind[MetricKind.READINESS]),
         sleep_observed_on=max((item.observed_on for item in sleep), default=None),
     )
+
+
+# Coach recovery section -> ((field, kind), ...) and its status domain, if any.
+_RECOVERY_RECORDS: Mapping[
+    str, tuple[tuple[tuple[str, MetricKind], ...], tuple[str, CategoricalDomain] | None]
+] = {
+    "sleep": (
+        (
+            ("sleep_seconds", MetricKind.SLEEP_DURATION),
+            ("sleep_score", MetricKind.SLEEP_SCORE),
+        ),
+        None,
+    ),
+    "hrv": (
+        (
+            ("last_night_avg_ms", MetricKind.HRV_RMSSD),
+            ("weekly_avg_ms", MetricKind.HRV_WEEKLY_AVERAGE),
+        ),
+        ("status", CategoricalDomain.HRV_STATUS),
+    ),
+    "resting_hr": ((("resting_hr_bpm", MetricKind.RESTING_HR),), None),
+    "readiness": (
+        (("score", MetricKind.READINESS),),
+        ("level", CategoricalDomain.READINESS_LEVEL),
+    ),
+}
+
+
+def read_garmin_recovery(
+    reader: ObservationReader, db: Any, *, start: date
+) -> dict[str, dict[str, Any]]:
+    """Return the latest Garmin recovery record of each section since ``start``.
+
+    A section's record is the latest day with any of its kinds or its status; it
+    holds that day's values, each the day's latest observation. A section without
+    any is an empty mapping. Status codes are read only from a source that stores
+    them.
+    """
+    reader = _resolved(reader, db)
+    records: dict[str, dict[str, Any]] = {}
+    for section, (fields, status) in _RECOVERY_RECORDS.items():
+        values: dict[date, dict[str, Any]] = {}
+        for name, kind in fields:
+            for day, value in _daily_values(
+                item
+                for item in reader.observations(db, kind, start=start)
+                if item.provenance.provider is ProviderId.GARMIN
+            ).items():
+                values.setdefault(day, {})[name] = _number(value)
+        if status is not None and isinstance(reader, CategoricalObservationReader):
+            name, domain = status
+            for item in reader.categorical_observations(db, domain, start=start):
+                if item.provenance.provider is ProviderId.GARMIN:
+                    values.setdefault(item.observed_on, {})[name] = item.code
+        if not values:
+            records[section] = {}
+            continue
+        day = max(values)
+        records[section] = {"date": day.isoformat(), **values[day]}
+    return records
+
+
+def _number(value: float) -> float | int:
+    return int(value) if float(value).is_integer() else value
 
 
 def read_garmin_sleep_day(reader: ObservationReader, db: Any) -> date | None:
@@ -195,6 +267,7 @@ _READ_KINDS = (
     MetricKind.SLEEP_DURATION,
     MetricKind.SLEEP_SCORE,
     MetricKind.HRV_RMSSD,
+    MetricKind.HRV_WEEKLY_AVERAGE,
     MetricKind.RESTING_HR,
     MetricKind.READINESS,
     MetricKind.WEIGHT,

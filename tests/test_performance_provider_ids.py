@@ -15,6 +15,7 @@ from backend.coach.context import coach_performance_projection
 from backend.performance.body import body_history
 from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import analysis_history
+from backend.performance.freshness import GarminSyncStatus
 
 TODAY = date(2026, 10, 12)
 CURRENT_KEYS = (
@@ -59,7 +60,12 @@ def _empty_garmin_metrics(**values):
 
 class ProviderIdPayloadTests(unittest.TestCase):
     def test_chart_history_series_carry_provider_ids_next_to_labels(self):
-        result = analysis_history(None, {}, TODAY, canonical=EMPTY_PERFORMANCE_INPUTS)
+        result = analysis_history(
+            None,
+            GarminSyncStatus.from_state({}),
+            TODAY,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
+        )
 
         eftp = result["metrics"]["cycling_eftp_watts"][0]
         ftp = result["metrics"]["cycling_ftp_watts"][0]
@@ -83,8 +89,8 @@ class ProviderIdPayloadTests(unittest.TestCase):
             ]
         }
         result = body_history(
-            snapshot,
-            garmin,
+            (snapshot or {}).get("synced_at"),
+            GarminSyncStatus.from_state(garmin),
             TODAY,
             wellness_days=days_from_rows(snapshot["recent_wellness"]),
             canonical=garmin_body_from_payload(garmin, TODAY),

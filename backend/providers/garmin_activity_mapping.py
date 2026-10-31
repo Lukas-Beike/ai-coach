@@ -37,6 +37,12 @@ the same moment.
   ``vO2MaxValue`` -> ``avg_speed_mps``, ``elevation_gain_m``,
   ``normalized_power`` and ``vo2max``.
 * ``activityName`` (text, stripped and truncated to 200 characters).
+* ``trainingEffectLabel`` (text, stripped, upper-cased and truncated to 50
+  characters) -> ``training_effect_label``.
+
+A dedicated ``training_load_activities`` row of the same ``activityId`` supplies
+``activityTrainingLoad`` and ``trainingEffectLabel`` before the activity is stored
+(``merge_training_load_rows``), so a re-projection of the stored row reads them too.
 
 Sport and environment. A known ``typeKey`` uses ``GARMIN_ACTIVITY_TYPES``. An
 environment that the key leaves UNKNOWN may be named by the activity name.
@@ -59,7 +65,11 @@ from backend.canonical.mapping import (
     MappingResult,
     coerce_number,
 )
-from backend.canonical.records import ActivityRecord, Provenance
+from backend.canonical.records import (
+    MAX_TRAINING_EFFECT_LABEL_LENGTH,
+    ActivityRecord,
+    Provenance,
+)
 from backend.canonical.sports import classify_environment_text, classify_sport_text
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
@@ -85,7 +95,8 @@ from backend.canonical.vocabulary import (
 # Version 4: a row with manualActivity exactly True is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
 # Version 7: maps average speed, elevation gain, normalized power and VO2max.
-MAPPER_VERSION: Final = 7
+# Version 8: maps the training-effect label (#1416).
+MAPPER_VERSION: Final = 8
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -102,6 +113,10 @@ _AVERAGE_SPEED_KEYS: Final = ("averageSpeed",)
 _ELEVATION_GAIN_KEYS: Final = ("elevationGain",)
 _NORMALIZED_POWER_KEYS: Final = ("normPower",)
 _VO2MAX_KEYS: Final = ("vO2MaxValue",)
+_TRAINING_EFFECT_LABEL_KEY: Final = "trainingEffectLabel"
+_TRAINING_LOAD_KEY: Final = "activityTrainingLoad"
+# The dedicated training-load rows override these activity fields.
+_TRAINING_LOAD_FIELDS: Final = (_TRAINING_LOAD_KEY, _TRAINING_EFFECT_LABEL_KEY)
 
 # Exact Garmin activityType.typeKey values. The environment is set only where the
 # key names it; otherwise UNKNOWN, which the activity name may still refine.
@@ -191,8 +206,9 @@ def _map_row(
         row, ("distance",), (0.0, MAX_ACTIVITY_DISTANCE_M), ref, issues
     )
     load = _optional_number(
-        row, ("activityTrainingLoad",), (0.0, MAX_ACTIVITY_LOAD), ref, issues
+        row, (_TRAINING_LOAD_KEY,), (0.0, MAX_ACTIVITY_LOAD), ref, issues
     )
+    training_effect_label = _training_effect_label(row, ref, issues)
     avg_hr = _optional_number(row, ("averageHR",), HEART_RATE_BOUNDS, ref, issues)
     max_hr = _optional_number(row, _MAX_HR_KEYS, HEART_RATE_BOUNDS, ref, issues)
     max_speed = _optional_number(
@@ -242,7 +258,62 @@ def _map_row(
         elevation_gain_m=elevation_gain,
         normalized_power=normalized_power,
         vo2max=vo2max,
+        training_effect_label=training_effect_label,
     )
+
+
+def merge_training_load_rows(activities: object, training_loads: object) -> object:
+    """Return the activity rows with the dedicated training-load values merged in.
+
+    A training-load row of the same ``activityId`` (or ``id``) replaces the
+    activity's training load and training-effect label where it carries one.
+    Anything that is not a list of rows is returned unchanged.
+    """
+    if not isinstance(activities, list) or not isinstance(training_loads, list):
+        return activities
+    by_id = {
+        str(identity): row
+        for row in training_loads
+        if isinstance(row, dict)
+        and not _is_absent(identity := row.get("activityId") or row.get("id"))
+    }
+    if not by_id:
+        return activities
+    merged: list[object] = []
+    for activity in activities:
+        load_row = (
+            by_id.get(str(activity.get("activityId") or activity.get("id") or ""))
+            if isinstance(activity, dict)
+            else None
+        )
+        if not isinstance(activity, dict) or load_row is None:
+            merged.append(activity)
+            continue
+        merged.append(
+            {
+                **activity,
+                **{
+                    key: load_row[key]
+                    for key in _TRAINING_LOAD_FIELDS
+                    if load_row.get(key) is not None
+                },
+            }
+        )
+    return merged
+
+
+def _training_effect_label(
+    row: dict[str, object], ref: str | None, issues: list[MappingIssue]
+) -> str | None:
+    value = row.get(_TRAINING_EFFECT_LABEL_KEY)
+    if _is_absent(value):
+        return None
+    if not isinstance(value, str):
+        issues.append(
+            MappingIssue(ref, _TRAINING_EFFECT_LABEL_KEY, IssueReason.INVALID_TYPE)
+        )
+        return None
+    return value.strip().upper()[:MAX_TRAINING_EFFECT_LABEL_LENGTH]
 
 
 def _is_absent(value: object) -> bool:

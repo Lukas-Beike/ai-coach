@@ -142,7 +142,6 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
 
     def test_valid_overrides_skip_checkin_and_calendar_reads(self):
         result = self.service.build(
-            snapshot={"recent_wellness": []},
             planned=[{"id": "planned", "starts_at_local": "2026-09-20"}],
             weather={"days": [{"date": "2026-09-20", "condition": "rain"}]},
             checkins=[{"checkin_date": "2026-09-20", "motivation": 8}],
@@ -167,7 +166,6 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.checkins.rows = [{"checkin_date": "2026-09-20", "stress": 2}]
         self.calendar.rows = []
         result = self.service.build(
-            snapshot=[],
             planned={},
             weather={"days": {}},
             checkins={},
@@ -285,8 +283,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
             }
         ]
         result = self.service.build(
-            # The Intervals.icu snapshot is no longer read for form.
-            snapshot={"recent_wellness": [{"id": "2026-09-20", "tsb": -99}]},
+            # Form comes from observations only; no snapshot is taken (#1416).
             planned=[{"id": "unit-1", "starts_at_local": "2026-09-20"}],
             weather={"days": [{"date": "2026-09-20", "temperature_max": 17}]},
             checkins=[{"checkin_date": "2026-09-20", "motivation": 9}],

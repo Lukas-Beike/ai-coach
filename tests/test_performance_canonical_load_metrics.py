@@ -31,6 +31,7 @@ from backend.performance.canonical_inputs import (
 )
 from backend.performance.chart_history import analysis_history
 from backend.performance.context import current_performance_context
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.providers.snapshot_projection import project_intervals_snapshot
 
@@ -93,8 +94,7 @@ def _context(
 ) -> dict[str, Any]:
     canonical = _inputs(snapshot, carrier)
     return current_performance_context(
-        _stripped(snapshot) if carrier is None else carrier,
-        {},
+        GarminSyncStatus.from_state({}),
         {},
         DAY,
         canonical=canonical,
@@ -365,13 +365,9 @@ class EftpTests(unittest.TestCase):
         self.assertEqual(len(inputs.current.bike_threshold_hr), 1)
 
     def test_without_canonical_inputs_no_eftp_remains(self) -> None:
-        snapshot = _snapshot(
-            [_row(_day(), sportInfo=[_ride(265)])],
-            settings=[_ride(262)],
-            activities=[self.ACTIVITY],
-        )
+        # Canonical reads (#1416): the context takes no snapshot at all.
         context = current_performance_context(
-            snapshot, {}, {}, DAY, canonical=EMPTY_PERFORMANCE_INPUTS
+            GarminSyncStatus.from_state({}), {}, DAY, canonical=EMPTY_PERFORMANCE_INPUTS
         )
         # Canonical reads (#1415): the snapshot's ride activity is no longer read
         # either (was 270 for both values). Without canonical values the context
@@ -388,7 +384,10 @@ class EftpTests(unittest.TestCase):
         ]
         snapshot = _snapshot(rows)
         history = analysis_history(
-            _stripped(snapshot), {}, DAY, canonical=_inputs(snapshot)
+            _stripped(snapshot),
+            GarminSyncStatus.from_state({}),
+            DAY,
+            canonical=_inputs(snapshot),
         )
         points = history["metrics"]["cycling_eftp_watts"][0]["points"]
         self.assertEqual([point["value"] for point in points[-2:]], [250.0, 260.0])

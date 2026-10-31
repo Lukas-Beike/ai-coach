@@ -36,6 +36,7 @@ from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.detail_envelope import activity_equipment
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.performance.report_service import TrainingRecordsService
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
@@ -570,7 +571,9 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
             _Snapshots(_snapshot([], raw)),
             **({} if read_equipment is None else {"read_equipment": read_equipment}),
         )
-        return service.detail("ride-1", garmin_snapshot={}, profile={}, today=TODAY)
+        return service.detail(
+            "ride-1", garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=TODAY
+        )
 
     def test_detail_reads_the_equipment_of_its_own_activity(self) -> None:
         requested: list[str] = []
@@ -908,7 +911,7 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
         self.assertEqual("recorded", row["workout_profile"]["source"])
         snapshots = _Snapshots(_snapshot([self.COMPACT_LEAN], [self.RAW]))
         detail = _detail_service(self.database, snapshots).detail(
-            "ride-1", garmin_snapshot={}, profile={}, today=TODAY
+            "ride-1", garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=TODAY
         )
         self.assertFalse(_intervals_entry(detail)["stale"])
 

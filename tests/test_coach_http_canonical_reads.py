@@ -264,16 +264,8 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
         reader = CoachPerformanceContextReader(
             Mock(), Mock(), Mock(), lambda: TODAY, None, source
         )
-        seen: list[bool] = []
+        _inputs, recent = reader.read_sources()
 
-        def read_snapshot() -> dict[str, Any]:
-            seen.append(manager.open)
-            return self.intervals
-
-        snapshot, _inputs, recent = reader.read_sources(read_snapshot)
-
-        self.assertEqual(seen, [True])
-        self.assertIs(snapshot, self.intervals)
         assert recent is not None
         self.assertTrue(recent[0])
         self.assertEqual(reader.activities([], recent), reader.activities([]))
@@ -283,9 +275,8 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
             Mock(), Mock(), Mock(), lambda: TODAY, None, None
         )
 
-        snapshot, _inputs, rows = reader.read_sources(lambda: self.intervals)
+        _inputs, rows = reader.read_sources()
 
-        self.assertIs(snapshot, self.intervals)
         self.assertIsNone(rows)
 
     def test_without_a_row_source_no_activities_are_projected(self) -> None:

@@ -17,6 +17,7 @@ from enum import StrEnum
 from typing import Any, Final, NamedTuple
 
 from backend.canonical.records import (
+    MAX_TRAINING_EFFECT_LABEL_LENGTH,
     MAX_ZONE_COUNT,
     MAX_ZONE_ID_LENGTH,
     UNKNOWN_CONTEXT,
@@ -57,6 +58,7 @@ _STEPS_KEY: Final = "steps"
 _DEVICE_TYPE_KEY: Final = "device_type"
 _PLANNED_EVENT_KEY: Final = "planned_event_id"
 _DEVICE_NAME_KEY: Final = "device_name"
+_TRAINING_EFFECT_LABEL_KEY: Final = "training_effect_label"
 # ActivityRecord summary fields stored in the details under their own names.
 ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "intensity",
@@ -1350,6 +1352,7 @@ def _activity_details(record: ActivityRecord) -> str:
             ),
             (_PLANNED_EVENT_KEY, record.planned_event_id),
             (_DEVICE_NAME_KEY, record.device_name),
+            (_TRAINING_EFFECT_LABEL_KEY, record.training_effect_label),
             (_CONTEXT_KEY, record.provenance.context.as_details() or None),
             *(
                 (field, getattr(record, field))
@@ -1391,6 +1394,13 @@ def activity_summary_values(details: object) -> dict[str, Any]:
         text = loaded.get(key)
         if isinstance(text, str) and text.strip() and len(text) <= 200:
             values[key] = text
+    label = loaded.get(_TRAINING_EFFECT_LABEL_KEY)
+    if (
+        isinstance(label, str)
+        and label.strip()
+        and len(label) <= MAX_TRAINING_EFFECT_LABEL_LENGTH
+    ):
+        values[_TRAINING_EFFECT_LABEL_KEY] = label
     return values
 
 

@@ -85,6 +85,10 @@ The system SHALL build ordinary Coach context from saved provider observations a
 - **WHEN** the saved Intervals snapshot is empty
 - **THEN** the context permits the implemented Garmin performance fallback while keeping provider recovery separate and unavailable evidence explicit.
 
+#### Scenario: Recovery section from canonical records
+- **WHEN** the Coach recovery section is built
+- **THEN** sleep, HRV, resting HR and readiness each show the latest canonical Garmin record of the last 14 days (`date` plus neutral fields such as `sleep_seconds`, `sleep_score`, `last_night_avg_ms`, `weekly_avg_ms`, `resting_hr_bpm`, `score`, and the provider status codes `status` and `level`), Body Battery the stored morning record, and the sync time, window, freshness and errors come from the Garmin sync status; the raw Garmin view is not read, and the Garmin performance fallback is requested only when the canonical inputs hold no Intervals.icu sync.
+
 #### Scenario: Local calendar planning
 - **WHEN** context combines planned units, competitions and external calendar entries
 - **THEN** calendar items identify their local-plan, competition or external-calendar origin; external calendar context is read-only.

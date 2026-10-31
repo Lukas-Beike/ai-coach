@@ -1435,9 +1435,12 @@ class ServerSyncTests(ServerTestCase):
 
     def test_build_training_context_uses_compact_intervals_projection(self):
         today = server.ATHLETE_CLOCK.now().date()
+        # Canonical reads (#1416): the preview's compacted flag follows the
+        # canonical Intervals.icu sync, here the stored athlete record.
         snapshot = {
             "synced_at": "now",
-            "athlete": {},
+            "athlete": {"lthr": 171},
+            "raw_provider_data": {"athlete": {"lthr": 171}},
             "recent_activities": [
                 {
                     "id": f"ride-{index}",

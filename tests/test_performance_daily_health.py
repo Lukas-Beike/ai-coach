@@ -14,6 +14,7 @@ from backend.performance.daily_health import (
     garmin_daily_health_metrics,
     read_daily_health_by_date,
 )
+from backend.performance.freshness import GarminSyncStatus
 
 
 class GarminDailyHealthTests(unittest.TestCase):
@@ -434,7 +435,7 @@ class GarminDailyHealthTests(unittest.TestCase):
             },
         }
         result = garmin_daily_health_metrics(
-            snapshot,
+            GarminSyncStatus.from_state(snapshot),
             2,
             date(2026, 8, 31),
             date(2026, 9, 2),
@@ -458,7 +459,7 @@ class GarminDailyHealthTests(unittest.TestCase):
             },
         }
         result = garmin_daily_health_metrics(
-            snapshot,
+            GarminSyncStatus.from_state(snapshot),
             1,
             date(2026, 8, 31),
             date(2026, 9, 1),
@@ -468,7 +469,7 @@ class GarminDailyHealthTests(unittest.TestCase):
         self.assertIn("Letzter guter Wert", result["steps_7d"]["note"])
         snapshot["source_freshness"]["daily_stats"]["freshness"] = "fresh"
         result = garmin_daily_health_metrics(
-            snapshot,
+            GarminSyncStatus.from_state(snapshot),
             1,
             date(2026, 8, 31),
             date(2026, 8, 31),
@@ -481,7 +482,7 @@ class GarminDailyHealthTests(unittest.TestCase):
         snapshot = {"daily_stats": [{"date": "2026-08-31", "unknown": 1}]}
         before = copy.deepcopy(snapshot)
         result = garmin_daily_health_metrics(
-            snapshot,
+            GarminSyncStatus.from_state(snapshot),
             7,
             date(2026, 8, 31),
             date(2026, 8, 31),
@@ -546,13 +547,17 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
         end = date(2026, 9, 20)
         canonical = read_daily_health_by_date(self.reader, "db")
         with_stats = garmin_daily_health_metrics(
-            self.SNAPSHOT, 7, end, end, health_by_date=canonical
+            GarminSyncStatus.from_state(self.SNAPSHOT),
+            7,
+            end,
+            end,
+            health_by_date=canonical,
         )
         without_stats = garmin_daily_health_metrics(
-            {}, 7, end, end, health_by_date=canonical
+            GarminSyncStatus.from_state({}), 7, end, end, health_by_date=canonical
         )
         without_observations = garmin_daily_health_metrics(
-            self.SNAPSHOT, 7, end, end, health_by_date={}
+            GarminSyncStatus.from_state(self.SNAPSHOT), 7, end, end, health_by_date={}
         )
 
         self.assertEqual(

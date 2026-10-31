@@ -106,7 +106,9 @@ class CoachContextPreviewServiceTests(unittest.TestCase):
         self.assertTrue(preview["snapshot_compacted"])
         self.assertEqual(preview["chat_prompt"]["content"], "Plan tomorrow")
         self.assertEqual(preview["context_text"], "exact assembled context")
-        self.sync_state.latest_snapshot.assert_called_once_with()
+        # Canonical reads (#1416): the preview reads no stored snapshot; the
+        # compacted flag follows the canonical Intervals.icu sync time.
+        self.sync_state.latest_snapshot.assert_not_called()
         self.messages.list.assert_called_once_with()
         self.structured_context.build.assert_called_once_with()
         self.assertIs(

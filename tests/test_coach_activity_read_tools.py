@@ -20,6 +20,7 @@ from backend.errors import AppError
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.providers.intervals_activity_detail_projection import (
     COACH_ACTIVITY_DETAIL_MAX_LAPS,
     COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
@@ -167,7 +168,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         other = {**raw_activity, "id": "synthetic-2", "name": "Other run"}
         manager = _sessions(self, raw_activity, other)
         _store_streams(manager, "synthetic-1", {"time": [0, 1], "watts": [200, 250]})
-        garmin = Mock(recent_view=Mock(return_value={"recent_wellness": []}))
+        garmin = Mock(sync_status=Mock(return_value=NO_GARMIN_SYNC_STATUS))
         profile = Mock(get=Mock(return_value={"weight_kg": "70"}))
         service = _detail_tool(manager, [raw_activity, other], garmin, profile)
 
@@ -197,7 +198,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         self.assertNotIn("provider_extra", text)
         self.assertNotIn("synthetic-2", text)
         self.assertNotIn("Other run", text)
-        garmin.recent_view.assert_called_once_with()
+        garmin.sync_status.assert_called_once_with()
         profile.get.assert_called_once_with()
 
     def test_detail_result_size_does_not_grow_with_the_recording(self):
@@ -231,7 +232,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
                 service = _detail_tool(
                     manager,
                     [raw_activity],
-                    Mock(recent_view=Mock(return_value={})),
+                    Mock(sync_status=Mock(return_value=NO_GARMIN_SYNC_STATUS)),
                     Mock(get=Mock(return_value={})),
                 )
                 result = service.execute(
@@ -402,7 +403,7 @@ def _canonical_activity_tool(case: unittest.TestCase, snapshot: dict):
         references=ActivityReferences(sessions),
         session_records=CanonicalTableReader().session_activities,
     )
-    garmin = Mock(recent_view=Mock(return_value={}))
+    garmin = Mock(sync_status=Mock(return_value=NO_GARMIN_SYNC_STATUS))
     profile = Mock(get=Mock(return_value={}))
     service = CoachActivityReadToolService(
         activity_read, garmin, profile, lambda: date(2026, 9, 23)

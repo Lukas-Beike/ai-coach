@@ -17,6 +17,7 @@ from backend.errors import AppError
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.snapshot_reader import SnapshotRepositoryReader
 
@@ -196,7 +197,10 @@ class ActivityReadServiceTests(unittest.TestCase):
     def test_detail_is_bounded_and_includes_feedback(self):
         snapshot = self.service()._snapshot()
         result = self.detail_service(snapshot).detail(
-            "new", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
+            "new",
+            garmin_status=NO_GARMIN_SYNC_STATUS,
+            profile={},
+            today=date(2026, 9, 20),
         )
         self.assertTrue(result["ok"])
         self.assertEqual("activity_detail.v1", result["contract"])
@@ -212,7 +216,10 @@ class ActivityReadServiceTests(unittest.TestCase):
         self.assertEqual(
             result,
             self.detail_service(snapshot).detail(
-                "act_new", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
+                "act_new",
+                garmin_status=NO_GARMIN_SYNC_STATUS,
+                profile={},
+                today=date(2026, 9, 20),
             ),
         )
 
@@ -240,10 +247,14 @@ class ActivityReadServiceTests(unittest.TestCase):
             summary_rows=rows,
         )
         today = date(2026, 9, 20)
-        recent = service.detail("new", garmin_snapshot={}, profile={}, today=today)
+        recent = service.detail(
+            "new", garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=today
+        )
         self.assertEqual("act_new", recent["session"]["activity_id"])
         self.assertEqual([date(2025, 9, 21)], rows.starts)
-        old = service.detail("old", garmin_snapshot={}, profile={}, today=today)
+        old = service.detail(
+            "old", garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=today
+        )
         # The current summary row of the old activity fills its summary scalars.
         self.assertEqual(3.1, old["metrics"]["avg_speed_mps"]["value"])
         self.assertTrue(old["activity_validation"]["available"])
@@ -251,7 +262,9 @@ class ActivityReadServiceTests(unittest.TestCase):
         # The full-history lookup shares the read snapshot of the windowed read.
         self.assertIs(rows.units[1], rows.units[2])
         with self.assertRaises(AppError) as missing:
-            service.detail("missing", garmin_snapshot={}, profile={}, today=today)
+            service.detail(
+                "missing", garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=today
+            )
         self.assertEqual("activity_details_not_found", missing.exception.reason)
         # An unknown session is rejected before any summary row is read.
         self.assertEqual(3, len(rows.starts))
@@ -259,13 +272,21 @@ class ActivityReadServiceTests(unittest.TestCase):
     def test_detail_rejects_invalid_or_missing_activity(self):
         service = self.detail_service(self.service()._snapshot())
         with self.assertRaises(AppError) as invalid:
-            service.detail("", garmin_snapshot={}, profile={}, today=date(2026, 9, 20))
+            service.detail(
+                "",
+                garmin_status=NO_GARMIN_SYNC_STATUS,
+                profile={},
+                today=date(2026, 9, 20),
+            )
         self.assertEqual("invalid_activity_request", invalid.exception.reason)
         self.assertEqual(400, invalid.exception.status)
         for missing_id in ("missing", "act_missing"):
             with self.assertRaises(AppError) as missing:
                 service.detail(
-                    missing_id, garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
+                    missing_id,
+                    garmin_status=NO_GARMIN_SYNC_STATUS,
+                    profile={},
+                    today=date(2026, 9, 20),
                 )
             self.assertEqual("activity_details_not_found", missing.exception.reason)
             self.assertEqual(404, missing.exception.status)
@@ -324,7 +345,10 @@ class ActivityReadServiceTests(unittest.TestCase):
         )
 
         result = service.detail(
-            "new", garmin_snapshot={}, profile={}, today=date(2026, 9, 20)
+            "new",
+            garmin_status=NO_GARMIN_SYNC_STATUS,
+            profile={},
+            today=date(2026, 9, 20),
         )
 
         self.assertEqual(3.3, result["metrics"]["avg_speed_mps"]["value"])

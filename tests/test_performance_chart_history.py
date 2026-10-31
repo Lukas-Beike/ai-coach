@@ -7,6 +7,7 @@ from performance_day_support import canonical_from_snapshot, garmin_inputs_from_
 
 from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import analysis_history as _analysis_history
+from backend.performance.freshness import GarminSyncStatus
 
 
 def analysis_history(snapshot, garmin, today, **overrides):
@@ -21,7 +22,7 @@ def analysis_history(snapshot, garmin, today, **overrides):
     )
     return _analysis_history(
         snapshot,
-        garmin,
+        GarminSyncStatus.from_state(garmin),
         today,
         canonical=garmin_inputs_from_payload(garmin, today, replace(base, **overrides)),
     )

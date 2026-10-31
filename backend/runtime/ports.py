@@ -7,9 +7,18 @@ from typing import Any, Protocol, runtime_checkable
 
 from backend.canonical.activity_summary import ActivitySummary
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
-from backend.canonical.domain_records import PowerCurve, SleepPeriod
+from backend.canonical.domain_records import (
+    CategoricalObservation,
+    PowerCurve,
+    SleepPeriod,
+)
 from backend.canonical.records import ActivityRecord, Observation
-from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.canonical.vocabulary import (
+    CategoricalDomain,
+    MetricKind,
+    ProviderId,
+    Sport,
+)
 
 
 class ProviderSnapshotReader(Protocol):
@@ -151,6 +160,22 @@ class PowerCurveReader(Protocol):
     """
 
     def power_curve(self, db: Any) -> PowerCurve: ...
+
+
+class CategoricalObservationReader(Protocol):
+    """Reads canonical provider status codes of one domain by inclusive day.
+
+    Oldest first. Only a source that stores them implements it.
+    """
+
+    def categorical_observations(
+        self,
+        db: Any,
+        domain: CategoricalDomain,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> tuple[CategoricalObservation, ...]: ...
 
 
 @runtime_checkable

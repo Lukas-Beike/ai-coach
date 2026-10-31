@@ -6,6 +6,7 @@ refactor. Deliberately pinned quirks are marked with "Quirk:" comments.
 
 import math
 import unittest
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -20,7 +21,9 @@ from performance_day_support import (
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance import body as _body
 from backend.performance import chart_history as _chart_history
+from backend.performance.canonical_current import NO_CURRENT_INPUTS
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.wellness_days import wellness_day_values
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 
@@ -106,8 +109,8 @@ def body_history(
         rows += raw.get("wellness", []) if isinstance(raw, dict) else []
         rows += snapshot.get("recent_wellness", [])
     return _body.body_history(
-        snapshot,
-        garmin,
+        (snapshot or {}).get("synced_at"),
+        GarminSyncStatus.from_state(garmin),
         today,
         eftp_by_day=_eftp_by_day(snapshot),
         wellness_days=days_from_rows(rows),
@@ -121,6 +124,13 @@ def body_history(
     )
 
 
+def _synced_at(snapshot: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str((snapshot or {}).get("synced_at")))
+    except ValueError:
+        return None
+
+
 def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     if isinstance(snapshot, dict):
@@ -131,13 +141,17 @@ def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
         wellness_day=None,
         ctl=None,
         atl=None,
+        # The canonical Intervals.icu sync instant the snapshot's sync stored.
+        current=replace(NO_CURRENT_INPUTS, synced_at=_synced_at(snapshot)),
         eftp_by_day=_eftp_by_day(snapshot),
         history_wellness_days=days_from_rows(rows),
         activities=_activity_summaries(snapshot),
         garmin=garmin_metrics_from_payload(_payload(garmin)),
         body=garmin_body_from_payload(_payload(garmin), today),
     )
-    return _chart_history.analysis_history(snapshot, garmin, today, canonical=canonical)
+    return _chart_history.analysis_history(
+        snapshot, GarminSyncStatus.from_state(garmin), today, canonical=canonical
+    )
 
 
 def _garmin_weight(day: str, kg: float) -> dict[str, Any]:
@@ -516,7 +530,7 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
 
     def test_body_section_is_identical_to_direct_body_history(self) -> None:
         snapshot = {
-            "synced_at": "sync",
+            "synced_at": "2026-05-04T05:00:00+00:00",
             "recent_wellness": [
                 _wellness("2026-05-03", weight=70),
                 _wellness("2026-05-04", eftp=280),

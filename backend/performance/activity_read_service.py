@@ -27,6 +27,7 @@ from backend.performance.canonical_inputs import (
 )
 from backend.performance.context import current_performance_context
 from backend.performance.detail_envelope import DetailEnvelopeReader
+from backend.performance.freshness import GarminSyncStatus
 from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
 
 
@@ -64,18 +65,16 @@ class ActivityAnalysisReadService(ActivityReadService):
     def _performance_inputs(
         self, as_of: date, activity_id: str | None = None
     ) -> tuple[
-        dict[str, Any],
         CanonicalPerformanceInputs | None,
         Sequence[ActivitySummary] | None,
     ]:
-        """Read the snapshot, CTL and ATL, and the activity summaries in one read snapshot.
+        """Read the performance inputs and the activity summaries in one read snapshot.
 
         The performance inputs cover only the recent year, so an older activity
         is looked up in the full history of the same read snapshot.
         """
         source = self._canonical
         with source.database_manager().read_snapshot() as db:
-            snapshot = self._snapshot()
             reader = source.activity_summary_reader()
             canonical = with_read_status(
                 source,
@@ -96,13 +95,13 @@ class ActivityAnalysisReadService(ActivityReadService):
                 )
             ):
                 summaries = tuple(reader.activity_summaries(db))
-        return snapshot, canonical, summaries
+        return canonical, summaries
 
     def detail(
         self,
         activity_id: Any,
         *,
-        garmin_snapshot: dict[str, Any],
+        garmin_status: GarminSyncStatus,
         profile: dict[str, Any],
         today: date,
     ) -> dict[str, Any]:
@@ -119,10 +118,8 @@ class ActivityAnalysisReadService(ActivityReadService):
 
         def load_inputs(activity_id: str) -> Sequence[ActivitySummary] | None:
             # Recent canonical summaries first, then the full local history.
-            snapshot, canonical, summaries = self._performance_inputs(
-                today, activity_id
-            )
-            inputs.update(snapshot=snapshot, canonical=canonical)
+            canonical, summaries = self._performance_inputs(today, activity_id)
+            inputs.update(canonical=canonical)
             return summaries
 
         def summary_row(db: Any, provider_activity_id: str) -> dict | None:
@@ -136,11 +133,10 @@ class ActivityAnalysisReadService(ActivityReadService):
 
         def performance() -> Mapping[str, Any]:
             if not inputs:
-                snapshot, canonical, _rows = self._performance_inputs(today)
-                inputs.update(snapshot=snapshot, canonical=canonical)
+                canonical, _rows = self._performance_inputs(today)
+                inputs.update(canonical=canonical)
             return current_performance_context(
-                inputs["snapshot"],
-                garmin_snapshot,
+                garmin_status,
                 profile,
                 today,
                 canonical=inputs["canonical"] or EMPTY_PERFORMANCE_INPUTS,

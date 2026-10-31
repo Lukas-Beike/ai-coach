@@ -146,24 +146,6 @@ DAILY_HEALTH_DAYS: Final = 7
 RAMP_RATE_DAYS: Final = 7
 
 
-def snapshot_with_inputs(
-    source: CanonicalPerformanceSource | None,
-    read_snapshot: Callable[[], Any],
-    *,
-    as_of: date,
-) -> tuple[Any, CanonicalPerformanceInputs | None]:
-    """Read a snapshot and its canonical load inputs in one read snapshot.
-
-    Without a canonical source the snapshot is read exactly as before. The
-    reads never wait for the writer.
-    """
-    if source is None:
-        return read_snapshot(), None
-    with source.database_manager().read_snapshot() as db:
-        snapshot = read_snapshot()
-        return snapshot, inputs_for_snapshot(source, db, as_of=as_of)
-
-
 def with_read_status(
     source: CanonicalPerformanceSource,
     db: Any,

@@ -11,6 +11,7 @@ from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.display_sources import preferred_providers
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 
 INTERVALS_SOURCE = "Intervals.icu"
@@ -143,16 +144,16 @@ def _metric_series(
 
 def analysis_history(
     snapshot: dict[str, Any] | None,
-    garmin: dict[str, Any],
+    garmin: GarminSyncStatus,
     today: date,
     *,
     canonical: CanonicalPerformanceInputs,
 ) -> dict[str, Any]:
     """Use dated provider history, never backfill today's settings into the past.
 
-    ``canonical`` supplies the activity summaries, wellness days, Garmin history
-    and the power curve read through the canonical ports. The snapshot supplies
-    sync times.
+    ``canonical`` supplies the activity summaries, wellness days, Garmin history,
+    the power curve and the Intervals.icu sync time read through the canonical
+    ports; ``garmin`` is the Garmin sync status.
     """
     snapshot = snapshot or {}
     start = today - timedelta(days=89)
@@ -189,7 +190,7 @@ def analysis_history(
         # PublicPerformanceStateService exposes this as performance.history.body;
         # the UI can render it in the separate Body tab without another request.
         "body": body.body_history(
-            snapshot,
+            _intervals_synced_at(canonical),
             garmin,
             today,
             canonical=canonical.body,
@@ -237,8 +238,13 @@ _CANONICAL_PROVIDER_METRICS: Final = {
 _FETCH_OUTCOMES: Final = frozenset({"stale", "failed", "unsupported"})
 
 
+def _intervals_synced_at(canonical: CanonicalPerformanceInputs) -> str | None:
+    synced_at = canonical.current.synced_at
+    return None if synced_at is None else synced_at.isoformat()
+
+
 def _canonical_provider_metrics(
-    garmin: dict[str, Any],
+    garmin: GarminSyncStatus,
     start: date,
     today: date,
     canonical: GarminCanonicalMetrics,
@@ -250,18 +256,15 @@ def _canonical_provider_metrics(
     only from canonical data. A cached chart supplies its fetch outcome (stale,
     failed or unsupported); otherwise the status follows the canonical points.
     """
-    cached = garmin.get("provider_metrics")
-    cached = cached if isinstance(cached, dict) else {}
     metrics: dict[str, Any] = {}
     for key, (aggregation, fields) in _CANONICAL_PROVIDER_METRICS.items():
         data = _canonical_metric(
             key,
             aggregation,
             _canonical_values_by_day(fields, canonical, start, today),
-            garmin.get("synced_at"),
+            garmin.synced_at,
         )
-        previous = cached.get(key)
-        status = previous.get("status") if isinstance(previous, dict) else None
+        status = garmin.chart_status.get(key)
         if status not in _FETCH_OUTCOMES:
             status = data["status"]
         metrics[key] = {**data, "status": status}

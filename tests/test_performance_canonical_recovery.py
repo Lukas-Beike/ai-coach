@@ -34,6 +34,7 @@ from backend.performance.canonical_recovery import (
     read_recovery_inputs,
 )
 from backend.performance.context import current_performance_context
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.personal_recovery import personal_recovery
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -153,9 +154,9 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
         )
 
         served = current_performance_context(
-            self.intervals, {}, {}, TODAY, canonical=inputs
+            GarminSyncStatus.from_state({}), {}, TODAY, canonical=inputs
         )
-        expected = personal_recovery([], {}, {}, TODAY, canonical=mapped)
+        expected = personal_recovery({}, TODAY, canonical=mapped)
 
         recovery = served["recovery"]
         self.assertIsNotNone(recovery["sleep_hours"])
@@ -168,7 +169,10 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
 
     def test_without_canonical_inputs_no_recovery_value_is_shown(self) -> None:
         result = current_performance_context(
-            self.intervals, self.garmin, {}, TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
+            GarminSyncStatus.from_state(self.garmin),
+            {},
+            TODAY,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
         )
 
         # Without canonical inputs the context is unavailable (#1416).

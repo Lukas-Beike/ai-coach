@@ -1,8 +1,9 @@
-"""sleep-timing-variability-v1 gives the same result from canonical periods as raw rows.
+"""sleep-timing-variability-v1 reads the canonical sleep periods only.
 
 Each case maps synthetic Garmin sleep and Intervals.icu wellness rows to canonical
-periods with the production mapper and compares the full timing result with
-the legacy walk over the same rows. No account, network or real data is used.
+periods with the production mapper. The legacy walk over the raw rows is gone
+(#1416); its parity with these periods was proven before it was removed. No
+account, network or real data is used.
 """
 
 from __future__ import annotations
@@ -91,18 +92,12 @@ class ParityTests(unittest.TestCase):
     def assert_parity(
         self, garmin_rows: list[dict], wellness_rows: list[dict], timezone: str
     ) -> dict:
-        legacy = sleep_timing_variability(
-            wellness_rows, {"sleep": garmin_rows}, timezone, TODAY
-        )
-        canonical = sleep_timing_variability(
-            [],
-            {},
+        """The timing result of the canonical periods the rows map to."""
+        return sleep_timing_variability(
             timezone,
             TODAY,
             periods=canonical_periods(garmin_rows, wellness_rows),
         )
-        self.assertEqual(canonical, legacy)
-        return canonical
 
     def test_a_full_garmin_history(self) -> None:
         result = self.assert_parity(
@@ -142,7 +137,10 @@ class ParityTests(unittest.TestCase):
         )
 
     def test_no_intervals_is_insufficient_data(self) -> None:
-        self.assert_parity([], [{"id": "2026-10-30", "sleepSecs": 25_000}], "UTC")
+        result = self.assert_parity(
+            [], [{"id": "2026-10-30", "sleepSecs": 25_000}], "UTC"
+        )
+        self.assertEqual(result["status"], "insufficient_data")
 
 
 class FakeReader:
@@ -171,7 +169,7 @@ class ReadPathTests(unittest.TestCase):
         self.assertEqual(inputs.sleep_periods, periods)
         self.assertEqual(reader.start, TODAY - timedelta(days=RECOVERY_HISTORY_DAYS))
         regularity = personal_recovery(
-            [], {}, {"timezone": "Europe/Berlin"}, TODAY, canonical=inputs
+            {"timezone": "Europe/Berlin"}, TODAY, canonical=inputs
         )["regularity"]
         self.assertEqual(regularity["status"], "ok")
 
@@ -193,16 +191,15 @@ class ReadPathTests(unittest.TestCase):
         assert inputs is not None and inputs.recovery is not None
         self.assertEqual(inputs.recovery.sleep_periods, periods)
 
-    def test_a_source_without_periods_keeps_the_legacy_rows(self) -> None:
+    def test_a_source_without_periods_has_no_timing_data(self) -> None:
+        # Canonical reads (#1416): no raw-row fallback; no periods, no data.
         inputs = read_recovery_inputs(
             FakeReader(None), None, as_of=TODAY, latest_wellness_day=None
         )
         self.assertIsNone(inputs.sleep_periods)
-        garmin = {"sleep": [garmin_night(end, 8) for end in nights(30)]}
-        self.assertEqual(
-            personal_recovery([], garmin, {}, TODAY, canonical=inputs)["regularity"],
-            personal_recovery([], garmin, {}, TODAY)["regularity"],
-        )
+        regularity = personal_recovery({}, TODAY, canonical=inputs)["regularity"]
+        self.assertEqual(regularity["status"], "insufficient_data")
+        self.assertEqual(regularity, personal_recovery({}, TODAY)["regularity"])
 
 
 if __name__ == "__main__":

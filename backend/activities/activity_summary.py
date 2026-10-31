@@ -9,6 +9,9 @@ value, so consumers never read provider rows or provider field names.
 
 ``training_load`` is filled only from TSS-like load models, so loads of different
 scales are never added up; ``load_model`` names the model it came from.
+``training_effect_label`` is the provider's training-effect category and
+``training_effect_load`` the training load on that provider's own scale, from the
+same record.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from backend.canonical.activity_summary import (
     summary_local_date,
 )
 from backend.canonical.records import ActivityRecord
-from backend.canonical.vocabulary import ProviderId, RecordingOrigin
+from backend.canonical.vocabulary import LoadModel, ProviderId, RecordingOrigin
 
 # Summary key -> ActivityRecord field, in measured order.
 _MEASURED: Final = (
@@ -103,6 +106,16 @@ def activity_summary(
         summary["training_load"] = load.load
         summary["load_model"] = load.load_model.value
         sources["training_load"] = _label(load)
+    effect = _first(derived, "training_effect_label")
+    if effect is not None:
+        record, label = effect
+        summary["training_effect_label"] = label
+        sources["training_effect_label"] = _label(record)
+        if (
+            record.load is not None
+            and record.load_model is LoadModel.GARMIN_TRAINING_LOAD
+        ):
+            summary["training_effect_load"] = record.load
     summary["source"] = _label(primary)
     summary["sources"] = sources
     summary["record_ids"] = _record_ids(measured)

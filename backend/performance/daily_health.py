@@ -2,7 +2,7 @@
 
 Steps, floors and the total, active and resting energy come only from the
 canonical observations (``read_daily_health_by_date``). Freshness and the read
-windows are sync status and stay on the Garmin snapshot.
+windows are sync status (``GarminSyncStatus``).
 """
 
 from collections.abc import Iterable, Mapping
@@ -114,7 +114,13 @@ def daily_energy_expenditure(
     freshness = _requested_day_freshness(snapshot, requested_date)
     result = {
         **values,
-        **_projected_expenditure(snapshot, values, day, current_date, measured_history),
+        **_projected_expenditure(
+            performance_freshness.GarminSyncStatus.from_state(snapshot),
+            values,
+            day,
+            current_date,
+            measured_history,
+        ),
         "source": source if has_measurement else None,
         "measured_date": requested_date if has_measurement else None,
         "freshness": freshness.get("freshness", "unknown"),
@@ -185,7 +191,7 @@ def _window_average(metric_name: str, numbers: list[float]) -> float | int | Non
 
 
 def garmin_daily_health_metrics(
-    snapshot: dict[str, Any],
+    status: performance_freshness.GarminSyncStatus,
     days: int,
     end_date: date,
     current_date: date,
@@ -195,7 +201,7 @@ def garmin_daily_health_metrics(
     """Return daily health totals averaged over the requested window.
 
     ``health_by_date`` holds the canonical totals of ``read_daily_health_by_date``.
-    Freshness is sync status and is read from the snapshot.
+    Freshness is sync status and is read from ``status``.
     """
     values, sources = _window_values(
         health_by_date, end_date - timedelta(days=days - 1), end_date
@@ -209,7 +215,7 @@ def garmin_daily_health_metrics(
     for metric_name, numbers in values.items():
         average = _window_average(metric_name, numbers)
         result[f"{metric_name}_7d"] = performance_freshness.garmin_metric_freshness(
-            snapshot,
+            status,
             "daily_stats",
             _metric(
                 average,
@@ -222,23 +228,21 @@ def garmin_daily_health_metrics(
     return result
 
 
-def _complete_read_windows(snapshot: dict[str, Any]) -> list[tuple[date, date]]:
+def _complete_read_windows(
+    status: performance_freshness.GarminSyncStatus,
+) -> list[tuple[date, date]]:
     """Return the read windows trusted as complete daily-stats reads.
 
     These are the latest run's window and the window of the day's first, wide
     run, which later one-day runs would otherwise hide.
     """
-    freshness = snapshot.get("source_freshness")
-    daily_stats = freshness.get("daily_stats") if isinstance(freshness, dict) else None
-    if not isinstance(daily_stats, dict) or daily_stats.get("freshness") != "current":
-        return []
-    provider_sync = snapshot.get("provider_sync")
-    if not isinstance(provider_sync, dict):
+    daily_stats = status.source_freshness.get("daily_stats")
+    if daily_stats is None or daily_stats.get("freshness") != "current":
         return []
     windows: list[tuple[date, date]] = []
     for key in ("read_window", "daily_read_window"):
-        window = provider_sync.get(key)
-        if not isinstance(window, dict):
+        window = status.read_windows.get(key)
+        if window is None:
             continue
         try:
             windows.append(
@@ -250,7 +254,7 @@ def _complete_read_windows(snapshot: dict[str, Any]) -> list[tuple[date, date]]:
 
 
 def _projection_reference(
-    snapshot: dict[str, Any],
+    status: performance_freshness.GarminSyncStatus,
     current_date: date,
     measured_history: Mapping[str, Mapping[str, Any]],
 ) -> tuple[date, float | int] | None:
@@ -261,7 +265,7 @@ def _projection_reference(
     must lie inside the window of a fully current daily-stats read. The values
     come from ``measured_history``.
     """
-    read_windows = _complete_read_windows(snapshot)
+    read_windows = _complete_read_windows(status)
     if not read_windows:
         return None
     reference: tuple[date, float | int] | None = None
@@ -284,7 +288,7 @@ def _projection_reference(
 
 
 def _projected_expenditure(
-    snapshot: dict[str, Any],
+    status: performance_freshness.GarminSyncStatus,
     values: dict[str, Any],
     day: date | None,
     current_date: date,
@@ -304,7 +308,7 @@ def _projected_expenditure(
     active = values["active_kcal"]
     if day != current_date or active is None:
         return projection
-    reference = _projection_reference(snapshot, current_date, measured_history)
+    reference = _projection_reference(status, current_date, measured_history)
     if reference is None:
         return projection
     projected = reference[1] + active

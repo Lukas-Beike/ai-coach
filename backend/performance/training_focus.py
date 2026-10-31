@@ -1,15 +1,19 @@
-"""Recorded sensor zones and Garmin's activity training-effect categories."""
+"""Recorded sensor zones and the activity training-effect categories.
 
-from collections.abc import Sequence
+Both read the canonical activity summaries only: the categories come from the
+training-effect label and load of the sessions Garmin Connect reported (#1416).
+The Garmin sync status supplies only the freshness.
+"""
+
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.activities.activity_summary import summary_local_date
-from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
 from backend.performance import freshness as performance_freshness
 from backend.performance.activity_validation import bounded_activity_metric
 from backend.performance.training_report import zone_distribution
-from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 _CATEGORIES = {
     "RECOVERY": "low_aerobic",
@@ -25,10 +29,22 @@ _CATEGORIES = {
     "SPEED": "anaerobic",
     "ANAEROBIC": "anaerobic",
 }
+# The provider whose training-effect categories the focus shows.
+_CATEGORY_PROVIDER: Final = ProviderId.GARMIN.value
+# The Garmin sections whose freshness describes the categories.
+_ACTIVITIES_SECTION: Final = "activities"
+_TRAINING_LOAD_SECTION: Final = "training_load_activities"
+_UNKNOWN_FRESHNESS: Final = {
+    "freshness": "unknown",
+    "observed_at": None,
+    "fetched_at": None,
+    "measurement_status": "unknown",
+    "measurement_age_days": None,
+}
 
 
 def training_focus(
-    garmin: dict[str, Any],
+    garmin: performance_freshness.GarminSyncStatus,
     today: date,
     timezone: str = "UTC",
     *,
@@ -37,41 +53,33 @@ def training_focus(
 ) -> dict[str, Any]:
     start = (today - timedelta(days=days - 1)).isoformat()
     end = today.isoformat()
-    zones = zone_distribution(
-        [
-            row
-            for row in activities
-            if isinstance(row, dict)
-            and start <= summary_local_date(row, timezone) <= end
-        ]
-    )
+    in_window = [
+        row
+        for row in activities
+        if isinstance(row, Mapping)
+        and start <= summary_local_date(row, timezone) <= end
+    ]
+    zones = zone_distribution(in_window)
     categories = {
         key: {"load": 0.0, "sessions": 0}
         for key in ("low_aerobic", "high_aerobic", "anaerobic")
     }
-    # Remaining snapshot read: Garmin training effect and load focus have no kind.
-    dedicated_rows = garmin.get("training_load_activities")
-    has_dedicated_loads = isinstance(dedicated_rows, list) and bool(dedicated_rows)
+    has_dedicated_loads = _TRAINING_LOAD_SECTION in garmin.populated_sections
     activity_source = (
-        "training_load_activities+activities" if has_dedicated_loads else "activities"
+        f"{_TRAINING_LOAD_SECTION}+{_ACTIVITIES_SECTION}"
+        if has_dedicated_loads
+        else _ACTIVITIES_SECTION
     )
-    seen, unknown, observed_dates = _garmin_activity_coverage(
-        garmin, start, end, categories
+    known, unknown, observed_dates = _category_coverage(
+        activities, start, end, categories
     )
     freshness = performance_freshness.garmin_source_freshness(garmin, today)
     activity_freshness = {
-        key: freshness.get(key)
-        or {
-            "freshness": "unknown",
-            "observed_at": None,
-            "fetched_at": None,
-            "measurement_status": "unknown",
-            "measurement_age_days": None,
-        }
+        key: freshness.get(key) or dict(_UNKNOWN_FRESHNESS)
         for key in (
-            ("activities", "training_load_activities")
+            (_ACTIVITIES_SECTION, _TRAINING_LOAD_SECTION)
             if has_dedicated_loads
-            else ("activities",)
+            else (_ACTIVITIES_SECTION,)
         )
     }
     return {
@@ -80,89 +88,52 @@ def training_focus(
         "zones": [row for row in zones if row["sensor"] in {"heart_rate", "power"}],
         "categories": categories,
         "unclassified_sessions": unknown,
-        "classified_sessions": len(seen) - unknown,
+        "classified_sessions": known - unknown,
         "category_source": "Garmin Connect",
         "category_source_key": activity_source,
         "category_freshness": activity_freshness,
         "coverage": {
-            "known_sessions": len(seen),
+            "known_sessions": known,
             "observed_start": min(observed_dates) if observed_dates else None,
             "observed_end": max(observed_dates) if observed_dates else None,
         },
     }
 
 
-def _garmin_activity_coverage(
-    garmin: dict[str, Any],
+def _category_coverage(
+    summaries: Sequence[Any],
     start: str,
     end: str,
     categories: dict[str, dict[str, float | int]],
-) -> tuple[set[str], int, list[str]]:
-    seen: set[str] = set()
+) -> tuple[int, int, list[str]]:
+    """Add each Garmin session's load to its category; return the coverage.
+
+    A session is dated by its athlete-local start date, as Garmin's own local
+    start time dated it.
+    """
+    known = 0
     unknown = 0
     observed_dates = []
-    activities = garmin.get("activities")
-    activities = activities if isinstance(activities, list) else []
-    loads_by_id = _training_load_by_id(garmin.get("training_load_activities"))
-    for index, activity in enumerate(activities[:1000]):
-        row_data = _coverage_row(activity, index, loads_by_id, start, end)
-        if row_data is None:
+    for summary in summaries:
+        if not isinstance(summary, Mapping):
             continue
-        identity, dedupe_key, day, row = row_data
-        if dedupe_key in seen:
+        record_ids = summary.get("record_ids")
+        day = summary_local_date(summary)
+        if (
+            not isinstance(record_ids, Mapping)
+            or _CATEGORY_PROVIDER not in record_ids
+            or not start <= day <= end
+        ):
             continue
-        seen.add(dedupe_key)
+        known += 1
         observed_dates.append(day)
-        if not identity:
-            unknown += 1
-            continue
-        category = _CATEGORIES.get(
-            str(row.get("trainingEffectLabel") or "").upper()[:50]
-        )
+        category = _CATEGORIES.get(str(summary.get("training_effect_label") or ""))
         activity_load = bounded_activity_metric(
-            row.get("activityTrainingLoad"), 0, 100_000
+            summary.get("training_effect_load"), 0, 100_000
         )
         if category is None or activity_load is None:
             unknown += 1
         else:
             categories[category]["load"] += activity_load
             categories[category]["sessions"] += 1
-    return seen, unknown, observed_dates
-
-
-def _training_load_by_id(value: Any) -> dict[str, dict[str, Any]]:
-    if not isinstance(value, list):
-        return {}
-    return {
-        str(row.get("activityId") or row.get("id")): row
-        for row in value[:1000]
-        if isinstance(row, dict) and (row.get("activityId") or row.get("id"))
-    }
-
-
-def _coverage_row(
-    activity: Any,
-    index: int,
-    loads_by_id: dict[str, dict[str, Any]],
-    start: str,
-    end: str,
-) -> tuple[str, str, str, dict[str, Any]] | None:
-    if not isinstance(activity, dict):
-        return None
-    identity = str(activity.get("activityId") or activity.get("id") or "")
-    row = dict(activity)
-    load_record = loads_by_id.get(identity)
-    if identity and load_record is not None:
-        for key in ("activityTrainingLoad", "trainingEffectLabel"):
-            if load_record.get(key) is not None:
-                row[key] = load_record[key]
-    day = iso_date_prefix(
-        str(
-            row.get(garmin_perf_fields.ACTIVITY_START_LOCAL)
-            or row.get("start_date_local")
-            or ""
-        )
-    )
-    if not day or not start <= day <= end:
-        return None
-    return identity, identity or f"row:{index}", day, row
+    return known, unknown, observed_dates

@@ -371,13 +371,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "fetch",
             side_effect=AssertionError("coach context must not refresh weather"),
         ):
-            context = server.COACH_CONTEXT.structured_context_service().build(
-                {
-                    "recent_activities": [],
-                    "recent_wellness": [],
-                    "upcoming_calendar": [],
-                }
-            )
+            context = server.COACH_CONTEXT.structured_context_service().build()
         self.assertEqual(context["weather"]["fetched_at"], "2000-01-01T00:00:00+00:00")
 
     def test_daily_planning_context_combines_checkin_recovery_weather_and_appointments(
@@ -453,7 +447,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 ),
             )
         context = server.PLANNING_WORKFLOWS.daily_planning_context_service().build(
-            server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
             server.SYNC_PERSISTENCE.state_repository().latest_snapshot()[
                 "upcoming_calendar"
             ],
@@ -1069,7 +1062,6 @@ class ServerWeatherCalendarTests(ServerTestCase):
         )
         self.assertEqual([item["id"] for item in calendar], ["external-relevant"])
         context = server.PLANNING_WORKFLOWS.daily_planning_context_service().build(
-            {},
             [],
             {},
             [],

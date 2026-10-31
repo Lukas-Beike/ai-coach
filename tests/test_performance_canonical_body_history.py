@@ -46,6 +46,7 @@ from backend.performance.canonical_body import (
     read_body_inputs,
 )
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.freshness import GarminSyncStatus
 from backend.runtime.ports import ObservationReader
 from backend.sync.canonical_backfill import STATE_KEY as BACKFILL_STATE_KEY
 
@@ -169,8 +170,8 @@ def _body(
     canonical: CanonicalBodyInputs,
 ) -> dict[str, Any]:
     return body_history(
-        snapshot,
-        garmin,
+        (snapshot or {}).get("synced_at"),
+        GarminSyncStatus.from_state(garmin),
         TODAY,
         canonical=canonical,
         wellness_days=_days(snapshot),
@@ -205,17 +206,18 @@ def _service(
     sync_state = Mock()
     sync_state.latest_snapshot.return_value = snapshot
 
-    def capture_garmin(_db: Any) -> dict[str, Any]:
+    def capture_garmin(_db: Any) -> GarminSyncStatus:
         if events is not None:
             events.append("garmin")
-        return garmin
+        return GarminSyncStatus.from_state(garmin)
 
+    # Canonical reads (#1416): only the Garmin sync status is read.
     garmin_payload = Mock()
-    garmin_payload.recent_view_in.side_effect = capture_garmin
-    garmin_payload.recent_view.return_value = garmin
+    garmin_payload.sync_status_in.side_effect = capture_garmin
+    garmin_payload.sync_status.return_value = GarminSyncStatus.from_state(garmin)
     if events is not None:
         # With an event log, any read outside the captured transaction fails.
-        garmin_payload.recent_view.side_effect = AssertionError(
+        garmin_payload.sync_status.side_effect = AssertionError(
             "Garmin re-read outside the transaction"
         )
     profile = Mock()
@@ -450,8 +452,8 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
             observation_reader=lambda: reader,
         )
         state = _service(case.intervals, case.garmin, source).performance_state()
-        legacy = _service(case.intervals, case.garmin, None).from_snapshot(
-            case.intervals
+        legacy = _service(case.intervals, case.garmin, None).from_inputs(
+            None, case.intervals
         )
         self.assert_wellness_boundary(legacy, state)
         # Body reads happen inside the single lease.
@@ -465,7 +467,7 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         self.assertIn(MetricKind.BODY_FAT, kinds)
         self.assertIn(MetricKind.WEIGHT, kinds)
 
-    def test_garmin_snapshot_is_captured_once_inside_the_unit_of_work(self) -> None:
+    def test_garmin_status_is_captured_once_inside_the_unit_of_work(self) -> None:
         case = CASES[0]
         events: list[str] = []
         reader = BodyReader(_observations(case), events=events)
@@ -482,8 +484,8 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         self.assertEqual(1, events.count("garmin"))
         self.assertLess(events.index("enter"), events.index("garmin"))
         self.assertLess(events.index("garmin"), events.index("exit"))
-        legacy = _service(case.intervals, case.garmin, None).from_snapshot(
-            case.intervals
+        legacy = _service(case.intervals, case.garmin, None).from_inputs(
+            None, case.intervals
         )
         self.assert_wellness_boundary(legacy, state)
 
@@ -511,8 +513,8 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
 
     def test_source_without_observations_shows_no_garmin_body_values(self) -> None:
         case = CASES[0]
-        state = _service(case.intervals, case.garmin, None).from_snapshot(
-            case.intervals
+        state = _service(case.intervals, case.garmin, None).from_inputs(
+            None, case.intervals
         )
         body = state["performance"]["history"]["body"]
         for metric in ("weight_kg", "body_fat_pct"):
@@ -591,8 +593,8 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
             inputs = read_body_inputs(selector, db, today)
         self.assertEqual(
             body_history(
-                self.intervals,
-                self.garmin,
+                (self.intervals or {}).get("synced_at"),
+                GarminSyncStatus.from_state(self.garmin),
                 today,
                 canonical=garmin_body_from_payload(self.garmin, today),
                 wellness_days=_days(self.intervals),
@@ -600,8 +602,8 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
                 garmin_ftp={},
             ),
             body_history(
-                self.intervals,
-                self.garmin,
+                (self.intervals or {}).get("synced_at"),
+                GarminSyncStatus.from_state(self.garmin),
                 today,
                 canonical=inputs,
                 wellness_days=_days(self.intervals),

@@ -23,7 +23,7 @@ def append_garmin_performance_history(
         payload, current_date
     )
     current["readiness"] = performance_freshness.garmin_metric_freshness(
-        payload,
+        performance_freshness.GarminSyncStatus.from_state(payload),
         "readiness",
         {"value": performance_wellness.readiness_score_value(payload.get("readiness"))},
         current_date,

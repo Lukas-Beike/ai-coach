@@ -72,7 +72,6 @@ class PublicStateCalendarProjection:
             window_days=self._external_calendar_window_days,
         )
         daily_context = self._daily_context.build(
-            snapshot,
             canonical_planned,
             weather,
             checkins,

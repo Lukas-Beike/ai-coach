@@ -167,9 +167,12 @@ _SYNC_WRITER = "writer: persists or ingests the raw provider snapshot"
 _BACKUP = "export: backup/privacy export serializes the stored raw snapshot"
 _SYNC_STATUS = "sync-status: reads synced_at/freshness, not metric values"
 _AWAITING_PERFORMANCE_KINDS = (
-    "awaiting-kind: legacy builders still take the snapshot; needs metric kinds for "
-    "performance and FTP history, power curve, training status and load balance, "
-    "training effect/load focus and the overall endurance score"
+    "awaiting-kind: the cycling power curve has no canonical form yet and is the "
+    "only performance value still read from the snapshot (#1416 slice 2b)"
+)
+_AWAITING_PLANNING_READS = (
+    "awaiting-planning: the calendar window, snapshot sport settings and the "
+    "calendar projection still read the stored snapshot"
 )
 _LEGACY_LABEL = (
     "legacy-label: view still emits or compares the label itself; move it to "
@@ -256,10 +259,6 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
         _PLANNING_RECORDS,
         ("intervals_performance_fields",),
     ),
-    "backend/performance/training_focus.py": (
-        _AWAITING_PERFORMANCE_KINDS,
-        ("garmin_performance_fields",),
-    ),
     "backend/performance/wellness.py": (
         _LEGACY_FALLBACK,
         ("garmin_performance_fields",),
@@ -304,25 +303,14 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/activities/read_service.py"): _SYNC_STATUS,
     (RULE_SOURCE_LABEL, "backend/athlete/equipment.py"): _LEGACY_LABEL,
     (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,
-    (RULE_SNAPSHOT_KEY, "backend/coach/context.py"): _AWAITING_PERFORMANCE_KINDS,
-    (RULE_SNAPSHOT_KEY, "backend/http_api/assembly.py"): _AWAITING_PERFORMANCE_KINDS,
-    (
-        RULE_SNAPSHOT_KEY,
-        "backend/http_api/athlete_assembly.py",
-    ): _AWAITING_PERFORMANCE_KINDS,
-    (
-        RULE_SNAPSHOT_KEY,
-        "backend/http_api/bootstrap_state.py",
-    ): _AWAITING_PERFORMANCE_KINDS,
+    (RULE_SNAPSHOT_KEY, "backend/http_api/athlete_assembly.py"): _DEAD_LEGACY,
+    (RULE_SNAPSHOT_KEY, "backend/http_api/bootstrap_state.py"): _SYNC_STATUS,
     (
         RULE_SNAPSHOT_KEY,
         "backend/http_api/public_performance.py",
     ): _AWAITING_PERFORMANCE_KINDS,
-    (RULE_SNAPSHOT_KEY, "backend/http_api/public_plan.py"): _AWAITING_PERFORMANCE_KINDS,
-    (
-        RULE_SNAPSHOT_KEY,
-        "backend/http_api/state_prelude.py",
-    ): _AWAITING_PERFORMANCE_KINDS,
+    (RULE_SNAPSHOT_KEY, "backend/http_api/public_plan.py"): _AWAITING_PLANNING_READS,
+    (RULE_SNAPSHOT_KEY, "backend/http_api/state_prelude.py"): _AWAITING_PLANNING_READS,
     **{
         (RULE_SOURCE_LABEL, path): _LEGACY_LABEL
         for path in (

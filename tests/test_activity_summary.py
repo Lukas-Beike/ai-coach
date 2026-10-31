@@ -149,6 +149,52 @@ class ActivitySummaryTests(unittest.TestCase):
         self.assertEqual(10000.0, summary["distance_m"])
         self.assertEqual("Garmin Connect", summary["source"])
 
+    def test_training_effect_label_and_its_load_come_from_one_record(self) -> None:
+        # #1416: the training focus reads the effect label and Garmin's own load.
+        summary = activity_summary(
+            "act_1",
+            [
+                record(
+                    ProviderId.INTERVALS,
+                    "i1",
+                    load=60.0,
+                    load_model=LoadModel.INTERVALS_TRAINING_LOAD,
+                ),
+                record(
+                    ProviderId.GARMIN,
+                    "g1",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    load=120.0,
+                    load_model=LoadModel.GARMIN_TRAINING_LOAD,
+                    training_effect_label="TEMPO",
+                ),
+            ],
+            BERLIN,
+        )
+
+        self.assertEqual("TEMPO", summary["training_effect_label"])
+        self.assertEqual(120.0, summary["training_effect_load"])
+        self.assertEqual("Garmin Connect", summary["sources"]["training_effect_label"])
+        self.assertEqual(60.0, summary["training_load"])
+
+    def test_session_without_an_effect_label_has_no_effect_values(self) -> None:
+        summary = activity_summary(
+            "act_1",
+            [
+                record(
+                    ProviderId.GARMIN,
+                    "g1",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    load=120.0,
+                    load_model=LoadModel.GARMIN_TRAINING_LOAD,
+                )
+            ],
+            BERLIN,
+        )
+
+        self.assertNotIn("training_effect_label", summary)
+        self.assertNotIn("training_effect_load", summary)
+
     def test_wahoo_tss_counts_as_training_load(self) -> None:
         summary = activity_summary(
             "act_1",
