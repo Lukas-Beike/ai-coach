@@ -50,6 +50,36 @@ def outgoing_objects(updates: str) -> set[str]:
     return objects
 
 
+def file_content(section: bytes) -> tuple[str, str, bytes]:
+    """Return suffix, whole-blob id to scan (or empty) and added lines of one file diff."""
+    head, _, body = section.partition(b"\n@@")
+    suffix = Path(
+        head.split(b"\n", 1)[0].rsplit(b" b/", 1)[-1].decode("utf-8", "replace")
+    ).suffix
+    if not re.fullmatch(r"\.[A-Za-z0-9]{1,10}", suffix):
+        suffix = ""
+    whole = ""
+    index = re.search(rb"^index ([0-9a-f,]+)\.\.([0-9a-f]+)", head, re.MULTILINE)
+    if index and index[2].strip(b"0"):
+        new_file = not index[1].strip(b"0,")
+        if new_file or b"\nBinary files" in head:
+            whole = index[2].decode("ascii")
+    if not body:
+        return suffix, whole, b""
+    # Combined diffs prefix one column per parent; keep lines new to all.
+    columns = head.rsplit(b"\n", 1)[-1].count(b"@") - 1 if False else 0
+    rows = []
+    for hunk in re.split(rb"(?m)^(?=@@)", b"@@" + body)[1:]:
+        header, _, lines = hunk.partition(b"\n")
+        columns = header.split()[0].count(b"@") - 1
+        rows += [
+            row[columns:]
+            for row in lines.split(b"\n")
+            if row[:columns] == b"+" * columns
+        ]
+    return suffix, whole, b"\n".join(rows)
+
+
 def added_content(updates: str) -> tuple[set[str], set[tuple[str, bytes]]]:
     """Split outgoing blob content into whole blobs and per-file added-line runs.
 
@@ -61,45 +91,17 @@ def added_content(updates: str) -> tuple[set[str], set[tuple[str, bytes]]]:
     runs: set[tuple[str, bytes]] = set()
     for local, exclusions in outgoing_revisions(updates):
         diff = git(
-            *(
-                "log",
-                "--format=",
-                "-p",
-                "--cc",
-                "--root",
-                "-U0",
-                "--full-index",
-                "--no-renames",
-            ),
-            *("--no-color", "--no-ext-diff", "--no-textconv", local, *exclusions),
+            *("log", "--format=", "-p", "--cc", "--root", "-U0", "--full-index"),
+            *("--no-renames", "--no-color", "--no-ext-diff", "--no-textconv"),
+            local,
+            *exclusions,
         )
-        suffix, new_blob, in_hunk, parents = "", "", False, 1
-        rows: list[bytes] = []
-        # A final sentinel row flushes the last file.
-        for row in [*diff.split(b"\n"), b"diff --git a/ b/"]:
-            if row.startswith(b"diff --git "):
-                if rows:
-                    runs.add((suffix, b"\n".join(rows)))
-                rows, in_hunk, new_blob = [], False, ""
-                suffix = Path(
-                    row.rsplit(b" b/", 1)[-1].decode("utf-8", "replace")
-                ).suffix
-                if not re.fullmatch(r"\.[A-Za-z0-9]{1,10}", suffix):
-                    suffix = ""
-            elif in_hunk:
-                # Combined diffs prefix one column per parent; keep lines new to all.
-                if row[:parents] == b"+" * parents:
-                    rows.append(row[parents:])
-            elif row.startswith(b"@@"):
-                in_hunk = True
-                parents = row.split()[0].count(b"@") - 1
-            elif row.startswith(b"index "):
-                old, new_blob = row.split()[1].decode("ascii").split("..")
-                if set(old) <= {"0", ","} and set(new_blob) != {"0"}:
-                    whole.add(new_blob)
-            elif row.startswith(b"Binary files") and new_blob:
-                whole.add(new_blob)
-    whole = {oid for oid in whole if set(oid) != {"0"}}
+        for section in re.split(rb"(?m)^diff --git ", diff)[1:]:
+            suffix, blob, added = file_content(section)
+            if blob:
+                whole.add(blob)
+            if added:
+                runs.add((suffix, added))
     return whole, runs
 
 
