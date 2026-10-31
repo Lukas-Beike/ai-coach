@@ -21,6 +21,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.providers import canonical_plans
 from backend.providers.garmin_health_mapping import (
     GARMIN_LABEL,
     MAPPER_VERSION,
@@ -514,9 +515,7 @@ class AliasAndUnitTests(unittest.TestCase):
         self.assertEqual(_rows(last_night), [("hrv_rmssd", 70.0, DAY, "-")])
         self.assertEqual(_rows(fallback), [("hrv_rmssd", 61.0, DAY, "-")])
         # The weekly average is its own kind, never a last-night reading.
-        self.assertEqual(
-            _rows(weekly_only), [("hrv_weekly_average", 58.0, DAY, "-")]
-        )
+        self.assertEqual(_rows(weekly_only), [("hrv_weekly_average", 58.0, DAY, "-")])
         self.assertEqual(
             _rows(both),
             [("hrv_rmssd", 61.0, DAY, "-"), ("hrv_weekly_average", 57.0, DAY, "-")],
@@ -571,6 +570,61 @@ class AliasAndUnitTests(unittest.TestCase):
             ],
         )
         self.assertEqual(_issues(result), [])
+
+    def test_ftp_history_range_record_issues_name_the_raw_fields(self) -> None:
+        result = _map(
+            {
+                "cycling_ftp_history": [
+                    {"from": "2026-10-01", "value": "abc"},
+                    # An empty ``from`` is no range record: the dated FTP is kept.
+                    {
+                        "from": None,
+                        "calendarDate": "2026-10-03",
+                        "functionalThresholdPower": 270,
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(_rows(result), [("ftp", 270.0, "2026-10-03", "ride")])
+        self.assertEqual(
+            _issues(result),
+            [("cycling_ftp_history[0]", "value", IssueReason.INVALID_NUMBER)],
+        )
+
+    def test_stored_ftp_range_records_reproject_without_a_refetch(self) -> None:
+        plan = canonical_plans.garmin_ingest_plan(
+            {
+                "synced_at": "2026-10-11T06:00:00+00:00",
+                "cycling_ftp_history": [{"from": "2026-10-01", "value": 270}],
+            },
+            zone=ZONE,
+        )
+        # The stored raw record is the range record itself.
+        (raw,) = plan.raw_records
+        reprojected = canonical_plans.reprojection_plan(
+            {
+                "provider": "garmin",
+                "record_kind": raw.record_kind,
+                "source_record_id": raw.source_record_id,
+                "payload": json.dumps(raw.payload),
+                "fetched_at": (raw.retrieved_at or RETRIEVED_AT).isoformat(),
+            },
+            zone=ZONE,
+        )
+
+        assert reprojected is not None
+        self.assertEqual(
+            [
+                (
+                    item.observation.kind,
+                    item.observation.value.value,
+                    item.mapper_version,
+                )
+                for item in reprojected.observations
+            ],
+            [(MetricKind.FTP, 270.0, MAPPER_VERSION)],
+        )
 
     def test_latest_ftp_with_an_invalid_date_is_not_replaced_by_the_sync_day(
         self,

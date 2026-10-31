@@ -226,6 +226,10 @@ _CANONICAL_PROVIDER_METRICS: Final = {
 }
 
 
+# Cached chart states that describe the provider fetch, not the snapshot's points.
+_FETCH_OUTCOMES: Final = frozenset({"stale", "failed", "unsupported"})
+
+
 def _canonical_provider_metrics(
     garmin: dict[str, Any],
     start: date,
@@ -236,7 +240,8 @@ def _canonical_provider_metrics(
 
     A day with an endurance group value shows the group values only, as the
     group map wins over the overall score in the snapshot reader. The points come
-    only from canonical data; a cached chart supplies its sync status only.
+    only from canonical data. A cached chart supplies its fetch outcome (stale,
+    failed or unsupported); otherwise the status follows the canonical points.
     """
     cached = garmin.get("provider_metrics")
     cached = cached if isinstance(cached, dict) else {}
@@ -250,7 +255,9 @@ def _canonical_provider_metrics(
         )
         previous = cached.get(key)
         status = previous.get("status") if isinstance(previous, dict) else None
-        metrics[key] = {**data, "status": status or data["status"]}
+        if status not in _FETCH_OUTCOMES:
+            status = data["status"]
+        metrics[key] = {**data, "status": status}
     return metrics
 
 

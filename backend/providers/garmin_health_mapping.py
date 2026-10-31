@@ -165,6 +165,8 @@ from backend.providers.garmin_fields import (
     GARMIN_ENDURANCE_WRAPPER_KEYS,
     GARMIN_FLOORS_ALIASES,
     GARMIN_FTP_ALIASES,
+    GARMIN_FTP_RANGE_DAY,
+    GARMIN_FTP_RANGE_VALUE,
     GARMIN_HRV_LAST_NIGHT_ALIASES,
     GARMIN_HRV_WEEKLY_ALIASES,
     GARMIN_RACE_DISTANCE_ALIASES,
@@ -393,10 +395,12 @@ class _Group:
 
 
 # A biometric range record of the FTP history: its day is ``from``, its FTP
-# ``value``; a bare ``value`` elsewhere is not FTP.
-_RANGE_DAY: Final = "from"
+# ``value``.
 _FTP_RANGE_GROUPS: Final = (
-    _Group(None, (_Field(("value",), MetricKind.FTP, _PROVIDER, Sport.RIDE),)),
+    _Group(
+        None,
+        (_Field((GARMIN_FTP_RANGE_VALUE,), MetricKind.FTP, _PROVIDER, Sport.RIDE),),
+    ),
 )
 
 
@@ -1168,13 +1172,13 @@ class _HealthMapping:
     def _map_grouped(
         self, name: str, payload: object, groups: tuple[_Group, ...]
     ) -> None:
+        section_date_keys = _SECTION_DATE_KEYS.get(name, (_DATE_FIELD,))
         for ref, record, index in self._records(name, payload):
-            date_keys = _SECTION_DATE_KEYS.get(name, (_DATE_FIELD,))
-            record_groups = groups
+            date_keys, record_groups = section_date_keys, groups
             if name == _DAILY_STATS:
                 record = flatten_daily_summary(record)
-            elif name == "cycling_ftp_history" and _RANGE_DAY in record:
-                date_keys, record_groups = (_RANGE_DAY,), _FTP_RANGE_GROUPS
+            elif name == "cycling_ftp_history" and _is_range_record(record):
+                date_keys, record_groups = (GARMIN_FTP_RANGE_DAY,), _FTP_RANGE_GROUPS
             day = self._record_day(
                 record,
                 ref,
@@ -1550,3 +1554,8 @@ def map_garmin_health(
     return MappingResult(
         records=tuple(mapping.observations), issues=tuple(mapping.issues)
     )
+
+
+def _is_range_record(record: Mapping[str, object]) -> bool:
+    """Return True for an FTP history record of the biometric range endpoint."""
+    return record.get(GARMIN_FTP_RANGE_DAY) not in (None, "")

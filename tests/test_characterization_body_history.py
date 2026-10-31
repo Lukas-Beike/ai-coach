@@ -745,6 +745,23 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
         self.assertEqual(cached["endurance_score"]["status"], "stale")
         self.assertEqual(cached["endurance_score"]["points"], [])
         self.assertEqual(cached["running_tolerance"]["status"], "unavailable")
+        # A cached "current" or "unknown" described the snapshot's points; the
+        # status follows the canonical points instead.
+        derived = analysis_history(
+            None,
+            {
+                "provider_metrics": {
+                    "endurance_score": {"status": "current"},
+                    "running_tolerance": {"status": "unknown"},
+                },
+                "running_tolerance": [
+                    {"calendarDate": "2026-05-04", "toleranceScore": 12}
+                ],
+            },
+            TODAY,
+        )["provider_metrics"]
+        self.assertEqual(derived["endurance_score"]["status"], "unavailable")
+        self.assertEqual(derived["running_tolerance"]["status"], "current")
         projected = analysis_history(
             None,
             {
