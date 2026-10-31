@@ -17,8 +17,10 @@ from backend.providers.intervals_activity_keys import TRAINING_LOAD_LOOKUP
 
 # Units without a planned time are stored as a bare date or at local midnight.
 _DATE_ONLY_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]00:00(?::00(?:\.0+)?)?)?")
-_UNIT_START_FIELDS = ("start_date_local", "date", "start")
+# Planned units are local planning records; activities keep their stored keys.
+_UNIT_START_FIELDS = ("starts_at_local", "date", "start")
 _ACTIVITY_START_FIELDS = ("start_date_local", "start_date", "start")
+_UNIT_DURATION_FIELDS = ("planned_duration_s", "elapsed_time")
 _DURATION_FIELDS = ("moving_time", "elapsed_time")
 _LOAD_FIELDS = TRAINING_LOAD_LOOKUP
 
@@ -48,9 +50,7 @@ def is_planned_workout_event(event: Any) -> bool:
     # Provider records may omit category. Only infer a workout when the record
     # has a duration, so races and calendar notes are not counted as missed
     # training.
-    return (
-        _as_number(_first_present(event, ("moving_time", "elapsed_time"))) is not None
-    )
+    return _as_number(_first_present(event, _UNIT_DURATION_FIELDS)) is not None
 
 
 def record_date(value: Any) -> str:
@@ -148,7 +148,7 @@ def _start_distance(activity: dict[str, Any], event_start: datetime | None) -> f
 
 def _duration_gap(unit: dict[str, Any], activity: dict[str, Any]) -> float:
     """Relative duration difference from the planned duration."""
-    planned = _number_field(unit, _DURATION_FIELDS)
+    planned = _number_field(unit, _UNIT_DURATION_FIELDS)
     actual = _number_field(activity, _DURATION_FIELDS)
     if planned is None or actual is None or planned <= 0:
         return math.inf

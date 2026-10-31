@@ -1,14 +1,15 @@
 """Neutral key names for the activity and calendar JSON shown in the browser.
 
-Stored activity rows and planned workouts keep the keys of the provider that
-reported them. The browser contract names them neutrally, so the HTTP layer
-translates stored keys through this module instead of exposing them.
+Stored activity rows keep the keys of the provider that reported them. The
+browser contract names them neutrally, so the HTTP layer translates stored keys
+through this module instead of exposing them.
 
 Completed-activity objects (list rows, completed calendar entries and the
 ``compliance.actual_activity`` of a matched planned unit) get the full activity
 map, in the vocabulary of the activity detail document. Every other calendar
-entry (planned units, competitions, external events) keeps its stored keys until
-the planning records move (#1507) and gets only the metric renames.
+entry (planned units, competitions, external events) is a local record whose
+start and planned duration are already stored as ``starts_at_local`` and
+``planned_duration_s``; it gets only the metric renames.
 """
 
 from __future__ import annotations
@@ -99,8 +100,9 @@ def neutral_activity_records(records: Iterable[Any]) -> list[Any]:
 def neutral_calendar_entry(entry: Any) -> Any:
     """Translate one calendar entry and the activity matched to it.
 
-    A completed-activity entry is an activity; every other entry keeps its stored
-    keys apart from the metric renames.
+    A completed-activity entry is an activity; every other entry is a local
+    planning record with neutral start and duration keys and gets only the metric
+    renames.
     """
     if not isinstance(entry, Mapping):
         return entry

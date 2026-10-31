@@ -151,14 +151,14 @@ class PlanningReplacementTests(unittest.TestCase):
         arguments["payload"]["workouts"] = [
             self.workout(
                 "2026-09-22",
-                start_date_local="2026-09-22T08:00:00",
+                starts_at_local="2026-09-22T08:00:00",
                 duration_minutes=45,
                 description="- 45m Z2",
             ),
             self.workout(
                 "2026-09-22",
                 name="Second",
-                start_date_local="2026-09-22T08:30:00",
+                starts_at_local="2026-09-22T08:30:00",
                 duration_minutes=30,
                 description="- 30m Z2",
             ),
@@ -199,12 +199,12 @@ class PlanningReplacementTests(unittest.TestCase):
         workouts = [
             {
                 "date": "2026-09-19",
-                "start_date_local": "2026-09-19T08:00:00",
+                "starts_at_local": "2026-09-19T08:00:00",
                 "duration_minutes": 60,
             },
             {
                 "date": "2026-09-19",
-                "start_date_local": "2026-09-19T08:30:00",
+                "starts_at_local": "2026-09-19T08:30:00",
                 "duration_minutes": 30,
             },
         ]

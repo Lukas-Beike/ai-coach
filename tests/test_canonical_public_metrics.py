@@ -215,11 +215,11 @@ class NeutralPublicMetricsTests(unittest.TestCase):
         )
         self.assertEqual({"vo2max": 50}, neutral_activity({"icu_vo2max": 50}))
 
-    def test_planned_units_keep_their_stored_keys(self) -> None:
+    def test_planned_units_keep_their_neutral_planning_keys(self) -> None:
         planned = {
             "id": "planned-1",
-            "start_date_local": "2026-10-12T07:00:00",
-            "moving_time": 3600,
+            "starts_at_local": "2026-10-12T07:00:00",
+            "planned_duration_s": 3600,
             "icu_training_load": 40,
             "compliance": {
                 "status": "completed",
@@ -243,8 +243,8 @@ class NeutralPublicMetricsTests(unittest.TestCase):
             [
                 {
                     "id": "planned-1",
-                    "start_date_local": "2026-10-12T07:00:00",
-                    "moving_time": 3600,
+                    "starts_at_local": "2026-10-12T07:00:00",
+                    "planned_duration_s": 3600,
                     "training_load": 40,
                     "compliance": {
                         "status": "completed",
@@ -269,7 +269,7 @@ class NeutralPublicMetricsTests(unittest.TestCase):
 
     def test_calendar_state_translates_every_calendar_list(self) -> None:
         actual = {"moving_time": 3500, "is_completed_activity": True}
-        entry = {"moving_time": 3600, "compliance": {"actual_activity": actual}}
+        entry = {"planned_duration_s": 3600, "compliance": {"actual_activity": actual}}
         state = {
             "training_calendar": [dict(entry)],
             "planned": [dict(entry)],
@@ -281,7 +281,7 @@ class NeutralPublicMetricsTests(unittest.TestCase):
         translated = neutral_calendar_state(state)
 
         expected = {
-            "moving_time": 3600,
+            "planned_duration_s": 3600,
             "compliance": {
                 "actual_activity": {
                     "moving_duration_s": 3500,

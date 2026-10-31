@@ -110,12 +110,12 @@ class WeatherHistoryTests(unittest.TestCase):
             {
                 "id": "same-id",
                 "name": "Renamed",
-                "start_date_local": "2026-09-21T08:00",
+                "starts_at_local": "2026-09-21T08:00",
             },
             {
                 "id": "date-match",
                 "name": "Tempo",
-                "start_date_local": "2026-09-22T09:00",
+                "starts_at_local": "2026-09-22T09:00",
             },
             {"name": "Geplante Einheit", "date": "2026-09-23"},
             {"id": "none", "name": "No match", "date": "2026-09-24"},

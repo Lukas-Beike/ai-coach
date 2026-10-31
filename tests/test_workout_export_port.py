@@ -60,7 +60,7 @@ class FakeExportTarget:
             "external_id": f"intervals-coach-{local_id}",
             "name": export.name,
             "type": export.sport_token,
-            "start_date_local": f"{export.start_date_local[:10]}T06:00:00",
+            "start_date_local": f"{export.starts_at_local[:10]}T06:00:00",
         }
 
     def upsert(self, payloads):

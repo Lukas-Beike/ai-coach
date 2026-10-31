@@ -27,7 +27,7 @@ def event_for(target: date, **values: Any) -> dict[str, Any]:
     return {
         "type": "Ride",
         "date": target.isoformat(),
-        "moving_time": 10_800,
+        "planned_duration_s": 10_800,
         **values,
     }
 
@@ -58,20 +58,22 @@ class WeatherAdaptiveTests(unittest.TestCase):
     def test_duration_prefers_duration_minutes_then_moving_time(self):
         self.assertEqual(
             _weather_adaptive_duration_minutes(
-                {"duration_minutes": "180,25", "moving_time": 1}
+                {"duration_minutes": "180,25", "planned_duration_s": 1}
             ),
             180.25,
         )
         self.assertEqual(
             _weather_adaptive_duration_minutes(
-                {"duration_minutes": "bad", "moving_time": 3600}
+                {"duration_minutes": "bad", "planned_duration_s": 3600}
             ),
             60,
         )
-        self.assertEqual(_weather_adaptive_duration_minutes({"moving_time": "bad"}), 0)
+        self.assertEqual(
+            _weather_adaptive_duration_minutes({"planned_duration_s": "bad"}), 0
+        )
         self.assertEqual(
             _weather_adaptive_duration_minutes(
-                {"duration_minutes": math.inf, "moving_time": 3600}
+                {"duration_minutes": math.inf, "planned_duration_s": 3600}
             ),
             60,
         )
@@ -106,7 +108,7 @@ class WeatherAdaptiveTests(unittest.TestCase):
 
     def test_date_precedence_and_malformed_dates(self):
         event = event_for(
-            self.target, date="not-a-date", start_date_local=self.target.isoformat()
+            self.target, date="not-a-date", starts_at_local=self.target.isoformat()
         )
         self.assertIsNone(weather_adaptive_reason(event, self.weather_days, self.today))
         self.assertIsNone(
@@ -116,7 +118,7 @@ class WeatherAdaptiveTests(unittest.TestCase):
         )
         self.assertIsNone(
             weather_adaptive_reason(
-                event_for(self.target, date=None, start_date_local="bad"),
+                event_for(self.target, date=None, starts_at_local="bad"),
                 self.weather_days,
                 self.today,
             )

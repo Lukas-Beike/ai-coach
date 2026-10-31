@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Final
 
 from backend.db.garmin_items_migration import split_garmin_snapshot
+from backend.db.planning_fields_migration import rename_planning_fields_in_database
 from backend.db.schema import (
     ACTIVITY_DETAIL_DDL,
     CANONICAL_EXTENSIONS_DDL,
@@ -33,6 +34,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V12,
     SHAPE_SCHEMA_V13,
     SHAPE_SCHEMA_V14,
+    SHAPE_SCHEMA_V15,
     released_shape,
 )
 
@@ -195,11 +197,18 @@ def _upgrade_v14_to_v15(db: Any) -> None:
     )
 
 
+def _upgrade_v15_to_v16(db: Any) -> None:
+    # Names the start and duration of local planning records provider-neutrally
+    # (see planning_fields_migration); ids, values and row counts stay as is.
+    rename_planning_fields_in_database(db)
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V9: (SHAPE_SCHEMA_V10, _upgrade_v9_to_v10),
     SHAPE_SCHEMA_V10: (SHAPE_SCHEMA_V11, _upgrade_v10_to_v11),
     SHAPE_SCHEMA_V11: (SHAPE_SCHEMA_V12, _upgrade_v11_to_v12),
     SHAPE_SCHEMA_V12: (SHAPE_SCHEMA_V13, _upgrade_v12_to_v13),
     SHAPE_SCHEMA_V13: (SHAPE_SCHEMA_V14, _upgrade_v13_to_v14),
-    SHAPE_SCHEMA_V14: (SHAPE_CURRENT, _upgrade_v14_to_v15),
+    SHAPE_SCHEMA_V14: (SHAPE_SCHEMA_V15, _upgrade_v14_to_v15),
+    SHAPE_SCHEMA_V15: (SHAPE_CURRENT, _upgrade_v15_to_v16),
 }

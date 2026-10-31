@@ -1150,7 +1150,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
             [
                 {
                     **self.workout(),
-                    "start_date_local": "2026-09-09T08:30:00",
+                    "starts_at_local": "2026-09-09T08:30:00",
                     "duration_minutes": 30,
                 }
             ]
@@ -1166,7 +1166,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                             "local_id": existing["id"],
                             "action": "update",
                             "date": "2026-09-08",
-                            "start_date_local": "2026-09-08T08:30:00",
+                            "starts_at_local": "2026-09-08T08:30:00",
                             "expected_payload_hash": before["planned_units"][0][
                                 "expected_payload_hash"
                             ],
@@ -1175,7 +1175,7 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
                     "workouts": [
                         {
                             **self.workout("2026-09-08", "Collision"),
-                            "start_date_local": "2026-09-08T08:00:00",
+                            "starts_at_local": "2026-09-08T08:00:00",
                             "duration_minutes": 60,
                         }
                     ],

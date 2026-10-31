@@ -160,7 +160,10 @@ def build_structured_tool_schemas(
                     "items": {"type": "string", "minLength": 2, "maxLength": 120},
                 },
                 "barcode": {"type": "string", "pattern": "^[0-9]{8,14}$"},
-                "source": {"type": "string", "enum": ["bls", "open_food_facts", "yazio"]},
+                "source": {
+                    "type": "string",
+                    "enum": ["bls", "open_food_facts", "yazio"],
+                },
             },
         ),
         _canonical_coach_tool(
@@ -344,14 +347,14 @@ def build_structured_tool_schemas(
                                     "duration_minutes",
                                     "target",
                                     "rationale",
-                                    "start_date_local",
+                                    "starts_at_local",
                                 ],
                                 "properties": {
                                     "date": {
                                         "type": "string",
                                         "description": "Local workout date in YYYY-MM-DD format; plan span at most 730 days.",
                                     },
-                                    "start_date_local": {
+                                    "starts_at_local": {
                                         "type": ["string", "null"],
                                         "description": "Optional ISO-8601 local start timestamp on the workout date.",
                                     },
@@ -415,14 +418,14 @@ def build_structured_tool_schemas(
                                     "duration_minutes",
                                     "target",
                                     "rationale",
-                                    "start_date_local",
+                                    "starts_at_local",
                                 ],
                                 "properties": {
                                     "date": {
                                         "type": "string",
                                         "description": "Local workout date in YYYY-MM-DD format.",
                                     },
-                                    "start_date_local": {
+                                    "starts_at_local": {
                                         "type": ["string", "null"],
                                         "description": "Optional ISO-8601 local start timestamp on the workout date.",
                                     },
@@ -467,7 +470,7 @@ def build_structured_tool_schemas(
                                 "description": "Moving a workout uses update with its new date.",
                             },
                             "date": {"type": "string"},
-                            "start_date_local": {"type": "string"},
+                            "starts_at_local": {"type": "string"},
                             "name": {"type": "string"},
                             "description": {"type": "string"},
                             "duration_minutes": {"type": "integer"},
@@ -680,7 +683,7 @@ def build_structured_tool_schemas(
                             for field in (
                                 "name",
                                 "event_date",
-                                "start_date_local",
+                                "starts_at_local",
                                 "sport",
                                 "distance",
                                 "target",
@@ -690,7 +693,7 @@ def build_structured_tool_schemas(
                             )
                         },
                         "priority": {"type": "string", "enum": ["A", "B", "C"]},
-                        "moving_time_seconds": {
+                        "planned_duration_s": {
                             "type": ["integer", "null"],
                             "minimum": 0,
                         },

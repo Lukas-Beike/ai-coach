@@ -206,7 +206,7 @@ class WorkoutLibraryService:
         library_workout = {
             **{key: value for key, value in workout.items() if key != "type"},
             "sport": workout.get("sport") or INTERVALS_DEFAULT_WORKOUT_TYPE,
-            "moving_time": int(workout.get("duration_minutes") or 0) * 60,
+            "planned_duration_s": int(workout.get("duration_minutes") or 0) * 60,
         }
         entry = library.normalize_library_workout(
             library_workout,

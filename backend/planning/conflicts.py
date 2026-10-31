@@ -34,8 +34,8 @@ def _naive_calendar_datetime(value: Any) -> datetime | None:
 
 def _calendar_duration_minutes(value: dict[str, Any], default_minutes: int) -> int:
     duration = value.get("duration_minutes")
-    if duration in (None, "") and value.get("moving_time") not in (None, ""):
-        duration = float(value["moving_time"]) / 60
+    if duration in (None, "") and value.get("planned_duration_s") not in (None, ""):
+        duration = float(value["planned_duration_s"]) / 60
     try:
         return (
             max(1, int(float(duration)))
@@ -63,7 +63,7 @@ def _calendar_interval(
     value: dict[str, Any], default_minutes: int = 60
 ) -> tuple[datetime, datetime, bool] | None:
     raw_start = _first_present(
-        value, ("start_date_local", "start_local", "start", "date", "event_date")
+        value, ("starts_at_local", "start_local", "start", "date", "event_date")
     )
     if raw_start in (None, ""):
         return None
@@ -96,7 +96,7 @@ def calendar_items_conflict(
     candidate_date = iso_date_prefix(
         str(
             _first_present(
-                candidate, ("date", "event_date", "start_date_local", "start_local")
+                candidate, ("date", "event_date", "starts_at_local", "start_local")
             )
             or ""
         )
@@ -104,7 +104,7 @@ def calendar_items_conflict(
     existing_date = iso_date_prefix(
         str(
             _first_present(
-                existing, ("date", "event_date", "start_date_local", "start_local")
+                existing, ("date", "event_date", "starts_at_local", "start_local")
             )
             or ""
         )
@@ -153,7 +153,7 @@ def _calendar_conflict_record(
         "date": iso_date_prefix(
             str(
                 _first_present(
-                    item, ("date", "event_date", "start_date_local", "start_local")
+                    item, ("date", "event_date", "starts_at_local", "start_local")
                 )
                 or ""
             )

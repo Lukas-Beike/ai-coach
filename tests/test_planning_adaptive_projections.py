@@ -272,7 +272,7 @@ class AdaptiveProjectionTests(unittest.TestCase):
             ["synthetic-2026-02-28", "synthetic-2026-03-01"],
         )
         self.assertEqual(events[0]["category"], "CUSTOM_SICK")
-        self.assertEqual(events[0]["start_date_local"], "2026-02-28T05:00:00Z")
+        self.assertEqual(events[0]["starts_at_local"], "2026-02-28T05:00:00Z")
         self.assertEqual(events[1]["name"], "Krankheit")
         self.assertEqual(len(events[0]["description"]), 12000)
         self.assertEqual(events[0]["description"], "x" * 12000)

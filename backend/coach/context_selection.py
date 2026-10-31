@@ -252,7 +252,7 @@ class CoachContextSelection:
                     str(
                         item.get("date")
                         or item.get("event_date")
-                        or item.get("start_date_local")
+                        or item.get("starts_at_local")
                         or ""
                     )
                 )

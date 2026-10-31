@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v15 (v14 is the released Yazio food-source schema); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v16 (v15 is the released canonical-extension schema); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,17 +28,17 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from schema v9 through released v14 and the extended current schema v15, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from schema v9 through released v15 and the current schema v16, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Skipped-release upgrade
 - **WHEN** a populated released v9 database is opened by this build
 - **THEN** all intermediate migrations run to the exact current schema while preserving existing rows.
 
 #### Scenario: Later supported release
-- **WHEN** a populated v10, v11, v12, v13 or v14 database is opened
+- **WHEN** a populated v10, v11, v12, v13, v14 or v15 database is opened
 - **THEN** only remaining upgrade steps run and existing data remains intact.
 
-Evidence baseline: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py`. The outgoing v14 fixture must be frozen before changing the live shape.
+Evidence baseline: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py`. The outgoing v15 fixture is frozen (`tests/test_db_migrations.py::test_frozen_v15_fixture_is_the_recorded_released_shape`); freeze v16 before changing the live shape again.
 
 ### Requirement: Unknown schema preservation
 
@@ -151,3 +151,28 @@ The extended schema SHALL preserve all athlete records, feedback, snapshots, tom
 #### Scenario: Unknown or newer shape
 - **WHEN** a database has an unsupported version, unrecognized shape or mismatched version/shape pair
 - **THEN** initialization rejects it without deleting, resetting or partially modifying it.
+
+### Requirement: Provider-neutral planning field upgrade
+The v15 to v16 upgrade SHALL rename the stored start and planned duration of local planning records from `start_date_local` and `moving_time` to `starts_at_local` and `planned_duration_s` in one migration transaction, in competition columns and in every stored planning JSON record, preserving ids, values, key order, row counts, sync markers and remote baselines. Change history SHALL NOT be rewritten; recorded field names SHALL be translated on read.
+
+#### Scenario: Populated upgrade
+- **WHEN** a populated v15 or v9 database with planning records under the former names is opened
+- **THEN** every planning record names `starts_at_local` and `planned_duration_s` with unchanged values, and every other table keeps its exact rows.
+
+#### Scenario: Rewritten records
+- **WHEN** planned-unit or workout-library payloads, planned-unit or competition sync conflicts, staged Coach plan artifacts, adaptive preview changes or pending undo proposals name the former keys
+- **THEN** only those keys are renamed; rows without them, non-object JSON, used proposals and activity proposals keep their exact bytes.
+
+#### Scenario: Recorded remote baseline
+- **WHEN** a synced planned unit recorded its remote baseline hash before the upgrade
+- **THEN** the same remote event still matches it afterwards and reports no remote change.
+
+#### Scenario: Undo of an earlier change
+- **WHEN** a planned-unit or competition change recorded before the upgrade, or its pending undo proposal, is undone afterwards
+- **THEN** the hash check accepts the recorded state and the restore writes the current field names.
+
+#### Scenario: Upgrade fails partway
+- **WHEN** an injected failure follows the column rename and JSON rewrite
+- **THEN** the database returns to the unchanged v15 or v9 schema and rows.
+
+Evidence: `backend/db/planning_fields_migration.py::rename_planning_fields_in_database`; `backend/db/migrations.py::_upgrade_v15_to_v16`; `backend/planning/planned_units.py::planned_unit_payload_hash`; `backend/change_history.py::accepted_audit_hashes`, `backend/change_history.py::current_audit_fields`. Tests: `tests/test_db_planning_fields_migration.py::test_populated_releases_upgrade_every_planning_record_to_the_neutral_names`; `tests/test_db_planning_fields_migration.py::test_recorded_remote_baseline_still_matches_after_the_upgrade`; `tests/test_db_planning_fields_migration.py::test_failure_after_the_rewrite_rolls_back_to_the_unchanged_release`; `tests/test_db_planning_fields_migration.py::test_upgraded_database_restarts_with_the_same_build_unchanged`; `tests/test_db_planning_fields_migration.py::test_restore_of_a_populated_v15_backup_upgrades_through_validation`; `tests/test_db_planning_fields_migration.py::PreUpgradeUndoTests`; `tests/test_db_encrypted_upgrade_matrix.py`.

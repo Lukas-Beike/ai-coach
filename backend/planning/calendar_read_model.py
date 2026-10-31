@@ -74,7 +74,7 @@ def planned_unit_conflicts(
     if unit.get("archived") or unit.get("local_deleted"):
         return []
     unit_day = iso_date_prefix(
-        str(unit.get("date") or unit.get("start_date_local") or "")
+        str(unit.get("date") or unit.get("starts_at_local") or "")
     )
     codes = [
         *_marker_conflict_reasons(unit, external_events),
@@ -96,7 +96,7 @@ def snapshot_sport_settings(snapshot: Any) -> Any:
 def _row_day(row: dict[str, Any]) -> date | None:
     try:
         return date.fromisoformat(
-            iso_date_prefix(str(row.get("date") or row.get("start_date_local") or ""))
+            iso_date_prefix(str(row.get("date") or row.get("starts_at_local") or ""))
         )
     except ValueError:
         return None

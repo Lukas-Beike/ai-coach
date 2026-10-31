@@ -46,8 +46,8 @@ class WeatherRecommendationsTests(unittest.TestCase):
             {
                 "id": "monday",
                 "type": "Ride",
-                "start_date_local": f"{monday}T08:00:00",
-                "moving_time": 7200,
+                "starts_at_local": f"{monday}T08:00:00",
+                "planned_duration_s": 7200,
             },
             forecast_for(monday, low_hours={8, 9, 16, 17}),
         )
@@ -55,8 +55,8 @@ class WeatherRecommendationsTests(unittest.TestCase):
             {
                 "id": "friday",
                 "type": "Run",
-                "start_date_local": f"{friday}T08:00:00",
-                "moving_time": 3600,
+                "starts_at_local": f"{friday}T08:00:00",
+                "planned_duration_s": 3600,
             },
             forecast_for(friday, low_hours={8, 14}),
         )
@@ -68,7 +68,7 @@ class WeatherRecommendationsTests(unittest.TestCase):
     def test_weekend_and_missing_hour_gaps(self):
         saturday = date(2026, 9, 5)
         result = weather_recommendation(
-            {"type": "Ride", "date": saturday.isoformat(), "moving_time": 3600},
+            {"type": "Ride", "date": saturday.isoformat(), "planned_duration_s": 3600},
             forecast_for(saturday),
         )
         self.assertEqual(result["availability"], "Wochenende")
@@ -77,7 +77,7 @@ class WeatherRecommendationsTests(unittest.TestCase):
             f"{saturday.isoformat()}T{hour:02d}:00" for hour in range(6, 22, 2)
         ]
         missing = weather_recommendation(
-            {"type": "Ride", "date": saturday.isoformat(), "moving_time": 7200},
+            {"type": "Ride", "date": saturday.isoformat(), "planned_duration_s": 7200},
             forecast,
         )
         self.assertIsNone(missing)
@@ -93,11 +93,11 @@ class WeatherRecommendationsTests(unittest.TestCase):
             )
         )
         short = weather_recommendation(
-            {"type": "Ride", "date": target.isoformat(), "moving_time": -1},
+            {"type": "Ride", "date": target.isoformat(), "planned_duration_s": -1},
             forecast_for(target),
         )
         long = weather_recommendation(
-            {"type": "Ride", "date": target.isoformat(), "moving_time": 999999},
+            {"type": "Ride", "date": target.isoformat(), "planned_duration_s": 999999},
             forecast_for(target),
         )
         self.assertEqual(short["duration_minutes"], 5)
@@ -110,7 +110,7 @@ class WeatherRecommendationsTests(unittest.TestCase):
             "name": "x" * 250,
             "type": "Ride",
             "date": target.isoformat(),
-            "moving_time": 3660,
+            "planned_duration_s": 3660,
         }
         forecast = forecast_for(target, code=63)
         before = (copy.deepcopy(event), copy.deepcopy(forecast))
@@ -176,7 +176,7 @@ class WeatherRecommendationsTests(unittest.TestCase):
             35 if hour == 10 else None for hour in range(24)
         ]
         result = weather_recommendation(
-            {"type": "Ride", "date": target.isoformat(), "moving_time": 7200},
+            {"type": "Ride", "date": target.isoformat(), "planned_duration_s": 7200},
             forecast,
         )
         self.assertEqual(result["suggested_time"], "10:00–12:00 Uhr")
@@ -188,7 +188,7 @@ class WeatherRecommendationsTests(unittest.TestCase):
         forecast = forecast_for(target)
         forecast["hourly"]["wind_gusts_10m"] = [None] * 24
         result = weather_recommendation(
-            {"type": "Ride", "date": target.isoformat(), "moving_time": 3600},
+            {"type": "Ride", "date": target.isoformat(), "planned_duration_s": 3600},
             forecast,
         )
         self.assertIsNone(result["wind_gusts"])
@@ -201,7 +201,7 @@ class WeatherRecommendationsTests(unittest.TestCase):
             if key != "time":
                 forecast["hourly"][key] = [None] * 24
         result = weather_recommendation(
-            {"type": "Ride", "date": target.isoformat(), "moving_time": 7200},
+            {"type": "Ride", "date": target.isoformat(), "planned_duration_s": 7200},
             forecast,
         )
         self.assertIsNone(result)
@@ -212,7 +212,7 @@ class WeatherRecommendationsTests(unittest.TestCase):
         for key in ("wind_speed_10m", "wind_gusts_10m", "wind_direction_10m"):
             forecast["hourly"][key] = [None] * 24
         result = weather_recommendation(
-            {"type": "Ride", "date": target.isoformat(), "moving_time": 3600},
+            {"type": "Ride", "date": target.isoformat(), "planned_duration_s": 3600},
             forecast,
         )
         self.assertIsNotNone(result)

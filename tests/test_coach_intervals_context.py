@@ -94,7 +94,7 @@ class CoachIntervalsContextTests(unittest.TestCase):
             {
                 "id": f"future-{index:02}",
                 "name": f"Future {index:02}",
-                "start_date_local": (self.today + timedelta(days=1)).isoformat(),
+                "starts_at_local": (self.today + timedelta(days=1)).isoformat(),
                 "description": "private provider detail",
                 "athlete_detail": "private athlete detail",
             }

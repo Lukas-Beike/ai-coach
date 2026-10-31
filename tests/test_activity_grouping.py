@@ -11,19 +11,19 @@ class ActivityGroupingTests(unittest.TestCase):
                 {
                     "id": "ride-2",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T08:30:00",
-                    "moving_time": 3600,
+                    "starts_at_local": "2026-08-30T08:30:00",
+                    "planned_duration_s": 3600,
                 },
                 {
                     "id": "ride-1",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T08:00:00",
-                    "moving_time": 3600,
+                    "starts_at_local": "2026-08-30T08:00:00",
+                    "planned_duration_s": 3600,
                 },
                 {
                     "id": "run-1",
                     "type": "Run",
-                    "start_date_local": "2026-08-30T08:15:00",
+                    "starts_at_local": "2026-08-30T08:15:00",
                 },
             ]
         )
@@ -39,12 +39,12 @@ class ActivityGroupingTests(unittest.TestCase):
                 {
                     "id": "midnight",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T00:00:00",
+                    "starts_at_local": "2026-08-30T00:00:00",
                 },
                 {
                     "id": "later",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T12:00:00",
+                    "starts_at_local": "2026-08-30T12:00:00",
                 },
             ]
         )
@@ -59,14 +59,14 @@ class ActivityGroupingTests(unittest.TestCase):
                 {
                     "id": "first",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T08:00:00",
-                    "moving_time": 3600,
+                    "starts_at_local": "2026-08-30T08:00:00",
+                    "planned_duration_s": 3600,
                 },
                 {
                     "id": "second",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T09:00:00",
-                    "moving_time": 1800,
+                    "starts_at_local": "2026-08-30T09:00:00",
+                    "planned_duration_s": 1800,
                 },
             ]
         )
@@ -78,20 +78,20 @@ class ActivityGroupingTests(unittest.TestCase):
                 {
                     "id": "middle",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T09:30:00",
-                    "moving_time": 3600,
+                    "starts_at_local": "2026-08-30T09:30:00",
+                    "planned_duration_s": 3600,
                 },
                 {
                     "id": "last",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T10:15:00",
-                    "moving_time": 3600,
+                    "starts_at_local": "2026-08-30T10:15:00",
+                    "planned_duration_s": 3600,
                 },
                 {
                     "id": "first",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T08:00:00",
-                    "moving_time": 7200,
+                    "starts_at_local": "2026-08-30T08:00:00",
+                    "planned_duration_s": 7200,
                 },
             ]
         )
@@ -106,13 +106,13 @@ class ActivityGroupingTests(unittest.TestCase):
             parallel_cycling_event_groups(
                 [
                     "not-an-event",
-                    {"type": "Ride", "start_date_local": "2026-08-30T08:00:00"},
+                    {"type": "Ride", "starts_at_local": "2026-08-30T08:00:00"},
                     {
                         "id": "run",
                         "type": "Run",
-                        "start_date_local": "2026-08-30T08:00:00",
+                        "starts_at_local": "2026-08-30T08:00:00",
                     },
-                    {"id": "invalid", "type": "Ride", "start_date_local": "not-a-date"},
+                    {"id": "invalid", "type": "Ride", "starts_at_local": "not-a-date"},
                 ]
             ),
             [],
@@ -126,20 +126,20 @@ class ActivityGroupingTests(unittest.TestCase):
                 {
                     "id": "default",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T08:00:00",
-                    "moving_time": "invalid",
+                    "starts_at_local": "2026-08-30T08:00:00",
+                    "planned_duration_s": "invalid",
                 },
                 {
                     "id": "short",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T08:59:30",
-                    "moving_time": 1,
+                    "starts_at_local": "2026-08-30T08:59:30",
+                    "planned_duration_s": 1,
                 },
                 {
                     "id": "other",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T12:00:00",
-                    "moving_time": None,
+                    "starts_at_local": "2026-08-30T12:00:00",
+                    "planned_duration_s": None,
                 },
             ]
         )
@@ -153,14 +153,14 @@ class ActivityGroupingTests(unittest.TestCase):
             {
                 "id": "a",
                 "type": "Ride",
-                "start_date_local": "2026-08-30T08:00:00",
-                "moving_time": 3600,
+                "starts_at_local": "2026-08-30T08:00:00",
+                "planned_duration_s": 3600,
             },
             {
                 "id": "b",
                 "type": "Ride",
-                "start_date_local": "2026-08-30T08:30:00",
-                "moving_time": 3600,
+                "starts_at_local": "2026-08-30T08:30:00",
+                "planned_duration_s": 3600,
             },
         ]
         before = copy.deepcopy(events)

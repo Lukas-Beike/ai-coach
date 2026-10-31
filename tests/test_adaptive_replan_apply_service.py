@@ -195,7 +195,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self.assertEqual((planned["sync_dirty"], planned["sync_state"]), (1, "local"))
         self.assertEqual(saved["description"], "- 25m 50% Easy")
         self.assertEqual(saved["duration_minutes"], 25)
-        self.assertEqual(saved["moving_time"], 1500)
+        self.assertEqual(saved["planned_duration_s"], 1500)
         for key in ("workout_doc", "icu_training_load", "icu_intensity"):
             self.assertNotIn(key, saved)
         archived_saved = json.loads(
@@ -572,7 +572,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         original = self.workout(
             workout_id,
             "2026-09-21",
-            start_date_local="2026-09-21T06:30:00",
+            starts_at_local="2026-09-21T06:30:00",
             plan_id="plan-a",
             plan_name="Plan A",
             external_id="ext-old",
@@ -590,7 +590,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
                             **original,
                             "duration_minutes": 20,
                             "description": "- 20m 50% Easy",
-                            "start_date_local": "2026-09-21T06:30:00",
+                            "starts_at_local": "2026-09-21T06:30:00",
                         },
                     }
                 ]
@@ -598,7 +598,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         )
         edited = {
             **original,
-            "start_date_local": "2026-09-21T18:00:00",
+            "starts_at_local": "2026-09-21T18:00:00",
             "plan_id": "plan-b",
             "plan_name": "Plan B",
             "external_id": "ext-new",
@@ -620,7 +620,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self.assertEqual(saved["description"], "- 20m 50% Easy")
         self.assertEqual(saved["duration_minutes"], 20)
         for key in (
-            "start_date_local",
+            "starts_at_local",
             "plan_id",
             "plan_name",
             "external_id",

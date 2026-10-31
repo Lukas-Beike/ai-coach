@@ -18,7 +18,7 @@ class PlannedWorkoutExport:
     provider type cannot be recovered from ``sport`` alone.
     """
 
-    start_date_local: str
+    starts_at_local: str
     sport: Sport
     environment: Environment
     sport_token: str

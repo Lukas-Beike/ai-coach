@@ -950,7 +950,7 @@ class ServerCoachTests(ServerTestCase):
             {
                 "id": f"event-{index}",
                 "name": f"Workout {index}",
-                "start_date_local": (today + timedelta(days=1)).isoformat(),
+                "starts_at_local": (today + timedelta(days=1)).isoformat(),
             }
             for index in range(coach_context.COACH_PLANNED_EVENT_LIMIT + 5)
         ]
@@ -1009,7 +1009,7 @@ class ServerCoachTests(ServerTestCase):
             [
                 {"name": "Later", "date": "2026-09-15"},
                 {"name": "Invalid", "date": "not-a-date"},
-                {"name": "Past", "start_date_local": "2026-09-12"},
+                {"name": "Past", "starts_at_local": "2026-09-12"},
                 {"name": "Today", "date": "2026-09-13"},
             ],
             today,
@@ -1068,10 +1068,10 @@ class ServerCoachTests(ServerTestCase):
         today = server.ATHLETE_CLOCK.now().date()
         event = {
             "id": "planned-1",
-            "start_date_local": (today + timedelta(days=1)).isoformat(),
+            "starts_at_local": (today + timedelta(days=1)).isoformat(),
             "name": "Threshold ride",
             "type": "Ride",
-            "moving_time": 3600,
+            "planned_duration_s": 3600,
             "target": "2 x 20 min at threshold",
             "icu_intensity": 0.92,
             "status": "planned",
@@ -1318,7 +1318,7 @@ class ServerCoachTests(ServerTestCase):
                     "name": "Locker Lauf",
                     "type": "Run",
                     "description": "- 30m 60% Pace locker",
-                    "moving_time": 1800,
+                    "planned_duration_s": 1800,
                 }
             ]
         )[0]
@@ -1374,7 +1374,7 @@ class ServerCoachTests(ServerTestCase):
             "competition_id": "",
             "name": "Münsterland Giro",
             "event_date": event_date,
-            "start_date_local": "",
+            "starts_at_local": "",
             "sport": "Cycling",
             "priority": "A",
             "distance": "125 km",
@@ -1382,7 +1382,7 @@ class ServerCoachTests(ServerTestCase):
             "course_profile": "Rolling",
             "notes": "",
             "description": "",
-            "moving_time_seconds": -1,
+            "planned_duration_s": -1,
         }
         created = server.PLANNING_DATA.competition().save(arguments)
         competition_id = created["competition"]["id"]
@@ -1439,7 +1439,7 @@ class ServerCoachTests(ServerTestCase):
                 "competition_id": competition_id,
                 "name": "Updated Race",
                 "event_date": event_date,
-                "start_date_local": "",
+                "starts_at_local": "",
                 "sport": "Cycling",
                 "priority": "A",
                 "distance": "100 km",
@@ -1447,7 +1447,7 @@ class ServerCoachTests(ServerTestCase):
                 "course_profile": "Road",
                 "notes": "Updated locally",
                 "description": "Updated locally",
-                "moving_time_seconds": -1,
+                "planned_duration_s": -1,
             }
         )
         pushed = []

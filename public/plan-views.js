@@ -309,14 +309,14 @@ function plannedDayNotes(dayContext) {
 function plannedEntryDurationLabel(actual, entry) {
   if (actual) return AppFormat.duration(actual.moving_duration_s ?? actual.elapsed_duration_s);
   if (entry.duration_minutes) return AppFormat.duration(Number(entry.duration_minutes) * 60);
-  return AppFormat.duration(entry.moving_time);
+  return AppFormat.duration(entry.planned_duration_s);
 }
 
 function appendPlannedCalendarComparison(details, entry, actual) {
   if (!actual || entry.is_completed_activity) return;
   const comparison = document.createElement("div");
   comparison.className = "planned-comparison";
-  const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time;
+  const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s;
   const planLine = document.createElement("p");
   planLine.textContent = `Plan: ${[
     entry.name,
@@ -423,7 +423,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   function trainingPlanEntry(item) {
     const entry = document.createElement("div");
     entry.className = "training-plan-entry";
-    entry.textContent = `${item.date ? dateLabel(item.date) : "Ohne Datum"} · ${item.name || "Einheit"} · ${item.duration_minutes || Math.round(Number(item.moving_time || 0) / 60) || "?"} Min.`;
+    entry.textContent = `${item.date ? dateLabel(item.date) : "Ohne Datum"} · ${item.name || "Einheit"} · ${item.duration_minutes || Math.round(Number(item.planned_duration_s || 0) / 60) || "?"} Min.`;
     return entry;
   }
 
@@ -609,7 +609,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const header = document.createElement("span");
     header.className = "planned-session-header";
     const sport = document.createElement("span");
-    sport.textContent = [activitySportLabel(displayed), actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.start_date_local)].filter(Boolean).join(" · ");
+    sport.textContent = [activitySportLabel(displayed), actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local)].filter(Boolean).join(" · ");
     const duration = document.createElement("strong");
     duration.textContent = plannedEntryDurationLabel(actual, entry);
     const distance = document.createElement("span");
@@ -680,7 +680,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     card.dataset.sport = activitySportLabel(displayed);
     meta.textContent = [
       activitySportLabel(displayed),
-      actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.start_date_local),
+      actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local),
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
     appendPlannedSessionHeader(cardSummary, entry, actual);
@@ -818,7 +818,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const sum = (items, metric) => items.reduce((total, item) => total + Math.max(0, Number(metric(item)) || 0), 0);
     const planned = weekEntries.filter((entry) => !entry.is_completed_activity);
     const actual = weekEntries.map(calendarActualActivity).filter(Boolean);
-    const plannedSeconds = sum(planned, (entry) => entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time);
+    const plannedSeconds = sum(planned, (entry) => entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s);
     const actualSeconds = sum(actual, (entry) => entry.moving_duration_s ?? entry.elapsed_duration_s);
     for (const [label, value] of [
       ["Geplant", plannedSeconds > 0 ? AppFormat.duration(plannedSeconds) : "–"],
@@ -882,7 +882,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const entries = (Array.isArray(trainingCalendar) ? trainingCalendar : [])
       .filter((item) => item && !item.archived && !item.local_deleted && plannedEventDate(item))
       .filter((item) => plannedEventDate(item) >= firstWeekKey && plannedEventDate(item) <= lastDateKey)
-      .sort((left, right) => String(left.start_date_local || left.started_at_local || left.date || "").localeCompare(String(right.start_date_local || right.started_at_local || right.date || "")));
+      .sort((left, right) => String(left.starts_at_local || left.started_at_local || left.date || "").localeCompare(String(right.starts_at_local || right.started_at_local || right.date || "")));
     if (summary) summary.textContent = calendarCountLabel(entries, todayKey) || "Keine Einheiten im Zeitraum";
     const planningContextByDate = new Map(
       (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
@@ -955,7 +955,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
           const cardTitle = document.createElement("h4");
           cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
           const meta = document.createElement("span");
-          meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null].filter(Boolean).join(" · ");
+          meta.textContent = [workout.type, workout.planned_duration_s ? formatDuration(workout.planned_duration_s) : null].filter(Boolean).join(" · ");
           heading.append(cardTitle, meta);
           const description = document.createElement("p");
           description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
@@ -992,9 +992,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const details = document.createElement("div");
     details.className = "competition-card-facts";
     const optional = [
-      ["Startzeit", competition.start_date_local ? formatLocalCompetitionTime(competition.start_date_local) : null],
+      ["Startzeit", competition.starts_at_local ? formatLocalCompetitionTime(competition.starts_at_local) : null],
       ["Ziel", competition.target],
-      ["Erwartete Dauer", competition.moving_time == null ? null : AppFormat.duration(competition.moving_time)],
+      ["Erwartete Dauer", competition.planned_duration_s == null ? null : AppFormat.duration(competition.planned_duration_s)],
       ["Streckenprofil", competition.course_profile],
       ["Beschreibung", competition.description],
       ["Notizen", competition.notes],

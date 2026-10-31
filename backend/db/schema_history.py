@@ -31,6 +31,8 @@ SHAPE_SCHEMA_V12: Final = "schema-v12"
 SHAPE_SCHEMA_V13: Final = "schema-v13"
 # Schema version 14: Yazio food sources in the mirror and saved products.
 SHAPE_SCHEMA_V14: Final = "schema-v14"
+# Schema version 15: the canonical model extensions of Epic B.
+SHAPE_SCHEMA_V15: Final = "schema-v15"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
@@ -41,6 +43,7 @@ RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
     SHAPE_SCHEMA_V12: "7c953ad5b939077d4c4bcaef85bbce9600ec5d698ea503ee82af2848b99287d7",
     SHAPE_SCHEMA_V13: "f1fc5172dc01f2dec8a0f1a73387a7b1916652355e684d9b7d5d0ff277fef5c1",
     SHAPE_SCHEMA_V14: "36b275450a46830a245d882bc18b621104413d1f2f6b84fd721befdcd903746e",
+    SHAPE_SCHEMA_V15: "ef7832ee261bf45df2cd429bffd549fdb90aa3841a8baea411bec3ce150025c7",
 }
 
 # Stored PRAGMA user_version -> schema shapes that version is allowed to hold.
@@ -54,6 +57,7 @@ ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
     12: frozenset({SHAPE_SCHEMA_V12}),
     13: frozenset({SHAPE_SCHEMA_V13}),
     14: frozenset({SHAPE_SCHEMA_V14}),
+    15: frozenset({SHAPE_SCHEMA_V15}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

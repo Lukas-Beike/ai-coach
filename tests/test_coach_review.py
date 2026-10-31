@@ -318,9 +318,9 @@ class CoachReviewTests(unittest.TestCase):
             "stage",
         )
         workouts[-1]["date"] = workouts[0]["date"]
-        workouts[-1]["start_date_local"] = workouts[0]["date"] + "T08:00:00"
+        workouts[-1]["starts_at_local"] = workouts[0]["date"] + "T08:00:00"
         workouts[-1]["duration_minutes"] = 60
-        workouts[0]["start_date_local"] = workouts[0]["date"] + "T08:30:00"
+        workouts[0]["starts_at_local"] = workouts[0]["date"] + "T08:30:00"
         workouts[0]["duration_minutes"] = 30
         with server.database_manager().unit_of_work() as db:
             db.execute(

@@ -146,16 +146,14 @@ class PlannedUnitService:
         restored_target = dict(target)
         if restore_date:
             suffix = (
-                _start_time_suffix(str(target.get("start_date_local") or ""))
-                or _start_time_suffix(
-                    str(current_payload.get("start_date_local") or "")
-                )
+                _start_time_suffix(str(target.get("starts_at_local") or ""))
+                or _start_time_suffix(str(current_payload.get("starts_at_local") or ""))
                 or "T00:00:00"
             )
-            restored_target["start_date_local"] = restore_date + suffix
+            restored_target["starts_at_local"] = restore_date + suffix
         window_changed = any(
             key in restored_target and restored_target[key] != current_payload.get(key)
-            for key in ("start_date_local", "duration_minutes", "moving_time")
+            for key in ("starts_at_local", "duration_minutes", "planned_duration_s")
         )
         if restore_date != current_date or window_changed or restored_from_hidden:
             self._reject_restore_conflict(

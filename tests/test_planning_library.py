@@ -15,7 +15,7 @@ EXPECTED_LIBRARY_FIELDS = {
     "sport",
     "environment",
     "sport_detail",
-    "moving_time",
+    "planned_duration_s",
     "duration_minutes",
     "distance",
     "target",
@@ -99,7 +99,7 @@ class LibraryWorkoutNormalizationTests(unittest.TestCase):
             "name": "n" * 250,
             "description": "d" * 13000,
             "type": "Running",
-            "moving_time": 3601,
+            "planned_duration_s": 3601,
             "date": "2026-09-20-extra",
             "rationale": "r" * 2100,
             "plan_name": "p" * 250,
@@ -150,27 +150,29 @@ class LibraryWorkoutNormalizationTests(unittest.TestCase):
 
     def test_duration_derivation_and_fallback(self):
         short = library.normalize_library_workout(
-            {"moving_time": 120}, local_id=LOCAL_ID
+            {"planned_duration_s": 120}, local_id=LOCAL_ID
         )
         self.assertEqual(short["duration_minutes"], 5)
 
         explicit = library.normalize_library_workout(
-            {"duration_minutes": 45, "moving_time": 3600}, local_id=LOCAL_ID
+            {"duration_minutes": 45, "planned_duration_s": 3600}, local_id=LOCAL_ID
         )
         self.assertEqual(explicit["duration_minutes"], 45)
 
         invalid = library.normalize_library_workout(
-            {"moving_time": "unknown"}, local_id=LOCAL_ID
+            {"planned_duration_s": "unknown"}, local_id=LOCAL_ID
         )
         self.assertNotIn("duration_minutes", invalid)
 
         self.assertEqual(
             library.library_workout_duration_minutes(
-                {"duration_minutes": -1, "moving_time": 600}
+                {"duration_minutes": -1, "planned_duration_s": 600}
             ),
             10,
         )
-        self.assertIsNone(library.library_workout_duration_minutes({"moving_time": -1}))
+        self.assertIsNone(
+            library.library_workout_duration_minutes({"planned_duration_s": -1})
+        )
 
 
 class LibraryWorkoutMatchingTests(unittest.TestCase):

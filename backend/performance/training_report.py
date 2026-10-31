@@ -89,7 +89,15 @@ def activity_day(row: dict[str, Any], timezone: str = "UTC") -> str:
                 return started.astimezone(ZoneInfo(timezone)).date().isoformat()
         except ValueError, ZoneInfoNotFoundError:
             pass
-    return iso_date_prefix(str(row.get("start_date_local") or row.get("date") or ""))
+    # Activities keep their stored start; planned rows name it starts_at_local.
+    return iso_date_prefix(
+        str(
+            row.get("start_date_local")
+            or row.get("starts_at_local")
+            or row.get("date")
+            or ""
+        )
+    )
 
 
 def _totals(rows: list[dict[str, Any]]) -> dict[str, Any]:

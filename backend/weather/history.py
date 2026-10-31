@@ -63,7 +63,7 @@ def calendar_state(history: Any, weather: Any, *, today: date) -> dict[str, Any]
 
 
 def _date_name(item: dict[str, Any], default_name: str) -> tuple[str, str]:
-    day = iso_date_prefix(str(item.get("start_date_local") or item.get("date") or ""))
+    day = iso_date_prefix(str(item.get("starts_at_local") or item.get("date") or ""))
     name = str(item.get("name") or default_name)[:200]
     return day, name
 

@@ -250,10 +250,10 @@ def payload_cases() -> list[tuple[str, str, dict[str, Any]]]:
         for duration in (ABSENT, 60):
             add(
                 f"moving:{moving!r}:duration:{duration!r}",
-                with_fields(moving_time=moving, duration_minutes=duration),
+                with_fields(planned_duration_s=moving, duration_minutes=duration),
             )
     for start in STARTS:
-        add(f"start:{start!r}", with_fields(start_date_local=start))
+        add(f"start:{start!r}", with_fields(starts_at_local=start))
     for name in NAMES:
         add(f"name:{name!r}", with_fields(name=name))
     for workout_id in WORKOUT_IDS:
@@ -290,7 +290,7 @@ def normalize_cases() -> list[tuple[str, Any]]:
                     "description": "- 60m Z2 HR",
                     "duration_minutes": duration,
                     "rationale": "r",
-                    "start_date_local": start,
+                    "starts_at_local": start,
                 }
                 cases.append(
                     (

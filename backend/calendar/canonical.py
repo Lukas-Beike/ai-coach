@@ -4,6 +4,7 @@ from typing import Any
 
 from backend.athlete.local_date import LocalDate
 from backend.canonical.vocabulary import ProviderId
+from backend.providers.intervals_workouts import planning_fields_from_intervals
 
 ISO_MIDNIGHT_SUFFIX = "T00:00:00"
 LOCAL_INTERVALS_SCOPE = "local+intervals"
@@ -90,8 +91,8 @@ def _canonical_local_event(
         "remote_library_id": str(entry.get("external_id") or "") or None,
         "external_id": remote_external_id or None,
         "category": "WORKOUT",
-        "start_date_local": str(
-            entry.get("start_date_local")
+        "starts_at_local": str(
+            entry.get("starts_at_local")
             or (event_date + ISO_MIDNIGHT_SUFFIX if event_date else "")
         )[:40]
         or None,
@@ -110,7 +111,7 @@ def _canonical_local_event(
 def _canonical_remote_event(event: dict[str, Any]) -> dict[str, Any]:
     event_id = str(event.get("id") or "")
     return {
-        **event,
+        **planning_fields_from_intervals(event),
         "local_id": None,
         "local_library_id": None,
         "remote_id": event_id or None,
@@ -125,7 +126,7 @@ def _canonical_remote_event(event: dict[str, Any]) -> dict[str, Any]:
 
 def _canonical_planned_workout_sort_key(item: dict[str, Any]) -> tuple[str, str, str]:
     return (
-        str(item.get("start_date_local") or item.get("date") or "9999-12-31"),
+        str(item.get("starts_at_local") or item.get("date") or "9999-12-31"),
         str(item.get("name") or "").casefold(),
         str(item.get("local_id") or item.get("remote_id") or ""),
     )

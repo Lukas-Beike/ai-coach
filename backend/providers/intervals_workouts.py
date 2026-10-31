@@ -2,9 +2,11 @@
 
 Provider-owned: maps stored planned-workout sport text onto Intervals.icu
 activity types, renders a provider-neutral ``PlannedWorkoutExport`` as the
-Intervals.icu event payload, and reads remote event identity, category, and
-pairing fields. Planning owns validation and the export model; date-aware
-predicates live in the sync-layer export adapter.
+Intervals.icu event payload, maps the start and duration fields of Intervals.icu
+events and workouts onto the provider-neutral names of local planning records,
+and reads remote event identity, category, and pairing fields. Planning owns
+validation and the export model; date-aware predicates live in the sync-layer
+export adapter.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from backend.canonical.stored_sports import (
     workout_sport_from_record,
 )
 from backend.canonical.vocabulary import Environment
+from backend.providers.intervals_activity_fields import REMOTE_EVENT_METRIC_KEYS
 from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 
 INTERVALS_EVENT_CATEGORY = "WORKOUT"
@@ -36,6 +39,47 @@ INTERVALS_TEMPLATE_WORKOUT_TYPES = frozenset(
     {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}
 )
 
+# Intervals.icu event and workout field -> the provider-neutral field of a local
+# planning record (planned unit, library entry, competition). The wire names
+# exist only on the wire: every planning record crossing the provider boundary
+# passes through planning_fields_from_intervals or intervals_fields_from_planning.
+PLANNING_START_FIELD = "starts_at_local"
+PLANNING_DURATION_FIELD = "planned_duration_s"
+_PLANNING_WIRE_FIELDS = (
+    ("start_date_local", PLANNING_START_FIELD),
+    ("moving_time", PLANNING_DURATION_FIELD),
+)
+_PLANNING_FIELD_BY_WIRE = dict(_PLANNING_WIRE_FIELDS)
+# Planned-unit metrics a synced remote event carries back, by planning name.
+REMOTE_PLANNED_METRIC_KEYS = tuple(
+    _PLANNING_FIELD_BY_WIRE.get(key, key) for key in REMOTE_EVENT_METRIC_KEYS
+)
+
+
+def _renamed_fields(
+    record: Mapping[str, Any], renames: tuple[tuple[str, str], ...]
+) -> dict[str, Any]:
+    result = dict(record)
+    for source, target in renames:
+        if source not in result:
+            continue
+        value = result.pop(source)
+        if target not in result:
+            result[target] = value
+    return result
+
+
+def planning_fields_from_intervals(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Return an Intervals.icu event or workout with planning-record field names."""
+    return _renamed_fields(record, _PLANNING_WIRE_FIELDS)
+
+
+def intervals_fields_from_planning(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a planning-record payload with the Intervals.icu wire field names."""
+    return _renamed_fields(
+        record, tuple((neutral, wire) for wire, neutral in _PLANNING_WIRE_FIELDS)
+    )
+
 
 def intervals_event_payload(
     local_id: str, export: PlannedWorkoutExport
@@ -43,7 +87,7 @@ def intervals_event_payload(
     """Render one planned-workout export model as an Intervals.icu event payload."""
     return {
         "category": INTERVALS_EVENT_CATEGORY,
-        "start_date_local": export.start_date_local,
+        "start_date_local": export.starts_at_local,
         "type": intervals_workout_type(
             StoredSport(export.sport, export.environment, export.sport_token or None)
         ),

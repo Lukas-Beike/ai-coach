@@ -435,8 +435,8 @@ class CompetitionRepository:
         self._remote_links = remote_links or RemoteLinkRepository()
 
     _LIST_FIELDS = (
-        "id, name, event_date, start_date_local, sport, environment, sport_detail, priority, category, distance, target, "
-        "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
+        "id, name, event_date, starts_at_local, sport, environment, sport_detail, priority, category, distance, target, "
+        "course_profile, notes, description, planned_duration_s, external_id, intervals_event_id, sync_dirty, "
         "sync_state, sync_conflict, last_synced_at"
     )
 
@@ -461,7 +461,7 @@ class CompetitionRepository:
 
     def create_local(self, db: Any, competition: dict[str, Any], now: str) -> None:
         db.execute(
-            "INSERT INTO competitions(id, name, event_date, sport, environment, sport_detail, priority, distance, target, course_profile, notes, category, start_date_local, description, moving_time, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
+            "INSERT INTO competitions(id, name, event_date, sport, environment, sport_detail, priority, distance, target, course_profile, notes, category, starts_at_local, description, planned_duration_s, external_id, sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, 'local', '', ?, ?)",
             (
                 competition["id"],
@@ -476,9 +476,9 @@ class CompetitionRepository:
                 competition["course_profile"],
                 competition["notes"],
                 competition["category"],
-                competition["start_date_local"],
+                competition["starts_at_local"],
                 competition["description"],
-                competition["moving_time"],
+                competition["planned_duration_s"],
                 now,
                 now,
             ),
@@ -486,7 +486,7 @@ class CompetitionRepository:
 
     def update_local(self, db: Any, competition: dict[str, Any], now: str) -> None:
         db.execute(
-            "UPDATE competitions SET name=?, event_date=?, sport=?, environment=?, sport_detail=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, start_date_local=?, description=?, moving_time=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
+            "UPDATE competitions SET name=?, event_date=?, sport=?, environment=?, sport_detail=?, priority=?, distance=?, target=?, course_profile=?, notes=?, category=?, starts_at_local=?, description=?, planned_duration_s=?, sync_dirty=1, sync_state='local', sync_conflict='', updated_at=? WHERE id=?",
             (
                 competition["name"],
                 competition["event_date"],
@@ -499,9 +499,9 @@ class CompetitionRepository:
                 competition["course_profile"],
                 competition["notes"],
                 competition["category"],
-                competition["start_date_local"],
+                competition["starts_at_local"],
                 competition["description"],
-                competition["moving_time"],
+                competition["planned_duration_s"],
                 now,
                 competition["id"],
             ),
@@ -552,11 +552,11 @@ class CompetitionRepository:
         now: str,
     ) -> None:
         db.execute(
-            "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, environment=?, sport_detail=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
+            "UPDATE competitions SET name=?, event_date=?, starts_at_local=?, sport=?, environment=?, sport_detail=?, priority=?, category=?, distance=?, target=?, description=?, planned_duration_s=?, notes=?, intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
             (
                 data["name"],
                 data["event_date"],
-                data["start_date_local"],
+                data["starts_at_local"],
                 data["sport"],
                 data.get("environment"),
                 data.get("sport_detail"),
@@ -565,7 +565,7 @@ class CompetitionRepository:
                 data["distance"],
                 data["target"],
                 data["description"],
-                data["moving_time"],
+                data["planned_duration_s"],
                 data["notes"],
                 data["intervals_event_id"],
                 external_id,

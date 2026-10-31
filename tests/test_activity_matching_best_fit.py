@@ -11,8 +11,8 @@ def _unit(unit_id, sport, minutes, load=None):
         "id": unit_id,
         "category": "WORKOUT",
         "type": sport,
-        "start_date_local": DAY,
-        "moving_time": minutes * 60,
+        "starts_at_local": DAY,
+        "planned_duration_s": minutes * 60,
     }
     if load is not None:
         unit["icu_training_load"] = load
@@ -136,7 +136,7 @@ class DateOnlyBestFitTests(unittest.TestCase):
         # Units without a planned time are stored at local midnight (P2-04).
         for start in (f"{DAY}T00:00:00", f"{DAY}T00:00", f"{DAY} 00:00:00"):
             with self.subTest(start=start):
-                unit = {**_unit("ride", "Ride", 45), "start_date_local": start}
+                unit = {**_unit("ride", "Ride", 45), "starts_at_local": start}
                 activities = [
                     _activity("noon-30", "Ride", 30, start="12:00:00"),
                     _activity("evening-45", "VirtualRide", 45, start="18:00:00"),
@@ -151,7 +151,7 @@ class DateOnlyBestFitTests(unittest.TestCase):
             "id": "timed",
             "category": "WORKOUT",
             "type": "Run",
-            "start_date_local": f"{DAY}T10:00:00",
+            "starts_at_local": f"{DAY}T10:00:00",
         }
         activities = [
             _activity("morning", "Run", 30, start="09:00:00"),
@@ -166,7 +166,7 @@ class DateOnlyBestFitTests(unittest.TestCase):
             "id": "timed",
             "category": "WORKOUT",
             "type": "Run",
-            "start_date_local": f"{DAY}T10:00:00",
+            "starts_at_local": f"{DAY}T10:00:00",
         }
         activities = [_activity("only", "Run", 30, start="10:00:00")]
         result = match_planned_workouts([date_only, timed], activities)

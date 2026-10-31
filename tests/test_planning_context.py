@@ -164,8 +164,8 @@ class PlanningContextTests(unittest.TestCase):
     def test_combines_sorts_and_bounds_public_fields(self):
         result = build_daily_planning_context(
             planned=[
-                {"id": "late", "start_date_local": "2026-09-07T10:00:00", "secret": 1},
-                {"id": "early", "start_date_local": "2026-09-07T08:00:00"},
+                {"id": "late", "starts_at_local": "2026-09-07T10:00:00", "secret": 1},
+                {"id": "early", "starts_at_local": "2026-09-07T08:00:00"},
             ],
             checkins=[{"checkin_date": "2026-09-07", "motivation": 8, "private": 1}],
             calendar_events=[

@@ -135,7 +135,7 @@ class ProviderSchemaTests(unittest.TestCase):
         self.assertEqual(
             db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
         )
-        self.assertEqual(CURRENT_SCHEMA_VERSION, 15)
+        self.assertEqual(CURRENT_SCHEMA_VERSION, 16)
         self.assertTrue(database_schema_is_current(db))
         for table in PROVIDER_TABLES:
             with self.subTest(table=table):

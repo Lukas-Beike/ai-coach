@@ -22,7 +22,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
                 "calendar_window": {"start": "2026-01-01", "end": "2026-03-01"}
             },
         }
-        planned = [{"id": "planned-1", "start_date_local": "2026-01-02T07:00:00"}]
+        planned = [{"id": "planned-1", "starts_at_local": "2026-01-02T07:00:00"}]
         competitions = [{"id": "competition-1"}]
         external_1000 = [{"id": f"external-{index}"} for index in range(1000)]
         external_window = [{"id": f"daily-{index}"} for index in range(60)]
@@ -155,7 +155,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         entry = {
             "id": "planned-1",
             "icu_training_load": 30,
-            "moving_time": 3600,
+            "planned_duration_s": 3600,
             "compliance": {
                 "actual_activity": {"icu_training_load": 28, "moving_time": 3500}
             },
@@ -178,7 +178,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         expected = {
             "id": "planned-1",
             "training_load": 30,
-            "moving_time": 3600,
+            "planned_duration_s": 3600,
             "compliance": {
                 "actual_activity": {"training_load": 28, "moving_duration_s": 3500}
             },

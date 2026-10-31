@@ -13,7 +13,7 @@ from backend.planning import competitions
 
 _REQUIRED_FIELDS = ("name", "event_date", "sport", "priority")
 _OPTIONAL_FIELDS = (
-    "start_date_local",
+    "starts_at_local",
     "distance",
     "target",
     "course_profile",
@@ -38,14 +38,14 @@ def _competition_id(value: Any, *, required: bool = False) -> str:
 def _coach_payload(arguments: Any) -> dict[str, Any]:
     if not isinstance(arguments, dict):
         raise AppError(400, "Die Wettkampfdaten müssen als Objekt übergeben werden.")
-    moving_time = arguments.get("moving_time_seconds")
-    if moving_time == -1:
-        moving_time = None
+    planned_duration_s = arguments.get("planned_duration_s")
+    if planned_duration_s == -1:
+        planned_duration_s = None
     return {
         "id": str(arguments.get("competition_id") or "").strip(),
         "name": arguments.get("name"),
         "event_date": arguments.get("event_date"),
-        "start_date_local": arguments.get("start_date_local"),
+        "starts_at_local": arguments.get("starts_at_local"),
         "sport": arguments.get("sport"),
         "environment": arguments.get("environment"),
         "sport_detail": arguments.get("sport_detail"),
@@ -55,7 +55,7 @@ def _coach_payload(arguments: Any) -> dict[str, Any]:
         "course_profile": arguments.get("course_profile"),
         "notes": arguments.get("notes"),
         "description": arguments.get("description"),
-        "moving_time": moving_time,
+        "planned_duration_s": planned_duration_s,
     }
 
 
@@ -73,8 +73,11 @@ def _merge_update(
     for field in _OPTIONAL_FIELDS:
         if value.get(field) in (None, "") and existing.get(field) not in (None, ""):
             value[field] = existing[field]
-    if value.get("moving_time") is None and existing.get("moving_time") is not None:
-        value["moving_time"] = existing["moving_time"]
+    if (
+        value.get("planned_duration_s") is None
+        and existing.get("planned_duration_s") is not None
+    ):
+        value["planned_duration_s"] = existing["planned_duration_s"]
 
 
 class CompetitionService:

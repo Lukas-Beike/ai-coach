@@ -402,7 +402,7 @@ class ReplacementServiceTest(unittest.TestCase):
                 {
                     "id": "imported",
                     "date": "2030-01-03",
-                    "start_date_local": "2030-01-03T08:00:00",
+                    "starts_at_local": "2030-01-03T08:00:00",
                     "duration_minutes": 60,
                     "source": "intervals",
                 }
@@ -416,14 +416,14 @@ class ReplacementServiceTest(unittest.TestCase):
             calendar.conflicts(
                 {
                     "date": "2030-01-03",
-                    "start_date_local": "2030-01-03T08:30:00",
+                    "starts_at_local": "2030-01-03T08:30:00",
                     "duration_minutes": 30,
                 }
             )
         )
         request = self.request()
         workout = request["payload"]["workouts"][0]
-        workout["start_date_local"] = "2030-01-03T08:30:00"
+        workout["starts_at_local"] = "2030-01-03T08:30:00"
         workout["duration_minutes"] = 30
         workout["description"] = "- 30m 60% easy"
         result = self.make_service(calendar_conflict_service=calendar).replace(

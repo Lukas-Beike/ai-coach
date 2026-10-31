@@ -162,7 +162,7 @@ def validate_workout_description(workout: dict[str, Any]) -> float | None:
     expected_seconds = (
         expected_minutes * 60
         if expected_minutes is not None
-        else _as_number(workout.get("moving_time"))
+        else _as_number(workout.get("planned_duration_s"))
     )
     _validate_workout_duration_match(seconds, has_distance, expected_seconds)
     return None if has_distance else seconds

@@ -30,6 +30,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V12,
     SHAPE_SCHEMA_V13,
     SHAPE_SCHEMA_V14,
+    SHAPE_SCHEMA_V15,
     released_shape,
 )
 
@@ -45,6 +46,8 @@ V12_FIXTURE = FIXTURES / "schema_v12.sql.txt"
 V13_FIXTURE = FIXTURES / "schema_v13.sql.txt"
 # Release schema 14: Yazio food sources; the canonical extensions are version 15.
 V14_FIXTURE = FIXTURES / "schema_v14.sql.txt"
+# Release schema 15: canonical extensions; version 16 renames planning fields.
+V15_FIXTURE = FIXTURES / "schema_v15.sql.txt"
 RELEASED_FIXTURES = (
     OLDEST_SUPPORTED_FIXTURE,
     V10_FIXTURE,
@@ -52,7 +55,14 @@ RELEASED_FIXTURES = (
     V12_FIXTURE,
     V13_FIXTURE,
     V14_FIXTURE,
+    V15_FIXTURE,
 )
+# Columns an upgrade renamed: (table, released name) -> current name. Rows read
+# with the columns of a released schema compare the same values afterwards.
+RENAMED_COLUMNS = {
+    ("competitions", "start_date_local"): "starts_at_local",
+    ("competitions", "moving_time"): "planned_duration_s",
+}
 CURRENT_FIXTURE = FIXTURES / f"schema_v{CURRENT_SCHEMA_VERSION}.sql.txt"
 DETAIL_TABLES = {
     "activity_detail_sets",
@@ -208,8 +218,14 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         # original value after an upgrade that adds columns.
         rows = {}
         for table in tables:
+            present = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
             selected = (
-                ", ".join(f'"{name}"' for name in columns[table]) if columns else "*"
+                ", ".join(
+                    f'"{name if name in present else RENAMED_COLUMNS.get((table, name), name)}"'
+                    for name in columns[table]
+                )
+                if columns
+                else "*"
             )
             rows[table] = [
                 tuple(row) for row in db.execute(f"SELECT {selected} FROM {table}")
@@ -739,6 +755,13 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                 "SELECT activity_id, provider, session_id FROM activity_feedback"
             )
         }
+
+    def test_frozen_v15_fixture_is_the_recorded_released_shape(self):
+        db = self.connect()
+        db.executescript(V15_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V15
+        )
 
     def test_frozen_v14_fixture_is_the_recorded_released_shape(self):
         db = self.connect()

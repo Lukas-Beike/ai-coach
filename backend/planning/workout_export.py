@@ -38,8 +38,8 @@ def build_planned_workout_export(
         )
     stored = planned_stored_sport(workout)
     return PlannedWorkoutExport(
-        start_date_local=str(
-            workout.get("start_date_local") or workout_date.isoformat() + "T00:00:00"
+        starts_at_local=str(
+            workout.get("starts_at_local") or workout_date.isoformat() + "T00:00:00"
         )[:40],
         sport=stored.sport,
         environment=stored.environment,

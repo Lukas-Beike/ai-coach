@@ -537,7 +537,7 @@ test("planned agenda prioritizes dates and sessions with compact weather and exp
       checkin: { stress: 5, illness: "Magen-Darm" },
     }];
     state.data.training_calendar = [
-      { id: "agenda-run", date, start_date_local: `${date}T18:30:00`, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
+      { id: "agenda-run", date, starts_at_local: `${date}T18:30:00`, name: "Lockerer Dauerlauf mit Steigerungen", type: "Run", duration_minutes: 45, description: "Locker laufen. <img src=x onerror=alert(1)>" },
       { id: "agenda-strength", date, name: "Mobilität und Rumpfstabilität", type: "WeightTraining", duration_minutes: 20 },
       { id: "agenda-completed", date: addDateKey(date, 1), started_at_local: `${addDateKey(date, 1)}T07:15:00`, name: "Grundlagenausfahrt", type: "Ride", is_completed_activity: true, moving_duration_s: 3600, distance_m: 28000, training_load: 42, rpe: 3 },
       { id: "agenda-completed-run", date: addDateKey(date, 1), name: "Absolvierte Laufeinheit", type: "Run", is_completed_activity: true, moving_duration_s: 2700, distance_m: 7000 },

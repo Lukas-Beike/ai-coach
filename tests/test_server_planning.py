@@ -658,8 +658,8 @@ class ServerPlanningTests(ServerTestCase):
                 "category": "WORKOUT",
                 "type": "Ride",
                 "name": "Tempo",
-                "start_date_local": f"{today.isoformat()}T00:00:00",
-                "moving_time": 3600,
+                "starts_at_local": f"{today.isoformat()}T00:00:00",
+                "planned_duration_s": 3600,
                 "icu_training_load": 50,
             },
             {
@@ -667,8 +667,8 @@ class ServerPlanningTests(ServerTestCase):
                 "category": "WORKOUT",
                 "type": "Ride",
                 "name": "Grundlage",
-                "start_date_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
-                "moving_time": 3600,
+                "starts_at_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
+                "planned_duration_s": 3600,
                 "icu_training_load": 50,
             },
             {
@@ -676,8 +676,8 @@ class ServerPlanningTests(ServerTestCase):
                 "category": "RACE",
                 "type": "Ride",
                 "name": "Wettkampf",
-                "start_date_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
-                "moving_time": 7200,
+                "starts_at_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
+                "planned_duration_s": 7200,
                 "icu_training_load": 100,
             },
         ]
@@ -747,7 +747,10 @@ class ServerPlanningTests(ServerTestCase):
 
     def test_workout_compliance_uses_duration_and_unavailable_fallbacks(self):
         today = date(2026, 9, 12)
-        duration_event = {"start_date_local": today.isoformat(), "moving_time": 3600}
+        duration_event = {
+            "starts_at_local": today.isoformat(),
+            "planned_duration_s": 3600,
+        }
         duration_activity = {
             "id": "done",
             "start_date_local": today.isoformat(),
@@ -758,7 +761,7 @@ class ServerPlanningTests(ServerTestCase):
         )
         self.assertEqual((duration["basis"], duration["percentage"]), ("duration", 75))
         unavailable = activity_calendar_projection.workout_compliance(
-            {"start_date_local": today.isoformat()}, duration_activity, today
+            {"starts_at_local": today.isoformat()}, duration_activity, today
         )
         self.assertEqual(
             (unavailable["basis"], unavailable["percentage"]), ("unavailable", 100)
@@ -772,8 +775,8 @@ class ServerPlanningTests(ServerTestCase):
                     "id": "event-1",
                     "category": "WORKOUT",
                     "type": "Run",
-                    "start_date_local": f"{today}T00:00:00",
-                    "moving_time": 1800,
+                    "starts_at_local": f"{today}T00:00:00",
+                    "planned_duration_s": 1800,
                 }
             ],
             [
@@ -1044,13 +1047,13 @@ class ServerPlanningTests(ServerTestCase):
     def test_competition_event_optional_payload_excludes_invalid_distance(self):
         payload = planning_competitions.competition_event_optional_payload(
             {
-                "moving_time": "3600",
+                "planned_duration_s": "3600",
                 "distance": "not-a-distance",
                 "target": "Finish",
                 "intervals_event_id": "external-race-id",
             }
         )
-        self.assertEqual(payload["moving_time"], 3600)
+        self.assertEqual(payload["planned_duration_s"], 3600)
         self.assertNotIn("distance", payload)
         self.assertEqual(payload["target"], "Finish")
         self.assertEqual(payload["id"], "external-race-id")
@@ -1087,7 +1090,7 @@ class ServerPlanningTests(ServerTestCase):
                     "name": "Locker Rad",
                     "type": "Ride",
                     "description": "- 45m Z2",
-                    "moving_time": 2700,
+                    "planned_duration_s": 2700,
                 }
             ]
         )[0]
@@ -1100,7 +1103,7 @@ class ServerPlanningTests(ServerTestCase):
                     "name": "Locker Rad aktualisiert",
                     "type": "Ride",
                     "description": "- 45m Z2",
-                    "moving_time": 2700,
+                    "planned_duration_s": 2700,
                 }
             ]
         )[0]
@@ -1443,7 +1446,7 @@ class ServerPlanningTests(ServerTestCase):
                     "name": "Locker Rad",
                     "type": "Ride",
                     "description": "- 45m Z2",
-                    "moving_time": 2700,
+                    "planned_duration_s": 2700,
                 }
             ]
         )
@@ -1473,7 +1476,7 @@ class ServerPlanningTests(ServerTestCase):
                     "name": "Locker Rad",
                     "type": "Ride",
                     "description": "- 30m Z2",
-                    "moving_time": 1800,
+                    "planned_duration_s": 1800,
                 }
             ]
         )
@@ -1499,7 +1502,7 @@ class ServerPlanningTests(ServerTestCase):
                     "name": "Intervall",
                     "type": "Ride",
                     "description": "4x\n- 5m 105%\n- 5m 55%",
-                    "moving_time": 2400,
+                    "planned_duration_s": 2400,
                 }
             ]
         )
@@ -2739,7 +2742,7 @@ class ServerPlanningTests(ServerTestCase):
                 "date": (
                     _local_datetime.now().astimezone().date() + timedelta(days=1)
                 ).isoformat(),
-                "start_date_local": (
+                "starts_at_local": (
                     _local_datetime.now().astimezone().date() + timedelta(days=1)
                 ).isoformat()
                 + "T07:30:00",
@@ -2768,7 +2771,7 @@ class ServerPlanningTests(ServerTestCase):
                     "workouts": [
                         {
                             "date": old["date"],
-                            "start_date_local": (
+                            "starts_at_local": (
                                 _local_datetime.now().astimezone().date()
                                 + timedelta(days=1)
                             ).isoformat()

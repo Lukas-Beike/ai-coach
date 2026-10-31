@@ -86,7 +86,7 @@ def _unique_local_match(row: dict, activities: list[dict], planned: list[dict]) 
         return False
     return (
         sum(
-            record_date(item.get("start_date_local")) == day
+            record_date(item.get("starts_at_local")) == day
             and activity_kind(item) == kind
             for item in planned
         )
