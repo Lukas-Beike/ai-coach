@@ -23,7 +23,10 @@ from typing import Any, Final
 
 _START_RENAME: Final = ("start_date_local", "starts_at_local")
 _DURATION_RENAME: Final = ("moving_time", "planned_duration_s")
-_PLANNING_RENAMES: Final[Mapping[str, str]] = dict((_START_RENAME, _DURATION_RENAME))
+_PLANNING_RENAMES: Final[Mapping[str, str]] = {
+    _START_RENAME[0]: _START_RENAME[1],
+    _DURATION_RENAME[0]: _DURATION_RENAME[1],
+}
 
 type _Rewrite = Callable[[Any], Any]
 
