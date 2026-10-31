@@ -162,6 +162,7 @@ class PowerCurveReader(Protocol):
     def power_curve(self, db: Any) -> PowerCurve: ...
 
 
+@runtime_checkable
 class CategoricalObservationReader(Protocol):
     """Reads canonical provider status codes of one domain by inclusive day.
 
