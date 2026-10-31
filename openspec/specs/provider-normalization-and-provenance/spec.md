@@ -37,11 +37,15 @@ Detailed contract: Wahoo's naive `starts` SHALL be interpreted as UTC, and worko
 Evidence: `backend/canonical/local_time.py:localize_wall_time`, `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`; `tests/test_intervals_activity_mapping.py:test_aware_start_date_wins_over_local_wall_time`, `tests/test_intervals_activity_mapping.py:test_naive_start_date_alone_drops_the_record`, `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`, `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`.
 
 ### Requirement: Activity field and load semantics
-The system SHALL retain distinct moving and elapsed durations, distance in metres, power in watts, heart rate in bpm, ascent in metres, speed in metres per second, cadence in rpm, energy in kJ where mapped, and provider-specific load models. Intervals SHALL prefer moving time and average-watts aliases; Wahoo SHALL use summary active duration before total duration and never use planned workout minutes as completed duration.
+The system SHALL retain distinct moving and elapsed durations from every provider, distance in metres, power in watts, heart rate in bpm, ascent in metres, speed in metres per second, cadence in rpm, energy in kJ where mapped, and provider-specific load models. Intervals SHALL prefer moving time and average-watts aliases; Wahoo SHALL use summary active duration before total duration and never use planned workout minutes as completed duration.
 
 #### Scenario: Planned versus completed Wahoo duration
 - **WHEN** a workout has planned minutes but no processed summary duration
 - **THEN** actual duration remains unknown rather than using the plan as a measurement.
+
+#### Scenario: Elapsed duration beside moving duration
+- **WHEN** a Wahoo workout has both an active and a total duration, or a Garmin activity has `duration` and `movingTime`
+- **THEN** the total or `duration` is stored as the elapsed duration and the moving time is not.
 
 #### Scenario: Provider loads differ
 - **WHEN** Intervals training load and Wahoo TSS describe copies of a session

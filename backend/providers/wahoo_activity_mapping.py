@@ -13,7 +13,8 @@ Field rules:
   read as UTC, as the Wahoo API documents. The athlete-local date is derived by
   the plan from the athlete zone, not from the workout's own ``time_zone``.
 * duration: the summary's ``duration_active_accum`` before ``duration_total_accum``.
-  The workout's own ``minutes`` is the PLANNED duration and is never used.
+  The summary's ``duration_total_accum`` is also ``elapsed_duration_s``. The
+  workout's own ``minutes`` is the PLANNED duration and is never used.
 * distance (m), average heart rate, average power, ascent, average cadence,
   normalized power, energy and moving duration come from the summary, which
   arrives as decimal text and may be null until Wahoo has processed the workout.
@@ -265,13 +266,10 @@ def _map_row(
     moving_duration = reader.number(
         _MOVING_DURATION_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
     )
-    duration = (
-        moving_duration
-        if moving_duration is not None
-        else reader.number(
-            _TOTAL_DURATION_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
-        )
+    elapsed_duration = reader.number(
+        _TOTAL_DURATION_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
     )
+    duration = moving_duration if moving_duration is not None else elapsed_duration
     tss = _positive(reader.number(_TSS_KEYS, 0.0, MAX_ACTIVITY_LOAD))
     joules = reader.number(
         _WORK_JOULES_KEYS, 0.0, MAX_ACTIVITY_ENERGY_KJ * _JOULES_PER_KJ
@@ -297,6 +295,7 @@ def _map_row(
         avg_power=reader.number(_AVERAGE_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
         name=reader.name(),
         moving_duration_s=moving_duration,
+        elapsed_duration_s=elapsed_duration,
         elevation_gain_m=reader.number(_ELEVATION_KEYS, 0.0, MAX_ACTIVITY_ELEVATION_M),
         normalized_power=_positive(
             reader.number(_NORMALIZED_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W)

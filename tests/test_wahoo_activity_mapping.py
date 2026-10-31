@@ -146,6 +146,15 @@ class FieldTests(unittest.TestCase):
         record = mapped(row(workout_summary=summary)).records[0]
 
         self.assertEqual(1800.0, record.duration_s)
+        self.assertEqual(1800.0, record.elapsed_duration_s)
+
+    def test_total_duration_is_kept_as_elapsed_next_to_the_active_duration(
+        self,
+    ) -> None:
+        record = mapped(row()).records[0]
+
+        self.assertEqual(3900.0, record.elapsed_duration_s)
+        self.assertEqual(record.moving_duration_s, record.duration_s)
 
     def test_a_missing_summary_is_not_an_issue(self) -> None:
         result = mapped(row(workout_summary=None))
