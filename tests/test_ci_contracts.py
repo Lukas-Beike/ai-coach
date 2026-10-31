@@ -450,6 +450,8 @@ class CodexReviewWorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/checkout", workflow)
         self.assertNotIn("--admin", workflow)
         self.assertNotIn("update-type", workflow)
+        self.assertIn("steps.release-app-token.outputs.token", workflow)
+        self.assertNotIn("secrets.GITHUB_TOKEN", workflow)
 
     def test_dependabot_tool_bumps_align_the_baseline_without_running_pr_code(self):
         root = Path(__file__).resolve().parents[1]
