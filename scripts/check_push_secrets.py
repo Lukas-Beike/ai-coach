@@ -61,10 +61,19 @@ def added_content(updates: str) -> tuple[set[str], set[tuple[str, bytes]]]:
     runs: set[tuple[str, bytes]] = set()
     for local, exclusions in outgoing_revisions(updates):
         diff = git(
-            *("log", "--format=", "-p", "-m", "-U0", "--full-index", "--no-renames"),
+            *(
+                "log",
+                "--format=",
+                "-p",
+                "--cc",
+                "--root",
+                "-U0",
+                "--full-index",
+                "--no-renames",
+            ),
             *("--no-color", "--no-ext-diff", "--no-textconv", local, *exclusions),
         )
-        suffix, new_blob, in_hunk = "", "", False
+        suffix, new_blob, in_hunk, parents = "", "", False, 1
         rows: list[bytes] = []
         # A final sentinel row flushes the last file.
         for row in [*diff.split(b"\n"), b"diff --git a/ b/"]:
@@ -78,13 +87,15 @@ def added_content(updates: str) -> tuple[set[str], set[tuple[str, bytes]]]:
                 if not re.fullmatch(r"\.[A-Za-z0-9]{1,10}", suffix):
                     suffix = ""
             elif in_hunk:
-                if row.startswith(b"+"):
-                    rows.append(row[1:])
+                # Combined diffs prefix one column per parent; keep lines new to all.
+                if row[:parents] == b"+" * parents:
+                    rows.append(row[parents:])
             elif row.startswith(b"@@"):
                 in_hunk = True
+                parents = row.split()[0].count(b"@") - 1
             elif row.startswith(b"index "):
                 old, new_blob = row.split()[1].decode("ascii").split("..")
-                if set(old) == {"0"} and set(new_blob) != {"0"}:
+                if set(old) <= {"0", ","} and set(new_blob) != {"0"}:
                     whole.add(new_blob)
             elif row.startswith(b"Binary files") and new_blob:
                 whole.add(new_blob)

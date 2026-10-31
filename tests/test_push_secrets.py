@@ -107,21 +107,7 @@ class PushSecretTests(unittest.TestCase):
     def test_untouched_lines_of_an_edited_file_are_not_rescanned(self):
         base = self.commit("synthetic flagged line\nkept\n")
         tip = self.commit("synthetic flagged line\nkept\nadded clean line\n")
-        run = subprocess.run
-        scanned = []
-
-        def scanner(command, **kwargs):
-            if command[0] == "synthetic-sonar":
-                scanned.extend(Path(p).read_bytes() for p in command[3:])
-                return subprocess.CompletedProcess(command, 0)
-            return run(command, **kwargs)
-
-        with (
-            patch.object(scan.shutil, "which", return_value="synthetic-sonar"),
-            patch.object(scan.subprocess, "run", side_effect=scanner),
-        ):
-            self.assertEqual(scan.check(self.update(tip, base)), 0)
-        joined = b"\n".join(scanned)
+        joined = b"\n".join(self.scanned_by(self.update(tip, base)))
         self.assertIn(b"added clean line", joined)
         self.assertNotIn(b"synthetic flagged line", joined)
 
@@ -159,23 +145,24 @@ class PushSecretTests(unittest.TestCase):
         self.assertIn(b"fresh line\nsecond\n", scanned)
         self.assertIn(b"\x00\x01binary secret\x00", scanned)
 
+    def test_merged_base_lines_are_not_rescanned(self):
+        self.commit("keep\n")
+        scan.git("branch", "-m", "base")
+        scan.git("checkout", "-qb", "feature")
+        self.commit("keep\nfeature line\n")
+        scan.git("checkout", "-q", "base")
+        pushed = self.commit("keep\nsynthetic flagged base line\n")
+        scan.git("update-ref", "refs/remotes/origin/base", pushed)
+        scan.git("checkout", "-q", "feature")
+        scan.git("merge", "-q", "--no-edit", "-X", "ours", "base")
+        tip = scan.git("rev-parse", "HEAD").decode().strip()
+        joined = b"\n".join(self.scanned_by(self.update(tip, "f" * 40)))
+        self.assertNotIn(b"synthetic flagged base line", joined)
+
     def test_clean_push_scans_committed_content_not_dirty_worktree(self):
         tip = self.commit("committed clean")
         (self.root / "fixture.py").write_text("uncommitted private data")
-        run = subprocess.run
-        scanned = []
-
-        def scanner(command, **kwargs):
-            if command[0] == "synthetic-sonar":
-                scanned.extend(Path(p).read_bytes() for p in command[3:])
-                return subprocess.CompletedProcess(command, 0)
-            return run(command, **kwargs)
-
-        with (
-            patch.object(scan.shutil, "which", return_value="synthetic-sonar"),
-            patch.object(scan.subprocess, "run", side_effect=scanner),
-        ):
-            self.assertEqual(scan.check(self.update(tip)), 0)
+        scanned = self.scanned_by(self.update(tip))
         self.assertIn(b"committed clean", scanned)
         self.assertNotIn(b"uncommitted private data", scanned)
 
