@@ -53,7 +53,8 @@ class PublicPlanDependencies:
     activity_row_reader: Callable[[], ActivityRowReader] | None = None
     # Canonical zone configurations and sport thresholds set the plan zones.
     zone_configurations: Callable[[], Sequence[ZoneConfiguration]] = tuple
-    sport_thresholds: Callable[[], Sequence[Observation]] = tuple
+    # (db) -> the plan-zone thresholds, read inside the plan's read snapshot.
+    sport_thresholds: Callable[[Any], Sequence[Observation]] = lambda _db: ()
 
 
 class PublicPlanStateService:
@@ -106,8 +107,8 @@ class PublicPlanStateService:
             if weather.pop("_refreshed", False):
                 self._adaptive_followup.check("weather")
         # Every read below shares one read-only snapshot.
-        with manager.read_snapshot():
-            return self._read(weather)
+        with manager.read_snapshot() as db:
+            return self._read(weather, db)
 
     def _history_and_profiles(self) -> tuple[Any, Any, dict[str, str]]:
         manager = self._database_manager_factory()
@@ -136,8 +137,8 @@ class PublicPlanStateService:
             return row
         return {**row, "workout_profile": stored["profile"]}
 
-    def _read(self, weather: dict[str, Any] | None) -> dict[str, Any]:
-        sync_metadata = self._sync_state.sync_metadata()
+    def _read(self, weather: dict[str, Any] | None, db: Any) -> dict[str, Any]:
+        sync_metadata = self._sync_state.sync_metadata(db)
         local_planned = self._planned_units.list(500)
         canonical_planned = calendar_canonical.canonical_planned_workouts(
             [], local_planned
@@ -170,7 +171,7 @@ class PublicPlanStateService:
             today=self._today(),
             provider_window=calendar_window,
             default_name=self._default_workout_name,
-            sport_thresholds=self._sport_thresholds(),
+            sport_thresholds=self._sport_thresholds(db),
             zone_configurations=self._zone_configurations(),
         )
         return {

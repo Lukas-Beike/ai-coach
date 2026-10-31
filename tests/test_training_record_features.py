@@ -30,6 +30,7 @@ def sync_garmin(manager, service, snapshot):
 
 class MemoryManager:
     def __init__(self):
+        self.matches = {}
         self.connection = sqlite3.connect(":memory:")
         self.connection.row_factory = sqlite3.Row
         initialize_schema(self.connection)
@@ -38,7 +39,15 @@ class MemoryManager:
         """Store a Garmin payload the way the sync does: one row per section element.
 
         The gear also becomes canonical gear items and links, which equipment reads.
+        The payload's ``activity_matches`` stand in for the duplicate pairs the app
+        computes from canonical activity records (``match_activities``).
         """
+        if "activity_matches" in snapshot:
+            self.matches = {}
+            for match in snapshot["activity_matches"]:
+                self.matches.setdefault(str(match["garmin_activity_id"]), set()).add(
+                    str(match["intervals_activity_id"])
+                )
         if "gear" in snapshot:
             items, links = [], []
             for element in snapshot["gear"] or []:
@@ -69,6 +78,13 @@ class MemoryManager:
                 mapper_version=1,
                 replace=True,
             )
+
+    def match_activities(self, db, garmin_ids, intervals_ids):
+        return {
+            garmin_id: self.matches[garmin_id] & set(intervals_ids)
+            for garmin_id in garmin_ids
+            if garmin_id in self.matches
+        }
 
     def unit_of_work(self):
         manager = self
@@ -456,6 +472,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             lambda: "2026-09-01T00:00:00Z",
             deduplicated_rows,
             gear_reader=CanonicalTableReader(),
+            match_activities=self.manager.match_activities,
         )
 
     @staticmethod
@@ -493,15 +510,10 @@ class TrainingRecordFeatureTests(unittest.TestCase):
 
     @staticmethod
     def _matches(rows):
-        """Link each row to Garmin activity "a" + id through its external_id.
-
-        Canonical reads (#1416): stored ``activity_matches`` are no longer read;
-        a Garmin activity reaches a row through its canonical session or an
-        ``external_id`` equal to the Garmin id, so the rows carry that id.
-        """
-        for row in rows:
-            row["external_id"] = "a" + row["id"]
-        return []
+        return [
+            {"garmin_activity_id": "a" + row["id"], "intervals_activity_id": row["id"]}
+            for row in rows
+        ]
 
     @staticmethod
     def _snapshot(gear, matches=()):
@@ -517,9 +529,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         sync_garmin(self.manager, service, snapshot)
         return {item["garmin_uuid"]: item for item in service.read()["items"]}
 
-    def test_garmin_gear_activities_link_through_external_id_not_stored_matches(
-        self,
-    ):
+    def test_garmin_gear_activities_link_through_matches_and_external_id(self):
         rows = [
             self._ride("i1"),
             self._ride("i2", external_id="222"),
@@ -528,24 +538,19 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             self._ride("i5", external_id=""),
         ]
         service = self._gear_service(rows)
-        snapshot = {
-            **self._snapshot(
-                [self._gear_row("g1", activity_ids=["111", "222", "333"])]
-            ),
-            "activity_matches": [
-                {"garmin_activity_id": "111", "intervals_activity_id": "i1"}
-            ],
-        }
-        sync_garmin(self.manager, service, snapshot)
-        (item,) = service.read()["items"]
-        # i2 and i4 via external_id (no sport check), not i3/i5, even though the
-        # import date (2026-09-01) is after every linked session. Canonical reads
-        # (#1416): the stored match no longer links i1; its canonical session would.
-        self.assertEqual(item["usage"]["assigned_sessions"], 2)
-        self.assertEqual(item["usage"]["hours"], 1)
+        items = self._garmin_gear(
+            service,
+            [self._gear_row("g1", activity_ids=["111", "222", "333"])],
+            [{"garmin_activity_id": "111", "intervals_activity_id": "i1"}],
+        )
+        item = items["g1"]
+        # i1 via the match, i2 and i4 via external_id (no sport check), not i3/i5,
+        # even though the import date (2026-09-01) is after every linked session.
+        self.assertEqual(item["usage"]["assigned_sessions"], 3)
+        self.assertEqual(item["usage"]["hours"], 1.5)
         self.assertEqual(item["usage"]["distance_km"], 50)
         links = {row["activity_id"]: row for row in service.read()["assignments"]}
-        self.assertEqual(set(links), {"i2", "i4"})
+        self.assertEqual(set(links), {"i1", "i2", "i4"})
         self.assertEqual({row["source"] for row in links.values()}, {"garmin_gear"})
 
     def test_explicit_assignment_and_unassignment_beat_the_garmin_link(self):
@@ -668,14 +673,19 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             "distance": 20000,
             "moving_time": 3600,
         }
-        # Canonical reads (#1416): both recordings reach the Garmin ride; in the
-        # app their canonical session does, here the external_id stands in for it.
         rows = [
-            {**base, "id": "i1", "device_name": "Wahoo ELEMNT", "external_id": "a1"},
+            {**base, "id": "i1", "device_name": "Wahoo ELEMNT", "external_id": "w1"},
             {**base, "id": "i2", "device_name": "Garmin Edge 840", "external_id": "a1"},
         ]
         service = self._gear_service(rows)
-        items = self._garmin_gear(service, [self._gear_row("g1", activity_ids=["a1"])])
+        items = self._garmin_gear(
+            service,
+            [self._gear_row("g1", activity_ids=["a1"])],
+            [
+                {"garmin_activity_id": "a1", "intervals_activity_id": "i1"},
+                {"garmin_activity_id": "a1", "intervals_activity_id": "i2"},
+            ],
+        )
         self.assertEqual(items["g1"]["usage"]["assigned_sessions"], 1)
         self.assertEqual(items["g1"]["usage"]["hours"], 1)
 

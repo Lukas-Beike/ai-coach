@@ -17,8 +17,7 @@ from backend.nutrition.models import validate_iso_date
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import (
     daily_energy_expenditure,
-    garmin_daily_health_retrievals,
-    read_daily_health_by_date,
+    read_daily_health_with_retrievals,
 )
 from backend.runtime.ports import ObservationReader
 
@@ -79,14 +78,13 @@ class NutritionSyncStatusService:
         A day a current targeted refresh read without a Garmin daily total is
         emptied (``_filter_targeted_missing_energy``).
         """
-        reader = resolve_reader(self._observation_reader(), db)
-        first, last = date.fromisoformat(start), date.fromisoformat(end)
-        return _filter_targeted_missing_energy(
-            read_daily_health_by_date(reader, db, start=first, end=last),
-            state,
-            dates,
-            garmin_daily_health_retrievals(reader, db, start=first, end=last),
+        measured, retrievals = read_daily_health_with_retrievals(
+            resolve_reader(self._observation_reader(), db),
+            db,
+            start=date.fromisoformat(start),
+            end=date.fromisoformat(end),
         )
+        return _filter_targeted_missing_energy(measured, state, dates, retrievals)
 
     def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
         validated_date = validate_iso_date(meal_date)
@@ -232,7 +230,7 @@ def _filter_targeted_missing_energy(
     """Do not reuse older canonical observations after a complete empty day read.
 
     ``snapshot`` is the Garmin sync state. ``retrievals`` holds the latest fetch
-    time of each day's Garmin daily totals (``garmin_daily_health_retrievals``).
+    time of each day's Garmin daily totals (``read_daily_health_with_retrievals``).
     A day counts as read only with a total fetched at or after the refresh; a
     refresh time that is not an ISO instant accepts any stored total of the day.
     """

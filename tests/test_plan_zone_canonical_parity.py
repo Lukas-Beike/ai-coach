@@ -21,9 +21,11 @@ from zone_settings_reference import (
 
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import Environment, MetricKind, Sport
+from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
-    sport_thresholds,
+    inputs_for_snapshot,
+    resolve_reader,
 )
 from backend.planning.calendar_read_model import project_planning_calendar
 
@@ -62,10 +64,16 @@ class SettingVariantParityTests(unittest.TestCase):
 
 class PlanZoneParityTests(CanonicalReadFixture):
     def _thresholds(self) -> tuple:
+        """The thresholds the state prelude's canonical current inputs carry."""
         selector = make_selector(self)
-        return sport_thresholds(
-            CanonicalPerformanceSource(lambda: self.manager, lambda: selector)
-        )
+        source = CanonicalPerformanceSource(lambda: self.manager, lambda: selector)
+        with self.manager.reader() as db:
+            inputs = inputs_for_snapshot(source, db, as_of=date(2026, 10, 11))
+            direct = read_zone_thresholds(resolve_reader(selector, db), db)
+        thresholds = () if inputs is None else inputs.current.zone_thresholds
+        # The plan read takes the same thresholds without the other inputs.
+        self.assertEqual(direct, thresholds)
+        return thresholds
 
     def test_canonical_thresholds_give_the_snapshot_zone_settings(self) -> None:
         populate(self)

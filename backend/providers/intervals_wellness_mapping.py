@@ -138,6 +138,7 @@ _PACE_METRES_PER_KM: Final = 1000.0
 _UNSET_WHEN_ZERO: Final = frozenset(
     {
         MetricKind.FTP,
+        MetricKind.INDOOR_FTP,
         MetricKind.THRESHOLD_HR,
         MetricKind.MAX_HR,
         MetricKind.THRESHOLD_PACE,
@@ -190,6 +191,8 @@ _EFTP_ALIASES: Final = ("eftp", "eFTP")
 _SPORT_INFO_TYPE_KEYS: Final = ("type", "sport", "sport_type")
 _LTHR_ALIASES: Final = ("lthr",)
 _MAX_HR_ALIASES: Final = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
+# INDOOR_FTP is the setting's own indoor_ftp. FTP takes the setting's ftp and,
+# when ftp is absent or null, its indoor_ftp, as the current metrics read it.
 _INDOOR_FTP_ALIASES: Final = ("indoor_ftp",)
 _SPORT_SETTING_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
     (MetricKind.FTP, ("ftp", "indoor_ftp")),

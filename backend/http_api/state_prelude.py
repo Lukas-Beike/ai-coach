@@ -65,7 +65,7 @@ class PublicStateLocalPrelude:
     def read(self, local_only: bool) -> LocalStatePrelude:
         # One WAL snapshot serves every local read; a writer never blocks it.
         with self._database_manager.read_snapshot() as db:
-            sync_metadata = self._sync_state.sync_metadata()
+            sync_metadata = self._sync_state.sync_metadata(db)
             performance_inputs = (
                 self._performance_inputs(db)
                 if self._performance_inputs is not None

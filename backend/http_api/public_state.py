@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from backend.canonical.records import Observation
 from backend.canonical.vocabulary import ProviderId
 from backend.db.manager import DatabaseManager
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
@@ -86,6 +87,12 @@ class PublicStateDependencies:
     provider_credentials: Callable[[], Any] | None = None
 
 
+def _zone_thresholds(inputs: Any) -> tuple[Observation, ...]:
+    """The plan-zone thresholds of the prelude's canonical current inputs."""
+    current = getattr(inputs, "current", None)
+    return tuple(getattr(current, "zone_thresholds", ()))
+
+
 class PublicStateService:
     """Own the full public state orchestration and response contract."""
 
@@ -127,6 +134,7 @@ class PublicStateService:
                 activities,
                 weather,
                 calendar_window,
+                _zone_thresholds(getattr(prelude, "performance_inputs", None)),
             )
             checkins = calendar_data.checkins
             competitions = calendar_data.competitions

@@ -345,6 +345,7 @@ class CanonicalCurrentInputTests(unittest.TestCase):
                 (MetricKind.WEIGHT, *window, None),
                 (MetricKind.EFTP, *window, None),
                 *((kind, *window, None) for kind in ATHLETE_RECORD_KINDS),
+                (MetricKind.INDOOR_FTP, *window, None),
                 (MetricKind.FTP, None, None, None),
                 (MetricKind.WEIGHT, None, None, None),
                 (MetricKind.WEIGHT, latest, latest, None),

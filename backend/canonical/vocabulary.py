@@ -146,8 +146,10 @@ class MetricKind(StrEnum):
     W_PRIME = "w_prime"
     HEIGHT = "height"
     ZONE2_PACE = "zone2_pace"
-    # The sport setting's indoor FTP (mapper version 10 of Intervals.icu). It is a
-    # kind of its own so FTP readers never take it for the sport FTP.
+    # The sport setting's indoor FTP (mapper version 10 of Intervals.icu). Only the
+    # plan zones of indoor and virtual workouts read this kind. FTP stays the
+    # setting's ``ftp``; a setting without ``ftp`` (absent or null) also stores its
+    # ``indoor_ftp`` as FTP, as the current metrics read it.
     INDOOR_FTP = "indoor_ftp"
 
     @property

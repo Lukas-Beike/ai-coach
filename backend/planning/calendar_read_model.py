@@ -129,7 +129,8 @@ def project_planning_calendar(
 
     The canonical ``zone_configurations`` set the zone limits and thresholds of
     the planned workout profiles; a metric without one keeps the sport's canonical
-    ``sport_thresholds`` (``read_sport_thresholds``) and the default limits.
+    ``sport_thresholds`` (``CanonicalCurrentInputs.zone_thresholds``) and the default
+    limits.
     """
     canonical_planned = canonical.canonical_planned_workouts([], local_planned)
     compliance_planned, planning_compliance = (

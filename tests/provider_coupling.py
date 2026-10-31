@@ -260,7 +260,6 @@ FIELD_MODULE_IMPORTS_ALLOWED = frozenset(
 # once its consumer reads canonical observations.
 OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/canonical/garmin_payload.py"): _SYNC_WRITER,
-    (RULE_SNAPSHOT_KEY, "backend/sync/garmin.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/snapshot_reader.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/snapshot_storage.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/state.py"): _SYNC_WRITER,

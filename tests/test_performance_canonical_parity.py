@@ -77,8 +77,9 @@ _NO_RECOVERY = CanonicalRecoveryInputs(
 # load and load balance kinds and the four history-chart kinds), the daily totals
 # (with resting energy) and the recovery kinds not read before (the weekly HRV
 # average), the form and eFTP kinds (#1412), and the athlete-record kinds without
-# an earlier read (zone-2 pace, height and W′, #1415).
-_UNIT_READS = 51
+# an earlier read (zone-2 pace, height and W′, #1415), and the plan-zone indoor FTP
+# (#1416).
+_UNIT_READS = 52
 
 
 class StubObservationReader(ObservationReader):

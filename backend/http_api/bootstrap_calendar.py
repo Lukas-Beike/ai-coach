@@ -43,7 +43,6 @@ class PublicStateCalendarProjection:
         default_workout_name: str,
         today: Callable[[], date],
         zone_configurations: Callable[[], Sequence[ZoneConfiguration]] = tuple,
-        sport_thresholds: Callable[[], Sequence[Observation]] = tuple,
     ) -> None:
         self._checkins = checkins
         self._competitions = competitions
@@ -55,7 +54,6 @@ class PublicStateCalendarProjection:
         self._default_workout_name = default_workout_name
         self._today = today
         self._zone_configurations = zone_configurations
-        self._sport_thresholds = sport_thresholds
 
     def read(
         self,
@@ -64,8 +62,13 @@ class PublicStateCalendarProjection:
         activities: list[dict[str, Any]],
         weather: dict[str, Any],
         calendar_window: dict[str, Any],
+        sport_thresholds: Sequence[Observation] = (),
     ) -> PublicStateCalendarData:
-        """Read and project calendar data without opening a transaction."""
+        """Read and project calendar data without opening a transaction.
+
+        ``sport_thresholds`` are the plan-zone thresholds of the canonical current
+        inputs the caller already read.
+        """
         checkins = self._checkins.list(30)
         competitions = self._competitions.list()
         external_calendar = self._external_calendar.state(
@@ -94,7 +97,7 @@ class PublicStateCalendarProjection:
             today=self._today(),
             provider_window=calendar_window,
             default_name=self._default_workout_name,
-            sport_thresholds=self._sport_thresholds(),
+            sport_thresholds=sport_thresholds,
             zone_configurations=self._zone_configurations(),
         )
         neutral_calendar_state(calendar_projection)

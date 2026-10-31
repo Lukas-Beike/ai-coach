@@ -997,6 +997,14 @@ class SnapshotRepository:
         ).fetchone()
         return dict(row) if row else {}
 
+    def latest_provider_sync(self, db: Any) -> str | None:
+        """Return the latest snapshot's ``provider_sync`` JSON text; nothing else."""
+        row = db.execute(
+            "SELECT json_extract(payload, '$.provider_sync') AS provider_sync "
+            "FROM snapshots ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return row["provider_sync"] if row else None
+
     def latest_payload(self, db: Any) -> str | None:
         row = db.execute(
             "SELECT payload FROM snapshots ORDER BY id DESC LIMIT 1"

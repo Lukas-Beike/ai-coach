@@ -59,12 +59,32 @@ def read_daily_health_by_date(
     to its value. Per day and kind the latest observation wins; ``source`` names
     the providers of the day's values.
     """
+    return read_daily_health_with_retrievals(reader, db, start=start, end=end)[0]
+
+
+def read_daily_health_with_retrievals(
+    reader: ObservationReader,
+    db: Any,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, datetime | None]]:
+    """Return ``read_daily_health_by_date`` and the Garmin fetch time of each day.
+
+    The second mapping holds, per ISO day with a stored Garmin daily total, the
+    latest fetch time among them (None when none carries one). Each kind is read
+    once for both.
+    """
     latest: dict[str, dict[str, Observation]] = {}
+    retrievals: dict[str, datetime | None] = {}
     for kind, name in DAILY_HEALTH_KINDS.items():
         for item in reader.observations(db, kind, start=start, end=end):
-            day = latest.setdefault(item.observed_on.isoformat(), {})
+            day_text = item.observed_on.isoformat()
+            day = latest.setdefault(day_text, {})
             if name not in day or _order(item) >= _order(day[name]):
                 day[name] = item
+            if item.provenance.provider is ProviderId.GARMIN:
+                _add_retrieval(retrievals, day_text, item.provenance.retrieved_at)
     health_by_date: dict[str, dict[str, Any]] = {}
     for record_date, values in sorted(latest.items()):
         health: dict[str, Any] = {
@@ -73,30 +93,17 @@ def read_daily_health_by_date(
         }
         health["source"] = _sources(values.values())
         health_by_date[record_date] = health
-    return health_by_date
+    return health_by_date, retrievals
 
 
-def garmin_daily_health_retrievals(
-    reader: ObservationReader, db: Any, *, start: date, end: date
-) -> dict[str, datetime | None]:
-    """Return, per ISO day, the latest fetch time of a Garmin daily total.
-
-    A day appears once any Garmin daily-health observation is stored for it; its
-    value is None when no stored observation carries a fetch time.
-    """
-    retrievals: dict[str, datetime | None] = {}
-    for kind in DAILY_HEALTH_KINDS:
-        for item in reader.observations(db, kind, start=start, end=end):
-            if item.provenance.provider is not ProviderId.GARMIN:
-                continue
-            day = item.observed_on.isoformat()
-            retrieved = item.provenance.retrieved_at
-            current = retrievals.get(day)
-            if day not in retrievals or (
-                retrieved is not None and (current is None or retrieved > current)
-            ):
-                retrievals[day] = retrieved
-    return retrievals
+def _add_retrieval(
+    retrievals: dict[str, datetime | None], day: str, retrieved: datetime | None
+) -> None:
+    current = retrievals.get(day)
+    if day not in retrievals or (
+        retrieved is not None and (current is None or retrieved > current)
+    ):
+        retrievals[day] = retrieved
 
 
 def daily_energy_expenditure(

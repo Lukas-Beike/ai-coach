@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.activities.session_linking import garmin_activity_matches
 from backend.athlete.equipment import EquipmentService
-from backend.db import DatabaseManager, row_factory
+from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.sync import canonical_ingest
@@ -311,6 +312,87 @@ class CanonicalGearParityTests(unittest.TestCase):
                 }
             ],
         )
+
+
+class CanonicalDuplicatePairTests(unittest.TestCase):
+    """A Garmin gear ride links every Intervals.icu ride the duplicate rule pairs.
+
+    Two Intervals.icu recordings match the Garmin ride; bundling gives the Garmin
+    record to one of them, the pairwise rule still pairs both, as the stored
+    matches of the raw view did.
+    """
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.manager = DatabaseManager(
+            Path(temporary.name) / "pairs.db", sqlite3, row_factory=row_factory
+        )
+        self.addCleanup(self.manager.close)
+        self.rows = [intervals_row("i1"), intervals_row("i2")]
+        with self.manager.unit_of_work() as db:
+            initialize_schema(db)
+            canonical_ingest.ingest_intervals_partial_snapshot(
+                db,
+                {"synced_at": SYNCED, "raw_provider_data": {"activities": self.rows}},
+                zone=ZONE,
+            )
+            GarminSnapshotWriter(
+                KeyValueRepository(lambda: SYNCED), lambda: ZONE
+            ).write(
+                db,
+                {
+                    "synced_at": SYNCED,
+                    "activities": [garmin_activity(910)],
+                    "source_freshness": {"gear": {"freshness": "current"}},
+                    "gear": [
+                        {
+                            "gearUUID": "g1",
+                            "gearName": "Road bike",
+                            "gearTypeName": "Bike",
+                            "stats": {"totalDistance": 50000},
+                            "activity_ids": ["910"],
+                        }
+                    ],
+                },
+            )
+
+    def service(self, matcher: Any) -> EquipmentService:
+        return EquipmentService(
+            self.manager,
+            lambda: self.rows,
+            lambda: date(2026, 10, 2),
+            lambda: "2026-10-02T12:00:00Z",
+            deduplicated_rows,
+            gear_reader=CanonicalTableReader(),
+            match_activities=matcher,
+        )
+
+    def links(self, service: EquipmentService) -> set[str]:
+        with self.manager.reader() as db:
+            from backend.db import garmin_store
+
+            service.sync_garmin_snapshot(garmin_store.read_state(db))
+        return {row["activity_id"] for row in service.read()["assignments"]}
+
+    def test_the_pairwise_rule_pairs_both_recordings(self) -> None:
+        with self.manager.reader() as db:
+            matches = garmin_activity_matches(db, ["910"], ["i1", "i2"], zone=ZONE)
+            sessions = canonical_store.provider_activity_sessions(
+                db, "intervals", ["i1", "i2"]
+            )
+        self.assertEqual(matches, {"910": {"i1", "i2"}})
+        # Bundling kept the two recordings in separate sessions.
+        self.assertNotEqual(sessions["i1"], sessions["i2"])
+
+    def test_gear_links_every_paired_recording(self) -> None:
+        def matcher(db: Any, garmin_ids: Any, intervals_ids: Any) -> Any:
+            return garmin_activity_matches(db, garmin_ids, intervals_ids, zone=ZONE)
+
+        self.assertEqual(self.links(self.service(matcher)), {"i1", "i2"})
+
+    def test_without_the_pairs_only_the_bundled_session_links(self) -> None:
+        self.assertEqual(len(self.links(self.service(None))), 1)
 
 
 if __name__ == "__main__":

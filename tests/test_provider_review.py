@@ -482,10 +482,9 @@ class ProviderReviewTests(unittest.TestCase):
                     ],
                     0,
                 )
-                self.assertEqual(
-                    read_garmin()["activity_matches"],
-                    [{"garmin_activity_id": 123, "intervals_activity_id": "canonical"}],
-                )
+                # Canonical reads (#1416): the sync stores no activity matches;
+                # equipment pairs canonical activity records at read time.
+                self.assertNotIn("activity_matches", read_garmin())
                 self.assertEqual(
                     server.SYNC_PERSISTENCE.state_repository().cursor("garmin", "data")[
                         "cursor"

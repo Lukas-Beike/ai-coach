@@ -27,9 +27,7 @@ from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
 from backend.providers.garmin_gear_fields import garmin_gear_id
-from backend.runtime.ports import ActivityRowReader
 from backend.sync.daily import DailySyncMarkerService
-from backend.sync.garmin_activity_duplicates import garmin_activity_duplicates_intervals
 from backend.sync.garmin_payload_metrics import garmin_source_observed_at
 from backend.sync.garmin_performance_history import append_garmin_performance_history
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
@@ -236,14 +234,11 @@ class GarminPayloadService:
         key_value_repository: KeyValueRepository,
         sync_state_repository: SyncStateRepository,
         local_today: Callable[[], date],
-        *,
-        activity_rows: Callable[[], ActivityRowReader] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
         self._sync_state_repository = sync_state_repository
         self._local_today = local_today
-        self._activity_rows = activity_rows
 
     def state(self) -> dict[str, Any]:
         """Return the small stored Garmin state: freshness, sync metadata, errors."""
@@ -417,7 +412,6 @@ class GarminPayloadService:
             garmin_activity_max_hr(payload.get("activities")),
             previous.get("sport_max_hr"),
         )
-        payload["activity_matches"] = self._activity_matches(payload)
         if fixture:
             payload["provider_sync"].setdefault(
                 "pagination",
@@ -434,33 +428,6 @@ class GarminPayloadService:
         payload["performance_history"] = window["performance_history"]
         payload["provider_metrics"] = window["provider_metrics"]
         return payload
-
-    def intervals_activities(self) -> list[dict[str, Any]]:
-        """Return the stored Intervals.icu activity rows used for duplicate matching.
-
-        With an injected row reader the canonical selector serves them (tables once
-        the backfill is complete, the snapshot before); otherwise the legacy
-        snapshot is read directly.
-        """
-        if self._activity_rows is None:
-            canonical = self._sync_state_repository.latest_snapshot() or {}
-            return list(canonical.get("recent_activities") or [])
-        with self._database_manager.reader() as db:
-            return list(self._activity_rows().activity_rows(db))
-
-    def _activity_matches(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        intervals = self.intervals_activities()
-        return [
-            {
-                "garmin_activity_id": activity.get("activityId") or activity.get("id"),
-                "intervals_activity_id": match.get("id"),
-            }
-            for activity in payload.get("activities") or []
-            if isinstance(activity, dict)
-            for match in intervals
-            if isinstance(match, dict)
-            and garmin_activity_duplicates_intervals(activity, [match])
-        ]
 
 
 def _overlaid(window: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:

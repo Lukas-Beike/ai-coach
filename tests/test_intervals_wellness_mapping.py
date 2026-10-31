@@ -1155,6 +1155,13 @@ class SportSettingValueTests(unittest.TestCase):
         )
         self.assertEqual(result.issues, ())
 
+    def test_zero_indoor_ftp_stores_nothing(self) -> None:
+        result = thresholds(
+            {"sportSettings": [{"types": ["Ride"], "ftp": 260, "indoor_ftp": 0}]}
+        )
+        self.assertEqual(sport_records(result), {(MetricKind.FTP, Sport.RIDE, 260)})
+        self.assertEqual(result.issues, ())
+
     def test_zero_lthr_and_max_hr_are_unset_without_issues(self) -> None:
         for field in ("lthr", "max_hr"):
             with self.subTest(field=field):

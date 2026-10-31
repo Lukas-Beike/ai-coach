@@ -10,6 +10,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.performance import freshness as performance_freshness
 from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.garmin_fields import first_present as _first_present
 from backend.sync import garmin_metric_history
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
@@ -130,16 +131,6 @@ def _provider_metric_state(
     if pagination.get("available") is False:
         return "unsupported"
     return "unknown"
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def readiness_score_value(value: Any) -> float | int | None:

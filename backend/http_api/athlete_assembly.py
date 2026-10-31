@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, tzinfo
 from typing import Any
@@ -11,6 +11,7 @@ from backend.activities.activity_reference import ActivityReferences
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
+from backend.activities.session_linking import garmin_activity_matches
 from backend.athlete.checkins import CheckinService
 from backend.athlete.clock import AthleteLocalClock
 from backend.athlete.context import AthleteContextService
@@ -92,6 +93,15 @@ class AthleteDataAssembly:
             deduplicated_rows,
             resolve_activity=ActivityReferences(self._database_manager()).resolve,
             gear_reader=CanonicalTableReader(),
+            match_activities=self._garmin_activity_matches,
+        )
+
+    def _garmin_activity_matches(
+        self, db: Any, garmin_ids: Sequence[str], intervals_ids: Sequence[str]
+    ) -> dict[str, set[str]]:
+        """Pair Garmin and Intervals.icu activities on the athlete's wall clock."""
+        return garmin_activity_matches(
+            db, garmin_ids, intervals_ids, zone=self._athlete_zone()
         )
 
     def zones(self) -> ZoneConfigurationService:

@@ -1684,6 +1684,27 @@ def linkable_activity_rows(db: Any, *, start: str, end: str) -> list[dict[str, A
     )
 
 
+def provider_activity_record_rows(
+    db: Any, provider: str, provider_activity_ids: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Return the active records of the given provider activity ids, linkable columns.
+
+    Unknown and deleted records are absent; the session state is not filtered.
+    """
+    rows: list[dict[str, Any]] = []
+    for chunk in _chunked(list(dict.fromkeys(provider_activity_ids))):
+        rows.extend(
+            _fetch_all(
+                db,
+                f"SELECT {', '.join(_LINKABLE_COLUMNS)} FROM activity_records AS r "
+                "WHERE r.provider = ? AND r.state = ? "
+                f"AND r.provider_activity_id IN ({_placeholders(chunk)})",
+                (provider, ActivityRecordState.ACTIVE.value, *chunk),
+            )
+        )
+    return rows
+
+
 def activity_session_link_rows(
     db: Any, activity_ids: Sequence[str]
 ) -> dict[str, dict[str, Any]]:
