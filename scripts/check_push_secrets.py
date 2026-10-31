@@ -50,22 +50,46 @@ def outgoing_objects(updates: str) -> set[str]:
     return objects
 
 
-def added_lines(updates: str) -> set[bytes]:
-    """Lines the outgoing commits add; pre-existing lines of touched files stay unscanned."""
-    lines = set()
+def added_content(updates: str) -> tuple[set[str], set[tuple[str, bytes]]]:
+    """Split outgoing blob content into whole blobs and per-file added-line runs.
+
+    New and binary files are scanned whole. For an edited text file only the
+    added lines are scanned, in order, so findings already on the base cannot
+    block an unrelated change and multi-line secrets stay intact.
+    """
+    whole: set[str] = set()
+    runs: set[tuple[str, bytes]] = set()
     for local, exclusions in outgoing_revisions(updates):
         diff = git(
-            *("log", "--format=", "-p", "-c", "-U0", "--no-color", "--no-ext-diff"),
-            "--no-textconv",
-            local,
-            *exclusions,
+            *("log", "--format=", "-p", "-m", "-U0", "--full-index", "--no-renames"),
+            *("--no-color", "--no-ext-diff", "--no-textconv", local, *exclusions),
         )
-        lines.update(
-            row[1:]
-            for row in diff.split(b"\n")
-            if row.startswith(b"+") and not row.startswith(b"+++")
-        )
-    return lines
+        suffix, new_blob, in_hunk = "", "", False
+        rows: list[bytes] = []
+        # A final sentinel row flushes the last file.
+        for row in [*diff.split(b"\n"), b"diff --git a/ b/"]:
+            if row.startswith(b"diff --git "):
+                if rows:
+                    runs.add((suffix, b"\n".join(rows)))
+                rows, in_hunk, new_blob = [], False, ""
+                suffix = Path(
+                    row.rsplit(b" b/", 1)[-1].decode("utf-8", "replace")
+                ).suffix
+                if not re.fullmatch(r"\.[A-Za-z0-9]{1,10}", suffix):
+                    suffix = ""
+            elif in_hunk:
+                if row.startswith(b"+"):
+                    rows.append(row[1:])
+            elif row.startswith(b"@@"):
+                in_hunk = True
+            elif row.startswith(b"index "):
+                old, new_blob = row.split()[1].decode("ascii").split("..")
+                if set(old) == {"0"} and set(new_blob) != {"0"}:
+                    whole.add(new_blob)
+            elif row.startswith(b"Binary files") and new_blob:
+                whole.add(new_blob)
+    whole = {oid for oid in whole if set(oid) != {"0"}}
+    return whole, runs
 
 
 def check(updates: str) -> int:
@@ -85,18 +109,19 @@ def check(updates: str) -> int:
         for row in metadata.decode("ascii").splitlines()
         if row.split()[1] in {"commit", "tag"}
     ]
-    sources = [(oid, git("cat-file", kind, oid)) for oid, kind in messages]
-    ordered = sorted(added_lines(updates))
+    whole, runs = added_content(updates)
+    sources = [(oid + ".txt", git("cat-file", kind, oid)) for oid, kind in messages]
+    sources += [(oid + ".txt", git("cat-file", "blob", oid)) for oid in sorted(whole)]
     sources += [
-        (f"added-{start}", b"\n".join(ordered[start : start + 2000]))
-        for start in range(0, len(ordered), 2000)
+        (f"added-{index}{suffix or '.txt'}", data)
+        for index, (suffix, data) in enumerate(sorted(runs))
     ]
     with tempfile.TemporaryDirectory(prefix="ai-coach-push-scan-") as temp:
         # Scan batches to bound disk use and Windows command-line length.
         for start in range(0, len(sources), 35):
             paths = []
             for name, data in sources[start : start + 35]:
-                path = Path(temp) / (name + ".txt")
+                path = Path(temp) / name
                 path.write_bytes(data)
                 paths.append(str(path))
             result = subprocess.run(

@@ -125,6 +125,40 @@ class PushSecretTests(unittest.TestCase):
         self.assertIn(b"added clean line", joined)
         self.assertNotIn(b"synthetic flagged line", joined)
 
+    def scanned_by(self, updates):
+        run = subprocess.run
+        scanned = []
+
+        def scanner(command, **kwargs):
+            if command[0] == "synthetic-sonar":
+                scanned.extend(Path(p).read_bytes() for p in command[3:])
+                return subprocess.CompletedProcess(command, 0)
+            return run(command, **kwargs)
+
+        with (
+            patch.object(scan.shutil, "which", return_value="synthetic-sonar"),
+            patch.object(scan.subprocess, "run", side_effect=scanner),
+        ):
+            scan.check(updates)
+        return scanned
+
+    def test_added_runs_keep_order_and_plus_prefixed_content(self):
+        base = self.commit("keep\n")
+        tip = self.commit("keep\nBEGIN\n++body\nBEGIN\nEND\n")
+        scanned = self.scanned_by(self.update(tip, base))
+        self.assertIn(b"BEGIN\n++body\nBEGIN\nEND", scanned)
+
+    def test_new_and_binary_files_are_scanned_whole(self):
+        base = self.commit("keep\n")
+        (self.root / "new.txt").write_text("fresh line\nsecond\n")
+        (self.root / "blob.bin").write_bytes(b"\x00\x01binary secret\x00")
+        scan.git("add", ".")
+        scan.git("commit", "-qm", "files")
+        tip = scan.git("rev-parse", "HEAD").decode().strip()
+        scanned = self.scanned_by(self.update(tip, base))
+        self.assertIn(b"fresh line\nsecond\n", scanned)
+        self.assertIn(b"\x00\x01binary secret\x00", scanned)
+
     def test_clean_push_scans_committed_content_not_dirty_worktree(self):
         tip = self.commit("committed clean")
         (self.root / "fixture.py").write_text("uncommitted private data")
