@@ -50,16 +50,25 @@ class MappedDailyReader:
         )
 
 
-def mapped_health(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The canonical daily totals of the snapshot's mapped Garmin daily stats."""
-    return read_daily_health_by_date(MappedDailyReader(snapshot, strict=False), None)
+def mapped_health(
+    snapshot: dict[str, Any], *, strict: bool = True
+) -> dict[str, dict[str, Any]]:
+    """The canonical daily totals of the snapshot's mapped Garmin daily stats.
+
+    ``strict`` fails on any mapping issue; tests of invalid input opt out.
+    """
+    return read_daily_health_by_date(MappedDailyReader(snapshot, strict=strict), None)
 
 
 def mapped_expenditure(
-    snapshot: dict[str, Any], requested_date: str, current_date: date
+    snapshot: dict[str, Any],
+    requested_date: str,
+    current_date: date,
+    *,
+    strict: bool = True,
 ) -> dict[str, Any]:
     """``daily_energy_expenditure`` with the snapshot's energy mapped first (#1415)."""
-    health = mapped_health(snapshot)
+    health = mapped_health(snapshot, strict=strict)
     return daily_energy_expenditure(
         snapshot,
         requested_date,

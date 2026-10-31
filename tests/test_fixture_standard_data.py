@@ -307,9 +307,14 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         garmin = fixture_runtime._fixture_demo_garmin(
             self.today, fixture_runtime.demo_performance_history(self.today)
         )
-        today = mapped_expenditure(garmin, self.today.isoformat(), self.today)
+        today = mapped_expenditure(
+            garmin, self.today.isoformat(), self.today, strict=False
+        )
         zero_day = mapped_expenditure(
-            garmin, (self.today - timedelta(days=12)).isoformat(), self.today
+            garmin,
+            (self.today - timedelta(days=12)).isoformat(),
+            self.today,
+            strict=False,
         )
 
         self.assertTrue(today["provisional"])

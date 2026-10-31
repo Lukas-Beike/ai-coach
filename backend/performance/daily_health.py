@@ -14,29 +14,14 @@ from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import freshness as performance_freshness
-from backend.providers.garmin_fields import (
-    GARMIN_ACTIVE_KCAL_ALIASES,
-    GARMIN_FLOORS_ALIASES,
-    GARMIN_RESTING_KCAL_ALIASES,
-    GARMIN_STEPS_ALIASES,
-    GARMIN_TOTAL_KCAL_ALIASES,
-)
 from backend.providers.source_labels import SourceView, provider_label
 from backend.runtime.ports import ObservationReader
 
 GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.DAILY_HEALTH)
 
-GARMIN_DAILY_HEALTH_FIELDS = {
-    "steps": GARMIN_STEPS_ALIASES,
-    "floors": GARMIN_FLOORS_ALIASES,
-    "calories": GARMIN_TOTAL_KCAL_ALIASES,
-}
-
-GARMIN_DAILY_EXPENDITURE_FIELDS = {
-    "active_kcal": GARMIN_ACTIVE_KCAL_ALIASES,
-    "resting_kcal": GARMIN_RESTING_KCAL_ALIASES,
-    "total_kcal": GARMIN_DAILY_HEALTH_FIELDS["calories"],
-}
+# The 7-day averaged daily totals and the energy components of one day.
+DAILY_HEALTH_FIELDS = ("steps", "floors", "calories")
+DAILY_EXPENDITURE_FIELDS = ("active_kcal", "resting_kcal", "total_kcal")
 
 # Daily totals by canonical kind and the field of the date-indexed view.
 DAILY_HEALTH_KINDS: Mapping[MetricKind, str] = {
@@ -114,7 +99,7 @@ def daily_energy_expenditure(
     if not isinstance(snapshot, dict):
         snapshot = {}
     values: dict[str, float | int | None] = {
-        field: None for field in GARMIN_DAILY_EXPENDITURE_FIELDS
+        field: None for field in DAILY_EXPENDITURE_FIELDS
     }
     try:
         day = date.fromisoformat(requested_date)
@@ -172,8 +157,8 @@ def _window_values(
     health_by_date: Mapping[str, Mapping[str, Any]], cutoff: date, end_date: date
 ) -> tuple[dict[str, list[float]], dict[str, set[str]]]:
     """Collect each daily total and its sources for the days in the window."""
-    values: dict[str, list[float]] = {key: [] for key in GARMIN_DAILY_HEALTH_FIELDS}
-    sources: dict[str, set[str]] = {key: set() for key in GARMIN_DAILY_HEALTH_FIELDS}
+    values: dict[str, list[float]] = {key: [] for key in DAILY_HEALTH_FIELDS}
+    sources: dict[str, set[str]] = {key: set() for key in DAILY_HEALTH_FIELDS}
     for record_date, health in health_by_date.items():
         try:
             current = date.fromisoformat(iso_date_prefix(record_date))

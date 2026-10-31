@@ -10,7 +10,6 @@ from canonical_daily_health_support import (
 )
 
 from backend.performance.daily_health import (
-    GARMIN_DAILY_HEALTH_FIELDS,
     daily_energy_expenditure,
     garmin_daily_health_metrics,
     read_daily_health_by_date,
@@ -115,6 +114,7 @@ class GarminDailyHealthTests(unittest.TestCase):
             },
             "2026-08-31",
             date(2026, 9, 1),
+            strict=False,
         )
 
         self.assertEqual(result["active_kcal"], 0)
@@ -226,6 +226,7 @@ class GarminDailyHealthTests(unittest.TestCase):
                     },
                     "2026-10-15",
                     date(2026, 10, 15),
+                    strict=False,
                 )
                 self.assertIsNone(result["projected_total_kcal"])
                 self.assertIsNone(result["projection_resting_kcal"])
@@ -388,7 +389,7 @@ class GarminDailyHealthTests(unittest.TestCase):
         }
         # Canonical reads (#1415): an invalid first alias is a mapping issue and
         # never falls back to a later alias; comma decimals are not numbers.
-        self.assertEqual(mapped_health(snapshot), {})
+        self.assertEqual(mapped_health(snapshot, strict=False), {})
 
     def test_recovery_list_limit_is_respected(self):
         records = [
@@ -490,10 +491,6 @@ class GarminDailyHealthTests(unittest.TestCase):
         self.assertTrue(all(item["value"] is None for item in result.values()))
         self.assertTrue(all(item["source"] is None for item in result.values()))
         self.assertEqual(snapshot, before)
-        self.assertEqual(
-            GARMIN_DAILY_HEALTH_FIELDS["steps"],
-            ("totalSteps", "total_steps", "steps", "stepCount", "step_count"),
-        )
 
 
 class CanonicalDailyHealthParityTests(unittest.TestCase):
@@ -545,25 +542,30 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
         self.assertEqual(len(self.reader.calls), 5)
         self.assertTrue(all(call[1:] == window for call in self.reader.calls))
 
-    def test_metrics_window_matches_the_snapshot_with_an_empty_snapshot(self) -> None:
+    def test_metrics_window_ignores_the_snapshot_daily_stats(self) -> None:
         end = date(2026, 9, 20)
-        legacy = garmin_daily_health_metrics(
-            self.SNAPSHOT, 7, end, end, health_by_date=mapped_health(self.SNAPSHOT)
+        canonical = read_daily_health_by_date(self.reader, "db")
+        with_stats = garmin_daily_health_metrics(
+            self.SNAPSHOT, 7, end, end, health_by_date=canonical
         )
-        canonical = garmin_daily_health_metrics(
-            {},
-            7,
-            end,
-            end,
-            health_by_date=read_daily_health_by_date(self.reader, "db"),
+        without_stats = garmin_daily_health_metrics(
+            {}, 7, end, end, health_by_date=canonical
+        )
+        without_observations = garmin_daily_health_metrics(
+            self.SNAPSHOT, 7, end, end, health_by_date={}
         )
 
-        self.assertEqual(canonical, legacy)
-        self.assertEqual(canonical["steps_7d"]["value"], 6500)
+        self.assertEqual(
+            {key: item["value"] for key, item in with_stats.items()},
+            {key: item["value"] for key, item in without_stats.items()},
+        )
+        self.assertEqual(with_stats["steps_7d"]["value"], 6500)
+        self.assertTrue(
+            all(item["value"] is None for item in without_observations.values())
+        )
 
     def test_expenditure_reads_every_component_from_the_observations(self) -> None:
         measured = read_daily_health_by_date(self.reader, "db")
-        legacy = mapped_expenditure(self.SNAPSHOT, "2026-09-19", date(2026, 9, 21))
         canonical = daily_energy_expenditure(
             {},
             "2026-09-19",
@@ -572,17 +574,31 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
             measured_history=measured,
         )
 
-        for key in (
-            "total_kcal",
-            "active_kcal",
-            "resting_kcal",
-            "source",
-            "status",
-            "measured_date",
-        ):
-            with self.subTest(key=key):
-                self.assertEqual(canonical[key], legacy[key])
-        self.assertEqual(canonical["resting_kcal"], 1700)
+        self.assertEqual(
+            (
+                canonical["total_kcal"],
+                canonical["active_kcal"],
+                canonical["resting_kcal"],
+                canonical["source"],
+                canonical["status"],
+                canonical["measured_date"],
+            ),
+            (2400, 700, 1700, "Garmin Connect", "measured", "2026-09-19"),
+        )
+
+    def test_snapshot_energy_without_observations_is_unavailable(self) -> None:
+        result = daily_energy_expenditure(
+            self.SNAPSHOT,
+            "2026-09-19",
+            date(2026, 9, 21),
+            measured={},
+            measured_history={},
+        )
+
+        self.assertIsNone(result["total_kcal"])
+        self.assertIsNone(result["active_kcal"])
+        self.assertIsNone(result["resting_kcal"])
+        self.assertEqual(result["status"], "unavailable")
 
     def test_measured_day_without_values_is_unavailable_without_a_snapshot(
         self,
