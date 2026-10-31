@@ -588,12 +588,25 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "watts",
         "observed_on",
         "provider_activity_id",
-        "window_start",
-        "window_end",
-        "fetch_status",
         "source_kind",
         "recorded_by",
         "source_record_id",
+        "retrieved_at",
+        "label",
+        "details",
+        "mapper_version",
+        "state",
+        "created_at",
+        "updated_at",
+    },
+    "power_curve_fetches": {
+        "provider",
+        "source_record_id",
+        "fetch_status",
+        "window_start",
+        "window_end",
+        "source_kind",
+        "recorded_by",
         "retrieved_at",
         "label",
         "details",
@@ -1121,7 +1134,8 @@ CANONICAL_EXTENSIONS_DDL = f"""
 """
 
 
-# Schema version 17: the best power per duration of a provider's power curve.
+# Schema version 17: the best power per duration of a provider's power curve and,
+# once per source record, the outcome and window of the fetch that delivered it.
 POWER_CURVE_DDL = f"""
     CREATE TABLE power_curve_points (
         provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
@@ -1129,9 +1143,6 @@ POWER_CURVE_DDL = f"""
         watts REAL NOT NULL CHECK (watts >= 0),
         observed_on TEXT NOT NULL CHECK (length(observed_on) = 10),
         provider_activity_id TEXT CHECK (provider_activity_id IS NULL OR length(provider_activity_id) BETWEEN 1 AND 256),
-        window_start TEXT NOT NULL CHECK (length(window_start) = 10),
-        window_end TEXT NOT NULL CHECK (length(window_end) = 10),
-        fetch_status TEXT NOT NULL CHECK (length(fetch_status) BETWEEN 1 AND 64),
         source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
         recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
         source_record_id TEXT NOT NULL CHECK (length(source_record_id) BETWEEN 1 AND 256),
@@ -1145,6 +1156,23 @@ POWER_CURVE_DDL = f"""
         PRIMARY KEY (provider, duration_s)
     );
     CREATE INDEX idx_power_curve_points_source ON power_curve_points(provider, source_record_id);
+    CREATE TABLE power_curve_fetches (
+        provider TEXT NOT NULL CHECK (length(provider) BETWEEN 1 AND 64),
+        source_record_id TEXT NOT NULL CHECK (length(source_record_id) BETWEEN 1 AND 256),
+        fetch_status TEXT NOT NULL CHECK (length(fetch_status) BETWEEN 1 AND 64),
+        window_start TEXT CHECK (window_start IS NULL OR length(window_start) = 10),
+        window_end TEXT CHECK (window_end IS NULL OR length(window_end) = 10),
+        source_kind TEXT NOT NULL CHECK (length(source_kind) BETWEEN 1 AND 64),
+        recorded_by TEXT NOT NULL CHECK (length(recorded_by) BETWEEN 1 AND 64),
+        retrieved_at TEXT,
+        label TEXT,
+        details TEXT NOT NULL DEFAULT '{{}}' CHECK (json_valid(details) AND json_type(details) = 'object'),
+        mapper_version INTEGER NOT NULL CHECK (mapper_version >= 1),
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_PROJECTION_STATES})),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, source_record_id)
+    );
 """
 
 

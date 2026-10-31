@@ -1,22 +1,29 @@
-"""Map the stored Intervals.icu power curve envelope to canonical power curve points.
+"""Map the stored Intervals.icu power curve envelope to canonical power curve rows.
 
 The envelope is what ``IntervalsReader`` stores as ``cycling_power_profile``:
 ``status``, the fetch window ``start`` and ``end``, ``synced_at`` and the
-``points`` of ``backend.providers.intervals_power.cycling_power_points``. Each
-point keeps its watts, the day and activity of the best effort, the window and
-the fetch status. The points were fetched at ``synced_at``; without a usable
-one, the raw record's fetch time stands in. Only ``ok`` points are mapped. A
-point that fails validation, repeats a duration, or an envelope without a
-usable window maps to nothing, so a corrupted curve never blocks the rest.
+``points`` of ``backend.providers.intervals_power.cycling_power_points``.
+
+The fetch-level facts (status, window, ``synced_at``) map once to a
+``PowerCurveFetch``; each point keeps its watts and the day and activity of the
+best effort. The points were fetched at ``synced_at``; without a usable one, the
+raw record's fetch time stands in. Only ``ok`` points inside the window are
+mapped; a point that fails validation or repeats a duration is left out.
+
+An envelope without a usable window or point list, such as ``{"status":
+"failed"}`` after a failed first fetch, reports no curve: its points are None,
+so the stored best efforts are kept, while its status is still recorded. An
+envelope without a usable status maps to nothing at all.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date, datetime, tzinfo
 from typing import Final
 
-from backend.canonical.domain_records import PowerCurvePoint
+from backend.canonical.domain_records import PowerCurveFetch, PowerCurvePoint
 from backend.canonical.local_time import parse_provider_datetime
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, SourceKind
@@ -24,6 +31,14 @@ from backend.providers.intervals_power import POWER_CURVE_LABEL
 
 MAPPER_VERSION: Final = 1
 _POINT_OK: Final = "ok"
+
+
+@dataclass(frozen=True, slots=True)
+class PowerCurveMapping:
+    """The fetch and the points of one envelope; None means keep what is stored."""
+
+    fetch: PowerCurveFetch | None = None
+    points: tuple[PowerCurvePoint, ...] | None = None
 
 
 def _day(value: object) -> date | None:
@@ -35,12 +50,38 @@ def _day(value: object) -> date | None:
         return None
 
 
-def _point(
-    point: object,
-    *,
-    window: tuple[date, date],
-    fetch_status: str,
+def _provenance(source_record_id: str, retrieved_at: datetime | None) -> Provenance:
+    return Provenance(
+        provider=ProviderId.INTERVALS,
+        source_kind=SourceKind.PROVIDER_REPORTED,
+        source_record_id=source_record_id,
+        recorded_by=RecordingOrigin.UNKNOWN,
+        retrieved_at=retrieved_at,
+        label=POWER_CURVE_LABEL,
+    )
+
+
+def _fetch(
+    envelope: Mapping[str, object],
+    window: tuple[date, date] | None,
     provenance: Provenance,
+) -> PowerCurveFetch | None:
+    status = envelope.get("status")
+    if not isinstance(status, str):
+        return None
+    try:
+        return PowerCurveFetch(
+            fetch_status=status,
+            window_start=None if window is None else window[0],
+            window_end=None if window is None else window[1],
+            provenance=provenance,
+        )
+    except TypeError, ValueError:
+        return None
+
+
+def _point(
+    point: object, *, window: tuple[date, date], provenance: Provenance
 ) -> PowerCurvePoint | None:
     if not isinstance(point, Mapping) or point.get("status") != _POINT_OK:
         return None
@@ -48,6 +89,8 @@ def _point(
     duration, watts = point.get("duration_seconds"), point.get("watts")
     activity = point.get("activity_id")
     if day is None or duration is None or watts is None:
+        return None
+    if not window[0] <= day <= window[1]:
         return None
     try:
         return PowerCurvePoint(
@@ -57,9 +100,6 @@ def _point(
             provider_activity_id=activity
             if isinstance(activity, str) and activity
             else None,
-            window_start=window[0],
-            window_end=window[1],
-            fetch_status=fetch_status,
             provenance=provenance,
         )
     except TypeError, ValueError:
@@ -72,31 +112,25 @@ def map_intervals_power_curve(
     source_record_id: str,
     fetched_at: datetime,
     zone: tzinfo,
-) -> tuple[PowerCurvePoint, ...]:
-    """Return the best power per duration of one stored power curve envelope."""
+) -> PowerCurveMapping:
+    """Return the fetch and the best power per duration of one stored envelope."""
     if not isinstance(envelope, Mapping):
-        return ()
+        return PowerCurveMapping()
+    synced_at = parse_provider_datetime(envelope.get("synced_at"), zone)
     start, end = _day(envelope.get("start")), _day(envelope.get("end"))
-    status = envelope.get("status")
-    points = envelope.get("points")
-    if start is None or end is None or not isinstance(points, list):
-        return ()
-    if not isinstance(status, str):
-        return ()
-    provenance = Provenance(
-        provider=ProviderId.INTERVALS,
-        source_kind=SourceKind.PROVIDER_REPORTED,
-        source_record_id=source_record_id,
-        recorded_by=RecordingOrigin.UNKNOWN,
-        retrieved_at=parse_provider_datetime(envelope.get("synced_at"), zone)
-        or fetched_at,
-        label=POWER_CURVE_LABEL,
-    )
+    window = (start, end) if start is not None and end is not None else None
+    if window is not None and window[0] > window[1]:
+        window = None
+    fetch = _fetch(envelope, window, _provenance(source_record_id, synced_at))
+    rows = envelope.get("points")
+    if fetch is None or window is None or not isinstance(rows, list):
+        return PowerCurveMapping(fetch=fetch)
+    provenance = _provenance(source_record_id, synced_at or fetched_at)
     mapped: dict[int, PowerCurvePoint] = {}
-    for item in points:
-        point = _point(
-            item, window=(start, end), fetch_status=status, provenance=provenance
-        )
+    for item in rows:
+        point = _point(item, window=window, provenance=provenance)
         if point is not None and point.duration_s not in mapped:
             mapped[point.duration_s] = point
-    return tuple(mapped[duration] for duration in sorted(mapped))
+    return PowerCurveMapping(
+        fetch=fetch, points=tuple(mapped[duration] for duration in sorted(mapped))
+    )

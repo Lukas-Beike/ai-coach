@@ -5,8 +5,8 @@ snapshot (``cycling_power_profile``). After the empty ``power_curve_points``
 table is created, this step copies the curve of the newest stored snapshot into
 one Intervals.icu ``power_curve`` raw record with ``mapped_version`` 0, so the
 canonical backfill projects it with the current mapper. A snapshot without a
-curve adds nothing and a raw record that already exists is kept. The snapshot
-itself stays unchanged.
+curve, or without any parseable fetch time, adds nothing, and a raw record that
+already exists is kept. The snapshot itself stays unchanged.
 
 The names are frozen with the release, so the step does not import the mapper.
 """
@@ -14,8 +14,10 @@ The names are frozen with the release, so the step does not import the mapper.
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from typing import Any, Final
 
+from backend.canonical.local_time import parse_provider_datetime
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
 from backend.observability import sanitized_provider_payload
@@ -39,11 +41,19 @@ def copy_power_curve_to_raw_record(db: Any) -> None:
     curve = snapshot.get(SNAPSHOT_KEY)
     if not isinstance(curve, dict) or not curve:
         return
-    fetched_at = (
-        _text(snapshot.get("synced_at"))
-        or _text(curve.get("synced_at"))
-        or str(row["created_at"])
+    # The backfill parses the fetch time to re-project the record, so the first
+    # parseable candidate is kept; the zone does not change what parses.
+    candidates = (snapshot.get("synced_at"), curve.get("synced_at"), row["created_at"])
+    fetched_at = next(
+        (
+            value
+            for value in candidates
+            if isinstance(value, str) and parse_provider_datetime(value, UTC)
+        ),
+        None,
     )
+    if fetched_at is None:
+        return
     canonical_store.insert_provider_record_if_absent(
         db,
         provider=INTERVALS_PROVIDER,
@@ -62,7 +72,3 @@ def _decode(text: Any) -> dict[str, Any]:
     except TypeError, ValueError, RecursionError:
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _text(value: Any) -> str | None:
-    return value if isinstance(value, str) and value else None

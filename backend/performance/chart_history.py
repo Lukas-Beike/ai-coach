@@ -6,7 +6,7 @@ from typing import Any, Final
 
 from backend.activities.activity_summary import summary_duration_s
 from backend.athlete.local_date import LocalDate
-from backend.canonical.domain_records import PowerCurvePoint
+from backend.canonical.domain_records import PowerCurve
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
@@ -39,36 +39,34 @@ def _day(value: Any) -> date | None:
 _POWER_POINT_STATUS: Final = "ok"
 
 
-def _power_curve(
-    points: Sequence[PowerCurvePoint], start: date, today: date
-) -> dict[str, Any]:
-    """The canonical best power per duration in the stored fetch envelope shape.
+def _power_curve(curve: PowerCurve, start: date, today: date) -> dict[str, Any]:
+    """The canonical power curve in the stored fetch envelope shape.
 
-    The window, fetch status and fetch time are those of the fetch that
-    delivered the points; only best efforts of the chart's days are listed.
+    The status, window and fetch time are those of the latest fetch, also when
+    it delivered no points; only best efforts of the chart's days are listed.
     """
-    if not points:
-        return {"points": []}
-    first = points[0]
-    retrieved_at = first.provenance.retrieved_at
-    return {
-        "status": first.fetch_status,
-        "start": first.window_start.isoformat(),
-        "end": first.window_end.isoformat(),
-        "synced_at": None if retrieved_at is None else retrieved_at.isoformat(),
-        "points": [
-            {
-                "duration_seconds": point.duration_s,
-                "watts": _number(point.watts),
-                "date": point.observed_on.isoformat(),
-                "activity_id": point.provider_activity_id or "",
-                "source": point.provenance.label,
-                "status": _POWER_POINT_STATUS,
-            }
-            for point in points
-            if start <= point.observed_on <= today
-        ],
-    }
+    envelope: dict[str, Any] = {}
+    if curve.fetches:
+        fetch = curve.fetches[0]
+        envelope["status"] = fetch.fetch_status
+        if fetch.window_start is not None and fetch.window_end is not None:
+            envelope["start"] = fetch.window_start.isoformat()
+            envelope["end"] = fetch.window_end.isoformat()
+        if fetch.provenance.retrieved_at is not None:
+            envelope["synced_at"] = fetch.provenance.retrieved_at.isoformat()
+    envelope["points"] = [
+        {
+            "duration_seconds": point.duration_s,
+            "watts": _number(point.watts),
+            "date": point.observed_on.isoformat(),
+            "activity_id": point.provider_activity_id or "",
+            "source": point.provenance.label,
+            "status": _POWER_POINT_STATUS,
+        }
+        for point in curve.points
+        if start <= point.observed_on <= today
+    ]
+    return envelope
 
 
 def _load_history(

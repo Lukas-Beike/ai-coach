@@ -43,6 +43,8 @@ from backend.canonical.domain_records import (
     CategoricalObservation,
     GearActivityLink,
     GearItem,
+    PowerCurve,
+    PowerCurveFetch,
     PowerCurvePoint,
     SleepPeriod,
     ZoneConfiguration,
@@ -294,10 +296,18 @@ class CanonicalTableReader(
         rows = canonical_domain_store.active_gear_link_rows(db)
         return tuple(_gear_activity_link(row) for row in rows)
 
-    def power_curve(self, db: Any) -> tuple[PowerCurvePoint, ...]:
-        """Return the best power per duration by provider and duration."""
-        rows = canonical_domain_store.active_power_curve_rows(db)
-        return tuple(_power_curve_point(row) for row in rows)
+    def power_curve(self, db: Any) -> PowerCurve:
+        """Return each provider's latest power curve fetch and its best efforts."""
+        return PowerCurve(
+            fetches=tuple(
+                _power_curve_fetch(row)
+                for row in canonical_domain_store.active_power_curve_fetch_rows(db)
+            ),
+            points=tuple(
+                _power_curve_point(row)
+                for row in canonical_domain_store.active_power_curve_rows(db)
+            ),
+        )
 
 
 def _payload_object(text: str) -> dict[str, Any] | None:
@@ -521,8 +531,14 @@ def _power_curve_point(row: Mapping[str, Any]) -> PowerCurvePoint:
         watts=row["watts"],
         observed_on=date.fromisoformat(str(row["observed_on"])),
         provider_activity_id=row["provider_activity_id"],
-        window_start=date.fromisoformat(str(row["window_start"])),
-        window_end=date.fromisoformat(str(row["window_end"])),
+        provenance=_domain_provenance(row),
+    )
+
+
+def _power_curve_fetch(row: Mapping[str, Any]) -> PowerCurveFetch:
+    return PowerCurveFetch(
         fetch_status=row["fetch_status"],
+        window_start=_optional_date(row["window_start"]),
+        window_end=_optional_date(row["window_end"]),
         provenance=_domain_provenance(row),
     )

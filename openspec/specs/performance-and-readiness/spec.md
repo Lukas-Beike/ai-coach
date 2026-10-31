@@ -129,7 +129,7 @@ The system SHALL provide bounded dated performance and provider-metric histories
 
 #### Scenario: Power profile reads the canonical power curve
 - **WHEN** the analysis cycling power profile is composed
-- **THEN** its best power per duration, the day and activity of each best effort, the fetch window, fetch status and fetch time come from the canonical power curve rows, with the same points and source label the stored snapshot curve showed; before the first completed backfill it shows no points.
+- **THEN** its best power per duration, the day and activity of each best effort, the fetch window, fetch status and fetch time come from the canonical power curve rows (fetch-level facts once per source record), with the same points and source label the stored snapshot curve showed; a fetch that reports no usable curve keeps the stored points and still shows its status, and before the first completed backfill it shows no points.
 
 Detailed contract: Intervals eFTP averages SHALL use actual Intervals estimates rather than configured FTP; race predictions, endurance scores, running tolerance, readiness history, and weekly training status SHALL retain their supported observation dates and aggregation metadata.
 

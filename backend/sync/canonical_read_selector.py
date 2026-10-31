@@ -43,7 +43,11 @@ from typing import Any, Final
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
-from backend.canonical.domain_records import PowerCurvePoint, SleepPeriod
+from backend.canonical.domain_records import (
+    EMPTY_POWER_CURVE,
+    PowerCurve,
+    SleepPeriod,
+)
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.db.repositories import KeyValueRepository
@@ -122,9 +126,9 @@ class _PendingReader:
         del start, end, db
         return ()
 
-    def power_curve(self, db: Any) -> tuple[PowerCurvePoint, ...]:
+    def power_curve(self, db: Any) -> PowerCurve:
         del db
-        return ()
+        return EMPTY_POWER_CURVE
 
     def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
         del db

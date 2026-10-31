@@ -23,6 +23,7 @@ from backend.canonical.domain_records import (
     CategoricalObservation,
     GearActivityLink,
     GearItem,
+    PowerCurveFetch,
     PowerCurvePoint,
     SleepPeriod,
     ZoneConfiguration,
@@ -187,7 +188,9 @@ class DomainBatch:
     zones: tuple[ZoneConfiguration, ...] = ()
     gear_items: tuple[GearItem, ...] = ()
     gear_links: tuple[GearActivityLink, ...] = ()
-    power_curve: tuple[PowerCurvePoint, ...] = ()
+    # None keeps the stored power curve points or fetch of the source record.
+    power_curve: tuple[PowerCurvePoint, ...] | None = None
+    power_curve_fetch: PowerCurveFetch | None = None
 
     @property
     def is_empty(self) -> bool:
@@ -198,6 +201,7 @@ class DomainBatch:
             or self.gear_items
             or self.gear_links
             or self.power_curve
+            or self.power_curve_fetch is not None
         )
 
 
@@ -228,15 +232,15 @@ def intervals_ingest_plan(
     """Plan the canonical rows of one Intervals.icu ``raw_provider_data`` block.
 
     ``power_curve`` is the snapshot's stored power curve envelope; a mapping
-    becomes the ``power_curve`` raw record and its points, anything else plans
-    nothing for it, so the stored curve rows stay as they are.
+    becomes the ``power_curve`` raw record and its fetch and points, anything else
+    plans nothing for it, so the stored curve rows stay as they are.
     """
     curve = _power_curve_items(power_curve, zone=zone, retrieved_at=retrieved_at)
     if not isinstance(raw, Mapping):
         return IngestPlan(
             provider=ProviderId.INTERVALS,
-            raw_records=curve[0],
-            domain_batches=curve[1],
+            raw_records=curve.raw_records,
+            domain_batches=curve.batches,
         )
     activity_rows, raw_records, skipped, present = _activity_batch(
         raw.get("activities"),
@@ -293,23 +297,31 @@ def intervals_ingest_plan(
         skipped += 1
     return IngestPlan(
         provider=ProviderId.INTERVALS,
-        raw_records=(*raw_records, *curve[0]),
+        raw_records=(*raw_records, *curve.raw_records),
         activities=tuple(activity_rows),
         observations=tuple(observations),
         present_activity_ids=frozenset(present),
         skipped_invalid=skipped,
-        domain_batches=(*batches, *curve[1]),
+        domain_batches=(*batches, *curve.batches),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _PowerCurveItems:
+    """The raw record and the domain batch a stored power curve envelope plans."""
+
+    raw_records: tuple[RawRecord, ...] = ()
+    batches: tuple[DomainBatch, ...] = ()
 
 
 def _power_curve_items(
     envelope: object, *, zone: tzinfo, retrieved_at: datetime
-) -> tuple[tuple[RawRecord, ...], tuple[DomainBatch, ...]]:
+) -> _PowerCurveItems:
     """Return the raw record and the batch of a stored power curve envelope."""
     if not isinstance(envelope, Mapping) or not envelope:
-        return (), ()
-    return (
-        (
+        return _PowerCurveItems()
+    return _PowerCurveItems(
+        raw_records=(
             RawRecord(
                 POWER_CURVE_RECORD_KIND,
                 POWER_CURVE_RECORD_ID,
@@ -317,23 +329,28 @@ def _power_curve_items(
                 INTERVALS_POWER_CURVE_VERSION,
             ),
         ),
-        (_power_curve_batch(envelope, zone=zone, fetched_at=retrieved_at),),
+        batches=(_power_curve_batch(envelope, zone=zone, fetched_at=retrieved_at),),
     )
 
 
 def _power_curve_batch(
     envelope: object, *, zone: tzinfo, fetched_at: datetime
 ) -> DomainBatch:
-    """Return the power curve points of the Intervals.icu power curve record."""
+    """Return the fetch and points of the Intervals.icu power curve record.
+
+    An envelope that reports no usable curve keeps the stored points (None).
+    """
+    mapped = map_intervals_power_curve(
+        envelope,
+        source_record_id=POWER_CURVE_RECORD_ID,
+        fetched_at=fetched_at,
+        zone=zone,
+    )
     return DomainBatch(
         POWER_CURVE_RECORD_ID,
         INTERVALS_POWER_CURVE_VERSION,
-        power_curve=map_intervals_power_curve(
-            envelope,
-            source_record_id=POWER_CURVE_RECORD_ID,
-            fetched_at=fetched_at,
-            zone=zone,
-        ),
+        power_curve=mapped.points,
+        power_curve_fetch=mapped.fetch,
     )
 
 
@@ -664,7 +681,7 @@ def _wahoo_threshold_items(
 
 
 def intervals_snapshot_ingest_plan(
-    snapshot: Mapping[str, Any], *, zone: tzinfo
+    snapshot: Mapping[str, Any], *, zone: tzinfo, include_power_curve: bool = True
 ) -> IngestPlan:
     """Plan the Intervals.icu rows of one stored snapshot for the backfill.
 
@@ -673,11 +690,12 @@ def intervals_snapshot_ingest_plan(
     is not mapped and counts as one invalid row. A snapshot stored without its
     activity sections (``intervals_snapshot_is_stripped``) plans only what it still
     carries; with nothing left to map it plans nothing and counts no invalid row.
-    The stored power curve envelope is planned with the raw block.
+    The stored power curve envelope is planned with the raw block unless
+    ``include_power_curve`` is False: an older snapshot's curve is superseded.
     """
     retrieved_at = stored_retrieved_at(snapshot, zone=zone)
     raw = snapshot.get("raw_provider_data")
-    curve = snapshot.get(INTERVALS_POWER_CURVE_KEY)
+    curve = snapshot.get(INTERVALS_POWER_CURVE_KEY) if include_power_curve else None
     if intervals_snapshot_is_stripped(snapshot) and not isinstance(raw, Mapping):
         if retrieved_at is None:
             return IngestPlan(provider=ProviderId.INTERVALS)

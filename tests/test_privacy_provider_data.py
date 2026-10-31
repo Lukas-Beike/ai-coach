@@ -92,6 +92,7 @@ DOMAIN_FILES = (
     "gear_items.jsonl",
     "gear_activity_links.jsonl",
     "power_curve_points.jsonl",
+    "power_curve_fetches.jsonl",
 )
 DOMAIN_TABLES = tuple(name.removesuffix(".jsonl") for name in DOMAIN_FILES)
 SECRET_PAYLOAD = {

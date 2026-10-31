@@ -244,6 +244,7 @@ PRIVACY_DELETE_SCOPE = (
         (
             "observations",
             "power_curve_points",
+            "power_curve_fetches",
             "sleep_periods",
             "zone_configurations",
             "categorical_observations",

@@ -328,23 +328,17 @@ class GearActivityLink:
 
 @dataclass(frozen=True, slots=True)
 class PowerCurvePoint:
-    """The best mean power over one duration within a provider's fetch window.
+    """The best mean power over one duration, as a provider's power curve reports it.
 
     ``observed_on`` is the day of the best effort and ``provider_activity_id``
-    the provider activity it came from, None when the provider names none.
-    ``window_start`` and ``window_end`` bound the days the provider searched;
-    ``fetch_status`` is the outcome of the fetch that last delivered the curve,
-    such as ``ok``, or ``failed`` when a later fetch failed and the earlier best
-    efforts were kept.
+    the provider activity it came from, None when the provider names none. The
+    fetch the point came from is described once by its ``PowerCurveFetch``.
     """
 
     duration_s: int
     watts: float
     observed_on: date
     provider_activity_id: str | None
-    window_start: date
-    window_end: date
-    fetch_status: str
     provenance: Provenance
 
     def __post_init__(self) -> None:
@@ -360,10 +354,44 @@ class PowerCurvePoint:
         )
         require_date(self.observed_on, "observed_on")
         optional_text(self.provider_activity_id, "provider_activity_id")
-        require_date(self.window_start, "window_start")
-        require_date(self.window_end, "window_end")
-        if not self.window_start <= self.observed_on <= self.window_end:
-            raise ValueError("observed_on must lie within the fetch window")
+        _require_provider_source(self.provenance)
+
+
+@dataclass(frozen=True, slots=True)
+class PowerCurveFetch:
+    """The outcome of a provider's latest power curve fetch, once per source record.
+
+    ``fetch_status`` is the provider fetch outcome, such as ``ok``,
+    ``insufficient_data`` or ``failed`` (the earlier best efforts are kept).
+    ``window_start`` and ``window_end`` bound the days the fetch searched; both
+    are None when the outcome names no window. ``provenance.retrieved_at`` is
+    when the reported points were fetched, None when unknown.
+    """
+
+    fetch_status: str
+    window_start: date | None
+    window_end: date | None
+    provenance: Provenance
+
+    def __post_init__(self) -> None:
         if optional_slug(self.fetch_status, "fetch_status") is None:
             raise TypeError("fetch_status must be text")
+        if (self.window_start is None) != (self.window_end is None):
+            raise ValueError("window_start and window_end go together")
+        _require_validity(self.window_start, self.window_end)
         _require_provider_source(self.provenance)
+
+
+@dataclass(frozen=True, slots=True)
+class PowerCurve:
+    """The stored power curve: each provider's latest fetch and its best efforts."""
+
+    fetches: tuple[PowerCurveFetch, ...] = ()
+    points: tuple[PowerCurvePoint, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.fetches or self.points)
+
+
+EMPTY_POWER_CURVE: Final = PowerCurve()

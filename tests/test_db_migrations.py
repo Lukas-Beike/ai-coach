@@ -85,7 +85,7 @@ EXTENSION_TABLES = {
 }
 # Schema version 17: the canonical power curve; added empty by every upgrade
 # whose newest snapshot stores no power curve.
-POWER_CURVE_TABLES = {"power_curve_points"}
+POWER_CURVE_TABLES = {"power_curve_points", "power_curve_fetches"}
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend

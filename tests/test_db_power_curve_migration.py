@@ -2,7 +2,7 @@
 
 Populated databases of every released schema (v9 to v16) hold synthetic
 snapshots, the newest with a stored Intervals.icu power curve. The upgrade adds
-the empty ``power_curve_points`` table and keeps that curve as an unmapped raw
+the empty ``power_curve_points`` and ``power_curve_fetches`` tables and keeps that curve as an unmapped raw
 record; every other row stays exactly as it was. A failure rolls back to the
 unchanged release, a restart changes nothing, an older backup restores through
 validation, and an installation whose backfill completed before the upgrade
@@ -150,6 +150,7 @@ class PowerCurveMigrationTests(unittest.TestCase):
                         self.assertEqual(after[table], rows, table)
                 self.assertEqual(before["provider_records"], [])
                 self.assertEqual(after["power_curve_points"], [])
+                self.assertEqual(after["power_curve_fetches"], [])
                 (raw,) = raw_curve_rows(db)
                 self.assertEqual(json.loads(raw.pop("payload")), ENVELOPE)
                 self.assertEqual(
@@ -169,6 +170,12 @@ class PowerCurveMigrationTests(unittest.TestCase):
             None,
             {"synced_at": SYNCED_AT},
             {**NEWEST_SNAPSHOT, "cycling_power_profile": {}},
+            # No candidate fetch time parses, so the backfill could not project it.
+            {
+                **NEWEST_SNAPSHOT,
+                "synced_at": "gestern",
+                "cycling_power_profile": {**ENVELOPE, "synced_at": "?"},
+            },
         ):
             with self.subTest(payload=payload):
                 db = connect()
@@ -184,6 +191,17 @@ class PowerCurveMigrationTests(unittest.TestCase):
                     db.execute("SELECT COUNT(*) FROM power_curve_points").fetchone()[0],
                     0,
                 )
+
+    def test_the_raw_record_takes_the_first_parseable_fetch_time(self):
+        db = connect()
+        self.addCleanup(db.close)
+        db.executescript(V16_FIXTURE.read_text(encoding="utf-8"))
+        insert_snapshot(db, {**NEWEST_SNAPSHOT, "synced_at": "gestern"})
+        db.commit()
+        migrate_schema(db)
+        db.commit()
+        (raw,) = raw_curve_rows(db)
+        self.assertEqual(raw["fetched_at"], ENVELOPE["synced_at"])
 
     def test_failure_after_the_step_rolls_back_to_the_unchanged_release(self):
         for version in (16, 9):
@@ -323,22 +341,26 @@ class CompletedBackfillUpgradeTests(unittest.TestCase):
         with self.manager.reader() as db:
             self.assertIs(read_state(self.key_values, db, zone=ZONE), ReadState.TABLES)
             inputs = read_performance_inputs(
-                selector, db, activity_reader=selector, as_of=TODAY
+                selector,
+                db,
+                activity_reader=selector,
+                as_of=TODAY,
+                include_power_curve=True,
             )
             self.assertEqual(
                 raw_curve_rows(db)[0]["mapped_version"],
                 current_mapper_versions()[POWER_CURVE_VERSION_KEY],
             )
         assert inputs is not None
-        self.assertEqual(
-            inputs.power_curve,
-            map_intervals_power_curve(
-                ENVELOPE,
-                source_record_id="power_curve",
-                fetched_at=datetime.fromisoformat(SYNCED_AT),
-                zone=ZONE,
-            ),
+        mapped = map_intervals_power_curve(
+            ENVELOPE,
+            source_record_id="power_curve",
+            fetched_at=datetime.fromisoformat(SYNCED_AT),
+            zone=ZONE,
         )
+        assert mapped.fetch is not None and mapped.points is not None
+        self.assertEqual(inputs.power_curve.points, mapped.points)
+        self.assertEqual(inputs.power_curve.fetches, (mapped.fetch,))
         start = TODAY - timedelta(days=89)
         self.assertEqual(
             chart(inputs.power_curve), legacy_chart(NEWEST_SNAPSHOT, start, TODAY)

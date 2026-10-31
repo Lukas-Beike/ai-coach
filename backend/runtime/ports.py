@@ -7,7 +7,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from backend.canonical.activity_summary import ActivitySummary
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
-from backend.canonical.domain_records import PowerCurvePoint, SleepPeriod
+from backend.canonical.domain_records import PowerCurve, SleepPeriod
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 
@@ -143,13 +143,14 @@ class SleepPeriodReader(Protocol):
 
 @runtime_checkable
 class PowerCurveReader(Protocol):
-    """Reads the canonical best power per duration, by provider and duration.
+    """Reads the stored power curve: each provider's latest fetch and best efforts.
 
-    Only a source that stores the power curve implements it; a reader without it
-    means no power curve is available from the serving source.
+    Fetches are ordered by provider and source record, points by provider and
+    duration. Only a source that stores the power curve implements it; a reader
+    without it means no power curve is available from the serving source.
     """
 
-    def power_curve(self, db: Any) -> tuple[PowerCurvePoint, ...]: ...
+    def power_curve(self, db: Any) -> PowerCurve: ...
 
 
 @runtime_checkable

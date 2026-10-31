@@ -51,8 +51,8 @@ names the start and planned duration of local planning records (planned units,
 workout-library entries, competitions, staged Coach plans and adaptive previews)
 `starts_at_local` and `planned_duration_s` instead of the Intervals.icu fields
 `start_date_local` and `moving_time`, and version 17 stores the Intervals.icu
-cycling power curve (best power per duration, its day, activity and fetch window)
-as canonical rows. A version 9 to 16 database or backup is
+cycling power curve (best power per duration with its day and activity, plus the
+status and window of the latest fetch) as canonical rows. A version 9 to 16 database or backup is
 upgraded to it in place within one transaction, and a failed upgrade leaves it
 unchanged. The version 12 step splits the stored
 Garmin value into rows, reads every element back to verify it, and keeps the

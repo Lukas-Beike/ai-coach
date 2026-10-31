@@ -178,15 +178,15 @@ The v15 to v16 upgrade SHALL rename the stored start and planned duration of loc
 Evidence: `backend/db/planning_fields_migration.py::rename_planning_fields_in_database`; `backend/db/migrations.py::_upgrade_v15_to_v16`; `backend/planning/planned_units.py::planned_unit_payload_hash`; `backend/change_history.py::accepted_audit_hashes`, `backend/change_history.py::current_audit_fields`. Tests: `tests/test_db_planning_fields_migration.py::test_populated_releases_upgrade_every_planning_record_to_the_neutral_names`; `tests/test_db_planning_fields_migration.py::test_recorded_remote_baseline_still_matches_after_the_upgrade`; `tests/test_db_planning_fields_migration.py::test_failure_after_the_rewrite_rolls_back_to_the_unchanged_release`; `tests/test_db_planning_fields_migration.py::test_upgraded_database_restarts_with_the_same_build_unchanged`; `tests/test_db_planning_fields_migration.py::test_restore_of_a_populated_v15_backup_upgrades_through_validation`; `tests/test_db_planning_fields_migration.py::PreUpgradeUndoTests`; `tests/test_db_encrypted_upgrade_matrix.py`.
 
 ### Requirement: Canonical power curve upgrade
-The v16 to v17 upgrade SHALL add the canonical `power_curve_points` table in one migration transaction and keep the Intervals.icu power curve of the newest stored snapshot as one unmapped `power_curve` raw record, so the canonical backfill projects it; every other row SHALL stay unchanged.
+The v16 to v17 upgrade SHALL add the canonical `power_curve_points` and `power_curve_fetches` tables in one migration transaction and keep the Intervals.icu power curve of the newest stored snapshot as one unmapped `power_curve` raw record, so the canonical backfill projects it; every other row SHALL stay unchanged.
 
 #### Scenario: Populated upgrade
 - **WHEN** a populated v9 to v16 database whose newest snapshot stores a power curve is opened
-- **THEN** the empty table is added, the curve is kept as one raw record with mapped version 0, and every other table keeps its exact rows.
+- **THEN** the empty tables are added, the curve is kept as one raw record with mapped version 0, and every other table keeps its exact rows.
 
 #### Scenario: No stored curve
-- **WHEN** no snapshot or a snapshot without a power curve is stored
-- **THEN** only the empty table is added.
+- **WHEN** no snapshot, a snapshot without a power curve, or one without any parseable fetch time is stored
+- **THEN** only the empty tables are added.
 
 #### Scenario: Completed backfill before the upgrade
 - **WHEN** an installation whose backfill completed under v16 finishes its next backfill run
@@ -196,4 +196,4 @@ The v16 to v17 upgrade SHALL add the canonical `power_curve_points` table in one
 - **WHEN** an injected failure follows the table creation and the raw record copy
 - **THEN** the database returns to the unchanged v16 or v9 schema and rows.
 
-Evidence: `backend/db/power_curve_migration.py::copy_power_curve_to_raw_record`; `backend/db/migrations.py::_upgrade_v16_to_v17`. Tests: `tests/test_db_power_curve_migration.py::test_every_populated_release_keeps_its_rows_and_its_newest_curve`; `tests/test_db_power_curve_migration.py::test_a_release_without_a_stored_curve_only_adds_the_empty_table`; `tests/test_db_power_curve_migration.py::test_failure_after_the_step_rolls_back_to_the_unchanged_release`; `tests/test_db_power_curve_migration.py::test_upgraded_database_restarts_with_the_same_build_unchanged`; `tests/test_db_power_curve_migration.py::test_restore_of_a_populated_v16_backup_upgrades_through_validation`; `tests/test_db_power_curve_migration.py::CompletedBackfillUpgradeTests`; `tests/test_db_encrypted_upgrade_matrix.py`.
+Evidence: `backend/db/power_curve_migration.py::copy_power_curve_to_raw_record`; `backend/db/migrations.py::_upgrade_v16_to_v17`. Tests: `tests/test_db_power_curve_migration.py::test_every_populated_release_keeps_its_rows_and_its_newest_curve`; `tests/test_db_power_curve_migration.py::test_a_release_without_a_stored_curve_only_adds_the_empty_table`; `tests/test_db_power_curve_migration.py::test_the_raw_record_takes_the_first_parseable_fetch_time`; `tests/test_db_power_curve_migration.py::test_failure_after_the_step_rolls_back_to_the_unchanged_release`; `tests/test_db_power_curve_migration.py::test_upgraded_database_restarts_with_the_same_build_unchanged`; `tests/test_db_power_curve_migration.py::test_restore_of_a_populated_v16_backup_upgrades_through_validation`; `tests/test_db_power_curve_migration.py::CompletedBackfillUpgradeTests`; `tests/test_db_encrypted_upgrade_matrix.py`.

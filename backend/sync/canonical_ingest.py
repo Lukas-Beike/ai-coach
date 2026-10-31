@@ -271,6 +271,7 @@ def ingest_plan(
                 gear_items=batch.gear_items,
                 gear_links=batch.gear_links,
                 power_curve=batch.power_curve,
+                power_curve_fetch=batch.power_curve_fetch,
             )
         )
     if deletion_window is not None:

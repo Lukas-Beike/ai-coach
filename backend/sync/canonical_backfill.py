@@ -13,7 +13,8 @@ never deletes. A snapshot without ``raw_provider_data`` is not mapped, because i
 snapshot counts as ``skipped_invalid``. The sleep, status, zone, gear and power curve
 rows of a raw record (its domain batch) are inserted only when that source record has
 no domain row at all, active or retired; otherwise the batch counts as
-``already_present``. An empty batch inserts nothing and counts nothing.
+``already_present``. An empty batch inserts nothing and counts nothing. Only the
+newest snapshot (the one that may insert activities) plans its power curve.
 
 Supersession: the newest snapshot present when the run starts is the only one that
 may insert activities. Its activities and their raw ``activity`` records are inserted
@@ -712,6 +713,7 @@ def _replace_domain_rows(
         gear_items=batch.gear_items,
         gear_links=batch.gear_links,
         power_curve=batch.power_curve,
+        power_curve_fetch=batch.power_curve_fetch,
     ).retired
 
 
@@ -760,8 +762,12 @@ def _ingest_work(
     payload = json.loads(text)
     if not isinstance(payload, dict):
         return _Work(skipped_invalid=1)
+    # Only the newest snapshot plans the power curve: an older one's curve is
+    # superseded and must not fill the table with stale best efforts.
     return _work_from_plan(
-        intervals_snapshot_ingest_plan(payload, zone=zone),
+        intervals_snapshot_ingest_plan(
+            payload, zone=zone, include_power_curve=may_insert_activities
+        ),
         stored_retrieved_at(payload, zone=zone),
         may_insert_activities=may_insert_activities,
         domain_items=True,
@@ -907,6 +913,7 @@ def _write_ingest(
                 gear_items=value.gear_items,
                 gear_links=value.gear_links,
                 power_curve=value.power_curve,
+                power_curve_fetch=value.power_curve_fetch,
             )
     else:
         inserted = canonical_store.insert_observation_if_absent(
