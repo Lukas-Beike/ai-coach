@@ -142,7 +142,7 @@ class M1SessionRpeInputs(linking.LinkingCase):
                 canonical_store.activity_elapsed_duration(intervals["details"]),
             ),
             (3300.0, None, 3600.0),
-            msg="#1427: Intervals duration_s is moving time, elapsed only in details",
+            msg="#1445: Intervals keeps its elapsed time in the one elapsed field",
         )
         self.assertEqual(
             (
@@ -150,8 +150,8 @@ class M1SessionRpeInputs(linking.LinkingCase):
                 garmin["moving_duration_s"],
                 canonical_store.activity_elapsed_duration(garmin["details"]),
             ),
-            (3600.0, 3300.0, None),
-            msg="#1427: Garmin duration_s is elapsed time, no elapsed detail field",
+            (3600.0, 3300.0, 3600.0),
+            msg="#1445: Garmin stores its elapsed duration in the one elapsed field",
         )
         self.assertEqual(
             (intervals["recorded_by"], garmin["recorded_by"]),
@@ -181,10 +181,10 @@ class M1SessionRpeInputs(linking.LinkingCase):
         self.assertEqual(
             (record["duration_s"], record["moving_duration_s"]), (3600.0, 3600.0)
         )
-        self.assertIsNone(
+        self.assertEqual(
             canonical_store.activity_elapsed_duration(record["details"]),
-            msg="#1427: the Wahoo total duration is dropped when an active duration "
-            "exists; expected an elapsed duration once one is stored",
+            3900.0,
+            msg="#1445: the Wahoo total survives next to the active duration",
         )
         local_id = self._sessions()[linking.WAHOO_ID]["activity_id"]
         self.assertEqual(self._stored_feedback(linking.WAHOO_ID), [])

@@ -80,8 +80,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_five(self) -> None:
-        self.assertEqual(5, MAPPER_VERSION)
+    def test_mapper_version_is_six(self) -> None:
+        self.assertEqual(6, MAPPER_VERSION)
 
     def test_fixture_maps_every_record_without_issues(self) -> None:
         result = _map(*_fixture_rows())
@@ -546,6 +546,19 @@ class DurationAndDistanceTests(unittest.TestCase):
                 self.assertEqual(duration, record.duration_s)
                 self.assertEqual(moving, record.moving_duration_s)
                 self.assertEqual((), issues)
+
+    def test_elapsed_duration_is_duration_never_the_moving_time_fallback(self) -> None:
+        cases = (
+            ({"duration": 4500.0, "movingTime": 3000.0}, 4500.0),
+            ({"duration": None, "movingTime": 3200}, None),
+            ({"duration": 4500.0}, 4500.0),
+        )
+        for overrides, elapsed in cases:
+            with self.subTest(overrides=overrides):
+                record, _ = _one(**overrides)
+
+                assert record is not None
+                self.assertEqual(elapsed, record.elapsed_duration_s)
 
     def test_invalid_moving_duration_is_one_issue_and_keeps_duration(self) -> None:
         record, issues = _one(duration=4500.0, movingDuration="abc", movingTime=3000.0)

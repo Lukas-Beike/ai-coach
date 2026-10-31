@@ -319,7 +319,7 @@ class ActivityRecord:
     normalized_power: float | None = None
     avg_cadence: float | None = None
     energy_kj: float | None = None
-    # Elapsed time when ``duration_s`` is moving time (Intervals.icu); otherwise None.
+    # Elapsed time including pauses, whichever provider reported it; None if unknown.
     elapsed_duration_s: float | None = None
     max_hr: float | None = None
     max_speed_mps: float | None = None

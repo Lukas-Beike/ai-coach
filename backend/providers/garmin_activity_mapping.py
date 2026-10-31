@@ -21,6 +21,8 @@ the same moment.
   form, the key as plain text.
 * ``duration``, then ``movingTime`` (seconds). ``movingTime`` is the fallback that
   ``backend.activities.duplicates`` uses for ``duration``.
+* ``duration`` alone (seconds) -> ``elapsed_duration_s``; the ``movingTime`` fallback
+  is not elapsed time and stays out of it.
 * ``movingDuration`` (seconds) -> ``moving_duration_s``, with no ``movingTime``
   fallback because ``movingTime`` already feeds ``duration_s``. Garmin
   ``duration`` is elapsed time, so duplicate detection also compares this moving
@@ -78,7 +80,7 @@ from backend.canonical.vocabulary import (
 # Version 5: maps the maximum speed, maximum power and step count.
 # Version 4: a row with manualActivity exactly True is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 5
+MAPPER_VERSION: Final = 6
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -169,6 +171,10 @@ def _map_row(
     duration = _optional_number(
         row, _DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
+    # Issues for ``duration`` are already reported above.
+    elapsed_duration = _optional_number(
+        row, ("duration",), (0.0, MAX_ACTIVITY_DURATION_S), ref, []
+    )
     moving_duration = _optional_number(
         row, _MOVING_DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
@@ -200,6 +206,7 @@ def _map_row(
         started_at=started_at,
         duration_s=duration,
         moving_duration_s=moving_duration,
+        elapsed_duration_s=elapsed_duration,
         distance_m=distance,
         load=load,
         load_model=(

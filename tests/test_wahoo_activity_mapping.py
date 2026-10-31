@@ -146,6 +146,15 @@ class FieldTests(unittest.TestCase):
         record = mapped(row(workout_summary=summary)).records[0]
 
         self.assertEqual(1800.0, record.duration_s)
+        self.assertEqual(1800.0, record.elapsed_duration_s)
+
+    def test_total_duration_is_kept_as_elapsed_next_to_the_active_duration(
+        self,
+    ) -> None:
+        record = mapped(row()).records[0]
+
+        self.assertEqual(3900.0, record.elapsed_duration_s)
+        self.assertEqual(record.moving_duration_s, record.duration_s)
 
     def test_a_missing_summary_is_not_an_issue(self) -> None:
         result = mapped(row(workout_summary=None))
@@ -455,9 +464,9 @@ class StoredRawRecordTests(unittest.TestCase):
 
 
 class ReprojectionTests(unittest.TestCase):
-    def test_mapper_version_is_two_and_newer_than_the_stored_version_one(self) -> None:
-        self.assertEqual(2, MAPPER_VERSION)
-        self.assertEqual(2, reprojection_mapper_version("wahoo", "activity"))
+    def test_mapper_version_is_three_and_newer_than_the_stored_version_one(self) -> None:
+        self.assertEqual(3, MAPPER_VERSION)
+        self.assertEqual(3, reprojection_mapper_version("wahoo", "activity"))
 
     def test_a_stored_version_one_row_reprojects_the_new_metrics(self) -> None:
         stored = {
