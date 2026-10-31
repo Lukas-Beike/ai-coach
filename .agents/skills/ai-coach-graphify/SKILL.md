@@ -51,6 +51,8 @@ Commands (run from the repository root):
   delegates exports to the separate export helper. Its read-only snapshot
   exposes `graph_query`, `graph_node`, `graph_path`, and `graph_stats`, with no
   upstream PR tools; restart the server after graph edits to refresh the snapshot.
+  The Claude `explorer` subagent defines this server inline, so each run starts
+  from the current graph.
 
 Codex requires repository trust and approval for the hook in `/hooks`. Claude
 Code requires repository trust for the checked-in hook settings. Do not bypass

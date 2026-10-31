@@ -14,7 +14,10 @@ and do not give better answers. Delegate only for:
   files or changing contracts.
 - **Cheaper execution:** large, clearly specified mechanical work a lower tier
   does well.
-- **Noisy search:** a broad read-only search where only the conclusion matters.
+- **Noisy search:** a broad read-only search where only the conclusion matters,
+  such as callers or owners across several directories; it goes to `explorer`,
+  which starts with Graphify. Targeted lookups of a few Graphify, Grep, or Read
+  calls, and reads needed for an edit, stay with the main model.
 - **Independent review:** a risky diff reviewed without the author's reasoning.
 
 State the decision in one line and continue. An explicit user instruction wins.

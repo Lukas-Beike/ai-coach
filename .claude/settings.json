@@ -1,6 +1,9 @@
 {
   "effortLevel": "medium",
   "permissions": {
+    "allow": [
+      "mcp__graphify"
+    ],
     "deny": [
       "Read(//**/.env)",
       "Read(//**/.env.local)",
