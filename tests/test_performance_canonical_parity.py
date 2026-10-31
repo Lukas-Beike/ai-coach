@@ -242,7 +242,7 @@ def _load_pair(
         [], days, PARITY_TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
     )["load"]
     canonical_load = performance_load_context(
-        [], days, PARITY_TODAY, canonical=canonical
+        [], days, PARITY_TODAY, canonical=_present(canonical)
     )["load"]
     return legacy, canonical_load, canonical
 
@@ -574,7 +574,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         )
         canonical = read_performance_inputs(reader, "db", as_of=PARITY_TODAY)
         load = performance_load_context(
-            [], current_days(rows), PARITY_TODAY, canonical=canonical
+            [], current_days(rows), PARITY_TODAY, canonical=_present(canonical)
         )["load"]
         self.assertIsNone(_present(canonical).ctl)
         self.assertEqual((load["ctl"], load["atl"]), (None, 60.0))
