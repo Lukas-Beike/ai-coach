@@ -74,7 +74,7 @@ def release_test_passed(pr, repository, token):
     return False
 
 
-def run(repository, token):
+def open_pull_numbers(repository, token):
     page = 1
     numbers = []
     while True:
@@ -82,29 +82,33 @@ def run(repository, token):
             f"repos/{repository}/pulls?state=open&per_page=100&page={page}", token
         )
         if not prs:
-            break
+            return numbers
         numbers.extend(pr["number"] for pr in prs)
         page += 1
-    for number in numbers:
+
+
+def merge_if_eligible(number, repository, token):
+    pr = request(f"repos/{repository}/pulls/{number}", token)
+    if not eligible(pr, repository):
+        return
+    if pr["user"]["login"] == "ai-coach-release-bot[bot]" and not release_test_passed(
+        pr, repository, token
+    ):
+        return
+    result = request(
+        f"repos/{repository}/pulls/{number}/merge",
+        token,
+        {"sha": pr["head"]["sha"], "merge_method": "squash"},
+    )
+    if result.get("merged") is not True:
+        raise RuntimeError(f"GitHub did not confirm merge of PR #{number}")
+    print(f"Merged PR #{number}.")
+
+
+def run(repository, token):
+    for number in open_pull_numbers(repository, token):
         try:
-            pr = request(f"repos/{repository}/pulls/{number}", token)
-            if not eligible(pr, repository):
-                continue
-            sha = pr["head"]["sha"]
-            if pr["user"][
-                "login"
-            ] == "ai-coach-release-bot[bot]" and not release_test_passed(
-                pr, repository, token
-            ):
-                continue
-            result = request(
-                f"repos/{repository}/pulls/{number}/merge",
-                token,
-                {"sha": sha, "merge_method": "squash"},
-            )
-            if result.get("merged") is not True:
-                raise RuntimeError(f"GitHub did not confirm merge of PR #{number}")
-            print(f"Merged PR #{number}.")
+            merge_if_eligible(number, repository, token)
         except HTTPError as error:
             error.close()
             if error.code not in (404, 405, 409, 422):
