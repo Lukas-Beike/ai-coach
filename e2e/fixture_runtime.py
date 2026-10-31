@@ -51,6 +51,7 @@ import server
 from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
+from backend.providers.snapshot_projection import stored_retrieved_at
 from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
@@ -505,9 +506,23 @@ def demo_performance_history(today):
 
 
 def _save_intervals_snapshot(db, snapshot):
-    """Store a fixture snapshot and ingest its raw block like a partial sync does."""
+    """Store a fixture snapshot and ingest its raw block like a partial sync does.
+
+    The canonical backfill then runs to completion in the same transaction, so the
+    fixture app reads its data from the canonical tables instead of the pending
+    state an installation shows before its first completed backfill.
+    """
     server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
     ingest_intervals_partial_snapshot(db, snapshot, zone=UTC)
+    if stored_retrieved_at(
+        snapshot, zone=UTC
+    ) is None or server.CANONICAL_READ.serves_tables(db):
+        return
+    backfill = server.CANONICAL_BACKFILL.status_reader
+    for _ in range(1000):
+        if backfill.run_batch(db).done:
+            return
+    raise RuntimeError("fixture canonical backfill did not finish")
 
 
 def _save_garmin_snapshot(db, payload):

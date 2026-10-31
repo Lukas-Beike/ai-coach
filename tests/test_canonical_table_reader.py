@@ -1,4 +1,4 @@
-"""Canonical table reader: stored rows only, the legacy order and the stored-state rules."""
+"""Canonical table reader: stored rows only, the canonical order and the stored-state rules."""
 
 from __future__ import annotations
 
@@ -13,46 +13,91 @@ from canonical_read_support import (
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.providers.canonical_plans import current_observation_mapper_versions
 
+# The fixture activities in canonical order: provider activity id, provider and
+# elapsed duration. Garmin's 910001 is the duplicate copy of i-act-001.
+FIXTURE_ACTIVITIES = [
+    ("i-act-002", "intervals", None),
+    ("i-act-003", "intervals", None),
+    ("910001", "garmin", 5400.0),
+    ("i-act-001", "intervals", 5600.0),
+    ("910002", "garmin", 2400.0),
+    ("i-act-004", "intervals", None),
+    ("i-act-005", "intervals", None),
+]
+# The stored observations per metric after the fixture backfill.
+FIXTURE_OBSERVATION_COUNTS = {
+    "weight": 5,
+    "ftp": 4,
+    "threshold_hr": 4,
+    "max_hr": 2,
+    "resting_hr": 4,
+    "hrv_rmssd": 4,
+    "hrv_weekly_average": 1,
+    "sleep_duration": 5,
+    "sleep_score": 5,
+    "vo2max": 3,
+    "threshold_pace": 2,
+    "readiness": 4,
+    "ctl": 3,
+    "atl": 3,
+    "form": 3,
+    "eftp": 4,
+    "run_threshold_power": 1,
+    "acute_load": 1,
+    "chronic_load": 1,
+    "acute_chronic_ratio": 1,
+    "load_balance_aerobic_low": 1,
+    "load_balance_aerobic_low_target_min": 1,
+    "load_balance_aerobic_low_target_max": 1,
+    "load_balance_aerobic_high": 1,
+    "load_balance_aerobic_high_target_min": 1,
+    "load_balance_aerobic_high_target_max": 1,
+    "load_balance_anaerobic": 1,
+    "load_balance_anaerobic_target_min": 1,
+    "load_balance_anaerobic_target_max": 1,
+    "subjective_fatigue": 3,
+    "subjective_soreness": 3,
+    "subjective_stress": 3,
+    "subjective_mood": 3,
+    "w_prime": 1,
+    "height": 1,
+}
+
 
 class CanonicalTableReaderTests(CanonicalReadFixture):
-    def test_populated_tables_serve_the_legacy_activities_in_the_same_order(
+    def test_populated_tables_serve_the_activities_in_canonical_order(
         self,
     ) -> None:
         populate(self)
-        legacy = self.read(self.projection.activities)
         table = self.read(self.table.activities)
 
-        self.assertTrue(table)
         self.assertEqual(
-            [(a.activity_id, a.provenance.provider) for a in legacy],
-            [(a.activity_id, a.provenance.provider) for a in table],
+            [(a.activity_id, a.provenance.provider.value) for a in table],
+            [
+                (activity_id, provider)
+                for activity_id, provider, _ in FIXTURE_ACTIVITIES
+            ],
         )
 
     def test_stored_activities_keep_their_elapsed_duration(self) -> None:
         populate(self)
-        legacy = self.read(self.projection.activities)
         table = self.read(self.table.activities)
 
-        self.assertIn(5600.0, [a.elapsed_duration_s for a in table])
         self.assertEqual(
-            [a.elapsed_duration_s for a in legacy],
             [a.elapsed_duration_s for a in table],
+            [elapsed for _id, _provider, elapsed in FIXTURE_ACTIVITIES],
         )
 
-    def test_populated_tables_serve_observations_with_their_legacy_values(self) -> None:
+    def test_populated_tables_serve_one_observation_per_natural_key(self) -> None:
         populate(self)
-        served = 0
-        for kind in MetricKind:
-            legacy = self.read(self.projection.observations, kind)
-            table = self.read(self.table.observations, kind)
-            # The table keeps one row per natural key, so identical duplicate
-            # legacy rows (for example two Garmin FTP sections) collapse to one.
-            self.assertEqual(
-                list(dict.fromkeys((o.observed_on, o.value) for o in legacy)),
-                list(dict.fromkeys((o.observed_on, o.value) for o in table)),
-            )
-            served += len(table)
-        self.assertGreater(served, 0)
+        counts = {
+            kind.value: len(served)
+            for kind in MetricKind
+            if (served := self.read(self.table.observations, kind))
+        }
+        # Identical duplicate source rows (for example two Garmin FTP sections)
+        # collapse to one row per natural key.
+        self.assertEqual(counts, FIXTURE_OBSERVATION_COUNTS)
 
     def test_activity_bounds_select_the_athlete_local_day(self) -> None:
         populate(self)
@@ -129,25 +174,27 @@ class CanonicalTableReaderTests(CanonicalReadFixture):
 
 
 class ActivitySessionReadTests(CanonicalReadFixture):
-    def test_backfilled_copies_are_summarised_once_like_the_legacy_bundles(
+    def test_backfilled_copies_are_summarised_once_per_session(
         self,
     ) -> None:
-        legacy = self.read(self.projection.activity_sessions)
         populate(self)
         grouped = self.read(self.table.activity_sessions)
         summaries = self.read(make_selector(self).activity_summaries)
 
-        self.assertEqual(len(legacy), len(grouped))
-        self.assertEqual(len(legacy), len(summaries))
+        self.assertEqual(len(grouped), len(summaries))
         self.assertEqual(
-            sorted(
-                sorted(record.activity_id for record in records)
-                for _id, records in legacy
-            ),
             sorted(
                 sorted(record.activity_id for record in records)
                 for _id, records in grouped
             ),
+            [
+                ["910001", "i-act-001"],
+                ["910002"],
+                ["i-act-002"],
+                ["i-act-003"],
+                ["i-act-004"],
+                ["i-act-005"],
+            ],
         )
         merged = [s for s in summaries if len(s["record_ids"]) > 1]
         self.assertEqual(1, len(merged))

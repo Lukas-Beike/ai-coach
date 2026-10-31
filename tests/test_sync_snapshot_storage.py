@@ -27,14 +27,15 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
+from backend.planning.compact_activities import compact_activity_rows
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND, HEALTH_RECORD_KIND
 from backend.providers.snapshot_projection import (
     CANONICAL_SECTIONS_KEY,
     CANONICAL_SECTIONS_TABLES,
+    intervals_snapshot_has_unmatched_compact_rows,
     without_intervals_activities,
 )
 from backend.sync.canonical_backfill import STATE_KEY
-from backend.sync.canonical_projection import CanonicalSnapshotProjection
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import (
@@ -100,6 +101,11 @@ class FakeIntervalsApi:
         return load_provider_fixture("intervals/athlete.json")
 
 
+class _UtcProfile:
+    def get(self) -> dict[str, Any]:
+        return {"timezone": "UTC"}
+
+
 class Environment:
     """One database with the real sync services wired as the composition root does."""
 
@@ -120,15 +126,12 @@ class Environment:
             lambda: "2026-11-01T00:00:00+00:00",
         )
         self.today = FIRST_DAY
-        projection = CanonicalSnapshotProjection(
-            intervals_snapshot=lambda db: self.state.latest_snapshot(db),
-            intervals_version=lambda db: json.dumps(self.state.latest_metadata(db)),
-            garmin_payload=lambda db: {},
-            zone=lambda db: UTC,
-            clock=lambda: datetime(2026, 11, 20, tzinfo=UTC),
-        )
         self.selector = build_canonical_read(
-            legacy=projection, key_values=self.key_values
+            key_values=self.key_values,
+            profile=_UtcProfile(),
+            compact_only=lambda db: intervals_snapshot_has_unmatched_compact_rows(
+                self.state.latest_snapshot(db)
+            ),
         )
         if tables:
             with self.manager.unit_of_work() as db:
@@ -384,6 +387,53 @@ class WriteGateTests(StorageCase):
         self.assertEqual(env.count("snapshots"), 0)
         for table in CANONICAL_TABLES:
             self.assertEqual(env.count(table), 0, table)
+
+
+class CompactOnlyGapTests(StorageCase):
+    """A compact-only snapshot from an old release stays marked until a full reload."""
+
+    def _compact_only(self) -> Environment:
+        env = self.environment(tables=True)
+        env.state.save_snapshot(
+            {
+                "synced_at": "2026-11-01T08:00:00+00:00",
+                "athlete": {},
+                RECENT: compact_activity_rows(_activities()),
+                "recent_wellness": [],
+            }
+        )
+        self.assertTrue(self.needs_refresh(env))
+        return env
+
+    @staticmethod
+    def needs_refresh(env: Environment) -> bool:
+        with env.manager.reader() as db:
+            return env.selector.activities_need_refresh(db)
+
+    def test_an_incremental_sync_keeps_the_compact_rows_and_the_mark(self) -> None:
+        env = self._compact_only()
+
+        env.sync([_activity(NEW_ID, "2026-11-09T07:00:00")], days=7, day=SECOND_DAY)
+
+        stored = env.stored()
+        # The older compact rows have no raw row, so the sections are kept.
+        self.assertNotIn(CANONICAL_SECTIONS_KEY, stored)
+        self.assertEqual(len(stored[RECENT]), 6)
+        self.assertEqual([row["id"] for row in stored[RAW]["activities"]], [NEW_ID])
+        self.assertTrue(self.needs_refresh(env))
+        self.assertEqual(env.table_activity_ids(), [NEW_ID])
+
+    def test_a_full_reload_with_the_raw_rows_closes_the_gap(self) -> None:
+        env = self._compact_only()
+        env.sync([_activity(NEW_ID, "2026-11-09T07:00:00")], days=7, day=SECOND_DAY)
+
+        env.sync(_activities(), days=ALL_DAYS, day=SECOND_DAY)
+
+        self.assertFalse(self.needs_refresh(env))
+        self.assert_stripped(env.stored())
+        self.assertEqual(
+            env.table_activity_ids(), sorted(str(row["id"]) for row in _activities())
+        )
 
 
 class MergeBaseTests(StorageCase):

@@ -9,7 +9,7 @@ cover the year before ``as_of``, extended to the current window's first day.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import date, timedelta
 from typing import Any, Final, cast
 
@@ -43,7 +43,7 @@ from backend.runtime.ports import (
     ActivityMaxHrReader,
     ActivityRowAndSummaryReader,
     ActivitySummaryReader,
-    CanonicalTableServing,
+    CanonicalReadStatus,
     ObservationReader,
     ObservationSourceSelector,
     ProviderCoverageReader,
@@ -72,6 +72,12 @@ class CanonicalPerformanceInputs:
     Intervals.icu wellness-day form and sport-scoped eFTP series.
     ``ramp_rate`` is the latest wellness day's CTL minus the CTL of exactly seven
     days earlier, rounded to two decimals, or None when either day is missing.
+
+    ``pending`` is True while the canonical source serves nothing yet (the first
+    backfill has not completed); every value is then empty.
+    ``activities_need_refresh`` is True while stored compact Intervals.icu
+    activities have no raw counterpart and are missing from the tables until the
+    full Intervals.icu reload.
     """
 
     wellness_day: date | None
@@ -89,11 +95,17 @@ class CanonicalPerformanceInputs:
     run_eftp_by_day: Mapping[date, float] | None = None
     ramp_rate: float | None = None
     body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
+    pending: bool = False
+    activities_need_refresh: bool = False
 
 
 # The inputs of a consumer without a canonical source: every value is unknown.
 EMPTY_PERFORMANCE_INPUTS: Final = CanonicalPerformanceInputs(
     wellness_day=None, ctl=None, atl=None
+)
+# The inputs before the first completed backfill: no values, marked pending.
+PENDING_PERFORMANCE_INPUTS: Final = CanonicalPerformanceInputs(
+    wellness_day=None, ctl=None, atl=None, pending=True
 )
 
 
@@ -102,15 +114,16 @@ class CanonicalPerformanceSource:
     """Lazy accessors a consumer uses to read canonical load inputs.
 
     Both callables are resolved at read time, as the other assemblies do, so the
-    composition root can pass ``lambda: ...`` accessors. ``serving`` is optional
-    and no performance read depends on it any more.
+    composition root can pass ``lambda: ...`` accessors. ``serving`` is optional;
+    with it the inputs are marked pending before the first completed backfill and
+    carry the compact-only activity gap (``with_read_status``).
     ``activity_summaries`` is optional; without it a consumer reads no activities.
     ``coverage`` is optional; without it the activities' sync time is unknown.
     """
 
     database_manager: Callable[[], Any]
     observation_reader: Callable[[], ObservationReader]
-    serving: Callable[[], CanonicalTableServing] | None = None
+    serving: Callable[[], CanonicalReadStatus] | None = None
     activity_summaries: Callable[[], ActivityRowAndSummaryReader] | None = None
     coverage: Callable[[], ProviderCoverageReader] | None = None
 
@@ -142,12 +155,30 @@ def snapshot_with_inputs(
         return read_snapshot(), None
     with source.database_manager().read_snapshot() as db:
         snapshot = read_snapshot()
-        return snapshot, read_performance_inputs(
-            source.observation_reader(),
-            db,
-            activity_reader=source.activity_summary_reader(),
-            as_of=as_of,
-        )
+        return snapshot, inputs_for_snapshot(source, db, as_of=as_of)
+
+
+def with_read_status(
+    source: CanonicalPerformanceSource,
+    db: Any,
+    inputs: CanonicalPerformanceInputs | None,
+) -> CanonicalPerformanceInputs | None:
+    """Mark the inputs with the canonical read state of ``source``, if it reports one.
+
+    Before the first completed backfill the reads are empty and the inputs are
+    ``PENDING_PERFORMANCE_INPUTS``; afterwards a compact-only activity gap is
+    carried as ``activities_need_refresh``.
+    """
+    if source.serving is None:
+        return inputs
+    status = source.serving()
+    if not status.serves_tables(db):
+        return PENDING_PERFORMANCE_INPUTS
+    if status.activities_need_refresh(db):
+        base = inputs or EMPTY_PERFORMANCE_INPUTS
+        values = {field.name: getattr(base, field.name) for field in fields(base)}
+        return CanonicalPerformanceInputs(**{**values, "activities_need_refresh": True})
+    return inputs
 
 
 def activity_summaries_with_sync_time(
@@ -197,11 +228,15 @@ def inputs_for_snapshot(
     """Read canonical load inputs inside the caller's snapshot transaction."""
     if source is None:
         return None
-    return read_performance_inputs(
-        source.observation_reader(),
+    return with_read_status(
+        source,
         db,
-        activity_reader=source.activity_summary_reader(),
-        as_of=as_of,
+        read_performance_inputs(
+            source.observation_reader(),
+            db,
+            activity_reader=source.activity_summary_reader(),
+            as_of=as_of,
+        ),
     )
 
 

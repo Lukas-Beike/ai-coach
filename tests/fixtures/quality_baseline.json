@@ -50,12 +50,6 @@
     },
     {
       "tool": "ruff",
-      "path": "backend/sync/canonical_projection.py",
-      "code": "ARG002",
-      "message_sha256": "49077de21bff2fd26bfe65c031cc1accece53eee4360209ca2478ffed9c2b740"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/sync/wahoo_workout_export.py",
       "code": "ARG002",
       "message_sha256": "4d7428a13041433778d46b17e34016de821c7432071d6f89172af7211472202a"

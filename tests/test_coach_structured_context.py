@@ -135,11 +135,9 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         self.garmin_projection_service.coach_context.assert_called_once_with(
             include_performance=False
         )
-        self.assertEqual(result["current_performance"]["available"], True)
-        self.assertEqual(
-            result["current_performance"]["source"],
-            "Letzter gespeicherter Intervals.icu-Snapshot",
-        )
+        # No canonical source is wired here, so there are no canonical values.
+        self.assertEqual(result["current_performance"]["available"], False)
+        self.assertEqual(result["current_performance"]["source"], "Intervals.icu")
         self.assertEqual(result["weather"]["days"][0]["date"], "2026-09-24")
         self.assertEqual(result["calendar"][0]["source"], "local-plan")
         self.assertIn(

@@ -175,6 +175,48 @@ def canonical_backfill_stopped(server, timeout: float = 10.0):
         server.CANONICAL_BACKFILL.worker.join(timeout)
 
 
+def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -> None:
+    """Store an Intervals.icu snapshot and let the canonical tables serve it.
+
+    Stands in for a sync of the snapshot: it is saved as given, its activity rows
+    are ingested into the canonical tables (the raw rows, or else the compact rows
+    as their synthetic stand-in) and the backfill runs to completion, so reads come
+    from the tables. A snapshot without a usable sync time is ingested at the
+    current instant; the stored snapshot keeps its own value.
+    """
+    from zoneinfo import ZoneInfo
+
+    from backend.athlete.profile import timezone_name
+    from backend.providers.snapshot_projection import stored_retrieved_at
+    from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
+
+    server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot, **options)
+    zone = ZoneInfo(timezone_name(server.ATHLETE_DATA.profile().get().get("timezone")))
+    raw = dict(snapshot.get("raw_provider_data") or {})
+    if not isinstance(raw.get("activities"), list):
+        raw["activities"] = [
+            row
+            for row in snapshot.get("recent_activities") or []
+            if isinstance(row, dict)
+        ]
+    ingested = {**snapshot, "raw_provider_data": raw}
+    if stored_retrieved_at(ingested, zone=zone) is None:
+        ingested["synced_at"] = runtime_clock.utc_now()
+    with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+        ingest_intervals_partial_snapshot(db, ingested, zone=zone)
+    complete_canonical_backfill(server)
+
+
+def complete_canonical_backfill(server) -> None:
+    """Run the canonical backfill to completion, so reads come from the tables."""
+    backfill = server.CANONICAL_BACKFILL.status_reader
+    for _ in range(1000):
+        with server.DB_LOCK, server.database_manager().unit_of_work() as db:
+            if backfill.run_batch(db).done:
+                return
+    raise AssertionError("canonical backfill did not finish")
+
+
 def create_test_session(server) -> str:
     """Create one authenticated session without depending on a test case."""
     import uuid

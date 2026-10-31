@@ -4,7 +4,7 @@ The plans call the provider mappers and never write. A row that maps to no
 record is skipped and counted, so one malformed row never blocks the rest of a
 payload. Raw records keep the provider rows as fetched; the sync layer sanitizes
 them before they are stored. Activities are mapped from the full raw rows, not
-from the compact read model used by the legacy snapshot projection.
+from the compact read model.
 
 A Garmin payload keeps sections from earlier reads when a refresh fails or skips
 them. Each Garmin section is therefore stamped with the time it was fetched, not

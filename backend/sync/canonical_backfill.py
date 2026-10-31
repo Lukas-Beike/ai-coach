@@ -76,8 +76,8 @@ the marker existed) counts as completed once, and the marker is added when the n
 re-projection starts. From then on reads come from the tables (``read_state``): a
 mapper-version bump or a zone change re-projects as described above, but reads stay
 on the tables meanwhile and serve each observation's newest stored version, so
-nothing vanishes. Only an installation whose backfill never completed reads the
-legacy snapshot projection. Nothing is deleted.
+nothing vanishes. An installation whose backfill never completed reads nothing
+until it does. Nothing is deleted.
 
 Each batch writes at most ``batch_size`` plan items in one writer transaction. The
 cursor and the content-free counters are one kv value written in that same
@@ -200,7 +200,7 @@ def read_status(key_values: KeyValueRepository, db: Any) -> str:
     try:
         state = json.loads(raw)
     except ValueError:
-        # A corrupt backfill record reads as not started, so the switch stays on legacy.
+        # A corrupt backfill record reads as not started, so reads stay pending.
         return BackfillStatus.PENDING.value
     status = state.get("status") if isinstance(state, dict) else None
     return status if isinstance(status, str) else BackfillStatus.PENDING.value
@@ -209,7 +209,7 @@ def read_status(key_values: KeyValueRepository, db: Any) -> str:
 class ReadState(StrEnum):
     """Which source serves canonical reads, decided from the backfill state alone."""
 
-    LEGACY = "legacy"
+    PENDING = "pending"
     TABLES = "tables"
     TABLES_REPROJECTING = "tables_reprojecting"
 
@@ -270,10 +270,10 @@ def backfill_complete(key_values: KeyValueRepository, db: Any, *, zone: tzinfo) 
 
 
 def read_state(key_values: KeyValueRepository, db: Any, *, zone: tzinfo) -> ReadState:
-    """Return which source serves reads: legacy only before the first completion."""
+    """Return which source serves reads: pending until the first completion."""
     state = _stored_state(key_values, db)
     if not _completed_once(state):
-        return ReadState.LEGACY
+        return ReadState.PENDING
     if _is_current(state, zone):
         return ReadState.TABLES
     return ReadState.TABLES_REPROJECTING
@@ -364,7 +364,7 @@ class CanonicalBackfill:
         state = self._load(db, self._zone_provider() or UTC)
         if state["status"] == BackfillStatus.COMPLETE:
             # A completion that predates the marker must survive the failure, or
-            # reads would fall back to legacy.
+            # reads would become pending again.
             self._mark_completed_once(state, now=self._clock())
         state["status"] = BackfillStatus.FAILED
         self._save(db, state)

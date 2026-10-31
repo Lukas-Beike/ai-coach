@@ -319,9 +319,6 @@ from backend.sync.assembly import (
     ProviderSyncRuntime,
 )
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
-from backend.sync.canonical_projection_assembly import (
-    build_canonical_snapshot_projection,
-)
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -713,6 +710,7 @@ ACTIVITY_READS = ActivityReadAssembly(
         lambda: CANONICAL_READ,
         observation_reader=lambda: CANONICAL_READ,
         coverage=lambda: CANONICAL_READ,
+        serving=lambda: CANONICAL_READ,
     ),
     ATHLETE_DATA.activity_feedback,
     lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
@@ -1974,16 +1972,12 @@ PUBLIC_STATE = PublicStateAssembly(
     provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
 )
 
-CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
-    intervals_snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
-    snapshot_payloads=SNAPSHOT_REPOSITORY,
-    profile=ATHLETE_PROFILE_SERVICE,
-    clock=ATHLETE_CLOCK.now,
-)
-
 CANONICAL_READ = build_canonical_read(
-    legacy=CANONICAL_SNAPSHOT_PROJECTION,
     key_values=KEY_VALUE_REPOSITORY,
+    profile=ATHLETE_PROFILE_SERVICE,
+    compact_only=SnapshotRepositoryReader(
+        SNAPSHOT_REPOSITORY
+    ).has_unmatched_compact_activity_rows,
 )
 METRIC_EXPORT: MetricExportService = build_metric_export_service(
     database_manager,

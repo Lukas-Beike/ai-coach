@@ -374,10 +374,12 @@ class EftpTests(unittest.TestCase):
             snapshot, {}, {}, DAY, canonical=EMPTY_PERFORMANCE_INPUTS
         )
         # Canonical reads (#1415): the snapshot's ride activity is no longer read
-        # either (was 270 for both values).
-        self.assertIsNone(context["metrics"]["cycling_eftp_watts"]["value"])
-        self.assertIsNone(context["comparisons"]["cycling_eftp_30d"])
-        self.assertIsNone(context["current_load"]["tsb"])
+        # either (was 270 for both values). Without canonical values the context
+        # is unavailable (#1416).
+        self.assertFalse(context["available"])
+        self.assertEqual(context["metrics"], {})
+        self.assertNotIn("comparisons", context)
+        self.assertNotIn("current_load", context)
 
     def test_chart_and_body_history_read_the_canonical_series(self) -> None:
         rows = [

@@ -255,7 +255,9 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
                 },
             }
         )
-        # A snapshot sync also ingests the activity, so canonical reads find it.
+        # A snapshot sync also ingests the activity, so canonical reads find it
+        # once the backfill has completed.
+        mark_tables_serving(server)
         seed_intervals_activity(
             server.database_manager(),
             activity["id"],

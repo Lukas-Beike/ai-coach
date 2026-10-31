@@ -1,10 +1,10 @@
-"""Garmin readers on the canonical selector: equality with the legacy snapshot reads.
+"""Garmin readers on the canonical selector: the tables against the payload readers.
 
 The Garmin sections that have canonical observations are read through the injected
 selector. These tests run the real backfill over the wire fixtures, then compare the
-migrated readers with the legacy snapshot readers, first while the selector still
-serves the legacy projection and then from the tables after the canonical sections
-were removed from the stored Garmin snapshot. All storage is temporary.
+migrated readers with the payload readers, also after the canonical sections were
+removed from the stored Garmin snapshot. Before the first completed backfill the
+selector serves nothing. All storage is temporary.
 """
 
 from __future__ import annotations
@@ -152,7 +152,7 @@ class GarminReadFixture(CanonicalReadFixture):
         )
 
     def _store_snapshot(self) -> None:
-        """Store the Garmin payload without a backfill, so the selector serves legacy."""
+        """Store the Garmin payload without a backfill, so the selector serves nothing."""
         self.write(lambda db: store_garmin(self, db, self.garmin))
 
     def _strip_canonical_sections(self) -> None:
@@ -168,14 +168,14 @@ class GarminReadFixture(CanonicalReadFixture):
 
 
 class GarminStateEqualityTests(GarminReadFixture):
-    def test_table_and_legacy_observations_give_the_same_state(self) -> None:
+    def test_table_observations_give_the_payload_state(self) -> None:
         populate(self)
-        legacy = self.read(lambda db: read_garmin_state(self.projection, db))
         table = self.read(lambda db: read_garmin_state(self.table, db))
+        payload = garmin_metrics.garmin_payload_performance_metrics(self.garmin, TODAY)
 
-        self.assertEqual(legacy, table)
         self.assertTrue(table.has_sleep)
         self.assertIsNotNone(table.metrics.weight_kg)
+        self.assertEqual(table.metrics.weight_kg, payload["weight_kg"]["value"])
 
     def test_state_has_the_flags_and_values_of_the_snapshot_sections(self) -> None:
         populate(self)
@@ -218,13 +218,11 @@ class GarminStateEqualityTests(GarminReadFixture):
 
         self.assertNotIn(Sport.RIDE, self.read(read))
 
-    def test_sleep_day_matches_between_sources(self) -> None:
+    def test_sleep_day_matches_the_payload_section(self) -> None:
         populate(self)
-        legacy = self.read(lambda db: read_garmin_sleep_day(self.projection, db))
         table = self.read(lambda db: read_garmin_sleep_day(self.table, db))
 
         self.assertIsNotNone(table)
-        self.assertEqual(legacy, table)
         self.assertEqual(
             garmin_observations.garmin_source_observed_at(self.garmin["sleep"]),
             None if table is None else table.isoformat(),
@@ -247,18 +245,20 @@ class GarminStateEqualityTests(GarminReadFixture):
 
 
 class GarminServiceEqualityTests(GarminReadFixture):
-    def test_services_are_unchanged_when_the_tables_take_over(self) -> None:
+    def test_services_read_no_table_values_until_the_backfill_completes(
+        self,
+    ) -> None:
         self._store_snapshot()
-        service = self._projection_service()
-        legacy_state = service.public_state()
-        legacy_context = service.coach_context(include_performance=True)
+        pending = self._projection_service().public_state()
+        # No Intervals.icu activity is served yet, so no Garmin copy is a duplicate.
+        self.assertEqual(pending["duplicate_activities_skipped"], 0)
 
         populate(self)
         state = self._projection_service().public_state()
-        context = self._projection_service().coach_context(include_performance=True)
 
-        self.assertEqual(state, legacy_state)
-        self.assertEqual(context["performance"], legacy_context["performance"])
+        self.assertEqual(state["duplicate_activities_skipped"], 1)
+        for key in ("has_sleep", "has_hrv", "has_resting_hr", "has_readiness"):
+            self.assertTrue(state[key], key)
 
     def test_services_are_unchanged_once_tables_serve_without_the_sections(
         self,

@@ -109,7 +109,7 @@ Detailed contract: Body-fat current composition uses Intervals and manual profil
 Evidence: `backend/performance/source_policy.py:CURRENT_RULES`, `backend/performance/source_policy.py:DAILY_RULES`, `backend/performance/current_metrics.py:current_performance_metrics`, `backend/sync/authority.py:PlanningAuthorityService`; `tests/test_performance_current_metrics.py:test_garmin_ftp_beats_intervals_and_wahoo_ftp`, `tests/test_performance_current_metrics.py:test_manual_profile_weight_beats_wahoo_weight`, `tests/test_sync_authority.py:test_revision_failure_rolls_back_planning_update_atomically`.
 
 ### Requirement: Correction and reprojection continuity
-The system SHALL preserve provider raw-record identity and mapper version, ingest canonical data with the owning provider transaction, and reproject stored records on mapper/timezone changes. Before first successful canonical backfill, reads SHALL use legacy projection; after first completion, reads SHALL continue from tables during later reprojection/failure rather than disappearing or reverting wholesale to legacy.
+The system SHALL preserve provider raw-record identity and mapper version, ingest canonical data with the owning provider transaction, and reproject stored records on mapper/timezone changes. Before the first successful canonical backfill, canonical reads SHALL return no values and consumers SHALL report a pending state; after first completion, reads SHALL continue from tables during later reprojection/failure rather than disappearing or becoming pending again.
 
 #### Scenario: Mapper update after completed backfill
 - **WHEN** a new mapper version requires reprojection
@@ -117,11 +117,15 @@ The system SHALL preserve provider raw-record identity and mapper version, inges
 
 #### Scenario: First backfill has not completed
 - **WHEN** initial backfill is pending, running, or failed
-- **THEN** consumers use the supported legacy source instead of claiming table coverage that has never completed.
+- **THEN** activities, activity rows and summaries, observations, metric windows and the chosen reader return nothing, coverage reports only current persisted summaries, and performance and Coach contexts report that data is being prepared instead of partial values.
 
-Detailed contract: Compact-only activity snapshots retain their implemented activity-row fallback. Reprojection SHALL preserve session ownership and mark retired or invalid mapped records without deleting original provider evidence.
+#### Scenario: Compact-only Intervals.icu snapshot
+- **WHEN** the stored Intervals.icu snapshot lists activities only in compact form (from a release before raw provider data) and the backfill has completed
+- **THEN** activity reads come from the tables without those compact rows, and the gap is reported as `activities_need_refresh` and marked in the PWA while any stored compact row has no raw row with its id. An incremental sync keeps the older compact rows and the mark; only the full read-only Intervals.icu reload (`POST /api/intervals/full-resync`) that returns raw rows for them closes it. No remote write or implicit refetch happens.
 
-Evidence: `backend/sync/canonical_ingest.py:ingest_plan`, `backend/sync/canonical_backfill.py:CanonicalBackfill`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector`; `tests/test_canonical_read_selector.py:test_observations_stay_available_until_the_reprojection_completes`, `tests/test_canonical_backfill.py:test_a_dropped_activity_is_invalid_and_a_later_version_restores_it`.
+Detailed contract: No legacy snapshot projection serves reads. Reprojection SHALL preserve session ownership and mark retired or invalid mapped records without deleting original provider evidence.
+
+Evidence: `backend/sync/canonical_ingest.py:ingest_plan`, `backend/sync/canonical_backfill.py:CanonicalBackfill`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector`; `tests/test_canonical_read_selector.py:test_observations_stay_available_until_the_reprojection_completes`, `tests/test_canonical_read_selector.py:test_first_backfill_not_complete_serves_nothing_from_filled_tables`, `tests/test_canonical_read_selector.py:test_compact_only_snapshot_reads_tables_and_needs_a_refresh`, `tests/test_canonical_backfill.py:test_a_dropped_activity_is_invalid_and_a_later_version_restores_it`.
 
 ### Requirement: Provenance and incomplete coverage remain visible
 The system SHALL expose source labels, observation dates, retrieval freshness, and missing or unsupported coverage without synthesizing measurements. Canonically mapped Garmin status, load balance and Body Battery SHALL retain provider-estimate labels, their supported measurement windows and explicit partial coverage.

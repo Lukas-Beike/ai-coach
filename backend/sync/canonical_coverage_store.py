@@ -10,8 +10,8 @@ for. It holds no record references, field names or athlete text.
 
 A stored summary is current only while its mapper versions and time zone equal the
 current ones. By default anything else (missing, corrupt, outdated) reads as "not
-stored", and a caller before the first completed backfill falls back to computing
-coverage from the legacy projection. After that backfill the caller loads with
+stored", and a caller before the first completed backfill reports no summary for
+that provider. After that backfill the caller loads with
 ``allow_outdated`` and keeps reporting the last persisted summary until the next
 ingest replaces it.
 """
@@ -48,8 +48,8 @@ COVERAGE_KEY_PREFIX: Final = "canonical_coverage:"
 # The providers whose ingest persists a coverage summary. A provider without a
 # canonical ingest is absent here, so it never blocks the persisted path.
 CANONICAL_COVERAGE_PROVIDERS: Final = (ProviderId.INTERVALS, ProviderId.GARMIN)
-# Providers ingested live without a legacy snapshot. Their persisted summary is
-# reported when present and never decides between the persisted and legacy path.
+# Providers ingested live without a stored snapshot. Their persisted summary is
+# reported when present, after the snapshot-ingested providers.
 LIVE_COVERAGE_PROVIDERS: Final = (ProviderId.WAHOO,)
 
 

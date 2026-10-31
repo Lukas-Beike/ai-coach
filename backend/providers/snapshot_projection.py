@@ -186,11 +186,14 @@ def strip_intervals_activity_sections(snapshot: Mapping[str, Any]) -> dict[str, 
 def intervals_activity_sections_are_mapped(snapshot: object, *, zone: tzinfo) -> bool:
     """Return True when the canonical tables durably hold every activity row.
 
-    Stripping is safe only then: a row the mapper rejects, a compact-only list and
-    a snapshot without a sync time never reach the tables, so their sections must
-    stay in the snapshot. A snapshot without activity sections is trivially mapped.
+    Stripping is safe only then: a row the mapper rejects, a compact row without a
+    raw counterpart and a snapshot without a sync time never reach the tables, so
+    their sections must stay in the snapshot. A snapshot without activity sections
+    is trivially mapped.
     """
     if not isinstance(snapshot, Mapping):
+        return False
+    if intervals_snapshot_has_unmatched_compact_rows(snapshot):
         return False
     raw = snapshot.get(_INTERVALS_RAW_KEY)
     rows = raw.get(_INTERVALS_RAW_ACTIVITIES_KEY) if isinstance(raw, Mapping) else None
@@ -237,20 +240,34 @@ def restore_intervals_activity_sections(
     return restored
 
 
-def intervals_snapshot_has_only_compact_rows(snapshot: object) -> bool:
-    """Return True when a stored snapshot lists activities only in compact form.
+def intervals_snapshot_has_unmatched_compact_rows(snapshot: object) -> bool:
+    """Return True when a stored compact activity row has no raw counterpart.
 
     Snapshots from releases before ``raw_provider_data`` keep their activities only
-    in ``recent_activities``. The backfill cannot map that compact read model, so
-    its rows never reach the tables.
+    in ``recent_activities``. The mapper cannot map that compact read model, so
+    those rows never reach the tables. An incremental sync merges its window's raw
+    rows with the older compact rows, so the gap stays until a full reload returns
+    a raw row with the same id. A compact row without an id is never matched and
+    is ignored.
     """
     if not isinstance(snapshot, Mapping):
         return False
+    compact = snapshot.get(_INTERVALS_ACTIVITIES_KEY)
+    if not isinstance(compact, list):
+        return False
     raw = snapshot.get(_INTERVALS_RAW_KEY)
     rows = raw.get(_INTERVALS_RAW_ACTIVITIES_KEY) if isinstance(raw, Mapping) else None
-    if isinstance(rows, list):
-        return False
-    return isinstance(snapshot.get(_INTERVALS_ACTIVITIES_KEY), list)
+    raw_ids = {
+        str(row["id"])
+        for row in (rows if isinstance(rows, list) else ())
+        if isinstance(row, Mapping) and row.get("id") is not None
+    }
+    return any(
+        isinstance(row, Mapping)
+        and row.get("id") is not None
+        and str(row["id"]) not in raw_ids
+        for row in compact
+    )
 
 
 def intervals_row_local_date(

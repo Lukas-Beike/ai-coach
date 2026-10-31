@@ -16,6 +16,7 @@ from backend.performance.canonical_inputs import (
     read_once,
     read_performance_inputs,
     resolve_reader,
+    with_read_status,
 )
 from backend.performance.chart_history import analysis_history
 from backend.performance.training_focus import training_focus
@@ -55,11 +56,15 @@ class PublicPerformanceStateService:
             snapshot = self._sync_state_repository.latest_snapshot()
             garmin = self._garmin_payload_service.recent_view_in(db)
             reader = read_once(resolve_reader(source.observation_reader(), db))
-            canonical = read_performance_inputs(
-                reader,
+            canonical = with_read_status(
+                source,
                 db,
-                activity_reader=source.activity_summary_reader(),
-                as_of=today,
+                read_performance_inputs(
+                    reader,
+                    db,
+                    activity_reader=source.activity_summary_reader(),
+                    as_of=today,
+                ),
             )
             return self._project(
                 snapshot, garmin, canonical, today, observations=reader
@@ -93,6 +98,11 @@ class PublicPerformanceStateService:
     ) -> dict[str, Any]:
         profile = self._profile_service.get()
         inputs = canonical or EMPTY_PERFORMANCE_INPUTS
+        if inputs.pending:
+            # Nothing is served before the first completed backfill: no history,
+            # focus or Garmin values from the stored snapshot or the raw view. The
+            # Garmin connection status stays.
+            snapshot, garmin = {}, {}
         performance = performance_context.current_performance_context(
             snapshot,
             garmin,

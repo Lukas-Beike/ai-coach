@@ -263,11 +263,16 @@ function currentPerformanceValues(metrics, history) {
   return values;
 }
 
-function renderCurrentPerformance(metrics, history) {
+function performanceDataStatus(performance) {
+  return typeof performance?.status === "string" && performance.status ? [performance.status] : [];
+}
+
+function renderCurrentPerformance(metrics, history, status = []) {
   metrics = currentPerformanceValues(metrics, history);
   const root = document.getElementById("currentPerformance");
   rememberAnalysisSectionState(root);
   root.replaceChildren(reportNode("h3", "Aktuelle Leistungswerte"));
+  for (const text of status) root.append(reportNode("p", text, "empty"));
   const groups = [
     ["Laufen", [
       ["run_threshold_pace_seconds_per_km", "Schwellenpace"],
@@ -317,7 +322,7 @@ function renderPerformance(performance, { refreshCharts = true } = {}) {
   const root = $("#performancePredictions");
   root.replaceChildren();
   const values = performance?.metrics || {};
-  renderCurrentPerformance(values, performance?.history);
+  renderCurrentPerformance(values, performance?.history, performanceDataStatus(performance));
   const predictions = racePredictionRows(values);
   root.hidden = false;
   root.append(reportNode("h4", "Laufprognosen"));

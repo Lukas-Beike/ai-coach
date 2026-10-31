@@ -1,6 +1,7 @@
 """Counts-only canonical coverage summary for the diagnostics report.
 
-The projection is built from in-memory fakes over the read-only wire fixtures.
+The coverage is summarized from the read-only wire fixtures with the summaries the
+ingest persists.
 """
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import unittest
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -18,9 +19,11 @@ from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.mapping import IssueReason
 from backend.canonical.vocabulary import ProviderId
 from backend.diagnostics.canonical_coverage import summarize_canonical_coverage
-from backend.sync.canonical_projection import CanonicalSnapshotProjection
+from backend.sync.canonical_coverage_store import (
+    garmin_payload_coverage,
+    intervals_snapshot_coverage,
+)
 
-CLOCK_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
 NEWEST = date(2026, 10, 11)
 FAKE_DB: Any = object()
 SUMMARY_VOCABULARY = {
@@ -39,20 +42,22 @@ SUMMARY_VOCABULARY = {
 }
 
 
-def fixture_projection(
-    *,
-    snapshot: dict[str, Any] | None = None,
-    payload: dict[str, Any] | None = None,
-) -> CanonicalSnapshotProjection:
-    stored_snapshot = intervals_snapshot_fixture() if snapshot is None else snapshot
-    stored_payload = garmin_payload_fixture() if payload is None else payload
-    return CanonicalSnapshotProjection(
-        intervals_snapshot=lambda db: stored_snapshot,
-        intervals_version=lambda db: "row-1",
-        garmin_payload=lambda db: stored_payload,
-        zone=lambda db: ZoneInfo("Europe/Berlin"),
-        clock=lambda: CLOCK_AT,
-    )
+class FixtureCoverage:
+    """The coverage the ingest persists for the wire fixtures."""
+
+    def coverage(self, db: Any) -> tuple[ProviderCoverage, ...]:
+        zone = ZoneInfo("Europe/Berlin")
+        return tuple(
+            item
+            for item in (
+                intervals_snapshot_coverage(intervals_snapshot_fixture(), zone=zone),
+                garmin_payload_coverage(garmin_payload_fixture(), zone=zone),
+            )
+            if item is not None
+        )
+
+    def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:
+        return ()
 
 
 def providers_by_name(summary: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -80,7 +85,7 @@ class FailingCoverage:
 
 class CanonicalCoverageSummaryTests(unittest.TestCase):
     def test_summary_reports_counts_and_flags_per_provider(self) -> None:
-        summary = summarize_canonical_coverage(fixture_projection(), FAKE_DB)
+        summary = summarize_canonical_coverage(FixtureCoverage(), FAKE_DB)
 
         self.assertEqual(summary["status"], "available")
         providers = providers_by_name(summary)
@@ -143,23 +148,12 @@ class CanonicalCoverageSummaryTests(unittest.TestCase):
             },
         )
 
-    def test_missing_stored_sync_time_is_reported_as_a_flag_only(self) -> None:
-        snapshot = intervals_snapshot_fixture()
-        snapshot.pop("synced_at", None)
-        summary = summarize_canonical_coverage(
-            fixture_projection(snapshot=snapshot), FAKE_DB
-        )
-
-        providers = providers_by_name(summary)
-        self.assertFalse(providers[str(ProviderId.INTERVALS)]["sync_time_stored"])
-        self.assertTrue(providers[str(ProviderId.GARMIN)]["sync_time_stored"])
-
     def test_summary_carries_no_dates_or_fixture_content(self) -> None:
-        projection = fixture_projection()
-        summary = summarize_canonical_coverage(projection, FAKE_DB)
+        reader = FixtureCoverage()
+        summary = summarize_canonical_coverage(reader, FAKE_DB)
         serialized = repr(summary)
 
-        for item in projection.coverage(FAKE_DB):
+        for item in reader.coverage(FAKE_DB):
             self.assertIsNotNone(item.first_observed_on)
             for day in (item.first_observed_on, item.last_observed_on):
                 if isinstance(day, date):

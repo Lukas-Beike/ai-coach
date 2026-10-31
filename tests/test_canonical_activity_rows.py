@@ -1,4 +1,4 @@
-"""Raw activity rows: table and legacy sources, the selector route and the dedup helper."""
+"""Raw activity rows: the table source, the selector route and the dedup helper."""
 
 from __future__ import annotations
 
@@ -15,30 +15,23 @@ def _by_id(rows: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
 
 
 class ActivitySummarySourceTests(CanonicalReadFixture):
-    def test_table_and_legacy_return_the_same_raw_rows(self) -> None:
+    def test_tables_return_the_raw_snapshot_rows(self) -> None:
         populate(self)
-        legacy = self.read(self.projection.activity_rows)
         table = self.read(self.table.activity_rows)
 
         self.assertTrue(table)
-        self.assertEqual(_by_id(legacy), _by_id(table))
         self.assertEqual(
             _by_id(table),
             _by_id(tuple(self.intervals["raw_provider_data"]["activities"])),
         )
 
-    def test_legacy_keeps_the_snapshot_order_and_tables_serve_newest_first(
-        self,
-    ) -> None:
+    def test_tables_serve_newest_first(self) -> None:
         populate(self)
-        snapshot_ids = [
-            r["id"] for r in self.intervals["raw_provider_data"]["activities"]
-        ]
-        self.assertEqual(
-            [r["id"] for r in self.read(self.projection.activity_rows)], snapshot_ids
-        )
-
         table_rows = self.read(self.table.activity_rows)
+        self.assertEqual(
+            [row["id"] for row in table_rows],
+            ["i-act-005", "i-act-004", "i-act-001", "i-act-003", "i-act-002"],
+        )
         starts = [
             self.rows(
                 "SELECT started_at FROM activity_records WHERE provider_activity_id = ?",
@@ -48,31 +41,17 @@ class ActivitySummarySourceTests(CanonicalReadFixture):
         ]
         self.assertEqual(starts, sorted(starts, reverse=True))
 
-    def test_legacy_falls_back_to_recent_activities_without_a_raw_block(self) -> None:
-        del self.intervals["raw_provider_data"]
-        rows = self.read(self.projection.activity_rows)
-        self.assertEqual(list(rows), self.intervals["recent_activities"])
-
-    def test_date_bounds_agree_between_sources(self) -> None:
+    def test_date_bounds_filter_the_athlete_local_day(self) -> None:
         populate(self)
-        for start, end in (
-            (date(2026, 10, 8), date(2026, 10, 8)),
-            (date(2026, 10, 1), None),
-            (None, date(2026, 3, 30)),
-            (date(2999, 1, 1), None),
+        for start, end, expected in (
+            (date(2026, 10, 8), date(2026, 10, 8), ["i-act-001"]),
+            (date(2026, 10, 1), None, ["i-act-001", "i-act-004", "i-act-005"]),
+            (None, date(2026, 3, 30), ["i-act-002", "i-act-003"]),
+            (date(2999, 1, 1), None, []),
         ):
             with self.subTest(start=start, end=end):
-                legacy = self.read(self.projection.activity_rows, start=start, end=end)
                 table = self.read(self.table.activity_rows, start=start, end=end)
-                self.assertEqual(_by_id(legacy), _by_id(table))
-        one_day = date(2026, 10, 8)
-        self.assertEqual(
-            [
-                r["id"]
-                for r in self.read(self.table.activity_rows, start=one_day, end=one_day)
-            ],
-            ["i-act-001"],
-        )
+                self.assertEqual(sorted(row["id"] for row in table), expected)
 
     def test_deleted_and_invalid_records_are_not_served(self) -> None:
         populate(self)
@@ -110,16 +89,14 @@ class ActivitySummarySourceTests(CanonicalReadFixture):
 
 
 class ActivityRowSelectorTests(CanonicalReadFixture):
-    def test_pending_backfill_serves_legacy_rows(self) -> None:
+    def test_pending_backfill_serves_no_rows(self) -> None:
         selector = make_selector(self)
-        rows = self.read(selector.activity_rows)
-        self.assertEqual(list(rows), list(self.read(self.projection.activity_rows)))
-        self.assertTrue(rows)
+        self.assertEqual(self.read(selector.activity_rows), ())
 
     def test_complete_backfill_serves_table_rows(self) -> None:
         populate(self)
         selector = make_selector(self)
-        # Change the legacy snapshot so the two sources differ.
+        # Change the stored snapshot so it differs from the tables.
         self.intervals = copy.deepcopy(self.intervals)
         self.intervals["raw_provider_data"]["activities"].pop()
         rows = self.read(selector.activity_rows)
@@ -128,14 +105,19 @@ class ActivityRowSelectorTests(CanonicalReadFixture):
             len(rows), len(self.intervals["raw_provider_data"]["activities"]) + 1
         )
 
-    def test_complete_backfill_keeps_compact_only_snapshots_on_legacy(self) -> None:
+    def test_complete_backfill_serves_table_rows_for_a_compact_only_snapshot(
+        self,
+    ) -> None:
         populate(self)
         selector = make_selector(self)
         self.intervals = copy.deepcopy(self.intervals)
         del self.intervals["raw_provider_data"]
         rows = self.read(selector.activity_rows)
-        self.assertEqual(list(rows), self.intervals["recent_activities"])
-        self.assertTrue(rows)
+        self.assertEqual(
+            [row["id"] for row in rows],
+            ["i-act-005", "i-act-004", "i-act-001", "i-act-003", "i-act-002"],
+        )
+        self.assertTrue(self.read(selector.activities_need_refresh))
 
     def test_complete_backfill_serves_tables_without_any_snapshot_rows(self) -> None:
         populate(self)

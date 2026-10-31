@@ -28,7 +28,7 @@ from backend.planning.compact_activities import ActivitySummarySource
 from backend.runtime.ports import (
     ActivityRowAndSummaryReader,
     ActivityRowReader,
-    CanonicalTableServing,
+    CanonicalReadStatus,
     ObservationReader,
     ProviderCoverageReader,
 )
@@ -51,7 +51,7 @@ class PublicStateCoreInputs:
     observation_reader: Callable[[], ObservationReader] | None = None
     # When set, body history reads weight and body fat from canonical tables while
     # the tables serve reads.
-    canonical_serving: Callable[[], CanonicalTableServing] | None = None
+    canonical_serving: Callable[[], CanonicalReadStatus] | None = None
     # When set, season preparation, load scenarios, the performance readers and
     # the state and plan endpoints read activity rows from it.
     activity_summary_reader: Callable[[], ActivityRowAndSummaryReader] | None = None

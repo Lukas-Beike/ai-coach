@@ -14,6 +14,7 @@ from support import (
     IntervalsRequestRecorder,
     RecordedIntervalsClient,
     parsed_workout_fixture,
+    store_canonical_snapshot,
 )
 
 from backend.activities import calendar_projection as activity_calendar_projection
@@ -383,7 +384,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self,
     ):
         today = server.ATHLETE_CLOCK.now().date().isoformat()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        store_canonical_snapshot(
+            server,
             {
                 "synced_at": "2026-08-31T08:00:00+00:00",
                 "athlete": {},
@@ -399,7 +401,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                         "moving_time": 3600,
                     }
                 ],
-            }
+            },
         )
         server.ATHLETE_DATA.checkin().save(
             {

@@ -77,7 +77,8 @@ class CanonicalCurrentInputs:
     mapper stores at most one per sport and sync. The athlete-wide and weight
     fields hold one observation or None, and ``athlete_record`` the athlete
     record's other settings. ``wahoo_ftp`` is the newest cycling FTP and
-    ``wahoo_weight`` the newest weight stored from Wahoo, or None.
+    ``wahoo_weight`` the newest weight stored from Wahoo, or None. ``synced_at``
+    is the sync instant of those Intervals observations, or None without a sync.
     """
 
     bike_threshold_hr: tuple[Observation, ...]
@@ -92,6 +93,7 @@ class CanonicalCurrentInputs:
     athlete_eftp: Observation | None = None
     wellness_eftp: Observation | None = None
     athlete_record: tuple[Observation, ...] = ()
+    synced_at: datetime | None = None
 
     def athlete_value(
         self, kind: MetricKind, sport: Sport | None = None
@@ -146,6 +148,7 @@ def read_current_inputs(
         athlete_eftp=intervals.athlete_eftp,
         wellness_eftp=_wellness_eftp(reader, db, latest_wellness_day),
         athlete_record=intervals.athlete_record,
+        synced_at=intervals.synced_at,
     )
 
 
@@ -161,6 +164,7 @@ class _SyncValues:
     athlete_weight: Observation | None = None
     athlete_eftp: Observation | None = None
     athlete_record: tuple[Observation, ...] = ()
+    synced_at: datetime | None = None
 
 
 _NO_SYNC: Final = _SyncValues()
@@ -205,6 +209,7 @@ def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None
         athlete_weight=_athlete_weight(weights),
         athlete_eftp=_athlete_eftp(eftps),
         athlete_record=athlete_record,
+        synced_at=synced,
     )
 
 
