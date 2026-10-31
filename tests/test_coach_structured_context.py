@@ -52,8 +52,6 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
             "name": "Public event",
             "training_relevant": 1,
         }
-        self.sync_state_repository = Mock()
-        self.sync_state_repository.latest_snapshot.return_value = self.snapshot
         self.checkin_service = Mock()
         self.checkin_service.context.return_value = {
             "recent": [{"date": "2026-09-22", "mood": "good"}]
@@ -90,7 +88,6 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         self.garmin_projection_service = Mock()
         self.garmin_projection_service.coach_context.return_value = {"recovery": {}}
         self.service = CoachStructuredContextService(
-            self.sync_state_repository,
             self.checkin_service,
             self.weather_service,
             self.activity_feedback_service,
@@ -123,9 +120,8 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
     ) -> None:
         result = self.service.build()
 
-        # Canonical reads (#1416): the stored snapshot is not read, and without a
-        # canonical Intervals.icu sync the Garmin performance fallback is requested.
-        self.sync_state_repository.latest_snapshot.assert_not_called()
+        # Canonical reads (#1416): the service takes no snapshot reader, and without
+        # a canonical Intervals.icu sync the Garmin performance fallback is requested.
         self.planned_unit_service.list.assert_called_once_with(250, future_only=True)
         self.weather_service.state.assert_called_once_with(
             self.planned_unit_service.list.return_value, refresh=False

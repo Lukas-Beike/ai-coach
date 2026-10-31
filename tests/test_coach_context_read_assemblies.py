@@ -23,7 +23,6 @@ class CoachContextAssemblyTests(unittest.TestCase):
         deps = {
             name: Mock(name=name)
             for name in (
-                "sync_state",
                 "checkins",
                 "weather",
                 "feedback",
@@ -57,7 +56,6 @@ class CoachContextAssemblyTests(unittest.TestCase):
         assembly = CoachContextAssembly(
             dependencies=CoachContextAssembly.Inputs(
                 performance=CoachContextPerformanceSources(
-                    sync_state_repository=deps["sync_state"],
                     weather_service=deps["weather"],
                     garmin_payload_service=deps["garmin_payload"],
                     garmin_projection_service=deps["garmin_projection"],
@@ -96,9 +94,9 @@ class CoachContextAssemblyTests(unittest.TestCase):
         with patch.object(context_assembly, "CoachStructuredContextService") as factory:
             assembly.structured_context_service()
 
-        self.assertIs(factory.call_args.args[0], deps["sync_state"].return_value)
-        planning = factory.call_args.args[4]
-        performance = factory.call_args.args[5]
+        self.assertIs(factory.call_args.args[0], deps["checkins"].return_value)
+        planning = factory.call_args.args[3]
+        performance = factory.call_args.args[4]
         self.assertIs(
             planning._planned_unit_service, deps["planned_units"].return_value
         )
@@ -130,9 +128,7 @@ class CoachContextAssemblyTests(unittest.TestCase):
             assembly.request_payload_service()
 
         self.assertIsNotNone(training)
-        self.assertIs(
-            training_factory.call_args.args[0], deps["sync_state"].return_value
-        )
+        self.assertEqual(training_factory.call_args.args[0], "structured")
         self.assertEqual(training_factory.call_args.kwargs["total_char_limit"], 10000)
         self.assertEqual(
             training_factory.call_args.kwargs["section_limits"], {"planning": 1000}

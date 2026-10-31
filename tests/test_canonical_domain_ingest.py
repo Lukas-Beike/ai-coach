@@ -182,8 +182,10 @@ def reprojecting(codes: Mapping[str, tuple[str, ...]]) -> Any:
     """Patch the re-projection plan: wellness record ``id`` emits ``codes[id]``."""
     real = canonical_plans.reprojection_plan
 
-    def plan(raw_row: Mapping[str, Any], *, zone: Any) -> IngestPlan | None:
-        result = real(raw_row, zone=zone)
+    def plan(
+        raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
+    ) -> IngestPlan | None:
+        result = real(raw_row, zone=zone, training_loads=training_loads)
         source_id = str(raw_row["source_record_id"])
         if result is None or raw_row["record_kind"] != WELLNESS:
             return result
@@ -376,7 +378,9 @@ class BackfillReprojectionTests(BackfillFixture):
     def test_a_batch_of_another_record_is_rejected(self) -> None:
         backfill = self.populate()
 
-        def plan(raw_row: Mapping[str, Any], *, zone: Any) -> IngestPlan:
+        def plan(
+            raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
+        ) -> IngestPlan:
             return IngestPlan(
                 provider=INTERVALS, domain_batches=(batch(day_id(9), "PRODUCTIVE"),)
             )

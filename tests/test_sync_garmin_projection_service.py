@@ -51,6 +51,9 @@ class _PayloadService:
         self.reads += 1
         return GarminSyncStatus.from_state(self.value)
 
+    def sync_status_in(self, _db):
+        return self.sync_status()
+
 
 class _SyncService:
     def __init__(self, available):
@@ -332,10 +335,13 @@ class GarminProjectionServiceTests(unittest.TestCase):
         alone = {"id": "s1", "record_ids": {"garmin": "1"}}
         shared = {"id": "s1", "record_ids": {"intervals": "i1", "garmin": "1"}}
         intervals_only = {"id": "s2", "record_ids": {"intervals": "i2"}}
+        # Only an Intervals.icu record makes the Garmin copy a skipped duplicate.
+        with_wahoo = {"id": "s3", "record_ids": {"wahoo": "w1", "garmin": "3"}}
         for summaries, expected in (
             ([], (0, 0)),
             ([alone, intervals_only], (1, 0)),
             ([shared], (0, 1)),
+            ([with_wahoo], (1, 0)),
         ):
             with self.subTest(summaries=len(summaries)):
                 service, _ = self._service(snapshot=snapshot, summaries=summaries)

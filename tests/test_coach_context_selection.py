@@ -192,7 +192,6 @@ class CoachContextSelectionTests(unittest.TestCase):
             Mock(),
             Mock(),
             Mock(),
-            Mock(),
             lambda: library,
         )
         section = service._selected_sections(
@@ -222,7 +221,7 @@ class CoachContextSelectionTests(unittest.TestCase):
             {"id": f"p{index}", "name": f"Produkt {index}"} for index in range(81)
         ]
         service = CoachStructuredContextService(
-            Mock(), Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
+            Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
         )
         section = service._selected_sections(
             frozenset({"nutrition_products"}), {}, [], {}, []
@@ -244,7 +243,7 @@ class CoachContextSelectionTests(unittest.TestCase):
             for index in range(80)
         ]
         service = CoachStructuredContextService(
-            Mock(), Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
+            Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
         )
         section = service._selected_sections(
             frozenset({"nutrition_products"}), {}, [], {}, []

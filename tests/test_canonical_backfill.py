@@ -822,21 +822,27 @@ class ReprojectionTests(BackfillFixture):
             rows,
         )
 
+    def garmin_activity_rows(self) -> list[dict[str, Any]]:
+        return self.rows(
+            "SELECT details, load, mapper_version FROM activity_records "
+            "WHERE provider = ?",
+            (GARMIN,),
+        )
+
     def test_garmin_version_eight_reprojects_the_training_effect_label(self) -> None:
-        # #1416: rows mapped by version 7 carry no training-effect label. The
-        # stored raw row already holds the merged dedicated training-load values,
-        # so the version bump re-projects the label from it.
-        activity = {
-            **garmin_activity(1),
-            "trainingEffectLabel": "tempo",
-            "activityTrainingLoad": 55.0,
-        }
+        # #1416: a raw activity row stored before version 8 carries neither the
+        # label nor the load; both live only in the stored dedicated row, which
+        # the re-projection merges in.
         self.set_garmin(
             self.manager,
             garmin_payload(
-                activities=[activity],
+                activities=[garmin_activity(1)],
                 training_load_activities=[
-                    {"activityId": 1, "trainingEffectLabel": "VO2_MAX"}
+                    {
+                        "activityId": 1,
+                        "trainingEffectLabel": "VO2_MAX",
+                        "activityTrainingLoad": 80.0,
+                    }
                 ],
             ),
         )
@@ -844,10 +850,10 @@ class ReprojectionTests(BackfillFixture):
         with patch.dict(canonical_plans._MAPPER_VERSIONS, {(GARMIN, ACTIVITY_KIND): 7}):
             self.run_to_completion(backfill)
         with self.manager.unit_of_work() as db:
-            # What version 7 stored: the details without the label.
+            # What version 7 stored: the details without the label, no load.
             db.execute(
-                "UPDATE activity_records SET details = '{}', mapper_version = 7 "
-                "WHERE provider = ?",
+                "UPDATE activity_records SET details = '{}', load = NULL, "
+                "mapper_version = 7 WHERE provider = ?",
                 (GARMIN,),
             )
             db.execute(
@@ -855,24 +861,62 @@ class ReprojectionTests(BackfillFixture):
                 "WHERE provider = ? AND record_kind = ?",
                 (GARMIN, ACTIVITY_KIND),
             )
+        raw = self.rows(
+            "SELECT payload FROM provider_records WHERE provider = ? "
+            "AND record_kind = ?",
+            (GARMIN, ACTIVITY_KIND),
+        )
+        self.assertNotIn("trainingEffectLabel", json.loads(raw[0]["payload"]))
 
         self.run_to_completion(backfill)
 
-        rows = self.rows(
-            "SELECT details, load, mapper_version FROM activity_records "
-            "WHERE provider = ?",
-            (GARMIN,),
-        )
+        rows = self.garmin_activity_rows()
         self.assertEqual(len(rows), 1)
         self.assertEqual(
             json.loads(rows[0]["details"])["training_effect_label"], "VO2_MAX"
         )
-        self.assertEqual(rows[0]["load"], 55.0)
+        self.assertEqual(rows[0]["load"], 80.0)
         self.assertEqual(
             rows[0]["mapper_version"],
             canonical_plans._MAPPER_VERSIONS[(GARMIN, ACTIVITY_KIND)],
         )
         self.assertEqual(self.summary(backfill)["providers"][GARMIN]["reprojected"], 1)
+
+    def test_an_activities_only_sync_keeps_the_merged_training_load(self) -> None:
+        # #1416: a later sync without the dedicated rows re-maps the activity
+        # with the stored dedicated row, so label and load do not revert.
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                activities=[{**garmin_activity(1), "trainingEffectLabel": "TEMPO"}],
+                training_load_activities=[
+                    {
+                        "activityId": 1,
+                        "trainingEffectLabel": "VO2_MAX",
+                        "activityTrainingLoad": 80.0,
+                    }
+                ],
+            ),
+        )
+        self.set_garmin(
+            self.manager,
+            garmin_payload(
+                activities=[
+                    {
+                        **garmin_activity(1),
+                        "trainingEffectLabel": "TEMPO",
+                        "distance": 21000.0,
+                    }
+                ]
+            ),
+        )
+
+        rows = self.garmin_activity_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            json.loads(rows[0]["details"])["training_effect_label"], "VO2_MAX"
+        )
+        self.assertEqual(rows[0]["load"], 80.0)
 
     def test_higher_version_reprojects_only_that_record_kind(self) -> None:
         backfill = self.populate()
@@ -1359,8 +1403,10 @@ class ReprojectionTests(BackfillFixture):
         """Patch the plan the backfill uses; the real mapper runs, then ``transform`` edits it."""
         real = canonical_plans.reprojection_plan
 
-        def plan(raw_row: Mapping[str, Any], *, zone: Any) -> Any:
-            result = real(raw_row, zone=zone)
+        def plan(
+            raw_row: Mapping[str, Any], *, zone: Any, training_loads: Any = None
+        ) -> Any:
+            result = real(raw_row, zone=zone, training_loads=training_loads)
             return None if result is None else transform(raw_row, result)
 
         return patch(

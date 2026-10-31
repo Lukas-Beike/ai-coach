@@ -6,7 +6,6 @@ refactor. Deliberately pinned quirks are marked with "Quirk:" comments.
 
 import math
 import unittest
-from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -16,12 +15,12 @@ from performance_day_support import (
     garmin_body_from_payload,
     garmin_metrics_from_payload,
     intervals_activity_summaries,
+    snapshot_coverage_time,
 )
 
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance import body as _body
 from backend.performance import chart_history as _chart_history
-from backend.performance.canonical_current import NO_CURRENT_INPUTS
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.wellness_days import wellness_day_values
@@ -124,13 +123,6 @@ def body_history(
     )
 
 
-def _synced_at(snapshot: Any) -> datetime | None:
-    try:
-        return datetime.fromisoformat(str((snapshot or {}).get("synced_at")))
-    except ValueError:
-        return None
-
-
 def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     if isinstance(snapshot, dict):
@@ -141,8 +133,8 @@ def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
         wellness_day=None,
         ctl=None,
         atl=None,
-        # The canonical Intervals.icu sync instant the snapshot's sync stored.
-        current=replace(NO_CURRENT_INPUTS, synced_at=_synced_at(snapshot)),
+        # The Intervals.icu coverage time the snapshot's sync stored.
+        intervals_synced_at=snapshot_coverage_time(snapshot),
         eftp_by_day=_eftp_by_day(snapshot),
         history_wellness_days=days_from_rows(rows),
         activities=_activity_summaries(snapshot),

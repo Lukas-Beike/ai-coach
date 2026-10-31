@@ -231,7 +231,6 @@ def _structured_service(
         garmin_payload, canonical=canonical
     )
     service = CoachStructuredContextService(
-        sync_state_repository,
         checkin_service,
         weather_service,
         activity_feedback_service,
@@ -252,6 +251,7 @@ def _structured_service(
 def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionService:
     payload_service = Mock()
     payload_service.sync_status.return_value = GarminSyncStatus.from_state(snapshot)
+    payload_service.sync_status_in.return_value = GarminSyncStatus.from_state(snapshot)
     battery_service = Mock()
     battery_service.current.return_value = None
     redactor = Mock()

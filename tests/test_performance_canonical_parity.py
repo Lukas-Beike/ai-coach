@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date
-from typing import Any
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from activity_row_support import SnapshotActivityRows
@@ -775,11 +775,9 @@ class CanonicalWiringTests(unittest.TestCase):
         )
         performance = Mock()
         performance.read_sources.return_value = (inputs, None)
-        repository = Mock()
-        service = _structured_service(repository, performance)
+        service = _structured_service(performance)
         service.build(selection=_performance_selection())
         performance.read_sources.assert_called_once_with()
-        repository.latest_snapshot.assert_not_called()
         performance.current_performance.assert_called_once_with(inputs)
 
     def test_public_state_prelude_reads_load_inside_its_snapshot_unit(self) -> None:
@@ -853,12 +851,8 @@ def _performance_selection() -> Mock:
     return selection
 
 
-def _structured_service(
-    repository: Mock, performance: Mock
-) -> CoachStructuredContextService:
-    return CoachStructuredContextService(
-        repository, Mock(), Mock(), Mock(), Mock(), performance
-    )
+def _structured_service(performance: Mock) -> CoachStructuredContextService:
+    return CoachStructuredContextService(Mock(), Mock(), Mock(), Mock(), performance)
 
 
 def _prelude(
@@ -968,9 +962,16 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
         self.write(lambda db: store_garmin(self, db, self.garmin))
         source = self._source()
 
-        public = _service(self.intervals, source, self.garmin).performance_state()
+        service = _service(self.intervals, source, self.garmin)
+        public = service.performance_state()
         coach = self._coach_performance(source)
 
+        # While values are withheld the Garmin card gets the empty sync status:
+        # no freshness, source or pagination, only the connection status.
+        projection = cast(Mock, service._garmin_projection_service)
+        self.assertEqual(
+            projection.public_state.call_args.args[0], NO_GARMIN_SYNC_STATUS
+        )
         for performance in (public["performance"], coach):
             self.assertFalse(performance["available"])
             self.assertEqual(performance["reason"], "canonical_pending")
@@ -1002,7 +1003,13 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
             self.assertEqual(focus["zones"], [])
 
         populate(self)
-        served = _service(self.intervals, source, self.garmin).performance_state()
+        served_service = _service(self.intervals, source, self.garmin)
+        served = served_service.performance_state()
+        served_projection = cast(Mock, served_service._garmin_projection_service)
+        self.assertEqual(
+            served_projection.public_state.call_args.args[0],
+            GarminSyncStatus.from_state(self.garmin),
+        )
         self.assertTrue(served["performance"]["available"])
         self.assertNotIn("reason", served["performance"])
         self.assertTrue(self._coach_performance(source)["available"])

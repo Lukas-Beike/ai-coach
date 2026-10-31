@@ -286,7 +286,9 @@ class GarminPayloadService:
 
     def sync_status_in(self, db: Any) -> GarminSyncStatus:
         """Read ``sync_status`` inside the caller's transaction."""
-        return GarminSyncStatus.from_state(garmin_store.read_state(db))
+        return GarminSyncStatus.from_state(
+            garmin_store.read_state(db), stored_sections=garmin_store.section_names(db)
+        )
 
     def automatic_sync_days(self, minimum_days: int) -> int:
         return self.automatic_sync_window(minimum_days)[0]

@@ -204,7 +204,6 @@ class CoachZoneTests(unittest.TestCase):
             Mock(),
             Mock(),
             Mock(),
-            Mock(),
             performance,
             zone_configurations=provider_configurations,
             today=lambda: date(2026, 10, 12),

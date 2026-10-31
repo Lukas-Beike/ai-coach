@@ -599,25 +599,32 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         )
         self.assertEqual(result["zones"][0]["seconds"], {"Z1": 600.0})
 
-    def test_garmin_coverage_uses_local_start_time_and_ignores_timezone(self) -> None:
-        # Quirk: Garmin rows only carry a local timestamp, so the timezone argument
-        # never moves them to another day.
+    def test_categories_and_zones_date_a_session_in_the_profile_zone(self) -> None:
+        # Canonical reads (#1416): categories and zones date a session in the same
+        # profile zone, so a near-midnight session moves day for both.
         garmin = {
             "activities": [
-                _garmin("a", "TEMPO", 40, start="2026-05-04T23:30:00"),
-                _garmin("b", "TEMPO", 40, start="2026-05-05T00:30:00"),
+                {
+                    **_garmin("a", "TEMPO", 40, start="2026-05-04T23:30:00"),
+                    "activityType": {"typeKey": "running"},
+                }
             ]
         }
-        for timezone in ("UTC", "Europe/Berlin"):
+        summaries = [
+            {**summary, "heart_rate_zone_times": _hr(600)}
+            for summary in garmin_activity_summaries(garmin)
+        ]
+        for timezone, sessions in (("UTC", 1), ("Europe/Berlin", 0)):
             with self.subTest(timezone=timezone):
                 result = training_focus(
-                    garmin_sync_status(garmin),
-                    TODAY,
-                    timezone,
-                    activities=garmin_activity_summaries(garmin),
+                    garmin_sync_status(garmin), TODAY, timezone, activities=summaries
                 )
-                self.assertEqual(result["coverage"]["known_sessions"], 1)
-                self.assertEqual(result["coverage"]["observed_end"], "2026-05-04")
+                self.assertEqual(result["coverage"]["known_sessions"], sessions)
+                self.assertEqual(len(result["zones"]), sessions)
+                self.assertEqual(
+                    result["coverage"]["observed_end"],
+                    "2026-05-04" if sessions else None,
+                )
 
     def test_activity_id_zero_is_a_valid_identity(self) -> None:
         # Canonical reads (#1416): the mapper keeps the activity id 0, so the

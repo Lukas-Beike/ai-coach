@@ -190,7 +190,7 @@ def analysis_history(
         # PublicPerformanceStateService exposes this as performance.history.body;
         # the UI can render it in the separate Body tab without another request.
         "body": body.body_history(
-            _intervals_synced_at(canonical),
+            canonical.intervals_synced_at,
             garmin,
             today,
             canonical=canonical.body,
@@ -236,11 +236,6 @@ _CANONICAL_PROVIDER_METRICS: Final = {
 
 # Cached chart states that describe the provider fetch, not the snapshot's points.
 _FETCH_OUTCOMES: Final = frozenset({"stale", "failed", "unsupported"})
-
-
-def _intervals_synced_at(canonical: CanonicalPerformanceInputs) -> str | None:
-    synced_at = canonical.current.synced_at
-    return None if synced_at is None else synced_at.isoformat()
 
 
 def _canonical_provider_metrics(

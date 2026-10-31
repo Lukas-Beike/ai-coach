@@ -64,15 +64,13 @@ def training_focus(
         key: {"load": 0.0, "sessions": 0}
         for key in ("low_aerobic", "high_aerobic", "anaerobic")
     }
-    has_dedicated_loads = _TRAINING_LOAD_SECTION in garmin.populated_sections
+    has_dedicated_loads = _TRAINING_LOAD_SECTION in garmin.stored_sections
     activity_source = (
         f"{_TRAINING_LOAD_SECTION}+{_ACTIVITIES_SECTION}"
         if has_dedicated_loads
         else _ACTIVITIES_SECTION
     )
-    known, unknown, observed_dates = _category_coverage(
-        activities, start, end, categories
-    )
+    known, unknown, observed_dates = _category_coverage(in_window, timezone, categories)
     freshness = performance_freshness.garmin_source_freshness(garmin, today)
     activity_freshness = {
         key: freshness.get(key) or dict(_UNKNOWN_FRESHNESS)
@@ -101,29 +99,22 @@ def training_focus(
 
 
 def _category_coverage(
-    summaries: Sequence[Any],
-    start: str,
-    end: str,
+    summaries: Sequence[Mapping[str, Any]],
+    timezone: str,
     categories: dict[str, dict[str, float | int]],
 ) -> tuple[int, int, list[str]]:
     """Add each Garmin session's load to its category; return the coverage.
 
-    A session is dated by its athlete-local start date, as Garmin's own local
-    start time dated it.
+    ``summaries`` are the sessions of the window, dated in the profile zone as
+    for the zone distribution.
     """
     known = 0
     unknown = 0
     observed_dates = []
     for summary in summaries:
-        if not isinstance(summary, Mapping):
-            continue
         record_ids = summary.get("record_ids")
-        day = summary_local_date(summary)
-        if (
-            not isinstance(record_ids, Mapping)
-            or _CATEGORY_PROVIDER not in record_ids
-            or not start <= day <= end
-        ):
+        day = summary_local_date(summary, timezone)
+        if not isinstance(record_ids, Mapping) or _CATEGORY_PROVIDER not in record_ids:
             continue
         known += 1
         observed_dates.append(day)

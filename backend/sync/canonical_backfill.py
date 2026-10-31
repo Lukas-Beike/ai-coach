@@ -122,6 +122,7 @@ from backend.providers.snapshot_projection import (
     CANONICAL_SECTIONS_KEY,
     stored_retrieved_at,
 )
+from backend.sync.canonical_ingest import stored_training_loads
 
 STATE_KEY: Final = "canonical_backfill_state"
 DEFAULT_BATCH_SIZE: Final = 200
@@ -460,11 +461,12 @@ class CanonicalBackfill:
                 continue
             current = state["reproject_current"]
             row, version = pending
+            loads = stored_training_loads(db)
             work = self._work_for(
                 f"row:{current['id']}",
                 current,
-                f"{version}:{zone}:{row['payload']}",
-                partial(_reprojection_work, row, zone),
+                f"{version}:{zone}:{row['payload']}:{_training_load_text(row, loads)}",
+                partial(_reprojection_work, row, zone, loads),
             )
             count, finished = _drain(
                 work,
@@ -774,8 +776,17 @@ def _ingest_work(
     )
 
 
-def _reprojection_work(row: Mapping[str, Any], zone: tzinfo) -> _Work:
-    plan = reprojection_plan(row, zone=zone)
+def _training_load_text(row: Mapping[str, Any], loads: Callable[[str], Any]) -> str:
+    """The stored dedicated training-load row a Garmin activity re-projects with."""
+    if row["provider"] != _GARMIN or row["record_kind"] != ACTIVITY_RECORD_KIND:
+        return ""
+    return json.dumps(loads(str(row["source_record_id"])), sort_keys=True)
+
+
+def _reprojection_work(
+    row: Mapping[str, Any], zone: tzinfo, loads: Callable[[str], Any] | None = None
+) -> _Work:
+    plan = reprojection_plan(row, zone=zone, training_loads=loads)
     if plan is None:
         return _Work()
     return _work_from_plan(plan, None, may_insert_activities=True, domain_items=False)

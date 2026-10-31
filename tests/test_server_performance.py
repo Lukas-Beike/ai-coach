@@ -43,7 +43,6 @@ from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import queue as sync_queue
 from backend.sync.garmin_activity_duplicates import (
-    filter_garmin_activities,
     garmin_activity_duplicates_intervals,
 )
 from backend.sync.intervals import IntervalsSnapshotReader
@@ -356,7 +355,12 @@ class ServerPerformanceTests(ServerTestCase):
                 "distance": 5000,
             },
         ]
-        kept, skipped = filter_garmin_activities(garmin, intervals)
+        kept = [
+            item
+            for item in garmin
+            if not garmin_activity_duplicates_intervals(item, intervals)
+        ]
+        skipped = len(garmin) - len(kept)
         self.assertEqual(skipped, 2)
         self.assertEqual(kept, [])
         metrics = _garmin_metrics(
@@ -1144,9 +1148,7 @@ class ServerPerformanceTests(ServerTestCase):
                 "distance": 10000,
             }
         ]
-        kept, skipped = filter_garmin_activities([garmin], intervals)
-        self.assertEqual(len(kept), 1)
-        self.assertEqual(skipped, 0)
+        self.assertFalse(garmin_activity_duplicates_intervals(garmin, intervals))
 
     def test_confirmed_duplicate_delete_removes_only_garmin_copy_and_keeps_the_snapshot(
         self,

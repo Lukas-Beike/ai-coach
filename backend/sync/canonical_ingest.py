@@ -12,19 +12,20 @@ replaced, so Garmin never deletes.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
 from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.local_time import local_date
-from backend.db import canonical_domain_store, canonical_store
+from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.canonical_domain_store import ReplaceResult
 from backend.db.canonical_store import WriteOutcome
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
+    GARMIN_TRAINING_LOAD_SECTION,
     INTERVALS_POWER_CURVE_KEY,
     IngestPlan,
     garmin_ingest_plan,
@@ -188,9 +189,18 @@ def ingest_garmin_payload(
     retrieved_at = garmin_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None:
         return CanonicalIngestCounters()
-    plan = garmin_ingest_plan(payload, zone=zone)
+    plan = garmin_ingest_plan(
+        payload, zone=zone, training_loads=stored_training_loads(db)
+    )
     return ingest_plan(
         db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=zone
+    )
+
+
+def stored_training_loads(db: Any) -> Callable[[str], Any]:
+    """Look up the stored dedicated Garmin training-load row of an activity id."""
+    return lambda activity_id: garmin_store.read_item(
+        db, GARMIN_TRAINING_LOAD_SECTION, activity_id
     )
 
 

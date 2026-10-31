@@ -1426,7 +1426,6 @@ WEATHER_ASSEMBLY = WeatherAssembly(
 COACH_CONTEXT = CoachContextAssembly(
     dependencies=CoachContextAssembly.Inputs(
         performance=CoachContextPerformanceSources(
-            sync_state_repository=sync_state_repository,
             weather_service=WEATHER_ASSEMBLY.service,
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             garmin_projection_service=GARMIN_ASSEMBLY.projection_service,

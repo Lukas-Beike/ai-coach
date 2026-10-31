@@ -25,7 +25,6 @@ _GARMIN_DUPLICATE_START_WINDOW = timedelta(minutes=30)
 
 __all__ = [
     "deduplicated_rows",
-    "filter_garmin_activities",
     "garmin_activity_duplicates_intervals",
     "intervals_cycling_activities_match",
 ]
@@ -140,57 +139,6 @@ def garmin_activity_duplicates_intervals(
         for item in intervals_activities
         if isinstance(item, dict)
     )
-
-
-def _window_bound(start: datetime, offset: timedelta) -> datetime:
-    """Shift a start by the window, clamped at the datetime range limits."""
-    try:
-        return start + offset
-    except OverflowError:
-        if offset > timedelta(0):
-            return datetime.max.replace(tzinfo=start.tzinfo)
-        return datetime.min.replace(tzinfo=start.tzinfo)
-
-
-def filter_garmin_activities(
-    activities: Any, intervals_activities: Any
-) -> tuple[list[dict[str, Any]], int]:
-    garmin_list = (
-        [item for item in activities if isinstance(item, dict)]
-        if isinstance(activities, list)
-        else []
-    )
-    intervals_list = (
-        [item for item in intervals_activities if isinstance(item, dict)]
-        if isinstance(intervals_activities, list)
-        else []
-    )
-    # Only recordings that start within the match window can be duplicates, so
-    # each Garmin activity is compared with that slice of the sorted starts.
-    indexed = sorted(
-        (start, index)
-        for index, item in enumerate(intervals_list)
-        if (start := _intervals_start(item)) is not None
-    )
-    starts = [start for start, _ in indexed]
-
-    def duplicates_intervals(item: dict[str, Any]) -> bool:
-        garmin_start = activity_datetime(activity_start_local(item))
-        if garmin_start is None:
-            return False
-        low = bisect_left(
-            starts, _window_bound(garmin_start, -_GARMIN_DUPLICATE_START_WINDOW)
-        )
-        high = bisect_right(
-            starts, _window_bound(garmin_start, _GARMIN_DUPLICATE_START_WINDOW)
-        )
-        return any(
-            _garmin_activity_matches(item, intervals_list[index])
-            for _, index in indexed[low:high]
-        )
-
-    filtered = [item for item in garmin_list if not duplicates_intervals(item)]
-    return filtered, len(garmin_list) - len(filtered)
 
 
 def intervals_cycling_activities_match(left: Any, right: Any) -> bool:

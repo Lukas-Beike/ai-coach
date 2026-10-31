@@ -9,12 +9,12 @@ cover the year before ``as_of``, extended to the current window's first day.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from datetime import date, timedelta
 from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary
-from backend.activities.sync_time import activities_synced_at
+from backend.activities.sync_time import activities_synced_at, intervals_synced_at
 from backend.canonical.domain_records import EMPTY_POWER_CURVE, PowerCurve
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
@@ -78,6 +78,10 @@ class CanonicalPerformanceInputs:
     duration; it is empty when none is stored or it was not read (only the
     analysis view asks for it).
 
+    ``intervals_synced_at`` is the newest Intervals.icu fetch time of the
+    canonical provider coverage (ISO text), None without an Intervals.icu sync; it
+    is the one Intervals.icu sync time of the performance and Coach reads.
+
     ``pending`` is True while the canonical source serves nothing yet (the first
     backfill has not completed); every value is then empty.
     ``activities_need_refresh`` is True while stored compact Intervals.icu
@@ -103,6 +107,7 @@ class CanonicalPerformanceInputs:
     power_curve: PowerCurve = EMPTY_POWER_CURVE
     pending: bool = False
     activities_need_refresh: bool = False
+    intervals_synced_at: str | None = None
 
 
 # The inputs of a consumer without a canonical source: every value is unknown.
@@ -155,8 +160,23 @@ def with_read_status(
 
     Before the first completed backfill the reads are empty and the inputs are
     ``PENDING_PERFORMANCE_INPUTS``; afterwards a compact-only activity gap is
-    carried as ``activities_need_refresh``.
+    carried as ``activities_need_refresh``. With a coverage reader the inputs
+    carry the Intervals.icu sync time of the coverage (``intervals_synced_at``).
     """
+    marked = _read_state(source, db, inputs)
+    if marked is None or marked.pending or source.coverage is None:
+        return marked
+    synced = intervals_synced_at(source.coverage(), db)
+    if synced is None:
+        return marked
+    return replace(marked, intervals_synced_at=synced)
+
+
+def _read_state(
+    source: CanonicalPerformanceSource,
+    db: Any,
+    inputs: CanonicalPerformanceInputs | None,
+) -> CanonicalPerformanceInputs | None:
     if source.serving is None:
         return inputs
     status = source.serving()

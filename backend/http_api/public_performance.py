@@ -109,11 +109,10 @@ class PublicPerformanceStateService:
         """Project canonical values; ``snapshot`` supplies only the power curve."""
         profile = self._profile_service.get()
         inputs = canonical or EMPTY_PERFORMANCE_INPUTS
-        status = garmin
         if inputs.pending:
             # Nothing is served before the first completed backfill: no history,
-            # focus or Garmin values and no power curve. The Garmin connection
-            # status stays.
+            # focus or Garmin values, no power curve and no Garmin freshness,
+            # source or pagination. Only the Garmin connection status stays.
             snapshot, garmin = {}, NO_GARMIN_SYNC_STATUS
         performance = performance_context.current_performance_context(
             garmin, profile, today, canonical=inputs
@@ -137,10 +136,10 @@ class PublicPerformanceStateService:
         return {
             "performance": performance,
             ProviderId.GARMIN.value: (
-                self._garmin_projection_service.public_state(status)
+                self._garmin_projection_service.public_state(garmin)
                 if observations is None
                 else self._garmin_projection_service.public_state(
-                    status, observations=observations
+                    garmin, observations=observations
                 )
             ),
         }

@@ -158,6 +158,15 @@ def snapshot_activity_summaries(
     return intervals_activity_summaries(snapshot.get("recent_activities") or [])
 
 
+def snapshot_coverage_time(snapshot: Any) -> str | None:
+    """The Intervals.icu coverage time a sync of the snapshot stores, if any."""
+    try:
+        synced = datetime.fromisoformat(str((snapshot or {}).get("synced_at") or ""))
+    except ValueError:
+        return None
+    return synced.isoformat() if synced.tzinfo is not None else None
+
+
 def snapshot_retrieved_at(
     snapshot: dict[str, Any], default: datetime = SYNCED_AT
 ) -> datetime:
@@ -179,12 +188,16 @@ def canonical_from_snapshot(snapshot: dict[str, Any], as_of: date):
         def activity_summaries(self, _db, *, start=None, end=None, limit=None):
             return snapshot_activity_summaries(snapshot)
 
-    return read_performance_inputs(
+    inputs = read_performance_inputs(
         StubReader(tuple(mapped.records)),
         object(),
         activity_reader=ActivityReader(),
         as_of=as_of,
     )
+    if inputs is None:
+        return None
+    # The sync stores its fetch time with the canonical coverage (#1416).
+    return replace(inputs, intervals_synced_at=snapshot_coverage_time(snapshot))
 
 
 def garmin_metrics_from_payload(
@@ -256,16 +269,5 @@ def garmin_activity_summaries(
 
 
 def garmin_sync_status(payload: dict[str, Any]) -> GarminSyncStatus:
-    """The sync status a sync stores for a synthetic payload.
-
-    A sync records how many rows each list section returned; a payload without
-    that bookkeeping gets it from its own sections.
-    """
-    provider_sync = dict(payload.get("provider_sync") or {})
-    pagination = dict(provider_sync.get("pagination") or {})
-    for key, value in payload.items():
-        if isinstance(value, list) and key not in pagination:
-            pagination[key] = {"records": len(value)}
-    return GarminSyncStatus.from_state(
-        {**payload, "provider_sync": {**provider_sync, "pagination": pagination}}
-    )
+    """The sync status of a synthetic payload: its sections count as stored."""
+    return GarminSyncStatus.from_state(payload)

@@ -48,7 +48,6 @@ from backend.sync import queue as sync_queue
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.authority import PlanningAuthorityService
 from backend.sync.garmin_activity_duplicates import (
-    filter_garmin_activities,
     garmin_activity_duplicates_intervals,
     intervals_cycling_activities_match,
 )
@@ -1436,11 +1435,10 @@ class ServerSyncTests(ServerTestCase):
     def test_build_training_context_uses_compact_intervals_projection(self):
         today = server.ATHLETE_CLOCK.now().date()
         # Canonical reads (#1416): the preview's compacted flag follows the
-        # canonical Intervals.icu sync, here the stored athlete record.
+        # Intervals.icu sync of the canonical coverage, not a stored snapshot.
         snapshot = {
             "synced_at": "now",
-            "athlete": {"lthr": 171},
-            "raw_provider_data": {"athlete": {"lthr": 171}},
+            "athlete": {},
             "recent_activities": [
                 {
                     "id": f"ride-{index}",
@@ -2612,9 +2610,6 @@ class ServerSyncTests(ServerTestCase):
             }
         ]
         self.assertTrue(garmin_activity_duplicates_intervals(garmin, intervals))
-        kept, skipped = filter_garmin_activities([garmin], intervals)
-        self.assertEqual(kept, [])
-        self.assertEqual(skipped, 1)
 
     def test_intervals_duplicate_requires_matching_start_duration_and_distance(self):
         wahoo = {

@@ -3,6 +3,7 @@ from datetime import date
 
 from performance_day_support import garmin_activity_summaries, garmin_sync_status
 
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.training_focus import training_focus
 
 
@@ -209,3 +210,27 @@ class TrainingFocusTests(unittest.TestCase):
         self.assertEqual(result["classified_sessions"], 0)
         self.assertEqual(result["unclassified_sessions"], 0)
         self.assertEqual(result["categories"]["high_aerobic"]["sessions"], 0)
+
+    def test_dedicated_loads_follow_the_stored_rows_not_the_last_run(self):
+        # #1416: a last run that read no dedicated rows (a rest day or a skipped
+        # fetch) keeps the dedicated source while stored rows exist.
+        state = {
+            "provider_sync": {
+                "pagination": {"training_load_activities": {"records": 0}}
+            },
+            "source_freshness": {"training_load_activities": {"freshness": "current"}},
+        }
+        stored = GarminSyncStatus.from_state(
+            state, stored_sections=frozenset({"training_load_activities"})
+        )
+        none_stored = GarminSyncStatus.from_state(state, stored_sections=frozenset())
+        today = date(2026, 10, 2)
+
+        self.assertEqual(
+            training_focus(stored, today, activities=())["category_source_key"],
+            "training_load_activities+activities",
+        )
+        self.assertEqual(
+            training_focus(none_stored, today, activities=())["category_source_key"],
+            "activities",
+        )

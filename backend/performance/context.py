@@ -103,10 +103,10 @@ def _has_provider_values(canonical: CanonicalPerformanceInputs) -> bool:
 
 def _sync_status(canonical: CanonicalPerformanceInputs) -> dict[str, Any]:
     """The source label and the canonical Intervals.icu sync time, if any."""
-    synced_at = canonical.current.synced_at
+    synced_at = canonical.intervals_synced_at
     if synced_at is None:
         return {"source": STORED_PROVIDERS_SOURCE, "as_of": None}
-    return {"source": INTERVALS_SNAPSHOT_SOURCE, "as_of": synced_at.isoformat()}
+    return {"source": INTERVALS_SNAPSHOT_SOURCE, "as_of": synced_at}
 
 
 def _refresh_status(canonical: CanonicalPerformanceInputs) -> dict[str, str]:

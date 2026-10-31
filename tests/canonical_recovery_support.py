@@ -217,6 +217,7 @@ def recovery_only_inputs(
     from canonical_daily_health_support import mapped_health
     from performance_day_support import (
         garmin_metrics_from_payload,
+        snapshot_coverage_time,
         snapshot_retrieved_at,
     )
 
@@ -260,6 +261,8 @@ def recovery_only_inputs(
         activities=full.activities,
         # The stored wellness days mark the provider data as present (#1416).
         history_wellness_days=full.history_wellness_days,
+        # The sync stores its fetch time with the canonical coverage (#1416).
+        intervals_synced_at=snapshot_coverage_time(snapshot),
     )
 
 

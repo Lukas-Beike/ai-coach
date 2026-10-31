@@ -50,15 +50,20 @@ class GarminCanonicalSources:
 
 
 def _garmin_sessions(summaries: tuple[ActivitySummary, ...]) -> tuple[int, int]:
-    """Count the sessions with a Garmin record, and those another provider shares."""
+    """Count the Garmin sessions: kept ones, and those an Intervals.icu record shares.
+
+    As before the canonical sessions, a Garmin activity is skipped as a duplicate
+    only of an Intervals.icu recording; a Garmin copy beside Wahoo alone stays.
+    """
     garmin = ProviderId.GARMIN.value
+    intervals = ProviderId.INTERVALS.value
     sessions = [
         record_ids
         for summary in summaries
         if isinstance(record_ids := summary.get("record_ids"), dict)
         and garmin in record_ids
     ]
-    shared = sum(1 for record_ids in sessions if len(record_ids) > 1)
+    shared = sum(1 for record_ids in sessions if intervals in record_ids)
     return len(sessions) - shared, shared
 
 
@@ -91,11 +96,6 @@ class GarminProjectionService:
         self._key_value_repository = key_value_repository
         self._redactor = redactor
         self._local_now = local_now
-
-    def _observation_state(self) -> GarminCanonicalState:
-        """Read the Garmin observations."""
-        with self._database_manager.reader() as db:
-            return read_garmin_state(self._canonical.observations(), db)
 
     def _canonical_read(
         self, observations: ObservationReader | None = None
@@ -205,15 +205,21 @@ class GarminProjectionService:
         }
 
     def coach_context(self, include_performance: bool = False) -> dict[str, Any]:
-        """The latest canonical Garmin recovery records and the sync status."""
-        status = self._garmin_payload_service.sync_status()
+        """The latest canonical Garmin recovery records and the sync status.
+
+        The status, the recovery records and the performance values are read in
+        one read transaction, so a sync committing in between cannot mix them.
+        """
         today = self._local_now().date()
         with self._database_manager.reader() as db:
+            status = self._garmin_payload_service.sync_status_in(db)
+            observations = self._canonical.observations()
             recovery = read_garmin_recovery(
-                self._canonical.observations(),
+                observations,
                 db,
                 start=today - timedelta(days=COACH_RECOVERY_DAYS - 1),
             )
+            state = read_garmin_state(observations, db) if include_performance else None
         context = {
             "synced_at": status.synced_at,
             "start": status.start,
@@ -232,8 +238,7 @@ class GarminProjectionService:
                 if error
             ][:20],
         }
-        if include_performance:
-            state = self._observation_state()
+        if state is not None:
             context["performance"] = (
                 performance_garmin_metrics.garmin_performance_context(
                     status, today, state.metrics

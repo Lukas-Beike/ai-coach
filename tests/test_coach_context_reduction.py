@@ -249,7 +249,6 @@ class CoachContextReductionTests(unittest.TestCase):
         structured_service.build.return_value = structured
         library.list.return_value = []
         service = CoachTrainingContextService(
-            repository,
             structured_service,
             library,
             local_planned_limit=50,
@@ -292,7 +291,6 @@ class CoachContextReductionTests(unittest.TestCase):
         library.list.return_value = []
         total_limit = 18_000
         service = CoachTrainingContextService(
-            repository,
             structured_service,
             library,
             local_planned_limit=50,

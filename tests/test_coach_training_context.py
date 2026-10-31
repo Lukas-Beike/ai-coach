@@ -23,7 +23,6 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         self.library = Mock()
         self.library.list.return_value = library or []
         return CoachTrainingContextService(
-            self.repository,
             self.structured,
             self.library,
             local_planned_limit=50,
@@ -105,8 +104,6 @@ class CoachTrainingContextServiceTests(unittest.TestCase):
         )
         self.assertEqual(result, expected)
         self.assertNotIn("private_description", result)
-        # The structured service reads the snapshot with its canonical inputs.
-        self.repository.latest_snapshot.assert_not_called()
         self.structured.build.assert_called_once_with()
 
     def test_external_text_cannot_reproduce_the_untrusted_data_fence(self):

@@ -76,7 +76,6 @@ def _coach_context(wellness: list[dict[str, Any]], checkins: CheckinService) -> 
         lambda: TODAY,
     )
     service = CoachStructuredContextService(
-        Mock(),
         checkins,
         Mock(),
         Mock(),

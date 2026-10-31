@@ -14,6 +14,7 @@ from datetime import date
 from typing import Any, Final
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.garmin_payload import SECTIONS
 
 # The read windows of the stored sync state: the latest run's and the day's first.
 _READ_WINDOW_KEYS: Final = ("read_window", "daily_read_window")
@@ -27,9 +28,13 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _record_count(page: Any) -> int:
-    count = page.get("records") if isinstance(page, Mapping) else None
-    return count if isinstance(count, int) and not isinstance(count, bool) else 0
+def _stored_sections(state: Mapping[str, Any]) -> frozenset[str]:
+    """The sections a payload-shaped mapping holds elements of."""
+    return frozenset(
+        str(key)
+        for key, value in state.items()
+        if key in SECTIONS and isinstance(value, (list, Mapping)) and value
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,8 +44,8 @@ class GarminSyncStatus:
     ``source_freshness`` maps a section to its freshness, ``observed_at`` and
     ``fetched_at``; ``read_windows`` holds the latest and the day's first read
     window (``{"start", "end"}``) by name; ``chart_status`` maps a provider chart
-    to its cached fetch outcome; ``populated_sections`` names the sections whose
-    last read returned records.
+    to its cached fetch outcome; ``stored_sections`` names the sections that
+    hold stored elements, whatever the last run fetched.
     """
 
     synced_at: str | None = None
@@ -51,14 +56,21 @@ class GarminSyncStatus:
     read_windows: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     pagination: Mapping[str, Any] = field(default_factory=dict)
     chart_status: Mapping[str, str] = field(default_factory=dict)
-    populated_sections: frozenset[str] = frozenset()
+    stored_sections: frozenset[str] = frozenset()
     errors: tuple[Any, ...] = ()
 
     @classmethod
-    def from_state(cls, state: Mapping[str, Any] | None) -> GarminSyncStatus:
+    def from_state(
+        cls,
+        state: Mapping[str, Any] | None,
+        *,
+        stored_sections: frozenset[str] | None = None,
+    ) -> GarminSyncStatus:
         """Extract the sync status from the stored Garmin state or a fetched payload.
 
-        Only status keys are read; sections and measured values are ignored.
+        Only status keys are read; measured values are ignored. ``stored_sections``
+        names the sections with stored elements; without it they are the sections a
+        payload-shaped ``state`` holds.
         """
         state = _mapping(state)
         provider_sync = _mapping(state.get("provider_sync"))
@@ -87,8 +99,8 @@ class GarminSyncStatus:
                 if isinstance(chart, Mapping)
                 and isinstance(status := chart.get("status"), str)
             },
-            populated_sections=frozenset(
-                str(key) for key, page in pagination.items() if _record_count(page) > 0
+            stored_sections=(
+                _stored_sections(state) if stored_sections is None else stored_sections
             ),
             errors=tuple(errors) if isinstance(errors, list) else (),
         )

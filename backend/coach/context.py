@@ -44,7 +44,6 @@ from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.library_service import WorkoutLibraryService
 from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 from backend.providers.source_labels import SourceView, provider_label
-from backend.sync.state import SyncStateRepository
 
 # INTENSITY and TRAINING_LOAD name the stored keys of planned units and library
 # entries; activities use summary keys.
@@ -543,7 +542,8 @@ class CoachPerformanceContextReader:
         """The Garmin recovery section; without an Intervals.icu sync also Garmin's
         performance values."""
         projection = self._garmin_projection_service.coach_context(
-            include_performance=canonical is None or canonical.current.synced_at is None
+            include_performance=canonical is None
+            or canonical.intervals_synced_at is None
         )
         return {
             "source": _section_source(ProviderId.GARMIN, projection.get("synced_at")),
@@ -598,7 +598,6 @@ class CoachStructuredContextService:
 
     def __init__(
         self,
-        sync_state_repository: Any,
         checkin_service: Any,
         weather_service: Any,
         activity_feedback_service: Any,
@@ -611,7 +610,6 @@ class CoachStructuredContextService:
         self._nutrition_meal_library = nutrition_meal_library
         self._zone_configurations = zone_configurations
         self._today = today
-        self._sync_state_repository = sync_state_repository
         self._checkin_service = checkin_service
         self._weather_service = weather_service
         self._activity_feedback_service = activity_feedback_service
@@ -1008,7 +1006,6 @@ class CoachTrainingContextService:
 
     def __init__(
         self,
-        sync_state_repository: SyncStateRepository,
         structured_context_service: CoachStructuredContextService,
         workout_library_service: WorkoutLibraryService,
         *,
@@ -1020,7 +1017,6 @@ class CoachTrainingContextService:
         activity_limit_per_sport: int,
         planned_event_limit: int,
     ) -> None:
-        self._sync_state_repository = sync_state_repository
         self._structured_context_service = structured_context_service
         self._workout_library_service = workout_library_service
         self._local_planned_limit = local_planned_limit
@@ -1201,7 +1197,6 @@ class CoachContextPreviewService:
 
     def __init__(
         self,
-        sync_state_repository: SyncStateRepository,
         coach_message_service: CoachMessageService,
         coach_training_context_service: CoachTrainingContextService,
         coach_structured_context_service: CoachStructuredContextService,
@@ -1210,7 +1205,6 @@ class CoachContextPreviewService:
         *,
         utc_now: Callable[[], datetime],
     ) -> None:
-        self._sync_state_repository = sync_state_repository
         self._coach_message_service = coach_message_service
         self._coach_training_context_service = coach_training_context_service
         self._coach_structured_context_service = coach_structured_context_service

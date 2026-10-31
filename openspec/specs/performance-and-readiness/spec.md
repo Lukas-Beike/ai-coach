@@ -100,7 +100,7 @@ The system SHALL summarize the supported 28-day training focus from recorded hea
 
 #### Scenario: Categories from canonical sessions
 - **WHEN** the training focus is composed
-- **THEN** the categories come only from the canonical activity summaries: each session with a Garmin Connect record in the window counts once, classified by its `training_effect_label` and `training_effect_load` (Garmin activity mapper version 8, with the dedicated training-load rows merged before the activity is stored); the Garmin sync status supplies only the category freshness and whether dedicated training-load rows were read, and the raw Garmin view is not read.
+- **THEN** the categories come only from the canonical activity summaries: each session with a Garmin Connect record in the window counts once, dated in the profile zone like the zone distribution and classified by its `training_effect_label` and `training_effect_load` (Garmin activity mapper version 8; at ingest and at re-projection the stored, accumulated dedicated training-load row of the activity is merged in, the same payload's rows winning, so the values do not depend on which sections a sync fetched); the Garmin sync status supplies only the category freshness and whether dedicated training-load rows are stored, and the raw Garmin view is not read.
 
 Evidence: `backend/performance/training_focus.py:training_focus`, `backend/performance/training_report.py:zone_distribution`; `tests/test_training_focus.py:test_recorded_hr_and_power_zones_remain_separate_and_bounded`, `tests/test_training_focus.py:test_activity_without_identity_is_not_classified_from_its_category`, `tests/test_training_report.py:test_sensor_zones_stay_separate_and_strength_is_not_classified_as_endurance`.
 
@@ -514,11 +514,11 @@ The system SHALL read every daily wellness value of the performance projection f
 
 #### Scenario: Availability follows canonical data, not the snapshot
 - **WHEN** canonical observations or activities exist without a stored Intervals.icu snapshot, for example a Garmin-only setup after the backfill completed
-- **THEN** the context is available with its full metrics. With a canonical Intervals.icu athlete sync, `as_of` is that sync instant in ISO form and the source keeps the label "Letzter gespeicherter Intervals.icu-Snapshot"; without one, `as_of` is null and the source names the stored provider data. The stored snapshot is never read for either.
+- **THEN** the context is available with its full metrics. With an Intervals.icu sync in the canonical provider coverage (also one that stored activities or wellness but no athlete record), `as_of` is its newest fetch time in ISO form, the one Intervals.icu sync time reports and the Coach use too, and the source keeps the label "Letzter gespeicherter Intervals.icu-Snapshot"; without one, `as_of` is null and the source names the stored provider data. The stored snapshot is never read for either.
 
 #### Scenario: Narrow Garmin sync status
 - **WHEN** the current context, the analysis history, the training focus, the body history, `/api/performance` or the Coach performance and recovery sections need Garmin freshness, fetch or sync times, read windows or a cached chart's fetch outcome
-- **THEN** they read one typed Garmin sync status built from the stored Garmin state (no section and no measured value), and never the Garmin view.
+- **THEN** they read one typed Garmin sync status built from the stored Garmin state and the names of the stored sections (no measured value), and never the Garmin view. While the canonical source is pending, the Garmin card gets the empty status, so it shows no freshness, source or pagination, only its connection status.
 
 #### Scenario: Pending state shows no partial values
 - **WHEN** the first canonical backfill has not completed and `/api/performance` is read

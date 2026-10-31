@@ -1500,7 +1500,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "_garmin_duplicate_measurements",
             "_garmin_activity_matches",
             "garmin_activity_duplicates_intervals",
-            "filter_garmin_activities",
             "intervals_cycling_activities_match",
         ),
     ),

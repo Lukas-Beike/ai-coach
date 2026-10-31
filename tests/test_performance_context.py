@@ -1,7 +1,7 @@
 import copy
 import unittest
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from canonical_recovery_support import (
     recovery_inputs,
@@ -10,11 +10,14 @@ from canonical_recovery_support import (
 )
 from performance_day_support import canonical_from_snapshot
 
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.coverage import ProviderCoverage
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
     PENDING_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
+    CanonicalPerformanceSource,
+    with_read_status,
 )
 from backend.performance.context import current_performance_context
 from backend.performance.freshness import GarminSyncStatus
@@ -375,24 +378,36 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertNotIn("status", result)
 
-    def test_sync_time_without_athlete_record_values_is_unknown(self):
+    def test_sync_time_without_athlete_record_values_comes_from_the_coverage(self):
+        # Canonical reads (#1416): a sync that stores wellness but no athlete
+        # record observation still names its sync: the Intervals.icu fetch time of
+        # the canonical coverage, the one sync time reports use too.
         today = date(2026, 9, 20)
-        # The athlete record has none of the sync-instant fields, so the canonical
-        # current inputs carry no sync time.
-        snapshot = {
-            "synced_at": "2026-09-20T08:00:00Z",
-            "athlete": {},
-            "recent_wellness": [{"id": today.isoformat(), "ctl": 40, "atl": 42}],
-        }
+        snapshot = {"recent_wellness": [{"id": today.isoformat(), "ctl": 40}]}
         canonical = canonical_from_snapshot(snapshot, today)
+        assert canonical is not None
         self.assertIsNone(canonical.current.synced_at)
+        coverage = _IntervalsCoverage(datetime(2026, 9, 20, 8, tzinfo=UTC))
+        source = CanonicalPerformanceSource(
+            database_manager=lambda: None,
+            observation_reader=lambda: None,  # type: ignore[arg-type, return-value]
+            coverage=lambda: coverage,
+        )
 
-        # Canonical reads (#1416): the stored snapshot no longer names the sync
-        # time, so without a canonical sync instant the source is the stored data.
+        served = with_read_status(source, None, canonical)
+        assert served is not None
+        result = current_performance_context(
+            GarminSyncStatus(), {}, today, canonical=served
+        )
         without = current_performance_context(
             GarminSyncStatus(), {}, today, canonical=canonical
         )
 
+        self.assertEqual(served.intervals_synced_at, "2026-09-20T08:00:00+00:00")
+        self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
+        self.assertEqual(
+            result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
+        )
         self.assertTrue(without["available"])
         self.assertIsNone(without["as_of"])
         self.assertEqual(without["source"], "Gespeicherte Provider-Daten")
@@ -460,3 +475,26 @@ class PerformanceContextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _IntervalsCoverage:
+    """Canonical coverage with one Intervals.icu fetch time and no metric windows."""
+
+    def __init__(self, retrieved_at: datetime) -> None:
+        self._retrieved_at = retrieved_at
+
+    def coverage(self, db):
+        return (
+            ProviderCoverage(
+                provider=ProviderId.INTERVALS,
+                retrieved_at=self._retrieved_at,
+                activity_count=0,
+                observation_count=1,
+                issue_counts={},
+                first_observed_on=None,
+                last_observed_on=None,
+            ),
+        )
+
+    def metric_windows(self, db):
+        return ()

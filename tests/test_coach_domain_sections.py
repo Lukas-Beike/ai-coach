@@ -2,7 +2,7 @@
 
 import unittest
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date
 from unittest.mock import Mock, patch
 
 from backend.canonical.vocabulary import ProviderId
@@ -147,14 +147,11 @@ class CoachDomainSectionSourceTests(unittest.TestCase):
         reader = CoachPerformanceContextReader(
             Mock(), Mock(), projection_service, lambda: TODAY
         )
-        # Canonical reads (#1416): a canonical Intervals.icu sync, not a stored
-        # snapshot, turns the Garmin performance fallback off.
-        synced = replace(
-            EMPTY_PERFORMANCE_INPUTS,
-            current=replace(
-                NO_CURRENT_INPUTS, synced_at=datetime.fromisoformat(SYNCED_AT)
-            ),
-        )
+        # Canonical reads (#1416): the coverage's Intervals.icu sync time, here of
+        # a sync without athlete-record observations, turns the Garmin
+        # performance fallback off; a stored snapshot does not.
+        synced = replace(EMPTY_PERFORMANCE_INPUTS, intervals_synced_at=SYNCED_AT)
+        self.assertEqual(synced.current, NO_CURRENT_INPUTS)
         result = reader.recovery(synced)
         projection_service.coach_context.assert_called_once_with(
             include_performance=False

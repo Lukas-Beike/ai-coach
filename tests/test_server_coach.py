@@ -759,14 +759,14 @@ class ServerCoachTests(ServerTestCase):
         # Saving writes the canonical rows too; Garmin values are read only from
         # them (#1415), so the context reads the stored snapshot as production does.
         save_garmin(payload)
-        # Canonical reads (#1416): a canonical Intervals.icu sync, here the
-        # athlete record, turns the Garmin performance fallback off.
+        # Canonical reads (#1416): the Intervals.icu sync in the canonical
+        # coverage, here one without athlete-record values, turns the Garmin
+        # performance fallback off.
         store_canonical_snapshot(
             server,
             {
                 "synced_at": "2026-10-11T07:00:00+00:00",
-                "athlete": {"lthr": 171},
-                "raw_provider_data": {"athlete": {"lthr": 171}, "activities": []},
+                "athlete": {},
                 "recent_activities": [],
                 "recent_wellness": [],
                 "upcoming_calendar": [],
