@@ -125,6 +125,18 @@ def _canonical_eftp_value(canonical: CanonicalCurrentInputs) -> float | None:
     return None
 
 
+def _activity_max_hr(activity: Any) -> tuple[float, ProviderId] | None:
+    """Return a summary's plausible max HR and the provider that reported it."""
+    sources = activity.get("sources") if isinstance(activity, dict) else None
+    if not isinstance(sources, dict):
+        return None
+    provider = _ACTIVITY_LABEL_PROVIDERS.get(str(sources.get("max_hr")))
+    value = as_number(activity.get("max_hr"))
+    if provider is None or value is None or not 80 <= float(value) <= 260:
+        return None
+    return float(value), provider
+
+
 def _intervals_max_hr_metric(
     category: str,
     sport: Sport,
@@ -135,19 +147,12 @@ def _intervals_max_hr_metric(
 
     An activity value keeps the provider its summary names for ``max_hr``.
     """
-    activity_values: list[tuple[float, ProviderId]] = []
-    for activity in activities:
-        sources = activity.get("sources") if isinstance(activity, dict) else None
-        provider = (
-            _ACTIVITY_LABEL_PROVIDERS.get(str(sources.get("max_hr")))
-            if isinstance(sources, dict)
-            else None
-        )
-        if activity_kind(activity) != category or provider is None:
-            continue
-        value = as_number(activity.get("max_hr"))
-        if value is not None and 80 <= float(value) <= 260:
-            activity_values.append((float(value), provider))
+    activity_values = [
+        found
+        for activity in activities
+        if activity_kind(activity) == category
+        and (found := _activity_max_hr(activity)) is not None
+    ]
     setting = _observation_number(canonical.athlete_value(MetricKind.MAX_HR, sport))
     athlete = _observation_number(canonical.athlete_value(MetricKind.MAX_HR))
     best = max(activity_values, default=None, key=lambda item: item[0])

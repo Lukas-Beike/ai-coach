@@ -83,20 +83,14 @@ def activity_summary(
         "environment": primary.environment.value,
         "recorded_by": primary.provenance.recorded_by.value,
     }
-    sources: dict[str, str] = {}
     name = _first(measured, "name")
     if name is not None:
         summary["name"] = name[1]
     if primary.device_type is not None:
         summary["device_type"] = primary.device_type.value
-    for ordered, fields in ((measured, _MEASURED), (derived, _DERIVED)):
-        for key, field in fields:
-            found = _first(ordered, field)
-            if found is None:
-                continue
-            record, value = found
-            summary[key] = _zones(value) if key in _ZONE_KEYS else value
-            sources[key] = _label(record)
+    sources = _values(summary, measured, _MEASURED) | _values(
+        summary, derived, _DERIVED
+    )
     load = next(
         (
             record
@@ -111,13 +105,35 @@ def activity_summary(
         sources["training_load"] = _label(load)
     summary["source"] = _label(primary)
     summary["sources"] = sources
+    summary["record_ids"] = _record_ids(measured)
+    return summary  # type: ignore[return-value]
+
+
+def _values(
+    summary: dict[str, Any],
+    ordered: Sequence[ActivityRecord],
+    fields: tuple[tuple[str, str], ...],
+) -> dict[str, str]:
+    """Set each field's first value on ``summary``; return each value's source."""
+    sources: dict[str, str] = {}
+    for key, field in fields:
+        found = _first(ordered, field)
+        if found is None:
+            continue
+        record, value = found
+        summary[key] = _zones(value) if key in _ZONE_KEYS else value
+        sources[key] = _label(record)
+    return sources
+
+
+def _record_ids(measured: Sequence[ActivityRecord]) -> dict[str, str]:
+    """Map each provider of the session to its first record's activity id."""
     record_ids: dict[str, str] = {}
     for record in measured:
         provider = record.provenance.provider
         if provider is not None:
             record_ids.setdefault(provider.value, record.activity_id)
-    summary["record_ids"] = record_ids
-    return summary  # type: ignore[return-value]
+    return record_ids
 
 
 def activity_summaries(
