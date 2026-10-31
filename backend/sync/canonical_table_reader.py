@@ -162,7 +162,19 @@ class CanonicalTableReader(
             bound = canonical_store.newest_sessions_start(db, newest)
             if bound is not None:
                 earliest = date.fromisoformat(bound) - timedelta(days=1)
-                start = earliest if start is None else max(start, earliest)
+                bounded = self._sessions(
+                    db,
+                    start=earliest if start is None else max(start, earliest),
+                    end=end,
+                )
+                # A session whose records were all skipped would leave too few.
+                if len(bounded) >= newest:
+                    return bounded
+        return self._sessions(db, start=start, end=end)
+
+    def _sessions(
+        self, db: Any, *, start: date | None, end: date | None
+    ) -> tuple[SessionRecords, ...]:
         grouped: dict[str, list[ActivityRecord]] = {}
         for session_id, row in canonical_store.active_session_activity_rows(
             db, start=_iso(start), end=_iso(end)

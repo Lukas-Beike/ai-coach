@@ -197,3 +197,27 @@ class ActivitySessionReadTests(CanonicalReadFixture):
                     everything[:limit],
                     self.read(selector.activity_summaries, limit=limit),
                 )
+
+    def test_a_limit_is_filled_when_newer_sessions_have_no_active_record(
+        self,
+    ) -> None:
+        populate(self)
+        newest = self.rows(
+            "SELECT provider_activity_id FROM activity_records "
+            "ORDER BY started_at DESC LIMIT 2"
+        )
+        for row in newest:
+            self.execute(
+                "UPDATE activity_records SET state = 'invalid' "
+                "WHERE provider_activity_id = ?",
+                (row["provider_activity_id"],),
+            )
+        selector = make_selector(self)
+        everything = self.read(selector.activity_summaries)
+
+        for limit in (1, 2, 3):
+            with self.subTest(limit=limit):
+                self.assertEqual(
+                    everything[:limit],
+                    self.read(selector.activity_summaries, limit=limit),
+                )

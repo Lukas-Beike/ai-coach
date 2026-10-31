@@ -589,16 +589,19 @@ def active_session_activity_rows(
 def newest_sessions_start(db: Any, count: int) -> str | None:
     """Return the local date of the ``count``-th newest live session, or None.
 
-    Live sessions are active or hidden; merged aliases and deleted sessions do not
-    count. None means there are at most ``count`` live sessions.
+    Live sessions are active or hidden and own an active record; merged aliases
+    and deleted sessions do not count. None means there are at most ``count``.
     """
     rows = _fetch_all(
         db,
-        "SELECT local_date FROM activity_sessions WHERE state IN (?, ?) "
-        "AND local_date IS NOT NULL ORDER BY started_at DESC LIMIT 1 OFFSET ?",
+        "SELECT s.local_date FROM activity_sessions AS s WHERE s.state IN (?, ?) "
+        "AND s.local_date IS NOT NULL AND EXISTS (SELECT 1 FROM activity_records "
+        "AS r WHERE r.activity_id = s.activity_id AND r.state = ?) "
+        "ORDER BY s.started_at DESC LIMIT 1 OFFSET ?",
         (
             ActivitySessionState.ACTIVE.value,
             ActivitySessionState.HIDDEN.value,
+            ActivityRecordState.ACTIVE.value,
             max(count - 1, 0),
         ),
     )
