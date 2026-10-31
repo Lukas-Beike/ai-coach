@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.bootstrap_state import (
@@ -26,8 +26,8 @@ from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.season_inputs import SeasonSource
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.runtime.ports import (
+    ActivityRowAndSummaryReader,
     ActivityRowReader,
-    ActivitySummaryReader,
     CanonicalTableServing,
     ObservationReader,
     ProviderCoverageReader,
@@ -54,7 +54,7 @@ class PublicStateCoreInputs:
     canonical_serving: Callable[[], CanonicalTableServing] | None = None
     # When set, season preparation, load scenarios, the performance readers and
     # the state and plan endpoints read activity rows from it.
-    activity_summary_reader: Callable[[], ActivitySummaryReader] | None = None
+    activity_summary_reader: Callable[[], ActivityRowAndSummaryReader] | None = None
     # When set, the activities' sync time comes from the canonical provider coverage.
     coverage: Callable[[], ProviderCoverageReader] | None = None
 
@@ -221,7 +221,7 @@ class PublicStateAssembly:
         """The canonical read selector, which serves summaries and raw rows alike."""
         if self._activity_summary_reader is None:
             raise RuntimeError("The plan state needs an activity summary reader.")
-        return cast(ActivityRowReader, self._activity_summary_reader())
+        return self._activity_summary_reader()
 
     def activity_summary_source(self) -> ActivitySummarySource | None:
         if self._activity_summary_reader is None:

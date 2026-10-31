@@ -745,6 +745,9 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         def activity_summaries(self, _db, *, start=None, end=None, limit=None):
             return ()
 
+        def activity_rows(self, _db, *, start=None, end=None, limit=None):
+            return ()
+
     def _stored(self, day: date) -> ObservationStub:
         return ObservationStub((_wahoo_ftp_on(250, day), _wahoo_weight_on(78.5, day)))
 

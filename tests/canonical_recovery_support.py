@@ -241,6 +241,9 @@ class NoActivityRows:
     def activity_summaries(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
         return ()
 
+    def activity_rows(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
+        return ()
+
 
 class FilteringReader:
     """Serves observations by kind, inclusive observed_on window and sport."""

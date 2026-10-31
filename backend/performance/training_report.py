@@ -83,7 +83,7 @@ def _cumulative_load(
     return metric
 
 
-def zone_distribution(summaries: Sequence[ActivitySummary]) -> list[dict[str, Any]]:
+def zone_distribution(summaries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     reports = []
     for sport in sorted({_sport(summary) for summary in summaries}):
         if sport == "strength":
@@ -238,7 +238,7 @@ def training_report(
     }
 
 
-def _sport(summary: ActivitySummary) -> str:
+def _sport(summary: Mapping[str, Any]) -> str:
     return str(summary.get("sport") or "other")
 
 
@@ -256,7 +256,7 @@ def _valid_zones(values: Any) -> list[dict]:
 
 
 def _sensor_zones(
-    sport_rows: Sequence[ActivitySummary], key: str
+    sport_rows: Sequence[Mapping[str, Any]], key: str
 ) -> tuple[dict[str, float], int]:
     zones: dict[str, float] = defaultdict(float)
     measured_sessions = 0
