@@ -872,8 +872,9 @@ and [AGENTS loading](https://code.claude.com/docs/en/memory#agents-md).
 
 Source reads, incoming prompts/provider data, and Graphify do not require a secret
 scan. Outgoing Git objects are checked by `.githooks/pre-push`, which invokes
-`python scripts/check_push_secrets.py`. It scans new committed blobs and
-commit/tag messages, including intermediate commits, in temporary storage and suppresses scanner payload output.
+`python scripts/check_push_secrets.py`. It scans the lines the outgoing
+commits add (so flagged lines already on the branch's base never block a push)
+and commit/tag messages, including intermediate commits, in temporary storage and suppresses scanner payload output.
 A finding, missing Sonar CLI, or scanner error blocks the push. Deleted refs need
 no scan. Do not use `--no-verify`.
 
