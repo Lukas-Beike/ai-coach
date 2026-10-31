@@ -27,7 +27,7 @@ from backend.runtime.ports import ObservationReader
 class NutritionPersistence:
     database_manager: Callable[[], Any]
     database_lock: Any
-    observation_reader: Callable[[], ObservationReader] | None = None
+    observation_reader: Callable[[], ObservationReader]
 
 
 @dataclass(frozen=True)

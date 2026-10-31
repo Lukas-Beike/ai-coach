@@ -81,7 +81,7 @@ def library_workout_event_payload(
         "name": workout.get("name") or "Bibliotheks-Einheit",
         "description": workout.get("description") or "",
         "duration_minutes": workout.get("duration_minutes")
-        or max(5, round(float(workout.get("moving_time") or 3600) / 60)),
+        or max(5, round(float(workout.get("planned_duration_s") or 3600) / 60)),
         "target": workout.get("target") or "AUTO",
     }
     return workout_event_payload(
@@ -114,17 +114,17 @@ def validate_workout_start_date(value: Any, workout_date: str) -> str:
     )
     if not isinstance(value, str):
         raise AppError(400, message, reason="invalid_workout_start_date")
-    start_date_local = value.strip()
+    starts_at_local = value.strip()
     try:
-        parsed_start = datetime.fromisoformat(start_date_local)
+        parsed_start = datetime.fromisoformat(starts_at_local)
     except ValueError as exc:
         raise AppError(400, message, reason="invalid_workout_start_date") from exc
     if (
-        "T" not in start_date_local.upper()
+        "T" not in starts_at_local.upper()
         or parsed_start.date().isoformat() != workout_date
     ):
         raise AppError(400, message, reason="invalid_workout_start_date")
-    return start_date_local[:40]
+    return starts_at_local[:40]
 
 
 def normalize_workout(workout: Any, *, today: date) -> dict[str, Any]:
@@ -151,10 +151,10 @@ def normalize_workout(workout: Any, *, today: date) -> dict[str, Any]:
             workout.get("rationale") or "Manuell geplante Einheit"
         ).strip()[:2000],
     }
-    start_date_local = workout.get("start_date_local")
-    if start_date_local is not None:
-        draft["start_date_local"] = validate_workout_start_date(
-            start_date_local, str(draft["date"])
+    starts_at_local = workout.get("starts_at_local")
+    if starts_at_local is not None:
+        draft["starts_at_local"] = validate_workout_start_date(
+            starts_at_local, str(draft["date"])
         )
     try:
         draft["duration_minutes"] = int(str(draft["duration_minutes"]))

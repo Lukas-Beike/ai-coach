@@ -160,22 +160,22 @@ class ServerRuntimeTests(ServerTestCase):
                     "id": "ride-1",
                     "type": "Ride",
                     "name": "Intervalle",
-                    "start_date_local": "2026-08-30T08:00:00",
-                    "moving_time": 3600,
+                    "starts_at_local": "2026-08-30T08:00:00",
+                    "planned_duration_s": 3600,
                 },
                 {
                     "id": "ride-2",
                     "type": "Ride",
                     "name": "Grundlage",
-                    "start_date_local": "2026-08-30T08:30:00",
-                    "moving_time": 3600,
+                    "starts_at_local": "2026-08-30T08:30:00",
+                    "planned_duration_s": 3600,
                 },
                 {
                     "id": "run-1",
                     "type": "Run",
                     "name": "Lauf",
-                    "start_date_local": "2026-08-30T08:15:00",
-                    "moving_time": 1800,
+                    "starts_at_local": "2026-08-30T08:15:00",
+                    "planned_duration_s": 1800,
                 },
             ]
         )
@@ -190,14 +190,14 @@ class ServerRuntimeTests(ServerTestCase):
                 {
                     "id": "ride-1",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T08:00:00",
-                    "moving_time": 1800,
+                    "starts_at_local": "2026-08-30T08:00:00",
+                    "planned_duration_s": 1800,
                 },
                 {
                     "id": "ride-2",
                     "type": "Ride",
-                    "start_date_local": "2026-08-30T12:00:00",
-                    "moving_time": 1800,
+                    "starts_at_local": "2026-08-30T12:00:00",
+                    "planned_duration_s": 1800,
                 },
             ]
         )

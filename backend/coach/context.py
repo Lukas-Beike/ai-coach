@@ -29,9 +29,9 @@ from backend.performance import activity_validation
 from backend.performance import context as performance_context
 from backend.performance import load as performance_load
 from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
-    performance_options,
     snapshot_with_inputs,
 )
 from backend.planning import adaptive as planning_adaptive
@@ -124,7 +124,7 @@ COACH_LIBRARY_FIELDS = (
     "name",
     "description",
     "type",
-    "moving_time",
+    "planned_duration_s",
     "distance",
     "target",
     TRAINING_LOAD,
@@ -214,10 +214,10 @@ def compact_coach_planned_event(
         event,
         (
             "id",
-            "start_date_local",
+            "starts_at_local",
             "name",
             "type",
-            "moving_time",
+            "planned_duration_s",
             "target",
             INTENSITY,
             "status",
@@ -228,7 +228,7 @@ def compact_coach_planned_event(
         compacted,
         {
             "id": 200,
-            "start_date_local": 40,
+            "starts_at_local": 40,
             "name": 200,
             "type": 80,
             "target": 1000,
@@ -246,7 +246,7 @@ def future_coach_planned_workouts(
         if not isinstance(event, dict):
             continue
         raw_date = iso_date_prefix(
-            str(event.get("start_date_local") or event.get("date") or "")
+            str(event.get("starts_at_local") or event.get("date") or "")
         )
         try:
             event_date = date.fromisoformat(raw_date)
@@ -257,7 +257,7 @@ def future_coach_planned_workouts(
     return sorted(
         planned,
         key=lambda item: (
-            str(item.get("start_date_local") or item.get("date") or ""),
+            str(item.get("starts_at_local") or item.get("date") or ""),
             str(item.get("name") or ""),
         ),
     )
@@ -524,7 +524,7 @@ class CoachPerformanceContextReader:
                 self._garmin_payload_service.recent_view(),
                 self._profile_service.get(),
                 self._today(),
-                **performance_options(canonical),
+                canonical=canonical or EMPTY_PERFORMANCE_INPUTS,
             )
         )
 

@@ -73,7 +73,7 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
             "type": "Cycling",
             "description": "- 30m Z2 Easy",
             "duration_minutes": 30,
-            "moving_time": 1800,
+            "planned_duration_s": 1800,
             "target": "AUTO",
             "source": "coach",
             "rationale": "Dauerlauf",
@@ -104,7 +104,7 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
         self.assertNotIn("type", updated)
         self.assertEqual(updated["name"], "Neue Einheit")
         self.assertEqual(updated["duration_minutes"], 35)
-        self.assertEqual(updated["moving_time"], 2100)
+        self.assertEqual(updated["planned_duration_s"], 2100)
         self.assertEqual(updated["source"], "coach")
         self.assertEqual(updated["rationale"], "Dauerlauf")
         self.assertEqual(updated["plan_id"], "plan-1")
@@ -142,17 +142,17 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
             {"description": "- 12m Z2 Easy"},
         )
         minutes_from_duration = library.updated_workout_library_entry(
-            {"type": "Strength", "name": "Strength", "moving_time": 600},
+            {"type": "Strength", "name": "Strength", "planned_duration_s": 600},
             {},
             LOCAL_ID,
             "update",
             {"duration_minutes": "15,5"},
         )
 
-        self.assertEqual(seconds_from_description["moving_time"], 720)
+        self.assertEqual(seconds_from_description["planned_duration_s"], 720)
         self.assertNotIn("duration_minutes", seconds_from_description)
         self.assertEqual(minutes_from_duration["duration_minutes"], "15,5")
-        self.assertEqual(minutes_from_duration["moving_time"], 930)
+        self.assertEqual(minutes_from_duration["planned_duration_s"], 930)
 
     def test_invalid_duration_does_not_replace_existing_moving_time(self):
         updated = library.updated_workout_library_entry(
@@ -160,7 +160,7 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
                 "type": "Strength",
                 "name": "Strength",
                 "duration_minutes": 10,
-                "moving_time": 600,
+                "planned_duration_s": 600,
             },
             {},
             LOCAL_ID,
@@ -168,7 +168,7 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
             {"duration_minutes": "unknown"},
         )
         self.assertEqual(updated["duration_minutes"], "unknown")
-        self.assertEqual(updated["moving_time"], 600)
+        self.assertEqual(updated["planned_duration_s"], 600)
 
     def test_invalid_workout_description_preserves_validation_error(self):
         with self.assertRaises(AppError) as raised:

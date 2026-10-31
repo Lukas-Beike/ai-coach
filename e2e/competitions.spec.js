@@ -24,7 +24,7 @@ async function overview(page) {
   const today = await page.evaluate(() => todayIso());
   events = [
     { id: "b", name: "Beta", event_date: today, sport: "run", priority: "B", distance: null },
-    { id: "a", name: "Alpha mit einem sehr langen Wettkampfnamen für schmale Bildschirme", event_date: today, sport: "other", sport_detail: "Swimrun", priority: "A", distance: "Sprintdistanz", target: "Ankommen", notes: "<img src=x onerror=alert(1)>", sync_state: "local_override", start_date_local: `${today}T08:30:00`, moving_time: 3600 },
+    { id: "a", name: "Alpha mit einem sehr langen Wettkampfnamen für schmale Bildschirme", event_date: today, sport: "other", sport_detail: "Swimrun", priority: "A", distance: "Sprintdistanz", target: "Ankommen", notes: "<img src=x onerror=alert(1)>", sync_state: "local_override", starts_at_local: `${today}T08:30:00`, planned_duration_s: 3600 },
     { id: "old", name: "Alt", event_date: "2020-01-02", sport: "ride", priority: "C", distance: 0 },
     { id: "older", name: "Älter", event_date: "2020-01-01", sport: "run", priority: "B", distance: 5000 },
     { id: "undated", name: "Ohne Datum", event_date: "2026-02-30", sport: "run", priority: "B" },

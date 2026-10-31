@@ -78,7 +78,7 @@ class LocalCalendarTests(unittest.TestCase):
         event_result = _local_calendar_external_event(event)
 
         self.assertEqual(competition_result["date"], "2026-09-20")
-        self.assertEqual(competition_result["start_date_local"], "2026-09-20T00:00:00")
+        self.assertEqual(competition_result["starts_at_local"], "2026-09-20T00:00:00")
         self.assertEqual(competition_result["sync_source"], LOCAL_INTERVALS_SCOPE)
         self.assertEqual(competition_result["sync_status"], "local")
         self.assertEqual(event_result["date"], "2026-09-21")

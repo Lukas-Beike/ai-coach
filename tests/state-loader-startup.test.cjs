@@ -132,6 +132,18 @@ test("a completed load schedules one coalesced snapshot save", async () => {
   assert.deepEqual(plain(context.readStateSnapshot().data.performance), { ctl: 40 });
 });
 
+test("a snapshot of an older key shape is neither shown nor reused for a failed area", () => {
+  const storage = new Map([["coach-state-snapshot", JSON.stringify({ asset: "earlier-assets", data: { training_calendar: [{ moving_time: 3600 }] } })]]);
+  const current = loader({ storage });
+  assert.equal(current.context.readStateSnapshot(), null);
+  assert.deepEqual(plain(current.context.previousSnapshotData()), {});
+  current.state.data = { training_calendar: [] };
+  current.state.initialStateLoaded = true;
+  current.context.saveStateSnapshot();
+  assert.equal(JSON.parse(storage.get("coach-state-snapshot")).contract, vm.runInContext("STATE_SNAPSHOT_CONTRACT", current.context));
+  assert.deepEqual(plain(loader({ storage }).context.readStateSnapshot()), { data: { training_calendar: [] }, updated: false });
+});
+
 test("the view cache keeps recent reads for the same assets and is cleared with the snapshot", () => {
   const first = loader();
   first.context.rememberViewCache("/api/nutrition/week", { days: [1] }, 0);

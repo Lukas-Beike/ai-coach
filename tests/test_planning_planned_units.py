@@ -54,7 +54,7 @@ class NormalizePlannedUnitTests(unittest.TestCase):
         workout = {
             "sport": "cycling",
             "date": "2026-09-21Tnot-a-date",
-            "start_date_local": "2026-09-21T07:15:00+02:00" + "x" * 50,
+            "starts_at_local": "2026-09-21T07:15:00+02:00" + "x" * 50,
             "duration_minutes": "45",
             "name": "Easy ride",
             "origin": "o" * 50,
@@ -81,9 +81,9 @@ class NormalizePlannedUnitTests(unittest.TestCase):
         self.assertNotIn("type", result)
         self.assertEqual((result["sport"], result["environment"]), ("ride", "unknown"))
         self.assertEqual(result["date"], "2026-09-21")
-        self.assertEqual(result["start_date_local"], workout["start_date_local"][:40])
+        self.assertEqual(result["starts_at_local"], workout["starts_at_local"][:40])
         self.assertEqual(result["duration_minutes"], "45")
-        self.assertEqual(result["moving_time"], 2700)
+        self.assertEqual(result["planned_duration_s"], 2700)
         self.assertEqual(result["origin"], "o" * 40)
         self.assertEqual(result["source"], "s" * 40)
         self.assertEqual(result["status"], "x" * 80)
@@ -175,7 +175,7 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
     def test_candidate_moves_existing_start_time_and_accepts_a_new_valid_time(self):
         current = {
             "date": "2026-09-22",
-            "start_date_local": "2026-09-22T07:30:00+02:00",
+            "starts_at_local": "2026-09-22T07:30:00+02:00",
         }
         moved = planned_workout_update_candidate(
             current, "update", {"date": "2026-09-23"}
@@ -186,20 +186,20 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
             "update",
             {
                 "date": "2026-09-23",
-                "start_date_local": "2026-09-23T08:15:00+02:00",
+                "starts_at_local": "2026-09-23T08:15:00+02:00",
             },
         )
         self.assertTrue(prepare_planned_workout_date(retimed, current))
 
-        self.assertEqual(moved["start_date_local"], "2026-09-23T07:30:00+02:00")
-        self.assertEqual(retimed["start_date_local"], "2026-09-23T08:15:00+02:00")
+        self.assertEqual(moved["starts_at_local"], "2026-09-23T07:30:00+02:00")
+        self.assertEqual(retimed["starts_at_local"], "2026-09-23T08:15:00+02:00")
         with self.assertRaises(AppError) as raised:
             planned_workout_update_candidate(
                 current,
                 "update",
                 {
                     "date": "2026-09-23",
-                    "start_date_local": "2026-09-22T08:15:00+02:00",
+                    "starts_at_local": "2026-09-22T08:15:00+02:00",
                 },
             )
         self.assertEqual(raised.exception.reason, "invalid_workout_start_date")
@@ -215,7 +215,7 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
     def test_normalized_update_canonicalizes_description_and_derives_moving_time(self):
         current = {
             "date": "2026-09-22",
-            "start_date_local": "2026-09-22T07:30:00+02:00",
+            "starts_at_local": "2026-09-22T07:30:00+02:00",
             "sport": "Ride",
             "name": "Before",
             "description": "- 40m Z1",
@@ -248,12 +248,12 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
 
         self.assertEqual((candidate, current, row, values), before)
         self.assertEqual(updated["description"], "- 5m Z2 HR\n- 35m Z1")
-        self.assertEqual(updated["moving_time"], 2400)
+        self.assertEqual(updated["planned_duration_s"], 2400)
         self.assertEqual(updated["id"], LOCAL_ID)
         self.assertEqual(updated["external_id"], "row-external")
         self.assertEqual(updated["sync_status"], "local")
         self.assertEqual(updated["source"], "coach")
-        self.assertEqual(updated["start_date_local"], current["start_date_local"])
+        self.assertEqual(updated["starts_at_local"], current["starts_at_local"])
         for key in (
             "plan_id",
             "plan_name",
@@ -297,7 +297,7 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
             "name": "Lift",
             "description": "Strength session",
             "duration_minutes": 35,
-            "moving_time": 2100,
+            "planned_duration_s": 2100,
         }
         candidate = planned_workout_update_candidate(
             strength, "update", {"duration_minutes": "35,5"}
@@ -310,7 +310,7 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
             "update",
             {"duration_minutes": "35,5"},
         )
-        self.assertEqual(result["moving_time"], 2130)
+        self.assertEqual(result["planned_duration_s"], 2130)
 
     def test_restore_candidate_clears_local_deleted_but_current_metadata_is_preserved(
         self,
@@ -336,11 +336,11 @@ class RemotePlannedUnitPayloadTests(unittest.TestCase):
             "id": " event-17 ",
             "external_id": " external-17 ",
             "category": "workout",
-            "start_date_local": "2026-09-21T06:45:00+02:00",
+            "starts_at_local": "2026-09-21T06:45:00+02:00",
             "type": "Run",
             "name": "Easy run",
             "description": "- 20m Z1",
-            "moving_time": 1200,
+            "planned_duration_s": 1200,
             "target": "PACE",
             "pairedEventId": "paired-9",
         }
@@ -355,11 +355,11 @@ class RemotePlannedUnitPayloadTests(unittest.TestCase):
         self.assertEqual(identity, "external-17")
         self.assertEqual(payload["external_id"], identity)
         self.assertEqual(payload["date"], "2026-09-21")
-        self.assertEqual(payload["start_date_local"], event["start_date_local"])
+        self.assertEqual(payload["starts_at_local"], event["starts_at_local"])
         self.assertEqual((payload["sport"], payload["environment"]), ("run", "unknown"))
         self.assertNotIn("type", payload)
         self.assertEqual(payload["duration_minutes"], 20)
-        self.assertEqual(payload["moving_time"], 1200)
+        self.assertEqual(payload["planned_duration_s"], 1200)
         self.assertEqual(payload["paired_event_id"], "paired-9")
         self.assertEqual(payload["source"], "intervals")
         self.assertEqual(payload["origin"], "intervals")
@@ -367,13 +367,13 @@ class RemotePlannedUnitPayloadTests(unittest.TestCase):
 
     def test_remote_defaults_and_fallback_identity_are_preserved(self):
         payload, remote_id, identity = remote_planned_unit_payload(
-            {"id": "event-18", "date": "2026-09-20", "moving_time": "bad"},
+            {"id": "event-18", "date": "2026-09-20", "planned_duration_s": "bad"},
             today=TODAY,
         )
         self.assertEqual(remote_id, "event-18")
         self.assertEqual(identity, "intervals-event-event-18")
         self.assertEqual(payload["date"], "2026-09-20")
-        self.assertEqual(payload["start_date_local"], "2026-09-20T00:00:00")
+        self.assertEqual(payload["starts_at_local"], "2026-09-20T00:00:00")
         self.assertEqual(payload["sport"], "ride")
         self.assertEqual(payload["name"], "Intervals.icu-Einheit")
         self.assertEqual(payload["duration_minutes"], 30)
@@ -381,7 +381,7 @@ class RemotePlannedUnitPayloadTests(unittest.TestCase):
 
     def test_remote_duration_has_five_minute_floor(self):
         payload, _, _ = remote_planned_unit_payload(
-            {"id": "event-short", "date": "2026-09-21", "moving_time": 30},
+            {"id": "event-short", "date": "2026-09-21", "planned_duration_s": 30},
             today=TODAY,
         )
         self.assertEqual(payload["duration_minutes"], 5)

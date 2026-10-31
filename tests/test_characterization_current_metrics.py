@@ -1,20 +1,21 @@
 """Characterize current source precedence of ``current_performance_metrics``.
 
-These tests pin today's behavior, including quirks, as the parity reference for
-a later refactor. Quirks are marked with a "Quirk:" comment. Note text is not
-asserted because it is not part of the precedence contract.
+Each synthetic snapshot runs through the Intervals.icu mappers and the canonical
+current read, so these tests are the parity reference of the former snapshot
+reader. Quirks are marked with a "Quirk:" comment and intended differences with
+"Canonical:". Note text is not asserted because it is not part of the precedence
+contract.
 """
 
 import unittest
 from datetime import UTC, date, datetime
 from typing import Any
 
-from performance_day_support import latest_day
+from performance_day_support import latest_day, snapshot_metrics
 
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_current import CanonicalCurrentInputs
-from backend.performance.current_metrics import current_performance_metrics
-from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
@@ -36,7 +37,7 @@ RACE_KEYS = (
 
 
 def _garmin(raw: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    return garmin_performance_metrics(raw or {}, TODAY)
+    return garmin_payload_performance_metrics(raw or {}, TODAY)
 
 
 def _snapshot(
@@ -56,7 +57,7 @@ def _current(
     profile: dict[str, Any] | None = None,
     garmin: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    return current_performance_metrics(
+    return snapshot_metrics(
         snapshot or _snapshot(),
         profile or {},
         garmin if garmin is not None else _garmin(),
@@ -299,12 +300,13 @@ class CurrentBodyMetricTests(unittest.TestCase):
                 self.assertEqual(_pair(result["height_cm"]), (expected, INTERVALS))
                 self.assertEqual(result["height_cm"]["unit"], "cm")
 
-    def test_height_outside_metre_band_is_not_converted_quirk(self) -> None:
-        # Quirk: values just outside 1.2-2.5 are left as-is and reported in cm.
+    def test_height_outside_metre_band_is_out_of_bounds(self) -> None:
+        # Canonical: values just outside 1.2-2.5 are read as centimetres, which
+        # the 30-300 cm bounds reject (the snapshot reader reported them as cm).
         for raw in (1.19, 2.51):
             with self.subTest(raw=raw):
                 result = _current(_snapshot(athlete={"height": raw}))
-                self.assertEqual(result["height_cm"]["value"], raw)
+                self.assertIsNone(result["height_cm"]["value"])
 
     def test_height_cm_key_wins_over_height_and_profile_is_fallback(self) -> None:
         result = _current(_snapshot(athlete={"height_cm": 170, "height": 1.8}))
@@ -434,11 +436,11 @@ class CurrentThresholdTests(unittest.TestCase):
                 )
 
     def test_run_threshold_pace_boundary_and_string_quirks(self) -> None:
-        # Quirk: only values below 20 are read as m/s; 20 and above pass through
-        # unchanged as s/km, so 19.99 (about 50) and 20 (20) are discontinuous.
+        # Canonical: values below 20 are m/s and 20 and above s/km; a pace faster
+        # than 15 m/s (about 66 s/km) is out of bounds, so 20 s/km has no value.
         # Quirk: a "4:27" string is not parsed and yields no value.
         # Quirk: negative values are rejected.
-        cases = ((20, 20), (250, 250), (-4.0, None), ("4:27", None))
+        cases = ((20, None), (250, 250), (-4.0, None), ("4:27", None))
         for raw, expected in cases:
             with self.subTest(raw=raw):
                 result = _current(
@@ -637,15 +639,15 @@ class CurrentMaxHrTests(unittest.TestCase):
 
 class CurrentEftpTests(unittest.TestCase):
     def test_eftp_athlete_then_wellness_then_latest_ride_activity(self) -> None:
-        # Intended difference (#1412): the athlete setting and the wellness
-        # sportInfo are read as canonical observations (the real mappers produce
-        # them), not from the snapshot, which is ignored for eFTP.
+        # The athlete setting and the wellness sportInfo eFTP are canonical
+        # observations (#1412); the snapshot's setting has none, so each case
+        # supplies them.
         activity = {"type": "Ride", "start_date_local": "2026-05-03", "icu_eftp": 270}
         wellness = [
             _wellness("2026-05-03", sport_info=[{"types": ["Ride"], "eFTP": 265}])
         ]
         snapshot = _snapshot(
-            athlete={"sport_settings": [_setting("Ride", eFTP=262)]},
+            athlete={"sport_settings": [_setting("Ride")]},
             wellness=wellness,
             activities=[activity],
         )
@@ -653,12 +655,10 @@ class CurrentEftpTests(unittest.TestCase):
             ("athlete first", _eftp_inputs(athlete=262, wellness=265), 262),
             ("then wellness", _eftp_inputs(wellness=265), 265),
             ("then latest ride", _eftp_inputs(), 270),
-            ("snapshot is not read", None, 270),
+            ("no eFTP observation", None, 270),
         ):
             with self.subTest(name):
-                result = current_performance_metrics(
-                    snapshot, {}, _garmin(), canonical=canonical
-                )
+                result = snapshot_metrics(snapshot, {}, _garmin(), canonical=canonical)
                 self.assertEqual(
                     _pair(result["cycling_eftp_watts"]), (expected, INTERVALS)
                 )

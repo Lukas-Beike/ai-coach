@@ -14,7 +14,13 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
-from performance_day_support import days_from_rows
+from canonical_daily_health_support import mapped_expenditure
+from performance_day_support import (
+    days_from_rows,
+    garmin_body_from_payload,
+    garmin_inputs_from_payload,
+    garmin_metrics_from_payload,
+)
 
 # Safe server setup first: temporary DATA_DIR, fake configuration, and no read of a real .env.
 from server_test_support import server
@@ -29,9 +35,9 @@ from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
+from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
-from backend.performance.daily_health import daily_energy_expenditure
-from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.performance.wellness_days import wellness_day_values
 from backend.providers.calendar import parse_ical_calendar
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
@@ -140,8 +146,15 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         garmin = fixture_runtime._fixture_demo_garmin(
             self.today, fixture_runtime.demo_performance_history(self.today)
         )
-        metrics = garmin_performance_metrics(garmin, self.today)
-        history = analysis_history({}, garmin, self.today)
+        metrics = garmin_payload_performance_metrics(garmin, self.today)
+        history = analysis_history(
+            {},
+            garmin,
+            self.today,
+            canonical=garmin_inputs_from_payload(
+                garmin, self.today, EMPTY_PERFORMANCE_INPUTS
+            ),
+        )
         for key, metric in metrics.items():
             with self.subTest(metric=key):
                 self.assertIsNotNone(metric["value"])
@@ -198,7 +211,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         )
         self.assertEqual(repeated, {"ready": True})
         self.assertEqual(restarted, garmin)
-        metrics = garmin_performance_metrics(garmin, today)
+        metrics = garmin_payload_performance_metrics(garmin, today)
         self.assertIsNotNone(metrics["run_marathon_seconds"]["value"])
         self.assertEqual(garmin["morning_body_battery"]["status"], "ready")
         self.assertEqual(garmin["morning_body_battery"]["before_sleep"]["value"], 24)
@@ -271,6 +284,11 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             self.today,
             eftp_by_day=eftp_by_day,
             wellness_days=days_from_rows(wellness),
+            canonical=garmin_body_from_payload(garmin, self.today),
+            activity_rows=(),
+            garmin_ftp=garmin_metrics_from_payload(garmin).performance_history[
+                "cycling_ftp_watts"
+            ],
         )
         window = result["windows"]["12w"]
         self.assertEqual(window["days"], 84)
@@ -307,9 +325,14 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         garmin = fixture_runtime._fixture_demo_garmin(
             self.today, fixture_runtime.demo_performance_history(self.today)
         )
-        today = daily_energy_expenditure(garmin, self.today.isoformat(), self.today)
-        zero_day = daily_energy_expenditure(
-            garmin, (self.today - timedelta(days=12)).isoformat(), self.today
+        today = mapped_expenditure(
+            garmin, self.today.isoformat(), self.today, strict=False
+        )
+        zero_day = mapped_expenditure(
+            garmin,
+            (self.today - timedelta(days=12)).isoformat(),
+            self.today,
+            strict=False,
         )
 
         self.assertTrue(today["provisional"])
@@ -318,9 +341,11 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         self.assertIsNotNone(today["total_kcal"])
         self.assertEqual(today["projected_total_kcal"], 1548 + 420)
         self.assertIsNone(zero_day["projected_total_kcal"])
+        # Canonical energy (#1415): a measured zero active energy is kept; zero
+        # resting and total energy are implausible and rejected by the mapper.
         self.assertEqual(
             (zero_day["active_kcal"], zero_day["resting_kcal"], zero_day["total_kcal"]),
-            (0, 0, 0),
+            (0, None, None),
         )
 
     def test_calendar_feed_parses_titles_descriptions_and_event_examples(self):

@@ -39,23 +39,33 @@ container, and do not replace or reset the data directory to resolve a
 rejected schema. A fresh database is only required when the athlete explicitly
 chooses to start over. Future schema changes add explicit, versioned and
 transactional migrations from version 9 with upgrade regression tests.
-The current schema is version 15. Version 10 adds canonical activity detail
+The current schema is version 16. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
 `garmin_snapshot` value, version 13 adds the maximum speed of each lap, and
 version 14 lets Yazio foods into the food-database mirror and saved products,
 and version 15 adds canonical sleep periods, zone configurations, provider
 statuses, gear with its activity links, the session each activity note was
-written for, and the survivor a deleted merged session keeps. A version 9 to 14
-database or backup is upgraded to it in place within one transaction, and a
-failed upgrade leaves it unchanged. The version 12 step splits the stored
+written for, and the survivor a deleted merged session keeps, and version 16
+names the start and planned duration of local planning records (planned units,
+workout-library entries, competitions, staged Coach plans and adaptive previews)
+`starts_at_local` and `planned_duration_s` instead of the Intervals.icu fields
+`start_date_local` and `moving_time`. A version 9 to 15 database or backup is
+upgraded to it in place within one transaction, and a failed upgrade leaves it
+unchanged. The version 12 step splits the stored
 Garmin value into rows, reads every element back to verify it, and keeps the
 original value unread as `garmin_snapshot_legacy`. The version 15 step links an
 existing activity note to its session only when the match is unambiguous
 and leaves every note's contents unchanged. Existing observations keep their
-keys and read with an unknown measurement context.
+keys and read with an unknown measurement context. The version 16 step renames
+only those two fields and keeps every value; the change history is not
+rewritten, so earlier changes stay undoable, and recorded Intervals.icu sync
+baselines still match. A sync confirmation that was prepared before the
+upgrade, or a confirmed sync job still queued during it, no longer matches the
+renamed records: it reports them as changed since the preview and writes
+nothing, so prepare and confirm that sync again.
 
-Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types.
+Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types. Likewise only that adapter maps `starts_at_local` and `planned_duration_s` to the Intervals.icu event and workout fields, and Coach tools take `starts_at_local` and `planned_duration_s` as well.
 
 ---
 
@@ -602,11 +612,11 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`. The restore is refused with HTTP 507 when `/data` lacks the free space for this copy, and a partial copy is deleted.
-5. The replacement database must have the current schema (version 15) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must have the current schema (version 16) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Privacy Export & Data Purge
-- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 7 also includes the canonical provider tables (provider records, activity sessions with the survivor each deleted merged session keeps, activity records, observations), the canonical activity detail (detail sets, stream channels as decoded point lists with `null` gaps, laps, zone times and session analyses) and the canonical sleep periods, zone configurations with decoded limit lists, provider statuses, gear and gear-to-activity links, retired rows included, as JSON Lines, the owning provider and session of each activity note, when known, and the remote links that map local workouts, planned units and competitions to their provider counterparts (including the provider of each competition sync tombstone). Stored sports are exported in the canonical vocabulary (`sport`, `environment` and a lossless `sport_detail`); credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
+- **Full Privacy Export**: Download a single comprehensive JSON archive containing all stored profile fields, workouts, check-ins, activity notes, and chat history. Export format version 8 also includes the canonical provider tables (provider records, activity sessions with the survivor each deleted merged session keeps, activity records, observations), the canonical activity detail (detail sets, stream channels as decoded point lists with `null` gaps, laps, zone times and session analyses) and the canonical sleep periods, zone configurations with decoded limit lists, provider statuses, gear and gear-to-activity links, retired rows included, as JSON Lines, the owning provider and session of each activity note, when known, and the remote links that map local workouts, planned units and competitions to their provider counterparts (including the provider of each competition sync tombstone). Stored sports are exported in the canonical vocabulary (`sport`, `environment` and a lossless `sport_detail`), and planning records name their start and planned duration `starts_at_local` and `planned_duration_s` (since version 8); credential-like keys are removed from provider payloads before export, and signed download URLs are replaced with a `[redacted]` marker.
 - **Local Data Purge**: Completely wipes all local athlete records from the database, including canonical provider data. To prevent accidental loss, the action requires entering the exact confirmation phrase `LOKALE DATEN LÖSCHEN`. External accounts (Intervals.icu and Garmin) remain untouched.
 
 ### Operational Logging & Diagnostics
@@ -862,8 +872,9 @@ and [AGENTS loading](https://code.claude.com/docs/en/memory#agents-md).
 
 Source reads, incoming prompts/provider data, and Graphify do not require a secret
 scan. Outgoing Git objects are checked by `.githooks/pre-push`, which invokes
-`python scripts/check_push_secrets.py`. It scans new committed blobs and
-commit/tag messages, including intermediate commits, in temporary storage and suppresses scanner payload output.
+`python scripts/check_push_secrets.py`. It scans the lines the outgoing
+commits add (so flagged lines already on the branch's base never block a push)
+and commit/tag messages, including intermediate commits, in temporary storage and suppresses scanner payload output.
 A finding, missing Sonar CLI, or scanner error blocks the push. Deleted refs need
 no scan. Do not use `--no-verify`.
 
@@ -1027,6 +1038,12 @@ private authentication files and a unique result directory under
 `manifest.json` records selection, source, environment, phase times, child exits
 and final status. Pending or interrupted records are unverified. Keep private
 storage state and traces out of reports; the runner disables traces.
+The runner warns when the application image's copy of `requirements.txt`,
+`server.py`, `garmin-login.py`, `backend/` or `public/` differs from the working
+tree; rebuild it before trusting results. A new `public/` file also needs an
+entry in `STATIC_TARGETS` (`backend/http_api/static_assets.py`), which a unit
+test enforces. A failed child prints a failing test's location and first error
+line; its manifest entry lists all of them under `failures`.
 
 CI builds and shares the current application image once, then starts browser
 jobs beside the native suite. Its prepared browser image is pinned by exact
@@ -1273,9 +1290,10 @@ fail the check until the code is fixed or the baseline is regenerated on purpose
 ### Continuous Integration & Gitar Reviews
 - **Conventional Commits**: All commit messages and pull request titles must follow the Conventional Commits specification (e.g., `feat(coach): add structured response support` or `fix(sync): resolve Garmin sleep retry backoff`).
 
-- **Gitar Reviews**: The installed Gitar GitHub App provides the required `Gitar` check for the current PR head. Both `develop` and `main` rulesets require this context from `gitar-bot` (integration ID `827041`), alongside the existing CI checks. Missing, pending, or failed Gitar checks block merging; there is no Codex watchdog or automatic `@codex review` fallback. Both rulesets require all review conversations to be resolved, including outdated threads and findings from other reviewers, with no bypass actors or exceptions for dependency/release bots. Fix or reconcile findings before resolving threads. Ordinary PR comments have no resolved state: complete their requested action or record an evidence-based disposition before merging. Hosted automatic review settings are managed in Gitar; disable the former automatic Codex review in [Codex Settings](https://chatgpt.com/codex/settings/code-review) if it is still enabled. Local review remains optional additional evidence.
+- **Gitar Reviews**: The installed Gitar GitHub App provides the required `Gitar` check for the current PR head. An isolated ruleset requires this context from `gitar-bot` (integration ID `827041`) on `develop` and `main`; Dependabot and the release app are exempt from that ruleset. Default and Main release protection separately require their CI checks and all review conversations to be resolved, including outdated threads. The release app is not exempt from either of those rulesets. Each ruleset also has an existing user-level pull-request bypass. Fix or reconcile findings before resolving threads. Ordinary PR comments have no resolved state: complete their requested action or record an evidence-based disposition before merging. Hosted automatic review settings are managed in Gitar; disable the former automatic Codex review in [Codex Settings](https://chatgpt.com/codex/settings/code-review) if it is still enabled. Local review remains optional additional evidence.
 - **Dependency Updates**: Dependabot updates pip, npm, Docker and GitHub Actions on `develop`. Squash auto-merge is enabled for patch, minor and major updates; protected-branch checks and review-thread resolution still apply. The privileged auto-merge workflow never checks out or executes PR code. Dependabot runs receive no secrets, so after each push to `develop` and hourly the auto-rebase workflow uses the trusted `develop` copy of `tools/quality_baseline.py --align-versions` to read open Dependabot PR files as data and commits only the aligned tool-version record through the GitHub App, rejecting the commit if the PR head moved after the reads.
-- **Automated Daily Releases**: At 03:00 UTC, an automated workflow inspects `develop`. If new commits exist, it creates a version-bump PR and a promotion PR to protected `main`. Both branches require native, SQLCipher container, quality and browser checks without bypass actors. After successful main tests, the workflow creates an immutable GitHub release and publishes the container. The container digest is signed and verified before promoting `latest`; the version tag and `latest` must resolve to that same digest. A read-only release preflight also verifies `APP_VERSION` before its tag exists. Actions use read-only default permissions, with explicit job-level write permissions where needed.
+- **Bot direct merge**: The protected bot merge workflow is disabled unless the repository Actions variable `BOT_MERGE_ENABLED` is `true`. Before enabling it, verify release app integration `4772643` cannot bypass any applicable non-Gitar ruleset. Keep its exemption limited to the isolated Gitar ruleset, and verify all normal checks and review-thread requirements remain enforced. Disable the variable before changing rulesets and repeat that verification before re-enabling. The workflow checks out trusted `develop` code, accepts only Dependabot PRs to `develop` or release-app PRs on the expected release branches with auto-merge enabled, and supplies the current head SHA to the squash-merge API. Release PRs also need a successful `test` check from GitHub Actions on the current head or GitHub's current test-merge commit. Relevant events and a twice-hourly schedule retry blocked PRs. A direct app merge was verified on Dependabot PR #1502; negative protection cases have not been tested directly with that app.
+- **Automated Daily Releases**: At 03:00 UTC, an automated workflow inspects `develop`. If new commits exist, it creates a version-bump PR and a promotion PR to protected `main`. Both branches require their configured test, quality and browser checks; the release app cannot bypass those requirements. After successful main tests, the workflow creates an immutable GitHub release and publishes the container. The container digest is signed and verified before promoting `latest`; the version tag and `latest` must resolve to that same digest. A read-only release preflight also verifies `APP_VERSION` before its tag exists. Actions use read-only default permissions, with explicit job-level write permissions where needed.
 
 ---
 

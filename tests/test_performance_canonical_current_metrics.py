@@ -2,7 +2,8 @@
 
 The threshold heart rate and VO2max values are read from the canonical observations
 of the snapshot's own sync. Each comparison is between whole metric dictionaries,
-including source labels, so the canonical read must reproduce the legacy output.
+including source labels: the stored-observation read must reproduce what the
+snapshot's own mapped observations give (``_legacy``).
 All storage is temporary and every provider is mocked by fixtures.
 """
 
@@ -25,23 +26,23 @@ from canonical_consumer_cases import (
     _observations,
 )
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
-from performance_day_support import latest_day
+from performance_day_support import latest_day, snapshot_metrics
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.coach.context import CoachPerformanceContextReader
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance.canonical_current import (
+    NO_CURRENT_INPUTS,
     CanonicalCurrentInputs,
     read_current_inputs,
-    read_wahoo_fallbacks,
 )
 from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceSource,
     read_performance_inputs,
 )
 from backend.performance.context import current_performance_context
-from backend.performance.current_metrics import current_performance_metrics
 from backend.providers.source_labels import SourceView, observation_source_label
 from backend.providers.wahoo_threshold_mapping import (
     map_wahoo_power_zones,
@@ -52,6 +53,19 @@ from backend.runtime.ports import ObservationReader
 SYNC_DAY = date(2026, 10, 12)
 SENSOR_KINDS = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX)
 SYNC_KINDS = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX, MetricKind.WEIGHT)
+ATHLETE_RECORD_KINDS = (
+    MetricKind.VO2MAX,
+    MetricKind.FTP,
+    MetricKind.MAX_HR,
+    MetricKind.THRESHOLD_PACE,
+    MetricKind.ZONE2_PACE,
+    MetricKind.BODY_FAT,
+    MetricKind.HEIGHT,
+    MetricKind.W_PRIME,
+)
+INSTANT_KINDS = tuple(
+    dict.fromkeys((*SYNC_KINDS, MetricKind.EFTP, *ATHLETE_RECORD_KINDS))
+)
 
 
 class ObservationStub(ObservationReader):
@@ -86,8 +100,11 @@ def _case(name: str) -> Case:
 
 
 def _legacy(case: Case) -> dict[str, Any]:
-    garmin = performance_garmin_metrics.garmin_performance_metrics(case.garmin, TODAY)
-    return current_performance_metrics(
+    """Current metrics of the case snapshot's own mapped observations."""
+    garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+        case.garmin, TODAY
+    )
+    return snapshot_metrics(
         case.intervals,
         case.profile,
         garmin,
@@ -104,12 +121,14 @@ def _read(
 
 
 def _canonical(case: Case, observations: tuple[Observation, ...] | None = None) -> Any:
-    garmin = performance_garmin_metrics.garmin_performance_metrics(case.garmin, TODAY)
+    garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+        case.garmin, TODAY
+    )
     reader = ObservationStub(
         _observations(case) if observations is None else observations
     )
     inputs = _read(reader, case.intervals)
-    return current_performance_metrics(
+    return snapshot_metrics(
         case.intervals,
         case.profile,
         garmin,
@@ -174,14 +193,16 @@ class CanonicalCurrentParityTests(unittest.TestCase):
             with self.subTest(case=case.name):
                 self.assertEqual(_canonical(case), _legacy(case))
 
-    def test_sport_values_missing_from_the_legacy_snapshot_stay_legacy(self) -> None:
+    def test_stored_sport_values_apply_without_the_snapshot_setting(self) -> None:
+        # The snapshot is not read: stored observations decide the current values.
         case = _case("intervals_only")
         without_sport_lthr = copy.deepcopy(case.intervals)
         for setting in without_sport_lthr["athlete"]["sport_settings"]:
             setting.pop("lthr", None)
         variant = replace(case, intervals=without_sport_lthr)
         metrics = _canonical(variant, _observations(case))
-        self.assertEqual(metrics, _legacy(variant))
+        self.assertEqual(metrics, _legacy(case))
+        self.assertNotEqual(metrics, _legacy(variant))
 
     def test_athlete_wide_threshold_is_the_fallback_with_the_general_label(
         self,
@@ -235,11 +256,11 @@ class CanonicalCurrentParityTests(unittest.TestCase):
             if observation.provenance.provider is ProviderId.GARMIN
         )
         inputs = _read(ObservationStub(garmin_only), case.intervals)
-        self.assertIsNone(inputs)
+        self.assertEqual(inputs, NO_CURRENT_INPUTS)
 
 
 class CanonicalSportMatchTests(unittest.TestCase):
-    """A canonical sport value is used only when it equals the legacy-selected value."""
+    """Only the first setting of a sport is mapped, so it alone decides the value."""
 
     def test_first_entry_without_the_metric_keeps_the_legacy_value(self) -> None:
         for _sport, sport_type, key, field, _kind, value in SPORT_METRICS:
@@ -247,7 +268,9 @@ class CanonicalSportMatchTests(unittest.TestCase):
                 case = _with_sport_settings(
                     [_setting(1, sport_type), _setting(2, sport_type, **{field: value})]
                 )
-                self.assertEqual(_canonical(case), _legacy(case))
+                metrics = _canonical(case)
+                self.assertEqual(metrics, _legacy(case))
+                self.assertNotEqual(metrics[key]["value"], value)
 
     def test_first_matching_entry_wins_over_a_later_different_value(self) -> None:
         for sport, sport_type, key, field, kind, value in SPORT_METRICS:
@@ -263,9 +286,8 @@ class CanonicalSportMatchTests(unittest.TestCase):
                 self.assertEqual(metrics, _legacy(case))
                 self.assertEqual(metrics[key]["value"], first)
                 self.assertEqual(metrics[key]["source"], "Intervals.icu")
-                self.assertEqual(
-                    sorted(_sync_sport_values(case, sport, kind)), [first, second]
-                )
+                # Only the first setting of a sport is mapped (#1473).
+                self.assertEqual(_sync_sport_values(case, sport, kind), [first])
 
     def test_single_entry_takes_the_canonical_label_and_value(self) -> None:
         for sport, sport_type, key, field, kind, value in SPORT_METRICS:
@@ -284,41 +306,67 @@ class CanonicalCurrentInputTests(unittest.TestCase):
         reader = ObservationStub(_observations(case))
         _read(reader, case.intervals)
         window = (SYNC_DAY - timedelta(days=1), SYNC_DAY + timedelta(days=1))
-        # The sync instant is found by one unbounded read per current-metric kind
-        # and for the athlete record's eFTP.
+        # The sync instant is found by one unbounded read per kind whose athlete
+        # record rows define it.
+        instant_kinds = INSTANT_KINDS
         self.assertEqual(
-            reader.calls[:4],
-            [(kind, None, None, None) for kind in (*SYNC_KINDS, MetricKind.EFTP)],
+            reader.calls[: len(instant_kinds)],
+            [(kind, None, None, None) for kind in instant_kinds],
         )
         # The Wahoo fallbacks follow, unwindowed: stored FTP, then weight. The
-        # wellness-day eFTP is read last, for the latest wellness day only.
+        # wellness-day weight and eFTP are read last, for the latest wellness day.
         latest = _latest_wellness_day(_latest_wellness(case.intervals))
         self.assertEqual(
-            reader.calls[4:],
+            reader.calls[len(instant_kinds) :],
             [
                 (MetricKind.THRESHOLD_HR, *window, None),
                 (MetricKind.VO2MAX, *window, None),
                 (MetricKind.WEIGHT, *window, None),
                 (MetricKind.EFTP, *window, None),
+                *((kind, *window, None) for kind in ATHLETE_RECORD_KINDS),
                 (MetricKind.FTP, None, None, None),
                 (MetricKind.WEIGHT, None, None, None),
+                (MetricKind.WEIGHT, latest, latest, None),
                 (MetricKind.EFTP, latest, latest, Sport.RIDE),
             ],
         )
 
-    def test_weight_window_extends_to_an_older_latest_wellness_day(self) -> None:
+    def test_wellness_weight_is_read_for_an_older_latest_wellness_day(self) -> None:
         case = _case("intervals_only")
         reader = ObservationStub(_observations(case))
         read_current_inputs(
             reader, None, latest_wellness_day=date(2026, 10, 1), as_of=TODAY
         )
-        # The Intervals weight read is windowed; the Wahoo weight read follows it.
+        # The wellness weight is read for that day alone, not the sync window.
         self.assertIn(
-            (MetricKind.WEIGHT, date(2026, 10, 1), SYNC_DAY + timedelta(days=1), None),
+            (MetricKind.WEIGHT, date(2026, 10, 1), date(2026, 10, 1), None),
             reader.calls,
         )
 
-    def test_observations_without_an_intervals_sync_instant_yield_none(self) -> None:
+    def test_a_later_wellness_only_write_keeps_the_athlete_settings(self) -> None:
+        case = _case("intervals_only")
+        observations = _observations(case)
+        later = max(
+            item.provenance.retrieved_at
+            for item in observations
+            if item.provenance.retrieved_at is not None
+        ) + timedelta(hours=1)
+        wellness_only = tuple(
+            replace(item, provenance=replace(item.provenance, retrieved_at=later))
+            for item in observations
+            if item.provenance.source_record_id == item.observed_on.isoformat()
+        )
+        before = read_current_inputs(ObservationStub(observations), None, as_of=TODAY)
+        after = read_current_inputs(
+            ObservationStub((*observations, *wellness_only)), None, as_of=TODAY
+        )
+
+        self.assertTrue(before.athlete_record)
+        self.assertEqual(after.athlete_record, before.athlete_record)
+
+    def test_observations_without_an_intervals_sync_instant_yield_empty_inputs(
+        self,
+    ) -> None:
         case = _case("intervals_only")
         observations = _observations(case)
         unstamped = tuple(
@@ -329,11 +377,16 @@ class CanonicalCurrentInputTests(unittest.TestCase):
             for observation in observations
         )
         reader = ObservationStub(unstamped)
-        self.assertIsNone(read_current_inputs(reader, None, as_of=TODAY))
+        self.assertEqual(
+            read_current_inputs(reader, None, as_of=TODAY), NO_CURRENT_INPUTS
+        )
         self.assertEqual({call[1:] for call in reader.calls}, {(None, None, None)})
 
-    def test_sync_without_stored_sport_values_yields_none(self) -> None:
-        self.assertIsNone(read_current_inputs(ObservationStub(()), None, as_of=TODAY))
+    def test_sync_without_stored_sport_values_yields_empty_inputs(self) -> None:
+        self.assertEqual(
+            read_current_inputs(ObservationStub(()), None, as_of=TODAY),
+            NO_CURRENT_INPUTS,
+        )
 
 
 def _eftp_case(*, athlete: float | None, wellness: float | None) -> Case:
@@ -445,8 +498,10 @@ class CanonicalEftpInputTests(unittest.TestCase):
 
     def test_the_eftp_current_value_is_labelled_like_the_legacy_metric(self) -> None:
         case = _eftp_case(athlete=262, wellness=265)
-        garmin = performance_garmin_metrics.garmin_performance_metrics({}, TODAY)
-        metrics = current_performance_metrics(
+        garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+            {}, TODAY
+        )
+        metrics = snapshot_metrics(
             case.intervals, {}, garmin, canonical=self._inputs(case)
         )
         self.assertEqual(
@@ -521,7 +576,9 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         self.assertIsNotNone(inputs)
         assert inputs is not None
         self.assertIsNotNone(inputs.current)
-        legacy = current_performance_context(self.intervals, self.garmin, {}, TODAY)
+        legacy = current_performance_context(
+            self.intervals, self.garmin, {}, TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
+        )
         canonical = current_performance_context(
             self.intervals, self.garmin, {}, TODAY, canonical=inputs
         )
@@ -546,7 +603,29 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
                 "note": "",
             },
         )
-        for key in legacy["metrics"].keys() - {"cycling_eftp_watts"}:
+        # Intended difference (#1415): Garmin values are read from canonical inputs
+        # only, so the context without them has none. Their parity with the stored
+        # payload is pinned in tests/test_garmin_canonical_reads.py.
+        garmin_keys = {
+            key
+            for key, value in canonical["metrics"].items()
+            if value.get("source_provider") == "garmin"
+        }
+        self.assertTrue(garmin_keys)
+        for key in garmin_keys:
+            self.assertNotEqual(legacy["metrics"][key]["source_provider"], "garmin")
+        # Intended difference (#1415): the Intervals.icu athlete settings are read
+        # from canonical inputs only, so the context without them has none.
+        intervals_keys = {
+            key
+            for key, value in canonical["metrics"].items()
+            if value.get("source_provider") == "intervals"
+        } - {"cycling_eftp_watts"}
+        self.assertTrue(intervals_keys)
+        for key in intervals_keys:
+            self.assertIsNone(legacy["metrics"][key]["value"], key)
+        compared = legacy["metrics"].keys() - {"cycling_eftp_watts"} - garmin_keys
+        for key in compared - intervals_keys:
             self.assertEqual(canonical["metrics"][key], legacy["metrics"][key], key)
 
 
@@ -577,7 +656,7 @@ class WahooFallbackReadTests(unittest.TestCase):
     def test_stored_wahoo_ftp_and_weight_are_the_only_current_inputs(self) -> None:
         reader = ObservationStub((_wahoo_ftp(250), _wahoo_weight(78.5)))
 
-        inputs = read_wahoo_fallbacks(reader, None, as_of=TODAY)
+        inputs = read_current_inputs(reader, None, as_of=TODAY)
 
         assert inputs is not None
         assert inputs.wahoo_ftp is not None
@@ -595,15 +674,15 @@ class WahooFallbackReadTests(unittest.TestCase):
         )
         run_ftp = _wahoo_ftp(280, sport_family=1)
 
-        self.assertIsNone(
-            read_wahoo_fallbacks(ObservationStub((intervals_ftp,)), None, as_of=TODAY)
-        )
-        self.assertIsNone(
-            read_wahoo_fallbacks(ObservationStub((run_ftp,)), None, as_of=TODAY)
-        )
+        for observation in (intervals_ftp, run_ftp):
+            reader = ObservationStub((observation,))
+            self.assertIsNone(read_current_inputs(reader, None, as_of=TODAY).wahoo_ftp)
 
-    def test_no_stored_wahoo_rows_yields_none(self) -> None:
-        self.assertIsNone(read_wahoo_fallbacks(ObservationStub(()), None, as_of=TODAY))
+    def test_no_stored_wahoo_rows_yields_empty_inputs(self) -> None:
+        self.assertEqual(
+            read_current_inputs(ObservationStub(()), None, as_of=TODAY),
+            NO_CURRENT_INPUTS,
+        )
 
     def test_wahoo_rows_alone_feed_the_current_inputs(self) -> None:
         reader = ObservationStub((_wahoo_ftp(250), _wahoo_weight(78.5)))
@@ -678,7 +757,7 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
             as_of=AS_OF,
         )
         assert inputs is not None
-        self.assertIsNone(inputs.current)
+        self.assertEqual(inputs.current, NO_CURRENT_INPUTS)
 
     def test_a_wahoo_value_90_days_old_is_current(self) -> None:
         limit = AS_OF - timedelta(days=WAHOO_AGE_LIMIT_DAYS)
@@ -738,4 +817,4 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         )
         _snapshot, inputs = context.read_snapshot(lambda: self.SNAPSHOT)
         assert inputs is not None
-        self.assertIsNone(inputs.current)
+        self.assertEqual(inputs.current, NO_CURRENT_INPUTS)

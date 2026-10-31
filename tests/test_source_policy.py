@@ -16,7 +16,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import recovery_inputs
-from performance_day_support import latest_day
+from performance_day_support import latest_day, snapshot_metrics
 
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
@@ -26,10 +26,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
-from backend.performance.current_metrics import (
-    current_performance_metrics as _current_performance_metrics,
-)
-from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.performance.load_context import performance_load_context
 from backend.performance.planning_recovery import planning_recovery_by_date
 from backend.performance.recovery_context import performance_recovery_context
@@ -52,7 +49,7 @@ def current_performance_metrics(snapshot, profile, garmin, **kwargs):
     kwargs.setdefault(
         "latest_wellness", latest_day(snapshot.get("recent_wellness", []))
     )
-    return _current_performance_metrics(snapshot, profile, garmin, **kwargs)
+    return snapshot_metrics(snapshot, profile, garmin, **kwargs)
 
 
 INTERVALS = ProviderId.INTERVALS
@@ -843,7 +840,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.observations = _mapped(WELLNESS_ROWS, ATHLETE, GARMIN_SECTIONS)
-        self.garmin_metrics = garmin_performance_metrics(GARMIN_SECTIONS, TODAY)
+        self.garmin_metrics = garmin_payload_performance_metrics(GARMIN_SECTIONS, TODAY)
         self.snapshot: dict[str, Any] = {
             "athlete": LEGACY_ATHLETE,
             "recent_wellness": WELLNESS_ROWS,
@@ -894,7 +891,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         observations = _mapped(WELLNESS_ROWS, ATHLETE, garmin)
 
         legacy = current_performance_metrics(
-            self.snapshot, {}, garmin_performance_metrics(garmin, TODAY)
+            self.snapshot, {}, garmin_payload_performance_metrics(garmin, TODAY)
         )
         self.assertEqual(legacy["cycling_max_hr_bpm"]["value"], 188)
         self.assertEqual(
@@ -926,7 +923,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         legacy_without = current_performance_metrics(
             self.snapshot,
             {},
-            garmin_performance_metrics({}, TODAY),
+            garmin_payload_performance_metrics({}, TODAY),
         )
         self.assertEqual(legacy_without["cycling_ftp_watts"]["value"], 250)
         self.assertEqual(
@@ -950,7 +947,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
                 _garmin_record("2026-05-03", functionalThresholdPower=300),
             ]
         }
-        legacy = garmin_performance_metrics(garmin, TODAY)
+        legacy = garmin_payload_performance_metrics(garmin, TODAY)
         self.assertEqual(legacy["cycling_ftp_watts"]["value"], 300)
         self.assertEqual(
             _values(
@@ -969,7 +966,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
             ]
         }
 
-        legacy = garmin_performance_metrics(garmin, TODAY)
+        legacy = garmin_payload_performance_metrics(garmin, TODAY)
         self.assertEqual(legacy["cycling_ftp_watts"]["value"], 260)
         self.assertEqual(
             _values(
@@ -1027,7 +1024,7 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         legacy = current_performance_metrics(
             {"athlete": {}, "recent_wellness": rows, "recent_activities": []},
             {},
-            garmin_performance_metrics({}, TODAY),
+            garmin_payload_performance_metrics({}, TODAY),
         )
         self.assertIsNone(legacy["weight_kg"]["value"])
         self.assertIsNone(
@@ -1188,7 +1185,7 @@ class IntentionalDeviationTests(unittest.TestCase):
         legacy = current_performance_metrics(
             {"athlete": {}, "recent_wellness": [], "recent_activities": []},
             {},
-            garmin_performance_metrics(garmin, TODAY),
+            garmin_payload_performance_metrics(garmin, TODAY),
         )
         self.assertEqual(legacy["running_vo2max_ml_kg_min"]["value"], 55)
         self.assertIsNone(
@@ -1208,7 +1205,7 @@ class IntentionalDeviationTests(unittest.TestCase):
         }
         observations = _mapped([], None, garmin)
 
-        legacy = garmin_performance_metrics(garmin, TODAY)
+        legacy = garmin_payload_performance_metrics(garmin, TODAY)
         self.assertEqual(legacy["cycling_ftp_watts"]["value"], 302)
         self.assertEqual(
             _values(select_current(observations, MetricKind.FTP, sport=Sport.RIDE)),
@@ -1247,7 +1244,7 @@ class IntentionalDeviationTests(unittest.TestCase):
                         "recent_activities": [],
                     },
                     {},
-                    garmin_performance_metrics({}, TODAY),
+                    garmin_payload_performance_metrics({}, TODAY),
                 )
                 # The athlete observation is listed first to show that input order
                 # does not decide between an undated and a dated weight.
@@ -1282,7 +1279,7 @@ class IntentionalDeviationTests(unittest.TestCase):
                 "recent_activities": [],
             },
             {},
-            garmin_performance_metrics({}, TODAY),
+            garmin_payload_performance_metrics({}, TODAY),
         )
         self.assertEqual(legacy["cycling_vo2max_ml_kg_min"]["value"], 58)
         self.assertEqual(

@@ -115,6 +115,11 @@ def _workout_duration(record: Any) -> float | int | None:
     return activity_metric(record, ("moving_time", "elapsed_time"))
 
 
+def _planned_duration(record: Any) -> float | int | None:
+    """Planned units are local planning records with the neutral duration key."""
+    return activity_metric(record, ("planned_duration_s", "elapsed_time"))
+
+
 def _workout_load(record: Any) -> float | int | None:
     return activity_metric(record, TRAINING_LOAD_LOOKUP)
 
@@ -161,7 +166,7 @@ def workout_compliance(
     event: dict[str, Any], activity: dict[str, Any] | None, today: date
 ) -> dict[str, Any]:
     event_date = _record_date(
-        _first_present(event, ("start_date_local", "date", "start"))
+        _first_present(event, ("starts_at_local", "date", "start"))
     )
     if activity is not None:
         status = "completed"
@@ -171,7 +176,7 @@ def workout_compliance(
         status = "planned"
     planned_load = _workout_load(event)
     actual_load = _workout_load(activity)
-    planned_duration = _workout_duration(event)
+    planned_duration = _planned_duration(event)
     actual_duration = _workout_duration(activity)
     basis, planned_value, actual_value = _workout_compliance_basis(
         activity,
@@ -224,7 +229,7 @@ def _planning_compliance_rows(
         compliance = workout_compliance(event, matches.get(index), today)
         enriched.append({**event, "compliance": compliance})
         event_date = _record_date(
-            _first_present(event, ("start_date_local", "date", "start"))
+            _first_present(event, ("starts_at_local", "date", "start"))
         )
         try:
             event_day = date.fromisoformat(event_date)
@@ -339,7 +344,14 @@ def training_calendar_items(
     combined = planned_rows + [item for item in completed_rows if item.get("date")]
     combined.sort(
         key=lambda item: (
-            str(item.get("start_date_local") or item.get("date") or "9999-12-31"),
+            # Planned entries start at starts_at_local, completed activities
+            # keep their stored start_date_local.
+            str(
+                item.get("starts_at_local")
+                or item.get("start_date_local")
+                or item.get("date")
+                or "9999-12-31"
+            ),
             str(item.get("name") or "").casefold(),
             str(
                 item.get("id") or item.get("local_id") or item.get("external_id") or ""

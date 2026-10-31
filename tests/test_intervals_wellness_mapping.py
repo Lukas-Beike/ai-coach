@@ -21,7 +21,6 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
-from backend.db.canonical_store import observation_natural_key
 from backend.performance.body import _number as legacy_weight_number
 from backend.providers.intervals_wellness_mapping import (
     MAPPER_VERSION,
@@ -91,7 +90,7 @@ def sport_records(
 
 class ModuleContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 7)
+        self.assertEqual(MAPPER_VERSION, 9)
 
     def test_naive_retrieved_at_is_a_programming_error_for_both_mappers(self) -> None:
         naive_time = naive("2026-10-11T08:00:00")
@@ -682,6 +681,63 @@ class WellnessProvenanceTests(unittest.TestCase):
         )
 
 
+class AthleteSettingsV9Tests(unittest.TestCase):
+    """Athlete settings mapped since version 9 for the current metrics (#1415)."""
+
+    def test_body_fat_height_and_w_prime_are_athlete_wide(self) -> None:
+        result = thresholds(
+            {"id": "athlete-1", "bodyFat": 18, "height": 1.8, "icu_w_prime": 20000}
+        )
+        self.assertEqual(
+            sport_records(result),
+            {
+                (MetricKind.BODY_FAT, None, 18.0),
+                (MetricKind.HEIGHT, None, 180.0),
+                (MetricKind.W_PRIME, None, 20000.0),
+            },
+        )
+
+    def test_height_cm_wins_and_out_of_bounds_height_is_an_issue(self) -> None:
+        result = thresholds({"height_cm": 172, "height": 1.8})
+        self.assertEqual(sport_records(result), {(MetricKind.HEIGHT, None, 172.0)})
+        result = thresholds({"height": 2.6})
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            [issue.reason for issue in result.issues], [IssueReason.OUT_OF_RANGE]
+        )
+
+    def test_run_zone2_pace_is_metres_per_second(self) -> None:
+        for raw, expected in ((3.2, 3.2), (400, 2.5)):
+            with self.subTest(raw=raw):
+                result = thresholds(
+                    {"sportSettings": [{"types": ["Run"], "z2_pace": raw}]}
+                )
+                self.assertEqual(
+                    sport_records(result),
+                    {(MetricKind.ZONE2_PACE, Sport.RUN, expected)},
+                )
+
+    def test_athlete_vo2max_fills_only_a_sport_without_a_setting_value(self) -> None:
+        result = thresholds(
+            {
+                "running_vo2max": 55,
+                "cycling_vo2max": 51,
+                "sportSettings": [{"types": ["Ride"], "vo2max": 53}],
+            }
+        )
+        self.assertEqual(
+            sport_records(result),
+            {
+                (MetricKind.VO2MAX, Sport.RIDE, 53.0),
+                (MetricKind.VO2MAX, Sport.RUN, 55.0),
+            },
+        )
+
+    def test_generic_athlete_vo2max_stays_without_a_sport(self) -> None:
+        result = thresholds({"vo2max": 54})
+        self.assertEqual(sport_records(result), {(MetricKind.VO2MAX, None, 54.0)})
+
+
 class AthleteFixtureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.result = thresholds(load_fixture("athlete.json"))
@@ -702,6 +758,8 @@ class AthleteFixtureTests(unittest.TestCase):
                 (MetricKind.MAX_HR, Sport.RUN, 192),
                 (MetricKind.THRESHOLD_PACE, Sport.RUN, 4.2),
                 (MetricKind.WEIGHT, None, 70.0),
+                (MetricKind.HEIGHT, None, 180.0),
+                (MetricKind.W_PRIME, None, 18000.0),
             },
         )
 
@@ -733,6 +791,8 @@ class AthleteFixtureTests(unittest.TestCase):
                 MetricKind.THRESHOLD_PACE,
                 MetricKind.WEIGHT,
                 MetricKind.EFTP,
+                MetricKind.HEIGHT,
+                MetricKind.W_PRIME,
             },
         )
 
@@ -953,7 +1013,7 @@ class SportSettingsAliasTests(unittest.TestCase):
 
 
 class SportSettingEntryTests(unittest.TestCase):
-    def test_first_types_text_selects_the_sport(self) -> None:
+    def test_types_text_selects_the_sport(self) -> None:
         cases = {
             "VirtualRide": Sport.RIDE,
             "WeightTraining": Sport.STRENGTH,
@@ -967,9 +1027,12 @@ class SportSettingEntryTests(unittest.TestCase):
                 )
                 self.assertEqual(sport_records(result), {(MetricKind.FTP, sport, 100)})
 
-    def test_only_the_first_types_entry_classifies_the_sport(self) -> None:
+    def test_every_types_entry_classifies_a_sport(self) -> None:
         result = thresholds({"sportSettings": [{"types": ["Ride", "Run"], "ftp": 250}]})
-        self.assertEqual(sport_records(result), {(MetricKind.FTP, Sport.RIDE, 250)})
+        self.assertEqual(
+            sport_records(result),
+            {(MetricKind.FTP, Sport.RIDE, 250), (MetricKind.FTP, Sport.RUN, 250)},
+        )
 
     def test_missing_or_empty_types_skip_the_entry_with_an_issue(self) -> None:
         for entry in (
@@ -1082,7 +1145,7 @@ class SportSettingValueTests(unittest.TestCase):
                 self.assertEqual(result.records, ())
                 self.assertEqual(result.issues, ())
 
-    def test_duplicate_sport_entries_both_map_in_input_order(self) -> None:
+    def test_only_the_first_entry_of_a_sport_is_mapped(self) -> None:
         result = thresholds(
             {
                 "sportSettings": [
@@ -1096,10 +1159,7 @@ class SportSettingValueTests(unittest.TestCase):
                 (record.kind, record.sport, record.value.value)
                 for record in result.records
             ],
-            [
-                (MetricKind.FTP, Sport.RIDE, 260),
-                (MetricKind.FTP, Sport.RIDE, 250),
-            ],
+            [(MetricKind.FTP, Sport.RIDE, 260)],
         )
 
     def test_secret_threshold_text_is_never_echoed(self) -> None:
@@ -1267,50 +1327,86 @@ class AthleteGarbageTests(unittest.TestCase):
                 )
 
 
-class KnownEftpClassificationLimitTests(unittest.TestCase):
-    """Pin where the mapper differs from the former snapshot eFTP readers (#1412).
+class EftpClassificationTests(unittest.TestCase):
+    """Pin the eFTP classification of the former snapshot readers (#1473)."""
 
-    These are known deviations of this mapper version, not requirements.
-    """
-
-    def eftp(self, result: MappingResult[Observation]) -> list[tuple[Sport | None, float]]:
+    def eftp(
+        self, result: MappingResult[Observation]
+    ) -> list[tuple[Sport | None, float]]:
         return [
             (record.sport, record.value.value)
             for record in result.records
             if record.kind is MetricKind.EFTP
         ]
 
-    def test_sport_info_identified_only_by_sport_or_sport_type_has_no_eftp(
+    def test_sport_info_identified_only_by_sport_or_sport_type_has_eftp(
         self,
     ) -> None:
-        entries = [
+        for entry in (
             {"sport": "Cycling", "eFTP": 270},
             {"sport_type": "Ride", "eFTP": 280},
-        ]
-        self.assertEqual(self.eftp(wellness([row(sportInfo=entries)])), [])
+        ):
+            with self.subTest(entry=entry):
+                self.assertEqual(
+                    self.eftp(wellness([row(sportInfo=[entry])])),
+                    [(Sport.RIDE, entry["eFTP"])],
+                )
 
-    def test_a_setting_is_classified_by_its_first_type_only(self) -> None:
+    def test_each_type_text_classifies_the_entry(self) -> None:
         athlete = {"sportSettings": [{"types": ["Run", "Ride"], "eftp": 300}]}
-        self.assertEqual(self.eftp(thresholds(athlete)), [(Sport.RUN, 300)])
+        self.assertEqual(
+            self.eftp(thresholds(athlete)), [(Sport.RUN, 300), (Sport.RIDE, 300)]
+        )
+        info = [{"types": ["Workout", "VirtualRide"], "eftp": 290}]
+        self.assertEqual(
+            self.eftp(wellness([row(sportInfo=info)])), [(Sport.RIDE, 290)]
+        )
 
-    def test_two_ride_settings_each_yield_an_observation_with_one_key(self) -> None:
+    def test_an_empty_sport_info_types_list_is_not_replaced_by_type(self) -> None:
+        info = [{"types": [], "type": "Ride", "eftp": 280}]
+        self.assertEqual(self.eftp(wellness([row(sportInfo=info)])), [])
+
+    def test_unknown_types_only_classify_as_other(self) -> None:
+        athlete = {"sportSettings": [{"types": ["Workout"], "eftp": 210}]}
+        self.assertEqual(self.eftp(thresholds(athlete)), [(Sport.OTHER, 210)])
+
+    def test_non_text_types_are_skipped(self) -> None:
+        athlete = {"sportSettings": [{"types": [5, "Ride"], "eftp": 300}]}
+        self.assertEqual(self.eftp(thresholds(athlete)), [(Sport.RIDE, 300)])
+        result = thresholds({"sportSettings": [{"types": [5], "eftp": 300}]})
+        self.assertEqual(result.records, ())
+        self.assertEqual(
+            issue_tuples(result), [(None, "types", IssueReason.INVALID_TYPE)]
+        )
+
+    def test_a_multi_sport_entry_reports_each_invalid_value_once(self) -> None:
+        result = thresholds(
+            {
+                "id": ATHLETE_ID,
+                "sportSettings": [{"types": ["Ride", "Run"], "ftp": "x"}],
+            }
+        )
+        self.assertEqual(
+            issue_tuples(result), [(ATHLETE_ID, "ftp", IssueReason.INVALID_NUMBER)]
+        )
+        info = [{"types": ["Ride", "Run"], "eftp": "x"}]
+        self.assertEqual(
+            issue_tuples(wellness([row(sportInfo=info)])),
+            [(ROW_DAY, "eftp", IssueReason.INVALID_NUMBER)],
+        )
+
+    def test_the_first_of_two_ride_settings_wins(self) -> None:
         athlete = {
             "id": ATHLETE_ID,
             "sportSettings": [
                 {"types": ["Ride"], "eftp": 250},
                 {"types": ["VirtualRide"], "eftp": 262},
+                {"types": ["Run"], "eftp": 200},
             ],
         }
-        result = thresholds(athlete)
         self.assertEqual(
-            self.eftp(result), [(Sport.RIDE, 250), (Sport.RIDE, 262)]
+            self.eftp(thresholds(athlete)), [(Sport.RIDE, 250), (Sport.RUN, 200)]
         )
-        keys = {
-            observation_natural_key(record)
-            for record in result.records
-            if record.kind is MetricKind.EFTP
-        }
-        self.assertEqual(len(keys), 1)
 
 
 if __name__ == "__main__":

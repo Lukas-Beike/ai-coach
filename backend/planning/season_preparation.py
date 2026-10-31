@@ -285,7 +285,7 @@ def load_scenarios(
         if not row.get("is_completed_activity")
         and not (row.get("compliance") or {}).get("actual_activity")
         and today.isoformat()
-        <= iso_date_prefix(str(row.get("start_date_local") or row.get("date") or ""))
+        <= iso_date_prefix(str(row.get("starts_at_local") or row.get("date") or ""))
         <= end.isoformat()
     ]
     planned_loads, estimated, missing = _planned_loads(calendar)
@@ -418,7 +418,7 @@ def _planned_loads(
     estimated: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
     for row in calendar:
-        key = str(row.get("start_date_local") or row.get("date") or "")
+        key = str(row.get("starts_at_local") or row.get("date") or "")
         day = iso_date_prefix(key)
         name = str(row.get("name") or "Training")[:200]
         load = number(row.get(TRAINING_LOAD))
@@ -441,7 +441,7 @@ def _planned_loads(
 
 def _estimated_load(row: dict[str, Any]) -> float | None:
     """TSS-like estimate: hours x IF^2 x 100, from planned duration and the activity intensity."""
-    seconds = number(row.get("moving_time"))
+    seconds = number(row.get("planned_duration_s"))
     intensity = number(row.get(INTENSITY))
     if not seconds or seconds <= 0 or intensity is None:
         return None

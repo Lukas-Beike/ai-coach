@@ -10,7 +10,10 @@ from canonical_recovery_support import (
 from performance_day_support import canonical_from_snapshot
 
 from backend.canonical.vocabulary import MetricKind
-from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
+    CanonicalPerformanceInputs,
+)
 from backend.performance.context import current_performance_context
 
 
@@ -23,7 +26,9 @@ class PerformanceContextTests(unittest.TestCase):
             "metrics": {},
         }
         for snapshot in (None, {}):
-            result = current_performance_context(snapshot, {}, {}, date(2026, 9, 20))
+            result = current_performance_context(
+                snapshot, {}, {}, date(2026, 9, 20), canonical=EMPTY_PERFORMANCE_INPUTS
+            )
             recovery = result.pop("personal_recovery")
             focus = result.pop("training_focus")
             self.assertEqual(focus["zones"], [])
@@ -98,7 +103,17 @@ class PerformanceContextTests(unittest.TestCase):
             },
         }
 
-        result = current_performance_context(snapshot, garmin, {}, today)
+        # Athlete settings, recovery and Garmin values come only from canonical
+        # observations (#1411, #1415); map the fixtures.
+        result = current_performance_context(
+            snapshot,
+            garmin,
+            {},
+            today,
+            canonical=recovery_only_inputs(
+                garmin, snapshot["recent_wellness"], snapshot=snapshot
+            ),
+        )
 
         self.assertTrue(result["available"])
         self.assertEqual(
@@ -107,8 +122,9 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual(result["as_of"], snapshot["synced_at"])
         self.assertEqual(result["thresholds"]["ftp_w"], 300)
         # Form and ramp rate come from canonical observations only (#1412): the
-        # row's tsb is a carrier field and is not read without canonical inputs.
-        self.assertIsNone(result["current_load"]["tsb"])
+        # mapped row's form is shown; without a CTL seven days earlier there is no
+        # ramp rate.
+        self.assertEqual(result["current_load"]["tsb"], -6)
         self.assertIsNone(result["current_load"]["ramp_rate"])
         self.assertIsNone(result["current_load"]["ramp_rate_source"])
         self.assertEqual(
@@ -203,16 +219,18 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual((snapshot, garmin, profile), before)
 
     def test_missing_and_malformed_lists_do_not_break_projection(self):
+        snapshot = {
+            "synced_at": "now",
+            "athlete": "invalid",
+            "recent_wellness": [None, {"id": "2026-09-20", "readiness": "bad"}],
+            "recent_activities": [None, "bad", {"type": "Unknown"}],
+        }
         result = current_performance_context(
-            {
-                "synced_at": "now",
-                "athlete": "invalid",
-                "recent_wellness": [None, {"id": "2026-09-20", "readiness": "bad"}],
-                "recent_activities": [None, "bad", {"type": "Unknown"}],
-            },
+            snapshot,
             {},
             {},
             date(2026, 9, 20),
+            canonical=canonical_from_snapshot(snapshot, date(2026, 9, 20)),
         )
 
         self.assertTrue(result["available"])
@@ -240,6 +258,7 @@ class PerformanceContextTests(unittest.TestCase):
             {"resting_hr": [{"calendarDate": "2026-09-20", "restingHR": 50}]},
             {},
             today,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
         )
 
         self.assertFalse(result["available"])

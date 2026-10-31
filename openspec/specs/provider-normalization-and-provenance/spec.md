@@ -37,11 +37,15 @@ Detailed contract: Wahoo's naive `starts` SHALL be interpreted as UTC, and worko
 Evidence: `backend/canonical/local_time.py:localize_wall_time`, `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`; `tests/test_intervals_activity_mapping.py:test_aware_start_date_wins_over_local_wall_time`, `tests/test_intervals_activity_mapping.py:test_naive_start_date_alone_drops_the_record`, `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`, `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`.
 
 ### Requirement: Activity field and load semantics
-The system SHALL retain distinct moving and elapsed durations, distance in metres, power in watts, heart rate in bpm, ascent in metres, speed in metres per second, cadence in rpm, energy in kJ where mapped, and provider-specific load models. Intervals SHALL prefer moving time and average-watts aliases; Wahoo SHALL use summary active duration before total duration and never use planned workout minutes as completed duration.
+The system SHALL retain distinct moving and elapsed durations from every provider, distance in metres, power in watts, heart rate in bpm, ascent in metres, speed in metres per second, cadence in rpm, energy in kJ where mapped, and provider-specific load models. Intervals SHALL prefer moving time and average-watts aliases; Wahoo SHALL use summary active duration before total duration and never use planned workout minutes as completed duration.
 
 #### Scenario: Planned versus completed Wahoo duration
 - **WHEN** a workout has planned minutes but no processed summary duration
 - **THEN** actual duration remains unknown rather than using the plan as a measurement.
+
+#### Scenario: Elapsed duration beside moving duration
+- **WHEN** a Wahoo workout has both an active and a total duration, or a Garmin activity has `duration` and `movingTime`
+- **THEN** the total or `duration` is stored as the elapsed duration and the moving time is not.
 
 #### Scenario: Provider loads differ
 - **WHEN** Intervals training load and Wahoo TSS describe copies of a session
@@ -77,13 +81,17 @@ The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed
 - **WHEN** Garmin returns an undated current FTP together with no dated historical FTP record
 - **THEN** the current reading may be dated to the local fetch day and historical gaps remain empty.
 
+#### Scenario: Garmin FTP history range records
+- **WHEN** stored Garmin FTP history holds biometric range records with `from` and `value`
+- **THEN** since Garmin health mapper version 14 each becomes a ride FTP observation on its `from` day, reprojected without a provider refetch; a bare `value` without `from` is not FTP.
+
 #### Scenario: Multiple Wahoo zone revisions
 - **WHEN** Wahoo returns multiple power-zone sets for one supported family
 - **THEN** the newest update time wins, later input wins an equal-time tie, and only that selected source row supplies the FTP observation.
 
 Detailed contract: Wahoo SHALL map the newest power-zone set per cycling/running family to FTP and current profile weight to the local fetch day; it SHALL not infer zone boundaries or other profile metrics from them.
 
-Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
+Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_ftp_history_reads_biometric_range_records`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
 
 ### Requirement: Metric-specific source priority and local authority
 The system SHALL apply per-metric source rules rather than a universal provider order. Current weight, FTP, thresholds, and VO2max prefer supported Garmin values before Intervals, with Wahoo a last fallback for current cycling FTP and weight. Manual profile weight precedes Wahoo fallback.
@@ -147,11 +155,15 @@ The system SHALL map dated Intervals wellness body, HRV, sleep, readiness, VO2ma
 
 #### Scenario: eFTP observations and their classification
 - **WHEN** wellness `sportInfo` entries and athlete sport settings carry eFTP
-- **THEN** each sport's first `sportInfo` entry yields one wellness-day eFTP observation, and each classified sport setting yields an athlete-record eFTP observation; the sport is classified from the first `types` entry (or `type` for `sportInfo`), `mmp_model` eFTP wins over the entry's own eFTP, and zero means unset.
+- **THEN** each sport's first `sportInfo` entry yields one wellness-day eFTP observation, and each sport's first sport setting yields the athlete-record eFTP observation; every sport that a `types` text classifies to counts, as for the zone configurations (or, for a `sportInfo` entry without a `types` list, its `type`, `sport` and `sport_type`), with OTHER only when no text names a known sport, `mmp_model` eFTP wins over the entry's own eFTP, and zero means unset.
 
-Detailed contract (known limits of this mapper version, relied on by the performance readers; not requirements): entries identified only by `sport` or `sport_type` and settings whose ride type is not the first `types` entry yield no eFTP observation; two athlete sport settings of the same sport share one observation key, so the store keeps the last written. Mapper version 7 (Epic B) left these limits unchanged; a follow-up with the next mapper version decides whether to align them with the legacy readers. A derived form carries its method (`ctl_minus_atl`, version 1) and input fingerprint since version 7; readers use its value and unchanged DERIVED source kind only.
+#### Scenario: Athlete settings since mapper version 9
+- **WHEN** the athlete record carries W′, height, body fat or a generic VO2max, a Run setting carries a Zone-2 pace, or the athlete record carries a sport VO2max for a sport whose setting has none
+- **THEN** they are stored as athlete-record observations: W′ in J, height in cm (1.2–2.5 is read as metres), body fat in % and the generic VO2max without a sport; the Zone-2 pace in m/s for Run; the sport VO2max for that sport. The athlete body fat and generic VO2max keep their own athlete series next to the same day's wellness values, as weight and eFTP do, so neither replaces the other. Re-projection applies this to stored records without a refetch.
 
-Evidence: `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`, `backend/providers/intervals_wellness_mapping.py:map_intervals_athlete_thresholds`; `tests/test_intervals_wellness_mapping.py:test_hrv_sdnn_maps_to_sdnn_in_milliseconds`, `tests/test_intervals_wellness_mapping.py:test_without_tsb_form_is_ctl_minus_atl_and_derived`, `tests/test_intervals_wellness_mapping.py:test_invalid_first_alias_is_not_replaced_by_the_later_alias`, `tests/test_intervals_wellness_mapping.py:test_rejected_tsb_is_reported_and_not_derived`, `tests/test_intervals_wellness_mapping.py:test_each_sport_keeps_its_first_entry`, `tests/test_intervals_wellness_mapping.py:test_untyped_entries_are_skipped_and_malformed_lists_reported`, `tests/test_intervals_wellness_mapping.py:test_sport_setting_mmp_model_eftp_wins_and_zero_is_unset`. The known limits are pinned by `tests/test_intervals_wellness_mapping.py:KnownEftpClassificationLimitTests` and `tests/test_canonical_store.py:test_two_athlete_eftp_observations_of_one_sport_keep_the_last_written`.
+Detailed contract: since mapper version 8 the classification and the first-setting rule match the legacy readers and apply to every sport-setting threshold; reprojection of stored athlete and wellness records applies them without a provider refetch. A derived form carries its method (`ctl_minus_atl`, version 1) and input fingerprint since version 7; readers use its value and unchanged DERIVED source kind only.
+
+Evidence: `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`, `backend/providers/intervals_wellness_mapping.py:map_intervals_athlete_thresholds`; `tests/test_intervals_wellness_mapping.py:test_hrv_sdnn_maps_to_sdnn_in_milliseconds`, `tests/test_intervals_wellness_mapping.py:test_without_tsb_form_is_ctl_minus_atl_and_derived`, `tests/test_intervals_wellness_mapping.py:test_invalid_first_alias_is_not_replaced_by_the_later_alias`, `tests/test_intervals_wellness_mapping.py:test_rejected_tsb_is_reported_and_not_derived`, `tests/test_intervals_wellness_mapping.py:test_each_sport_keeps_its_first_entry`, `tests/test_intervals_wellness_mapping.py:test_untyped_entries_are_skipped_and_malformed_lists_reported`, `tests/test_intervals_wellness_mapping.py:test_sport_setting_mmp_model_eftp_wins_and_zero_is_unset`. The legacy classification is pinned by `tests/test_intervals_wellness_mapping.py:EftpClassificationTests`, `tests/test_canonical_store.py:test_the_first_of_two_athlete_ride_settings_is_stored` and `tests/test_canonical_backfill.py:test_athlete_stored_at_the_previous_version_keeps_its_first_ride_setting`, and the version 9 athlete settings by `tests/test_intervals_wellness_mapping.py:AthleteSettingsV9Tests`, `tests/test_canonical_store.py:test_athlete_body_fat_and_sportless_vo2max_have_their_own_series` and `tests/test_canonical_ingest.py:test_athlete_and_wellness_body_fat_and_vo2max_are_both_kept`.
 
 ### Requirement: Reproducible observation metadata
 Canonical observations SHALL round-trip optional method, aggregation, method version, input fingerprint and observation-period metadata. Derived observations MUST supply a method, version and input fingerprint. Numeric and categorical provider values SHALL remain distinct, validated values.

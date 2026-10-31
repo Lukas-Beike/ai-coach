@@ -2,14 +2,25 @@ import copy
 import unittest
 from datetime import date
 
+from performance_day_support import garmin_metrics_from_payload
+
 from backend.performance.garmin_projection import (
     GARMIN_CONTEXT_FIELDS,
     GARMIN_RECOVERY_FIELDS,
     compact_garmin_context,
     compact_garmin_recovery,
-    garmin_training_load_projection,
     latest_garmin_record,
 )
+from backend.performance.garmin_projection import (
+    garmin_training_load_projection as project_training_load,
+)
+
+
+def garmin_training_load_projection(snapshot, current_date):
+    """Project the canonical values the production mapper makes of the snapshot."""
+    return project_training_load(
+        snapshot, current_date, garmin_metrics_from_payload(snapshot)
+    )
 
 
 class GarminProjectionTests(unittest.TestCase):

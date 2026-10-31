@@ -36,6 +36,9 @@ from backend.db import canonical_store
 from backend.db.canonical_store import WriteOutcome
 from backend.db.schema import initialize_schema
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
+from backend.providers.intervals_wellness_mapping import (
+    map_intervals_athlete_thresholds,
+)
 
 RETRIEVED_AT = datetime(2026, 10, 11, 8, 0, tzinfo=UTC)
 STAMP = "2026-10-11T08:00:00+00:00"
@@ -362,12 +365,39 @@ class ObservationStoreTests(StoreFixture):
         self.assertIs(self.write(athlete), WriteOutcome.WRITTEN)
         self.assertEqual(self.count("observations"), 2)
 
+    def test_athlete_body_fat_and_sportless_vo2max_have_their_own_series(
+        self,
+    ) -> None:
+        for kind, sport, series in (
+            (MetricKind.BODY_FAT, None, "athlete"),
+            (MetricKind.VO2MAX, None, "athlete"),
+            (MetricKind.VO2MAX, Sport.RIDE, ""),
+        ):
+            with self.subTest(kind=kind, sport=sport):
+                self.db.execute("DELETE FROM observations")
+                wellness = observation(
+                    20.0, kind=kind, sport=sport, source_record_id="2026-10-01"
+                )
+                athlete = observation(
+                    21.0, kind=kind, sport=sport, source_record_id="i12345"
+                )
+                self.assertEqual(
+                    canonical_store.observation_natural_key(athlete),
+                    f"intervals|{kind.value}|{sport.value if sport else ''}"
+                    f"|{series}|2026-10-01",
+                )
+                self.assertIs(self.write(wellness), WriteOutcome.WRITTEN)
+                expected = 2 if series else 1
+                self.write(athlete)
+                self.assertEqual(self.count("observations"), expected)
+
     def test_other_athlete_profile_kinds_share_the_daily_key(self) -> None:
         ftp = observation(
             260.0, kind=MetricKind.FTP, sport=Sport.RIDE, source_record_id="i12345"
         )
         self.assertEqual(
-            canonical_store.observation_natural_key(ftp), "intervals|ftp|ride||2026-10-01"
+            canonical_store.observation_natural_key(ftp),
+            "intervals|ftp|ride||2026-10-01",
         )
 
     def test_insert_unchanged_and_update_by_natural_key(self) -> None:
@@ -380,26 +410,26 @@ class ObservationStoreTests(StoreFixture):
         )
         self.assertEqual((value, details, updated_at, count), (80.0, "{}", LATER, 1))
 
-    def test_two_athlete_eftp_observations_of_one_sport_keep_the_last_written(
-        self,
-    ) -> None:
-        # Known deviation (#1412): two ride sport settings of one athlete record
-        # share one key, so the store keeps the last one; the snapshot reader took
-        # the first matching setting. The mapper is unchanged by that work.
-        first = observation(
-            250.0, kind=MetricKind.EFTP, sport=Sport.RIDE, source_record_id="i12345"
+    def test_the_first_of_two_athlete_ride_settings_is_stored(self) -> None:
+        # Both ride settings would share one key; the mapper keeps the first
+        # (#1473), as the former snapshot reader did.
+        mapped = map_intervals_athlete_thresholds(
+            {
+                "id": "i12345",
+                "sportSettings": [
+                    {"types": ["Ride"], "eftp": 250},
+                    {"types": ["VirtualRide"], "eftp": 262},
+                ],
+            },
+            observed_on=date(2026, 10, 1),
+            retrieved_at=datetime(2026, 10, 1, 6, tzinfo=UTC),
         )
-        last = replace(first, value=replace(first.value, value=262.0))
-        self.assertEqual(
-            canonical_store.observation_natural_key(first),
-            canonical_store.observation_natural_key(last),
-        )
-        self.write(first)
-        self.write(last)
+        for record in mapped.records:
+            self.write(record)
         (value, count) = self.one(
             "SELECT value, (SELECT COUNT(*) FROM observations) FROM observations"
         )
-        self.assertEqual((value, count), (262.0, 1))
+        self.assertEqual((value, count), (250.0, 1))
 
     def test_different_sport_or_day_is_a_different_observation(self) -> None:
         self.write(observation())

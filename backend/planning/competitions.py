@@ -16,7 +16,10 @@ from backend.canonical.stored_sports import (
 )
 from backend.canonical.vocabulary import Environment, Sport
 from backend.errors import AppError
-from backend.providers.intervals_workouts import intervals_competition_type
+from backend.providers.intervals_workouts import (
+    intervals_competition_type,
+    intervals_fields_from_planning,
+)
 
 COMPETITION_TEXT_LIMITS = {
     "name": 200,
@@ -92,8 +95,8 @@ def competition_external_id(competition_id: str) -> str:
 
 def competition_event_optional_payload(competition: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {}
-    if competition.get("moving_time") is not None:
-        payload["moving_time"] = int(competition["moving_time"])
+    if competition.get("planned_duration_s") is not None:
+        payload["planned_duration_s"] = int(competition["planned_duration_s"])
     distance = competition.get("distance")
     if distance not in (None, ""):
         try:
@@ -124,8 +127,8 @@ def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
         )
     payload = {
         "category": category,
-        "start_date_local": str(
-            competition.get("start_date_local")
+        "starts_at_local": str(
+            competition.get("starts_at_local")
             or f"{competition['event_date']}{_ISO_MIDNIGHT_SUFFIX}"
         ),
         "type": competition_provider_type(competition),
@@ -139,7 +142,7 @@ def competition_event_payload(competition: dict[str, Any]) -> dict[str, Any]:
         ),
     }
     payload.update(competition_event_optional_payload(competition))
-    return payload
+    return intervals_fields_from_planning(payload)
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -153,7 +156,7 @@ def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
 
 
 def remote_competition_date(event: dict[str, Any]) -> str | None:
-    raw = _first_present(event, ("start_date_local", "date", "start"))
+    raw = _first_present(event, ("starts_at_local", "date", "start"))
     if raw in (None, ""):
         return None
     try:
@@ -197,10 +200,10 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
     category = str(event.get("category") or "RACE_B").upper()
     suffix = category.rsplit("_", 1)[-1]
     priority = suffix if suffix in {"A", "B", "C"} else "B"
-    start_date_local = str(
-        event.get("start_date_local") or f"{event_date}{_ISO_MIDNIGHT_SUFFIX}"
+    starts_at_local = str(
+        event.get("starts_at_local") or f"{event_date}{_ISO_MIDNIGHT_SUFFIX}"
     )[:19]
-    moving_time = remote_competition_moving_time(event.get("moving_time"))
+    planned_duration_s = remote_competition_moving_time(event.get("planned_duration_s"))
     distance = remote_competition_distance(event.get("distance"))
     description = str(event.get("description") or "").strip()[
         : COMPETITION_TEXT_LIMITS["description"]
@@ -212,14 +215,14 @@ def remote_competition_data(event: dict[str, Any]) -> dict[str, Any] | None:
         or None,
         "name": name,
         "event_date": event_date,
-        "start_date_local": start_date_local,
+        "starts_at_local": starts_at_local,
         **resolve_competition_fields(sport),
         "priority": priority,
         "category": f"RACE_{priority}",
         "distance": distance,
         "target": competition_target(event.get("target")),
         "description": description,
-        "moving_time": moving_time,
+        "planned_duration_s": planned_duration_s,
         "notes": description[: COMPETITION_TEXT_LIMITS["notes"]],
     }
 
@@ -389,11 +392,11 @@ def competition_remote_signature(
         "id",
         "external_id",
         "name",
-        "start_date_local",
+        "starts_at_local",
         "type",
         "category",
         "distance",
-        "moving_time",
+        "planned_duration_s",
         "target",
         "description",
     )
@@ -586,18 +589,18 @@ def normalize_competition(value: Any) -> dict[str, str | int | None]:
     name = str(value.get("name") or "").strip()[: COMPETITION_TEXT_LIMITS["name"]]
     if not name:
         raise AppError(400, "Jeder Wettkampf benötigt einen Namen.")
-    event_date, start_date_local = competition_start(
-        value.get("start_date_local"), value.get("event_date")
+    event_date, starts_at_local = competition_start(
+        value.get("starts_at_local"), value.get("event_date")
     )
     category, priority = competition_category_and_priority(value, name)
     result: dict[str, str | int | None] = {
         "id": competition_normalized_id(value.get("id")),
         "name": name,
         "event_date": event_date,
-        "start_date_local": start_date_local,
+        "starts_at_local": starts_at_local,
         "priority": priority,
         "category": category,
-        "moving_time": competition_moving_time(value.get("moving_time")),
+        "planned_duration_s": competition_moving_time(value.get("planned_duration_s")),
     }
     result.update(competition_normalized_text_fields(value))
     stored = competition_stored_sport(value)

@@ -12,21 +12,21 @@ class PlanningCompetitionSyncPlanTests(unittest.TestCase):
             "id": "remote-id",
             "external_id": "shared-external",
             "name": "Different Remote Name",
-            "start_date_local": "2026-10-04T09:00:00",
+            "starts_at_local": "2026-10-04T09:00:00",
             "type": "Ride",
         }
         external_event = {
             "id": "remote-external",
             "external_id": "shared-external",
             "name": "External Match",
-            "start_date_local": "2026-10-05T09:00:00",
+            "starts_at_local": "2026-10-05T09:00:00",
             "type": "Run",
         }
         identity_event = {
             "id": "remote-identity",
             "external_id": "identity-external",
             "name": "Fall Race",
-            "start_date_local": "2026-10-04T08:00:00",
+            "starts_at_local": "2026-10-04T08:00:00",
             "type": "Ride",
         }
         by_external, by_id, by_identity = competitions.competition_remote_indexes(
@@ -77,7 +77,7 @@ class PlanningCompetitionSyncPlanTests(unittest.TestCase):
         remote_event = {
             "id": "remote-identity",
             "name": "Fall Race",
-            "start_date_local": "2026-10-04T00:00:00",
+            "starts_at_local": "2026-10-04T00:00:00",
             "type": "Ride",
         }
         indexes = competitions.competition_remote_indexes([remote_event])
@@ -149,7 +149,7 @@ class PlanningCompetitionSyncPlanTests(unittest.TestCase):
             {
                 "id": "remote-changed",
                 "name": "Remote Name",
-                "start_date_local": "2026-10-07T08:00:00",
+                "starts_at_local": "2026-10-07T08:00:00",
                 "type": "Ride",
             }
         ]
@@ -195,7 +195,7 @@ class PlanningCompetitionSyncPlanTests(unittest.TestCase):
         identity_event = {
             "id": "remote-identity",
             "name": "Identity Conflict",
-            "start_date_local": "2026-10-04T00:00:00",
+            "starts_at_local": "2026-10-04T00:00:00",
             "type": "Ride",
         }
         local_rows = [
@@ -270,11 +270,11 @@ class PlanningCompetitionSyncPlanTests(unittest.TestCase):
                 "id",
                 "external_id",
                 "name",
-                "start_date_local",
+                "starts_at_local",
                 "type",
                 "category",
                 "distance",
-                "moving_time",
+                "planned_duration_s",
                 "target",
                 "description",
             },

@@ -28,6 +28,10 @@ GARMIN_READINESS_ALIASES = (
 )
 GARMIN_VO2MAX_ALIASES = ("vo2MaxPreciseValue", "vo2MaxValue")
 GARMIN_FTP_ALIASES = ("functionalThresholdPower", "ftp")
+# A biometric range record (FTP history) gives its day in ``from`` and its FTP in
+# ``value``; a bare ``value`` elsewhere is not FTP.
+GARMIN_FTP_RANGE_DAY = "from"
+GARMIN_FTP_RANGE_VALUE = "value"
 GARMIN_BODY_FAT_ALIASES = (
     "bodyFat",
     "body_fat",

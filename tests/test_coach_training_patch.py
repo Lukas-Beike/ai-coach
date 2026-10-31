@@ -174,13 +174,13 @@ class CoachTrainingPatchTests(DialogueHarness, unittest.TestCase):
         w1 = {
             **self.workout(name="One"),
             "date": "2026-09-08",
-            "start_date_local": "2026-09-08T08:00:00",
+            "starts_at_local": "2026-09-08T08:00:00",
             "duration_minutes": 60,
         }
         w2 = {
             **self.workout(name="Two"),
             "date": "2026-09-08",
-            "start_date_local": "2026-09-08T08:30:00",
+            "starts_at_local": "2026-09-08T08:30:00",
             "duration_minutes": 30,
         }
         with self.assertRaises(server.AppError) as error:

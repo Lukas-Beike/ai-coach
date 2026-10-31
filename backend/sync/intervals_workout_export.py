@@ -1,7 +1,8 @@
 """Intervals.icu implementation of the planned-event export port.
 
 REST transport lives in ``backend.providers.intervals_client``. This adapter maps
-local planned units onto the Intervals event payload and checks saved readback.
+local planned units onto the Intervals event payload, returns library workouts
+with the provider-neutral planning field names, and checks saved readback.
 The client is resolved per remote call, so local serialization and readback
 never open the transport.
 """
@@ -28,6 +29,8 @@ from backend.providers.intervals_workouts import (
     intervals_event_payload,
     intervals_event_start_date,
     intervals_external_id,
+    intervals_fields_from_planning,
+    planning_fields_from_intervals,
 )
 from backend.sync.workout_export import WorkoutExportCapabilities
 
@@ -93,14 +96,27 @@ class IntervalsWorkoutExport:
     ) -> list[dict[str, Any]]:
         client = self._client_factory()
         if cancel_event is None:
-            return client.get_workout_library()
-        return client.get_workout_library(cancel_event=cancel_event)
+            workouts = client.get_workout_library()
+        else:
+            workouts = client.get_workout_library(cancel_event=cancel_event)
+        return [planning_fields_from_intervals(workout) for workout in workouts]
 
     def library_create(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return self._client_factory().create_library_workouts([*payloads])
+        created = self._client_factory().create_library_workouts([*payloads])
+        return [
+            planning_fields_from_intervals(workout)
+            if isinstance(workout, dict)
+            else workout
+            for workout in created
+        ]
 
     def library_update(self, remote_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._client_factory().update_library_workout(remote_id, payload)
+        updated = self._client_factory().update_library_workout(remote_id, payload)
+        return (
+            planning_fields_from_intervals(updated)
+            if isinstance(updated, dict)
+            else updated
+        )
 
     def library_plan(
         self,
@@ -122,4 +138,9 @@ class IntervalsWorkoutExport:
     def verify_library_readback(
         self, workout: dict[str, Any], remote: dict[str, Any]
     ) -> None:
-        planning_workouts.validate_intervals_workout_result(workout, remote)
+        planning_workouts.validate_intervals_workout_result(
+            workout,
+            intervals_fields_from_planning(remote)
+            if isinstance(remote, dict)
+            else remote,
+        )

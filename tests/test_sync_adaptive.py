@@ -137,6 +137,17 @@ class IllnessPauseSyncServiceTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), INTERVALS_API_KEY_ERROR)
         writer.upsert_calendar_events.assert_not_called()
 
+    def test_sync_sends_the_illness_start_under_the_intervals_wire_name(self):
+        writer = Mock()
+        writer.upsert_calendar_events.return_value = []
+        service = IllnessPauseSyncService(self.make_config(), writer)
+
+        service.sync({"start_date": "2026-09-21", "end_date": "2026-09-21"})
+
+        (sent,) = writer.upsert_calendar_events.call_args.args[0]
+        self.assertEqual(sent["start_date_local"], "2026-09-21T00:00:00")
+        self.assertNotIn("starts_at_local", sent)
+
     def test_sync_passes_exact_event_builder_arguments_and_returns_exact_result(self):
         pause = {
             "start_date": "2026-09-21",

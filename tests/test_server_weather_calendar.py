@@ -769,7 +769,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
         self.assertEqual(adjustment["original_duration_minutes"], 120)
         self.assertEqual(adjustment["adjusted_duration_minutes"], 60)
         self.assertEqual(
-            server.PLANNING_DATA.planned_unit().list()[0]["moving_time"], 120 * 60
+            server.PLANNING_DATA.planned_unit().list()[0]["planned_duration_s"],
+            120 * 60,
         )
 
     def test_planned_unit_preserves_private_calendar_adjustment(self):
@@ -846,8 +847,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 "category": "WORKOUT",
                 "type": "Ride",
                 "name": "Plan",
-                "start_date_local": f"{today.isoformat()}T00:00:00",
-                "moving_time": 3600,
+                "starts_at_local": f"{today.isoformat()}T00:00:00",
+                "planned_duration_s": 3600,
             }
         ]
         activities = [
@@ -902,8 +903,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 "category": "WORKOUT",
                 "type": "Run",
                 "name": "Tempolauf",
-                "start_date_local": f"{today.isoformat()}T00:00:00",
-                "moving_time": 2400,
+                "starts_at_local": f"{today.isoformat()}T00:00:00",
+                "planned_duration_s": 2400,
             }
         ]
         snapshot = {
@@ -1117,7 +1118,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts(
                 {
                     "date": tomorrow,
-                    "start_date_local": tomorrow + "T08:30:00",
+                    "starts_at_local": tomorrow + "T08:30:00",
                     "duration_minutes": 30,
                 }
             )[0]["name"],
@@ -1150,14 +1151,14 @@ class ServerWeatherCalendarTests(ServerTestCase):
             server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts(
                 {
                     "date": day,
-                    "start_date_local": day + "T08:00:00",
+                    "starts_at_local": day + "T08:00:00",
                     "duration_minutes": 60,
                 }
             ),
             [],
         )
         conflict = server.PLANNING_WORKFLOWS.calendar_conflict_service().conflicts(
-            {"date": day, "start_date_local": day + "T12:15:00", "duration_minutes": 30}
+            {"date": day, "starts_at_local": day + "T12:15:00", "duration_minutes": 30}
         )[0]
         self.assertEqual(conflict["name"], "Later")
         self.assertEqual(conflict["match"], "time_window")
@@ -1195,8 +1196,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
                     "name": "Local Race",
                     "event_date": day,
                     "sport": "Cycling",
-                    "start_date_local": day + "T10:00:00",
-                    "moving_time": 7200,
+                    "starts_at_local": day + "T10:00:00",
+                    "planned_duration_s": 7200,
                 }
             ],
         )
@@ -1257,7 +1258,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
             "description": description,
             "name": "Recovery 6-8km",
             "duration_minutes": 40,
-            "moving_time": 2400,
+            "planned_duration_s": 2400,
         }
         client = server.PROVIDER_TRANSPORT.intervals_client()
         library_payload = planning_workouts.library_workout_payload(workout)
@@ -1375,7 +1376,7 @@ class ServerWeatherCalendarTests(ServerTestCase):
                     "name": "Tempo",
                     "type": "Ride",
                     "description": "- 30m 85%",
-                    "moving_time": 1800,
+                    "planned_duration_s": 1800,
                 }
             ]
         )
@@ -1563,22 +1564,22 @@ class ServerWeatherCalendarTests(ServerTestCase):
                 "id": "ride-1",
                 "name": "Lange Ausfahrt",
                 "type": "Ride",
-                "start_date_local": tomorrow + "T09:00:00",
-                "moving_time": 7200,
+                "starts_at_local": tomorrow + "T09:00:00",
+                "planned_duration_s": 7200,
             },
             {
                 "id": "indoor-1",
                 "name": "Trainer",
                 "type": "VirtualRide",
-                "start_date_local": tomorrow + "T18:00:00",
-                "moving_time": 3600,
+                "starts_at_local": tomorrow + "T18:00:00",
+                "planned_duration_s": 3600,
             },
             {
                 "id": "ride-2",
                 "name": "Spätere Ausfahrt",
                 "type": "Ride",
-                "start_date_local": day_six + "T09:00:00",
-                "moving_time": 3600,
+                "starts_at_local": day_six + "T09:00:00",
+                "planned_duration_s": 3600,
             },
         ]
         server.ATHLETE_DATA.profile().save({"weather_location": "Münster"})
@@ -1660,8 +1661,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
             {
                 "id": "monday",
                 "type": "Ride",
-                "start_date_local": f"{monday}T08:00:00",
-                "moving_time": 7200,
+                "starts_at_local": f"{monday}T08:00:00",
+                "planned_duration_s": 7200,
             },
             forecast_for(monday, {8, 9, 16, 17}),
         )
@@ -1672,8 +1673,8 @@ class ServerWeatherCalendarTests(ServerTestCase):
             {
                 "id": "friday",
                 "type": "Run",
-                "start_date_local": f"{friday}T08:00:00",
-                "moving_time": 3600,
+                "starts_at_local": f"{friday}T08:00:00",
+                "planned_duration_s": 3600,
             },
             forecast_for(friday, {8, 14}),
         )

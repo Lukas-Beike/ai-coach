@@ -15,12 +15,17 @@ from typing import Any, Final, cast
 
 from backend.activities.sync_time import activities_synced_at
 from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, Sport
+from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance import canonical_sections, wellness_days
+from backend.performance.canonical_body import (
+    EMPTY_BODY_INPUTS,
+    CanonicalBodyInputs,
+    read_body_inputs,
+)
 from backend.performance.canonical_current import (
+    NO_CURRENT_INPUTS,
     CanonicalCurrentInputs,
     read_current_inputs,
-    read_wahoo_fallbacks,
 )
 from backend.performance.canonical_recovery import (
     CanonicalRecoveryInputs,
@@ -34,6 +39,7 @@ from backend.performance.garmin_canonical import (
 from backend.performance.source_policy import select_current
 from backend.performance.wellness_days import WellnessDay
 from backend.runtime.ports import (
+    ActivityMaxHrReader,
     ActivityRowReader,
     CanonicalTableServing,
     ObservationReader,
@@ -48,8 +54,8 @@ class CanonicalPerformanceInputs:
     """CTL and ATL for the wellness day that the legacy load context reads.
 
     ``wellness_day`` is None when there is no usable wellness day. ``current`` holds
-    the sport thresholds and VO2max of the latest sync, or None when they were not
-    read. ``recovery`` holds the recovery observations of the current context and
+    the athlete settings, weights and Wahoo fallbacks of the latest sync; it is
+    empty when they were not read. ``recovery`` holds the recovery observations of the current context and
     the personal baselines, or None when they were not read.
 
     ``activity_rows`` are raw activity rows and ``activities`` their compact
@@ -58,7 +64,8 @@ class CanonicalPerformanceInputs:
 
     ``garmin`` holds the Garmin performance values and ``daily_health`` the daily
     totals of the last ``DAILY_HEALTH_DAYS`` days by ISO date; both are None when
-    they were not read.
+    they were not read. ``body`` holds the Garmin weight and body fat of the body
+    history window.
 
     ``form_by_day``, ``eftp_by_day`` and ``run_eftp_by_day`` are the
     Intervals.icu wellness-day form and sport-scoped eFTP series.
@@ -69,7 +76,7 @@ class CanonicalPerformanceInputs:
     wellness_day: date | None
     ctl: float | None
     atl: float | None
-    current: CanonicalCurrentInputs | None = None
+    current: CanonicalCurrentInputs = NO_CURRENT_INPUTS
     recovery: CanonicalRecoveryInputs | None = None
     activity_rows: tuple[dict[str, Any], ...] | None = None
     activities: tuple[dict[str, Any], ...] | None = None
@@ -81,6 +88,13 @@ class CanonicalPerformanceInputs:
     eftp_by_day: Mapping[date, float] | None = None
     run_eftp_by_day: Mapping[date, float] | None = None
     ramp_rate: float | None = None
+    body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
+
+
+# The inputs of a consumer without a canonical source: every value is unknown.
+EMPTY_PERFORMANCE_INPUTS: Final = CanonicalPerformanceInputs(
+    wellness_day=None, ctl=None, atl=None
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +102,8 @@ class CanonicalPerformanceSource:
     """Lazy accessors a consumer uses to read canonical load inputs.
 
     Both callables are resolved at read time, as the other assemblies do, so the
-    composition root can pass ``lambda: ...`` accessors. ``serving`` is optional;
-    when it is None, consumers that gate table-only reads keep the legacy values.
+    composition root can pass ``lambda: ...`` accessors. ``serving`` is optional
+    and no performance read depends on it any more.
     ``activity_rows`` is optional; without it a consumer reads no activity rows.
     ``coverage`` is optional; without it the activities' sync time is unknown.
     """
@@ -232,16 +246,6 @@ def _load_resolved(
     )
 
 
-def performance_options(
-    canonical: CanonicalPerformanceInputs | None,
-) -> dict[str, CanonicalPerformanceInputs]:
-    """Keyword arguments for ``current_performance_context``.
-
-    Empty when there are no canonical inputs, so the legacy call shape is kept.
-    """
-    return {} if canonical is None else {"canonical": canonical}
-
-
 class ReadOnceObservationReader:
     """Serve the reads of one snapshot unit from one unbounded read per kind.
 
@@ -253,6 +257,14 @@ class ReadOnceObservationReader:
     def __init__(self, reader: ObservationReader) -> None:
         self._reader = reader
         self._rows: dict[MetricKind, tuple[Observation, ...]] = {}
+
+    def activity_max_hr(
+        self, db: Any, provider: ProviderId, *, low: float, high: float
+    ) -> tuple[tuple[Sport, float, date], ...]:
+        """Forward the activity max heart rate read; none for a source without it."""
+        if not isinstance(self._reader, ActivityMaxHrReader):
+            return ()
+        return self._reader.activity_max_hr(db, provider, low=low, high=high)
 
     def observations(
         self,
@@ -304,6 +316,7 @@ class _CarriedRows:
     history_wellness_days: tuple[WellnessDay, ...]
     garmin: GarminCanonicalMetrics
     daily_health: Mapping[str, Mapping[str, Any]]
+    body: CanonicalBodyInputs
     recovery: CanonicalRecoveryInputs
     form_by_day: Mapping[date, float]
     eftp_by_day: Mapping[date, float]
@@ -315,7 +328,7 @@ class _CarriedRows:
         wellness_day: date | None,
         ctl: float | None,
         atl: float | None,
-        current: CanonicalCurrentInputs | None = None,
+        current: CanonicalCurrentInputs,
         ramp_rate: float | None = None,
     ) -> CanonicalPerformanceInputs:
         return CanonicalPerformanceInputs(
@@ -330,6 +343,7 @@ class _CarriedRows:
             history_wellness_days=self.history_wellness_days,
             garmin=self.garmin,
             daily_health=self.daily_health,
+            body=self.body,
             form_by_day=self.form_by_day,
             eftp_by_day=self.eftp_by_day,
             run_eftp_by_day=self.run_eftp_by_day,
@@ -379,6 +393,7 @@ def read_performance_inputs(
         daily_health=read_daily_health_by_date(
             reader, db, start=as_of - timedelta(days=DAILY_HEALTH_DAYS), end=as_of
         ),
+        body=read_body_inputs(reader, db, as_of),
         recovery=read_recovery_inputs(
             reader, db, as_of=as_of, latest_wellness_day=latest_day
         ),
@@ -397,7 +412,7 @@ def read_performance_inputs(
             wellness_day=None,
             ctl=None,
             atl=None,
-            current=read_wahoo_fallbacks(reader, db, as_of=as_of),
+            current=read_current_inputs(reader, db, as_of=as_of),
         )
     start = days[0].day
     loaded = _load_resolved(

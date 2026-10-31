@@ -14,6 +14,7 @@ from typing import Any
 from performance_day_support import current_days
 
 from backend.canonical.vocabulary import MetricKind
+from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.load import activity_rollup
 from backend.performance.load import actual_atl_series as _actual_atl_series
 from backend.performance.load_context import (
@@ -44,7 +45,10 @@ def performance_load_context(
     activities: list[Any], rows: list[Any], _latest: dict[str, Any], today: date
 ) -> dict[str, Any]:
     return _performance_load_context(
-        activities, current_days([row for row in rows if isinstance(row, dict)]), today
+        activities,
+        current_days([row for row in rows if isinstance(row, dict)]),
+        today,
+        canonical=EMPTY_PERFORMANCE_INPUTS,
     )
 
 

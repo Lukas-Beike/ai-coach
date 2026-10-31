@@ -17,6 +17,7 @@ from backend.performance import load as performance_load
 from backend.performance import load_context as performance_load_context
 from backend.performance import recovery_context as performance_recovery_context
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
 from backend.performance.wellness_days import WellnessDay, latest
@@ -38,23 +39,9 @@ _GARMIN_RECOVERY_SOURCES = frozenset(
 )
 
 
-def _activities(
-    snapshot: dict[str, Any], canonical: CanonicalPerformanceInputs | None
-) -> list[Any]:
-    """Return canonical compact activities or the stored activity projection."""
-    if canonical is not None and canonical.activities is not None:
-        activities: list[Any] = list(canonical.activities)
-    else:
-        raw_activities = snapshot.get("recent_activities")
-        activities = raw_activities if isinstance(raw_activities, list) else []
-    return activities
-
-
-def _wellness_days(
-    canonical: CanonicalPerformanceInputs | None,
-) -> tuple[WellnessDay, ...]:
-    """The current wellness days; none without canonical inputs."""
-    return () if canonical is None else canonical.wellness_days or ()
+def _activities(canonical: CanonicalPerformanceInputs) -> list[Any]:
+    """Return the canonical compact activities; none when none were read."""
+    return list(canonical.activities or ())
 
 
 def _sleep_timing_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -77,11 +64,9 @@ def _subjective_ratings(day: WellnessDay | None) -> dict[str, float | None]:
 
 
 def _canonical_day_series(
-    canonical: CanonicalPerformanceInputs | None,
+    canonical: CanonicalPerformanceInputs,
 ) -> dict[str, Mapping[date, float] | None]:
-    """The canonical eFTP and form day series; both absent without canonical inputs."""
-    if canonical is None:
-        return {"eftp_by_day": None, "form_by_day": None, "run_eftp_by_day": None}
+    """The canonical eFTP and form day series."""
     return {
         "eftp_by_day": canonical.eftp_by_day,
         "form_by_day": canonical.form_by_day,
@@ -89,20 +74,21 @@ def _canonical_day_series(
     }
 
 
-def _activity_rows(canonical: CanonicalPerformanceInputs | None) -> Sequence[Any]:
-    """The canonical activity rows, none without canonical inputs."""
-    return (
-        ()
-        if canonical is None or canonical.activity_rows is None
-        else canonical.activity_rows
-    )
+def _garmin_canonical(canonical: CanonicalPerformanceInputs) -> GarminCanonicalMetrics:
+    """The canonical Garmin values; empty when none were read."""
+    return canonical.garmin or GarminCanonicalMetrics()
+
+
+def _activity_rows(canonical: CanonicalPerformanceInputs) -> Sequence[Any]:
+    """The canonical activity rows; none when none were read."""
+    return canonical.activity_rows or ()
 
 
 def _unavailable_context(
     garmin: dict[str, Any],
     profile: dict[str, Any],
     today: date,
-    canonical: CanonicalPerformanceInputs | None,
+    canonical: CanonicalPerformanceInputs,
 ) -> dict[str, Any]:
     """Projection without an Intervals.icu snapshot: Garmin-only recovery and load."""
     unavailable = {
@@ -115,7 +101,7 @@ def _unavailable_context(
             garmin,
             profile,
             today,
-            canonical=None if canonical is None else canonical.recovery,
+            canonical=canonical.recovery,
         ),
         "training_focus": training_focus(
             garmin,
@@ -124,7 +110,9 @@ def _unavailable_context(
             activity_rows=_activity_rows(canonical),
         ),
     }
-    load_projection = garmin_projection.garmin_training_load_projection(garmin, today)
+    load_projection = garmin_projection.garmin_training_load_projection(
+        garmin, today, _garmin_canonical(canonical)
+    )
     if load_projection:
         unavailable["garmin_training_load"] = load_projection
     return unavailable
@@ -136,25 +124,24 @@ def current_performance_context(
     profile: dict[str, Any],
     today: date,
     *,
-    canonical: CanonicalPerformanceInputs | None = None,
+    canonical: CanonicalPerformanceInputs,
 ) -> dict[str, Any]:
     """Compose the current performance projection from explicit inputs.
 
-    Canonical days supply wellness, load and body values. The stored snapshot
-    remains the source for athlete settings, activities without a row reader and
-    the pre-sleep-period timing fallback.
+    The canonical inputs supply activities, wellness, load, body, Garmin and
+    athlete-setting values; ``EMPTY_PERFORMANCE_INPUTS`` stands for none. The
+    stored snapshot remains the source for sync status and the pre-sleep-period
+    timing fallback.
     """
     if not snapshot:
         return _unavailable_context(garmin, profile, today, canonical)
 
-    athlete_value = snapshot.get("athlete")
-    athlete: dict[str, Any] = athlete_value if isinstance(athlete_value, dict) else {}
-    activities = _activities(snapshot, canonical)
-    days = _wellness_days(canonical)
+    activities = _activities(canonical)
+    days = canonical.wellness_days or ()
     latest_wellness = latest(days)
 
     recovery = performance_recovery_context.performance_recovery_context(
-        None if canonical is None else canonical.recovery, today
+        canonical.recovery, today
     )
     sleep_hours = recovery["sleep_hours"]
     sleep_source = recovery["sleep_source"]
@@ -167,13 +154,13 @@ def current_performance_context(
     readiness_current = recovery["readiness"]
     readiness_source = recovery["readiness_source"]
 
+    current = canonical.current
     metrics = performance_current_metrics.current_performance_metrics(
-        snapshot,
         profile,
         performance_garmin_metrics.garmin_performance_metrics(
-            garmin, today, None if canonical is None else canonical.garmin
+            garmin, today, _garmin_canonical(canonical)
         ),
-        canonical=None if canonical is None else canonical.current,
+        canonical=current,
         activities=activities,
         latest_wellness=latest_wellness,
     )
@@ -194,20 +181,21 @@ def current_performance_context(
             7,
             today - timedelta(days=1),
             today,
-            health_by_date=None if canonical is None else canonical.daily_health,
+            health_by_date=canonical.daily_health or {},
         )
     )
     comparisons = performance_comparisons.performance_comparisons(
-        garmin,
         metrics,
         recovery,
         load_context,
         days,
         activities,
         today,
-        garmin_history=None
-        if canonical is None or canonical.garmin is None
-        else canonical.garmin.performance_history,
+        # The weight trend uses the body history's per-day Garmin weights.
+        garmin_history={
+            **_garmin_canonical(canonical).performance_history,
+            "weight_kg": canonical.body.garmin_weight_kg,
+        },
         **_canonical_day_series(canonical),
     )
     activity_performance = activity_validation.activity_performance_validation(
@@ -220,10 +208,10 @@ def current_performance_context(
             garmin,
             profile,
             today,
-            canonical=None if canonical is None else canonical.recovery,
+            canonical=canonical.recovery,
         ),
         "garmin_training_load": garmin_projection.garmin_training_load_projection(
-            garmin, today, None if canonical is None else canonical.garmin
+            garmin, today, _garmin_canonical(canonical)
         ),
         "training_focus": training_focus(
             garmin,
@@ -236,9 +224,7 @@ def current_performance_context(
         "metrics": metrics,
         "thresholds": {
             "ftp_w": metrics["cycling_ftp_watts"]["value"],
-            "w_prime_j": performance_current_metrics.athlete_w_prime(athlete),
-            "max_hr": athlete.get("max_hr"),
-            "lthr": athlete.get("lthr"),
+            **performance_current_metrics.athlete_thresholds(current),
             "weight": metrics["weight_kg"]["value"],
         },
         "current_load": load,

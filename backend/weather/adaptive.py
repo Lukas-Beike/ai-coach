@@ -20,7 +20,7 @@ def _weather_adaptive_duration_minutes(event: dict[str, Any]) -> float | int:
     duration_minutes = _as_number(event.get("duration_minutes"))
     if duration_minutes is None:
         duration_minutes = (
-            weather_projection.weather_number(event.get("moving_time")) or 0
+            weather_projection.weather_number(event.get("planned_duration_s")) or 0
         ) / 60
     return duration_minutes
 
@@ -37,7 +37,7 @@ def _weather_adaptive_forecast(
     ):
         return None
     event_date = iso_date_prefix(
-        str(event.get("date") or event.get("start_date_local") or "")
+        str(event.get("date") or event.get("starts_at_local") or "")
     )
     try:
         target_date = date.fromisoformat(event_date)

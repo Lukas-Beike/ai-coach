@@ -40,7 +40,7 @@ class CalendarConflictServiceTests(unittest.TestCase):
             db.execute(
                 "CREATE TABLE competitions ("
                 "id TEXT PRIMARY KEY, name TEXT, event_date TEXT, "
-                "start_date_local TEXT, moving_time INTEGER)"
+                "starts_at_local TEXT, planned_duration_s INTEGER)"
             )
         self.external_reader = _ExternalCalendarReader(
             [
@@ -65,7 +65,7 @@ class CalendarConflictServiceTests(unittest.TestCase):
         *,
         archived: bool = False,
         local_deleted: bool = False,
-        start_date_local: str | None = None,
+        starts_at_local: str | None = None,
         duration_minutes: int | None = None,
     ) -> None:
         payload = {
@@ -75,8 +75,8 @@ class CalendarConflictServiceTests(unittest.TestCase):
             "archived": archived,
             "local_deleted": local_deleted,
         }
-        if start_date_local is not None:
-            payload["start_date_local"] = start_date_local
+        if starts_at_local is not None:
+            payload["starts_at_local"] = starts_at_local
         if duration_minutes is not None:
             payload["duration_minutes"] = duration_minutes
         with self.database_manager.unit_of_work() as db:
@@ -90,7 +90,7 @@ class CalendarConflictServiceTests(unittest.TestCase):
     ) -> None:
         self._add_planned_unit(
             "active",
-            start_date_local="2026-10-04T08:00:00",
+            starts_at_local="2026-10-04T08:00:00",
             duration_minutes=60,
         )
         self._add_planned_unit("archived", archived=True)
@@ -98,7 +98,7 @@ class CalendarConflictServiceTests(unittest.TestCase):
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO competitions "
-                "(id, name, event_date, start_date_local, moving_time) "
+                "(id, name, event_date, starts_at_local, planned_duration_s) "
                 "VALUES (?, ?, ?, ?, ?)",
                 ("race-1", "Local race", "2026-10-04", None, None),
             )
@@ -106,7 +106,7 @@ class CalendarConflictServiceTests(unittest.TestCase):
         conflicts = self.service.conflicts(
             {
                 "date": "2026-10-04",
-                "start_date_local": "2026-10-04T08:30:00",
+                "starts_at_local": "2026-10-04T08:30:00",
                 "duration_minutes": 30,
             }
         )
@@ -148,13 +148,13 @@ class CalendarConflictServiceTests(unittest.TestCase):
     def test_exclude_ids_only_remove_local_library_conflicts(self) -> None:
         self._add_planned_unit(
             "excluded",
-            start_date_local="2026-10-04T08:00:00",
+            starts_at_local="2026-10-04T08:00:00",
             duration_minutes=60,
         )
         with self.database_manager.unit_of_work() as db:
             db.execute(
                 "INSERT INTO competitions "
-                "(id, name, event_date, start_date_local, moving_time) "
+                "(id, name, event_date, starts_at_local, planned_duration_s) "
                 "VALUES (?, ?, ?, ?, ?)",
                 ("race-1", "Local race", "2026-10-04", None, None),
             )
@@ -162,7 +162,7 @@ class CalendarConflictServiceTests(unittest.TestCase):
         conflicts = self.service.conflicts(
             {
                 "date": "2026-10-04",
-                "start_date_local": "2026-10-04T08:30:00",
+                "starts_at_local": "2026-10-04T08:30:00",
                 "duration_minutes": 30,
             },
             {"excluded"},
@@ -304,7 +304,7 @@ class CalendarConflictServiceTests(unittest.TestCase):
         conflicts = self.service.conflicts(
             {
                 "date": "2026-10-04",
-                "start_date_local": "2026-10-04T17:00:00",
+                "starts_at_local": "2026-10-04T17:00:00",
                 "duration_minutes": 30,
                 "name": "Hard intervals",
             }

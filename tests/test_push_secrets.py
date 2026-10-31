@@ -104,9 +104,14 @@ class PushSecretTests(unittest.TestCase):
             self.assertEqual(scan.check(self.update("0" * 40, tip)), 0)
             self.assertEqual(scan.check(self.update(tip, tip)), 0)
 
-    def test_clean_push_scans_committed_content_not_dirty_worktree(self):
-        tip = self.commit("committed clean")
-        (self.root / "fixture.py").write_text("uncommitted private data")
+    def test_untouched_lines_of_an_edited_file_are_not_rescanned(self):
+        base = self.commit("synthetic flagged line\nkept\n")
+        tip = self.commit("synthetic flagged line\nkept\nadded clean line\n")
+        joined = b"\n".join(self.scanned_by(self.update(tip, base)))
+        self.assertIn(b"added clean line", joined)
+        self.assertNotIn(b"synthetic flagged line", joined)
+
+    def scanned_by(self, updates):
         run = subprocess.run
         scanned = []
 
@@ -120,7 +125,60 @@ class PushSecretTests(unittest.TestCase):
             patch.object(scan.shutil, "which", return_value="synthetic-sonar"),
             patch.object(scan.subprocess, "run", side_effect=scanner),
         ):
-            self.assertEqual(scan.check(self.update(tip)), 0)
+            scan.check(updates)
+        return scanned
+
+    def test_added_runs_keep_order_and_plus_prefixed_content(self):
+        base = self.commit("keep\n")
+        tip = self.commit("keep\nBEGIN\n++body\nBEGIN\nEND\n")
+        scanned = self.scanned_by(self.update(tip, base))
+        self.assertIn(b"BEGIN\n++body\nBEGIN\nEND", scanned)
+
+    def test_new_and_binary_files_are_scanned_whole(self):
+        base = self.commit("keep\n")
+        (self.root / "new.txt").write_text("fresh line\nsecond\n")
+        (self.root / "blob.bin").write_bytes(b"\x00\x01binary secret\x00")
+        scan.git("add", ".")
+        scan.git("commit", "-qm", "files")
+        tip = scan.git("rev-parse", "HEAD").decode().strip()
+        scanned = self.scanned_by(self.update(tip, base))
+        self.assertIn(b"fresh line\nsecond\n", scanned)
+        self.assertIn(b"\x00\x01binary secret\x00", scanned)
+
+    def test_merged_base_lines_are_not_rescanned(self):
+        self.commit("keep\n")
+        scan.git("branch", "-m", "base")
+        scan.git("checkout", "-qb", "feature")
+        self.commit("keep\nfeature line\n")
+        scan.git("checkout", "-q", "base")
+        pushed = self.commit("keep\nsynthetic flagged base line\n")
+        scan.git("update-ref", "refs/remotes/origin/base", pushed)
+        scan.git("checkout", "-q", "feature")
+        scan.git("merge", "-q", "--no-edit", "-X", "ours", "base")
+        tip = scan.git("rev-parse", "HEAD").decode().strip()
+        joined = b"\n".join(self.scanned_by(self.update(tip, "f" * 40)))
+        self.assertNotIn(b"synthetic flagged base line", joined)
+
+    def test_merge_resolution_content_is_scanned(self):
+        self.commit("keep\n")
+        scan.git("branch", "-m", "base")
+        scan.git("checkout", "-qb", "feature")
+        self.commit("keep\nfeature line\n")
+        scan.git("checkout", "-q", "base")
+        self.commit("keep\nbase line\n")
+        scan.git("checkout", "-q", "feature")
+        scan.git("merge", "-q", "--no-commit", "-X", "ours", "base")
+        (self.root / "fixture.py").write_text("keep\nresolution only line\n")
+        scan.git("commit", "-qam", "merge")
+        tip = scan.git("rev-parse", "HEAD").decode().strip()
+        remote = scan.git("rev-parse", "HEAD^1").decode().strip()
+        joined = b"\n".join(self.scanned_by(self.update(tip, remote)))
+        self.assertIn(b"resolution only line", joined)
+
+    def test_clean_push_scans_committed_content_not_dirty_worktree(self):
+        tip = self.commit("committed clean")
+        (self.root / "fixture.py").write_text("uncommitted private data")
+        scanned = self.scanned_by(self.update(tip))
         self.assertIn(b"committed clean", scanned)
         self.assertNotIn(b"uncommitted private data", scanned)
 

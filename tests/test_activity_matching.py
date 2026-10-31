@@ -16,12 +16,14 @@ class ActivityMatchingTests(unittest.TestCase):
     def test_category_and_duration_fallback_match_the_workout_contract(self):
         self.assertTrue(is_planned_workout_event({"category": " workout "}))
         self.assertFalse(
-            is_planned_workout_event({"category": "race", "moving_time": 1})
+            is_planned_workout_event({"category": "race", "planned_duration_s": 1})
         )
-        self.assertTrue(is_planned_workout_event({"moving_time": "1,5"}))
+        self.assertTrue(is_planned_workout_event({"planned_duration_s": "1,5"}))
         self.assertTrue(is_planned_workout_event({"elapsed_time": "3600"}))
-        self.assertFalse(is_planned_workout_event({"moving_time": "not-a-number"}))
-        self.assertFalse(is_planned_workout_event({"moving_time": "nan"}))
+        self.assertFalse(
+            is_planned_workout_event({"planned_duration_s": "not-a-number"})
+        )
+        self.assertFalse(is_planned_workout_event({"planned_duration_s": "nan"}))
         self.assertFalse(is_planned_workout_event("not-a-record"))
 
     def test_workout_rows_keep_original_indices_and_ignore_malformed_rows(self):
@@ -29,7 +31,7 @@ class ActivityMatchingTests(unittest.TestCase):
             "not-a-record",
             {"category": "RACE"},
             {"category": "WORKOUT", "id": "workout"},
-            {"type": "Run", "moving_time": 1200},
+            {"type": "Run", "planned_duration_s": 1200},
         ]
         self.assertEqual(
             _planned_workout_rows(planned), [(2, planned[2]), (3, planned[3])]
@@ -97,7 +99,7 @@ class ActivityMatchingTests(unittest.TestCase):
             "category": "WORKOUT",
             "type": "VirtualRide",
             "date": "2026-09-20",
-            "moving_time": 2700,
+            "planned_duration_s": 2700,
         }
         remote_paired = {
             "id": "ride",
@@ -114,7 +116,7 @@ class ActivityMatchingTests(unittest.TestCase):
         event = {
             "category": "WORKOUT",
             "type": "Run",
-            "start_date_local": "2026-09-20T10:00:00",
+            "starts_at_local": "2026-09-20T10:00:00",
         }
         activities = [
             {"id": "far", "type": "Run", "start_date_local": "2026-09-20T12:00:00"},

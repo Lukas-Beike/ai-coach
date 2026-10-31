@@ -86,8 +86,8 @@ PLANNED_FIELDS = (
     "name",
     "type",
     "category",
-    "start_date_local",
-    "moving_time",
+    "starts_at_local",
+    "planned_duration_s",
     "duration_minutes",
     "is_local",
     "is_remote",
@@ -345,7 +345,7 @@ def _project_planned_days(
     days: dict[str, dict[str, Any]], planned: list[dict[str, Any]]
 ) -> None:
     for event in planned:
-        value = planning_date(event.get("start_date_local") or event.get("date"))
+        value = planning_date(event.get("starts_at_local") or event.get("date"))
         if value:
             _day(days, value)["planned"].append(selected(event, PLANNED_FIELDS))
 
@@ -426,7 +426,7 @@ def _sort_and_clean_daily_planning_days(
     for value in days.values():
         value["planned"].sort(
             key=lambda event: str(
-                event.get("start_date_local") or event.get("date") or ""
+                event.get("starts_at_local") or event.get("date") or ""
             )
         )
         value["appointments"].sort(

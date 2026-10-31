@@ -309,3 +309,20 @@ The system SHALL execute the exact selected sync entries with per-entry outcomes
 - **THEN** the aggregate status is partial, or error if every entry failed, with failed_object_ids and retry_scope directing selection of only failed objects; an all-success result is ok with no retry scope. Completed remote effects for other entries remain in place even if a later entry fails.
 
 Evidence: `backend/sync/executor.py:IntervalsSyncJobOwner.execute_specific`; `backend/sync/selected.py:SelectedWorkoutSyncService.sync`, `backend/sync/selected.py:SelectedWorkoutSyncService._sync_unlocked`, `backend/sync/selected.py:SelectedWorkoutSyncService._sync_entry`, `backend/sync/selected.py:SelectedWorkoutSyncService._verify_repair`; `backend/sync/planned_calendar.py:PlannedCalendarRepairBatch.snapshot`, `backend/sync/planned_calendar.py:PlannedCalendarRepairBatch.verify`; `tests/test_sync_executor.py:test_dispatches_specific_intervals_jobs_and_preserves_plan_repair`; `tests/test_sync_selected.py:test_planned_normal_and_repair_paths`, `tests/test_sync_selected.py:test_hash_and_not_found_conflicts_are_aggregated`, `tests/test_sync_selected.py:test_partial_and_all_failure_aggregation`, `tests/test_sync_selected.py:test_repair_errors_are_recorded_and_verification_failure_overrides_result`, `tests/test_sync_selected.py:test_repair_lock_timeout_release_and_exception_cleanup`; `tests/test_sync_planned_calendar.py:test_repair_batch_shares_two_reads_and_deferred_verification`. Retry scope here is the selected operation's failed-object guidance; the separately authorized durable job retry in TL10 retains the original job selection. Evidence uses inspected implementation and synthetic/mocked tests, not a live provider or a distributed rollback guarantee.
+
+### Requirement: TL16 Provider-neutral planning record fields
+Local planning records (planned units, workout-library entries, competitions, staged plan workouts and adaptive previews) SHALL store and return their local start as `starts_at_local` and their planned duration in seconds as `planned_duration_s`, in the HTTP API, Coach tools and Coach context alike. Only the Intervals.icu adapter SHALL map these fields to and from the Intervals.icu event and workout fields `start_date_local` and `moving_time`, so payloads sent to Intervals.icu stay unchanged.
+
+#### Scenario: Remote workout import
+- **WHEN** an Intervals.icu planned event or library workout is imported
+- **THEN** the stored local record names its start and duration `starts_at_local` and `planned_duration_s`.
+
+#### Scenario: Explicit export to Intervals.icu
+- **WHEN** an athlete explicitly synchronizes planned units, library workouts or competitions
+- **THEN** the Intervals.icu payload carries `start_date_local` and `moving_time` exactly as before.
+
+#### Scenario: Coach save of a competition
+- **WHEN** an athlete-started Coach turn saves a competition with `starts_at_local` and `planned_duration_s`
+- **THEN** the competition is stored with those values.
+
+Evidence: `backend/providers/intervals_workouts.py::planning_fields_from_intervals`, `backend/providers/intervals_workouts.py::intervals_fields_from_planning`, `backend/providers/intervals_workouts.py::intervals_event_payload`; `backend/sync/intervals_workout_export.py::IntervalsWorkoutExport`; `backend/sync/competitions.py::CompetitionSyncService.sync`; `backend/sync/planned_units.py`; `backend/sync/reconcile.py`. Tests: `tests/test_workout_export_parity.py::test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_workout_export_intervals.py::test_library_workouts_cross_the_adapter_with_planning_field_names`; `tests/test_workout_export_intervals.py::test_library_readback_checks_the_remote_duration_under_its_wire_name`; `tests/test_planning_competitions.py::test_event_payload_fallbacks_limits_and_input_immutability`; `tests/test_sync_adaptive.py::test_sync_sends_the_illness_start_under_the_intervals_wire_name`; `tests/test_server_coach.py`.

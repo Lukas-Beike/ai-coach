@@ -16,6 +16,7 @@ from backend.db.repositories import CompetitionRepository, KeyValueRepository
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.planning import competitions as planning_competitions
 from backend.planning.competition_service import CompetitionService
+from backend.providers.intervals_workouts import planning_fields_from_intervals
 from backend.sync.authority import competition_push_manifest
 from backend.sync.competitions import CompetitionSyncReconciler, CompetitionSyncService
 
@@ -115,8 +116,8 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
                 "sport TEXT NOT NULL, environment TEXT, sport_detail TEXT, "
                 "priority TEXT NOT NULL, distance TEXT NOT NULL, "
                 "target TEXT NOT NULL, course_profile TEXT NOT NULL, notes TEXT NOT NULL, "
-                "category TEXT NOT NULL DEFAULT 'RACE_B', start_date_local TEXT, "
-                "description TEXT NOT NULL DEFAULT '', moving_time INTEGER, intervals_event_id TEXT, "
+                "category TEXT NOT NULL DEFAULT 'RACE_B', starts_at_local TEXT, "
+                "description TEXT NOT NULL DEFAULT '', planned_duration_s INTEGER, intervals_event_id TEXT, "
                 "external_id TEXT, sync_dirty INTEGER NOT NULL DEFAULT 1, "
                 "sync_state TEXT NOT NULL DEFAULT 'local', sync_conflict TEXT NOT NULL DEFAULT '', "
                 "last_synced_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
@@ -162,9 +163,9 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             "course_profile": "",
             "notes": "",
             "category": "RACE_B",
-            "start_date_local": f"{event_date}T00:00:00",
+            "starts_at_local": f"{event_date}T00:00:00",
             "description": "Local description",
-            "moving_time": None,
+            "planned_duration_s": None,
             "intervals_event_id": intervals_event_id,
             "external_id": external_id,
             "sync_dirty": sync_dirty,
@@ -202,7 +203,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             db.execute(
                 "INSERT INTO competitions(id, name, event_date, sport, environment, sport_detail, "
                 "priority, distance, target, "
-                "course_profile, notes, category, start_date_local, description, moving_time, "
+                "course_profile, notes, category, starts_at_local, description, planned_duration_s, "
                 "intervals_event_id, external_id, sync_dirty, sync_state, sync_conflict, "
                 "last_synced_at, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -258,8 +259,11 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         )
 
     def sync_plan(self, local_rows, remote_events, tombstones=None):
+        # The sync service hands the plan provider events with planning names.
         return planning_competitions.competition_sync_plan(
-            local_rows, tombstones or [], remote_events
+            local_rows,
+            tombstones or [],
+            [planning_fields_from_intervals(event) for event in remote_events],
         )
 
     def test_records_returns_ordered_tombstones_and_local_rows(self):
@@ -359,9 +363,11 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertIsNone(self.stored_competition("local-push")["intervals_event_id"])
         self.assertIsNone(self.stored_competition("local-push")["external_id"])
 
-        pushed = self.remote_event(
-            "remote-created",
-            planning_competitions.competition_external_id("local-push"),
+        pushed = planning_fields_from_intervals(
+            self.remote_event(
+                "remote-created",
+                planning_competitions.competition_external_id("local-push"),
+            )
         )
         second = self.reconciler.reconcile(
             plan, [pushed], [], [row], push_local=True, now=NOW
@@ -399,7 +405,7 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
         self.assertEqual(result["updated"], 1)
         self.assertEqual(stored["name"], "Remote Name")
         self.assertEqual(stored["description"], "Remote details")
-        self.assertEqual(stored["moving_time"], 14400)
+        self.assertEqual(stored["planned_duration_s"], 14400)
         self.assertEqual(stored["last_synced_at"], NOW)
 
     def test_clean_row_keeps_local_indoor_environment_for_the_same_remote_type(self):
@@ -761,7 +767,9 @@ class CompetitionSyncReconcilerTests(unittest.TestCase):
             service.sync()
 
         plan = reconcile.call_args.args[0]
-        self.assertEqual(plan["remote_events"], [linked])
+        self.assertEqual(
+            plan["remote_events"], [planning_fields_from_intervals(linked)]
+        )
 
     def test_success_result_status_values_and_coach_event(self):
         row = self.local_competition(

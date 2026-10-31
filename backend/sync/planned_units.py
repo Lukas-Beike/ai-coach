@@ -15,6 +15,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.planning import planned_units
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
+from backend.providers.intervals_workouts import planning_fields_from_intervals
 
 _REMOTE_LINKS = RemoteLinkRepository()
 _DATE_ONLY_PATTERN = r"\d{4}-\d{2}-\d{2}"
@@ -86,7 +87,7 @@ class RemotePlannedUnitReconciler:
                 if not isinstance(raw_event, dict):
                     continue
                 prepared = planned_units.remote_planned_unit_payload(
-                    raw_event, today=today
+                    planning_fields_from_intervals(raw_event), today=today
                 )
                 if prepared is None:
                     continue

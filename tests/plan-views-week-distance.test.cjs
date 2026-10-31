@@ -16,20 +16,20 @@ vm.runInContext(`${loadPublicScript("plan-views.js")};globalThis.calendarWeekDis
 const { calendarWeekDistanceLabel } = context;
 
 test("week distance counts a distance-bearing sport that is not in the classic list", () => {
-  assert.equal(calendarWeekDistanceLabel([{ type: "OpenWaterSwim", distance: 1500 }]), "1,5 km");
-  assert.equal(calendarWeekDistanceLabel([{ type: "VirtualRow", distance: 4000 }]), "4,0 km");
+  assert.equal(calendarWeekDistanceLabel([{ type: "OpenWaterSwim", distance_m: 1500 }]), "1,5 km");
+  assert.equal(calendarWeekDistanceLabel([{ type: "VirtualRow", distance_m: 4000 }]), "4,0 km");
 });
 
 test("week distance includes any activity type with a positive distance", () => {
-  assert.equal(calendarWeekDistanceLabel([{ type: "Workout", distance: 2000 }, { type: "Ride", distance: 10000 }]), "12,0 km");
+  assert.equal(calendarWeekDistanceLabel([{ type: "Workout", distance_m: 2000 }, { type: "Ride", distance_m: 10000 }]), "12,0 km");
 });
 
 test("week distance ignores strength sessions without distance", () => {
   assert.equal(calendarWeekDistanceLabel([{ type: "WeightTraining" }]), "–");
-  assert.equal(calendarWeekDistanceLabel([{ type: "Run", distance: 5000 }, { type: "WeightTraining", distance: null }]), "5,0 km");
+  assert.equal(calendarWeekDistanceLabel([{ type: "Run", distance_m: 5000 }, { type: "WeightTraining", distance_m: null }]), "5,0 km");
 });
 
 test("week distance reports distance sports without distance as missing", () => {
-  assert.equal(calendarWeekDistanceLabel([{ type: "OpenWaterSwim", distance: 1000 }, { type: "OpenWaterSwim" }]), "1,0 km · ohne 1 Aktivität");
-  assert.equal(calendarWeekDistanceLabel([{ type: "VirtualRow" }, { type: "Snowshoe", distance: 0 }]), "– · ohne 2 Aktivitäten");
+  assert.equal(calendarWeekDistanceLabel([{ type: "OpenWaterSwim", distance_m: 1000 }, { type: "OpenWaterSwim" }]), "1,0 km · ohne 1 Aktivität");
+  assert.equal(calendarWeekDistanceLabel([{ type: "VirtualRow" }, { type: "Snowshoe", distance_m: 0 }]), "– · ohne 2 Aktivitäten");
 });

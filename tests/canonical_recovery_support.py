@@ -173,15 +173,17 @@ def recovery_only_inputs(
 ) -> Any:
     """Return performance inputs for a context test that changes only some sources.
 
-    The inputs carry the mapped recovery observations. Without a wellness day the
-    load, threshold and Garmin metric readers keep the snapshot path. With a
-    ``snapshot`` they also carry what the Intervals.icu observations of that
-    snapshot give for form, ramp rate and eFTP (#1412), which are not read from the
-    snapshot itself; ctl and atl stay on the snapshot rows.
+    The inputs carry the mapped recovery observations and the Garmin metrics mapped
+    from ``garmin`` (#1415). With a ``snapshot`` they also carry what the
+    Intervals.icu observations of that snapshot give for form, ramp rate and the
+    current athlete settings (#1412, #1415), and the snapshot's activity rows as
+    the activity reader serves them; ctl and atl stay on the snapshot rows.
     """
     from dataclasses import replace
 
-    from backend.performance.canonical_current import CanonicalCurrentInputs
+    from canonical_daily_health_support import mapped_health
+    from performance_day_support import garmin_metrics_from_payload
+
     from backend.performance.canonical_inputs import (
         CanonicalPerformanceInputs,
         read_performance_inputs,
@@ -193,6 +195,9 @@ def recovery_only_inputs(
         ctl=None,
         atl=None,
         recovery=mapped_recovery_inputs(garmin, wellness),
+        garmin=None if garmin is None else garmin_metrics_from_payload(dict(garmin)),
+        # Daily totals come only from observations (#1415).
+        daily_health=None if garmin is None else mapped_health(dict(garmin)),
     )
     if snapshot is None:
         return inputs
@@ -202,32 +207,31 @@ def recovery_only_inputs(
     full = read_performance_inputs(
         FilteringReader(tuple(mapped.records)),
         None,
-        activity_reader=NoActivityRows(),
+        activity_reader=SnapshotActivityRows(snapshot),
         as_of=RETRIEVED.date(),
     )
     if full is None:
         return inputs
-    current = full.current
     return replace(
         inputs,
         wellness_day=full.wellness_day,
         form_by_day=full.form_by_day,
         eftp_by_day=full.eftp_by_day,
         ramp_rate=full.ramp_rate,
-        current=None
-        if current is None
-        else CanonicalCurrentInputs(
-            bike_threshold_hr=(),
-            run_threshold_hr=(),
-            athlete_threshold_hr=None,
-            cycling_vo2max=(),
-            running_vo2max=(),
-            wellness_weight=None,
-            athlete_weight=None,
-            athlete_eftp=current.athlete_eftp,
-            wellness_eftp=current.wellness_eftp,
-        ),
+        current=full.current,
+        activities=full.activities,
+        activity_rows=full.activity_rows,
     )
+
+
+class SnapshotActivityRows:
+    """Serves the activity rows of a stored Intervals.icu snapshot."""
+
+    def __init__(self, snapshot: Mapping[str, Any]) -> None:
+        self._rows = tuple(snapshot.get("recent_activities") or ())
+
+    def activity_rows(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
+        return self._rows
 
 
 class NoActivityRows:

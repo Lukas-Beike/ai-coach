@@ -218,7 +218,7 @@ def weather_recommendation(
     event: dict[str, Any], forecast: dict[str, Any]
 ) -> dict[str, Any] | None:
     event_date = iso_date_prefix(
-        str(event.get("start_date_local") or event.get("date") or "")
+        str(event.get("starts_at_local") or event.get("date") or "")
     )
     if not re.fullmatch(DATE_ONLY_PATTERN, event_date):
         return None
@@ -234,7 +234,10 @@ def weather_recommendation(
         min(
             600,
             round(
-                (weather_projection.weather_number(event.get("moving_time")) or 3600)
+                (
+                    weather_projection.weather_number(event.get("planned_duration_s"))
+                    or 3600
+                )
                 / 60
             ),
         ),
@@ -295,7 +298,7 @@ def weather_recommendations(
         if not is_outdoor_activity(event):
             continue
         event_date = iso_date_prefix(
-            str(event.get("start_date_local") or event.get("date") or "")
+            str(event.get("starts_at_local") or event.get("date") or "")
         )
         try:
             event_day = date.fromisoformat(event_date)

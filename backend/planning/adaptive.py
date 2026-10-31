@@ -233,7 +233,7 @@ def illness_calendar_events(
         events.append(
             {
                 "category": category,
-                "start_date_local": f"{date_key}{midnight_suffix}",
+                "starts_at_local": f"{date_key}{midnight_suffix}",
                 "name": "Krankheit",
                 "description": str(illness or "Krankheit").strip()[:12000],
                 "external_id": f"{external_prefix}{date_key}",
@@ -475,7 +475,9 @@ class AdaptiveReplanApplyService:
             "id": draft_id,
             "sync_status": "local",
         }
-        replacement["moving_time"] = int(replacement.get("duration_minutes") or 0) * 60
+        replacement["planned_duration_s"] = (
+            int(replacement.get("duration_minutes") or 0) * 60
+        )
         if not replacement.get("archived") and not replacement.get("local_deleted"):
             planning_workouts.validate_workout_description(replacement)
             for key in planning_workouts.DERIVED_WORKOUT_KEYS:

@@ -10,21 +10,26 @@ tables) is decided by the injected reader.
 Selection follows the legacy readers: the latest observed day wins, and on one day
 a timestamped record beats an untimed one and a later record beats an earlier one.
 Garmin's training load and load balance are read here too, as the latest value
-of each kind with its day. Values with no canonical form (the heart rate
-fallbacks from Garmin activities and freshness) stay on the snapshot path of
-their owners.
+of each kind with its day. The max heart rate fallback is derived from the
+canonical Garmin activity records. Freshness is sync status and stays on the
+snapshot path of its owners.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
 
 from backend.canonical.records import Observation
+from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
-from backend.runtime.ports import ObservationReader, ObservationSourceSelector
+from backend.runtime.ports import (
+    ActivityMaxHrReader,
+    ObservationReader,
+    ObservationSourceSelector,
+)
 
 _SLEEP_KINDS = (MetricKind.SLEEP_DURATION, MetricKind.SLEEP_SCORE)
 _PACE_SECONDS_PER_KM_RANGE = (120, 900)
@@ -73,6 +78,18 @@ _MAX_HR_CATEGORIES: Mapping[Sport | None, str] = {
     Sport.RUN: "running",
     None: "generic",
 }
+ACTIVITY_MAX_HR_CATEGORIES = ("cycling", "running")
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityMaxHr:
+    """The highest max heart rate of a category's Garmin activities.
+
+    ``observed_on`` is the start day of the newest activity with that value.
+    """
+
+    value: float
+    observed_on: date
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +100,8 @@ class GarminCanonicalMetrics:
     ``generic`` to the profile max heart rate of the latest day of that category;
     the highest value resolves records of that one day. ``race_predictions`` maps
     the legacy keys ``run_5k_seconds`` and so on to the latest predicted time.
+    ``activity_max_hr`` maps ``cycling`` and ``running`` to the derived activity
+    max heart rate; it is read only for a category without a profile value.
     """
 
     weight_kg: float | None = None
@@ -97,6 +116,7 @@ class GarminCanonicalMetrics:
     race_predictions: Mapping[str, float] = field(default_factory=dict)
     # Latest (day, value) of each training-load and load-balance kind.
     training_load: Mapping[MetricKind, tuple[date, float]] = field(default_factory=dict)
+    activity_max_hr: Mapping[str, ActivityMaxHr] = field(default_factory=dict)
     # Legacy performance-history key -> day -> the value the current metric would
     # show on that day (same kind, sport, bounds and unit).
     performance_history: Mapping[str, Mapping[date, float]] = field(
@@ -121,12 +141,28 @@ class GarminCanonicalState:
 
 
 def read_garmin_state(reader: ObservationReader, db: Any) -> GarminCanonicalState:
-    """Read the Garmin observations once, from one source, inside ``db``'s unit of work."""
+    """Read the Garmin observations once, from one source, inside ``db``'s unit of work.
+
+    When the source also stores activities and a category has no profile max heart
+    rate, the max heart rate fallback is read from the same source.
+    """
     reader = _resolved(reader, db)
     by_kind = {kind: _garmin_only(reader, db, kind) for kind in _READ_KINDS}
     sleep = [item for kind in _SLEEP_KINDS for item in by_kind[kind]]
+    metrics = _metrics(by_kind)
+    if isinstance(reader, ActivityMaxHrReader) and any(
+        profile_max_hr_for(metrics.profile_max_hr, category) is None
+        for category in ACTIVITY_MAX_HR_CATEGORIES
+    ):
+        low, high = _MAX_HR_RANGE
+        metrics = replace(
+            metrics,
+            activity_max_hr=activity_max_hr(
+                reader.activity_max_hr(db, ProviderId.GARMIN, low=low, high=high)
+            ),
+        )
     return GarminCanonicalState(
-        metrics=_metrics(by_kind),
+        metrics=metrics,
         has_sleep=bool(sleep),
         has_hrv=bool(by_kind[MetricKind.HRV_RMSSD]),
         has_resting_hr=bool(by_kind[MetricKind.RESTING_HR]),
@@ -313,15 +349,37 @@ def _performance_history(
     }
 
 
+def profile_max_hr_for(profile: Mapping[str, float], category: str) -> float | None:
+    """A category's profile max heart rate, else the generic one."""
+    return profile.get(category) or profile.get("generic")
+
+
+def activity_max_hr(
+    by_sport: Iterable[tuple[Sport, float, date]],
+) -> dict[str, ActivityMaxHr]:
+    """Group the per-sport activity max heart rates into the legacy categories.
+
+    The highest value wins; on equal values the newest start day is kept.
+    """
+    derived: dict[str, ActivityMaxHr] = {}
+    for sport, value, day in by_sport:
+        category = legacy_activity_family(sport)
+        if category not in ACTIVITY_MAX_HR_CATEGORIES:
+            continue
+        kept = derived.get(category)
+        if kept is None or (value, day) > (kept.value, kept.observed_on):
+            derived[category] = ActivityMaxHr(value, day)
+    return derived
+
+
 def _profile_category_max_hr(
     observations: Iterable[Observation], category: str
 ) -> float | None:
     """A category's profile max heart rate, else the generic one, as the metric reads it.
 
-    The activity-derived fallback of the metric stays on the snapshot path.
+    The day history keeps only the profile value; the activity fallback is current only.
     """
-    values = _profile_max_hr(observations)
-    return values.get(category) or values.get("generic")
+    return profile_max_hr_for(_profile_max_hr(observations), category)
 
 
 def _daily_values(observations: Iterable[Observation]) -> dict[date, float]:

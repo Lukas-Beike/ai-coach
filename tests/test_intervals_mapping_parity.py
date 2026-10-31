@@ -1,7 +1,8 @@
 """Parity between the Intervals.icu mappers and the legacy readers.
 
-The legacy readers in ``backend.performance`` and ``backend.activities`` consume
-compact snapshots. Each comparison therefore runs the synthetic Intervals.icu
+The legacy readers in ``backend.activities`` consume compact snapshots. The
+current metrics (``legacy_metrics``) read the mapped observations of a compact
+snapshot, so they pin parity with the former snapshot reader. Each comparison therefore runs the synthetic Intervals.icu
 fixtures through ``compact_snapshot`` and through the mappers, in both raw and
 compact form, and checks that the mapped values agree with the legacy readers.
 
@@ -21,7 +22,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import mapped_recovery_inputs
-from performance_day_support import current_days, latest_day
+from performance_day_support import current_days, latest_day, snapshot_metrics
 
 from backend.activities.identity import activity_kind
 from backend.athlete.local_date import iso_date_prefix
@@ -30,7 +31,6 @@ from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.sports import legacy_activity_family
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
-from backend.performance.current_metrics import current_performance_metrics
 from backend.performance.load import activity_rollup
 from backend.performance.load_context import performance_load_context
 from backend.performance.recovery_context import performance_recovery_context
@@ -166,7 +166,7 @@ def empty_garmin_metrics() -> dict[str, dict[str, Any]]:
 
 
 def legacy_metrics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return current_performance_metrics(
+    return snapshot_metrics(
         snapshot,
         {},
         empty_garmin_metrics(),
@@ -595,10 +595,18 @@ class ThresholdParityTests(unittest.TestCase):
 
     def test_eftp_is_a_ride_observation_and_not_read_from_the_snapshot(self) -> None:
         # The snapshot reader of cycling_eftp_watts was removed (#1412): the value
-        # is read from this observation, so the snapshot-only path reports none.
+        # is read from this observation.
         result = map_thresholds(self.athlete)
-        self.assertIsNone(self.legacy["cycling_eftp_watts"]["value"])
+        self.assertEqual(self.legacy["cycling_eftp_watts"]["value"], 258)
         self.assertEqual(first_value(result, MetricKind.EFTP, sport=Sport.RIDE), 258)
+
+    def test_any_type_entry_classifies_a_sport_setting(self) -> None:
+        athlete = {"sportSettings": [{"types": ["Workout", "Ride"], "ftp": 255}]}
+        legacy = legacy_metrics(compact_form(athlete, [], []))
+        result = map_thresholds(athlete)
+        self.assertEqual(legacy["cycling_ftp_watts"]["value"], 255)
+        self.assertEqual(first_value(result, MetricKind.FTP, sport=Sport.RIDE), 255)
+        self.assertIsNone(first_value(result, MetricKind.FTP, sport=Sport.OTHER))
 
     def test_zero_values_mean_unset_in_both_readers(self) -> None:
         athlete = {
@@ -626,32 +634,19 @@ class ThresholdParityTests(unittest.TestCase):
 
     # Known deviations, named so that each one stays visible.
 
-    def test_sport_setting_is_classified_by_its_first_type_only(self) -> None:
-        # Deviation: current_metrics matches any entry in ``types``. The mapper
-        # classifies the first text only, as its module docstring documents.
-        athlete = {"sportSettings": [{"types": ["Workout", "Ride"], "ftp": 255}]}
-        legacy = legacy_metrics(compact_form(athlete, [], []))
-        result = map_thresholds(athlete)
-        self.assertEqual(legacy["cycling_ftp_watts"]["value"], 255)
-        self.assertIsNone(first_value(result, MetricKind.FTP, sport=Sport.RIDE))
-        self.assertEqual(first_value(result, MetricKind.FTP, sport=Sport.OTHER), 255)
-
     def test_threshold_pace_bound_rejects_paces_the_legacy_reader_accepts(
         self,
     ) -> None:
-        # Deviation: the canonical THRESHOLD_PACE bound is 15 m/s. The legacy
-        # reader accepts any positive value. 16 is read as metres per second and
-        # gives 62 s/km; 60 is read as seconds per kilometre.
-        for threshold_pace, legacy_seconds in ((16, 62), (60, 60)):
+        # Deviation: the canonical THRESHOLD_PACE bound is 15 m/s. The former
+        # snapshot reader accepted any positive value (16 m/s gave 62 s/km and 60
+        # s/km stayed 60); the current metric now has no value for either.
+        for threshold_pace in (16, 60):
             athlete = {
                 "sportSettings": [{"types": ["Run"], "threshold_pace": threshold_pace}]
             }
             with self.subTest(threshold_pace=threshold_pace):
                 legacy = legacy_metrics(compact_form(athlete, [], []))
-                self.assertEqual(
-                    legacy["run_threshold_pace_seconds_per_km"]["value"],
-                    legacy_seconds,
-                )
+                self.assertIsNone(legacy["run_threshold_pace_seconds_per_km"]["value"])
                 result = map_thresholds(athlete)
                 self.assertIsNone(
                     first_value(result, MetricKind.THRESHOLD_PACE, sport=Sport.RUN)
@@ -726,11 +721,11 @@ class ThresholdParityTests(unittest.TestCase):
     # Known deviations for the athlete-level fallback, named so they stay visible.
 
     def test_zero_athlete_lthr_is_unset_where_legacy_reads_zero(self) -> None:
-        # Deviation: the legacy generic lthr fallback reads 0 bpm. The mapper treats
+        # Deviation: the former generic lthr fallback read 0 bpm. The mapper treats
         # a zero athlete-level lthr as unset, as it does for a zero sport setting.
         athlete = {"lthr": 0}
         legacy = legacy_metrics(compact_form(athlete, [], []))
-        self.assertEqual(legacy["bike_threshold_hr_bpm"]["value"], 0)
+        self.assertIsNone(legacy["bike_threshold_hr_bpm"]["value"])
         self.assertIsNone(first_value(map_thresholds(athlete), MetricKind.THRESHOLD_HR))
 
     def test_rejected_sport_lthr_lets_the_athlete_level_value_apply(self) -> None:

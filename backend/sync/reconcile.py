@@ -10,7 +10,11 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.observability import Redactor
 from backend.planning.planned_units import planned_unit_payload_hash
 from backend.planning.revision import PlanningRevisionService
-from backend.providers.intervals_activity_fields import REMOTE_EVENT_METRIC_KEYS
+from backend.providers.intervals_workouts import (
+    PLANNING_DURATION_FIELD,
+    REMOTE_PLANNED_METRIC_KEYS,
+    planning_fields_from_intervals,
+)
 
 _REMOTE_LINKS = RemoteLinkRepository()
 
@@ -28,6 +32,7 @@ def _apply_remote_event(
 ) -> str:
     if not isinstance(remote_event, dict):
         return ""
+    remote_event = planning_fields_from_intervals(remote_event)
     if remote_event.get("id") not in (None, ""):
         payload["remote_event_id"] = str(remote_event["id"])
     if remote_event.get("external_id") not in (None, ""):
@@ -40,10 +45,10 @@ def _apply_remote_event(
         # sent, so an answer without it must not erase it. A duration cleared on
         # Intervals.icu reaches the unit through RemotePlannedUnitReconciler, which
         # keeps a locally edited unit as a conflict instead.
-        for key in REMOTE_EVENT_METRIC_KEYS:
+        for key in REMOTE_PLANNED_METRIC_KEYS:
             if remote_event.get(key) is not None:
                 payload[key] = remote_event[key]
-            elif key != "moving_time":
+            elif key != PLANNING_DURATION_FIELD:
                 payload.pop(key, None)
     return str(remote_event.get("external_id") or "").strip()
 

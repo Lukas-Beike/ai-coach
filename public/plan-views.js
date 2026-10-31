@@ -143,15 +143,15 @@ function plannedWeatherFlags(weather) {
 
 // Every activity with a positive distance adds to the total; only distance sports without one count as missing.
 function calendarWeekDistanceLabel(activities) {
-  const measured = activities.filter((entry) => Number(entry.distance) > 0);
+  const measured = activities.filter((entry) => Number(entry.distance_m) > 0);
   const unmeasured = activities.filter((entry) => {
-    const distance = Number(entry.distance);
+    const distance = Number(entry.distance_m);
     return distance <= 0 || Number.isNaN(distance);
   });
   const missing = unmeasured.filter((entry) => DISTANCE_SPORT_TYPES.has(String(entry.type || "").toLowerCase())).length;
   if (!measured.length && !missing) return "–";
   const total = measured.length
-    ? AppFormat.distance(measured.reduce((sum, entry) => sum + Number(entry.distance), 0))
+    ? AppFormat.distance(measured.reduce((sum, entry) => sum + Number(entry.distance_m), 0))
     : "–";
   if (!missing) return total;
   return `${total} · ohne ${missing} ${missing === 1 ? "Aktivität" : "Aktivitäten"}`;
@@ -307,16 +307,16 @@ function plannedDayNotes(dayContext) {
 }
 
 function plannedEntryDurationLabel(actual, entry) {
-  if (actual) return AppFormat.duration(actual.moving_time ?? actual.elapsed_time);
+  if (actual) return AppFormat.duration(actual.moving_duration_s ?? actual.elapsed_duration_s);
   if (entry.duration_minutes) return AppFormat.duration(Number(entry.duration_minutes) * 60);
-  return AppFormat.duration(entry.moving_time);
+  return AppFormat.duration(entry.planned_duration_s);
 }
 
 function appendPlannedCalendarComparison(details, entry, actual) {
   if (!actual || entry.is_completed_activity) return;
   const comparison = document.createElement("div");
   comparison.className = "planned-comparison";
-  const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time;
+  const plannedDuration = entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s;
   const planLine = document.createElement("p");
   planLine.textContent = `Plan: ${[
     entry.name,
@@ -325,7 +325,7 @@ function appendPlannedCalendarComparison(details, entry, actual) {
   ].filter(Boolean).join(" · ")}`;
   const actualLine = document.createElement("p");
   actualLine.textContent = `Ist: ${[
-    AppFormat.duration(actual.moving_time ?? actual.elapsed_time),
+    AppFormat.duration(actual.moving_duration_s ?? actual.elapsed_duration_s),
     actual.training_load != null ? `Load ${calendarMetricNumber(actual.training_load)}` : null,
   ].filter(Boolean).join(" · ")}`;
   comparison.append(planLine, actualLine);
@@ -423,7 +423,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   function trainingPlanEntry(item) {
     const entry = document.createElement("div");
     entry.className = "training-plan-entry";
-    entry.textContent = `${item.date ? dateLabel(item.date) : "Ohne Datum"} · ${item.name || "Einheit"} · ${item.duration_minutes || Math.round(Number(item.moving_time || 0) / 60) || "?"} Min.`;
+    entry.textContent = `${item.date ? dateLabel(item.date) : "Ohne Datum"} · ${item.name || "Einheit"} · ${item.duration_minutes || Math.round(Number(item.planned_duration_s || 0) / 60) || "?"} Min.`;
     return entry;
   }
 
@@ -548,8 +548,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   function calendarPaceLabel(activity) {
     if (activitySportLabel(activity) !== "Laufen") return null;
-    const duration = Number(activity?.moving_time);
-    const distance = Number(activity?.distance);
+    const duration = Number(activity?.moving_duration_s);
+    const distance = Number(activity?.distance_m);
     return duration > 0 && distance > 0 ? formatPace(duration / (distance / 1000)) : null;
   }
 
@@ -592,15 +592,15 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     primaryMetrics.textContent = [load != null ? `Load ${load}` : null, rpe != null ? `RPE ${rpe}/10` : "RPE offen"].filter(Boolean).join(" · ");
     const facts = document.createElement("div");
     facts.className = "planned-actual-facts";
-    appendCalendarFact(facts, "Dauer", AppFormat.duration(actual.moving_time ?? actual.elapsed_time));
-    appendCalendarFact(facts, "Distanz", distanceLabel(actual.distance));
+    appendCalendarFact(facts, "Dauer", AppFormat.duration(actual.moving_duration_s ?? actual.elapsed_duration_s));
+    appendCalendarFact(facts, "Distanz", distanceLabel(actual.distance_m));
     appendCalendarFact(facts, "Trainingsload", calendarMetricNumber(actual.training_load));
     appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
     appendCalendarFact(facts, "Intensität", calendarIntensityLabel(actual.intensity));
-    appendCalendarFact(facts, "Ø Puls", calendarMetricNumber(actual.average_heartrate, " bpm"));
-    appendCalendarFact(facts, "Ø Leistung", calendarMetricNumber(actual.weighted_average_watts ?? actual.average_watts, " W"));
+    appendCalendarFact(facts, "Ø Puls", calendarMetricNumber(actual.avg_hr, " bpm"));
+    appendCalendarFact(facts, "Ø Leistung", calendarMetricNumber(actual.weighted_avg_power ?? actual.avg_power, " W"));
     appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
-    appendCalendarFact(facts, "Höhenmeter", calendarMetricNumber(actual.total_elevation_gain, " hm"));
+    appendCalendarFact(facts, "Höhenmeter", calendarMetricNumber(actual.elevation_gain_m, " hm"));
     details.append(primaryMetrics, facts);
   }
 
@@ -609,17 +609,18 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const header = document.createElement("span");
     header.className = "planned-session-header";
     const sport = document.createElement("span");
-    sport.textContent = [activitySportLabel(displayed), actual ? calendarStartTime(actual.start_date_local) : plannedUnitStartTime(entry.start_date_local)].filter(Boolean).join(" · ");
+    sport.textContent = [activitySportLabel(displayed), actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local)].filter(Boolean).join(" · ");
     const duration = document.createElement("strong");
     duration.textContent = plannedEntryDurationLabel(actual, entry);
     const distance = document.createElement("span");
-    distance.textContent = displayed.distance > 0 ? distanceLabel(displayed.distance) : "";
+    const shownDistance = actual ? actual.distance_m : entry.distance;
+    distance.textContent = shownDistance > 0 ? distanceLabel(shownDistance) : "";
     header.append(sport, duration, distance);
     const metrics = document.createElement("span");
     metrics.className = "planned-session-metrics";
     metrics.textContent = [
-      actual ? calendarMetricNumber(actual.average_heartrate, " bpm") : null,
-      actual ? calendarMetricNumber(actual.average_watts ?? actual.weighted_average_watts, " W") : null,
+      actual ? calendarMetricNumber(actual.avg_hr, " bpm") : null,
+      actual ? calendarMetricNumber(actual.avg_power ?? actual.weighted_avg_power, " W") : null,
       calendarMetricNumber(displayed.training_load) != null ? `Belastung ${calendarMetricNumber(displayed.training_load)}` : null,
     ].filter(Boolean).join(" · ");
     cardSummary.append(header);
@@ -679,7 +680,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     card.dataset.sport = activitySportLabel(displayed);
     meta.textContent = [
       activitySportLabel(displayed),
-      actual ? calendarStartTime(actual.start_date_local) : plannedUnitStartTime(entry.start_date_local),
+      actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local),
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");
     appendPlannedSessionHeader(cardSummary, entry, actual);
@@ -817,8 +818,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const sum = (items, metric) => items.reduce((total, item) => total + Math.max(0, Number(metric(item)) || 0), 0);
     const planned = weekEntries.filter((entry) => !entry.is_completed_activity);
     const actual = weekEntries.map(calendarActualActivity).filter(Boolean);
-    const plannedSeconds = sum(planned, (entry) => entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.moving_time);
-    const actualSeconds = sum(actual, (entry) => entry.moving_time ?? entry.elapsed_time);
+    const plannedSeconds = sum(planned, (entry) => entry.duration_minutes ? Number(entry.duration_minutes) * 60 : entry.planned_duration_s);
+    const actualSeconds = sum(actual, (entry) => entry.moving_duration_s ?? entry.elapsed_duration_s);
     for (const [label, value] of [
       ["Geplant", plannedSeconds > 0 ? AppFormat.duration(plannedSeconds) : "–"],
       ["Absolviert", AppFormat.duration(actualSeconds)],
@@ -881,7 +882,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const entries = (Array.isArray(trainingCalendar) ? trainingCalendar : [])
       .filter((item) => item && !item.archived && !item.local_deleted && plannedEventDate(item))
       .filter((item) => plannedEventDate(item) >= firstWeekKey && plannedEventDate(item) <= lastDateKey)
-      .sort((left, right) => String(left.start_date_local || left.date || "").localeCompare(String(right.start_date_local || right.date || "")));
+      .sort((left, right) => String(left.starts_at_local || left.started_at_local || left.date || "").localeCompare(String(right.starts_at_local || right.started_at_local || right.date || "")));
     if (summary) summary.textContent = calendarCountLabel(entries, todayKey) || "Keine Einheiten im Zeitraum";
     const planningContextByDate = new Map(
       (Array.isArray(state.data?.daily_planning_context) ? state.data.daily_planning_context : [])
@@ -954,7 +955,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
           const cardTitle = document.createElement("h4");
           cardTitle.textContent = workout.name || "Bibliotheks-Einheit";
           const meta = document.createElement("span");
-          meta.textContent = [workout.type, workout.moving_time ? formatDuration(workout.moving_time) : null].filter(Boolean).join(" · ");
+          meta.textContent = [workout.type, workout.planned_duration_s ? formatDuration(workout.planned_duration_s) : null].filter(Boolean).join(" · ");
           heading.append(cardTitle, meta);
           const description = document.createElement("p");
           description.textContent = workout.description || "Kein Workout-Text hinterlegt.";
@@ -991,9 +992,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const details = document.createElement("div");
     details.className = "competition-card-facts";
     const optional = [
-      ["Startzeit", competition.start_date_local ? formatLocalCompetitionTime(competition.start_date_local) : null],
+      ["Startzeit", competition.starts_at_local ? formatLocalCompetitionTime(competition.starts_at_local) : null],
       ["Ziel", competition.target],
-      ["Erwartete Dauer", competition.moving_time == null ? null : AppFormat.duration(competition.moving_time)],
+      ["Erwartete Dauer", competition.planned_duration_s == null ? null : AppFormat.duration(competition.planned_duration_s)],
       ["Streckenprofil", competition.course_profile],
       ["Beschreibung", competition.description],
       ["Notizen", competition.notes],

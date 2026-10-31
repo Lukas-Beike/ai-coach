@@ -12,14 +12,14 @@ from backend.planning.calendar_read_model import (
 )
 
 
-def _unit(name, moving_time=3600, *, day="2026-10-12", **extra):
+def _unit(name, planned_duration_s=3600, *, day="2026-10-12", **extra):
     return {
         "id": f"unit-{name}-{day}",
         "date": day,
-        "start_date_local": f"{day}T09:00:00",
+        "starts_at_local": f"{day}T09:00:00",
         "name": name,
         "type": "Ride",
-        "moving_time": moving_time,
+        "planned_duration_s": planned_duration_s,
         **extra,
     }
 
@@ -65,19 +65,19 @@ class PlanningCalendarReadModelTests(unittest.TestCase):
             {
                 "id": "ride-a",
                 "date": today_text,
-                "start_date_local": f"{today_text}T06:00:00",
+                "starts_at_local": f"{today_text}T06:00:00",
                 "name": "First ride",
                 "type": "Ride",
-                "moving_time": 3600,
+                "planned_duration_s": 3600,
                 "icu_training_load": 100,
             },
             {
                 "id": "ride-b",
                 "date": today_text,
-                "start_date_local": f"{today_text}T06:30:00",
+                "starts_at_local": f"{today_text}T06:30:00",
                 "name": "Second ride",
                 "type": "Ride",
-                "moving_time": 3600,
+                "planned_duration_s": 3600,
             },
         ]
         activities = [

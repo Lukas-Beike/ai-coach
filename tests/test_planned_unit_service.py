@@ -25,6 +25,7 @@ from backend.planning.calendar_service import CalendarConflictService
 from backend.planning.changes import StructuredTrainingChangeValidator
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
+from backend.providers.intervals_workouts import planning_fields_from_intervals
 
 NOW = "2026-09-20T08:00:00+00:00"
 TODAY = date(2026, 9, 20)
@@ -766,9 +767,9 @@ class PlannedUnitServiceTests(unittest.TestCase):
             "description": "- 30m Z2",
             "moving_time": 1800,
         }
-        remote = planned_units.remote_planned_unit_payload(provider_event, today=TODAY)[
-            0
-        ]
+        remote = planned_units.remote_planned_unit_payload(
+            planning_fields_from_intervals(provider_event), today=TODAY
+        )[0]
         local_id = self.make_conflict({"remote": remote})
         with self.manager.unit_of_work() as db:
             local = json.loads(
@@ -947,7 +948,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
         entry = planned_units.normalize_planned_unit(
             self.workout(
                 date="2026-09-23",
-                start_date_local="2026-09-23T07:15:00",
+                starts_at_local="2026-09-23T07:15:00",
                 archived=True,
                 local_deleted=True,
             ),
@@ -978,7 +979,7 @@ class PlannedUnitServiceTests(unittest.TestCase):
         self.assertEqual(restored, stored)
         self.assertEqual(stored["name"], "Wiederhergestellt")
         self.assertEqual(stored["date"], "2026-09-21")
-        self.assertEqual(stored["start_date_local"], "2026-09-21T07:15:00")
+        self.assertEqual(stored["starts_at_local"], "2026-09-21T07:15:00")
         self.assertFalse(stored["archived"])
         self.assertFalse(stored["local_deleted"])
         self.assertEqual(stored["external_id"], "remote-42")
@@ -1122,7 +1123,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
                 "name": "Lauf",
                 "description": f"- {duration}m 60% locker",
                 "duration_minutes": duration,
-                "start_date_local": start,
+                "starts_at_local": start,
                 **overrides,
             }
         )
@@ -1148,12 +1149,12 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
         local_id = self.unit("2026-09-21T10:00:00")
         before = len(self.history_rows())
 
-        self.service.update(local_id, {"start_date_local": "2026-09-21T08:30:00"})
+        self.service.update(local_id, {"starts_at_local": "2026-09-21T08:30:00"})
 
         rows = self.history_rows()[before:]
         self.assertEqual([row["action"] for row in rows], ["update"])
         self.assertEqual(
-            list(json.loads(rows[0]["diff"])["fields"]), ["start_date_local"]
+            list(json.loads(rows[0]["diff"])["fields"]), ["starts_at_local"]
         )
 
     def test_same_day_start_collision_is_rejected(self):
@@ -1161,11 +1162,11 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
         local_id = self.unit("2026-09-21T10:00:00")
 
         with self.assertRaises(AppError) as caught:
-            self.service.update(local_id, {"start_date_local": "2026-09-21T08:30:00"})
+            self.service.update(local_id, {"starts_at_local": "2026-09-21T08:30:00"})
 
         self.assertEqual(caught.exception.status, 409)
         self.assertEqual(
-            self.stored(local_id)["start_date_local"], "2026-09-21T10:00:00"
+            self.stored(local_id)["starts_at_local"], "2026-09-21T10:00:00"
         )
 
     def test_same_day_duration_collision_is_rejected(self):
@@ -1182,10 +1183,10 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
         self.unit("2026-09-21T08:00:00")
         local_id = self.unit("2026-09-21T10:00:00")
 
-        self.service.update(local_id, {"start_date_local": "2026-09-21T09:30:00"})
+        self.service.update(local_id, {"starts_at_local": "2026-09-21T09:30:00"})
 
         self.assertEqual(
-            self.stored(local_id)["start_date_local"], "2026-09-21T09:30:00"
+            self.stored(local_id)["starts_at_local"], "2026-09-21T09:30:00"
         )
 
     def test_name_only_edit_is_not_blocked_by_existing_external_overlap(self):
@@ -1194,7 +1195,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
             {
                 "id": "race-1",
                 "name": "Wettkampf",
-                "start_date_local": "2026-09-21T10:00:00",
+                "starts_at_local": "2026-09-21T10:00:00",
                 "duration_minutes": 60,
             }
         ]
@@ -1203,14 +1204,14 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
         self.assertEqual(self.stored(local_id)["name"], "Umbenannt")
 
         with self.assertRaises(AppError) as caught:
-            self.service.update(local_id, {"start_date_local": "2026-09-21T10:30:00"})
+            self.service.update(local_id, {"starts_at_local": "2026-09-21T10:30:00"})
         self.assertEqual(caught.exception.status, 409)
 
     def test_name_and_time_edit_undo_restores_exact_timestamp(self):
         local_id = self.unit("2026-09-21T10:00:00")
         self.service.update(
             local_id,
-            {"name": "Neu", "start_date_local": "2026-09-21T08:15:00"},
+            {"name": "Neu", "starts_at_local": "2026-09-21T08:15:00"},
         )
         undo = HistoryUndoService(
             self.manager,
@@ -1227,12 +1228,12 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
         undo.apply(preview["proposal"]["payload"])
 
         stored = self.stored(local_id)
-        self.assertEqual(stored["start_date_local"], "2026-09-21T10:00:00")
+        self.assertEqual(stored["starts_at_local"], "2026-09-21T10:00:00")
         self.assertEqual(stored["name"], "Lauf")
 
     def test_time_only_undo_is_rejected_when_the_old_slot_was_taken(self):
         local_id = self.unit("2026-09-21T10:00:00")
-        self.service.update(local_id, {"start_date_local": "2026-09-21T08:00:00"})
+        self.service.update(local_id, {"starts_at_local": "2026-09-21T08:00:00"})
         change_id = self._update_change_id()
         self.unit("2026-09-21T10:00:00")
         undo = HistoryUndoService(
@@ -1253,7 +1254,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.status, 409)
         self.assertEqual(
-            self.stored(local_id)["start_date_local"], "2026-09-21T08:00:00"
+            self.stored(local_id)["starts_at_local"], "2026-09-21T08:00:00"
         )
 
     def _update_change_id(self):
@@ -1268,7 +1269,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
         self.service.update(local_id, {"name": "Neu"})
         stored = self.stored(local_id)
         legacy_projection = {
-            key: value for key, value in stored.items() if key != "start_date_local"
+            key: value for key, value in stored.items() if key != "starts_at_local"
         }
         legacy_projection = change_history.audit_projection(
             "planned_unit", legacy_projection
@@ -1295,7 +1296,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
 
         self.assertEqual(self.stored(local_id)["name"], "Lauf")
         self.assertEqual(
-            self.stored(local_id)["start_date_local"], "2026-09-21T10:00:00"
+            self.stored(local_id)["starts_at_local"], "2026-09-21T10:00:00"
         )
 
     def test_restore_takes_target_time_component_on_the_restored_date(self):
@@ -1312,14 +1313,14 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
                 current,
                 {
                     "date": "2026-09-21",
-                    "start_date_local": "2026-09-21T07:15:00",
+                    "starts_at_local": "2026-09-21T07:15:00",
                     "name": "Lauf",
                 },
                 "update",
             )
 
         self.assertEqual(
-            self.stored(local_id)["start_date_local"], "2026-09-21T07:15:00"
+            self.stored(local_id)["starts_at_local"], "2026-09-21T07:15:00"
         )
 
     def _validator(self):
@@ -1340,7 +1341,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
                     {
                         "action": "update",
                         "local_id": local_id,
-                        "start_date_local": "2026-09-21T08:30:00",
+                        "starts_at_local": "2026-09-21T08:30:00",
                     }
                 ],
                 db,
@@ -1356,7 +1357,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
             {
                 "id": "race-1",
                 "name": "Wettkampf",
-                "start_date_local": "2026-09-21T10:00:00",
+                "starts_at_local": "2026-09-21T10:00:00",
                 "duration_minutes": 60,
             }
         ]
@@ -1371,7 +1372,7 @@ class PlannedUnitTimeWindowTests(unittest.TestCase):
                     {
                         "action": "update",
                         "local_id": local_id,
-                        "start_date_local": "2026-09-21T06:30:00",
+                        "starts_at_local": "2026-09-21T06:30:00",
                     }
                 ],
                 db,

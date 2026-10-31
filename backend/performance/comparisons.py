@@ -9,7 +9,7 @@ from datetime import date
 from typing import Any
 
 from backend.canonical.vocabulary import MetricKind
-from backend.performance import eftp, garmin_metrics, garmin_weight, trends, wellness
+from backend.performance import eftp, garmin_metrics, trends, wellness
 from backend.performance.wellness_days import WellnessDay
 
 VO2MAX_UNIT = "ml/kg/min"
@@ -54,7 +54,6 @@ def recurring_training_comparisons(
 
 
 def performance_trend_average(
-    garmin: dict[str, Any],
     metrics: dict[str, dict[str, Any]],
     key: str,
     days: int,
@@ -62,39 +61,35 @@ def performance_trend_average(
     *,
     wellness_days: tuple[WellnessDay, ...] = (),
     run_eftp_by_day: Mapping[date, float] | None = None,
-    garmin_history: Mapping[str, Mapping[date, float]] | None = None,
+    garmin_history: Mapping[str, Mapping[date, float]],
 ) -> float | None:
     """Average a metric over ``days``.
 
-    Intervals trends read canonical days; Garmin history uses its own source.
+    Intervals trends read canonical days, Garmin trends the canonical Garmin
+    day history.
     """
     current_source = metrics.get(key, {}).get("source")
     if current_source == garmin_metrics.GARMIN_PERFORMANCE_SOURCE:
-        if key == "weight_kg":
-            return garmin_weight.garmin_weight_average(garmin, days, end_date)
-        return trends.garmin_history_average(
-            garmin, key, days, end_date, garmin_history
-        )
+        return trends.garmin_history_average(key, days, end_date, garmin_history)
     return trends.intervals_performance_average(
         wellness_days, run_eftp_by_day, key, days, end_date
     )
 
 
 def _performance_trend(
-    garmin: dict[str, Any],
     metrics: dict[str, dict[str, Any]],
     key: str,
     unit: str,
     today: date,
     higher_is_better: bool | None = True,
+    *,
     wellness_days: tuple[WellnessDay, ...] = (),
     run_eftp_by_day: Mapping[date, float] | None = None,
-    garmin_history: Mapping[str, Mapping[date, float]] | None = None,
+    garmin_history: Mapping[str, Mapping[date, float]],
 ) -> dict[str, Any] | None:
     return wellness.comparison_value(
         metrics.get(key, {}).get("value"),
         performance_trend_average(
-            garmin,
             metrics,
             key,
             30,
@@ -110,7 +105,6 @@ def _performance_trend(
 
 
 def performance_comparisons(
-    garmin: dict[str, Any],
     metrics: dict[str, dict[str, Any]],
     recovery: dict[str, Any],
     load_context: dict[str, Any],
@@ -118,7 +112,7 @@ def performance_comparisons(
     activities: list[Any],
     today: date,
     *,
-    garmin_history: Mapping[str, Mapping[date, float]] | None = None,
+    garmin_history: Mapping[str, Mapping[date, float]],
     eftp_by_day: Mapping[date, float] | None = None,
     form_by_day: Mapping[date, float] | None = None,
     run_eftp_by_day: Mapping[date, float] | None = None,
@@ -132,7 +126,6 @@ def performance_comparisons(
         key: str, unit: str = "", higher_is_better: bool | None = True
     ) -> dict[str, Any] | None:
         return _performance_trend(
-            garmin,
             metrics,
             key,
             unit,
@@ -146,7 +139,6 @@ def performance_comparisons(
     readiness_trend = wellness.comparison_value(
         recovery["readiness"],
         performance_trend_average(
-            garmin,
             {"readiness": {"source": recovery["readiness_source"]}},
             "readiness",
             30,

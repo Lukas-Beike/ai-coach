@@ -1,9 +1,8 @@
 """Daily-health normalization and aggregate projections.
 
-Steps, floors and the total, active and resting energy come from the canonical
-observations when a reader is given (``read_daily_health_by_date``); without one
-they are read from the Garmin snapshot. Freshness and the read windows are sync
-status and stay on the snapshot.
+Steps, floors and the total, active and resting energy come only from the
+canonical observations (``read_daily_health_by_date``). Freshness and the read
+windows are sync status and stay on the Garmin snapshot.
 """
 
 from collections.abc import Iterable, Mapping
@@ -15,31 +14,14 @@ from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import freshness as performance_freshness
-from backend.performance import recovery as performance_recovery
-from backend.providers.garmin_fields import (
-    GARMIN_ACTIVE_KCAL_ALIASES,
-    GARMIN_FLOORS_ALIASES,
-    GARMIN_RESTING_KCAL_ALIASES,
-    GARMIN_STEPS_ALIASES,
-    GARMIN_TOTAL_KCAL_ALIASES,
-)
-from backend.providers.garmin_fields import first_present as _first_present
 from backend.providers.source_labels import SourceView, provider_label
 from backend.runtime.ports import ObservationReader
 
 GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.DAILY_HEALTH)
 
-GARMIN_DAILY_HEALTH_FIELDS = {
-    "steps": GARMIN_STEPS_ALIASES,
-    "floors": GARMIN_FLOORS_ALIASES,
-    "calories": GARMIN_TOTAL_KCAL_ALIASES,
-}
-
-GARMIN_DAILY_EXPENDITURE_FIELDS = {
-    "active_kcal": GARMIN_ACTIVE_KCAL_ALIASES,
-    "resting_kcal": GARMIN_RESTING_KCAL_ALIASES,
-    "total_kcal": GARMIN_DAILY_HEALTH_FIELDS["calories"],
-}
+# The 7-day averaged daily totals and the energy components of one day.
+DAILY_HEALTH_FIELDS = ("steps", "floors", "calories")
+DAILY_EXPENDITURE_FIELDS = ("active_kcal", "resting_kcal", "total_kcal")
 
 # Daily totals by canonical kind and the field of the date-indexed view.
 DAILY_HEALTH_KINDS: Mapping[MetricKind, str] = {
@@ -63,26 +45,6 @@ def _metric(
     }
 
 
-def garmin_daily_health_by_date(
-    snapshot: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
-    """Build a small date-indexed view of Garmin's daily activity totals."""
-    health_by_date: dict[str, dict[str, Any]] = {}
-    for record_date, record in performance_recovery.dated_garmin_recovery_records(
-        snapshot.get("daily_stats")
-    ):
-        health = health_by_date.setdefault(record_date, {})
-        for metric_name, keys in GARMIN_DAILY_HEALTH_FIELDS.items():
-            value = _as_number(_first_present(record, keys))
-            if value is not None:
-                health[metric_name] = (
-                    round(float(value)) if metric_name in {"steps", "floors"} else value
-                )
-        if health:
-            health["source"] = GARMIN_PERFORMANCE_SOURCE
-    return health_by_date
-
-
 def read_daily_health_by_date(
     reader: ObservationReader,
     db: Any,
@@ -92,9 +54,10 @@ def read_daily_health_by_date(
 ) -> dict[str, dict[str, Any]]:
     """Build the date-indexed daily totals from the canonical observations.
 
-    ``reader`` must already be the source chosen for the unit of work. The shape is
-    that of ``garmin_daily_health_by_date`` plus ``active_kcal``. Per day and kind
-    the latest observation wins; ``source`` names the providers of the day's values.
+    ``reader`` must already be the source chosen for the unit of work. Each day
+    maps ``steps``, ``floors``, ``calories``, ``active_kcal`` and ``resting_kcal``
+    to its value. Per day and kind the latest observation wins; ``source`` names
+    the providers of the day's values.
     """
     latest: dict[str, dict[str, Observation]] = {}
     for kind, name in DAILY_HEALTH_KINDS.items():
@@ -118,16 +81,15 @@ def daily_energy_expenditure(
     requested_date: str,
     current_date: date,
     *,
-    measured: Mapping[str, Any] | None = None,
-    measured_history: Mapping[str, Mapping[str, Any]] | None = None,
+    measured: Mapping[str, Any],
+    measured_history: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Return the measured daily calorie components for one local date.
 
     ``measured`` is the day's entry of ``read_daily_health_by_date`` (an empty
-    mapping when the day has none); when given, the total, active and resting
-    energy come from it, otherwise from the Garmin snapshot. ``measured_history``
-    holds ``read_daily_health_by_date`` for the week before ``current_date``; when
-    given, the projection reads its resting reference from it.
+    mapping when the day has none); the total, active and resting energy come
+    from it. ``measured_history`` holds ``read_daily_health_by_date`` for the week
+    before ``current_date``; the projection reads its resting reference from it.
 
     Total expenditure is only reported when the provider supplied a total
     directly; active and resting components are not summed to manufacture a
@@ -137,19 +99,17 @@ def daily_energy_expenditure(
     if not isinstance(snapshot, dict):
         snapshot = {}
     values: dict[str, float | int | None] = {
-        field: None for field in GARMIN_DAILY_EXPENDITURE_FIELDS
+        field: None for field in DAILY_EXPENDITURE_FIELDS
     }
     try:
         day = date.fromisoformat(requested_date)
     except ValueError:
         day = None
     is_future = day is None or day > current_date
-    _expenditure_values(snapshot, requested_date, is_future, values)
+    _measured_values(measured, is_future, values)
     source = GARMIN_PERFORMANCE_SOURCE
-    if measured is not None:
-        _measured_values(measured, is_future, values)
-        if any(values[field] is not None for field in values):
-            source = str(measured.get("source") or source)
+    if any(values[field] is not None for field in values):
+        source = str(measured.get("source") or source)
     has_measurement = any(value is not None for value in values.values())
     freshness = _requested_day_freshness(snapshot, requested_date)
     result = {
@@ -197,8 +157,8 @@ def _window_values(
     health_by_date: Mapping[str, Mapping[str, Any]], cutoff: date, end_date: date
 ) -> tuple[dict[str, list[float]], dict[str, set[str]]]:
     """Collect each daily total and its sources for the days in the window."""
-    values: dict[str, list[float]] = {key: [] for key in GARMIN_DAILY_HEALTH_FIELDS}
-    sources: dict[str, set[str]] = {key: set() for key in GARMIN_DAILY_HEALTH_FIELDS}
+    values: dict[str, list[float]] = {key: [] for key in DAILY_HEALTH_FIELDS}
+    sources: dict[str, set[str]] = {key: set() for key in DAILY_HEALTH_FIELDS}
     for record_date, health in health_by_date.items():
         try:
             current = date.fromisoformat(iso_date_prefix(record_date))
@@ -230,16 +190,13 @@ def garmin_daily_health_metrics(
     end_date: date,
     current_date: date,
     *,
-    health_by_date: Mapping[str, Mapping[str, Any]] | None = None,
+    health_by_date: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     """Return daily health totals averaged over the requested window.
 
-    ``health_by_date`` holds the canonical totals of ``read_daily_health_by_date``;
-    without it they are read from the Garmin snapshot. Freshness is sync status
-    and is always read from the snapshot.
+    ``health_by_date`` holds the canonical totals of ``read_daily_health_by_date``.
+    Freshness is sync status and is read from the snapshot.
     """
-    if health_by_date is None:
-        health_by_date = garmin_daily_health_by_date(snapshot)
     values, sources = _window_values(
         health_by_date, end_date - timedelta(days=days - 1), end_date
     )
@@ -292,43 +249,24 @@ def _complete_read_windows(snapshot: dict[str, Any]) -> list[tuple[date, date]]:
     return windows
 
 
-def _resting_by_date(
-    snapshot: dict[str, Any],
-    measured_history: Mapping[str, Mapping[str, Any]] | None,
-) -> list[tuple[str, Any]]:
-    if measured_history is not None:
-        return [
-            (day, values.get("resting_kcal"))
-            for day, values in measured_history.items()
-        ]
-    return [
-        (
-            record_date,
-            _first_present(record, GARMIN_DAILY_EXPENDITURE_FIELDS["resting_kcal"]),
-        )
-        for record_date, record in performance_recovery.dated_garmin_recovery_records(
-            snapshot.get("daily_stats")
-        )
-    ]
-
-
 def _projection_reference(
     snapshot: dict[str, Any],
     current_date: date,
-    measured_history: Mapping[str, Mapping[str, Any]] | None = None,
+    measured_history: Mapping[str, Mapping[str, Any]],
 ) -> tuple[date, float | int] | None:
     """Return the resting calories of the latest complete day within a week.
 
     Records retained from an earlier sync may still hold a day's running value
     (a partial or failed refresh, or a shorter manual window), so a reference
     must lie inside the window of a fully current daily-stats read. The values
-    come from ``measured_history`` when given, else from the snapshot.
+    come from ``measured_history``.
     """
     read_windows = _complete_read_windows(snapshot)
     if not read_windows:
         return None
     reference: tuple[date, float | int] | None = None
-    for record_date, raw in _resting_by_date(snapshot, measured_history):
+    for record_date, values in measured_history.items():
+        raw = values.get("resting_kcal")
         try:
             record_day = date.fromisoformat(record_date)
         except ValueError:
@@ -350,7 +288,7 @@ def _projected_expenditure(
     values: dict[str, Any],
     day: date | None,
     current_date: date,
-    measured_history: Mapping[str, Mapping[str, Any]] | None = None,
+    measured_history: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Derive the full-day total for the running day, never presented as Garmin's.
 
@@ -383,27 +321,10 @@ def _projected_expenditure(
     }
 
 
-def _expenditure_values(
-    snapshot: dict[str, Any],
-    requested_date: str,
-    is_future: bool,
-    values: dict[str, Any],
-) -> None:
-    for record_date, record in performance_recovery.dated_garmin_recovery_records(
-        snapshot.get("daily_stats")
-    ):
-        if record_date != requested_date or is_future:
-            continue
-        for field, keys in GARMIN_DAILY_EXPENDITURE_FIELDS.items():
-            value = _as_number(_first_present(record, keys))
-            if value is not None and value >= 0:
-                values[field] = value
-
-
 def _measured_values(
     measured: Mapping[str, Any], is_future: bool, values: dict[str, Any]
 ) -> None:
-    """Replace the snapshot's energy components by the canonical values."""
+    """Set the energy components from the canonical values."""
     for field, name in (
         ("total_kcal", "calories"),
         ("active_kcal", "active_kcal"),

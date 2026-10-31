@@ -740,14 +740,18 @@ class ServerCoachTests(ServerTestCase):
         self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
 
     def test_structured_context_keeps_garmin_value_in_performance_only(self):
-        save_garmin({
-                    "max_metrics": {"running": {"vo2MaxValue": 55}},
-                    "race_predictions": {"5k": 1320},
-                    "activities": [
-                        {"activityId": 1, "activityName": "Duplicate raw activity"}
-                    ],
-                })
-        context = server.COACH_CONTEXT.structured_context_service().build(
+        payload = {
+            "synced_at": "2026-10-11T08:00:00+00:00",
+            "max_metrics": [
+                {"calendarDate": "2026-10-10", "generic": {"vo2MaxValue": 55}}
+            ],
+            "race_predictions": {"5k": 1320},
+            "activities": [{"activityId": 1, "activityName": "Duplicate raw activity"}],
+        }
+        # Saving writes the canonical rows too; Garmin values are read only from
+        # them (#1415), so the context reads the stored snapshot as production does.
+        save_garmin(payload)
+        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -756,6 +760,7 @@ class ServerCoachTests(ServerTestCase):
                 "upcoming_calendar": [],
             }
         )
+        context = server.COACH_CONTEXT.structured_context_service().build()
 
         self.assertNotIn("performance", context["recovery"])
         self.assertNotIn("activities", context["recovery"])
@@ -945,7 +950,7 @@ class ServerCoachTests(ServerTestCase):
             {
                 "id": f"event-{index}",
                 "name": f"Workout {index}",
-                "start_date_local": (today + timedelta(days=1)).isoformat(),
+                "starts_at_local": (today + timedelta(days=1)).isoformat(),
             }
             for index in range(coach_context.COACH_PLANNED_EVENT_LIMIT + 5)
         ]
@@ -1004,7 +1009,7 @@ class ServerCoachTests(ServerTestCase):
             [
                 {"name": "Later", "date": "2026-09-15"},
                 {"name": "Invalid", "date": "not-a-date"},
-                {"name": "Past", "start_date_local": "2026-09-12"},
+                {"name": "Past", "starts_at_local": "2026-09-12"},
                 {"name": "Today", "date": "2026-09-13"},
             ],
             today,
@@ -1063,10 +1068,10 @@ class ServerCoachTests(ServerTestCase):
         today = server.ATHLETE_CLOCK.now().date()
         event = {
             "id": "planned-1",
-            "start_date_local": (today + timedelta(days=1)).isoformat(),
+            "starts_at_local": (today + timedelta(days=1)).isoformat(),
             "name": "Threshold ride",
             "type": "Ride",
-            "moving_time": 3600,
+            "planned_duration_s": 3600,
             "target": "2 x 20 min at threshold",
             "icu_intensity": 0.92,
             "status": "planned",
@@ -1133,9 +1138,7 @@ class ServerCoachTests(ServerTestCase):
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(intervals_snapshot)
         save_garmin(garmin_snapshot)
         garmin_stored = read_garmin()
-        self.assertEqual(
-            garmin_stored["vendor_payload"], "kept in the full snapshot"
-        )
+        self.assertEqual(garmin_stored["vendor_payload"], "kept in the full snapshot")
 
         context = server.COACH_CONTEXT.training_context_service().build()
 
@@ -1315,7 +1318,7 @@ class ServerCoachTests(ServerTestCase):
                     "name": "Locker Lauf",
                     "type": "Run",
                     "description": "- 30m 60% Pace locker",
-                    "moving_time": 1800,
+                    "planned_duration_s": 1800,
                 }
             ]
         )[0]
@@ -1371,7 +1374,7 @@ class ServerCoachTests(ServerTestCase):
             "competition_id": "",
             "name": "Münsterland Giro",
             "event_date": event_date,
-            "start_date_local": "",
+            "starts_at_local": "",
             "sport": "Cycling",
             "priority": "A",
             "distance": "125 km",
@@ -1379,7 +1382,7 @@ class ServerCoachTests(ServerTestCase):
             "course_profile": "Rolling",
             "notes": "",
             "description": "",
-            "moving_time_seconds": -1,
+            "planned_duration_s": -1,
         }
         created = server.PLANNING_DATA.competition().save(arguments)
         competition_id = created["competition"]["id"]
@@ -1436,7 +1439,7 @@ class ServerCoachTests(ServerTestCase):
                 "competition_id": competition_id,
                 "name": "Updated Race",
                 "event_date": event_date,
-                "start_date_local": "",
+                "starts_at_local": "",
                 "sport": "Cycling",
                 "priority": "A",
                 "distance": "100 km",
@@ -1444,7 +1447,7 @@ class ServerCoachTests(ServerTestCase):
                 "course_profile": "Road",
                 "notes": "Updated locally",
                 "description": "Updated locally",
-                "moving_time_seconds": -1,
+                "planned_duration_s": -1,
             }
         )
         pushed = []

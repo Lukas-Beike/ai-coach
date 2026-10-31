@@ -15,18 +15,23 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
 
-from canonical_recovery_support import FilteringReader, NoActivityRows
+from canonical_recovery_support import (
+    FilteringReader,
+    NoActivityRows,
+    SnapshotActivityRows,
+)
+from performance_day_support import snapshot_metrics
 
 from backend.canonical.records import FORM_METHOD, FORM_METHOD_VERSION, Observation
 from backend.canonical.vocabulary import MetricKind, SourceKind
 from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
     read_performance_inputs,
 )
 from backend.performance.chart_history import analysis_history
 from backend.performance.context import current_performance_context
-from backend.performance.current_metrics import current_performance_metrics
-from backend.performance.garmin_metrics import garmin_performance_metrics
+from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.providers.snapshot_projection import project_intervals_snapshot
 
 DAY = date(2026, 9, 20)
@@ -76,6 +81,7 @@ def _inputs(
     inputs = read_performance_inputs(
         FilteringReader(_observations(snapshot)),
         None,
+        activity_reader=SnapshotActivityRows(snapshot),
         as_of=DAY,
     )
     assert inputs is not None
@@ -317,8 +323,8 @@ class EftpTests(unittest.TestCase):
 
     def test_the_athlete_record_eftp_needs_no_wellness_day(self) -> None:
         # An athlete-only snapshot: no wellness row, so no wellness day. The latest
-        # sync's athlete eFTP still reaches the current metrics; the thresholds and
-        # the wellness-day eFTP stay absent in this branch.
+        # sync's athlete eFTP and thresholds still reach the current metrics; only
+        # the wellness-day eFTP stays absent in this branch.
         snapshot = _snapshot([], settings=[_ride(262, lthr=168)])
         inputs = read_performance_inputs(
             FilteringReader(_observations(snapshot)),
@@ -332,17 +338,21 @@ class EftpTests(unittest.TestCase):
         assert athlete_eftp is not None
         self.assertEqual(athlete_eftp.value.value, 262)
         self.assertIsNone(inputs.current.wellness_eftp)
-        self.assertEqual(inputs.current.bike_threshold_hr, ())
-        metrics = current_performance_metrics(
+        self.assertEqual(
+            [item.value.value for item in inputs.current.bike_threshold_hr], [168]
+        )
+        metrics = snapshot_metrics(
             snapshot,
             {},
-            garmin_performance_metrics({}, DAY),
+            garmin_payload_performance_metrics({}, DAY),
             canonical=inputs.current,
         )
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 262)
         self.assertEqual(metrics["cycling_eftp_watts"]["source"], INTERVALS)
 
-    def test_an_athlete_without_eftp_has_no_inputs_without_a_wellness_day(self) -> None:
+    def test_an_athlete_without_eftp_keeps_thresholds_without_a_wellness_day(
+        self,
+    ) -> None:
         snapshot = _snapshot([], settings=[_ride(lthr=168)])
         inputs = read_performance_inputs(
             FilteringReader(_observations(snapshot)),
@@ -351,17 +361,22 @@ class EftpTests(unittest.TestCase):
             as_of=DAY,
         )
         assert inputs is not None
-        self.assertIsNone(inputs.current)
+        self.assertIsNone(inputs.current.athlete_eftp)
+        self.assertEqual(len(inputs.current.bike_threshold_hr), 1)
 
-    def test_without_canonical_inputs_only_the_ride_activity_remains(self) -> None:
+    def test_without_canonical_inputs_no_eftp_remains(self) -> None:
         snapshot = _snapshot(
             [_row(_day(), sportInfo=[_ride(265)])],
             settings=[_ride(262)],
             activities=[self.ACTIVITY],
         )
-        context = current_performance_context(snapshot, {}, {}, DAY)
-        self.assertEqual(context["metrics"]["cycling_eftp_watts"]["value"], 270)
-        self.assertEqual(context["comparisons"]["cycling_eftp_30d"]["average"], 270)
+        context = current_performance_context(
+            snapshot, {}, {}, DAY, canonical=EMPTY_PERFORMANCE_INPUTS
+        )
+        # Canonical reads (#1415): the snapshot's ride activity is no longer read
+        # either (was 270 for both values).
+        self.assertIsNone(context["metrics"]["cycling_eftp_watts"]["value"])
+        self.assertIsNone(context["comparisons"]["cycling_eftp_30d"])
         self.assertIsNone(context["current_load"]["tsb"])
 
     def test_chart_and_body_history_read_the_canonical_series(self) -> None:

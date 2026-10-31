@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from backend.canonical.public_metrics import neutral_calendar_entries
+from backend.canonical.public_metrics import neutral_calendar_state
 from backend.canonical.vocabulary import ProviderId
 from backend.config import Config
 from backend.db.manager import DatabaseManager
@@ -98,7 +98,7 @@ class PublicBootstrapService:
             state_version_values = deps.state_version_service().versions(
                 deps.sync_state_repository().latest_metadata(db)
             )
-            return {
+            state = {
                 "schema_version": 3,
                 "state_versions": state_version_values,
                 "plan_revision": state_version_values.get("plan"),
@@ -120,8 +120,8 @@ class PublicBootstrapService:
                 "plans": deps.training_plan_service().list(limit=30),
                 "library": [],
                 "activities": [],
-                "planned": neutral_calendar_entries(local_planned),
-                "training_calendar": neutral_calendar_entries(local_planned),
+                "planned": local_planned,
+                "training_calendar": local_planned,
                 "calendar": deps.local_calendar_events(
                     local_planned, competitions, relevant_external
                 ),
@@ -292,6 +292,7 @@ class PublicBootstrapService:
                 ),
                 "usage": deps.provider_state_service().summary("openai"),
             }
+            return neutral_calendar_state(state)
 
 
 def _library_activity_at(deps: Any, db: Any) -> str | None:

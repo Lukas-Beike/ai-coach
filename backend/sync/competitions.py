@@ -18,6 +18,7 @@ from backend.errors import INTERVALS_API_KEY_ERROR, AppError
 from backend.observability import Redactor
 from backend.planning import competitions as planning_competitions
 from backend.planning.competition_service import CompetitionService
+from backend.providers.intervals_workouts import planning_fields_from_intervals
 from backend.runtime.events import StateEventBuffer
 from backend.sync.authority import competition_push_manifest
 
@@ -269,14 +270,14 @@ class CompetitionSyncReconciler:
                     environment = row.get("environment")
                     sport_detail = row.get("sport_detail")
                 db.execute(
-                    "UPDATE competitions SET name=?, event_date=?, start_date_local=?, sport=?, "
-                    "environment=?, sport_detail=?, priority=?, category=?, distance=?, target=?, description=?, moving_time=?, notes=?, "
+                    "UPDATE competitions SET name=?, event_date=?, starts_at_local=?, sport=?, "
+                    "environment=?, sport_detail=?, priority=?, category=?, distance=?, target=?, description=?, planned_duration_s=?, notes=?, "
                     "intervals_event_id=?, external_id=?, sync_dirty=0, sync_state='synced', "
                     "sync_conflict='', last_synced_at=?, updated_at=? WHERE id=?",
                     (
                         data["name"],
                         data["event_date"],
-                        data["start_date_local"],
+                        data["starts_at_local"],
                         data["sport"],
                         environment,
                         sport_detail,
@@ -285,7 +286,7 @@ class CompetitionSyncReconciler:
                         data["distance"],
                         data["target"],
                         data["description"],
-                        data["moving_time"],
+                        data["planned_duration_s"],
                         data["notes"],
                         data["intervals_event_id"]
                         or str(row.get("intervals_event_id") or "")
@@ -451,7 +452,7 @@ class CompetitionSyncReconciler:
             )
             db.execute(
                 "INSERT INTO competitions(id, name, event_date, sport, environment, sport_detail, priority, distance, target, "
-                "course_profile, notes, category, start_date_local, description, moving_time, "
+                "course_profile, notes, category, starts_at_local, description, planned_duration_s, "
                 "intervals_event_id, external_id, sync_dirty, sync_state, sync_conflict, "
                 "last_synced_at, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'synced', '', ?, ?, ?)",
@@ -468,9 +469,9 @@ class CompetitionSyncReconciler:
                     "",
                     data["notes"],
                     data["category"],
-                    data["start_date_local"],
+                    data["starts_at_local"],
                     data["description"],
-                    data["moving_time"],
+                    data["planned_duration_s"],
                     data["intervals_event_id"],
                     external_id,
                     now,
@@ -545,7 +546,7 @@ class CompetitionSyncService:
                 if row.get("intervals_event_id")
             }
             remote_events = [
-                event
+                planning_fields_from_intervals(event)
                 for event in client.fetch_competition_events()
                 if planning_competitions.is_remote_competition_event(event, linked_ids)
             ]
@@ -560,7 +561,10 @@ class CompetitionSyncService:
                 self._reconciler.clear_tombstones(tombstones)
                 deleted_remote = len(delete_identifiers)
             pushed = (
-                client.upsert_competition_events(outbound)
+                [
+                    planning_fields_from_intervals(event)
+                    for event in client.upsert_competition_events(outbound)
+                ]
                 if push_local and outbound
                 else []
             )

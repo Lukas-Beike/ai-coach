@@ -34,7 +34,12 @@ from backend.canonical.vocabulary import (
 
 ACTIVITY_ID_PREFIX: Final = "act_"
 ATHLETE_SERIES: Final = "athlete"
-_ATHLETE_SERIES_KINDS: Final = frozenset({MetricKind.WEIGHT, MetricKind.EFTP})
+_ATHLETE_SERIES_KINDS: Final = frozenset(
+    {MetricKind.WEIGHT, MetricKind.EFTP, MetricKind.BODY_FAT}
+)
+# Kinds whose athlete value collides with a wellness value only without a sport:
+# the athlete's sport VO2max keeps the daily key it had before mapper version 9.
+_ATHLETE_SPORTLESS_SERIES_KINDS: Final = frozenset({MetricKind.VO2MAX})
 OBSERVATION_DETAILS: Final = "{}"
 ACTIVITY_DETAILS: Final = "{}"
 _ELAPSED_DURATION_KEY: Final = "elapsed_duration_s"
@@ -532,6 +537,39 @@ def active_activity_rows(
     )
 
 
+def activity_max_hr_rows(
+    db: Any, provider: str, *, low: float, high: float
+) -> list[dict[str, Any]]:
+    """Return each sport's highest max heart rate within bounds and its newest day.
+
+    The maximum heart rate is read from the details object. Rows have ``sport``,
+    ``max_hr`` and ``local_date``; only active records of sessions that are not
+    deleted count.
+    """
+    return _fetch_all(
+        db,
+        "WITH hr AS (SELECT r.sport AS sport, r.local_date AS local_date, "
+        f"json_extract(CASE WHEN json_valid(r.details) THEN r.details END, '$.{_MAX_HR_KEY}') "
+        "AS max_hr FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.provider = ? AND r.state = ? AND s.state <> ? "
+        "AND r.local_date IS NOT NULL), "
+        "bounded AS (SELECT * FROM hr WHERE typeof(max_hr) IN ('integer', 'real') "
+        "AND max_hr BETWEEN ? AND ?) "
+        "SELECT b.sport AS sport, b.max_hr AS max_hr, MAX(b.local_date) AS local_date "
+        "FROM bounded AS b JOIN (SELECT sport, MAX(max_hr) AS top FROM bounded "
+        "GROUP BY sport) AS t ON t.sport = b.sport AND b.max_hr = t.top "
+        "GROUP BY b.sport ORDER BY b.sport",
+        (
+            provider,
+            ActivityRecordState.ACTIVE.value,
+            ActivitySessionState.DELETED.value,
+            low,
+            high,
+        ),
+    )
+
+
 def session_activity_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
     """Return the active activity rows bundled in one session, for detail reads.
 
@@ -792,17 +830,21 @@ def observation_natural_key(observation: Observation) -> str:
 def _observation_series(observation: Observation) -> str:
     """Return ``athlete`` for an Intervals.icu athlete-profile value, else empty.
 
-    Only weight and eFTP come from both records. A wellness row is identified by
-    its ISO day, so such a value whose source record is anything else comes from
-    the athlete record. The consumers tell the two apart by the same rule. Both
-    values are kept: the current-metrics reader shows the wellness weight first
-    and the athlete weight as its fallback, and the athlete eFTP before the
-    wellness eFTP.
+    Weight, eFTP, body fat and the sport-less VO2max come from both records. A
+    wellness row is identified by its ISO day, so such a value whose source record
+    is anything else comes from the athlete record. The consumers tell the two
+    apart by the same rule. Both values are kept: the current-metrics reader shows
+    the wellness weight and body fat first and the athlete values as their
+    fallbacks, and the athlete eFTP before the wellness eFTP.
     """
     provenance = observation.provenance
+    shared = observation.kind in _ATHLETE_SERIES_KINDS or (
+        observation.kind in _ATHLETE_SPORTLESS_SERIES_KINDS
+        and observation.sport is None
+    )
     if (
         provenance.provider is ProviderId.INTERVALS
-        and observation.kind in _ATHLETE_SERIES_KINDS
+        and shared
         and provenance.source_record_id != observation.observed_on.isoformat()
     ):
         return ATHLETE_SERIES

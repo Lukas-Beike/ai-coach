@@ -151,7 +151,7 @@ class LocalPlanCreationServiceTests(unittest.TestCase):
         self.assertEqual(len(created), 1)
         self.assertEqual(created[0]["sport"], "ride")
         self.assertEqual(created[0]["duration_minutes"], 30)
-        self.assertEqual(created[0]["moving_time"], 1800)
+        self.assertEqual(created[0]["planned_duration_s"], 1800)
         self.assertEqual(created[0]["target"], "AUTO")
         self.assertEqual(created[0]["description"], "- 30m Z2")
         self.assertEqual(created[0]["source"], "coach")
@@ -168,12 +168,12 @@ class LocalPlanCreationServiceTests(unittest.TestCase):
     def test_validate_calendar_rejects_overlapping_time_windows(self) -> None:
         w1 = {
             **self.workout(),
-            "start_date_local": "2026-09-22T08:00:00",
+            "starts_at_local": "2026-09-22T08:00:00",
             "duration_minutes": 60,
         }
         w2 = {
             **self.workout(),
-            "start_date_local": "2026-09-22T08:30:00",
+            "starts_at_local": "2026-09-22T08:30:00",
             "duration_minutes": 30,
         }
 
@@ -236,7 +236,7 @@ class LocalPlanCreationServiceTests(unittest.TestCase):
                         "name": "Easy ride",
                         "description": "- 35m Z2 HR",
                         "duration_minutes": 35,
-                        "moving_time": 2100,
+                        "planned_duration_s": 2100,
                         "target": "HR",
                     }
                 ),

@@ -152,7 +152,15 @@ class SyncGetRoutesTests(unittest.TestCase):
         self,
     ) -> None:
         self.activities.page.return_value = {
-            "activities": [{"id": "a1", "icu_training_load": 40, "icu_rpe": 4}]
+            "activities": [
+                {
+                    "id": "a1",
+                    "start_date_local": "2026-10-11T07:00:00",
+                    "moving_time": 3600,
+                    "icu_training_load": 40,
+                    "icu_rpe": 4,
+                }
+            ]
         }
         self.handler.path = "/api/activities"
         self.assertTrue(self.routes.handle(self.handler, "/api/activities"))
@@ -167,7 +175,20 @@ class SyncGetRoutesTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                (200, {"activities": [{"id": "a1", "training_load": 40, "rpe": 4}]}),
+                (
+                    200,
+                    {
+                        "activities": [
+                            {
+                                "id": "a1",
+                                "started_at_local": "2026-10-11T07:00:00",
+                                "moving_duration_s": 3600,
+                                "training_load": 40,
+                                "rpe": 4,
+                            }
+                        ]
+                    },
+                ),
                 (200, document),
             ],
             self.handler.responses,

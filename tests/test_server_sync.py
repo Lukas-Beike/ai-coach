@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
 from garmin_support import read_garmin, save_garmin
+from performance_day_support import snapshot_metrics
 from server_test_support import (
     ServerTestCase,
     _current_performance_context,
@@ -35,7 +36,6 @@ from backend.activities.duplicates import (
 )
 from backend.http_api import server as http_server_module
 from backend.http_api.static_assets import StaticAssetService
-from backend.performance import current_metrics as performance_current_metrics
 from backend.performance import garmin_observations
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
@@ -849,20 +849,20 @@ class ServerSyncTests(ServerTestCase):
             {
                 "name": "Alpenbrevet",
                 "event_date": "2026-09-20",
-                "start_date_local": "2026-09-20T06:30",
+                "starts_at_local": "2026-09-20T06:30",
                 "sport": "Radfahren",
                 "category": "RACE_A",
                 "description": "Lange Bergetappe",
-                "moving_time": "21600",
+                "planned_duration_s": "21600",
                 "distance": "250 km",
                 "target": "Finish",
                 "external_id": "alpenbrevet-2026",
             }
         )
         self.assertEqual(competition["event_date"], "2026-09-20")
-        self.assertEqual(competition["start_date_local"], "2026-09-20T06:30:00")
+        self.assertEqual(competition["starts_at_local"], "2026-09-20T06:30:00")
         self.assertEqual(competition["category"], "RACE_A")
-        self.assertEqual(competition["moving_time"], 21600)
+        self.assertEqual(competition["planned_duration_s"], 21600)
         self.assertEqual(competition["distance"], "250000")
         self.assertEqual(
             planning_competitions.competition_event_payload(competition)["type"], "Ride"
@@ -877,11 +877,11 @@ class ServerSyncTests(ServerTestCase):
             {
                 "id": 42,
                 "category": "RACE_C",
-                "start_date_local": "2026-09-20T07:15:00",
+                "starts_at_local": "2026-09-20T07:15:00",
                 "type": "Run",
                 "name": "Remote Race",
                 "description": "Remote description",
-                "moving_time": 7200,
+                "planned_duration_s": 7200,
                 "distance": 21097,
                 "target": "Sub 2:00",
             }
@@ -889,8 +889,8 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(data["intervals_event_id"], "42")
         self.assertEqual(data["category"], "RACE_C")
         self.assertEqual(data["priority"], "C")
-        self.assertEqual(data["start_date_local"], "2026-09-20T07:15:00")
-        self.assertEqual(data["moving_time"], 7200)
+        self.assertEqual(data["starts_at_local"], "2026-09-20T07:15:00")
+        self.assertEqual(data["planned_duration_s"], 7200)
         self.assertEqual(data["distance"], "21097")
         self.assertEqual(data["target"], "Sub 2:00")
 
@@ -905,7 +905,7 @@ class ServerSyncTests(ServerTestCase):
             "recent_activities": [],
             "recent_wellness": [],
         }
-        metrics = performance_current_metrics.current_performance_metrics(
+        metrics = snapshot_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),
@@ -990,7 +990,9 @@ class ServerSyncTests(ServerTestCase):
         comparison = _current_performance_context(snapshot)["comparisons"][
             "cycling_ftp_watts_30d"
         ]
-        self.assertIsNone(comparison)
+        # The Garmin FTP is compared with its own canonical history only, never
+        # with the Intervals.icu 280 W.
+        self.assertEqual(comparison["average"], 300)
 
     def test_existing_snapshot_uses_configured_intervals_window(self):
         server.SYNC_PERSISTENCE.state_repository().save_snapshot(
@@ -2096,7 +2098,7 @@ class ServerSyncTests(ServerTestCase):
                     "name": "Local template",
                     "type": "Ride",
                     "description": "- 30m Z2",
-                    "moving_time": 1800,
+                    "planned_duration_s": 1800,
                 }
             ]
         )

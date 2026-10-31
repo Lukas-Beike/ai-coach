@@ -142,6 +142,10 @@ class MetricKind(StrEnum):
     SUBJECTIVE_SORENESS = "subjective_soreness"
     SUBJECTIVE_STRESS = "subjective_stress"
     SUBJECTIVE_MOOD = "subjective_mood"
+    # Athlete settings reported by a provider (mapper version 9 of Intervals.icu).
+    W_PRIME = "w_prime"
+    HEIGHT = "height"
+    ZONE2_PACE = "zone2_pace"
 
     @property
     def unit(self) -> str:
@@ -202,6 +206,9 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.SUBJECTIVE_SORENESS: "rating",
     MetricKind.SUBJECTIVE_STRESS: "rating",
     MetricKind.SUBJECTIVE_MOOD: "rating",
+    MetricKind.W_PRIME: "J",
+    MetricKind.HEIGHT: "cm",
+    MetricKind.ZONE2_PACE: "m/s",
 }
 
 

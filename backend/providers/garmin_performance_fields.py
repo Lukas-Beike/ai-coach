@@ -8,6 +8,8 @@ from typing import Final
 
 from backend.providers.garmin_fields import (
     GARMIN_DATE_ALIASES,
+    GARMIN_FTP_RANGE_DAY,
+    GARMIN_FTP_RANGE_VALUE,
     GARMIN_HRV_LAST_NIGHT_ALIASES,
     GARMIN_HRV_WEEKLY_ALIASES,
     GARMIN_SLEEP_DURATION_ALIASES,
@@ -24,12 +26,13 @@ WEIGHT_KG: Final = "weightKg"
 SLEEP_SECONDS: Final = "sleepTimeSeconds"
 HRV_NIGHT_AVERAGE: Final = "lastNightAvg"
 FTP_VALUE: Final = "functionalThresholdPower"
+FTP_RANGE_DAY: Final = GARMIN_FTP_RANGE_DAY
+FTP_RANGE_VALUE: Final = GARMIN_FTP_RANGE_VALUE
 
 # Date-bearing keys; each tuple keeps the lookup order it replaces.
-RECORD_DATE_KEYS: Final = GARMIN_DATE_ALIASES
 RECORD_TIMESTAMP_KEYS: Final = (*GARMIN_DATE_ALIASES, "timestamp")
 RECORD_IDENTITY_KEYS: Final = (*GARMIN_DATE_ALIASES, "timestamp", "id")
-METRIC_DATE_KEYS: Final = ("date", CALENDAR_DATE, SUMMARY_DATE, "from")
+METRIC_DATE_KEYS: Final = ("date", CALENDAR_DATE, SUMMARY_DATE, FTP_RANGE_DAY)
 PLANNING_ROW_DATE_KEYS: Final = ("id", "date", CALENDAR_DATE)
 WELLNESS_ROW_DATE_KEYS: Final = (CALENDAR_DATE, "date", "id", "timestamp")
 OBSERVATION_DATE_FIELDS: Final = (
@@ -46,7 +49,6 @@ OBSERVATION_DATE_FIELDS: Final = (
 # Value aliases.
 SLEEP_DURATION_ALIASES: Final = GARMIN_SLEEP_DURATION_ALIASES
 ACTIVITY_FTP_ALIASES: Final = ("ftp", FTP_VALUE)
-DIRECT_FTP_VALUE_KEYS: Final = (FTP_VALUE, "ftp", "power")
 MAX_HEART_RATE_ALIASES: Final = ("maxHeartRateUsed", "maxHeartRate", "maxHR")
 WEIGHT_VALUE_ALIASES: Final = (WEIGHT_KG, "weight_kg", "weight", "value")
 WEIGHT_READING_ALIASES: Final = (WEIGHT_KG, "weight_kg", "weight")

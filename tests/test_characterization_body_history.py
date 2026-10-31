@@ -9,7 +9,12 @@ import unittest
 from datetime import UTC, date, datetime
 from typing import Any
 
-from performance_day_support import SYNCED_AT, days_from_rows
+from performance_day_support import (
+    SYNCED_AT,
+    days_from_rows,
+    garmin_body_from_payload,
+    garmin_metrics_from_payload,
+)
 
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance import body as _body
@@ -19,6 +24,7 @@ from backend.performance.wellness_days import wellness_day_values
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 
 TODAY = date(2026, 5, 4)
+SYNC_DAY_BEFORE = datetime(2026, 5, 3, 8, tzinfo=UTC)
 GARMIN = "Garmin Connect"
 INTERVALS = "Intervals.icu"
 INTERVALS_WELLNESS = "Intervals.icu Wellness"
@@ -69,7 +75,28 @@ def _eftp_by_day(snapshot: Any) -> dict[date, float]:
     )
 
 
-def body_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
+def _payload(garmin: Any) -> dict[str, Any]:
+    return garmin if isinstance(garmin, dict) else {}
+
+
+def _activity_rows(snapshot: Any) -> tuple[Any, ...]:
+    """The raw activity rows, then the compact ones, as the activity reader serves."""
+    if not isinstance(snapshot, dict):
+        return ()
+    raw = snapshot.get("raw_provider_data")
+    raw = raw if isinstance(raw, dict) else {}
+    return tuple(
+        row
+        for rows in (raw.get("activities"), snapshot.get("recent_activities"))
+        if isinstance(rows, list)
+        for row in rows
+        if isinstance(row, dict)
+    )
+
+
+def body_history(
+    snapshot: Any, garmin: Any, today: date, *, retrieved_at: datetime = SYNCED_AT
+) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     if isinstance(snapshot, dict):
         raw = snapshot.get("raw_provider_data")
@@ -81,6 +108,13 @@ def body_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
         today,
         eftp_by_day=_eftp_by_day(snapshot),
         wellness_days=days_from_rows(rows),
+        canonical=garmin_body_from_payload(
+            _payload(garmin), today, retrieved_at=retrieved_at
+        ),
+        activity_rows=_activity_rows(snapshot),
+        garmin_ftp=garmin_metrics_from_payload(
+            _payload(garmin), retrieved_at=retrieved_at
+        ).performance_history.get("cycling_ftp_watts", {}),
     )
 
 
@@ -96,6 +130,9 @@ def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
         atl=None,
         eftp_by_day=_eftp_by_day(snapshot),
         history_wellness_days=days_from_rows(rows),
+        activity_rows=_activity_rows(snapshot),
+        garmin=garmin_metrics_from_payload(_payload(garmin)),
+        body=garmin_body_from_payload(_payload(garmin), today),
     )
     return _chart_history.analysis_history(snapshot, garmin, today, canonical=canonical)
 
@@ -314,10 +351,10 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
                             any("ftp_watts" in point for point in series["points"])
                         )
 
-    def test_ftp_same_day_precedence_is_direct_then_performance_then_history(
+    def test_ftp_same_day_precedence_is_direct_then_history_then_performance(
         self,
     ) -> None:
-        history = [{"date": "2026-05-04", "functionalThresholdPower": 260}]
+        history = [{"calendarDate": "2026-05-04", "functionalThresholdPower": 260}]
         performance = [_performance_ftp("2026-05-04", 280)]
         direct = {"calendarDate": "2026-05-04", "functionalThresholdPower": 300}
         base: dict[str, Any] = {
@@ -337,15 +374,24 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
                     "cycling_ftp": direct,
                 },
                 300,
-                "direct-fetch",
+                # Canonical reads (#1415): the history's sync time stamps every
+                # Garmin FTP day (was "direct-fetch").
+                "history-fetch",
+            ),
+            # Canonical reads (#1415): a dedicated section wins over the accumulated
+            # performance history of the same day (was 280).
+            (
+                "history",
+                {"cycling_ftp_history": history, "performance_history": performance},
+                260,
+                "history-fetch",
             ),
             (
                 "performance",
-                {"cycling_ftp_history": history, "performance_history": performance},
+                {"performance_history": performance},
                 280,
                 "history-fetch",
             ),
-            ("history", {"cycling_ftp_history": history}, 260, "history-fetch"),
         )
         for winner, extra, expected_watts, expected_sync in cases:
             with self.subTest(winner=winner):
@@ -369,6 +415,7 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
                 "source_freshness": {"cycling_ftp": {"observed_at": "2026-05-03"}},
             },
             TODAY,
+            retrieved_at=SYNC_DAY_BEFORE,
         )
         # Quirk: a bare scalar cycling_ftp has no date and is never recorded.
         self.assertFalse(
@@ -380,6 +427,8 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
             )
         )
 
+        # Canonical reads (#1415): an undated direct FTP is dated on the sync day of
+        # the mapper (2026-05-03 here), no longer on the freshness observed_at.
         dated_by_freshness = body_history(
             {},
             {
@@ -388,6 +437,7 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
                 "source_freshness": {"cycling_ftp": {"observed_at": "2026-05-03"}},
             },
             TODAY,
+            retrieved_at=SYNC_DAY_BEFORE,
         )
         series = _body_series(dated_by_freshness, "14d", "cycling_w_per_kg", GARMIN)
         point = _point(series, "2026-05-03")
@@ -557,16 +607,17 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
         self.assertIsNone(_point_value(points, "2026-05-03"))
         self.assertIsNone(_point_value(points, "2026-05-04"))
 
-    def test_training_load_last_row_per_day_wins_even_when_it_has_no_value(
+    def test_training_load_row_without_acute_load_keeps_a_valid_value(
         self,
     ) -> None:
         acute = {"calendarDate": "2026-05-03", "acuteTrainingLoad": 475}
         without_acute = {"calendarDate": "2026-05-03", "dailyTrainingLoad": 100}
-        # Quirk: a later row without acute load overwrites an earlier valid value.
+        # Canonical reads (#1415): a row without acute load maps to no observation,
+        # so it no longer overwrites an earlier valid value (was None).
         points = analysis_history(
             None, {"training_status": [acute, without_acute]}, TODAY
         )["load"]["points"]
-        self.assertIsNone(_point_value(points, "2026-05-03"))
+        self.assertEqual(_point_value(points, "2026-05-03"), 475)
         reversed_points = analysis_history(
             None, {"training_status": [without_acute, acute]}, TODAY
         )["load"]["points"]
@@ -579,7 +630,6 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             "performance_history": [
                 {"date": "2026-02-03", "metrics": {"cycling_vo2max_ml_kg_min": 50}},
                 {"date": "2026-02-04", "metrics": {"cycling_vo2max_ml_kg_min": 51}},
-                {"date": "2026-05-03", "metrics": {"cycling_vo2max_ml_kg_min": 55}},
                 {"date": "2026-05-03", "metrics": {"cycling_vo2max_ml_kg_min": 57}},
                 {
                     "date": "2026-05-03",
@@ -591,8 +641,9 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             analysis_history(None, garmin, TODAY), "cycling_vo2max_ml_kg_min"
         )
         self.assertEqual(points[0], {"date": "2026-02-04", "value": 51})
-        # Quirk: for Garmin metric series the last valid value wins and an invalid
-        # later row is ignored (contrast with training load below).
+        # Quirk: an invalid later row is ignored. Canonical reads (#1415): a second
+        # valid row of the same day (55 before 57) is not part of the fixture, as
+        # canonical observations of one day have no stable last-row order.
         self.assertEqual(_point_value(points, "2026-05-03"), 57)
         self.assertEqual(sum(point["value"] is not None for point in points), 2)
 
@@ -682,23 +733,45 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
         )
         self.assertEqual(body_point["ftp_watts"], 270)
 
-    def test_provider_metrics_pass_through_or_fall_back_to_unavailable_projection(
+    def test_provider_metrics_keep_cached_status_or_fall_back_to_unavailable(
         self,
     ) -> None:
-        supplied = {"endurance_score": {"status": "current"}}
-        self.assertEqual(
-            analysis_history(None, {"provider_metrics": supplied}, TODAY)[
-                "provider_metrics"
-            ],
-            supplied,
-        )
+        # A cached chart supplies its status only; its points are never shown
+        # without canonical observations.
+        supplied = {"endurance_score": {"status": "stale", "points": [{"x": 1}]}}
+        cached = analysis_history(None, {"provider_metrics": supplied}, TODAY)[
+            "provider_metrics"
+        ]
+        self.assertEqual(cached["endurance_score"]["status"], "stale")
+        self.assertEqual(cached["endurance_score"]["points"], [])
+        self.assertEqual(cached["running_tolerance"]["status"], "unavailable")
+        # A cached "current" or "unknown" described the snapshot's points; the
+        # status follows the canonical points instead.
+        derived = analysis_history(
+            None,
+            {
+                "provider_metrics": {
+                    "endurance_score": {"status": "current"},
+                    "running_tolerance": {"status": "unknown"},
+                },
+                "running_tolerance": [
+                    {"calendarDate": "2026-05-04", "toleranceScore": 12}
+                ],
+            },
+            TODAY,
+        )["provider_metrics"]
+        self.assertEqual(derived["endurance_score"]["status"], "unavailable")
+        self.assertEqual(derived["running_tolerance"]["status"], "current")
         projected = analysis_history(
             None,
             {
                 "endurance_score": [
                     {"calendarDate": "2026-05-03", "overallScore": 70},
                 ],
-                "running_tolerance": [{"calendarDate": "2026-05-04", "value": 12}],
+                # Canonical reads (#1415): the mapper reads toleranceScore, not a bare "value".
+                "running_tolerance": [
+                    {"calendarDate": "2026-05-04", "toleranceScore": 12}
+                ],
             },
             TODAY,
         )["provider_metrics"]

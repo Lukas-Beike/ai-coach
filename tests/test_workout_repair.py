@@ -537,7 +537,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             local_id, {"description": "- 75m Z1 HR", "duration_minutes": 75}
         )
         edited = server.PLANNING_DATA.planned_unit().list()[0]
-        self.assertEqual(edited["moving_time"], 4500)
+        self.assertEqual(edited["planned_duration_s"], 4500)
         for key in ("workout_doc", "icu_training_load", "icu_intensity"):
             self.assertNotIn(key, edited)
 
@@ -553,7 +553,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         ):
             self.assertTrue(self.repair(local_id)["ok"])
         current = server.PLANNING_DATA.planned_unit().list()[0]
-        self.assertEqual(current["moving_time"], 4500)
+        self.assertEqual(current["planned_duration_s"], 4500)
         self.assertEqual(current["icu_training_load"], 20)
         self.assertEqual(current["icu_intensity"], 55)
         self.assertEqual(current["workout_doc"], self.remote["existing"]["workout_doc"])
@@ -599,7 +599,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         current = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(current["sport"], "swim")
         self.assertIn("- 30m Z1 Pace", current["description"])
-        self.assertEqual(current["moving_time"], 1800)
+        self.assertEqual(current["planned_duration_s"], 1800)
         for key in ("workout_doc", "icu_training_load", "icu_intensity"):
             self.assertNotIn(key, current)
         parsed = parsed_workout_fixture(

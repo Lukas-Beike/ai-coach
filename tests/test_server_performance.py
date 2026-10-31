@@ -12,7 +12,12 @@ from canonical_detail_support import seed_intervals_activity
 from canonical_recovery_support import recovery_only_inputs
 from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
-from performance_day_support import canonical_from_snapshot, current_days
+from performance_day_support import (
+    canonical_from_snapshot,
+    current_days,
+    garmin_metrics_from_payload,
+    snapshot_metrics,
+)
 from server_test_support import (
     ServerTestCase,
     _current_performance_context,
@@ -27,7 +32,6 @@ from backend.activities.duplicates import (
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import context as performance_context
-from backend.performance import current_metrics as performance_current_metrics
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import load as performance_load
 from backend.performance import max_hr as performance_max_hr
@@ -48,12 +52,15 @@ from backend.weather import history as weather_history
 def _mapped_performance_context(snapshot):
     today = server.ATHLETE_CLOCK.now().date()
     canonical = canonical_from_snapshot(snapshot, today)
+    garmin = read_garmin()
     return performance_context.current_performance_context(
         snapshot,
-        read_garmin(),
+        garmin,
         server.ATHLETE_DATA.profile().get(),
         today,
-        canonical=None if canonical is None else replace(canonical, garmin=None),
+        canonical=None
+        if canonical is None
+        else replace(canonical, garmin=garmin_metrics_from_payload(garmin)),
     )
 
 
@@ -253,7 +260,7 @@ class ServerPerformanceTests(ServerTestCase):
             "recent_activities": [],
             "recent_wellness": [],
         }
-        metrics = performance_current_metrics.current_performance_metrics(
+        metrics = snapshot_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),
@@ -398,7 +405,7 @@ class ServerPerformanceTests(ServerTestCase):
                 {"id": _local_datetime.now().astimezone().date().isoformat()}
             ],
         }
-        metrics = performance_current_metrics.current_performance_metrics(
+        metrics = snapshot_metrics(
             snapshot,
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),
@@ -508,7 +515,8 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertIsNone(comparisons["bike_threshold_hr_bpm_30d"])
         self.assertEqual(comparisons["readiness_30d"]["delta"], 5)
         self.assertEqual(comparisons["readiness_30d"]["color"], "good")
-        self.assertEqual(comparisons["run_5k_seconds_30d"]["delta"], -100)
+        # The canonical Garmin history keeps today's prediction too (1500, 1600).
+        self.assertEqual(comparisons["run_5k_seconds_30d"]["delta"], -50)
         self.assertEqual(comparisons["run_5k_seconds_30d"]["color"], "good")
 
     def test_performance_does_not_use_eftp_as_ftp_history(self):

@@ -1,11 +1,137 @@
 {
   "schema": 1,
-  "base": "d640fbb2d6b91ace51978fb7cb9441168453df27",
+  "base": "2becf69249e9d0aa85d34ed52176e90299e2aa6c",
   "versions": {
-    "ruff": "0.17.2",
+    "ruff": "0.17.3",
     "mypy": "2.4.0"
   },
   "diagnostics": [
+    {
+      "tool": "ruff",
+      "path": "backend/providers/source_labels.py",
+      "code": "ARG001",
+      "message_sha256": "344e4547908f3c6648047a93e26e681434a3389f1721a6f92a24d758864f76ce"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/canonical_backfill.py",
+      "code": "ARG001",
+      "message_sha256": "6ed16008a3c74c0d3c454e048949d2553213d48cd3f164df37d3719be1723f57"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/providers/source_labels.py",
+      "code": "ARG001",
+      "message_sha256": "d4af0d95edf216a8ecf98591f90a9418d237f5d2a8b59f7ba191e2f62b625910"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/providers/http.py",
+      "code": "ARG002",
+      "message_sha256": "1254ae6a1908d8deba2afa1ab0aa9b9ffb29076ae5b3df2ced462536a5edbae3"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/activities/activity_reference.py",
+      "code": "ARG002",
+      "message_sha256": "27df9efb118324e481ac94ec7804cdabdab900381dffd49144b00ea63f600e6f"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/wahoo_workout_export.py",
+      "code": "ARG002",
+      "message_sha256": "2cbf185736ec7ea40d9f3da7d5e0f7a6820e08f1e867f6720ed185e5d81bec86"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/providers/http.py",
+      "code": "ARG002",
+      "message_sha256": "2fcd82d254b8f3aa9a05aa01491169bd0055b863bc052b2d2cccdc472117c0fd"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/detail_envelope.py",
+      "code": "ARG002",
+      "message_sha256": "49077de21bff2fd26bfe65c031cc1accece53eee4360209ca2478ffed9c2b740"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/canonical_projection.py",
+      "code": "ARG002",
+      "message_sha256": "49077de21bff2fd26bfe65c031cc1accece53eee4360209ca2478ffed9c2b740"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/wahoo_workout_export.py",
+      "code": "ARG002",
+      "message_sha256": "4d7428a13041433778d46b17e34016de821c7432071d6f89172af7211472202a"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/providers/http.py",
+      "code": "ARG002",
+      "message_sha256": "54ccb8fbcf79d1cbc0642155677bee49b476c416ec9ed4ed7c5a21ac9d24891f"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/providers/http.py",
+      "code": "ARG002",
+      "message_sha256": "5a5d7eb517878d68d2e2d5a7d36372132d071871ff3bf3b2c5482580c39a1923"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/coach/conversation.py",
+      "code": "ARG002",
+      "message_sha256": "8f8b4cd696a1e9b3a3c9896430292f76461401f0c44272e536452d920e9907b7"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/providers/http.py",
+      "code": "ARG002",
+      "message_sha256": "b1cbc925ba39147833b221147348a0b93984aa2cbcb4387f8429d3b8490258df"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/performance/detail_envelope.py",
+      "code": "ARG002",
+      "message_sha256": "cee1ad1cb5e5c41055bd5e20eeeb096833c129831e255148eb324d9641897a0e"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/providers/http.py",
+      "code": "ARG002",
+      "message_sha256": "cfed1ce6cb88690545a2c34112a459a839e93173e675cda840de36202c2e51b1"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/library.py",
+      "code": "ARG002",
+      "message_sha256": "f6772a07caa6c6987ae60b2292231352aaf7639b6bcfe90946388269249b38e1"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/wahoo_workout_export.py",
+      "code": "ARG002",
+      "message_sha256": "fcfd3fe4ee166a29b87591ac16a39846c245d84b11225b61048102e0ea69d866"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/sync/wahoo_workout_export.py",
+      "code": "ARG002",
+      "message_sha256": "fd930adc3e1456837a2cba88df9d5847a87027f961bd785c5ef57dca05f8d5f6"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/planning/changes.py",
+      "code": "ARG004",
+      "message_sha256": "61f2717a36264a60482c405b8d23f3fc95ebf303b527b34989f83d856d9fdb9f"
+    },
+    {
+      "tool": "ruff",
+      "path": "backend/planning/changes.py",
+      "code": "ARG004",
+      "message_sha256": "65500c398a77984b1b392abcf3776c894b2035811a4d00dfe7b8fe59b4a931e3"
+    },
     {
       "tool": "mypy",
       "path": "tests/test_sync_selected.py",
@@ -1389,18 +1515,6 @@
     {
       "tool": "mypy",
       "path": "backend/coach/planning_commands.py",
-      "code": "union-attr",
-      "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/performance/current_metrics.py",
-      "code": "union-attr",
-      "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/performance/trends.py",
       "code": "union-attr",
       "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
     },

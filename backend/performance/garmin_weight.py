@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Callable, Mapping
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
@@ -224,22 +224,3 @@ def garmin_weight_metric(snapshot: dict[str, Any]) -> dict[str, Any]:
         GARMIN_PERFORMANCE_SOURCE,
         "Garmin Connect Körpergewicht",
     )
-
-
-def garmin_weight_average(
-    snapshot: dict[str, Any], days: int, end_date: date
-) -> float | None:
-    cutoff = end_date - timedelta(days=days - 1)
-    values: list[float] = []
-    for record_date, weight in garmin_weight_daily_records(snapshot):
-        try:
-            record_day = (
-                date.fromisoformat(iso_date_prefix(str(record_date)))
-                if record_date
-                else None
-            )
-        except ValueError:
-            record_day = None
-        if record_day and cutoff <= record_day <= end_date:
-            values.append(weight)
-    return round(sum(values) / len(values), 2) if values else None

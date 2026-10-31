@@ -49,9 +49,9 @@ def _normalize_competition(value):
         "course_profile": value.get("course_profile", ""),
         "notes": value.get("notes", ""),
         "category": value.get("category", "RACE_B"),
-        "start_date_local": value.get("start_date_local", ""),
+        "starts_at_local": value.get("starts_at_local", ""),
         "description": value.get("description", ""),
-        "moving_time": value.get("moving_time"),
+        "planned_duration_s": value.get("planned_duration_s"),
         "external_id": value.get("external_id", ""),
     }
 
@@ -68,8 +68,8 @@ class AthleteContextServiceTests(unittest.TestCase):
                 sport TEXT NOT NULL, environment TEXT, sport_detail TEXT,
                 priority TEXT NOT NULL, distance TEXT NOT NULL,
                 target TEXT NOT NULL, course_profile TEXT NOT NULL, notes TEXT NOT NULL,
-                category TEXT NOT NULL, start_date_local TEXT, description TEXT NOT NULL,
-                moving_time INTEGER, intervals_event_id TEXT, external_id TEXT,
+                category TEXT NOT NULL, starts_at_local TEXT, description TEXT NOT NULL,
+                planned_duration_s INTEGER, intervals_event_id TEXT, external_id TEXT,
                 sync_dirty INTEGER NOT NULL, sync_state TEXT NOT NULL,
                 sync_conflict TEXT NOT NULL, last_synced_at TEXT, created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -114,7 +114,7 @@ class AthleteContextServiceTests(unittest.TestCase):
         self.db.execute(
             "INSERT INTO competitions "
             "(id, name, event_date, sport, priority, distance, target, course_profile, "
-            "notes, category, start_date_local, description, moving_time, intervals_event_id, "
+            "notes, category, starts_at_local, description, planned_duration_s, intervals_event_id, "
             "external_id, sync_dirty, sync_state, sync_conflict, last_synced_at, created_at, updated_at) "
             "VALUES (?, 'Old', '2026-10-01', 'Cycling', 'B', '', '', '', '', 'RACE_B', "
             "'', '', NULL, ?, ?, 0, 'synced', '', NULL, 'created-before', 'updated-before')",
@@ -317,8 +317,8 @@ class AthleteContextServiceTests(unittest.TestCase):
         self.db.execute(
             "INSERT INTO competitions "
             "(id, name, event_date, sport, environment, sport_detail, priority, distance, "
-            "target, course_profile, notes, category, start_date_local, description, "
-            "moving_time, intervals_event_id, external_id, sync_dirty, sync_state, "
+            "target, course_profile, notes, category, starts_at_local, description, "
+            "planned_duration_s, intervals_event_id, external_id, sync_dirty, sync_state, "
             "sync_conflict, last_synced_at, created_at, updated_at) "
             "VALUES (?, 'Gran Fondo', '2026-10-01', 'Cycling', NULL, NULL, 'A', '5 km', "
             "'', '', 'Race notes', 'RACE_A', '', '', 3600, NULL, NULL, 0, 'conflict', "

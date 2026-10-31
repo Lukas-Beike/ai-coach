@@ -22,6 +22,7 @@ from backend.planning.sport import apply_sport_update
 from backend.providers.intervals_workouts import (
     DERIVED_WORKOUT_KEYS,
     INTERVALS_DEFAULT_WORKOUT_TYPE,
+    intervals_fields_from_planning,
     intervals_record_type,
 )
 
@@ -70,8 +71,11 @@ def planned_unit_payload_hash(payload: Any) -> str:
         comparable.pop("environment", None)
         comparable.pop("sport_detail", None)
         comparable["sport"] = comparable["type"] = token
+    # Likewise a payload with the provider-neutral start and duration names
+    # hashes like the same payload stored before schema version 16, so baselines
+    # recorded under the old field names do not report a remote change.
     serialized = json.dumps(
-        comparable,
+        intervals_fields_from_planning(comparable),
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -85,8 +89,8 @@ def _planned_unit_metadata(workout: dict[str, Any]) -> dict[str, Any]:
         "origin": str(workout.get("origin") or workout.get("source") or "coach")[:40],
     }
     metadata["source"] = str(workout.get("source") or metadata["origin"])[:40]
-    if workout.get("start_date_local"):
-        metadata["start_date_local"] = str(workout["start_date_local"])[:40]
+    if workout.get("starts_at_local"):
+        metadata["starts_at_local"] = str(workout["starts_at_local"])[:40]
     for field, limit in (
         ("status", 80),
         ("remote_event_id", 120),
@@ -121,7 +125,7 @@ def normalize_planned_unit(
         {
             **workout,
             "date": iso_date_prefix(
-                str(workout.get("date") or workout.get("start_date_local") or "")
+                str(workout.get("date") or workout.get("starts_at_local") or "")
             ),
         },
         local_id=local_id,
@@ -129,10 +133,10 @@ def normalize_planned_unit(
         sync_status=sync_status,
     )
     normalized.update(_planned_unit_metadata(workout))
-    if normalized.get("moving_time") in (None, "") and normalized.get(
+    if normalized.get("planned_duration_s") in (None, "") and normalized.get(
         "duration_minutes"
     ) not in (None, ""):
-        normalized["moving_time"] = int(normalized["duration_minutes"]) * 60
+        normalized["planned_duration_s"] = int(normalized["duration_minutes"]) * 60
     return normalized
 
 
@@ -169,7 +173,7 @@ def _apply_planned_workout_update(
 ) -> None:
     for key in (
         "date",
-        "start_date_local",
+        "starts_at_local",
         "name",
         "description",
         "duration_minutes",
@@ -177,9 +181,9 @@ def _apply_planned_workout_update(
     ):
         if key in values:
             candidate[key] = values.get(key)
-    if "start_date_local" in values:
-        candidate["start_date_local"] = planning_workouts.validate_workout_start_date(
-            values["start_date_local"], str(candidate.get("date") or "")
+    if "starts_at_local" in values:
+        candidate["starts_at_local"] = planning_workouts.validate_workout_start_date(
+            values["starts_at_local"], str(candidate.get("date") or "")
         )
     if {"type", "sport", "environment"} & values.keys():
         apply_sport_update(candidate, values)
@@ -200,18 +204,18 @@ def prepare_planned_workout_date(
     except TypeError, ValueError:
         current_date = str(current.get("date") or "")
     date_changed = candidate["date"] != current_date
-    if date_changed and candidate.get("start_date_local") in (
+    if date_changed and candidate.get("starts_at_local") in (
         None,
-        current.get("start_date_local"),
+        current.get("starts_at_local"),
     ):
-        old_start = str(current.get("start_date_local") or "")
+        old_start = str(current.get("starts_at_local") or "")
         if old_start:
             time_suffix = (
                 old_start[10:]
                 if len(old_start) > 10 and old_start[10] == "T"
                 else _ISO_MIDNIGHT_SUFFIX
             )
-            candidate["start_date_local"] = candidate["date"] + time_suffix
+            candidate["starts_at_local"] = candidate["date"] + time_suffix
     return date_changed
 
 
@@ -260,9 +264,9 @@ def _reconcile_updated_planned_workout_content(
     seconds = planning_workouts.validate_workout_description(normalized)
     minutes = _as_number(normalized.get("duration_minutes"))
     if seconds is not None:
-        normalized["moving_time"] = round(seconds)
+        normalized["planned_duration_s"] = round(seconds)
     elif minutes is not None:
-        normalized["moving_time"] = round(minutes * 60)
+        normalized["planned_duration_s"] = round(minutes * 60)
     if any(
         key in values
         for key in ("description", "duration_minutes", "target", "type", "sport")
@@ -317,7 +321,7 @@ def _remote_planned_unit_id(event: dict[str, Any]) -> str | None:
 def _remote_planned_unit_date(event: dict[str, Any], *, today: date) -> str | None:
     try:
         event_date = LocalDate.parse(
-            event.get("start_date_local") or event.get("date")
+            event.get("starts_at_local") or event.get("date")
         ).isoformat()
     except TypeError, ValueError:
         return None
@@ -330,11 +334,11 @@ def _remote_planned_unit_date(event: dict[str, Any], *, today: date) -> str | No
 
 
 def _remote_planned_unit_duration(event: dict[str, Any]) -> int:
-    moving_time = event.get("moving_time")
+    planned_duration_s = event.get("planned_duration_s")
     try:
         return (
-            max(5, round(float(moving_time) / 60))
-            if moving_time not in (None, "")
+            max(5, round(float(planned_duration_s) / 60))
+            if planned_duration_s not in (None, "")
             else 30
         )
     except TypeError, ValueError:
@@ -352,13 +356,13 @@ def remote_planned_unit_payload(
         return None
     remote_external_id = str(event.get("external_id") or "").strip()
     identity = remote_external_id or f"intervals-event-{remote_id}"
-    moving_time = event.get("moving_time")
+    planned_duration_s = event.get("planned_duration_s")
     sport_type = (
         event.get("type") or event.get("sport") or INTERVALS_DEFAULT_WORKOUT_TYPE
     )
     payload = {
         "date": event_date,
-        "start_date_local": event.get("start_date_local")
+        "starts_at_local": event.get("starts_at_local")
         or event.get("start")
         or event_date + _ISO_MIDNIGHT_SUFFIX,
         "sport": sport_type,
@@ -366,7 +370,7 @@ def remote_planned_unit_payload(
         "name": event.get("name") or "Intervals.icu-Einheit",
         "description": event.get("description") or "",
         "duration_minutes": _remote_planned_unit_duration(event),
-        "moving_time": moving_time,
+        "planned_duration_s": planned_duration_s,
         "target": event.get("target") or "AUTO",
         "source": ProviderId.INTERVALS.value,
         "origin": ProviderId.INTERVALS.value,

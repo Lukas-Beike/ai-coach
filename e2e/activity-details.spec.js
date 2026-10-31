@@ -165,8 +165,8 @@ test("@responsive running cadence shows step frequency of both legs", async ({ p
 
 test("@responsive analysis shows running step frequency and cycling cadence", async ({ page }) => {
   const summaries = [
-    { id: "synthetic-run", name: "Synthetic run", type: "Run", start_date_local: "2026-10-17T08:00:00", moving_time: 3 },
-    { id: "synthetic-ride", name: "Synthetic ride cadence", type: "Ride", start_date_local: "2026-10-16T08:00:00", moving_time: 3 },
+    { id: "synthetic-run", name: "Synthetic run", type: "Run", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3 },
+    { id: "synthetic-ride", name: "Synthetic ride cadence", type: "Ride", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 3 },
   ];
   await page.route(/\/api\/activities(\?|\/)/, (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[3];
@@ -195,7 +195,7 @@ test("@responsive analysis shows running step frequency and cycling cadence", as
 test("@responsive analysis lists sessions whose details failed to load", async ({ page }) => {
   const message = "Intervals.icu hat für diese Einheit keine Detaildaten geliefert.";
   const summaries = [
-    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", type: "Ride", start_date_local: "2026-10-17T08:00:00", moving_time: 3, detail_error: message },
+    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", type: "Ride", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3, detail_error: message },
   ];
   await page.route(/\/api\/activities(\?|\/)/, (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[3];

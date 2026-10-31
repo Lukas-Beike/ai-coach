@@ -21,7 +21,7 @@ and absolute limits are never derived from percentages.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime
 from itertools import pairwise
 from typing import Any, Final
@@ -86,7 +86,12 @@ def _first_settings(athlete: Mapping[str, Any]) -> dict[Sport, Mapping[str, Any]
 
 def _setting_sports(setting: Mapping[str, Any]) -> Iterator[Sport]:
     types = setting.get("types")
-    for text in types if isinstance(types, list) else ():
+    return type_sports(types if isinstance(types, list) else ())
+
+
+def type_sports(texts: Iterable[object]) -> Iterator[Sport]:
+    """Yield the known sport of each type text, as the legacy readers matched each."""
+    for text in texts:
         sport = classify_sport_text(text) if isinstance(text, str) else None
         if sport is not None and sport is not Sport.OTHER:
             yield sport

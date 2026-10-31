@@ -28,7 +28,7 @@ LIBRARY_WORKOUT_FIELDS = {
     "sport",
     "environment",
     "sport_detail",
-    "moving_time",
+    "planned_duration_s",
     "duration_minutes",
     "distance",
     "target",
@@ -130,10 +130,15 @@ def _normalize_library_workout_text_fields(result: dict[str, Any]) -> None:
 
 
 def _normalize_library_workout_duration(result: dict[str, Any]) -> None:
-    if result.get("duration_minutes") is not None or result.get("moving_time") is None:
+    if (
+        result.get("duration_minutes") is not None
+        or result.get("planned_duration_s") is None
+    ):
         return
     try:
-        result["duration_minutes"] = max(5, round(float(result["moving_time"]) / 60))
+        result["duration_minutes"] = max(
+            5, round(float(result["planned_duration_s"]) / 60)
+        )
     except TypeError, ValueError:
         pass
 
@@ -179,10 +184,10 @@ def library_workout_duration_minutes(workout: dict[str, Any]) -> float | None:
     except TypeError, ValueError:
         pass
     try:
-        moving_time = float(workout.get("moving_time"))
+        planned_duration_s = float(workout.get("planned_duration_s"))
     except TypeError, ValueError:
         return None
-    return moving_time / 60 if moving_time >= 0 else None
+    return planned_duration_s / 60 if planned_duration_s >= 0 else None
 
 
 def library_workout_matches(left: dict[str, Any], right: dict[str, Any]) -> bool:
@@ -423,7 +428,7 @@ def _reconcile_updated_library_workout_content(
     seconds = planning_workouts.validate_workout_description(normalized)
     minutes = _library_workout_as_number(normalized.get("duration_minutes"))
     if seconds is not None or minutes is not None:
-        normalized["moving_time"] = round(
+        normalized["planned_duration_s"] = round(
             seconds if seconds is not None else minutes * 60
         )
     if any(

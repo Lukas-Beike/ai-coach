@@ -90,9 +90,14 @@ class ChangeHistoryService:
             raise AppError(
                 409, "Diese Änderung kann nicht erneut zurückgenommen werden."
             )
-        target = {
-            field: change.get("before")
-            for field, change in fields.items()
-            if isinstance(change, dict) and "before" in change
-        }
+        # Rows recorded before schema version 16 name planning fields with their
+        # former keys; the restore target uses the current ones.
+        target = change_history.current_audit_fields(
+            str(row.get("entity_type") or ""),
+            {
+                field: change.get("before")
+                for field, change in fields.items()
+                if isinstance(change, dict) and "before" in change
+            },
+        )
         return target, target
