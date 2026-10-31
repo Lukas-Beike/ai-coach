@@ -254,8 +254,12 @@ class PowerCurveMappingTests(unittest.TestCase):
                 self.assertEqual(self.mapped(envelope), PowerCurveMapping())
 
 
+def stored_curve(db: sqlite3.Connection) -> PowerCurve:
+    return CanonicalTableReader().power_curve(db)
+
+
 def stored_points(db: sqlite3.Connection) -> tuple[PowerCurvePoint, ...]:
-    return CanonicalTableReader().power_curve(db).points
+    return stored_curve(db).points
 
 
 def active_point_count(db: sqlite3.Connection) -> int:
@@ -289,9 +293,6 @@ class IngestFixture(unittest.TestCase):
             )
         self.db.commit()
 
-    def curve(self) -> PowerCurve:
-        return CanonicalTableReader().power_curve(self.db)
-
 
 class PowerCurveIngestTests(IngestFixture):
     def test_the_chart_shows_the_snapshot_curve_after_ingest(self) -> None:
@@ -301,19 +302,19 @@ class PowerCurveIngestTests(IngestFixture):
             (POWER_CURVE_RECORD_KIND,),
         ).fetchone()
         self.assertEqual(json.loads(raw["payload"]), ENVELOPE)
-        shown = chart(self.curve())
+        shown = chart(stored_curve(self.db))
         self.assertEqual(shown, legacy_chart(snapshot(), CHART_START, TODAY))
         self.assertEqual(
             [p["duration_seconds"] for p in shown["points"]], [5, 60, 1200, 3600]
         )
         self.assertIsInstance(shown["points"][0]["watts"], int)
-        self.assertEqual(len(self.curve().fetches), 1)
+        self.assertEqual(len(stored_curve(self.db).fetches), 1)
 
     def test_a_failed_fetch_keeps_the_points_and_shows_the_failure(self) -> None:
         self.ingest(snapshot())
         failed = snapshot({**ENVELOPE, "status": "failed"})
         self.ingest(failed, partial=True)
-        shown = chart(self.curve())
+        shown = chart(stored_curve(self.db))
         self.assertEqual(shown["status"], "failed")
         self.assertEqual(shown, legacy_chart(failed, CHART_START, TODAY))
 
@@ -323,7 +324,7 @@ class PowerCurveIngestTests(IngestFixture):
         self.ingest(snapshot({"status": "failed"}), partial=True)
         self.assertEqual(stored_points(self.db), before)
         self.assertEqual(active_point_count(self.db), 5)
-        shown = chart(self.curve())
+        shown = chart(stored_curve(self.db))
         self.assertEqual(shown["status"], "failed")
         self.assertNotIn("start", shown)
         self.assertEqual(
@@ -346,7 +347,7 @@ class PowerCurveIngestTests(IngestFixture):
                 stored = snapshot(envelope)
                 self.ingest(stored)
                 self.assertEqual(stored_points(self.db), ())
-                shown = chart(self.curve())
+                shown = chart(stored_curve(self.db))
                 self.assertEqual(shown["status"], envelope["status"])
                 self.assertEqual(shown, legacy_chart(stored, CHART_START, TODAY))
 
@@ -363,7 +364,8 @@ class PowerCurveIngestTests(IngestFixture):
             [(p.duration_s, p.watts) for p in stored_points(self.db)], [(5, 920.0)]
         )
         self.assertEqual(
-            chart(self.curve()), legacy_chart(snapshot(smaller), CHART_START, TODAY)
+            chart(stored_curve(self.db)),
+            legacy_chart(snapshot(smaller), CHART_START, TODAY),
         )
         self.assertEqual(active_point_count(self.db), 1)
 
@@ -388,7 +390,7 @@ class PowerCurveIngestTests(IngestFixture):
         assert plan is not None
         batch = plan.domain_batches[0]
         self.assertEqual(batch.power_curve, stored_points(self.db))
-        self.assertEqual((batch.power_curve_fetch,), self.curve().fetches)
+        self.assertEqual((batch.power_curve_fetch,), stored_curve(self.db).fetches)
 
     def test_the_stored_rows_are_listed(self) -> None:
         self.ingest(snapshot())
@@ -440,7 +442,7 @@ class PowerCurveReadStateTests(IngestFixture):
             reader, self.db, as_of=TODAY, include_power_curve=True
         )
         assert inputs is not None
-        self.assertEqual(inputs.power_curve, self.curve())
+        self.assertEqual(inputs.power_curve, stored_curve(self.db))
         self.assertEqual(
             chart(inputs.power_curve), legacy_chart(snapshot(), CHART_START, TODAY)
         )
