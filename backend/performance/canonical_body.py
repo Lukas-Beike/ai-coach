@@ -3,12 +3,8 @@
 Intervals.icu weight and body fat reach body history through the provider-neutral
 wellness days (``backend.performance.wellness_days``), not through this module.
 
-Reads are served only while the canonical tables serve reads (see
-``CanonicalTableServing``). Otherwise ``read_body_inputs`` returns None and the
-caller keeps the legacy Garmin values.
-
-``body_history`` overrides only the days this module returns. Days it lacks keep
-the legacy value, so a value the canonical mapper does not store is never dropped.
+The reader serves whichever source the unit of work chose; ``body_history``
+shows only the days this module returns.
 
 Per day, the last observation inside the legacy plausibility bounds wins, as the
 legacy body history does.
@@ -24,7 +20,7 @@ from typing import Any
 from backend.canonical.ordering import observation_order
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.runtime.ports import CanonicalTableServing, ObservationReader
+from backend.runtime.ports import ObservationReader
 
 WINDOW_DAYS = 84
 BODY_FAT_READ_DAYS = WINDOW_DAYS - 1
@@ -42,15 +38,13 @@ class CanonicalBodyInputs:
     garmin_body_fat_pct: dict[date, float]
 
 
+EMPTY_BODY_INPUTS = CanonicalBodyInputs(garmin_weight_kg={}, garmin_body_fat_pct={})
+
+
 def read_body_inputs(
-    reader: ObservationReader,
-    serving: CanonicalTableServing,
-    db: Any,
-    today: date,
-) -> CanonicalBodyInputs | None:
-    """Read weight and body fat up to ``today``, or None while legacy serves reads."""
-    if not serving.serves_tables(db):
-        return None
+    reader: ObservationReader, db: Any, today: date
+) -> CanonicalBodyInputs:
+    """Read the Garmin weight and body fat of the chart window up to ``today``."""
     weights = reader.observations(
         db,
         MetricKind.WEIGHT,

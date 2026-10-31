@@ -7,10 +7,8 @@ from typing import Any, Final
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import freshness as performance_freshness
-from backend.performance.activity_validation import bounded_activity_metric
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.providers import garmin_performance_fields as garmin_perf_fields
-from backend.providers.garmin_device_records import primary_device_record
 from backend.providers.garmin_fields import (
     GARMIN_FTP_ALIASES,
     GARMIN_HRV_LAST_NIGHT_ALIASES,
@@ -162,116 +160,15 @@ def _canonical_load_projection(
 def garmin_training_load_projection(
     snapshot: dict[str, Any],
     current_date: date,
-    canonical: GarminCanonicalMetrics | None = None,
+    canonical: GarminCanonicalMetrics,
 ) -> dict[str, Any]:
-    """Project new Garmin load endpoints with source and freshness attached.
+    """Project the canonical Garmin training load and load balance.
 
-    With ``canonical`` the values come from the canonical training-load and
-    load-balance observations; freshness is sync status and stays on the snapshot.
+    The values come from the canonical training-load and load-balance
+    observations; freshness is sync status and stays on the snapshot.
     """
     freshness = performance_freshness.garmin_source_freshness(snapshot, current_date)
-    if canonical is not None:
-        return _canonical_load_projection(
-            freshness, current_date, canonical.training_load
-        )
-    result: dict[str, Any] = {}
-    balance = primary_device_record(
-        snapshot.get("training_load_balance"),
-        "mostRecentTrainingLoadBalance",
-        "metricsTrainingLoadBalanceDTOMap",
-        (
-            garmin_perf_fields.CALENDAR_DATE,
-            "monthlyLoadAerobicLow",
-            "monthlyLoadAerobicLowTargetMin",
-            "monthlyLoadAerobicLowTargetMax",
-            "monthlyLoadAerobicHigh",
-            "monthlyLoadAerobicHighTargetMin",
-            "monthlyLoadAerobicHighTargetMax",
-            "monthlyLoadAnaerobic",
-            "monthlyLoadAnaerobicTargetMin",
-            "monthlyLoadAnaerobicTargetMax",
-        ),
-        day=_date,
-    )
-    if balance is not None:
-        fields = (
-            "monthlyLoadAerobicLow",
-            "monthlyLoadAerobicLowTargetMin",
-            "monthlyLoadAerobicLowTargetMax",
-            "monthlyLoadAerobicHigh",
-            "monthlyLoadAerobicHighTargetMin",
-            "monthlyLoadAerobicHighTargetMax",
-            "monthlyLoadAnaerobic",
-            "monthlyLoadAnaerobicTargetMin",
-            "monthlyLoadAnaerobicTargetMax",
-        )
-        result["four_week_balance"] = {
-            "source": GARMIN_SOURCE,
-            **freshness.get("training_load_balance", {"freshness": "unknown"}),
-            "date": _date(balance.get(garmin_perf_fields.CALENDAR_DATE)),
-            **{
-                key: metric
-                for key in fields
-                if _fresh_source(
-                    freshness.get("training_load_balance"),
-                    balance.get(garmin_perf_fields.CALENDAR_DATE),
-                    current_date,
-                )
-                if (metric := bounded_activity_metric(balance.get(key), 0, 100_000))
-                is not None
-            },
-        }
-    daily = primary_device_record(
-        snapshot.get("daily_training_status"),
-        "mostRecentTrainingStatus",
-        "latestTrainingStatusData",
-        (
-            garmin_perf_fields.CALENDAR_DATE,
-            "acuteTrainingLoadDTO.dailyTrainingLoadAcute",
-            "acuteTrainingLoadDTO.dailyTrainingLoadChronic",
-            "acuteTrainingLoadDTO.dailyAcuteChronicWorkloadRatio",
-        ),
-        day=_date,
-    )
-    acute = daily.get("acuteTrainingLoadDTO") if daily else None
-    acute = acute if isinstance(acute, dict) else {}
-    if daily is not None:
-        result["daily_status"] = {
-            "source": GARMIN_SOURCE,
-            **freshness.get("daily_training_status", {"freshness": "unknown"}),
-            "date": _date(daily.get(garmin_perf_fields.CALENDAR_DATE)),
-            "acute_load": bounded_activity_metric(
-                acute.get("dailyTrainingLoadAcute"), 0, 100_000
-            )
-            if daily
-            and _fresh_source(
-                freshness.get("daily_training_status"),
-                daily.get(garmin_perf_fields.CALENDAR_DATE),
-                current_date,
-            )
-            else None,
-            "chronic_load": bounded_activity_metric(
-                acute.get("dailyTrainingLoadChronic"), 0, 100_000
-            )
-            if daily
-            and _fresh_source(
-                freshness.get("daily_training_status"),
-                daily.get(garmin_perf_fields.CALENDAR_DATE),
-                current_date,
-            )
-            else None,
-            "acute_chronic_ratio": bounded_activity_metric(
-                acute.get("dailyAcuteChronicWorkloadRatio"), 0, 100
-            )
-            if daily
-            and _fresh_source(
-                freshness.get("daily_training_status"),
-                daily.get(garmin_perf_fields.CALENDAR_DATE),
-                current_date,
-            )
-            else None,
-        }
-    return result
+    return _canonical_load_projection(freshness, current_date, canonical.training_load)
 
 
 def _fresh_source(value: Any, observed_at: Any, current_date: date) -> bool:

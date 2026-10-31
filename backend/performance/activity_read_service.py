@@ -18,9 +18,9 @@ from backend.performance.canonical_detail import (
     SessionRecordReader,
 )
 from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
-    performance_options,
     read_performance_inputs,
 )
 from backend.performance.context import current_performance_context
@@ -124,7 +124,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 garmin_snapshot,
                 profile,
                 today,
-                **performance_options(inputs["canonical"]),
+                canonical=inputs["canonical"] or EMPTY_PERFORMANCE_INPUTS,
             )
 
         reader = CanonicalDetailReader(
