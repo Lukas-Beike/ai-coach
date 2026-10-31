@@ -45,6 +45,25 @@ class GraphifyHookTests(unittest.TestCase):
                 self.assertNotIn("graphify", json.dumps(entries), event)
 
     @unittest.skipUnless(
+        (ROOT / "AGENTS.md").is_file(),
+        "Host agent configurations are not packaged in the runtime image",
+    )
+    def test_explorer_graphify_tools_stay_read_only_and_local(self) -> None:
+        tools = [
+            f"mcp__graphify-local__graph_{name}"
+            for name in ("query", "node", "path", "stats")
+        ]
+        claude = json.loads(
+            (ROOT / ".claude/settings.json").read_text(encoding="utf-8-sig")
+        )
+        explorer = (ROOT / ".claude/agents/explorer.md").read_text(encoding="utf-8")
+
+        self.assertEqual(claude["permissions"]["allow"], tools)
+        self.assertIn(f"tools: Read, Grep, Glob, {', '.join(tools)}\n", explorer)
+        self.assertIn("  - graphify-local:\n", explorer)
+        self.assertIn('args: ["scripts/graphify_local.py", "mcp"]\n', explorer)
+
+    @unittest.skipUnless(
         os.name == "nt" and (ROOT / "AGENTS.md").is_file(),
         "Native PowerShell hooks require Windows and packaged host configurations",
     )
