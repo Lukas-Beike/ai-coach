@@ -8,12 +8,11 @@ from typing import Any
 
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import context as performance_context
-from backend.performance.canonical_body import CanonicalBodyInputs, read_body_inputs
 from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
     inputs_for_snapshot,
-    performance_options,
     read_once,
     read_performance_inputs,
     resolve_reader,
@@ -62,9 +61,8 @@ class PublicPerformanceStateService:
                 activity_reader=source.activity_row_reader(),
                 as_of=today,
             )
-            body = _body_inputs(source, reader, db, today)
             return self._project(
-                snapshot, garmin, canonical, body, today, observations=reader
+                snapshot, garmin, canonical, today, observations=reader
             )
 
     def canonical_inputs(self, db: Any) -> CanonicalPerformanceInputs | None:
@@ -81,7 +79,6 @@ class PublicPerformanceStateService:
             snapshot,
             self._garmin_payload_service.recent_view(),
             canonical,
-            None,
             self._today(),
         )
 
@@ -90,34 +87,30 @@ class PublicPerformanceStateService:
         snapshot: dict[str, Any],
         garmin: dict[str, Any],
         canonical: CanonicalPerformanceInputs | None,
-        body: CanonicalBodyInputs | None,
         today: date,
         *,
         observations: ObservationReader | None = None,
     ) -> dict[str, Any]:
         profile = self._profile_service.get()
+        inputs = canonical or EMPTY_PERFORMANCE_INPUTS
         performance = performance_context.current_performance_context(
             snapshot,
             garmin,
             profile,
             today,
-            **performance_options(canonical),
+            canonical=inputs,
         )
         timezone = str(profile.get("timezone") or "UTC")
         performance = {
             **performance,
-            "history": analysis_history(
-                snapshot, garmin, today, canonical_body=body, canonical=canonical
-            ),
+            "history": analysis_history(snapshot, garmin, today, canonical=inputs),
             # UI-only: the load tab's period selection picks the matching window.
             "training_focus_periods": {
                 period: training_focus(
                     garmin,
                     today,
                     timezone,
-                    activity_rows=()
-                    if canonical is None or canonical.activity_rows is None
-                    else canonical.activity_rows,
+                    activity_rows=inputs.activity_rows or (),
                     days=days,
                 )
                 for period, days in (("fortnight", 14), ("twelveWeeks", 84))
@@ -133,18 +126,6 @@ class PublicPerformanceStateService:
                 )
             ),
         }
-
-
-def _body_inputs(
-    source: CanonicalPerformanceSource,
-    reader: ObservationReader,
-    db: Any,
-    today: date,
-) -> CanonicalBodyInputs | None:
-    """Read canonical weight and body fat inside the snapshot transaction, when gated on."""
-    if source.serving is None:
-        return None
-    return read_body_inputs(reader, source.serving(), db, today)
 
 
 class PublicFeedbackStateService:

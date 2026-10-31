@@ -15,7 +15,12 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from canonical_daily_health_support import mapped_expenditure
-from performance_day_support import days_from_rows
+from performance_day_support import (
+    days_from_rows,
+    garmin_body_from_payload,
+    garmin_inputs_from_payload,
+    garmin_metrics_from_payload,
+)
 
 # Safe server setup first: temporary DATA_DIR, fake configuration, and no read of a real .env.
 from server_test_support import server
@@ -30,6 +35,7 @@ from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.errors import AppError
 from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
+from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.performance.wellness_days import wellness_day_values
@@ -141,7 +147,14 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             self.today, fixture_runtime.demo_performance_history(self.today)
         )
         metrics = garmin_payload_performance_metrics(garmin, self.today)
-        history = analysis_history({}, garmin, self.today)
+        history = analysis_history(
+            {},
+            garmin,
+            self.today,
+            canonical=garmin_inputs_from_payload(
+                garmin, self.today, EMPTY_PERFORMANCE_INPUTS
+            ),
+        )
         for key, metric in metrics.items():
             with self.subTest(metric=key):
                 self.assertIsNotNone(metric["value"])
@@ -271,6 +284,11 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             self.today,
             eftp_by_day=eftp_by_day,
             wellness_days=days_from_rows(wellness),
+            canonical=garmin_body_from_payload(garmin, self.today),
+            activity_rows=(),
+            garmin_ftp=garmin_metrics_from_payload(garmin).performance_history[
+                "cycling_ftp_watts"
+            ],
         )
         window = result["windows"]["12w"]
         self.assertEqual(window["days"], 84)

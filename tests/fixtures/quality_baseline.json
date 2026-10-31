@@ -1520,12 +1520,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/performance/trends.py",
-      "code": "union-attr",
-      "message_sha256": "e6c856b32ef1aa377d14a7a76ec3cadb77656d05192e245f2d902ca41989e031"
-    },
-    {
-      "tool": "mypy",
       "path": "backend/coach/background_job.py",
       "code": "union-attr",
       "message_sha256": "e7a7bc095459b8743886304bc1aa91f368c38f6705663cd2f340c805c3a1d08b"

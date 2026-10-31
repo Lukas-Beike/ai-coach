@@ -1,9 +1,8 @@
 import copy
 import unittest
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 from backend.performance.garmin_weight import (
-    garmin_weight_average,
     garmin_weight_metric,
     garmin_weight_records,
 )
@@ -83,18 +82,6 @@ class GarminWeightTests(unittest.TestCase):
             {"value": None, "unit": "kg", "source": None, "note": ""},
         )
 
-    def test_average_uses_inclusive_window_and_ignores_invalid_dates(self):
-        snapshot = {
-            "weight": [
-                {"date": "2026-08-29", "weightKg": 60},
-                {"date": "2026-08-30", "weightKg": 70},
-                {"date": "2026-08-31", "weightKg": 72},
-                {"date": "2026-09-01", "weightKg": 74},
-                {"date": "invalid", "weightKg": 100},
-            ]
-        }
-        self.assertEqual(garmin_weight_average(snapshot, 2, date(2026, 8, 31)), 71.0)
-
     def test_same_day_metric_uses_the_latest_timestamped_reading(self):
         timestamp = datetime(2026, 8, 30, 7, tzinfo=UTC).timestamp() * 1000
         snapshot = {
@@ -105,22 +92,11 @@ class GarminWeightTests(unittest.TestCase):
         }
         self.assertEqual(garmin_weight_metric(snapshot)["value"], 72.0)
 
-    def test_average_counts_one_reading_per_day(self):
-        snapshot = {
-            "weight": [
-                {"date": "2026-08-30", "weightKg": 70},
-                {"date": "2026-08-30", "weightKg": 72},
-                {"date": "2026-08-31", "weightKg": 74},
-            ]
-        }
-        self.assertEqual(garmin_weight_average(snapshot, 2, date(2026, 8, 31)), 73.0)
-
     def test_inputs_are_not_mutated(self):
         snapshot = {"weight": [{"calendarDate": "2026-08-30", "weightKg": 72}]}
         before = copy.deepcopy(snapshot)
         garmin_weight_records(snapshot)
         garmin_weight_metric(snapshot)
-        garmin_weight_average(snapshot, 30, date(2026, 8, 31))
         self.assertEqual(snapshot, before)
 
 

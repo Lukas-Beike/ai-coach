@@ -1,10 +1,11 @@
-"""Body fat history read from canonical observations matches legacy.
+"""Body history read from canonical observations.
 
-``body_history`` with canonical inputs must return the same output as the legacy
-builder on the same data. The cases cover the recorded consumer inputs, the
-legacy plausibility bounds, null days, athlete-record exclusion, future days, the
-serving gate and read window, unit-of-work order, and a populated temporary
-database served through the real selector.
+``body_history`` with canonical inputs must return the same output for the
+observations the ledger projection makes as for the payload mapped directly, and
+the Garmin values of the stored snapshot are never read. The cases cover the
+recorded consumer inputs, the plausibility bounds, null days, athlete-record
+exclusion, future days, the read window, unit-of-work order, and a populated
+temporary database served through the real selector.
 """
 
 from __future__ import annotations
@@ -24,7 +25,11 @@ from canonical_read_support import (
     make_selector,
     populate,
 )
-from performance_day_support import days_from_rows
+from performance_day_support import (
+    days_from_rows,
+    garmin_body_from_payload,
+    garmin_metrics_from_payload,
+)
 
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
@@ -36,6 +41,7 @@ from backend.canonical.vocabulary import (
 from backend.http_api.public_performance import PublicPerformanceStateService
 from backend.performance.body import body_history
 from backend.performance.canonical_body import (
+    EMPTY_BODY_INPUTS,
     CanonicalBodyInputs,
     read_body_inputs,
 )
@@ -83,21 +89,6 @@ class BodyReader(ObservationReader):
             and (start is None or start <= observation.observed_on)
             and (end is None or observation.observed_on <= end)
         )
-
-
-class ServingGate:
-    """Stands in for the canonical selector's serving check."""
-
-    def __init__(self, serving: bool, *, events: list[str] | None = None) -> None:
-        self._serving = serving
-        self._events = events
-        self.calls = 0
-
-    def serves_tables(self, db: Any) -> bool:
-        self.calls += 1
-        if self._events is not None:
-            self._events.append("serves")
-        return self._serving
 
 
 class SelectingReader:
@@ -172,9 +163,28 @@ def _measure(
     )
 
 
-def _legacy_body(case: Any) -> dict[str, Any]:
+def _body(
+    snapshot: dict[str, Any],
+    garmin: dict[str, Any] | None,
+    canonical: CanonicalBodyInputs,
+) -> dict[str, Any]:
     return body_history(
-        case.intervals, case.garmin, TODAY, wellness_days=_days(case.intervals)
+        snapshot,
+        garmin,
+        TODAY,
+        canonical=canonical,
+        wellness_days=_days(snapshot),
+        activity_rows=(),
+        garmin_ftp=garmin_metrics_from_payload(garmin or {}).performance_history.get(
+            "cycling_ftp_watts", {}
+        ),
+    )
+
+
+def _payload_body(case: Any) -> dict[str, Any]:
+    """The body history of the payload mapped directly, without the ledger."""
+    return _body(
+        case.intervals, case.garmin, garmin_body_from_payload(case.garmin, TODAY)
     )
 
 
@@ -223,29 +233,26 @@ def _service(
 
 
 class CanonicalBodyLedgerCaseTests(unittest.TestCase):
-    def test_every_ledger_case_matches_legacy_body_history(self) -> None:
+    def test_every_ledger_case_matches_the_directly_mapped_payload(self) -> None:
         for case in CASES:
             with self.subTest(case=case.name):
-                inputs = read_body_inputs(
-                    BodyReader(_observations(case)), ServingGate(True), "db", TODAY
-                )
-                self.assertIsNotNone(inputs)
+                inputs = read_body_inputs(BodyReader(_observations(case)), "db", TODAY)
                 self.assertEqual(
-                    body_history(
-                        case.intervals,
-                        case.garmin,
-                        TODAY,
-                        canonical=inputs,
-                        wellness_days=_days(case.intervals),
-                    ),
-                    _legacy_body(case),
+                    _body(case.intervals, case.garmin, inputs), _payload_body(case)
                 )
+
+    def test_garmin_body_values_are_those_of_the_canonical_inputs(self) -> None:
+        case = next(item for item in CASES if item.name == "complete")
+        day = date(2026, 10, 11)
+        inputs = read_body_inputs(BodyReader(_observations(case)), "db", TODAY)
+        self.assertEqual({day: 80.1}, inputs.garmin_weight_kg)
+        self.assertEqual({day: 15.2}, inputs.garmin_body_fat_pct)
 
 
 class CanonicalBodyInputTests(unittest.TestCase):
     def test_reads_weight_and_body_fat_for_their_windows_ending_today(self) -> None:
         reader = BodyReader()
-        read_body_inputs(reader, ServingGate(True), "db", TODAY)
+        read_body_inputs(reader, "db", TODAY)
         # Weight looks back 7 extra days for the quotient; body fat covers the chart.
         self.assertEqual(
             [
@@ -255,15 +262,8 @@ class CanonicalBodyInputTests(unittest.TestCase):
             reader.calls,
         )
 
-    def test_gate_closed_reads_nothing_and_keeps_legacy(self) -> None:
-        reader = BodyReader(_observations(CASES[0]))
-        gate = ServingGate(False)
-        self.assertIsNone(read_body_inputs(reader, gate, "db", TODAY))
-        self.assertEqual(1, gate.calls)
-        self.assertEqual([], reader.calls)
-
-    def test_bounds_and_rounding_match_the_legacy_limits(self) -> None:
-        # Legacy checks the bounds before rounding, so 300.004 is out and 299.996
+    def test_bounds_and_rounding_follow_the_plausibility_limits(self) -> None:
+        # The bounds are checked before rounding, so 300.004 is out and 299.996
         # is in and rounds to 300.0.
         days = [TODAY - timedelta(days=offset) for offset in range(1, 6)]
         observations = (
@@ -277,11 +277,7 @@ class CanonicalBodyInputTests(unittest.TestCase):
             _measure(MetricKind.WEIGHT, 300.004, days[2], provider=ProviderId.GARMIN),
             _measure(MetricKind.WEIGHT, 299.996, days[3], provider=ProviderId.GARMIN),
         )
-        inputs = read_body_inputs(
-            BodyReader(observations), ServingGate(True), "db", TODAY
-        )
-        self.assertIsNotNone(inputs)
-        assert inputs is not None
+        inputs = read_body_inputs(BodyReader(observations), "db", TODAY)
         self.assertEqual(
             {days[1]: 2.0, days[2]: 70.0, days[4]: 14.46},
             inputs.garmin_body_fat_pct,
@@ -331,11 +327,7 @@ class CanonicalBodyInputTests(unittest.TestCase):
                 observed_at=evening,
             ),
         )
-        inputs = read_body_inputs(
-            BodyReader(observations), ServingGate(True), "db", TODAY
-        )
-        self.assertIsNotNone(inputs)
-        assert inputs is not None
+        inputs = read_body_inputs(BodyReader(observations), "db", TODAY)
         self.assertEqual({DAY: 13.0}, inputs.garmin_body_fat_pct)
         self.assertEqual({DAY: 80.0}, inputs.garmin_weight_kg)
 
@@ -373,10 +365,7 @@ class CanonicalBodyInputTests(unittest.TestCase):
                 observed_at=datetime(2026, 10, 11, 22, 0, tzinfo=UTC),
             ),
         )
-        inputs = read_body_inputs(
-            BodyReader(observations), ServingGate(True), "db", TODAY
-        )
-        assert inputs is not None
+        inputs = read_body_inputs(BodyReader(observations), "db", TODAY)
         self.assertEqual({DAY: 81.0}, inputs.garmin_weight_kg)
         self.assertEqual({DAY: 12.0}, inputs.garmin_body_fat_pct)
 
@@ -393,10 +382,7 @@ class CanonicalBodyInputTests(unittest.TestCase):
             ),
             _measure(MetricKind.WEIGHT, 79.0, DAY, provider=ProviderId.GARMIN),
         )
-        inputs = read_body_inputs(
-            BodyReader(observations), ServingGate(True), "db", TODAY
-        )
-        assert inputs is not None
+        inputs = read_body_inputs(BodyReader(observations), "db", TODAY)
         self.assertEqual({DAY: 80.0}, inputs.garmin_weight_kg)
 
     def test_intervals_values_are_not_body_inputs(self) -> None:
@@ -405,14 +391,8 @@ class CanonicalBodyInputTests(unittest.TestCase):
             _measure(MetricKind.BODY_FAT, 12.0, DAY, record="athlete-42"),
             _measure(MetricKind.BODY_FAT, 14.0, DAY),
         )
-        inputs = read_body_inputs(
-            BodyReader(observations), ServingGate(True), "db", TODAY
-        )
-        self.assertIsNotNone(inputs)
-        assert inputs is not None
-        self.assertEqual(
-            CanonicalBodyInputs(garmin_weight_kg={}, garmin_body_fat_pct={}), inputs
-        )
+        inputs = read_body_inputs(BodyReader(observations), "db", TODAY)
+        self.assertEqual(EMPTY_BODY_INPUTS, inputs)
 
     def test_future_days_never_enter_the_inputs(self) -> None:
         tomorrow = TODAY + timedelta(days=1)
@@ -424,10 +404,7 @@ class CanonicalBodyInputTests(unittest.TestCase):
         )
         # The reader here ignores its window, so the module's own guard is tested.
         inputs = read_body_inputs(
-            BodyReader(observations, honour_window=False),
-            ServingGate(True),
-            "db",
-            TODAY,
+            BodyReader(observations, honour_window=False), "db", TODAY
         )
         self.assertEqual(
             CanonicalBodyInputs(
@@ -439,7 +416,7 @@ class CanonicalBodyInputTests(unittest.TestCase):
 
 
 # The body-history windows. Current-metric reads also read WEIGHT (U5) over other
-# windows, so the closed-gate assertions check these exact body windows.
+# windows, so the window assertions check these exact body windows.
 BODY_WEIGHT_WINDOW = (MetricKind.WEIGHT, TODAY - timedelta(days=90), TODAY)
 BODY_FAT_WINDOW = (MetricKind.BODY_FAT, TODAY - timedelta(days=83), TODAY)
 
@@ -468,23 +445,19 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         case = CASES[0]
         events: list[str] = []
         reader = BodyReader(_observations(case), events=events)
-        gate = ServingGate(True, events=events)
         source = CanonicalPerformanceSource(
             database_manager=lambda: RecordingManager(events),
             observation_reader=lambda: reader,
-            serving=lambda: gate,
         )
         state = _service(case.intervals, case.garmin, source).performance_state()
         legacy = _service(case.intervals, case.garmin, None).from_snapshot(
             case.intervals
         )
         self.assert_wellness_boundary(legacy, state)
-        # Body reads and the serving check happen inside the single lease.
+        # Body reads happen inside the single lease.
         enter, exit_ = events.index("enter"), events.index("exit")
         self.assertEqual(1, events.count("enter"))
         self.assertEqual(1, events.count("exit"))
-        self.assertLess(enter, events.index("serves"))
-        self.assertLess(events.index("serves"), exit_)
         self.assertTrue(
             all(enter < i < exit_ for i, e in enumerate(events) if e == "read")
         )
@@ -496,11 +469,9 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         case = CASES[0]
         events: list[str] = []
         reader = BodyReader(_observations(case), events=events)
-        gate = ServingGate(True, events=events)
         source = CanonicalPerformanceSource(
             database_manager=lambda: RecordingManager(events),
             observation_reader=lambda: reader,
-            serving=lambda: gate,
         )
         # The Garmin re-read raises, so the projection must use the captured value.
         state = _service(
@@ -524,7 +495,6 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
         source = CanonicalPerformanceSource(
             database_manager=lambda: RecordingManager(events),
             observation_reader=lambda: selector,
-            serving=lambda: ServingGate(True, events=events),
         )
         _service(case.intervals, case.garmin, source).performance_state()
         # One choice per unit of work, made inside the lease and before any read.
@@ -539,102 +509,47 @@ class CanonicalBodyPublicStateTests(unittest.TestCase):
             <= kinds
         )
 
-    def test_closed_gate_still_uses_observed_wellness_days_without_body_window_reads(
-        self,
-    ) -> None:
+    def test_source_without_observations_shows_no_garmin_body_values(self) -> None:
         case = CASES[0]
-        reader = BodyReader(_observations(case))
-        source = CanonicalPerformanceSource(
-            database_manager=lambda: RecordingManager([]),
-            observation_reader=lambda: reader,
-            serving=lambda: ServingGate(False),
-        )
-        state = _service(case.intervals, case.garmin, source).performance_state()
-        legacy = _service(case.intervals, case.garmin, None).from_snapshot(
+        state = _service(case.intervals, case.garmin, None).from_snapshot(
             case.intervals
         )
-        self.assert_wellness_boundary(legacy, state)
-        self.assertNotIn(BODY_FAT_WINDOW, reader.calls)
-        self.assertNotIn(BODY_WEIGHT_WINDOW, reader.calls)
-        # The wellness rows read every kind once, unbounded; no windowed body read.
-        self.assertNotIn(
-            MetricKind.BODY_FAT,
-            {kind for kind, start, end in reader.calls if (start, end) != (None, None)},
-        )
-
-    def test_source_without_serving_never_reads_body_kinds(self) -> None:
-        case = CASES[0]
-        reader = BodyReader(_observations(case))
-        source = CanonicalPerformanceSource(
-            database_manager=lambda: RecordingManager([]),
-            observation_reader=lambda: reader,
-        )
-        _service(case.intervals, case.garmin, source).performance_state()
-        self.assertNotIn(BODY_FAT_WINDOW, reader.calls)
-        self.assertNotIn(BODY_WEIGHT_WINDOW, reader.calls)
-        # The wellness rows read every kind once, unbounded; no windowed body read.
-        self.assertNotIn(
-            MetricKind.BODY_FAT,
-            {kind for kind, start, end in reader.calls if (start, end) != (None, None)},
-        )
+        body = state["performance"]["history"]["body"]
+        for metric in ("weight_kg", "body_fat_pct"):
+            for series in body["windows"]["12w"]["metrics"][metric]:
+                if series["source"] == "Garmin Connect":
+                    self.assertTrue(
+                        all(point["value"] is None for point in series["points"])
+                    )
 
 
 class CanonicalBodyFallbackTests(unittest.TestCase):
-    """Days the canonical inputs lack keep the legacy value; canonical days override."""
+    """Intervals.icu values come from the wellness days, Garmin from canonical."""
 
     @staticmethod
     def _values(output: dict[str, Any], metric: str) -> list[Any]:
         series = output["windows"]["14d"]["metrics"][metric]
         return [point.get("value") for entry in series for point in entry["points"]]
 
-    @staticmethod
-    def _empty() -> CanonicalBodyInputs:
-        return CanonicalBodyInputs(
-            garmin_weight_kg={},
-            garmin_body_fat_pct={},
-        )
-
-    def test_comma_decimal_day_keeps_the_legacy_value(self) -> None:
-        # The canonical mapper stores dot decimals only, so a comma day is absent
-        # from the canonical inputs and must keep the legacy 14.5.
+    def test_comma_decimal_day_comes_from_the_wellness_days(self) -> None:
         snapshot = {
             "synced_at": "2026-10-11T06:00:00+00:00",
             "raw_provider_data": {
                 "wellness": [{"id": DAY.isoformat(), "bodyFat": "14,5"}]
             },
         }
-        legacy = body_history(snapshot, None, TODAY, wellness_days=_days(snapshot))
-        self.assertIn(14.5, self._values(legacy, "body_fat_pct"))
-        self.assertEqual(
-            legacy,
-            body_history(
-                snapshot,
-                None,
-                TODAY,
-                canonical=self._empty(),
-                wellness_days=_days(snapshot),
-            ),
-        )
+        output = _body(snapshot, None, EMPTY_BODY_INPUTS)
+        self.assertIn(14.5, self._values(output, "body_fat_pct"))
 
-    def test_comma_decimal_weight_keeps_the_legacy_value(self) -> None:
+    def test_comma_decimal_weight_comes_from_the_wellness_days(self) -> None:
         snapshot = {
             "synced_at": "2026-10-11T06:00:00+00:00",
             "raw_provider_data": {
                 "wellness": [{"id": DAY.isoformat(), "weight": "70,4"}]
             },
         }
-        legacy = body_history(snapshot, None, TODAY, wellness_days=_days(snapshot))
-        self.assertIn(70.4, self._values(legacy, "weight_kg"))
-        self.assertEqual(
-            legacy,
-            body_history(
-                snapshot,
-                None,
-                TODAY,
-                canonical=self._empty(),
-                wellness_days=_days(snapshot),
-            ),
-        )
+        output = _body(snapshot, None, EMPTY_BODY_INPUTS)
+        self.assertIn(70.4, self._values(output, "weight_kg"))
 
     def test_intervals_body_values_come_from_the_history_wellness_days(
         self,
@@ -645,23 +560,24 @@ class CanonicalBodyFallbackTests(unittest.TestCase):
                 "wellness": [{"id": DAY.isoformat(), "bodyFat": 14.0, "weight": 70.0}]
             },
         }
-        canonical = CanonicalBodyInputs(
-            garmin_weight_kg={},
-            garmin_body_fat_pct={},
-        )
-        output = body_history(
-            snapshot, None, TODAY, canonical=canonical, wellness_days=_days(snapshot)
-        )
+        output = _body(snapshot, None, EMPTY_BODY_INPUTS)
         self.assertIn(14.0, self._values(output, "body_fat_pct"))
         self.assertIn(70.0, self._values(output, "weight_kg"))
+
+    def test_snapshot_garmin_values_are_ignored_without_canonical_values(self) -> None:
+        garmin = {"weight": [{"calendarDate": DAY.isoformat(), "weight": 80.4}]}
+        output = _body({}, garmin, EMPTY_BODY_INPUTS)
+        self.assertEqual(
+            [], [v for v in self._values(output, "weight_kg") if v is not None]
+        )
 
 
 class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
     """The populated temporary database, read through the real selector."""
 
-    def test_served_tables_match_legacy_body_history(self) -> None:
+    def test_served_tables_match_the_directly_mapped_payload(self) -> None:
         # The shared fixture carries no body fat, so give the wellness rows some in
-        # both the raw section (canonical source) and the compact projection (legacy).
+        # both the raw section (canonical source) and the compact projection.
         for index, row in enumerate(self.intervals["raw_provider_data"]["wellness"]):
             row["bodyFat"] = 14.0 + index
         for index, row in enumerate(self.intervals["recent_wellness"]):
@@ -672,12 +588,16 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
         # (CLOCK_AT), so read as of the last recorded day to include them.
         today = date(2026, 10, 10)
         with self.manager.reader() as db:
-            inputs = read_body_inputs(selector, selector, db, today)
-        self.assertIsNotNone(inputs)
-        assert inputs is not None
+            inputs = read_body_inputs(selector, db, today)
         self.assertEqual(
             body_history(
-                self.intervals, self.garmin, today, wellness_days=_days(self.intervals)
+                self.intervals,
+                self.garmin,
+                today,
+                canonical=garmin_body_from_payload(self.garmin, today),
+                wellness_days=_days(self.intervals),
+                activity_rows=(),
+                garmin_ftp={},
             ),
             body_history(
                 self.intervals,
@@ -685,11 +605,17 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
                 today,
                 canonical=inputs,
                 wellness_days=_days(self.intervals),
+                activity_rows=(),
+                garmin_ftp={},
             ),
         )
 
-    def test_never_completed_backfill_serves_no_body_inputs(self) -> None:
+    def test_never_completed_backfill_reads_the_projected_snapshot(self) -> None:
         populate(self)
+        selector = make_selector(self)
+        today = CLOCK_AT.date()
+        with self.manager.reader() as db:
+            served = read_body_inputs(selector, db, today)
         with self.manager.unit_of_work() as db:
             state = json.loads(self.key_values.get(db, BACKFILL_STATE_KEY) or "{}")
             self.key_values.set(
@@ -699,4 +625,4 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
             )
         selector = make_selector(self)
         with self.manager.reader() as db:
-            self.assertIsNone(read_body_inputs(selector, selector, db, CLOCK_AT.date()))
+            self.assertEqual(served, read_body_inputs(selector, db, today))

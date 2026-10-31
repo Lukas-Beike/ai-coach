@@ -4,7 +4,10 @@ from datetime import date, timedelta
 
 from performance_day_support import current_days
 
-from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
+    CanonicalPerformanceInputs,
+)
 from backend.performance.load_context import performance_load_context
 
 
@@ -19,7 +22,9 @@ class PerformanceLoadContextTests(unittest.TestCase):
             }
             for offset in (0, 6, 7, 29, 30, 36)
         ]
-        result = performance_load_context(activities, (), today)
+        result = performance_load_context(
+            activities, (), today, canonical=EMPTY_PERFORMANCE_INPUTS
+        )
         self.assertEqual(result["last_7"]["sessions"], 2)
         self.assertEqual(result["last_7"]["training_load"], 20)
         self.assertEqual(result["previous_7"]["sessions"], 1)
@@ -31,7 +36,9 @@ class PerformanceLoadContextTests(unittest.TestCase):
         days = current_days(
             [{"id": (today + timedelta(days=1)).isoformat(), "atl": 50}]
         )
-        result = performance_load_context([], days, today)
+        result = performance_load_context(
+            [], days, today, canonical=EMPTY_PERFORMANCE_INPUTS
+        )
         self.assertEqual(result["last_7"]["sessions"], 0)
         self.assertIsNone(result["actual_atl_current"])
         self.assertIsNone(result["actual_atl_date"])
@@ -53,7 +60,9 @@ class PerformanceLoadContextTests(unittest.TestCase):
                 )
             ]
         )
-        result = performance_load_context([], days, today)
+        result = performance_load_context(
+            [], days, today, canonical=EMPTY_PERFORMANCE_INPUTS
+        )
         self.assertEqual(result["actual_atl_current"], 4.24)
         self.assertEqual(result["actual_atl_date"], today)
         self.assertEqual(result["actual_atl_average"], 6.78)
@@ -73,7 +82,9 @@ class PerformanceLoadContextTests(unittest.TestCase):
                 }
             ]
         )
-        load = performance_load_context([], days, today)["load"]
+        load = performance_load_context(
+            [], days, today, canonical=EMPTY_PERFORMANCE_INPUTS
+        )["load"]
         self.assertEqual(
             load,
             {
@@ -139,7 +150,9 @@ class PerformanceLoadContextTests(unittest.TestCase):
         activities = [{"start_date_local": today.isoformat(), "icu_training_load": 20}]
         days = current_days([{"id": today.isoformat(), "atl": 20, "ctl": 30}])
         before = copy.deepcopy((activities, days))
-        performance_load_context(activities, days, today)
+        performance_load_context(
+            activities, days, today, canonical=EMPTY_PERFORMANCE_INPUTS
+        )
         self.assertEqual((activities, days), before)
 
 

@@ -16,7 +16,7 @@ def performance_load_context(
     days: tuple[WellnessDay, ...],
     today: date,
     *,
-    canonical: CanonicalPerformanceInputs | None = None,
+    canonical: CanonicalPerformanceInputs,
 ) -> dict[str, Any]:
     last_7 = performance_load.activity_rollup(activities, 7, today)
     previous_7 = performance_load.activity_rollup(
@@ -46,13 +46,13 @@ def performance_load_context(
     latest_day = latest(days)
     load = {
         "id": latest_day.day.isoformat() if latest_day else None,
-        "ctl": None if canonical is None else canonical.ctl,
-        "atl": None if canonical is None else canonical.atl,
+        "ctl": canonical.ctl,
+        "atl": canonical.atl,
         "tsb": None,
         "ramp_rate": None,
         "ramp_rate_source": None,
     }
-    if canonical is not None and canonical.wellness_day is not None:
+    if canonical.wellness_day is not None:
         form_by_day = canonical.form_by_day or {}
         load["tsb"] = form_by_day.get(canonical.wellness_day)
         load["ramp_rate"] = canonical.ramp_rate

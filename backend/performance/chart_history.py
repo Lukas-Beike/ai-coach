@@ -7,12 +7,9 @@ from typing import Any, Final
 from backend.athlete.local_date import LocalDate
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
-from backend.performance.canonical_body import CanonicalBodyInputs
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.display_sources import preferred_providers
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
-from backend.performance.garmin_load import acute_load_value
-from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 INTERVALS_SOURCE = "Intervals.icu"
 
@@ -44,40 +41,13 @@ def _rows(value: Any) -> list[dict[str, Any]]:
     )
 
 
-def _garmin_day(row: dict[str, Any]) -> date | None:
-    for field in garmin_perf_fields.RECORD_DATE_KEYS:
-        if (day := _day(row.get(field))) is not None:
-            return day
-    return None
-
-
-def _activity_history_rows(
-    raw: dict[str, Any],
-    snapshot: dict[str, Any],
-    canonical: CanonicalPerformanceInputs | None,
-) -> list[dict[str, Any]]:
-    """Raw activity rows: the canonical reader's, or the snapshot's sections."""
-    if canonical is not None and canonical.activity_rows is not None:
-        return list(canonical.activity_rows)
-    return _rows(raw.get("activities")) + _rows(snapshot.get("recent_activities"))
-
-
 def _load_history(
-    dates: list[str],
-    garmin: dict[str, Any],
-    canonical: GarminCanonicalMetrics | None = None,
+    dates: list[str], canonical: GarminCanonicalMetrics
 ) -> list[dict[str, Any]]:
-    """Garmin's acute load per day: canonical ACUTE_LOAD, else the snapshot rows."""
-    if canonical is not None:
-        acute = canonical.daily_history.get(MetricKind.ACUTE_LOAD, {})
-        values = {day.isoformat(): _number(value) for day, value in acute.items()}
-        return [{"date": day, "value": values.get(day)} for day in dates]
-    observations = {
-        day.isoformat(): acute_load_value(row)
-        for row in _rows(garmin.get("training_status"))
-        if (day := _garmin_day(row)) is not None
-    }
-    return [{"date": day, "value": observations.get(day)} for day in dates]
+    """Garmin's acute load per day from the canonical ACUTE_LOAD history."""
+    acute = canonical.daily_history.get(MetricKind.ACUTE_LOAD, {})
+    values = {day.isoformat(): _number(value) for day, value in acute.items()}
+    return [{"date": day, "value": values.get(day)} for day in dates]
 
 
 def _training_time_history(
@@ -111,51 +81,25 @@ def _training_time_history(
 
 
 def _garmin_values(
-    key: str,
-    garmin: dict[str, Any],
-    start: date,
-    today: date,
-    canonical: GarminCanonicalMetrics | None = None,
+    key: str, start: date, today: date, canonical: GarminCanonicalMetrics
 ) -> dict[str, float]:
-    """Garmin's daily values of one metric: canonical history, else the snapshot's
-    accumulated performance history and FTP history."""
-    if canonical is not None:
-        return {
-            day.isoformat(): value
-            for day, value in canonical.performance_history.get(key, {}).items()
-            if start <= day <= today
-            and activity_validation.bounded_performance_metric(key, value) is not None
-        }
-    observations = {}
-    for row in _rows(garmin.get("performance_history")):
-        day = _day(row.get("date"))
-        metrics = row.get("metrics")
-        if day is None or not start <= day <= today or not isinstance(metrics, dict):
-            continue
-        value = activity_validation.bounded_performance_metric(key, metrics.get(key))
-        if value is not None:
-            observations[day.isoformat()] = value
-    if key == "cycling_ftp_watts":
-        observations.update(
-            {
-                row["date"]: row["value"]
-                for row in garmin_metric_history.ftp_points(
-                    garmin.get("cycling_ftp_history"), start=start, end=today
-                )
-            }
-        )
-    return observations
+    """Garmin's daily values of one metric from the canonical history."""
+    return {
+        day.isoformat(): value
+        for day, value in canonical.performance_history.get(key, {}).items()
+        if start <= day <= today
+        and activity_validation.bounded_performance_metric(key, value) is not None
+    }
 
 
 def _metric_series(
     key: str,
     activities: list[dict[str, Any]],
-    garmin: dict[str, Any],
     eftp_by_day: Mapping[date, float] | None,
     dates: list[str],
     start: date,
     today: date,
-    canonical: GarminCanonicalMetrics | None = None,
+    canonical: GarminCanonicalMetrics,
 ) -> list[dict[str, Any]]:
     if key == "cycling_eftp_watts":
         source = INTERVALS_SOURCE
@@ -169,7 +113,7 @@ def _metric_series(
     else:
         source = "Garmin Connect"
         provider = ProviderId.GARMIN
-        observations = _garmin_values(key, garmin, start, today, canonical)
+        observations = _garmin_values(key, start, today, canonical)
     return [
         {
             "source": source,
@@ -184,13 +128,13 @@ def analysis_history(
     garmin: dict[str, Any],
     today: date,
     *,
-    canonical_body: CanonicalBodyInputs | None = None,
-    canonical: CanonicalPerformanceInputs | None = None,
+    canonical: CanonicalPerformanceInputs,
 ) -> dict[str, Any]:
     """Use dated provider history, never backfill today's settings into the past.
 
-    ``canonical`` supplies the activity and wellness rows read through the canonical
-    ports; without them the snapshot sections are read.
+    ``canonical`` supplies the activity rows, wellness days and Garmin history read
+    through the canonical ports. The snapshot supplies sync times and the power
+    curve, which has no metric kind yet.
     """
     snapshot = snapshot or {}
     start = today - timedelta(days=89)
@@ -198,16 +142,13 @@ def analysis_history(
     load_end = today
     load_start = load_end - timedelta(days=89)
     load_dates = [(load_start + timedelta(days=i)).isoformat() for i in range(90)]
-    raw = snapshot.get("raw_provider_data")
-    raw = raw if isinstance(raw, dict) else {}
-    # Raw provider rows retain the history that the compact Coach projection trims.
-    eftp_by_day = None if canonical is None else canonical.eftp_by_day
-    activities = _activity_history_rows(raw, snapshot, canonical)
-    garmin_canonical = None if canonical is None else canonical.garmin
-    load = _load_history(load_dates, garmin, garmin_canonical)
+    eftp_by_day = canonical.eftp_by_day
+    activities = list(canonical.activity_rows or ())
+    garmin_canonical = canonical.garmin or GarminCanonicalMetrics()
+    load = _load_history(load_dates, garmin_canonical)
     series = {
         key: _metric_series(
-            key, activities, garmin, eftp_by_day, dates, start, today, garmin_canonical
+            key, activities, eftp_by_day, dates, start, today, garmin_canonical
         )
         for key in METRIC_KEYS
     }
@@ -233,14 +174,12 @@ def analysis_history(
             snapshot,
             garmin,
             today,
-            canonical=canonical_body,
-            wellness_days=None
-            if canonical is None
-            else canonical.history_wellness_days,
-            activity_rows=None if canonical is None else canonical.activity_rows,
-            garmin_ftp=None
-            if garmin_canonical is None
-            else garmin_canonical.performance_history.get("cycling_ftp_watts", {}),
+            canonical=canonical.body,
+            wellness_days=canonical.history_wellness_days or (),
+            activity_rows=activities,
+            garmin_ftp=garmin_canonical.performance_history.get(
+                "cycling_ftp_watts", {}
+            ),
             eftp_by_day=eftp_by_day,
         ),
         # Remaining snapshot read: the power curve has no metric kind.
@@ -255,7 +194,9 @@ def analysis_history(
                 and start <= day <= today
             ],
         },
-        "provider_metrics": _provider_metrics(garmin, start, today, garmin_canonical),
+        "provider_metrics": _canonical_provider_metrics(
+            garmin, start, today, garmin_canonical
+        ),
         "metrics": series,
         "preferred_providers": preferred_providers(),
     }
@@ -365,37 +306,3 @@ def _canonical_metric(
 
 def _number(value: float) -> float | int:
     return int(value) if float(value).is_integer() else value
-
-
-def _provider_metrics(
-    garmin: dict[str, Any],
-    start: date,
-    today: date,
-    canonical: GarminCanonicalMetrics | None = None,
-) -> dict[str, Any]:
-    if canonical is not None:
-        return _canonical_provider_metrics(garmin, start, today, canonical)
-    cached = garmin.get("provider_metrics") or {}
-    metrics = dict(cached) if isinstance(cached, dict) else {}
-    for key, aggregation in (
-        ("endurance_score", "daily"),
-        ("running_tolerance", "daily"),
-        ("training_readiness_history", "daily"),
-        ("weekly_training_status", "weekly"),
-    ):
-        data = garmin_metric_history.projected_metric(
-            garmin.get(key),
-            start=start,
-            end=today,
-            aggregation=aggregation,
-            metric=key,
-            synced_at=garmin.get("synced_at"),
-        )
-        if data["points"] or (not cached and key not in metrics):
-            previous = metrics.get(key, {})
-            metrics[key] = {
-                **previous,
-                **data,
-                "status": previous.get("status", data["status"]),
-            }
-    return metrics

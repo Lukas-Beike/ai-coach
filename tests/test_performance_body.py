@@ -2,7 +2,12 @@ import math
 import unittest
 from datetime import date
 
-from performance_day_support import SYNCED_AT, days_from_rows
+from performance_day_support import (
+    SYNCED_AT,
+    days_from_rows,
+    garmin_body_from_payload,
+    garmin_metrics_from_payload,
+)
 
 from backend.performance.body import body_history as _body_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
@@ -23,6 +28,14 @@ def body_history(snapshot, garmin, today, **kwargs):
         if isinstance(snapshot, dict)
         else []
     )
+    kwargs.setdefault("canonical", garmin_body_from_payload(garmin, today))
+    kwargs.setdefault(
+        "garmin_ftp",
+        garmin_metrics_from_payload(garmin).performance_history.get(
+            "cycling_ftp_watts", {}
+        ),
+    )
+    kwargs.setdefault("activity_rows", ())
     return _body_history(
         snapshot, garmin, today, wellness_days=days_from_rows(rows), **kwargs
     )
@@ -135,7 +148,7 @@ class BodyHistoryTests(unittest.TestCase):
             {"recent_activities": []},
             {
                 "cycling_ftp_history": [
-                    {"date": "2026-10-05", "functionalThresholdPower": 280}
+                    {"calendarDate": "2026-10-05", "functionalThresholdPower": 280}
                 ],
                 "source_freshness": {
                     "cycling_ftp": {"fetched_at": "current-fetch"},

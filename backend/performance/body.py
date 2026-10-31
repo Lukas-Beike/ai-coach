@@ -12,10 +12,7 @@ from backend.athlete.local_date import LocalDate
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import (
-    activity_validation,
     eftp,
-    garmin_metric_history,
-    garmin_weight,
 )
 from backend.performance.canonical_body import (
     BODY_FAT_BOUNDS,
@@ -24,7 +21,6 @@ from backend.performance.canonical_body import (
 )
 from backend.performance.display_sources import preferred_providers
 from backend.performance.wellness_days import WellnessDay
-from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.source_labels import SourceView, provider_label
 
 INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
@@ -58,14 +54,6 @@ def _day(value: Any) -> date | None:
         return None
 
 
-def _rows(value: Any) -> list[dict[str, Any]]:
-    return (
-        [row for row in value if isinstance(row, dict)]
-        if isinstance(value, list)
-        else []
-    )
-
-
 def _bounded_weight(value: Any) -> float | None:
     number = _number(value)
     lower, upper = WEIGHT_BOUNDS
@@ -89,12 +77,6 @@ def _sync_timestamp(payload: dict[str, Any], source: str) -> Any:
             or payload.get("fetched_at")
         )
     return payload.get("synced_at") or payload.get("fetched_at")
-
-
-def _snapshot_activity_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    raw = snapshot.get("raw_provider_data")
-    raw_rows = raw.get("activities") if isinstance(raw, dict) else []
-    return _rows(snapshot.get("recent_activities")) + _rows(raw_rows)
 
 
 def _intervals_measurements(
@@ -125,161 +107,16 @@ def _intervals_measurements(
     return values
 
 
-def _garmin_measurements(
-    garmin: dict[str, Any], today: date
-) -> dict[str, dict[date, tuple[float, str, Any]]]:
-    synced_at = _sync_timestamp(garmin, "weight")
-    result: dict[str, dict[date, tuple[float, str, Any]]] = {
-        "weight_kg": {},
-        "body_fat_pct": {},
-    }
-    for observed_text, value in garmin_weight.garmin_weight_daily_records(garmin):
-        observed = _day(observed_text)
-        if observed is not None and observed <= today:
-            result["weight_kg"][observed] = (value, observed.isoformat(), synced_at)
-    for observed_text, value in garmin_weight.garmin_body_fat_daily_records(garmin):
-        observed = _day(observed_text)
-        if observed is not None and observed <= today:
-            result["body_fat_pct"][observed] = (value, observed.isoformat(), synced_at)
-    return result
-
-
 def _garmin_ftp(
-    garmin: dict[str, Any],
-    today: date,
-    canonical: Mapping[date, float] | None = None,
+    garmin: dict[str, Any], today: date, history: Mapping[date, float]
 ) -> dict[date, tuple[float, str, Any]]:
-    """Garmin's cycling FTP per day: the canonical history when given, else the
-    snapshot's FTP history, accumulated performance history and current FTP."""
-    result: dict[date, tuple[float, str, Any]] = {}
-    synced_at = _sync_timestamp(garmin, "cycling_ftp")
-    history_synced_at = _sync_timestamp(garmin, "cycling_ftp_history")
-    if canonical is not None:
-        return {
-            day: (float(value), day.isoformat(), history_synced_at)
-            for day, value in canonical.items()
-            if day <= today
-        }
-    for row in garmin_metric_history.ftp_points(
-        garmin.get("cycling_ftp_history"),
-        start=today - timedelta(days=89),
-        end=today,
-    ):
-        observed = _day(row["date"])
-        if observed is not None:
-            result[observed] = (float(row["value"]), row["date"], history_synced_at)
-    _append_performance_ftp(garmin, today, history_synced_at, result)
-    direct = garmin.get("cycling_ftp")
-    freshness = garmin.get("source_freshness")
-    fallback_day = _day(
-        freshness.get("cycling_ftp", {}).get("observed_at")
-        if isinstance(freshness, dict)
-        and isinstance(freshness.get("cycling_ftp"), dict)
-        else None
-    )
-
-    _append_direct_ftp(direct, today, fallback_day, synced_at, result)
-    return result
-
-
-def _append_performance_ftp(garmin, today, synced_at, result) -> None:
-    for row in _rows(garmin.get("performance_history")):
-        observed = _day(row.get("date"))
-        metrics = row.get("metrics")
-        value = (
-            activity_validation.bounded_performance_metric(
-                "cycling_ftp_watts", metrics.get("cycling_ftp_watts")
-            )
-            if observed is not None and isinstance(metrics, dict)
-            else None
-        )
-        if observed is not None and observed <= today and value is not None:
-            result[observed] = (float(value), observed.isoformat(), synced_at)
-
-
-def _append_direct_ftp(direct, today, fallback_day, synced_at, result) -> None:
-    budget = [2000]
-
-    _visit_direct_ftp(direct, None, 0, budget, today, fallback_day, synced_at, result)
-
-
-def _visit_direct_ftp(
-    value, inherited, depth, budget, today, fallback_day, synced_at, result
-) -> None:
-    if depth > 20 or budget[0] <= 0:
-        return
-    budget[0] -= 1
-    if isinstance(value, dict):
-        _visit_direct_dict(
-            value, inherited, depth, budget, today, fallback_day, synced_at, result
-        )
-    elif isinstance(value, list):
-        _visit_direct_list(
-            value, inherited, depth, budget, today, fallback_day, synced_at, result
-        )
-
-
-def _visit_direct_dict(
-    value, inherited, depth, budget, today, fallback_day, synced_at, result
-) -> None:
-    observed = _direct_ftp_record(
-        value, inherited or fallback_day, today, synced_at, result
-    )
-    for child in value.values():
-        if isinstance(child, (dict, list)):
-            _visit_direct_ftp(
-                child,
-                observed,
-                depth + 1,
-                budget,
-                today,
-                fallback_day,
-                synced_at,
-                result,
-            )
-
-
-def _visit_direct_list(
-    value, inherited, depth, budget, today, fallback_day, synced_at, result
-) -> None:
-    for child in value[:500]:
-        _visit_direct_ftp(
-            child, inherited, depth + 1, budget, today, fallback_day, synced_at, result
-        )
-
-
-def _direct_ftp_record(value, fallback_day, today, synced_at, result):
-    observed = _direct_ftp_date(value, fallback_day)
-    candidate = _direct_ftp_value(value)
-    number = activity_validation.bounded_performance_metric(
-        "cycling_ftp_watts", candidate
-    )
-    if observed is not None and observed <= today and number is not None:
-        result[observed] = (float(number), observed.isoformat(), synced_at)
-    return observed
-
-
-def _direct_ftp_date(value, fallback_day):
-    raw = next(
-        (
-            value.get(key)
-            for key in garmin_perf_fields.RECORD_TIMESTAMP_KEYS
-            if value.get(key)
-        ),
-        None,
-    )
-    return _day(raw) or fallback_day
-
-
-def _direct_ftp_value(value):
-    return next(
-        (
-            value.get(key)
-            for key in garmin_perf_fields.DIRECT_FTP_VALUE_KEYS
-            if value.get(key) not in (None, "")
-        ),
-        None,
-    )
+    """Garmin's cycling FTP per day from the canonical history."""
+    synced_at = _sync_timestamp(garmin, "cycling_ftp_history")
+    return {
+        day: (float(value), day.isoformat(), synced_at)
+        for day, value in history.items()
+        if day <= today
+    }
 
 
 def _point(day: date, record: tuple[float, str, Any] | None) -> dict[str, Any]:
@@ -411,7 +248,7 @@ def _quotient_series(
 
 
 def _stamped(
-    values: dict[date, float], synced_at: Any
+    values: Mapping[date, float], synced_at: Any
 ) -> dict[date, tuple[float, str, Any]]:
     """Attach the legacy observed_at and synced_at stamps to canonical values."""
     return {day: (value, day.isoformat(), synced_at) for day, value in values.items()}
@@ -422,10 +259,10 @@ def body_history(
     garmin: dict[str, Any] | None,
     today: date,
     *,
-    canonical: CanonicalBodyInputs | None = None,
-    wellness_days: Sequence[WellnessDay] | None = None,
-    activity_rows: Sequence[dict[str, Any]] | None = None,
-    garmin_ftp: Mapping[date, float] | None = None,
+    canonical: CanonicalBodyInputs,
+    wellness_days: Sequence[WellnessDay],
+    activity_rows: Sequence[dict[str, Any]],
+    garmin_ftp: Mapping[date, float],
     eftp_by_day: Mapping[date, float] | None = None,
 ) -> dict[str, Any]:
     """Return API-ready 14d/12w charts under performance.history.body.
@@ -434,23 +271,18 @@ def body_history(
     to-weight points also retain separate FTP and weight dates, sync times, and
     weight age. Missing dates stay null; profile values are never observations.
 
-    Wellness measurements come solely from canonical days. Other canonical body
-    inputs retain their source precedence. Activity eFTP remains a separate step.
+    Wellness measurements come solely from canonical days, Garmin weight, body fat
+    and FTP solely from canonical observations, and activity eFTP from the canonical
+    activity rows. The stored views supply only sync times.
     """
     snapshot = snapshot if isinstance(snapshot, dict) else {}
     garmin = garmin if isinstance(garmin, dict) else {}
-    intervals = _intervals_measurements(today, wellness_days or ())
-    garmin_values = _garmin_measurements(garmin, today)
-    if canonical is not None:
-        garmin_synced_at = _sync_timestamp(garmin, "weight")
-        garmin_values["weight_kg"] = {
-            **garmin_values["weight_kg"],
-            **_stamped(canonical.garmin_weight_kg, garmin_synced_at),
-        }
-        garmin_values["body_fat_pct"] = {
-            **garmin_values["body_fat_pct"],
-            **_stamped(canonical.garmin_body_fat_pct, garmin_synced_at),
-        }
+    intervals = _intervals_measurements(today, wellness_days)
+    garmin_synced_at = _sync_timestamp(garmin, "weight")
+    garmin_values = {
+        "weight_kg": _stamped(canonical.garmin_weight_kg, garmin_synced_at),
+        "body_fat_pct": _stamped(canonical.garmin_body_fat_pct, garmin_synced_at),
+    }
     weights = {
         ProviderId.INTERVALS: intervals["weight_kg"],
         ProviderId.GARMIN: garmin_values["weight_kg"],
@@ -458,9 +290,7 @@ def body_history(
     intervals_ftp: dict[date, tuple[float, str, Any]] = {}
     for observed_at, value in eftp.eftp_daily_values(
         eftp_by_day,
-        _snapshot_activity_rows(snapshot)
-        if activity_rows is None
-        else list(activity_rows),
+        list(activity_rows),
         today - timedelta(days=83),
         today,
     ).items():

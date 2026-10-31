@@ -176,8 +176,8 @@ def recovery_only_inputs(
     The inputs carry the mapped recovery observations and the Garmin metrics mapped
     from ``garmin`` (#1415). With a ``snapshot`` they also carry what the
     Intervals.icu observations of that snapshot give for form, ramp rate and the
-    current athlete settings (#1412, #1415), which are not read from the snapshot
-    itself; ctl and atl stay on the snapshot rows.
+    current athlete settings (#1412, #1415), and the snapshot's activity rows as
+    the activity reader serves them; ctl and atl stay on the snapshot rows.
     """
     from dataclasses import replace
 
@@ -207,7 +207,7 @@ def recovery_only_inputs(
     full = read_performance_inputs(
         FilteringReader(tuple(mapped.records)),
         None,
-        activity_reader=NoActivityRows(),
+        activity_reader=SnapshotActivityRows(snapshot),
         as_of=RETRIEVED.date(),
     )
     if full is None:
@@ -219,7 +219,19 @@ def recovery_only_inputs(
         eftp_by_day=full.eftp_by_day,
         ramp_rate=full.ramp_rate,
         current=full.current,
+        activities=full.activities,
+        activity_rows=full.activity_rows,
     )
+
+
+class SnapshotActivityRows:
+    """Serves the activity rows of a stored Intervals.icu snapshot."""
+
+    def __init__(self, snapshot: Mapping[str, Any]) -> None:
+        self._rows = tuple(snapshot.get("recent_activities") or ())
+
+    def activity_rows(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
+        return self._rows
 
 
 class NoActivityRows:

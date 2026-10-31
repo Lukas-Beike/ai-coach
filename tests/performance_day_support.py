@@ -8,11 +8,15 @@ from zoneinfo import ZoneInfo
 from backend.canonical.local_time import local_date
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind
+from backend.performance.canonical_body import read_body_inputs
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
     read_current_inputs,
 )
-from backend.performance.canonical_inputs import read_performance_inputs
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceInputs,
+    read_performance_inputs,
+)
 from backend.performance.current_metrics import current_performance_metrics
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
@@ -148,14 +152,16 @@ def canonical_from_snapshot(snapshot: dict[str, Any], as_of: date):
     )
 
 
-def garmin_metrics_from_payload(payload: dict[str, Any]) -> GarminCanonicalMetrics:
+def garmin_metrics_from_payload(
+    payload: dict[str, Any], *, retrieved_at: datetime = SYNCED_AT
+) -> GarminCanonicalMetrics:
     """Map a synthetic Garmin payload and its activities through the real mappers."""
     zone = ZoneInfo("UTC")
     observations = map_garmin_health(
-        dict(payload), zone=zone, retrieved_at=SYNCED_AT
+        dict(payload), zone=zone, retrieved_at=retrieved_at
     ).records
     activities = map_garmin_activities(
-        payload.get("activities") or [], zone=zone, retrieved_at=SYNCED_AT
+        payload.get("activities") or [], zone=zone, retrieved_at=retrieved_at
     ).records
 
     class Reader:
@@ -173,3 +179,24 @@ def garmin_metrics_from_payload(payload: dict[str, Any]) -> GarminCanonicalMetri
             return tuple((sport, *best[sport]) for sport in best)
 
     return read_garmin_state(Reader(), object()).metrics
+
+
+def garmin_body_from_payload(
+    payload: dict[str, Any], today: date, *, retrieved_at: datetime = SYNCED_AT
+):
+    """Map a synthetic Garmin payload and read its canonical weight and body fat."""
+    observations = map_garmin_health(
+        dict(payload), zone=ZoneInfo("UTC"), retrieved_at=retrieved_at
+    ).records
+    return read_body_inputs(StubReader(tuple(observations)), None, today)
+
+
+def garmin_inputs_from_payload(
+    payload: dict[str, Any], today: date, base: CanonicalPerformanceInputs
+) -> CanonicalPerformanceInputs:
+    """``base`` with the canonical Garmin values and body of a synthetic payload."""
+    return replace(
+        base,
+        garmin=garmin_metrics_from_payload(payload),
+        body=garmin_body_from_payload(payload, today),
+    )

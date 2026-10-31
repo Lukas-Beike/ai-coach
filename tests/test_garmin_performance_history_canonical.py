@@ -20,7 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.canonical.vocabulary import MetricKind
-from backend.performance import body, chart_history, trends
+from backend.performance import body, chart_history, garmin_metric_history, trends
 from backend.performance.garmin_canonical import read_garmin_state
 from backend.performance.history import append_garmin_performance_history
 from backend.providers.garmin_health_mapping import map_garmin_health
@@ -215,32 +215,46 @@ class PerformanceHistoryTests(unittest.TestCase):
             with self.subTest(key=key, day=day):
                 self.assertEqual(self.history[key][date.fromisoformat(day)], value)
 
+    def cached_values(self, key: str, start: date) -> dict[date, float]:
+        """The days the snapshot cache and the FTP history held for ``key``."""
+        values: dict[date, float] = {}
+        for row in self.snapshot["performance_history"]:
+            day = date.fromisoformat(row["date"])
+            if start <= day <= TODAY and row["metrics"].get(key) is not None:
+                values[day] = row["metrics"][key]
+        if key == "cycling_ftp_watts":
+            for point in garmin_metric_history.ftp_points(
+                self.snapshot.get("cycling_ftp_history"), start=start, end=TODAY
+            ):
+                values[date.fromisoformat(point["date"])] = point["value"]
+        return values
+
     def test_comparison_averages_match_the_cache(self) -> None:
+        start = TODAY - timedelta(days=29)
         for key in ("cycling_ftp_watts", "cycling_vo2max_ml_kg_min", "readiness"):
             with self.subTest(key=key):
+                cached = self.cached_values(key, start)
                 self.assertEqual(
-                    trends.garmin_history_average({}, key, 30, TODAY, self.history),
-                    trends.garmin_history_average(self.snapshot, key, 30, TODAY),
+                    trends.garmin_history_average(key, 30, TODAY, self.history),
+                    round(sum(cached.values()) / len(cached), 2),
                 )
 
     def test_chart_and_body_ftp_read_the_canonical_history(self) -> None:
         metrics = read_garmin_state(MappedReader(self.snapshot), None).metrics
         start = TODAY - timedelta(days=89)
         self.assertEqual(
-            chart_history._garmin_values(
-                "cycling_ftp_watts", {}, start, TODAY, metrics
-            ),
-            chart_history._garmin_values(
-                "cycling_ftp_watts", self.snapshot, start, TODAY
-            ),
+            chart_history._garmin_values("cycling_ftp_watts", start, TODAY, metrics),
+            {
+                day.isoformat(): value
+                for day, value in self.cached_values("cycling_ftp_watts", start).items()
+            },
         )
         canonical_ftp = body._garmin_ftp(
             {}, TODAY, metrics.performance_history["cycling_ftp_watts"]
         )
-        legacy_ftp = body._garmin_ftp(self.snapshot, TODAY)
         self.assertEqual(
             {day: value[0] for day, value in canonical_ftp.items()},
-            {day: value[0] for day, value in legacy_ftp.items()},
+            self.cached_values("cycling_ftp_watts", date.min),
         )
 
 

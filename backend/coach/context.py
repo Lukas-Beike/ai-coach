@@ -29,9 +29,9 @@ from backend.performance import activity_validation
 from backend.performance import context as performance_context
 from backend.performance import load as performance_load
 from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
-    performance_options,
     snapshot_with_inputs,
 )
 from backend.planning import adaptive as planning_adaptive
@@ -524,7 +524,7 @@ class CoachPerformanceContextReader:
                 self._garmin_payload_service.recent_view(),
                 self._profile_service.get(),
                 self._today(),
-                **performance_options(canonical),
+                canonical=canonical or EMPTY_PERFORMANCE_INPUTS,
             )
         )
 
