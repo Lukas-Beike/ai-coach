@@ -742,6 +742,9 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
     SNAPSHOT: Final = {"recent_wellness": [{"id": AS_OF.isoformat()}]}
 
     class ActivityReader:
+        def activity_summaries(self, _db, *, start=None, end=None, limit=None):
+            return ()
+
         def activity_rows(self, _db, *, start=None, end=None, limit=None):
             return ()
 
@@ -810,7 +813,7 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         source = CanonicalPerformanceSource(
             database_manager=_UnitOfWorkManager,
             observation_reader=lambda: reader,
-            activity_rows=self.ActivityReader,
+            activity_summaries=self.ActivityReader,
         )
         context = CoachPerformanceContextReader(
             None, None, None, today=lambda: AS_OF, canonical=source

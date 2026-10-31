@@ -704,7 +704,7 @@ class CanonicalWiringTests(unittest.TestCase):
             canonical=CanonicalPerformanceSource(
                 database_manager=lambda: manager,
                 observation_reader=lambda: reader,
-                activity_rows=lambda: SnapshotActivityRows(snapshot_reader),
+                activity_summaries=lambda: SnapshotActivityRows(snapshot_reader),
             ),
             session_records=CanonicalTableReader().session_activities,
         )

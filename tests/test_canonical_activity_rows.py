@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 import copy
-import json
 from datetime import date
 from typing import Any
 from unittest.mock import patch
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
-from backend.performance.training_report import deduplicated_rows
-
 
 def _by_id(rows: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: str(row["id"]))
 
 
-class ActivityRowSourceTests(CanonicalReadFixture):
+class ActivitySummarySourceTests(CanonicalReadFixture):
     def test_table_and_legacy_return_the_same_raw_rows(self) -> None:
         populate(self)
         legacy = self.read(self.projection.activity_rows)
@@ -96,7 +93,9 @@ class ActivityRowSourceTests(CanonicalReadFixture):
             "i-act-002", [r["id"] for r in self.read(self.table.activity_rows)]
         )
 
-        self.execute("UPDATE activity_sessions SET state = 'deleted'")
+        self.execute(
+            "UPDATE activity_sessions SET state = 'deleted', merged_into = NULL"
+        )
         self.assertEqual(self.read(self.table.activity_rows), ())
 
     def test_unparsable_and_non_object_payloads_are_skipped(self) -> None:
@@ -156,13 +155,3 @@ class ActivityRowSelectorTests(CanonicalReadFixture):
             [r["id"] for r in self.read(selector.activity_rows, start=day, end=day)],
             ["i-act-001"],
         )
-
-
-class DeduplicatedRowsTests(CanonicalReadFixture):
-    def test_helper_drops_repeated_ids_and_non_mapping_rows(self) -> None:
-        first = {"id": "a", "start_date_local": "2026-10-01T07:00:00"}
-        rows = [first, dict(first), "not a row", {"id": "b"}]
-        kept, dropped = deduplicated_rows(rows)
-        self.assertEqual([r["id"] for r in kept], ["a", "b"])
-        self.assertEqual(dropped, 0)
-        json.dumps(kept)

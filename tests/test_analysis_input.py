@@ -14,7 +14,6 @@ from backend.activities.detail_merge import (
     SetChoice,
     merge_details,
 )
-from backend.activities.detail_projection import detailed_activity
 from backend.canonical.activity_detail import (
     ActivityLap,
     ActivityLapSet,
@@ -41,7 +40,9 @@ from backend.performance.session_analysis import aerobic_analysis, interval_qual
 from backend.providers.intervals_activity_detail_mapping import (
     map_intervals_activity_detail,
 )
+from backend.providers.intervals_activity_detail_projection import detailed_activity
 from backend.providers.intervals_activity_fields import activity_detail_laps
+from backend.providers.intervals_activity_mapping import intervals_analysis_sport
 from backend.sync.activity_details import normalize_streams
 
 RETRIEVED = datetime(2026, 10, 19, 8, 0, tzinfo=UTC)
@@ -228,6 +229,8 @@ def from_intervals(
     streams = normalize_streams(stream_list)
     projected = detailed_activity({**payload, "laps": activity_detail_laps(payload)})
     projected["streams"] = streams
+    # The sync path analyses the projection with its canonical sport.
+    projected = {**projected, **intervals_analysis_sport(projected)}
     result = map_intervals_activity_detail(
         payload, streams, recorded_by=RecordingOrigin.WAHOO, retrieved_at=RETRIEVED
     )
@@ -307,29 +310,28 @@ class GoldenParityTests(unittest.TestCase):
 
 
 class AnalysisInputMappingTests(unittest.TestCase):
-    def test_activity_type_follows_sport_and_virtual_environment(self) -> None:
-        cases = (
-            (Sport.RIDE, Environment.OUTDOOR, "Ride"),
-            (Sport.RIDE, Environment.INDOOR, "Ride"),
-            (Sport.RIDE, Environment.VIRTUAL, "VirtualRide"),
-            (Sport.RUN, Environment.UNKNOWN, "Run"),
-            (Sport.RUN, Environment.VIRTUAL, "VirtualRun"),
-            (Sport.SWIM, Environment.OUTDOOR, "swim"),
-        )
-        for sport, environment, expected in cases:
+    def test_activity_names_its_canonical_sport_and_environment(self) -> None:
+        for sport, environment in (
+            (Sport.RIDE, Environment.OUTDOOR),
+            (Sport.RIDE, Environment.VIRTUAL),
+            (Sport.RUN, Environment.UNKNOWN),
+            (Sport.SWIM, Environment.OUTDOOR),
+        ):
             with self.subTest(sport=sport, environment=environment):
                 adapted = analysis_input(record(sport, environment), None, None)
-                self.assertEqual(expected, adapted.activity["type"])
+                self.assertEqual(sport.value, adapted.activity["sport"])
+                self.assertEqual(environment.value, adapted.activity["environment"])
+                self.assertNotIn("type", adapted.activity)
 
-    def test_intervals_outdoor_runs_are_named_trail_runs(self) -> None:
+    def test_intervals_outdoor_runs_are_trail_runs(self) -> None:
         adapted = analysis_input(record(Sport.RUN), None, None)
-        self.assertEqual("TrailRun", adapted.activity["type"])
+        self.assertTrue(adapted.activity["trail"])
 
-    def test_other_providers_keep_outdoor_runs_named_run(self) -> None:
+    def test_other_providers_outdoor_runs_are_not_trail_runs(self) -> None:
         adapted = analysis_input(
             as_provider(record(Sport.RUN), ProviderId.WAHOO), None, None
         )
-        self.assertEqual("Run", adapted.activity["type"])
+        self.assertFalse(adapted.activity["trail"])
 
     def test_moving_flags_map_to_booleans_and_gaps(self) -> None:
         source = candidate(

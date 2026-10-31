@@ -4,13 +4,11 @@ from collections.abc import Sequence
 from datetime import date, timedelta
 from typing import Any
 
+from backend.activities.activity_summary import summary_local_date
+from backend.athlete.local_date import iso_date_prefix
 from backend.performance import freshness as performance_freshness
 from backend.performance.activity_validation import bounded_activity_metric
-from backend.performance.training_report import (
-    activity_day,
-    deduplicated_rows,
-    zone_distribution,
-)
+from backend.performance.training_report import zone_distribution
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 
 _CATEGORIES = {
@@ -34,14 +32,18 @@ def training_focus(
     today: date,
     timezone: str = "UTC",
     *,
-    activity_rows: Sequence[Any],
+    activities: Sequence[Any],
     days: int = 28,
 ) -> dict[str, Any]:
     start = (today - timedelta(days=days - 1)).isoformat()
     end = today.isoformat()
-    activities, _ = deduplicated_rows(activity_rows)
     zones = zone_distribution(
-        [row for row in activities if start <= activity_day(row, timezone) <= end]
+        [
+            row
+            for row in activities
+            if isinstance(row, dict)
+            and start <= summary_local_date(row, timezone) <= end
+        ]
     )
     categories = {
         key: {"load": 0.0, "sessions": 0}
@@ -54,7 +56,7 @@ def training_focus(
         "training_load_activities+activities" if has_dedicated_loads else "activities"
     )
     seen, unknown, observed_dates = _garmin_activity_coverage(
-        garmin, start, end, timezone, categories
+        garmin, start, end, categories
     )
     freshness = performance_freshness.garmin_source_freshness(garmin, today)
     activity_freshness = {
@@ -94,7 +96,6 @@ def _garmin_activity_coverage(
     garmin: dict[str, Any],
     start: str,
     end: str,
-    timezone: str,
     categories: dict[str, dict[str, float | int]],
 ) -> tuple[set[str], int, list[str]]:
     seen: set[str] = set()
@@ -104,7 +105,7 @@ def _garmin_activity_coverage(
     activities = activities if isinstance(activities, list) else []
     loads_by_id = _training_load_by_id(garmin.get("training_load_activities"))
     for index, activity in enumerate(activities[:1000]):
-        row_data = _coverage_row(activity, index, loads_by_id, start, end, timezone)
+        row_data = _coverage_row(activity, index, loads_by_id, start, end)
         if row_data is None:
             continue
         identity, dedupe_key, day, row = row_data
@@ -145,7 +146,6 @@ def _coverage_row(
     loads_by_id: dict[str, dict[str, Any]],
     start: str,
     end: str,
-    timezone: str,
 ) -> tuple[str, str, str, dict[str, Any]] | None:
     if not isinstance(activity, dict):
         return None
@@ -156,12 +156,12 @@ def _coverage_row(
         for key in ("activityTrainingLoad", "trainingEffectLabel"):
             if load_record.get(key) is not None:
                 row[key] = load_record[key]
-    day = activity_day(
-        {
-            "start_date_local": row.get(garmin_perf_fields.ACTIVITY_START_LOCAL)
+    day = iso_date_prefix(
+        str(
+            row.get(garmin_perf_fields.ACTIVITY_START_LOCAL)
             or row.get("start_date_local")
-        },
-        timezone,
+            or ""
+        )
     )
     if not day or not start <= day <= end:
         return None

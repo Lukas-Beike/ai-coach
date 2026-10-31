@@ -176,10 +176,6 @@ _LEGACY_LABEL = (
     "backend/providers/source_labels.py"
 )
 
-_ACTIVITY_ROWS = (
-    "activity-rows: reads Intervals-shaped activity rows or the Coach activity "
-    "allowlist; moves to the neutral activity summary (#1510)"
-)
 _LEGACY_FALLBACK = (
     "legacy-fallback: Garmin view, snapshot athlete or legacy wellness fallback "
     "removed when the canonical record wins (#1415)"
@@ -188,50 +184,27 @@ _DEAD_LEGACY = (
     "dead-legacy: no production caller; deleted with the read selector (#1416)"
 )
 _PLANNING_RECORDS = (
-    "planning-records: local planned units and library entries still store the "
-    "provider training-load and intensity keys (start and duration moved in #1507)"
+    "planning-records: local planned units, library entries and frozen target "
+    "snapshots still store the provider training-load, intensity and FTP keys "
+    "(start and duration moved in #1507)"
 )
 # repository-relative path -> (reason, field-name modules it may still import).
 # A new module in an allowlisted file fails the guard as well.
 _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
-    "backend/activities/calendar_projection.py": (
-        _ACTIVITY_ROWS,
-        ("intervals_performance_fields",),
-    ),
-    "backend/activities/detail_projection.py": (
-        _ACTIVITY_ROWS,
-        ("intervals_performance_fields",),
-    ),
     "backend/activities/detail_store.py": (
         _DEAD_LEGACY,
         ("intervals_performance_fields",),
     ),
-    "backend/activities/duplicates.py": (_ACTIVITY_ROWS, ("garmin_gear_fields",)),
     "backend/athlete/equipment.py": (_LEGACY_FALLBACK, ("garmin_gear_fields",)),
-    "backend/coach/context.py": (_ACTIVITY_ROWS, ("intervals_performance_fields",)),
-    "backend/nutrition/sync_status.py": (_LEGACY_FALLBACK, ("garmin_fields",)),
-    "backend/performance/activity_validation.py": (
-        _ACTIVITY_ROWS,
-        (
-            "garmin_performance_fields",
-            "intervals_performance_fields",
-        ),
-    ),
-    "backend/performance/canonical_sections.py": (
-        _ACTIVITY_ROWS,
-        ("intervals_activity_fields",),
-    ),
-    "backend/performance/current_metrics.py": (
-        _LEGACY_FALLBACK,
+    "backend/activities/matching.py": (
+        _PLANNING_RECORDS,
         ("intervals_performance_fields",),
     ),
-    "backend/performance/eftp.py": (
-        _ACTIVITY_ROWS,
-        (
-            "garmin_fields",
-            "intervals_performance_fields",
-        ),
+    "backend/coach/context.py": (
+        _PLANNING_RECORDS,
+        ("intervals_performance_fields",),
     ),
+    "backend/nutrition/sync_status.py": (_LEGACY_FALLBACK, ("garmin_fields",)),
     "backend/performance/garmin_metric_history.py": (
         _LEGACY_FALLBACK,
         ("garmin_performance_fields",),
@@ -261,7 +234,6 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
             "garmin_performance_fields",
         ),
     ),
-    "backend/performance/load.py": (_ACTIVITY_ROWS, ("intervals_performance_fields",)),
     "backend/performance/planning_recovery.py": (
         _DEAD_LEGACY,
         (
@@ -276,28 +248,17 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
             "garmin_performance_fields",
         ),
     ),
-    "backend/performance/report_service.py": (
-        _ACTIVITY_ROWS,
-        ("intervals_activity_fields",),
-    ),
-    "backend/performance/session_analysis.py": (
-        _ACTIVITY_ROWS,
+    "backend/performance/training_report.py": (
+        _PLANNING_RECORDS,
         ("intervals_performance_fields",),
     ),
-    "backend/performance/tag_impact.py": (
-        _ACTIVITY_ROWS,
+    "backend/performance/session_analysis.py": (
+        _PLANNING_RECORDS,
         ("intervals_performance_fields",),
     ),
     "backend/performance/training_focus.py": (
-        _ACTIVITY_ROWS,
+        _AWAITING_PERFORMANCE_KINDS,
         ("garmin_performance_fields",),
-    ),
-    "backend/performance/training_report.py": (
-        _ACTIVITY_ROWS,
-        (
-            "intervals_activity_fields",
-            "intervals_performance_fields",
-        ),
     ),
     "backend/performance/wellness.py": (
         _LEGACY_FALLBACK,
@@ -315,7 +276,7 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
         ("intervals_performance_fields",),
     ),
     "backend/planning/season_preparation.py": (
-        _ACTIVITY_ROWS,
+        _PLANNING_RECORDS,
         ("intervals_performance_fields",),
     ),
     "backend/planning/target_snapshot.py": (
@@ -376,7 +337,6 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
             "backend/performance/report_service.py",
             "backend/performance/session_analysis.py",
             "backend/performance/training_focus.py",
-            "backend/performance/training_report.py",
         )
     },
     **{

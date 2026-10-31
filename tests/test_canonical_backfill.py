@@ -1194,7 +1194,9 @@ class ReprojectionTests(BackfillFixture):
 
     def test_reprojection_spans_batches_and_skips_a_row_deleted_mid_way(self) -> None:
         backfill = self.make_backfill(batch_size=100)
-        self.set_garmin(self.manager, garmin_payload(weight=[{"weight": synthetic_weights(300)}]))
+        self.set_garmin(
+            self.manager, garmin_payload(weight=[{"weight": synthetic_weights(300)}])
+        )
         self.run_to_completion(backfill)
         key = (GARMIN, HEALTH_KIND)
         version = canonical_plans._MAPPER_VERSIONS[key]
@@ -1383,6 +1385,7 @@ class ReprojectionTests(BackfillFixture):
                 "UPDATE activity_records SET moving_duration_s = NULL WHERE provider = ?",
                 (GARMIN,),
             )
+            _unlink_sessions(db)
         self.assertEqual({row["state"] for row in self.rows(query)}, {"active"})
         key = (GARMIN, ACTIVITY_KIND)
         with patch.dict(
@@ -1439,6 +1442,7 @@ class ReprojectionTests(BackfillFixture):
                 "UPDATE activity_records SET details = '{}' WHERE provider = ?",
                 (INTERVALS,),
             )
+            _unlink_sessions(db)
         self.assertEqual({row["state"] for row in self.rows(query)}, {"active"})
         key = (INTERVALS, ACTIVITY_KIND)
         with patch.dict(
@@ -2243,3 +2247,11 @@ class FollowupStageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _unlink_sessions(db: Any) -> None:
+    """Undo the links the first ingest made, as an older mapper left the sessions."""
+    db.execute(
+        "UPDATE activity_sessions SET state = 'active', merged_into = NULL "
+        "WHERE state = 'duplicate'"
+    )

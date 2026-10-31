@@ -1,7 +1,9 @@
 """Freeze conservatively matched planning targets at detail observation time."""
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
+from backend.activities.activity_summary import stored_activity_key
 from backend.activities.identity import activity_kind
 from backend.activities.matching import match_planned_workouts, record_date
 from backend.activities.workout_text import WorkoutTextError, structured_steps
@@ -11,7 +13,7 @@ from backend.providers.intervals_performance_fields import CONFIGURED_FTP
 
 def freeze_targets(
     local: list[dict[str, Any]],
-    activities: list[dict[str, Any]],
+    activities: Sequence[Mapping[str, Any]],
     activity_id: str,
     detail: dict[str, Any],
     observed_at: str,
@@ -21,7 +23,7 @@ def freeze_targets(
     candidates = [
         (event, row)
         for index, row in matches.items()
-        if str(row.get("id")) == activity_id
+        if stored_activity_key(row) == activity_id
         for event in [planned[index]]
     ]
     if len(candidates) != 1:
@@ -50,14 +52,14 @@ def freeze_targets(
 
 
 def _matching_basis(
-    event: dict, row: dict, activities: list[dict], planned: list[dict]
+    event: dict, row: Any, activities: Sequence[Mapping[str, Any]], planned: list[dict]
 ) -> str | None:
-    paired = str(row.get("paired_event_id") or "")
+    paired = str(row.get("planned_event_id") or "")
     if paired:
         if (
             paired != str(event.get("id"))
             or sum(
-                str(item.get("paired_event_id") or "") == paired for item in activities
+                str(item.get("planned_event_id") or "") == paired for item in activities
             )
             != 1
         ):
@@ -71,13 +73,15 @@ def _matching_basis(
     return matching
 
 
-def _unique_local_match(row: dict, activities: list[dict], planned: list[dict]) -> bool:
-    day = record_date(row.get("start_date_local"))
+def _unique_local_match(
+    row: Any, activities: Sequence[Mapping[str, Any]], planned: list[dict]
+) -> bool:
+    day = record_date(row.get("started_at_local"))
     kind = activity_kind(row)
     if (
         kind == "other"
         or sum(
-            record_date(item.get("start_date_local")) == day
+            record_date(item.get("started_at_local")) == day
             and activity_kind(item) == kind
             for item in activities
         )

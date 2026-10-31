@@ -137,7 +137,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
                 "ctl": 65,
                 "atl": 75,
                 "tsb": -7,
-                "sportInfo": [{"types": ["Ride"], "eFTP": 290}],
+                "sportInfo": [{"types": ["Ride"], "eftp_w": 290}],
             },
             {
                 "id": "2026-09-07",
@@ -148,7 +148,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
                 "ctl": 65,
                 "atl": 75,
                 "tsb": -8,
-                "sportInfo": [{"types": ["Ride"], "eFTP": 290}],
+                "sportInfo": [{"types": ["Ride"], "eftp_w": 290}],
             },
         ]
         recovery = {
@@ -171,7 +171,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
             "actual_atl_average": 70,
         }
         activities = [
-            {"start_date_local": "2026-09-07T08:00:00", "type": "Ride", "icu_eftp": 290}
+            {"started_at_local": "2026-09-07T08:00:00", "sport": "ride", "eftp_w": 290}
         ]
         return (
             metrics,

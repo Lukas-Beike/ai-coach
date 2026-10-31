@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager
 from datetime import date
 from typing import Any, Protocol, runtime_checkable
 
+from backend.canonical.activity_summary import ActivitySummary
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import ActivityRecord, Observation
@@ -41,6 +42,46 @@ class ActivityReader(Protocol):
     ) -> tuple[ActivityRecord, ...]: ...
 
 
+# One canonical session: its local id and its active records of every provider.
+type SessionRecords = tuple[str, tuple[ActivityRecord, ...]]
+
+
+class ActivitySessionReader(Protocol):
+    """Reads canonical activity sessions with all their active records.
+
+    Bounds are as in ``ActivityReader``. Deleted sessions are never returned; a
+    merged duplicate's records are listed under the session it was merged into.
+    ``newest`` lets a source skip days older than at least that many newest
+    sessions; it never drops one of them.
+    """
+
+    def activity_sessions(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        newest: int | None = None,
+    ) -> tuple[SessionRecords, ...]: ...
+
+
+class ActivitySummaryReader(Protocol):
+    """Reads provider-neutral activity summaries, one per canonical session.
+
+    Newest first. Bounds are as in ``ActivityReader``; ``limit`` keeps only the
+    newest summaries. See ``backend.activities.activity_summary``.
+    """
+
+    def activity_summaries(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        limit: int | None = None,
+    ) -> tuple[ActivitySummary, ...]: ...
+
+
 class ActivityRowReader(Protocol):
     """Reads the raw Intervals.icu activity payloads behind the canonical records.
 
@@ -61,6 +102,10 @@ class ActivityRowReader(Protocol):
         end: date | None = None,
         limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]: ...
+
+
+class ActivityRowAndSummaryReader(ActivityRowReader, ActivitySummaryReader, Protocol):
+    """Raw activity rows for provider-side reads and summaries for consumers."""
 
 
 class ObservationReader(Protocol):
@@ -114,6 +159,7 @@ class CanonicalReader(
     ActivityReader,
     ActivityMaxHrReader,
     ActivityRowReader,
+    ActivitySessionReader,
     ObservationReader,
     Protocol,
 ):

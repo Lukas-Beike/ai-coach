@@ -12,7 +12,7 @@ from backend.coach.context import (
     CoachPlanningContextReader,
     CoachStructuredContextService,
 )
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 
 # The coverage time is deliberately not the snapshot's own `synced_at`.
 COVERAGE_SYNCED_AT = "2026-09-22T09:30:00+00:00"
@@ -25,12 +25,12 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
             "recent_activities": [
                 {
                     "id": "activity-1",
-                    "start_date_local": "2026-09-21T07:00:00",
+                    "started_at_local": "2026-09-21T07:00:00",
                     "name": "Easy run",
-                    "type": "Run",
-                    "moving_time": 1800,
-                    "distance": 5000,
-                    "icu_training_load": 35,
+                    "sport": "run",
+                    "moving_duration_s": 1800,
+                    "distance_m": 5000,
+                    "training_load": 35,
                 }
             ],
             "recent_wellness": [],
@@ -112,9 +112,11 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
                 self.garmin_payload_service,
                 self.garmin_projection_service,
                 lambda: date(2026, 9, 23),
-                activity_rows=ActivityRowSource(
+                activity_rows=ActivitySummarySource(
                     ReadOnlyManager,
-                    lambda: FixedActivityRows(cast(list[dict[str, Any]], self.snapshot["recent_activities"])),
+                    lambda: FixedActivityRows(
+                        cast(list[dict[str, Any]], self.snapshot["recent_activities"])
+                    ),
                     coverage=lambda: StoredCoverage(COVERAGE_SYNCED_AT),
                 ),
             ),

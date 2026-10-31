@@ -198,16 +198,11 @@ class AnalysisHistoryTests(unittest.TestCase):
         self.assertIsNone(points[-2]["value"])
         self.assertEqual(result["start"], "2026-07-05")
 
-    def test_training_time_counts_each_activity_once_and_keeps_unknown_days_missing(
+    def test_training_time_sums_each_activity_and_keeps_unknown_days_missing(
         self,
     ):
         snapshot = {
             "recent_activities": [
-                {
-                    "id": "a1",
-                    "start_date_local": "2026-10-01T07:00:00",
-                    "moving_time": 3600,
-                },
                 {
                     "id": "a1",
                     "start_date_local": "2026-10-01T07:00:00",
@@ -302,21 +297,25 @@ class AnalysisHistoryTests(unittest.TestCase):
             ],
             "recent_activities": [
                 {
+                    "id": "e1",
                     "start_date_local": "2026-10-01T10:00:00",
                     "type": "Ride",
                     "icu_eftp": 250,
                 },
                 {
+                    "id": "e2",
                     "start_date_local": "2026-10-02T10:00:00",
                     "type": "Ride",
                     "icu_eftp": 260,
                 },
                 {
+                    "id": "e3",
                     "start_date_local": "2026-10-02T12:00:00",
                     "type": "VirtualRide",
                     "icu_eftp": 265,
                 },
                 {
+                    "id": "e4",
                     "start_date_local": "2026-10-02T13:00:00",
                     "type": "Run",
                     "icu_eftp": 999,

@@ -14,8 +14,8 @@ class DetailEnvelopeReader:
 
     Feedback and equipment are keyed by the resolved session reference, the id
     that feedback writes and gear assignments use. Validation compares the
-    current Intervals.icu summary with the performance context; a session
-    without one gets the validation's explicit no-data result.
+    session's activity summary with the performance context; a session without
+    one gets the validation's explicit no-data result.
     """
 
     def __init__(
@@ -25,18 +25,20 @@ class DetailEnvelopeReader:
         read_equipment: Callable[[str], dict[str, Any]],
         references: ActivityReferenceResolver,
         performance: Callable[[], Mapping[str, Any]],
+        summary: Callable[[], Mapping[str, Any] | None],
     ) -> None:
         self._feedback_service = feedback_service
         self._read_equipment = read_equipment
         self._references = references
         self._performance = performance
+        self._summary = summary
 
     def __call__(
         self,
-        db: Any,
+        _db: Any,
         activity_id: str,
-        provider_activity_id: str | None,
-        summary: Mapping[str, Any] | None,
+        _provider_activity_id: str | None,
+        _raw_summary: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         reference = str(self._references.resolve_reference(activity_id).activity_id)
         items = self._feedback_service.list(500)
@@ -48,6 +50,7 @@ class DetailEnvelopeReader:
             (item for item in items if item.get("activity_id") == str(activity_id)),
             None,
         )
+        summary = self._summary()
         if summary is None:
             validation = activity_performance_validation([], {}, {})
         else:

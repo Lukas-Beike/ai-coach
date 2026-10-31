@@ -22,6 +22,7 @@ from activity_row_support import (
     FixedActivityRows,
     SnapshotActivityRows,
     canonical_source,
+    summaries_of_rows,
 )
 from canonical_detail_support import NOW, seed_intervals_activity
 
@@ -38,7 +39,7 @@ from backend.performance.detail_envelope import activity_equipment
 from backend.performance.report_service import TrainingRecordsService
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
@@ -125,6 +126,7 @@ def _detail_service(
 ) -> ActivityAnalysisReadService:
     """Serve ``activity_detail.v1`` documents from the canonical tables."""
     rows = SnapshotActivityRows(snapshots)
+    kwargs.setdefault("summary_rows", rows)
     return ActivityAnalysisReadService(
         database,
         snapshots,
@@ -556,7 +558,9 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
     def _ingest(self, raw: dict[str, Any]) -> None:
         """Ingest the summary row the way the snapshot sync of ``raw`` does."""
         fields = {key: value for key, value in raw.items() if key != "id"}
-        seed_intervals_activity(cast(DatabaseManager, self.database), "ride-1", **fields)
+        seed_intervals_activity(
+            cast(DatabaseManager, self.database), "ride-1", **fields
+        )
 
     def _detail(
         self, raw: list[dict[str, Any]], read_equipment: Any = None
@@ -767,8 +771,10 @@ class TrainingRecordObservationCharacterizationTests(_StorageCase):
         )
         (record,) = self._observations([self.OK_RIDE])
         self.assertEqual("2026-05-04", record["date"])
-        self.assertEqual("Ride", record["sport"])
+        # Canonical: the observation carries the summary sport, not the raw type.
+        self.assertEqual("ride", record["sport"])
         self.assertEqual(3600, record["duration"])
+        # Canonical: the device is the summary's recording origin.
         self.assertEqual("Wahoo ELEMNT", record["device"])
         self.assertEqual("Intervals.icu", record["source"])
         self.assertEqual({"status": "ok"}, record["aerobic"])
@@ -826,7 +832,10 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
         )
 
     def _plan_service(
-        self, snapshot: dict[str, Any], compact: list[dict[str, Any]]
+        self,
+        snapshot: dict[str, Any],
+        compact: list[dict[str, Any]],
+        raw: list[dict[str, Any]],
     ) -> PublicPlanStateService:
         return PublicPlanStateService(
             PublicPlanDependencies(
@@ -856,13 +865,19 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
                 external_calendar_configured=False,
                 external_calendar_window_days=14,
                 default_workout_name="Workout",
+                # The plan shows summaries; the raw rows behind them fingerprint
+                # the stored workout profiles.
                 activity_rows=cast(
-                    ActivityRowSource, Mock(compact=Mock(return_value=compact))
+                    ActivitySummarySource,
+                    Mock(compact=Mock(return_value=list(summaries_of_rows(compact)))),
                 ),
+                activity_row_reader=lambda: FixedActivityRows(raw),
             )
         )
 
-    def _planning_activities(self, compact: list[dict[str, Any]]) -> list[Any]:
+    def _planning_activities(
+        self, compact: list[dict[str, Any]], raw: list[dict[str, Any]] | None = None
+    ) -> list[Any]:
         snapshot = _snapshot(compact, [self.RAW])
         captured: list[Any] = []
 
@@ -876,7 +891,7 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
             ),
             patch.object(planning_season, "planning_state", return_value={}),
         ):
-            self._plan_service(snapshot, compact).read()
+            self._plan_service(snapshot, compact, raw or [self.RAW]).read()
         return captured[0]
 
     def test_compact_row_with_matching_projection_gets_recorded_profile(self) -> None:
@@ -884,21 +899,24 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
         (row,) = self._planning_activities([self.COMPACT_MATCHING])
         self.assertEqual("recorded", row["workout_profile"]["source"])
 
-    def test_compact_row_missing_a_raw_field_hides_profile_while_detail_is_fresh(
-        self,
-    ) -> None:
-        # Quirk pinned: the public plan fingerprints the compact recent_activities
-        # row, while detail staleness fingerprints raw_provider_data. A compact row
-        # that omits a projected field therefore drops the profile even though the
-        # stored record is fresh against the raw provider row.
+    def test_profile_follows_the_raw_row_not_the_compact_summary(self) -> None:
+        # Canonical: the plan fingerprints the raw row behind each summary, so a
+        # summary that omits a projected field keeps its profile while the stored
+        # record is fresh (the former compact-row fingerprint quirk no longer applies).
         self._save_profile()
         (row,) = self._planning_activities([self.COMPACT_LEAN])
-        self.assertNotIn("workout_profile", row)
+        self.assertEqual("recorded", row["workout_profile"]["source"])
         snapshots = _Snapshots(_snapshot([self.COMPACT_LEAN], [self.RAW]))
         detail = _detail_service(self.database, snapshots).detail(
             "ride-1", garmin_snapshot={}, profile={}, today=TODAY
         )
         self.assertFalse(_intervals_entry(detail)["stale"])
+
+    def test_changed_raw_row_hides_the_stored_profile(self) -> None:
+        self._save_profile()
+        changed = {**self.RAW, "average_heartrate": 151}
+        (row,) = self._planning_activities([self.COMPACT_MATCHING], [changed])
+        self.assertNotIn("workout_profile", row)
 
 
 if __name__ == "__main__":

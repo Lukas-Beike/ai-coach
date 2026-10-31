@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "base": "2becf69249e9d0aa85d34ed52176e90299e2aa6c",
+  "base": "4bbc14b8a0f45c786bf1899e497a0aa83f234fce",
   "versions": {
     "ruff": "0.17.3",
     "mypy": "2.4.0"
@@ -50,12 +50,6 @@
     },
     {
       "tool": "ruff",
-      "path": "backend/performance/detail_envelope.py",
-      "code": "ARG002",
-      "message_sha256": "49077de21bff2fd26bfe65c031cc1accece53eee4360209ca2478ffed9c2b740"
-    },
-    {
-      "tool": "ruff",
       "path": "backend/sync/canonical_projection.py",
       "code": "ARG002",
       "message_sha256": "49077de21bff2fd26bfe65c031cc1accece53eee4360209ca2478ffed9c2b740"
@@ -89,12 +83,6 @@
       "path": "backend/providers/http.py",
       "code": "ARG002",
       "message_sha256": "b1cbc925ba39147833b221147348a0b93984aa2cbcb4387f8429d3b8490258df"
-    },
-    {
-      "tool": "ruff",
-      "path": "backend/performance/detail_envelope.py",
-      "code": "ARG002",
-      "message_sha256": "cee1ad1cb5e5c41055bd5e20eeeb096833c129831e255148eb324d9641897a0e"
     },
     {
       "tool": "ruff",
@@ -233,12 +221,6 @@
       "path": "tests/test_sync_planned_units.py",
       "code": "arg-type",
       "message_sha256": "3752d60f1464ca74bc92b22a587a37ffd7e01ac40903015e3ef8512f4d57129e"
-    },
-    {
-      "tool": "mypy",
-      "path": "backend/sync/activity_details.py",
-      "code": "arg-type",
-      "message_sha256": "384ff915813ee6feb4c371741e564d7961ee44a1bf689ebba95de84bebc228dc"
     },
     {
       "tool": "mypy",

@@ -77,7 +77,7 @@ def analysis_input(
         label for key, label in channel_labels.items() if key != "laps"
     )
     activity: dict[str, Any] = {
-        "type": _activity_type(record),
+        **analysis_sport(record),
         "decoupling": decoupling,
         "streams": stream_fields,
         "laps": lap_fields,
@@ -89,21 +89,19 @@ def analysis_input(
     )
 
 
-def _activity_type(record: ActivityRecord) -> str:
-    virtual = record.environment is Environment.VIRTUAL
-    if record.sport is Sport.RIDE:
-        return "VirtualRide" if virtual else "Ride"
-    if record.sport is Sport.RUN:
-        if virtual:
-            return "VirtualRun"
-        # Intervals.icu names its outdoor trail runs "TrailRun"; other sources keep "Run".
-        if (
-            record.environment is Environment.OUTDOOR
-            and record.provenance.provider is ProviderId.INTERVALS
-        ):
-            return "TrailRun"
-        return "Run"
-    return record.sport.value
+def analysis_sport(record: ActivityRecord) -> dict[str, Any]:
+    """Return the canonical sport, environment and trail-run flag of a record.
+
+    Intervals.icu names its outdoor trail runs "TrailRun"; only those are
+    ``trail``, other sources' outdoor runs are not.
+    """
+    return {
+        "sport": record.sport.value,
+        "environment": record.environment.value,
+        "trail": record.sport is Sport.RUN
+        and record.environment is Environment.OUTDOOR
+        and record.provenance.provider is ProviderId.INTERVALS,
+    }
 
 
 def _streams(

@@ -29,11 +29,6 @@ from support import (
     parsed_workout_fixture,
 )
 
-from backend.activities.duplicates import (
-    filter_garmin_activities,
-    garmin_activity_duplicates_intervals,
-    intervals_cycling_activities_match,
-)
 from backend.http_api import server as http_server_module
 from backend.http_api.static_assets import StaticAssetService
 from backend.performance import garmin_observations
@@ -51,6 +46,11 @@ from backend.sync import provider_resync_assembly as provider_resync_assembly_mo
 from backend.sync import queue as sync_queue
 from backend.sync import worker as sync_worker_runtime
 from backend.sync.authority import PlanningAuthorityService
+from backend.sync.garmin_activity_duplicates import (
+    filter_garmin_activities,
+    garmin_activity_duplicates_intervals,
+    intervals_cycling_activities_match,
+)
 from backend.sync.intervals import IntervalsSnapshotReader, IntervalsSyncService
 from backend.sync.intervals_lock import INTERVALS_SYNC_LOCK
 from backend.sync.library import WorkoutLibraryRefreshService, WorkoutLibrarySyncService
@@ -1442,7 +1442,8 @@ class ServerSyncTests(ServerTestCase):
                     "id": f"ride-{index}",
                     "type": "Ride",
                     "name": f"Ride {index}",
-                    "start_date_local": (today - timedelta(days=index)).isoformat(),
+                    "start_date_local": (today - timedelta(days=index)).isoformat()
+                    + "T07:00:00",
                 }
                 for index in range(6)
             ],
@@ -2518,6 +2519,8 @@ class ServerSyncTests(ServerTestCase):
             ],
             "recent_activities": [
                 {
+                    "id": "ride-1",
+                    "type": "Ride",
                     "start_date_local": today + "T07:00:00",
                     "moving_time": 7200,
                     "icu_training_load": 110,
@@ -2554,6 +2557,7 @@ class ServerSyncTests(ServerTestCase):
             },
             [
                 {
+                    "id": "ride-1",
                     "start_date_local": f"{today}T08:00:00",
                     "type": "Ride",
                     "icu_ftp": 300,

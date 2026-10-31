@@ -810,7 +810,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        "backend.activities.detail_projection",
+        "backend.providers.intervals_activity_detail_projection",
         (
             "COACH_ACTIVITY_DETAIL_FIELDS",
             "COACH_ACTIVITY_DETAIL_STREAM_FIELDS",
@@ -828,11 +828,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "backend.activities.duplicates",
         (
             "deduplicate_api_records",
-            "_garmin_duplicate_measurements",
-            "_garmin_activity_matches",
-            "garmin_activity_duplicates_intervals",
-            "filter_garmin_activities",
-            "intervals_cycling_activities_match",
             "duplicate_delete_action",
             "validate_duplicate_delete",
             "duplicate_activity_delete_preview",
@@ -1499,6 +1494,16 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "merge_sources",
             "_merge_garmin_source",
             "collection_complete",
+        ),
+    ),
+    (
+        "backend.sync.garmin_activity_duplicates",
+        (
+            "_garmin_duplicate_measurements",
+            "_garmin_activity_matches",
+            "garmin_activity_duplicates_intervals",
+            "filter_garmin_activities",
+            "intervals_cycling_activities_match",
         ),
     ),
     (

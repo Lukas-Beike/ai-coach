@@ -181,7 +181,7 @@ class ReadPathTests(unittest.TestCase):
         )
 
         class NoActivities:
-            def activity_rows(self, db: Any, **_: Any) -> tuple:
+            def activity_summaries(self, db: Any, **_: Any) -> tuple:
                 return ()
 
         inputs = read_performance_inputs(

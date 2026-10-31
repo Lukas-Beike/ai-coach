@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any
 
@@ -40,7 +40,7 @@ _GARMIN_RECOVERY_SOURCES = frozenset(
 
 
 def _activities(canonical: CanonicalPerformanceInputs) -> list[Any]:
-    """Return the canonical compact activities; none when none were read."""
+    """Return the canonical activity summaries; none when none were read."""
     return list(canonical.activities or ())
 
 
@@ -79,11 +79,6 @@ def _garmin_canonical(canonical: CanonicalPerformanceInputs) -> GarminCanonicalM
     return canonical.garmin or GarminCanonicalMetrics()
 
 
-def _activity_rows(canonical: CanonicalPerformanceInputs) -> Sequence[Any]:
-    """The canonical activity rows; none when none were read."""
-    return canonical.activity_rows or ()
-
-
 def _unavailable_context(
     garmin: dict[str, Any],
     profile: dict[str, Any],
@@ -107,7 +102,7 @@ def _unavailable_context(
             garmin,
             today,
             str(profile.get("timezone") or "UTC"),
-            activity_rows=_activity_rows(canonical),
+            activities=_activities(canonical),
         ),
     }
     load_projection = garmin_projection.garmin_training_load_projection(
@@ -217,7 +212,7 @@ def current_performance_context(
             garmin,
             today,
             str(profile.get("timezone") or "UTC"),
-            activity_rows=_activity_rows(canonical),
+            activities=_activities(canonical),
         ),
         "source": "Letzter gespeicherter Intervals.icu-Snapshot",
         "as_of": snapshot.get("synced_at"),

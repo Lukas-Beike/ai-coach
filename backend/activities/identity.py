@@ -42,6 +42,16 @@ def activity_sport(activity: Any) -> Sport:
     return classify_sport_text(value)
 
 
+def summary_sport(summary: Any) -> Sport:
+    """Return the canonical sport of an activity summary."""
+    if not isinstance(summary, dict):
+        return Sport.OTHER
+    try:
+        return Sport(str(summary.get("sport")))
+    except ValueError:
+        return Sport.OTHER
+
+
 def activity_kind(activity: Any) -> str:
     """Classify an activity by its legacy case-insensitive name matching."""
     return legacy_activity_family(activity_sport(activity))

@@ -37,6 +37,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Final
 
+from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
@@ -44,6 +45,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.runtime.ports import (
     ActivityReader,
     ActivityRowReader,
+    ActivitySummaryReader,
     CanonicalReader,
     ObservationSourceSelector,
     ProviderCoverageReader,
@@ -63,6 +65,7 @@ REASON_PENDING: Final = "backfill_pending"
 class CanonicalReadSelector(
     ActivityReader,
     ActivityRowReader,
+    ActivitySummaryReader,
     ObservationSourceSelector,
     ProviderCoverageReader,
 ):
@@ -109,12 +112,36 @@ class CanonicalReadSelector(
         A snapshot that lists activities only in compact form stays on legacy: the
         backfill cannot map those rows, so the tables would serve none of them.
         """
+        return self._row_source(db).activity_rows(db, start=start, end=end, limit=limit)
+
+    def _row_source(self, db: Any) -> CanonicalReader:
         source: CanonicalReader = self._source(db)
         if source is not self._legacy and self._legacy.has_only_compact_activity_rows(
             db
         ):
-            source = self._legacy
-        return source.activity_rows(db, start=start, end=end, limit=limit)
+            return self._legacy
+        return source
+
+    def activity_summaries(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        limit: int | None = None,
+    ) -> tuple[ActivitySummary, ...]:
+        """Return one neutral summary per session, newest first.
+
+        The source is chosen as for ``activity_rows``, so a compact-only snapshot
+        is summarised from the legacy projection.
+        """
+        return activity_summaries(
+            self._row_source(db).activity_sessions(
+                db, start=start, end=end, newest=limit
+            ),
+            self._legacy.zone(db),
+            limit=limit,
+        )
 
     def observations(
         self,

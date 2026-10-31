@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from backend.activities.activity_summary import stored_activity_key
 from backend.activities.detail_analysis_reads import calendar_profiles
 from backend.activities.detail_store import summary_fingerprint
 from backend.calendar import canonical as calendar_canonical
@@ -15,7 +16,11 @@ from backend.canonical.public_metrics import neutral_calendar_state
 from backend.db.manager import DatabaseManager
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import (
+    RECENT_ACTIVITY_LIMIT,
+    ActivitySummarySource,
+)
+from backend.runtime.ports import ActivityRowReader
 from backend.weather import cache as weather_cache
 from backend.weather import history as weather_history
 
@@ -41,8 +46,10 @@ class PublicPlanDependencies:
     external_calendar_configured: bool
     external_calendar_window_days: int
     default_workout_name: str
-    # Compact recent activities come from the canonical activity row port.
-    activity_rows: ActivityRowSource | None = None
+    # Recent activity summaries come from the canonical activity summary port.
+    activity_rows: ActivitySummarySource | None = None
+    # The raw rows behind the summaries; their fingerprints guard stored workout profiles.
+    activity_row_reader: Callable[[], ActivityRowReader] | None = None
     # Canonical zone configurations; the snapshot sport settings apply without any.
     zone_configurations: Callable[[], Sequence[ZoneConfiguration]] = tuple
 
@@ -71,6 +78,7 @@ class PublicPlanStateService:
         self._external_calendar_window_days = dependencies.external_calendar_window_days
         self._default_workout_name = dependencies.default_workout_name
         self._activity_rows = dependencies.activity_rows
+        self._activity_row_reader = dependencies.activity_row_reader
         self._zone_configurations = dependencies.zone_configurations
 
     def read_public(self, local_only: bool = False) -> dict[str, Any]:
@@ -98,11 +106,32 @@ class PublicPlanStateService:
         with manager.read_snapshot():
             return self._read(weather)
 
-    def _history_and_profiles(self) -> tuple[Any, Any]:
+    def _history_and_profiles(self) -> tuple[Any, Any, dict[str, str]]:
         manager = self._database_manager_factory()
+        fingerprints: dict[str, str] = {}
         with manager.reader() as db:
             history = self._key_values.get(db, weather_cache.HISTORY_KEY)
-        return history, calendar_profiles(manager)
+            if self._activity_row_reader is not None:
+                fingerprints = {
+                    str(row.get("id")): summary_fingerprint(row)
+                    for row in self._activity_row_reader().activity_rows(
+                        db, limit=RECENT_ACTIVITY_LIMIT
+                    )
+                }
+        return history, calendar_profiles(manager), fingerprints
+
+    @staticmethod
+    def _with_profile(
+        row: Any, profiles: dict[str, Any], fingerprints: dict[str, str]
+    ) -> Any:
+        """Attach the stored workout profile when it still matches the raw row."""
+        if not isinstance(row, dict):
+            return row
+        key = stored_activity_key(row)
+        stored = profiles.get(key)
+        if stored is None or stored["fingerprint"] != fingerprints.get(key):
+            return row
+        return {**row, "workout_profile": stored["profile"]}
 
     def _read(self, weather: dict[str, Any] | None) -> dict[str, Any]:
         snapshot = self._sync_state.latest_snapshot() or {}
@@ -114,14 +143,9 @@ class PublicPlanStateService:
         activities = self._activity_feedback.attach_to_activities(activities[:1000])
         if weather is None:
             weather = self._weather.state(canonical_planned, refresh=False)
-        history, profiles = self._history_and_profiles()
+        history, profiles, fingerprints = self._history_and_profiles()
         activities = [
-            {**row, "workout_profile": profiles[str(row.get("id"))]["profile"]}
-            if isinstance(row, dict)
-            and str(row.get("id")) in profiles
-            and profiles[str(row.get("id"))]["fingerprint"] == summary_fingerprint(row)
-            else row
-            for row in activities
+            self._with_profile(row, profiles, fingerprints) for row in activities
         ]
         weather = weather_history.calendar_state(history, weather, today=self._today())
         provider_sync = (

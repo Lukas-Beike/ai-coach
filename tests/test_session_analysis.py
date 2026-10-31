@@ -9,7 +9,7 @@ from backend.planning.target_snapshot import freeze_targets
 def ride(times=None):
     times = list(range(3601)) if times is None else times
     return {
-        "type": "Ride",
+        "sport": "ride",
         "streams": {
             "time": times,
             "watts": [200] * len(times),
@@ -92,16 +92,19 @@ class SessionAnalysisTests(unittest.TestCase):
             {
                 "id": "local-1",
                 "date": "2026-10-02",
-                "type": "Ride",
+                "sport": "ride",
                 "description": "- 2m 200w",
                 "target": "POWER",
             }
         ]
+        # Activity summaries: the local session id plus the Intervals.icu record id,
+        # which is the stored key the targets are frozen under.
         rows = [
             {
-                "id": "activity-1",
-                "start_date_local": "2026-10-02T08:00:00",
-                "type": "Ride",
+                "id": "act_1",
+                "record_ids": {"intervals": "activity-1"},
+                "started_at_local": "2026-10-02T08:00:00",
+                "sport": "ride",
             }
         ]
         frozen = freeze_targets(
@@ -111,7 +114,18 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertEqual(120, frozen["steps"][0]["duration"])
         self.assertIsNone(
             freeze_targets(
-                local, rows + [{**rows[0], "id": "activity-2"}], "activity-1", {}, "now"
+                local,
+                rows
+                + [
+                    {
+                        **rows[0],
+                        "id": "act_2",
+                        "record_ids": {"intervals": "activity-2"},
+                    }
+                ],
+                "activity-1",
+                {},
+                "now",
             )
         )
 

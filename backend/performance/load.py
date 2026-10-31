@@ -4,26 +4,13 @@ import math
 from datetime import date, timedelta
 from typing import Any
 
-from backend.athlete.local_date import iso_date_prefix
+from backend.activities.activity_summary import summary_local_date
 from backend.canonical.decimal_text import provider_number as _as_number
-from backend.providers import intervals_performance_fields as intervals_perf_fields
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def _activity_rollup_date(activity: dict[str, Any]) -> date | None:
     try:
-        return date.fromisoformat(
-            iso_date_prefix(str(activity.get("start_date_local") or ""))
-        )
+        return date.fromisoformat(summary_local_date(activity))
     except ValueError:
         return None
 
@@ -50,10 +37,10 @@ def _activity_rollup_totals(
         if activity_date is None or not cutoff <= activity_date <= anchor:
             continue
         count += 1
-        moving_seconds += _activity_rollup_number(activity, "moving_time")
-        training_load += _activity_rollup_number(
-            activity, intervals_perf_fields.TRAINING_LOAD
-        )
+        moving_seconds += _activity_rollup_number(
+            activity, "moving_duration_s"
+        ) or _activity_rollup_number(activity, "elapsed_duration_s")
+        training_load += _activity_rollup_number(activity, "training_load")
     return count, moving_seconds, training_load
 
 
@@ -75,17 +62,10 @@ def _activity_load_by_date(activities: list[Any], anchor: date) -> dict[date, fl
     for activity in activities:
         if not isinstance(activity, dict):
             continue
-        try:
-            activity_date = date.fromisoformat(
-                iso_date_prefix(str(activity.get("start_date_local") or ""))
-            )
-        except TypeError, ValueError:
+        activity_date = _activity_rollup_date(activity)
+        if activity_date is None or activity_date > anchor:
             continue
-        if activity_date > anchor:
-            continue
-        load = _as_number(
-            _first_present(activity, intervals_perf_fields.TRAINING_LOAD_ALIASES)
-        )
+        load = _as_number(activity.get("training_load"))
         if load is not None:
             load_by_date[activity_date] = load_by_date.get(activity_date, 0.0) + float(
                 load

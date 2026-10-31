@@ -277,7 +277,11 @@ def build_structured_tool_schemas(
             {
                 "start": {"type": "string", "format": "date"},
                 "days": {"type": "integer", "enum": [7, 28]},
-                "sport": {"type": "string", "maxLength": 40},
+                "sport": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "description": "all, or a canonical sport such as ride, run, swim or strength.",
+                },
                 "sections": {
                     "type": "array",
                     "minItems": 1,

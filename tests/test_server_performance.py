@@ -25,10 +25,6 @@ from server_test_support import (
     server,
 )
 
-from backend.activities.duplicates import (
-    filter_garmin_activities,
-    garmin_activity_duplicates_intervals,
-)
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import context as performance_context
@@ -44,6 +40,10 @@ from backend.providers import garmin as garmin_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import queue as sync_queue
+from backend.sync.garmin_activity_duplicates import (
+    filter_garmin_activities,
+    garmin_activity_duplicates_intervals,
+)
 from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.performance import PerformanceRefreshService
 from backend.weather import history as weather_history
@@ -641,24 +641,24 @@ class ServerPerformanceTests(ServerTestCase):
         rollup = performance_load.activity_rollup(
             [
                 {
-                    "start_date_local": "2026-09-12",
-                    "moving_time": "3600",
-                    "icu_training_load": "42.5",
+                    "started_at_local": "2026-09-12",
+                    "moving_duration_s": "3600",
+                    "training_load": "42.5",
                 },
                 {
-                    "start_date_local": "2026-09-11",
-                    "moving_time": "invalid",
-                    "icu_training_load": None,
+                    "started_at_local": "2026-09-11",
+                    "moving_duration_s": "invalid",
+                    "training_load": None,
                 },
                 {
-                    "start_date_local": "not-a-date",
-                    "moving_time": 7200,
-                    "icu_training_load": 90,
+                    "started_at_local": "not-a-date",
+                    "moving_duration_s": 7200,
+                    "training_load": 90,
                 },
                 {
-                    "start_date_local": "2026-09-01",
-                    "moving_time": 7200,
-                    "icu_training_load": 90,
+                    "started_at_local": "2026-09-01",
+                    "moving_duration_s": 7200,
+                    "training_load": 90,
                 },
             ],
             2,
@@ -705,7 +705,7 @@ class ServerPerformanceTests(ServerTestCase):
         validation = _current_performance_context(snapshot)["activity_validation"]
 
         self.assertTrue(validation["available"])
-        self.assertEqual(validation["activity"]["activity_id"], "latest-run")
+        self.assertEqual(validation["activity"]["activity_id"], "act_latest-run")
         self.assertEqual(validation["activity"]["sport"], "Laufen")
         self.assertEqual(validation["activity"]["pace_seconds_per_km"], 312)
         self.assertEqual(validation["activity"]["average_heart_rate_bpm"], 166)
@@ -778,8 +778,8 @@ class ServerPerformanceTests(ServerTestCase):
             [
                 {
                     "id": "invalid-provider",
-                    "type": "Run",
-                    "start_date_local": "2026-09-12T08:00:00",
+                    "sport": "run",
+                    "started_at_local": "2026-09-12T08:00:00",
                 }
             ],
             {
@@ -812,9 +812,9 @@ class ServerPerformanceTests(ServerTestCase):
     def test_activity_validation_omits_power_ratio_for_invalid_or_implausible_ftp(self):
         activity = {
             "id": "invalid-ftp",
-            "type": "Ride",
-            "start_date_local": "2026-09-12T08:00:00",
-            "weighted_average_watts": 270,
+            "sport": "ride",
+            "started_at_local": "2026-09-12T08:00:00",
+            "normalized_power": 270,
         }
         for ftp in (-1, 10):
             with self.subTest(ftp=ftp):
@@ -832,12 +832,12 @@ class ServerPerformanceTests(ServerTestCase):
             [
                 {
                     "id": "invalid-estimates",
-                    "type": "Ride",
-                    "start_date_local": "2026-09-12T08:00:00",
+                    "sport": "ride",
+                    "started_at_local": "2026-09-12T08:00:00",
                     "vo2max": {"value": 60},
                     "ftp": "999999999999999999999999999999999999999999",
-                    "eFTP": [300],
-                    "icu_ftp": 300,
+                    "eftp_w": [300],
+                    "ftp_w": 300,
                 }
             ],
             {},
@@ -854,13 +854,13 @@ class ServerPerformanceTests(ServerTestCase):
             [
                 {
                     "id": "invalid-evidence",
-                    "type": "Ride",
-                    "start_date_local": "2026-09-12T08:00:00",
-                    "moving_time": 3600,
-                    "average_heartrate": 9999,
-                    "average_watts": -10,
-                    "icu_rpe": 100,
-                    "icu_intensity": 999,
+                    "sport": "ride",
+                    "started_at_local": "2026-09-12T08:00:00",
+                    "moving_duration_s": 3600,
+                    "avg_hr": 9999,
+                    "avg_power": -10,
+                    "rpe": 100,
+                    "intensity": 999,
                 }
             ],
             {},
@@ -913,8 +913,8 @@ class ServerPerformanceTests(ServerTestCase):
         ]
         activities = [
             {
-                "start_date_local": today.isoformat() + "T08:00:00",
-                "icu_training_load": 70,
+                "started_at_local": today.isoformat() + "T08:00:00",
+                "training_load": 70,
             }
         ]
         series = performance_load.actual_atl_series(

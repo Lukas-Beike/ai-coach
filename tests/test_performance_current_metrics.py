@@ -197,7 +197,12 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             "athlete": {"sport_settings": [{"types": ["Ride"], "ftp": 300}]},
             "recent_wellness": [{"id": "2026-08-31"}],
             "recent_activities": [
-                {"type": "Ride", "start_date_local": "2026-09-01", "icu_eftp": 290}
+                {
+                    "id": "ride-1",
+                    "type": "Ride",
+                    "start_date_local": "2026-09-01T07:00:00",
+                    "icu_eftp": 290,
+                }
             ],
         }
         chain = {
@@ -217,14 +222,32 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
         result = snapshot_metrics(snapshot, {}, empty_garmin())
         self.assertIsNone(result["cycling_eftp_watts"]["value"])
 
-    def test_max_hr_activity_fallback_and_sport_aliases(self):
+    def test_max_hr_activity_fallback_by_canonical_sport(self):
+        # Canonical: the mapper classifies the Intervals.icu type, so the former raw
+        # sport/activityName aliases ("Radfahren", "Laufen") and the maxHeartRate
+        # key no longer reach the summaries; the type decides the sport.
         snapshot = {
             "athlete": {"sport_settings": [{"types": ["Ride"]}, {"types": ["Run"]}]},
             "recent_wellness": [],
             "recent_activities": [
-                {"sport": "Radfahren", "maxHR": 181},
-                {"activityName": "Laufen", "maxHeartRate": 191},
-                {"type": "Ride", "maxHR": 400},
+                {
+                    "id": "ride-1",
+                    "type": "Ride",
+                    "start_date_local": "2026-09-01T07:00:00",
+                    "maxHR": 181,
+                },
+                {
+                    "id": "run-1",
+                    "type": "Run",
+                    "start_date_local": "2026-09-02T07:00:00",
+                    "maxHR": 191,
+                },
+                {
+                    "id": "ride-2",
+                    "type": "Ride",
+                    "start_date_local": "2026-09-03T07:00:00",
+                    "maxHR": 400,
+                },
             ],
         }
         result = snapshot_metrics(snapshot, {}, empty_garmin())

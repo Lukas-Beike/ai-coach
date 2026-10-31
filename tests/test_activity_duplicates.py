@@ -5,6 +5,8 @@ from copy import deepcopy
 
 from backend.activities.duplicates import (
     deduplicate_api_records,
+)
+from backend.sync.garmin_activity_duplicates import (
     filter_garmin_activities,
     garmin_activity_duplicates_intervals,
     intervals_cycling_activities_match,

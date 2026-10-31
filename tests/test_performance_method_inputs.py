@@ -141,8 +141,9 @@ class M1SessionRpeInputs(linking.LinkingCase):
                 intervals["moving_duration_s"],
                 canonical_store.activity_elapsed_duration(intervals["details"]),
             ),
-            (3300.0, None, 3600.0),
-            msg="#1445: Intervals keeps its elapsed time in the one elapsed field",
+            (3300.0, 3300.0, 3600.0),
+            msg="#1445: Intervals keeps its elapsed time in the one elapsed field; "
+            "the Intervals.icu mapper (v6) also maps moving_time to moving_duration_s",
         )
         self.assertEqual(
             (
@@ -632,7 +633,7 @@ class M4BestEffortInputs(linking.LinkingCase):
 
         profile = power_profile(
             {
-                "type": "Ride",
+                "sport": "ride",
                 "streams": {
                     "time": list(detail.channels[StreamChannel.TIME_S]),
                     "watts": list(watts),
@@ -686,7 +687,7 @@ class M4BestEffortInputs(linking.LinkingCase):
             ),
             msg="#1430: best-effort points carry no resolution label",
         )
-        empty = power_profile({"type": "Ride", "streams": {}})
+        empty = power_profile({"sport": "ride", "streams": {}})
         self.assertEqual(
             (empty["status"], empty["reason"], empty["duration_curve"]),
             ("insufficient_data", "Vollständige Rad-Leistungsmessreihe fehlt.", []),

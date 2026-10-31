@@ -5,24 +5,32 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
+from backend.activities.activity_summary import summary_duration_s
 from backend.activities.identity import activity_datetime as _activity_datetime
 from backend.activities.identity import activity_sport as _activity_sport
+from backend.activities.identity import summary_sport as _summary_sport
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.vocabulary import Sport
-from backend.providers.intervals_activity_keys import TRAINING_LOAD_LOOKUP
+from backend.providers.intervals_performance_fields import (
+    TRAINING_LOAD as PLANNED_LOAD_KEY,
+)
 
 # Units without a planned time are stored as a bare date or at local midnight.
 _DATE_ONLY_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]00:00(?::00(?:\.0+)?)?)?")
-# Planned units are local planning records; activities keep their stored keys.
+# Planned units are local planning records and keep their stored keys; activities
+# are provider-neutral summaries.
 _UNIT_START_FIELDS = ("starts_at_local", "date", "start")
-_ACTIVITY_START_FIELDS = ("start_date_local", "start_date", "start")
+_ACTIVITY_START_FIELDS = ("started_at_local",)
 _UNIT_DURATION_FIELDS = ("planned_duration_s", "elapsed_time")
-_DURATION_FIELDS = ("moving_time", "elapsed_time")
-_LOAD_FIELDS = TRAINING_LOAD_LOOKUP
+# The stored training load of a planned unit.
+# Local planned units still store the provider load key (planning records, #1507).
+PLANNED_LOAD_FIELDS = (PLANNED_LOAD_KEY, "training_load", "tss")
+_ACTIVITY_LOAD_FIELDS = ("training_load",)
 
 
 def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
@@ -77,7 +85,7 @@ def _activities_by_paired_event_id(
 ) -> dict[str, list[int]]:
     by_paired_id: dict[str, list[int]] = {}
     for activity_index, activity in enumerate(activity_rows):
-        paired_id = _first_present(activity, ("paired_event_id", "pairedEventId"))
+        paired_id = _first_present(activity, ("planned_event_id",))
         if paired_id not in (None, ""):
             by_paired_id.setdefault(str(paired_id), []).append(activity_index)
     return by_paired_id
@@ -99,7 +107,7 @@ def _paired_activity_match(
         return None
     return min(
         candidates,
-        key=lambda index: str(activity_rows[index].get("start_date_local") or ""),
+        key=lambda index: str(activity_rows[index].get("started_at_local") or ""),
     )
 
 
@@ -110,7 +118,7 @@ def _is_unpaired(activity: dict[str, Any], planned_ids: frozenset[str]) -> bool:
     calendar event the local library does not hold) is free; one paired to a
     listed event belongs to that event only.
     """
-    paired_id = _first_present(activity, ("paired_event_id", "pairedEventId"))
+    paired_id = _first_present(activity, ("planned_event_id",))
     return paired_id is None or str(paired_id) not in planned_ids
 
 
@@ -133,7 +141,7 @@ def _same_day_candidates(
             _first_present(activity_rows[activity_index], _ACTIVITY_START_FIELDS)
         )
         == event_date
-        and _activity_sport(activity_rows[activity_index]) == event_sport
+        and _summary_sport(activity_rows[activity_index]) == event_sport
     ]
 
 
@@ -149,7 +157,7 @@ def _start_distance(activity: dict[str, Any], event_start: datetime | None) -> f
 def _duration_gap(unit: dict[str, Any], activity: dict[str, Any]) -> float:
     """Relative duration difference from the planned duration."""
     planned = _number_field(unit, _UNIT_DURATION_FIELDS)
-    actual = _number_field(activity, _DURATION_FIELDS)
+    actual = summary_duration_s(activity)
     if planned is None or actual is None or planned <= 0:
         return math.inf
     return abs(actual - planned) / planned
@@ -157,8 +165,8 @@ def _duration_gap(unit: dict[str, Any], activity: dict[str, Any]) -> float:
 
 def _load_gap(unit: dict[str, Any], activity: dict[str, Any]) -> float:
     """Absolute training-load difference; unknown when either side lacks load."""
-    planned = _number_field(unit, _LOAD_FIELDS)
-    actual = _number_field(activity, _LOAD_FIELDS)
+    planned = _number_field(unit, PLANNED_LOAD_FIELDS)
+    actual = _number_field(activity, _ACTIVITY_LOAD_FIELDS)
     if planned is None or actual is None:
         return math.inf
     return abs(actual - planned)
@@ -230,7 +238,7 @@ def _unpaired_activity_match(
 
 
 def match_planned_workouts(
-    planned: list[Any], activities: list[Any]
+    planned: list[Any], activities: Sequence[Any]
 ) -> dict[int, dict[str, Any]]:
     """Match completed activities to planned workouts without reusing one activity."""
     activity_rows = [item for item in activities if isinstance(item, dict)]
@@ -244,7 +252,7 @@ def match_planned_workouts(
         if (event_id := _first_present(event, ("id", "event_id"))) is not None
     )
 
-    # paired_event_id is the reliable Intervals.icu association.
+    # planned_event_id is the reliable provider association.
     for event_index, event in workout_rows:
         selected_index = _paired_activity_match(
             event, activity_rows, by_paired_id, unused

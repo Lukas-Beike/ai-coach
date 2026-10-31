@@ -2,31 +2,50 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from backend.activities.activity_summary import (
+    stored_activity_key,
+    summary_duration_s,
+    summary_is_indoor,
+    summary_local_date,
+)
 from backend.activities.detail_analysis_reads import analysis_summaries
 from backend.activities.detail_store import summary_fingerprint
-from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.stored_sports import resolve_workout_sport
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
-    activity_rows_for,
-    activity_rows_with_sync_time,
+    activity_summaries_and_rows,
+    activity_summaries_for,
+    activity_summaries_with_sync_time,
 )
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.season_inputs import (
     SeasonSource,
-    read_activity_rows,
+    read_activity_summaries,
     read_season_load_inputs,
 )
 from backend.performance.tag_impact import tag_impact
-from backend.performance.training_report import deduplicated_rows, training_report
-from backend.providers.intervals_activity_fields import intervals_activity_device_source
+from backend.performance.training_report import training_report
+
+
+def report_sport(value: Any) -> str | None:
+    """Return the report sport filter: "all" or a canonical sport, else None.
+
+    A previous Intervals.icu-style token (for example "VirtualRide") resolves to
+    its canonical sport, as the other HTTP and Coach inputs accept it.
+    """
+    text = str(value or "all").strip()
+    if text == "all":
+        return text
+    resolved = resolve_workout_sport(text) if len(text) <= 40 else None
+    return None if resolved is None else resolved.sport.value
 
 
 class TrainingRecordsService:
@@ -67,26 +86,36 @@ class TrainingRecordsService:
         return recurring_training_comparisons(self.observations())
 
     def observations(self) -> list[dict[str, Any]]:
-        rows, _ = deduplicated_rows(activity_rows_for(self._canonical))
-        known = {str(row.get("id")): row for row in rows}
+        summaries, rows = activity_summaries_and_rows(self._canonical)
+        fingerprints = {str(row.get("id")): summary_fingerprint(row) for row in rows}
+        known = {stored_activity_key(summary): summary for summary in summaries}
         records = []
         for stored in analysis_summaries(self._database_manager):
-            row = known.get(stored["activity_id"])
-            if row is None or stored["summary_sha256"] != summary_fingerprint(row):
+            summary = known.get(stored["activity_id"])
+            if summary is None or stored["summary_sha256"] != fingerprints.get(
+                stored["activity_id"]
+            ):
                 continue
+            sport = summary.get("sport")
             records.append(
                 {
                     **stored,
-                    "date": iso_date_prefix(str(row.get("start_date_local") or "")),
-                    "sport": row.get("type") or row.get("sport"),
-                    "activity_type": row.get("type") or row.get("sport"),
-                    "source": row.get("source") or "Intervals.icu",
-                    "name": row.get("name"),
-                    "average_temp": row.get("average_temp"),
-                    "duration": row.get("moving_time"),
+                    "date": summary_local_date(summary),
+                    "sport": sport,
+                    "activity_type": sport,
+                    "environment": "indoor"
+                    if summary_is_indoor(summary)
+                    else "outdoor",
+                    # Stored analyses come from the Intervals.icu detail.
+                    "source": "Intervals.icu"
+                    if ProviderId.INTERVALS.value in (summary.get("record_ids") or {})
+                    else summary.get("source") or "Intervals.icu",
+                    "name": summary.get("name"),
+                    "average_temp": summary.get("avg_temp_c"),
+                    "duration": summary_duration_s(summary),
                     "device": str(
-                        row.get("device_name")
-                        or intervals_activity_device_source(row)
+                        summary.get("device_name")
+                        or summary.get("recorded_by")
                         or "unknown"
                     )[:200],
                 }
@@ -149,12 +178,13 @@ class TrainingProfileSelectionService:
         eligible_records: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         compatibility = []
-        for sport in ("Ride", "VirtualRide"):
+        for environment in ("outdoor", "indoor"):
             for duration in (5, 60, 300, 1200):
                 candidates = [
                     (p.get("watts"), row)
                     for row in eligible_records
-                    if row.get("sport") == sport
+                    if row.get("sport") == "ride"
+                    and row.get("environment") == environment
                     for p in (row.get("power_profile") or {}).get("points", [])
                     if p.get("duration_seconds") == duration
                     and p.get("watts") is not None
@@ -163,11 +193,9 @@ class TrainingProfileSelectionService:
                     watts, row = max(candidates, key=lambda item: item[0])
                     compatibility.append(
                         {
-                            "sport": sport,
-                            "type": row.get("activity_type") or sport,
-                            "environment": "indoor"
-                            if sport == "VirtualRide"
-                            else "outdoor",
+                            "sport": "ride",
+                            "type": row.get("activity_type") or "ride",
+                            "environment": environment,
                             "duration_seconds": duration,
                             "watts": watts,
                             "activity_id": row["activity_id"],
@@ -210,12 +238,16 @@ class TrainingProfileSelectionService:
             "power": [],
             "running": {"speed": [], "distance": []},
         }
-        for sport in ("Ride", "VirtualRide"):
+        for environment in ("outdoor", "indoor"):
             for duration in (5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600):
-                candidates = _power_candidates(eligible, sport, duration)
+                candidates = _power_candidates(eligible, environment, duration)
                 result["power"].append(
                     TrainingProfileSelectionService._winner(
-                        candidates, sport, duration, "watts", "duration_seconds"
+                        candidates,
+                        ("ride", environment),
+                        duration,
+                        "watts",
+                        "duration_seconds",
                     )
                 )
         for key, field, values in (
@@ -227,7 +259,7 @@ class TrainingProfileSelectionService:
                 result["running"][key].append(
                     TrainingProfileSelectionService._winner(
                         candidates,
-                        "Run",
+                        ("run", None),
                         value,
                         field,
                         "duration_seconds" if key == "speed" else "distance_meters",
@@ -239,15 +271,21 @@ class TrainingProfileSelectionService:
     @staticmethod
     def _winner(
         candidates: list[tuple[dict[str, Any], dict[str, Any]]],
-        sport: str,
+        sport: tuple[str, str | None],
         value: int,
         field: str,
         label: str,
         minimum: bool = False,
     ) -> dict[str, Any]:
         if not candidates:
+            name, wanted_environment = sport
             return {
-                "sport": sport,
+                "sport": name,
+                **(
+                    {}
+                    if wanted_environment is None
+                    else {"environment": wanted_environment}
+                ),
                 label: value,
                 field: None,
                 "status": "unknown",
@@ -256,16 +294,11 @@ class TrainingProfileSelectionService:
         point, row = (min if minimum else max)(
             candidates, key=lambda item: item[0][field]
         )
-        actual_sport = row.get("sport", sport)
-        environment = (
-            "indoor"
-            if actual_sport in {"VirtualRide", "VirtualRun", "IndoorCycling"}
-            else "outdoor"
-        )
+        actual_sport = row.get("sport", sport[0])
         return {
             "sport": actual_sport,
             "type": row.get("activity_type") or actual_sport,
-            "environment": environment,
+            "environment": row.get("environment") or "outdoor",
             label: value,
             field: point[field],
             "activity_id": row.get("activity_id"),
@@ -332,14 +365,14 @@ class TrainingReportReadService:
             days = int(values.get("days", 7))
         except (TypeError, ValueError) as exc:
             raise AppError(400, "Ungültiger Berichtszeitraum.") from exc
-        sport = str(values.get("sport") or "all")
+        sport = report_sport(values.get("sport"))
         if (
             days not in {7, 28}
             or not date(2010, 1, 1) <= start <= today
-            or not re.fullmatch(r"[A-Za-z]{1,40}", sport)
+            or sport is None
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
-        rows, observed_at = activity_rows_with_sync_time(self._canonical)
+        summaries, observed_at = activity_summaries_with_sync_time(self._canonical)
         return training_report(
             start=start,
             days=days,
@@ -349,7 +382,7 @@ class TrainingReportReadService:
             checkins=self._read_checkins(),
             activity_feedback=self._read_feedback(),
             timezone=timezone,
-            activity_rows=rows,
+            activity_summaries=summaries,
             observed_at=observed_at,
         )
 
@@ -376,7 +409,7 @@ class TrainingDerivedReadService:
             self._read_recovery(),
             self._today(),
             timezone,
-            activity_rows=activity_rows_for(self._canonical),
+            activity_summaries=activity_summaries_for(self._canonical),
         )
 
     def body_history(self) -> dict[str, Any]:
@@ -417,7 +450,7 @@ class TrainingSeasonReadService:
                 self._today(),
                 timezone,
                 self._read_observations(),
-                activity_rows=lambda start, end: read_activity_rows(
+                activity_summaries=lambda start, end: read_activity_summaries(
                     self._season_source, db, start, end
                 ),
             )
@@ -434,12 +467,12 @@ class TrainingReportServices:
 
 
 def _power_candidates(
-    eligible: list[dict[str, Any]], sport: str, duration: int
+    eligible: list[dict[str, Any]], environment: str, duration: int
 ) -> list:
     return [
         (point, row)
         for row in eligible
-        if row.get("sport") == sport
+        if row.get("sport") == "ride" and row.get("environment") == environment
         for point in (row.get("power_profile") or {}).get("duration_curve", [])
         if point.get("duration_seconds") == duration and point.get("watts") is not None
     ]
@@ -451,7 +484,7 @@ def _running_candidates(
     return [
         (point, row)
         for row in eligible
-        if row.get("sport") in {"Run", "VirtualRun", "TrailRun"}
+        if row.get("sport") == "run"
         for point in (row.get("running_profile") or {}).get(key, [])
         if point.get(field) is not None
         and point.get("duration_seconds", point.get("distance_meters")) == value

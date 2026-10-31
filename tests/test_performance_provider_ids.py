@@ -88,7 +88,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
             TODAY,
             wellness_days=days_from_rows(snapshot["recent_wellness"]),
             canonical=garmin_body_from_payload(garmin, TODAY),
-            activity_rows=(),
+            activities=(),
             garmin_ftp=garmin_metrics_from_payload(garmin).performance_history[
                 "cycling_ftp_watts"
             ],

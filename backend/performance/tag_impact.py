@@ -5,10 +5,9 @@ from datetime import date, timedelta
 from statistics import median, quantiles
 from typing import Any
 
+from backend.activities.activity_summary import ActivitySummary, summary_local_date
 from backend.athlete.checkins import CHECKIN_TAGS
 from backend.athlete.measurements import number
-from backend.performance.training_report import activity_day, deduplicated_rows
-from backend.providers import intervals_performance_fields as intervals_perf_fields
 
 
 def tag_impact(
@@ -17,9 +16,9 @@ def tag_impact(
     today: date,
     timezone: str = "UTC",
     *,
-    activity_rows: Sequence[Any],
+    activity_summaries: Sequence[ActivitySummary],
 ) -> dict[str, Any]:
-    loads = _day_loads(timezone, activity_rows)
+    loads = _day_loads(timezone, activity_summaries)
     reports = []
     for baseline in recovery.get("baselines", []):
         history = {row["date"]: row["value"] for row in baseline["history"]}
@@ -57,13 +56,12 @@ def tag_impact(
 
 
 def _day_loads(
-    timezone: str, activity_rows: Sequence[Any]
+    timezone: str, summaries: Sequence[ActivitySummary]
 ) -> dict[str, list[float | None]]:
-    rows, _ = deduplicated_rows(activity_rows)
     loads: dict[str, list[float | None]] = {}
-    for row in rows:
-        loads.setdefault(activity_day(row, timezone), []).append(
-            number(row.get(intervals_perf_fields.TRAINING_LOAD))
+    for summary in summaries:
+        loads.setdefault(summary_local_date(summary, timezone), []).append(
+            number(summary.get("training_load"))
         )
 
     return loads

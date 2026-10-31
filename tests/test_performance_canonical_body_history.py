@@ -174,7 +174,7 @@ def _body(
         TODAY,
         canonical=canonical,
         wellness_days=_days(snapshot),
-        activity_rows=(),
+        activities=(),
         garmin_ftp=garmin_metrics_from_payload(garmin or {}).performance_history.get(
             "cycling_ftp_watts", {}
         ),
@@ -596,7 +596,7 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
                 today,
                 canonical=garmin_body_from_payload(self.garmin, today),
                 wellness_days=_days(self.intervals),
-                activity_rows=(),
+                activities=(),
                 garmin_ftp={},
             ),
             body_history(
@@ -605,7 +605,7 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
                 today,
                 canonical=inputs,
                 wellness_days=_days(self.intervals),
-                activity_rows=(),
+                activities=(),
                 garmin_ftp={},
             ),
         )

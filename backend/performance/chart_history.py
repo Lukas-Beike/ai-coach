@@ -1,9 +1,10 @@
 """Bounded, content-free historical series for the public analysis view."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
+from backend.activities.activity_summary import summary_duration_s
 from backend.athlete.local_date import LocalDate
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance import activity_validation, body, eftp, garmin_metric_history
@@ -51,26 +52,16 @@ def _load_history(
 
 
 def _training_time_history(
-    rows: list[dict[str, Any]], dates: list[str]
+    summaries: Sequence[Mapping[str, Any]], dates: list[str]
 ) -> list[dict[str, Any]]:
-    """Daily moving time in hours; each activity counts once, unknown stays a gap."""
+    """Daily moving time in hours; unknown stays a gap."""
     seconds: dict[str, float] = {}
-    seen: set[str] = set()
-    for row in rows:
-        key = str(row.get("id") or "")
-        day = _day(row.get("start_date_local"))
-        value = row.get("moving_time")
-        if (
-            day is None
-            or isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not 0 < value <= 86400
-            or (key and key in seen)
-        ):
+    for summary in summaries:
+        day = _day(summary.get("started_at_local"))
+        value = summary_duration_s(summary)
+        if day is None or value is None or not 0 < value <= 86400:
             continue
-        if key:
-            seen.add(key)
-        seconds[day.isoformat()] = seconds.get(day.isoformat(), 0) + float(value)
+        seconds[day.isoformat()] = seconds.get(day.isoformat(), 0) + value
     return [
         {
             "date": day,
@@ -94,7 +85,7 @@ def _garmin_values(
 
 def _metric_series(
     key: str,
-    activities: list[dict[str, Any]],
+    activities: Sequence[Mapping[str, Any]],
     eftp_by_day: Mapping[date, float] | None,
     dates: list[str],
     start: date,
@@ -132,7 +123,7 @@ def analysis_history(
 ) -> dict[str, Any]:
     """Use dated provider history, never backfill today's settings into the past.
 
-    ``canonical`` supplies the activity rows, wellness days and Garmin history read
+    ``canonical`` supplies the activity summaries, wellness days and Garmin history read
     through the canonical ports. The snapshot supplies sync times and the power
     curve, which has no metric kind yet.
     """
@@ -143,7 +134,7 @@ def analysis_history(
     load_start = load_end - timedelta(days=89)
     load_dates = [(load_start + timedelta(days=i)).isoformat() for i in range(90)]
     eftp_by_day = canonical.eftp_by_day
-    activities = list(canonical.activity_rows or ())
+    activities = list(canonical.activities or ())
     garmin_canonical = canonical.garmin or GarminCanonicalMetrics()
     load = _load_history(load_dates, garmin_canonical)
     series = {
@@ -176,7 +167,7 @@ def analysis_history(
             today,
             canonical=canonical.body,
             wellness_days=canonical.history_wellness_days or (),
-            activity_rows=activities,
+            activities=activities,
             garmin_ftp=garmin_canonical.performance_history.get(
                 "cycling_ftp_watts", {}
             ),

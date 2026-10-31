@@ -14,7 +14,7 @@ from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.tag_impact import tag_impact
-from backend.performance.training_report import deduplicated_rows
+from backend.sync.garmin_activity_duplicates import deduplicated_rows
 
 
 class MemoryManager:
@@ -969,7 +969,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                 ]
             },
             date(2026, 9, 1),
-            activity_rows=[],
+            activity_summaries=[],
         )
         report = next(row for row in result["reports"] if row["tag"] == "travel")
         self.assertEqual(report["measurement"], "duration")

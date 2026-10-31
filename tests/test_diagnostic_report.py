@@ -75,7 +75,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         # Activity and wellness counts come from the canonical read ports, not
         # from the stored snapshot's recent_activities / recent_wellness lists.
         self.canonical_rows = Mock()
-        self.canonical_rows.activity_rows.return_value = [{}, {}]
+        self.canonical_rows.activity_summaries.return_value = ({}, {})
         wellness = SimpleNamespace(
             observed_on="2026-09-22",
             provenance=SimpleNamespace(provider=ProviderId.INTERVALS),

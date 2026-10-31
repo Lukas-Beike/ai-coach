@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Final
 
 from backend.canonical.coverage import MetricWindow
@@ -79,7 +79,13 @@ from backend.providers.canonical_plans import (
 from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
-from backend.runtime.ports import ActivityReader, ActivityRowReader, ObservationReader
+from backend.runtime.ports import (
+    ActivityReader,
+    ActivityRowReader,
+    ActivitySessionReader,
+    ObservationReader,
+    SessionRecords,
+)
 
 _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
     ProviderId.INTERVALS: INTERVALS_LABEL,
@@ -88,7 +94,9 @@ _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
 }
 
 
-class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader):
+class CanonicalTableReader(
+    ActivityReader, ActivityRowReader, ActivitySessionReader, ObservationReader
+):
     """Serves canonical activities, raw activity rows and observations from the tables."""
 
     def __init__(
@@ -132,6 +140,51 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
         """
         rows = canonical_store.session_activity_rows(db, activity_id)
         return tuple(sorted((_activity(row) for row in rows), key=activity_order))
+
+    def activity_sessions(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        newest: int | None = None,
+    ) -> tuple[SessionRecords, ...]:
+        """Return each live session's id and its active records of every provider.
+
+        Records of sessions merged into another are listed under the survivor.
+        Records are in ``activity_order``; sessions in order of first record.
+        Records of a provider that is not a known ``ProviderId`` are skipped.
+        ``newest`` bounds the read to the days of at least the newest that many
+        sessions (a day earlier, so their merged copies stay); the caller still
+        keeps only as many as it needs.
+        """
+        if newest is not None:
+            bound = canonical_store.newest_sessions_start(db, newest)
+            if bound is not None:
+                earliest = date.fromisoformat(bound) - timedelta(days=1)
+                bounded = self._sessions(
+                    db,
+                    start=earliest if start is None else max(start, earliest),
+                    end=end,
+                )
+                # A session whose records were all skipped would leave too few.
+                if len(bounded) >= newest:
+                    return bounded
+        return self._sessions(db, start=start, end=end)
+
+    def _sessions(
+        self, db: Any, *, start: date | None, end: date | None
+    ) -> tuple[SessionRecords, ...]:
+        grouped: dict[str, list[ActivityRecord]] = {}
+        for session_id, row in canonical_store.active_session_activity_rows(
+            db, start=_iso(start), end=_iso(end)
+        ):
+            if _provider_or_none(row["provider"]) is not None:
+                grouped.setdefault(session_id, []).append(_activity(row))
+        return tuple(
+            (session_id, tuple(sorted(records, key=activity_order)))
+            for session_id, records in grouped.items()
+        )
 
     def activity_rows(
         self,
@@ -291,6 +344,7 @@ def _activity(row: Mapping[str, Any]) -> ActivityRecord:
         elevation_low_m=canonical_store.activity_elevation_low(row["details"]),
         steps=canonical_store.activity_steps(row["details"]),
         device_type=canonical_store.activity_device_type(row["details"]),
+        **canonical_store.activity_summary_values(row["details"]),
     )
 
 

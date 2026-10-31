@@ -174,7 +174,7 @@ def _garmin_source(garmin_payload: dict[str, Any]) -> CanonicalPerformanceSource
     return CanonicalPerformanceSource(
         database_manager=_Manager,
         observation_reader=lambda: reader,
-        activity_rows=NoActivityRows,
+        activity_summaries=NoActivityRows,
     )
 
 
@@ -522,48 +522,44 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
     def test_activity_projection_is_allowlisted_and_truncates_text(self) -> None:
         activity = {
             "id": "ride-9",
-            "type": "Ride",
+            "sport": "ride",
             "name": "N" * 250,
-            "start_date_local": "2026-05-03T07:00:00",
-            "moving_time": 3600,
-            "distance": None,
-            "icu_eftp": 265,
-            "max_speed": 12.5,
-            "description": "private coach note",
-            "feel": "F" * 200,
-            "icu_rpe": 6,
+            "started_at_local": "2026-05-03T07:00:00",
+            "moving_duration_s": 3600,
+            "distance_m": None,
+            "eftp_w": 265,
+            "max_speed_mps": 12.5,
+            "record_ids": {"intervals": "ride-9"},
+            "feel": 4.0,
+            "rpe": 6,
         }
 
         result = CoachIntervalsContextService().project([], TODAY, [activity])
 
         row = result["recent_activities_by_sport"]["Radfahren"][0]
-        # Fields outside COACH_ACTIVITY_FIELDS (icu_eftp, max_speed, description)
+        # Fields outside COACH_ACTIVITY_FIELDS (eftp_w, max_speed_mps, record_ids)
         # and None-valued fields are dropped.
         self.assertEqual(
             set(row),
             {
                 "id",
-                "start_date_local",
+                "started_at_local",
                 "name",
-                "type",
-                "moving_time",
+                "sport",
+                "moving_duration_s",
                 "feel",
-                "icu_rpe",
+                "rpe",
             },
         )
         self.assertEqual(len(row["name"]), 200)
-        self.assertEqual(len(row["feel"]), 120)
+        # Feel is a number in the summary: it passes through, not truncated as text.
+        self.assertEqual(row["feel"], 4.0)
 
-    def test_activity_without_id_loses_its_id_when_only_activity_id_exists(
-        self,
-    ) -> None:
-        # Quirk: sorting falls back to activityId, but the projection selects only
-        # `id`, so the row is kept without an identifier.
+    def test_activity_without_id_is_kept_without_an_identifier(self) -> None:
         activity = {
-            "activityId": "legacy-7",
-            "type": "Run",
+            "sport": "run",
             "name": "Legacy",
-            "start_date_local": "2026-05-03T07:00:00",
+            "started_at_local": "2026-05-03T07:00:00",
         }
 
         result = CoachIntervalsContextService().project([], TODAY, [activity])

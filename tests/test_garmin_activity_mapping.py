@@ -80,8 +80,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_six(self) -> None:
-        self.assertEqual(6, MAPPER_VERSION)
+    def test_mapper_version_is_seven(self) -> None:
+        self.assertEqual(7, MAPPER_VERSION)
 
     def test_fixture_maps_every_record_without_issues(self) -> None:
         result = _map(*_fixture_rows())
@@ -894,3 +894,17 @@ class RetrievedAtTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SummaryValueTests(unittest.TestCase):
+    def test_speed_elevation_normalized_power_and_vo2max_are_mapped(self) -> None:
+        record, issues = _one(
+            averageSpeed=7.5, elevationGain=310, normPower=240, vO2MaxValue=54
+        )
+
+        self.assertEqual((), issues)
+        assert record is not None
+        self.assertEqual(7.5, record.avg_speed_mps)
+        self.assertEqual(310.0, record.elevation_gain_m)
+        self.assertEqual(240.0, record.normalized_power)
+        self.assertEqual(54.0, record.vo2max)

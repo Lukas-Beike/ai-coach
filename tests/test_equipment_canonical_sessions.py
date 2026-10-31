@@ -20,9 +20,9 @@ from backend.athlete.equipment import EquipmentService
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
-from backend.performance.training_report import deduplicated_rows
 from backend.sync import canonical_ingest
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.garmin_activity_duplicates import deduplicated_rows
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 ZONE = ZoneInfo("Europe/Berlin")

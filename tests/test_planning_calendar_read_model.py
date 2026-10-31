@@ -83,20 +83,20 @@ class PlanningCalendarReadModelTests(unittest.TestCase):
         activities = [
             {
                 "id": "activity-a",
-                "paired_event_id": "ride-a",
-                "start_date_local": f"{today_text}T06:05:00",
+                "planned_event_id": "ride-a",
+                "started_at_local": f"{today_text}T06:05:00",
                 "name": "Morning ride",
-                "type": "Ride",
-                "moving_time": 3600,
-                "icu_training_load": 120,
+                "sport": "ride",
+                "moving_duration_s": 3600,
+                "training_load": 120,
             },
             {
                 "id": "activity-unmatched",
-                "start_date_local": (today + timedelta(days=2)).isoformat()
+                "started_at_local": (today + timedelta(days=2)).isoformat()
                 + "T07:00:00",
                 "name": "Unplanned run",
-                "type": "Run",
-                "moving_time": 1800,
+                "sport": "run",
+                "moving_duration_s": 1800,
             },
         ]
         weather = {

@@ -17,7 +17,7 @@ from backend.coach.context import (
 )
 from backend.coach.request_payload import CoachRequestPayloadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.settings import SettingsService
 
 
@@ -33,8 +33,8 @@ class CoachContextPerformanceSources:
     utc_now: Callable[[], datetime]
     # When set, Coach performance reads CTL and ATL from canonical observations.
     canonical: CanonicalPerformanceSource | None = None
-    # When set, recent activities come from the canonical activity row port.
-    activity_rows: ActivityRowSource | None = None
+    # When set, recent activities come from the canonical activity summary port.
+    activity_rows: ActivitySummarySource | None = None
     # When set, current performance lists the zones in effect (local first).
     zone_configurations: Callable[[], Any] | None = None
 
