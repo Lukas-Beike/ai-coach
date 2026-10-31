@@ -80,8 +80,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_five(self) -> None:
-        self.assertEqual(5, MAPPER_VERSION)
+    def test_mapper_version_is_six(self) -> None:
+        self.assertEqual(6, MAPPER_VERSION)
 
     def test_fixture_maps_every_record_without_issues(self) -> None:
         result = _map(*_fixture_rows())

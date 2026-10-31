@@ -65,7 +65,7 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 2
+MAPPER_VERSION: Final = 3
 WAHOO_LABEL: Final = "Wahoo"
 MAX_NAME_LENGTH: Final = 200
 MAX_WORKOUT_ID: Final = 2**63 - 1

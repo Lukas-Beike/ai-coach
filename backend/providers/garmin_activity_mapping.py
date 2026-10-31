@@ -80,7 +80,7 @@ from backend.canonical.vocabulary import (
 # Version 5: maps the maximum speed, maximum power and step count.
 # Version 4: a row with manualActivity exactly True is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 5
+MAPPER_VERSION: Final = 6
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64

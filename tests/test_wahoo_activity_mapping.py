@@ -464,9 +464,9 @@ class StoredRawRecordTests(unittest.TestCase):
 
 
 class ReprojectionTests(unittest.TestCase):
-    def test_mapper_version_is_two_and_newer_than_the_stored_version_one(self) -> None:
-        self.assertEqual(2, MAPPER_VERSION)
-        self.assertEqual(2, reprojection_mapper_version("wahoo", "activity"))
+    def test_mapper_version_is_three_and_newer_than_the_stored_version_one(self) -> None:
+        self.assertEqual(3, MAPPER_VERSION)
+        self.assertEqual(3, reprojection_mapper_version("wahoo", "activity"))
 
     def test_a_stored_version_one_row_reprojects_the_new_metrics(self) -> None:
         stored = {

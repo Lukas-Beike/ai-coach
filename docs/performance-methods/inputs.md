@@ -23,7 +23,7 @@ Provenance has three separate parts. Fixtures check them separately:
 
 | Input | Canonical storage today | Evidence |
 | --- | --- | --- |
-| Elapsed duration | `elapsed_duration_s` in the record details JSON for every provider (Intervals elapsed time, Garmin `duration`, Wahoo `duration_total_accum`, since #1445); `duration_s` stays the provider summary duration and `moving_duration_s` separate. | `backend/providers/intervals_activity_mapping.py:427-446`, `backend/providers/garmin_activity_mapping.py:87-88`, `backend/providers/wahoo_activity_mapping.py:265-274`, `backend/db/canonical_store.py:34` |
+| Elapsed duration | `elapsed_duration_s` in the record details JSON for every provider (Intervals elapsed time, Garmin `duration`, Wahoo `duration_total_accum`, since #1445); `duration_s` stays the provider summary duration and `moving_duration_s` separate. | `backend/providers/intervals_activity_mapping.py:427-446`, `backend/providers/garmin_activity_mapping.py:175-177`, `backend/providers/wahoo_activity_mapping.py:265-273`, `backend/db/canonical_store.py:34` |
 | Local session RPE | `activity_feedback.session_rpe` (0–10), keyed by the provider activity id plus `provider`; no link to `activity_sessions` | `backend/db/schema.py:662-673`, `backend/activities/feedback.py:43` |
 | Intervals `icu_rpe` | No canonical field. Kept in the stored provider activity row; the browser contract renames it to `rpe` | `backend/providers/intervals_activity_fields.py:47`, `backend/canonical/public_metrics.py:24` |
 | One session per ride | `bundle_sessions` groups records; `link_activity_sessions` marks the younger session `duplicate` with `merged_into` | `backend/activities/canonical_sessions.py:97`, `backend/activities/session_linking.py:47` |
