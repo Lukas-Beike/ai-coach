@@ -230,7 +230,6 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
         _LEGACY_FALLBACK,
         ("intervals_performance_fields",),
     ),
-    "backend/performance/daily_health.py": (_LEGACY_FALLBACK, ("garmin_fields",)),
     "backend/performance/eftp.py": (
         _ACTIVITY_ROWS,
         (

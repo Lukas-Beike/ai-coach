@@ -14,6 +14,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+from canonical_daily_health_support import mapped_expenditure
 from performance_day_support import days_from_rows
 
 # Safe server setup first: temporary DATA_DIR, fake configuration, and no read of a real .env.
@@ -30,7 +31,6 @@ from backend.errors import AppError
 from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
-from backend.performance.daily_health import daily_energy_expenditure
 from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.performance.wellness_days import wellness_day_values
 from backend.providers.calendar import parse_ical_calendar
@@ -307,9 +307,14 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         garmin = fixture_runtime._fixture_demo_garmin(
             self.today, fixture_runtime.demo_performance_history(self.today)
         )
-        today = daily_energy_expenditure(garmin, self.today.isoformat(), self.today)
-        zero_day = daily_energy_expenditure(
-            garmin, (self.today - timedelta(days=12)).isoformat(), self.today
+        today = mapped_expenditure(
+            garmin, self.today.isoformat(), self.today, strict=False
+        )
+        zero_day = mapped_expenditure(
+            garmin,
+            (self.today - timedelta(days=12)).isoformat(),
+            self.today,
+            strict=False,
         )
 
         self.assertTrue(today["provisional"])
@@ -318,9 +323,11 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         self.assertIsNotNone(today["total_kcal"])
         self.assertEqual(today["projected_total_kcal"], 1548 + 420)
         self.assertIsNone(zero_day["projected_total_kcal"])
+        # Canonical energy (#1415): a measured zero active energy is kept; zero
+        # resting and total energy are implausible and rejected by the mapper.
         self.assertEqual(
             (zero_day["active_kcal"], zero_day["resting_kcal"], zero_day["total_kcal"]),
-            (0, 0, 0),
+            (0, None, None),
         )
 
     def test_calendar_feed_parses_titles_descriptions_and_event_examples(self):

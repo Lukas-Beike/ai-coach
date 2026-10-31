@@ -41,7 +41,7 @@ Mapped sections and their canonical kinds:
   are searched with the legacy reader's depth, visit and list limits.
 * ``daily_stats``: STEPS, FLOORS, DAILY_ENERGY_TOTAL, DAILY_ENERGY_ACTIVE and
   DAILY_ENERGY_RESTING (kcal, a provider total, never estimated when absent), with
-  the aliases ``performance.daily_health`` reads, and STRESS, Garmin's daily mean
+  the aliases of ``backend.providers.garmin_fields``, and STRESS, Garmin's daily mean
   physiological stress on its 0 to 100 scale from ``averageStressLevel`` (the range
   endpoint's ``stress.avgLevel`` when no flat value is present).
 * ``body_battery``: BODY_BATTERY_CHARGED and BODY_BATTERY_DRAINED as daily totals,

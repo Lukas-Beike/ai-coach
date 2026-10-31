@@ -34,7 +34,7 @@ class NutritionSyncStatusService:
         nutrition_repository: NutritionRepository,
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
-        observation_reader: Callable[[], ObservationReader] | None = None,
+        observation_reader: Callable[[], ObservationReader],
     ) -> None:
         self._observation_reader = observation_reader
         self._database_manager = database_manager
@@ -54,32 +54,29 @@ class NutritionSyncStatusService:
         )
         with self._database_manager.read_snapshot() as db:
             summary = self._nutrition_repository.day_summary(db, validated_date)
-            # The snapshot carries the daily-stats sync status, and the energy
-            # values when no canonical reader serves them.
+            # The snapshot carries only the daily-stats sync status.
             garmin_snapshot = garmin_store.read_view(
                 db, _ENERGY_SECTIONS, start=snapshot_start, end=validated_date
             )
-            measured = self._measured_energy(db, snapshot_start, validated_date)
-        if measured is not None:
             measured = _filter_targeted_missing_energy(
-                measured, garmin_snapshot, [validated_date]
+                self._measured_energy(db, snapshot_start, validated_date),
+                garmin_snapshot,
+                [validated_date],
             )
         add_intake_totals(summary)
         summary["energy_expenditure"] = daily_energy_expenditure(
             garmin_snapshot,
             validated_date,
             today,
-            measured=None if measured is None else measured.get(validated_date, {}),
+            measured=measured.get(validated_date, {}),
             measured_history=measured,
         )
         return summary
 
     def _measured_energy(
         self, db: Any, start: str, end: str
-    ) -> dict[str, dict[str, Any]] | None:
-        """Read the canonical daily energy, or None without an observation reader."""
-        if self._observation_reader is None:
-            return None
+    ) -> dict[str, dict[str, Any]]:
+        """Read the canonical daily energy of the inclusive ISO date range."""
         return read_daily_health_by_date(
             resolve_reader(self._observation_reader(), db),
             db,
@@ -108,9 +105,9 @@ class NutritionSyncStatusService:
             snapshot = garmin_store.read_view(
                 db, _ENERGY_SECTIONS, start=dates[0], end=dates[-1]
             )
-            measured = self._measured_energy(db, dates[0], dates[-1])
-        if measured is not None:
-            measured = _filter_targeted_missing_energy(measured, snapshot, dates)
+            measured = _filter_targeted_missing_energy(
+                self._measured_energy(db, dates[0], dates[-1]), snapshot, dates
+            )
         days = []
         for summary in summaries:
             add_intake_totals(summary)
@@ -118,9 +115,7 @@ class NutritionSyncStatusService:
                 snapshot,
                 summary["date"],
                 today,
-                measured=None
-                if measured is None
-                else measured.get(summary["date"], {}),
+                measured=measured.get(summary["date"], {}),
                 measured_history=measured,
             )
             days.append(_week_day(summary, expenditure))

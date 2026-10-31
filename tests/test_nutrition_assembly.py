@@ -24,7 +24,9 @@ class NutritionAssemblyTests(unittest.TestCase):
         self.request_factory = Mock(return_value=self.request)
         return NutritionAssembly(
             dependencies=NutritionAssembly.Inputs(
-                persistence=NutritionPersistence(self.manager_factory, self.lock),
+                persistence=NutritionPersistence(
+                    self.manager_factory, self.lock, Mock()
+                ),
                 runtime=NutritionRuntime(
                     self.config_factory,
                     self.utc_now,

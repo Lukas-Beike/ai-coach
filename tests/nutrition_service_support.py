@@ -8,6 +8,7 @@ from backend.db.repositories import (
 from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.meal_library import NutritionMealLibraryService
+from backend.sync.canonical_table_reader import CanonicalTableReader
 
 
 def build_nutrition_services(
@@ -40,6 +41,8 @@ def build_nutrition_services(
         utc_now=utc_now,
         local_now=local_now,
         meal_library=meal_library,
-        observation_reader=observation_reader,
+        # The energy views read canonical observations only (#1415); the table
+        # reader serves what the Garmin snapshot writer stored.
+        observation_reader=observation_reader or CanonicalTableReader,
     )
     return diary, meal_library
