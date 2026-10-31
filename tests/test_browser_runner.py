@@ -72,6 +72,7 @@ class FakeProcesses:
         self.active = self.maximum = 0
         self.lock = threading.Lock()
         self.stopped = False
+        self.overlap = None
 
     def stop_all(self):
         self.stopped = True
@@ -112,9 +113,12 @@ class FakeProcesses:
         with self.lock:
             self.active += 1
             self.maximum = max(self.maximum, self.active)
+            overlap = self.overlap
         try:
             if self.interrupt:
                 raise InterruptedError
+            if overlap is not None:
+                overlap.wait()
             self.stop.wait(0.03)
             return (
                 7 if self.fail_browser else 0
@@ -247,6 +251,12 @@ class BrowserRunnerTests(unittest.TestCase):
         for jobs in (1, 2):
             with self.subTest(jobs=jobs):
                 fake = FakeProcesses()
+                if jobs == 2:
+                    fake.overlap = threading.Barrier(
+                        2,
+                        action=lambda fake=fake: setattr(fake, "overlap", None),
+                        timeout=5,
+                    )
                 code, value, _ = self.run_main(fake, jobs=jobs)
                 self.assertEqual(code, 0)
                 self.assertEqual(value["status"], "passed")

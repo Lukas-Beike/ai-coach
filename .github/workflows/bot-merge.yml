@@ -1,0 +1,54 @@
+name: Protected bot merge
+
+on:
+  # Runs with repository permissions and secrets. The job only checks out the
+  # trusted develop branch and never checks out or executes pull request code.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review_thread:
+    types: [resolved]
+  check_run:
+    types: [completed]
+  workflow_run:
+    workflows:
+      - Test and publish container image
+      - Validate Conventional Commits
+      - Validate repository AI documentation
+      - CodeQL
+    types: [completed]
+  status:
+  schedule:
+    - cron: '17,47 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protected-bot-merge
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  merge:
+    if: vars.BOT_MERGE_ENABLED == 'true' && (github.event_name != 'check_run' || github.event.check_run.name != 'merge')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: develop
+          persist-credentials: false
+      - name: Create release app token
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.0.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-checks: read
+      - name: Attempt protected bot merges
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: python3 tools/bot_merge.py
