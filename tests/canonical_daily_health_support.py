@@ -9,6 +9,10 @@ from zoneinfo import ZoneInfo
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
+from backend.performance.daily_health import (
+    daily_energy_expenditure,
+    read_daily_health_by_date,
+)
 from backend.providers.garmin_health_mapping import map_garmin_health
 
 RETRIEVED = datetime(2026, 9, 24, 8, 0, tzinfo=UTC)
@@ -17,11 +21,12 @@ RETRIEVED = datetime(2026, 9, 24, 8, 0, tzinfo=UTC)
 class MappedDailyReader:
     """Serves the observations the Garmin mapper produces from ``snapshot``."""
 
-    def __init__(self, snapshot: dict[str, Any]) -> None:
+    def __init__(self, snapshot: dict[str, Any], *, strict: bool = True) -> None:
         result = map_garmin_health(
             snapshot, zone=ZoneInfo("Europe/Berlin"), retrieved_at=RETRIEVED
         )
-        assert not result.issues, result.issues
+        if strict:
+            assert not result.issues, result.issues
         self._by_kind: dict[MetricKind, list[Observation]] = defaultdict(list)
         for observation in result.records:
             self._by_kind[observation.kind].append(observation)
@@ -43,3 +48,22 @@ class MappedDailyReader:
             if (start is None or item.observed_on >= start)
             and (end is None or item.observed_on <= end)
         )
+
+
+def mapped_health(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The canonical daily totals of the snapshot's mapped Garmin daily stats."""
+    return read_daily_health_by_date(MappedDailyReader(snapshot, strict=False), None)
+
+
+def mapped_expenditure(
+    snapshot: dict[str, Any], requested_date: str, current_date: date
+) -> dict[str, Any]:
+    """``daily_energy_expenditure`` with the snapshot's energy mapped first (#1415)."""
+    health = mapped_health(snapshot)
+    return daily_energy_expenditure(
+        snapshot,
+        requested_date,
+        current_date,
+        measured=health.get(requested_date, {}),
+        measured_history=health,
+    )

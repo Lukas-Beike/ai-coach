@@ -16,6 +16,7 @@ from backend.nutrition.components import MealComponentCalculator
 from backend.nutrition.food_database import FoodDatabaseService
 from backend.nutrition.photo_service import PhotoExtractionService
 from backend.nutrition.sync_status import NutritionSyncStatusService
+from backend.sync.canonical_table_reader import CanonicalTableReader
 
 
 class NutritionUseCaseServiceTests(unittest.TestCase):
@@ -47,6 +48,7 @@ class NutritionUseCaseServiceTests(unittest.TestCase):
             self.repository,
             lambda: self.now,
             lambda: datetime(2026, 9, 24, 12, tzinfo=UTC),
+            CanonicalTableReader,
         )
 
     def tearDown(self) -> None:

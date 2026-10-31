@@ -203,7 +203,7 @@ def current_performance_context(
             7,
             today - timedelta(days=1),
             today,
-            health_by_date=None if canonical is None else canonical.daily_health,
+            health_by_date={} if canonical is None else canonical.daily_health or {},
         )
     )
     comparisons = performance_comparisons.performance_comparisons(

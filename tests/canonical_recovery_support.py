@@ -181,6 +181,7 @@ def recovery_only_inputs(
     """
     from dataclasses import replace
 
+    from canonical_daily_health_support import mapped_health
     from performance_day_support import garmin_metrics_from_payload
 
     from backend.performance.canonical_inputs import (
@@ -195,6 +196,8 @@ def recovery_only_inputs(
         atl=None,
         recovery=mapped_recovery_inputs(garmin, wellness),
         garmin=None if garmin is None else garmin_metrics_from_payload(dict(garmin)),
+        # Daily totals come only from observations (#1415).
+        daily_health=None if garmin is None else mapped_health(dict(garmin)),
     )
     if snapshot is None:
         return inputs

@@ -70,7 +70,7 @@ class NutritionDiaryService:
         utc_now: Callable[[], str],
         local_now: Callable[[], datetime],
         meal_library: NutritionMealLibraryService,
-        observation_reader: Callable[[], ObservationReader] | None = None,
+        observation_reader: Callable[[], ObservationReader],
     ) -> None:
         self._database_manager = database_manager
         self._db_lock = db_lock

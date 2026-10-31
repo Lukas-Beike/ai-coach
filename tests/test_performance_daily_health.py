@@ -3,12 +3,15 @@ import unittest
 from datetime import date, timedelta
 from typing import Any, ClassVar
 
-from canonical_daily_health_support import MappedDailyReader
+from canonical_daily_health_support import (
+    MappedDailyReader,
+    mapped_expenditure,
+    mapped_health,
+)
 
 from backend.performance.daily_health import (
     GARMIN_DAILY_HEALTH_FIELDS,
     daily_energy_expenditure,
-    garmin_daily_health_by_date,
     garmin_daily_health_metrics,
     read_daily_health_by_date,
 )
@@ -33,7 +36,7 @@ class GarminDailyHealthTests(unittest.TestCase):
             },
         }
 
-        result = daily_energy_expenditure(snapshot, "2026-08-31", date(2026, 9, 1))
+        result = mapped_expenditure(snapshot, "2026-08-31", date(2026, 9, 1))
 
         self.assertEqual(result["active_kcal"], 0)
         self.assertEqual(result["resting_kcal"], 1420)
@@ -62,15 +65,13 @@ class GarminDailyHealthTests(unittest.TestCase):
             ]
         }
 
-        result = daily_energy_expenditure(snapshot, "2026-08-31", date(2026, 9, 1))
+        result = mapped_expenditure(snapshot, "2026-08-31", date(2026, 9, 1))
 
         self.assertEqual(result["active_kcal"], 300)
         self.assertEqual(result["resting_kcal"], 1420)
         self.assertEqual(result["total_kcal"], 1720)
         self.assertEqual(result["status"], "measured")
-        self.assertEqual(
-            garmin_daily_health_by_date(snapshot)["2026-08-31"]["steps"], 5000
-        )
+        self.assertEqual(mapped_health(snapshot)["2026-08-31"]["steps"], 5000)
 
     def test_daily_expenditure_does_not_invent_a_total_or_reuse_another_date(self):
         snapshot = {
@@ -83,7 +84,7 @@ class GarminDailyHealthTests(unittest.TestCase):
             ]
         }
 
-        result = daily_energy_expenditure(snapshot, "2026-08-31", date(2026, 8, 31))
+        result = mapped_expenditure(snapshot, "2026-08-31", date(2026, 8, 31))
 
         self.assertEqual(result["active_kcal"], None)
         self.assertEqual(result["resting_kcal"], None)
@@ -94,14 +95,14 @@ class GarminDailyHealthTests(unittest.TestCase):
         self.assertTrue(result["provisional"])
         self.assertEqual(result["status"], "unavailable")
 
-        prior_day = daily_energy_expenditure(snapshot, "2026-08-31", date(2026, 9, 1))
+        prior_day = mapped_expenditure(snapshot, "2026-08-31", date(2026, 9, 1))
         self.assertFalse(prior_day["provisional"])
         self.assertEqual(prior_day["status"], "unavailable")
 
     def test_daily_expenditure_rejects_negative_and_nonfinite_values_but_keeps_zero(
         self,
     ):
-        result = daily_energy_expenditure(
+        result = mapped_expenditure(
             {
                 "daily_stats": [
                     {
@@ -135,16 +136,14 @@ class GarminDailyHealthTests(unittest.TestCase):
             },
         ):
             with self.subTest(snapshot=snapshot):
-                result = daily_energy_expenditure(
-                    snapshot, "2026-09-02", date(2026, 9, 1)
-                )
+                result = mapped_expenditure(snapshot, "2026-09-02", date(2026, 9, 1))
                 self.assertIsNone(result["active_kcal"])
                 self.assertIsNone(result["total_kcal"])
                 self.assertIsNone(result["measured_date"])
                 self.assertEqual(result["status"], "unavailable")
 
     def test_daily_expenditure_exposes_components_without_summing_them(self):
-        result = daily_energy_expenditure(
+        result = mapped_expenditure(
             {
                 "daily_stats": [
                     {
@@ -182,16 +181,14 @@ class GarminDailyHealthTests(unittest.TestCase):
             },
         }
 
-        result = daily_energy_expenditure(snapshot, "2026-10-15", date(2026, 10, 15))
+        result = mapped_expenditure(snapshot, "2026-10-15", date(2026, 10, 15))
 
         self.assertEqual(result["total_kcal"], 1203)
         self.assertEqual(result["projected_total_kcal"], 2355)
         self.assertEqual(result["projection_resting_kcal"], 2332)
         self.assertEqual(result["projection_reference_date"], "2026-10-14")
 
-        closed_day = daily_energy_expenditure(
-            snapshot, "2026-10-14", date(2026, 10, 15)
-        )
+        closed_day = mapped_expenditure(snapshot, "2026-10-14", date(2026, 10, 15))
         self.assertIsNone(closed_day["projected_total_kcal"])
 
     def test_running_day_projection_is_omitted_without_trustworthy_inputs(self):
@@ -219,7 +216,7 @@ class GarminDailyHealthTests(unittest.TestCase):
         }
         for name, daily_stats in cases.items():
             with self.subTest(name):
-                result = daily_energy_expenditure(
+                result = mapped_expenditure(
                     {
                         "daily_stats": daily_stats,
                         "source_freshness": {"daily_stats": {"freshness": "current"}},
@@ -258,7 +255,7 @@ class GarminDailyHealthTests(unittest.TestCase):
         }
         for name, provider_sync in provider_sync_cases.items():
             with self.subTest(name):
-                result = daily_energy_expenditure(
+                result = mapped_expenditure(
                     {
                         "daily_stats": daily_stats,
                         "source_freshness": {"daily_stats": {"freshness": "current"}},
@@ -270,7 +267,7 @@ class GarminDailyHealthTests(unittest.TestCase):
                 self.assertIsNone(result["projected_total_kcal"])
                 self.assertEqual(result["total_kcal"], 1203)
 
-        covered = daily_energy_expenditure(
+        covered = mapped_expenditure(
             {
                 "daily_stats": daily_stats,
                 "source_freshness": {"daily_stats": {"freshness": "current"}},
@@ -284,7 +281,7 @@ class GarminDailyHealthTests(unittest.TestCase):
         self.assertEqual(covered["projected_total_kcal"], 2023)
 
         # The day's wide first run stays trusted after a later one-day run.
-        kept = daily_energy_expenditure(
+        kept = mapped_expenditure(
             {
                 "daily_stats": daily_stats,
                 "source_freshness": {"daily_stats": {"freshness": "current"}},
@@ -317,7 +314,7 @@ class GarminDailyHealthTests(unittest.TestCase):
         }
         for name, source_freshness in freshness_cases.items():
             with self.subTest(name):
-                result = daily_energy_expenditure(
+                result = mapped_expenditure(
                     {
                         "daily_stats": daily_stats,
                         "source_freshness": source_freshness,
@@ -329,7 +326,7 @@ class GarminDailyHealthTests(unittest.TestCase):
                 self.assertEqual(result["total_kcal"], 1203)
 
     def test_requested_day_freshness_overrides_source_freshness(self):
-        result = daily_energy_expenditure(
+        result = mapped_expenditure(
             {
                 "source_freshness": {"daily_stats": {"freshness": "stale"}},
                 "nutrition_refresh": {
@@ -362,15 +359,18 @@ class GarminDailyHealthTests(unittest.TestCase):
                 ]
             }
         }
+        # Canonical reads (#1415): the later record of the same day wins per kind.
         self.assertEqual(
-            garmin_daily_health_by_date(snapshot),
             {
-                "2026-08-30": {
-                    "steps": 1000,
-                    "calories": 200.25,
-                    "floors": 4,
-                    "source": "Garmin Connect",
-                }
+                key: value
+                for key, value in mapped_health(snapshot)["2026-08-30"].items()
+                if key in ("steps", "floors", "calories", "source")
+            },
+            {
+                "steps": 3000,
+                "calories": 250.5,
+                "floors": 4,
+                "source": "Garmin Connect",
             },
         )
 
@@ -386,23 +386,16 @@ class GarminDailyHealthTests(unittest.TestCase):
                 }
             ]
         }
-        self.assertEqual(
-            garmin_daily_health_by_date(snapshot),
-            {
-                "2026-08-30": {
-                    "floors": 6,
-                    "calories": 250.25,
-                    "source": "Garmin Connect",
-                }
-            },
-        )
+        # Canonical reads (#1415): an invalid first alias is a mapping issue and
+        # never falls back to a later alias; comma decimals are not numbers.
+        self.assertEqual(mapped_health(snapshot), {})
 
     def test_recovery_list_limit_is_respected(self):
         records = [
             {"date": f"2026-08-{index:02}", "steps": index} for index in range(1, 32)
         ]
         snapshot = {"daily_stats": records}
-        health = garmin_daily_health_by_date(snapshot)
+        health = mapped_health(snapshot)
         self.assertEqual(len(health), 31)
         records = [
             {
@@ -411,7 +404,7 @@ class GarminDailyHealthTests(unittest.TestCase):
             }
             for index in range(501)
         ]
-        health = garmin_daily_health_by_date({"daily_stats": records})
+        health = mapped_health({"daily_stats": records})
         self.assertEqual(health["2027-05-15"]["steps"], 499)
 
     def test_window_boundaries_rounding_and_missing_values(self):
@@ -440,7 +433,11 @@ class GarminDailyHealthTests(unittest.TestCase):
             },
         }
         result = garmin_daily_health_metrics(
-            snapshot, 2, date(2026, 8, 31), date(2026, 9, 2)
+            snapshot,
+            2,
+            date(2026, 8, 31),
+            date(2026, 9, 2),
+            health_by_date=mapped_health(snapshot),
         )
         self.assertEqual(result["steps_7d"]["value"], 102)
         self.assertEqual(result["floors_7d"]["value"], 2)
@@ -460,13 +457,21 @@ class GarminDailyHealthTests(unittest.TestCase):
             },
         }
         result = garmin_daily_health_metrics(
-            snapshot, 1, date(2026, 8, 31), date(2026, 9, 1)
+            snapshot,
+            1,
+            date(2026, 8, 31),
+            date(2026, 9, 1),
+            health_by_date=mapped_health(snapshot),
         )
         self.assertEqual(result["steps_7d"]["freshness"], "stale")
         self.assertIn("Letzter guter Wert", result["steps_7d"]["note"])
         snapshot["source_freshness"]["daily_stats"]["freshness"] = "fresh"
         result = garmin_daily_health_metrics(
-            snapshot, 1, date(2026, 8, 31), date(2026, 8, 31)
+            snapshot,
+            1,
+            date(2026, 8, 31),
+            date(2026, 8, 31),
+            health_by_date=mapped_health(snapshot),
         )
         self.assertEqual(result["steps_7d"]["freshness"], "fresh")
         self.assertEqual(result["steps_7d"]["measurement_status"], "today")
@@ -475,7 +480,11 @@ class GarminDailyHealthTests(unittest.TestCase):
         snapshot = {"daily_stats": [{"date": "2026-08-31", "unknown": 1}]}
         before = copy.deepcopy(snapshot)
         result = garmin_daily_health_metrics(
-            snapshot, 7, date(2026, 8, 31), date(2026, 8, 31)
+            snapshot,
+            7,
+            date(2026, 8, 31),
+            date(2026, 8, 31),
+            health_by_date=mapped_health(snapshot),
         )
         self.assertEqual(set(result), {"steps_7d", "floors_7d", "calories_7d"})
         self.assertTrue(all(item["value"] is None for item in result.values()))
@@ -517,19 +526,10 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
         self,
     ) -> None:
         canonical = read_daily_health_by_date(self.reader, "db")
-        legacy = garmin_daily_health_by_date(self.SNAPSHOT)
 
-        self.assertEqual(
-            {
-                day: {
-                    key: value
-                    for key, value in health.items()
-                    if key not in ("active_kcal", "resting_kcal")
-                }
-                for day, health in canonical.items()
-            },
-            legacy,
-        )
+        self.assertEqual(canonical["2026-09-19"]["steps"], 9000)
+        self.assertEqual(canonical["2026-09-19"]["floors"], 12)
+        self.assertEqual(canonical["2026-09-19"]["calories"], 2400)
         self.assertEqual(canonical["2026-09-19"]["active_kcal"], 700)
         self.assertEqual(canonical["2026-09-19"]["resting_kcal"], 1700)
         self.assertEqual(canonical["2026-09-20"]["source"], "Garmin Connect")
@@ -547,7 +547,9 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
 
     def test_metrics_window_matches_the_snapshot_with_an_empty_snapshot(self) -> None:
         end = date(2026, 9, 20)
-        legacy = garmin_daily_health_metrics(self.SNAPSHOT, 7, end, end)
+        legacy = garmin_daily_health_metrics(
+            self.SNAPSHOT, 7, end, end, health_by_date=mapped_health(self.SNAPSHOT)
+        )
         canonical = garmin_daily_health_metrics(
             {},
             7,
@@ -561,11 +563,13 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
 
     def test_expenditure_reads_every_component_from_the_observations(self) -> None:
         measured = read_daily_health_by_date(self.reader, "db")
-        legacy = daily_energy_expenditure(
-            self.SNAPSHOT, "2026-09-19", date(2026, 9, 21)
-        )
+        legacy = mapped_expenditure(self.SNAPSHOT, "2026-09-19", date(2026, 9, 21))
         canonical = daily_energy_expenditure(
-            {}, "2026-09-19", date(2026, 9, 21), measured=measured["2026-09-19"]
+            {},
+            "2026-09-19",
+            date(2026, 9, 21),
+            measured=measured["2026-09-19"],
+            measured_history=measured,
         )
 
         for key in (
@@ -584,7 +588,7 @@ class CanonicalDailyHealthParityTests(unittest.TestCase):
         self,
     ) -> None:
         result = daily_energy_expenditure(
-            {}, "2026-09-18", date(2026, 9, 21), measured={}
+            {}, "2026-09-18", date(2026, 9, 21), measured={}, measured_history={}
         )
 
         self.assertIsNone(result["total_kcal"])

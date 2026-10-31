@@ -232,7 +232,11 @@ The system SHALL retain dated weight/body-fat histories and daily energy/count m
 - **WHEN** historical FTP lacks an eligible recent measured weight or only current profile weight is available
 - **THEN** historical power-to-weight remains unknown and no manual current value is backfilled into the series.
 
-Evidence: `backend/performance/body.py:body_history`, `backend/performance/garmin_weight.py:garmin_weight_daily_records`, `backend/performance/daily_health.py:read_daily_health_by_date`; `tests/test_performance_body.py:test_ftp_sources_and_weight_age_limit`, `tests/test_performance_body.py:test_manual_profile_values_are_not_historical_and_invalid_garmin_values_drop`, `tests/test_performance_body.py:test_garmin_daily_record_uses_latest_timestamp_and_converts_pounds`.
+#### Scenario: Daily totals come from canonical observations only
+- **WHEN** the 7-day steps, floors and energy averages are composed
+- **THEN** they average the canonical daily observations only; Garmin daily stats in the stored view supply freshness, never values.
+
+Evidence: `backend/performance/body.py:body_history`, `backend/performance/garmin_weight.py:garmin_weight_daily_records`, `backend/performance/daily_health.py:read_daily_health_by_date`; `tests/test_performance_body.py:test_ftp_sources_and_weight_age_limit`, `tests/test_performance_body.py:test_manual_profile_values_are_not_historical_and_invalid_garmin_values_drop`, `tests/test_performance_body.py:test_garmin_daily_record_uses_latest_timestamp_and_converts_pounds`, `tests/test_performance_daily_health.py:CanonicalDailyHealthParityTests.test_metrics_window_matches_the_snapshot_with_an_empty_snapshot`.
 
 ### Requirement: Observed season preparation and read-only load scenarios
 The system SHALL separate observed competition preparation from calendar phase, expose supported 12-week sport-specific training/long-session evidence and nullable target context, and keep absent evidence unknown. Explicit load scenarios SHALL use dated CTL/ATL basis, labeled planned-load estimates, and fixed completed-today load, produce deterministic local curves with input identity, and leave local and remote plans unchanged.
