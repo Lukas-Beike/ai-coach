@@ -733,16 +733,35 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
         )
         self.assertEqual(body_point["ftp_watts"], 270)
 
-    def test_provider_metrics_pass_through_or_fall_back_to_unavailable_projection(
+    def test_provider_metrics_keep_cached_status_or_fall_back_to_unavailable(
         self,
     ) -> None:
-        supplied = {"endurance_score": {"status": "current"}}
-        self.assertEqual(
-            analysis_history(None, {"provider_metrics": supplied}, TODAY)[
-                "provider_metrics"
-            ],
-            supplied,
-        )
+        # A cached chart supplies its status only; its points are never shown
+        # without canonical observations.
+        supplied = {"endurance_score": {"status": "stale", "points": [{"x": 1}]}}
+        cached = analysis_history(None, {"provider_metrics": supplied}, TODAY)[
+            "provider_metrics"
+        ]
+        self.assertEqual(cached["endurance_score"]["status"], "stale")
+        self.assertEqual(cached["endurance_score"]["points"], [])
+        self.assertEqual(cached["running_tolerance"]["status"], "unavailable")
+        # A cached "current" or "unknown" described the snapshot's points; the
+        # status follows the canonical points instead.
+        derived = analysis_history(
+            None,
+            {
+                "provider_metrics": {
+                    "endurance_score": {"status": "current"},
+                    "running_tolerance": {"status": "unknown"},
+                },
+                "running_tolerance": [
+                    {"calendarDate": "2026-05-04", "toleranceScore": 12}
+                ],
+            },
+            TODAY,
+        )["provider_metrics"]
+        self.assertEqual(derived["endurance_score"]["status"], "unavailable")
+        self.assertEqual(derived["running_tolerance"]["status"], "current")
         projected = analysis_history(
             None,
             {

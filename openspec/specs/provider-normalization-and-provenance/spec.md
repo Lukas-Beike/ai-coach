@@ -77,13 +77,17 @@ The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed
 - **WHEN** Garmin returns an undated current FTP together with no dated historical FTP record
 - **THEN** the current reading may be dated to the local fetch day and historical gaps remain empty.
 
+#### Scenario: Garmin FTP history range records
+- **WHEN** stored Garmin FTP history holds biometric range records with `from` and `value`
+- **THEN** since Garmin health mapper version 14 each becomes a ride FTP observation on its `from` day, reprojected without a provider refetch; a bare `value` without `from` is not FTP.
+
 #### Scenario: Multiple Wahoo zone revisions
 - **WHEN** Wahoo returns multiple power-zone sets for one supported family
 - **THEN** the newest update time wins, later input wins an equal-time tie, and only that selected source row supplies the FTP observation.
 
 Detailed contract: Wahoo SHALL map the newest power-zone set per cycling/running family to FTP and current profile weight to the local fetch day; it SHALL not infer zone boundaries or other profile metrics from them.
 
-Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
+Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_ftp_history_reads_biometric_range_records`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
 
 ### Requirement: Metric-specific source priority and local authority
 The system SHALL apply per-metric source rules rather than a universal provider order. Current weight, FTP, thresholds, and VO2max prefer supported Garmin values before Intervals, with Wahoo a last fallback for current cycling FTP and weight. Manual profile weight precedes Wahoo fallback.

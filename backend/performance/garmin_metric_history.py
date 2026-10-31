@@ -88,11 +88,15 @@ def ftp_points(value: Any, *, start: date, end: date) -> list[dict[str, Any]]:
     for record in _records(value):
         # The biometric range API uses from/value; latest FTP uses
         # calendarDate/functionalThresholdPower. An unqualified value is not FTP.
-        range_record = "from" in record
+        range_record = garmin_perf_fields.FTP_RANGE_DAY in record
         observed = _observed(record)
         if observed is None or not start <= observed <= end:
             continue
-        field = "value" if range_record else garmin_perf_fields.FTP_VALUE
+        field = (
+            garmin_perf_fields.FTP_RANGE_VALUE
+            if range_record
+            else garmin_perf_fields.FTP_VALUE
+        )
         candidate = _number(record.get(field))
         if candidate is None or not 20 <= candidate <= 2000:
             continue

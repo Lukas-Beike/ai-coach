@@ -24,7 +24,9 @@ Mapped sections and their canonical kinds:
   requests the running lactate threshold and ``garmin_metrics`` shows it as running
   watts. Garmin may derive that power from cycling data; consumers keep their own
   plausibility window.
-* ``cycling_ftp`` and ``cycling_ftp_history``: FTP for cycling.
+* ``cycling_ftp`` and ``cycling_ftp_history``: FTP for cycling. A record of the
+  biometric range endpoint gives its day in ``from`` and its FTP in ``value``; a
+  bare ``value`` elsewhere is not FTP.
 * ``performance_history``: the app's accumulated Garmin values, each row on the
   day its value was measured (athlete decision 2026-10-26). Weight, FTP, VO2MAX,
   thresholds, readiness and race predictions keep their kinds and units (the
@@ -163,6 +165,8 @@ from backend.providers.garmin_fields import (
     GARMIN_ENDURANCE_WRAPPER_KEYS,
     GARMIN_FLOORS_ALIASES,
     GARMIN_FTP_ALIASES,
+    GARMIN_FTP_RANGE_DAY,
+    GARMIN_FTP_RANGE_VALUE,
     GARMIN_HRV_LAST_NIGHT_ALIASES,
     GARMIN_HRV_WEEKLY_ALIASES,
     GARMIN_RACE_DISTANCE_ALIASES,
@@ -198,7 +202,8 @@ from backend.providers.garmin_weight_walk import (
 # Version 12: HRV method, aggregation and window; stress, resting energy, Body
 # Battery and the training sections; sleep sections project canonical sleep periods.
 # Version 13: the stored performance history projects its dated values.
-MAPPER_VERSION: Final = 13
+# Version 14: FTP history range records (``from``/``value``).
+MAPPER_VERSION: Final = 14
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
@@ -387,6 +392,16 @@ class _Group:
 
     key: str | None
     fields: tuple[_Field, ...]
+
+
+# A biometric range record of the FTP history: its day is ``from``, its FTP
+# ``value``.
+_FTP_RANGE_GROUPS: Final = (
+    _Group(
+        None,
+        (_Field((GARMIN_FTP_RANGE_VALUE,), MetricKind.FTP, _PROVIDER, Sport.RIDE),),
+    ),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1157,10 +1172,13 @@ class _HealthMapping:
     def _map_grouped(
         self, name: str, payload: object, groups: tuple[_Group, ...]
     ) -> None:
-        date_keys = _SECTION_DATE_KEYS.get(name, (_DATE_FIELD,))
+        section_date_keys = _SECTION_DATE_KEYS.get(name, (_DATE_FIELD,))
         for ref, record, index in self._records(name, payload):
+            date_keys, record_groups = section_date_keys, groups
             if name == _DAILY_STATS:
                 record = flatten_daily_summary(record)
+            elif name == "cycling_ftp_history" and _is_range_record(record):
+                date_keys, record_groups = (GARMIN_FTP_RANGE_DAY,), _FTP_RANGE_GROUPS
             day = self._record_day(
                 record,
                 ref,
@@ -1169,7 +1187,7 @@ class _HealthMapping:
                 datetime_dates=name in ("cycling_ftp", "cycling_ftp_history"),
             )
             if day is not None:
-                for group in groups:
+                for group in record_groups:
                     self._map_group(name, record, group, ref, day, index=index)
 
     def _map_weight(self, sections: Mapping[str, object]) -> None:
@@ -1536,3 +1554,8 @@ def map_garmin_health(
     return MappingResult(
         records=tuple(mapping.observations), issues=tuple(mapping.issues)
     )
+
+
+def _is_range_record(record: Mapping[str, object]) -> bool:
+    """Return True for an FTP history record of the biometric range endpoint."""
+    return record.get(GARMIN_FTP_RANGE_DAY) not in (None, "")

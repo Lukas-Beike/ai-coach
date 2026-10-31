@@ -21,6 +21,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
+from backend.providers import canonical_plans
 from backend.providers.garmin_health_mapping import (
     GARMIN_LABEL,
     MAPPER_VERSION,
@@ -514,9 +515,7 @@ class AliasAndUnitTests(unittest.TestCase):
         self.assertEqual(_rows(last_night), [("hrv_rmssd", 70.0, DAY, "-")])
         self.assertEqual(_rows(fallback), [("hrv_rmssd", 61.0, DAY, "-")])
         # The weekly average is its own kind, never a last-night reading.
-        self.assertEqual(
-            _rows(weekly_only), [("hrv_weekly_average", 58.0, DAY, "-")]
-        )
+        self.assertEqual(_rows(weekly_only), [("hrv_weekly_average", 58.0, DAY, "-")])
         self.assertEqual(
             _rows(both),
             [("hrv_rmssd", 61.0, DAY, "-"), ("hrv_weekly_average", 57.0, DAY, "-")],
@@ -550,6 +549,81 @@ class AliasAndUnitTests(unittest.TestCase):
         self.assertEqual(
             _issues(result),
             [("cycling_ftp_history[0]", "calendarDate", IssueReason.MISSING)],
+        )
+
+    def test_ftp_history_reads_biometric_range_records(self) -> None:
+        result = _map(
+            {
+                "cycling_ftp_history": [
+                    {"from": "2026-10-01", "until": "2026-10-01", "value": 270},
+                    {"from": "2026-10-02T00:00:00.0", "value": 272.5},
+                    {"calendarDate": "2026-10-03", "value": 999},
+                ]
+            }
+        )
+
+        self.assertEqual(
+            _rows(result),
+            [
+                ("ftp", 270.0, "2026-10-01", "ride"),
+                ("ftp", 272.5, "2026-10-02", "ride"),
+            ],
+        )
+        self.assertEqual(_issues(result), [])
+
+    def test_ftp_history_range_record_issues_name_the_raw_fields(self) -> None:
+        result = _map(
+            {
+                "cycling_ftp_history": [
+                    {"from": "2026-10-01", "value": "abc"},
+                    # An empty ``from`` is no range record: the dated FTP is kept.
+                    {
+                        "from": None,
+                        "calendarDate": "2026-10-03",
+                        "functionalThresholdPower": 270,
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(_rows(result), [("ftp", 270.0, "2026-10-03", "ride")])
+        self.assertEqual(
+            _issues(result),
+            [("cycling_ftp_history[0]", "value", IssueReason.INVALID_NUMBER)],
+        )
+
+    def test_stored_ftp_range_records_reproject_without_a_refetch(self) -> None:
+        plan = canonical_plans.garmin_ingest_plan(
+            {
+                "synced_at": "2026-10-11T06:00:00+00:00",
+                "cycling_ftp_history": [{"from": "2026-10-01", "value": 270}],
+            },
+            zone=ZONE,
+        )
+        # The stored raw record is the range record itself.
+        (raw,) = plan.raw_records
+        reprojected = canonical_plans.reprojection_plan(
+            {
+                "provider": "garmin",
+                "record_kind": raw.record_kind,
+                "source_record_id": raw.source_record_id,
+                "payload": json.dumps(raw.payload),
+                "fetched_at": (raw.retrieved_at or RETRIEVED_AT).isoformat(),
+            },
+            zone=ZONE,
+        )
+
+        assert reprojected is not None
+        self.assertEqual(
+            [
+                (
+                    item.observation.kind,
+                    item.observation.value.value,
+                    item.mapper_version,
+                )
+                for item in reprojected.observations
+            ],
+            [(MetricKind.FTP, 270.0, MAPPER_VERSION)],
         )
 
     def test_latest_ftp_with_an_invalid_date_is_not_replaced_by_the_sync_day(
@@ -1534,7 +1608,7 @@ class PerformanceHistoryTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 13)
+        self.assertEqual(MAPPER_VERSION, 14)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):
