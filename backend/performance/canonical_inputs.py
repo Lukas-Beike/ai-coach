@@ -41,6 +41,7 @@ from backend.performance.source_policy import select_current
 from backend.performance.wellness_days import WellnessDay
 from backend.runtime.ports import (
     ActivityMaxHrReader,
+    ActivityRowAndSummaryReader,
     ActivitySummaryReader,
     CanonicalTableServing,
     ObservationReader,
@@ -110,10 +111,10 @@ class CanonicalPerformanceSource:
     database_manager: Callable[[], Any]
     observation_reader: Callable[[], ObservationReader]
     serving: Callable[[], CanonicalTableServing] | None = None
-    activity_summaries: Callable[[], ActivitySummaryReader] | None = None
+    activity_summaries: Callable[[], ActivityRowAndSummaryReader] | None = None
     coverage: Callable[[], ProviderCoverageReader] | None = None
 
-    def activity_summary_reader(self) -> ActivitySummaryReader | None:
+    def activity_summary_reader(self) -> ActivityRowAndSummaryReader | None:
         """Return the configured activity summary reader, if any."""
         return None if self.activity_summaries is None else self.activity_summaries()
 
@@ -163,6 +164,21 @@ def activity_summaries_with_sync_time(
     with source.database_manager().reader() as db:
         coverage = None if source.coverage is None else source.coverage()
         return reader.activity_summaries(db), activities_synced_at(coverage, db)
+
+
+def activity_summaries_and_rows(
+    source: CanonicalPerformanceSource,
+) -> tuple[tuple[ActivitySummary, ...], tuple[dict[str, Any], ...]]:
+    """Read the summaries and the raw Intervals.icu rows in one read snapshot.
+
+    Stored analyses fingerprint the raw row they were computed from, so the rows
+    must belong to the same revision as the summaries.
+    """
+    reader = source.activity_summary_reader()
+    if reader is None:
+        raise RuntimeError("activity reads need the canonical activity summary reader")
+    with source.database_manager().read_snapshot() as db:
+        return reader.activity_summaries(db), reader.activity_rows(db)
 
 
 def activity_summaries_for(

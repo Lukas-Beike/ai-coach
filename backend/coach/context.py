@@ -198,10 +198,21 @@ def _truncate_values(
 def compact_coach_activity(
     activity: Any, *, select: Callable[[Any, tuple[str, ...]], dict[str, Any]]
 ) -> dict[str, Any]:
-    return _truncate_values(
+    compacted = _truncate_values(
         select(activity, COACH_ACTIVITY_FIELDS),
         {"id": 200, "name": 200, "sport": 80},
     )
+    # Values of a merged session may come from another provider than the primary.
+    sources = activity.get("sources") if isinstance(activity, Mapping) else None
+    if isinstance(sources, Mapping):
+        differing = {
+            key: label
+            for key, label in sources.items()
+            if key in compacted and label != compacted.get("source")
+        }
+        if differing:
+            compacted["sources"] = differing
+    return compacted
 
 
 def compact_coach_planned_event(

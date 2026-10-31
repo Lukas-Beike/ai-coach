@@ -385,6 +385,8 @@ class ActivityRecord:
     pace_zone_times_s: ZoneSeconds | None = None
     # The provider calendar event the activity was paired with, if any.
     planned_event_id: str | None = None
+    # The recording device as the provider names it, for example "Garmin Edge 840".
+    device_name: str | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -539,3 +541,4 @@ class ActivityRecord:
         for field in _ZONE_FIELDS:
             object.__setattr__(self, field, _zone_seconds(getattr(self, field), field))
         optional_text(self.planned_event_id, "planned_event_id", max_length=200)
+        optional_text(self.device_name, "device_name", max_length=200)

@@ -13,6 +13,7 @@ import math
 import re
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
+from datetime import date, timedelta
 from itertools import islice, pairwise
 from typing import Any
 from urllib.parse import quote
@@ -85,6 +86,15 @@ def normalize_streams(value: Any) -> dict[str, list[Any]]:
     return streams
 
 
+def _local_day(row: dict[str, Any] | None) -> date | None:
+    """Return the athlete-local day of a raw Intervals.icu activity row."""
+    text = str((row or {}).get("start_date_local") or "")[:10]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 class ActivityDetailRefreshService:
     """Validate a locally known activity before fetching and committing details."""
 
@@ -113,6 +123,21 @@ class ActivityDetailRefreshService:
         self._canonical = canonical
         self._local_date = local_date
 
+    def _target_candidates(self, db: Any, summary: dict[str, Any] | None) -> list[Any]:
+        """Return the summaries around the activity's day that target freezing compares.
+
+        Matching only pairs activities of the same local day, so a day either side
+        is enough.
+        """
+        day = _local_day(summary)
+        if day is None:
+            return []
+        return list(
+            self._row_reader.activity_summaries(
+                db, start=day - timedelta(days=1), end=day + timedelta(days=1)
+            )
+        )
+
     def refresh(self, activity_id: str) -> dict[str, Any]:
         activity_id = normalize_activity_id(
             self._references.resolve_reference(
@@ -121,11 +146,11 @@ class ActivityDetailRefreshService:
         )
         with self._database_manager.unit_of_work() as db:
             rows = self._row_reader.activity_rows(db)
-            summaries = list(self._row_reader.activity_summaries(db))
-        summary = next(
-            (row for row in rows if str(row.get("id")) == activity_id),
-            None,
-        )
+            summary = next(
+                (row for row in rows if str(row.get("id")) == activity_id),
+                None,
+            )
+            summaries = self._target_candidates(db, summary)
         if summary is None:
             raise AppError(
                 404,

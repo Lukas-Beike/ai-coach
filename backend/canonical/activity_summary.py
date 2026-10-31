@@ -37,6 +37,7 @@ class ActivitySummary(TypedDict, total=False):
     environment: str
     recorded_by: str
     device_type: str
+    device_name: str
     source: str
     sources: dict[str, str]
     record_ids: dict[str, str]

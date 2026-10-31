@@ -27,6 +27,7 @@ from backend.canonical.activity_summary import (
     summary_local_date,
 )
 from backend.canonical.records import ActivityRecord
+from backend.canonical.vocabulary import ProviderId, RecordingOrigin
 
 # Summary key -> ActivityRecord field, in measured order.
 _MEASURED: Final = (
@@ -43,6 +44,7 @@ _MEASURED: Final = (
     ("avg_temp_c", "avg_temp_c"),
     ("rpe", "rpe"),
     ("feel", "feel"),
+    ("device_name", "device_name"),
 )
 # Summary key -> ActivityRecord field, in derived order.
 _DERIVED: Final = (
@@ -69,7 +71,7 @@ def activity_summary(
     """Summarise the active records of one session; ``records`` must not be empty."""
     if not records:
         raise ValueError("records must not be empty")
-    measured = measured_order(records)
+    measured = _session_order(measured_order(records))
     derived = derived_order(records)
     primary = measured[0]
     local_start = primary.started_at.astimezone(zone).replace(tzinfo=None)
@@ -138,6 +140,35 @@ def activity_summaries(
         reverse=True,
     )
     return tuple(summaries if limit is None else summaries[:limit])
+
+
+# Among one provider's copies, the Wahoo recording is primary over its Garmin copy,
+# as session bundling decides; other origins follow.
+_ORIGIN_RANK: Final = {RecordingOrigin.WAHOO: 0, RecordingOrigin.GARMIN: 1}
+_PROVIDER_RANK: Final = {
+    ProviderId.INTERVALS: 0,
+    ProviderId.GARMIN: 1,
+    ProviderId.WAHOO: 2,
+}
+
+
+def _session_order(measured: list[ActivityRecord]) -> list[ActivityRecord]:
+    """Keep the measured order, but break provider ties by the recording origin.
+
+    The sort is stable, so the newest retrieval and the id still decide last.
+    """
+
+    def key(record: ActivityRecord) -> tuple[int, int, int]:
+        provenance = record.provenance
+        provider = provenance.provider
+        own = provider is not None and provider.value == provenance.recorded_by.value
+        return (
+            0 if own else 1,
+            len(_PROVIDER_RANK) if provider is None else _PROVIDER_RANK[provider],
+            _ORIGIN_RANK.get(provenance.recorded_by, len(_ORIGIN_RANK)),
+        )
+
+    return sorted(measured, key=key)
 
 
 def _first(

@@ -212,3 +212,20 @@ class StoredKeyTests(unittest.TestCase):
         self.assertEqual({"garmin": "g1", "intervals": "i1"}, mixed["record_ids"])
         self.assertEqual("i1", stored_activity_key(mixed))
         self.assertEqual("act_2", stored_activity_key(garmin_only))
+
+
+class IntervalsCopyOrderTests(unittest.TestCase):
+    def test_wahoo_ride_is_primary_over_its_garmin_copy_on_intervals(self) -> None:
+        wahoo = record(ProviderId.INTERVALS, "i200", recorded_by=RecordingOrigin.WAHOO)
+        garmin_copy = record(
+            ProviderId.INTERVALS,
+            "i100",
+            recorded_by=RecordingOrigin.GARMIN,
+            name="Garmin copy",
+        )
+
+        summary = activity_summary("act_1", [garmin_copy, wahoo], BERLIN)
+
+        self.assertEqual({"intervals": "i200"}, summary["record_ids"])
+        self.assertEqual("wahoo", summary["recorded_by"])
+        self.assertEqual("Synthetic ride", summary["name"])

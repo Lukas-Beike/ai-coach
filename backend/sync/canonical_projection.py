@@ -135,12 +135,16 @@ class CanonicalSnapshotProjection(
         *,
         start: date | None = None,
         end: date | None = None,
+        newest: int | None = None,
     ) -> tuple[SessionRecords, ...]:
         """Bundle the projected records into sessions with the duplicate rules.
+
+        ``newest`` is accepted for the port; the projection is in memory already.
 
         The projection has no local session ids, so a session is named by its
         primary record's provider activity id.
         """
+        del newest
         zone = self._zone(db)
         return tuple(
             (session.primary.activity_id, (session.primary, *session.duplicates))

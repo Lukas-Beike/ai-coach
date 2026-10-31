@@ -251,5 +251,26 @@ class CoachRawRowParityTests(unittest.TestCase):
         )
 
 
+class CoachMergedSourceTests(unittest.TestCase):
+    def test_values_from_another_provider_name_their_source(self) -> None:
+        summary = {
+            **RUN_SUMMARY,
+            "source": "Garmin Connect",
+            "sources": {
+                "moving_duration_s": "Garmin Connect",
+                "training_load": "Intervals.icu",
+                "planned_event_id": "Intervals.icu",
+            },
+        }
+
+        row = compact_coach_activity(summary, select=planning_context.selected)
+
+        self.assertEqual({"training_load": "Intervals.icu"}, row["sources"])
+        self.assertNotIn(
+            "sources",
+            compact_coach_activity(RIDE_SUMMARY, select=planning_context.selected),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

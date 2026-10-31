@@ -6,9 +6,11 @@ import math
 import re
 from typing import Any
 
-from backend.providers.intervals_activity_mapping import (
-    INTERVALS_LABEL,
-    target_basis_ftp,
+from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
+
+# Frozen target snapshots store their FTP basis under the Intervals.icu key.
+from backend.providers.intervals_performance_fields import (
+    CONFIGURED_FTP as TARGET_BASIS_FTP_KEY,
 )
 
 METHOD = "time-weighted-session-analysis-v1"
@@ -223,7 +225,7 @@ def _numeric_target(
     if step.get("kind") == "power":
         sensor, unit = "watts", "W"
         if "%" in text:
-            ftp = _number(target_basis_ftp(basis))
+            ftp = _number(basis.get(TARGET_BASIS_FTP_KEY))
             if ftp is None or ftp <= 0:
                 return None
             values = [value * ftp / 100 for value in values]

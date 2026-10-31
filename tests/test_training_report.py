@@ -543,7 +543,9 @@ class TrainingReportTests(unittest.TestCase):
     def test_report_sport_filter_takes_canonical_sports(self):
         service = self._report_service(_canonical())
         service.read({"start": "2026-09-28", "days": 7, "sport": "nordic_ski"})
-        for invalid in ("Ride", "ride; drop", "x" * 41):
+        # A previous Intervals.icu token resolves to its canonical sport.
+        service.read({"start": "2026-09-28", "days": 7, "sport": "Ride"})
+        for invalid in ("ride; drop", "x" * 41):
             with self.subTest(sport=invalid), self.assertRaises(AppError):
                 service.read({"start": "2026-09-28", "days": 7, "sport": invalid})
 

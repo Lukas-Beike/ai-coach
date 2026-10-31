@@ -17,9 +17,11 @@ from backend.activities.activity_summary import (
 from backend.activities.detail_analysis_reads import analysis_summaries
 from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.stored_sports import resolve_workout_sport
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
+    activity_summaries_and_rows,
     activity_summaries_for,
     activity_summaries_with_sync_time,
 )
@@ -84,8 +86,8 @@ class TrainingRecordsService:
         return recurring_training_comparisons(self.observations())
 
     def observations(self) -> list[dict[str, Any]]:
-        summaries = activity_summaries_for(self._canonical)
-        fingerprints = self._fingerprints()
+        summaries, rows = activity_summaries_and_rows(self._canonical)
+        fingerprints = {str(row.get("id")): summary_fingerprint(row) for row in rows}
         known = {stored_activity_key(summary): summary for summary in summaries}
         records = []
         for stored in analysis_summaries(self._database_manager):
@@ -104,29 +106,22 @@ class TrainingRecordsService:
                     "environment": "indoor"
                     if summary_is_indoor(summary)
                     else "outdoor",
-                    "source": summary.get("source") or "Intervals.icu",
+                    # Stored analyses come from the Intervals.icu detail.
+                    "source": "Intervals.icu"
+                    if ProviderId.INTERVALS.value in (summary.get("record_ids") or {})
+                    else summary.get("source") or "Intervals.icu",
                     "name": summary.get("name"),
                     "average_temp": summary.get("avg_temp_c"),
                     "duration": summary_duration_s(summary),
-                    "device": str(summary.get("recorded_by") or "unknown")[:200],
+                    "device": str(
+                        summary.get("device_name")
+                        or summary.get("recorded_by")
+                        or "unknown"
+                    )[:200],
                 }
             )
         records.sort(key=lambda row: row["date"], reverse=True)
         return records
-
-    def _fingerprints(self) -> dict[str, str]:
-        """Fingerprint of each stored Intervals.icu payload, by stored activity key.
-
-        A stored analysis carries the fingerprint of the payload it was computed
-        from; only the raw rows of the same reader can tell whether it is current.
-        """
-        reader = self._canonical.activity_summary_reader()
-        read_rows = getattr(reader, "activity_rows", None)
-        if read_rows is None:
-            return {}
-        with self._canonical.database_manager().reader() as db:
-            rows = read_rows(db)
-        return {str(row.get("id")): summary_fingerprint(row) for row in rows}
 
     def endurance(self) -> dict[str, Any]:
         records = [

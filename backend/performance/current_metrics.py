@@ -26,6 +26,11 @@ PROVIDER_INTERVALS_NAME = provider_label(
 # provider_label has no view for this wellness label, so it stays a literal.
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.CURRENT_METRIC)
+# Activity summaries name each value's source by the provider's activity label.
+_ACTIVITY_LABEL_PROVIDERS = {
+    provider_label(provider, SourceView.ACTIVITY_DETAIL): provider
+    for provider in ProviderId
+}
 VO2MAX_UNIT = "ml/kg/min"
 
 
@@ -126,29 +131,38 @@ def _intervals_max_hr_metric(
     activities: list[Any],
     canonical: CanonicalCurrentInputs,
 ) -> dict[str, Any]:
-    """Return sport max HR: setting, then activities, then the athlete record."""
-    activity_values: list[float | int] = []
+    """Return sport max HR: setting, then activities, then the athlete record.
+
+    An activity value keeps the provider its summary names for ``max_hr``.
+    """
+    activity_values: list[tuple[float, ProviderId]] = []
     for activity in activities:
-        # The value is labelled Intervals.icu, so only Intervals.icu values count.
         sources = activity.get("sources") if isinstance(activity, dict) else None
-        if (
-            activity_kind(activity) != category
-            or not isinstance(sources, dict)
-            or sources.get("max_hr") != PROVIDER_INTERVALS_NAME
-        ):
+        provider = (
+            _ACTIVITY_LABEL_PROVIDERS.get(str(sources.get("max_hr")))
+            if isinstance(sources, dict)
+            else None
+        )
+        if activity_kind(activity) != category or provider is None:
             continue
         value = as_number(activity.get("max_hr"))
         if value is not None and 80 <= float(value) <= 260:
-            activity_values.append(value)
+            activity_values.append((float(value), provider))
+    setting = _observation_number(canonical.athlete_value(MetricKind.MAX_HR, sport))
+    athlete = _observation_number(canonical.athlete_value(MetricKind.MAX_HR))
+    best = max(activity_values, default=None, key=lambda item: item[0])
     candidates = (
-        _observation_number(canonical.athlete_value(MetricKind.MAX_HR, sport)),
-        max(activity_values, default=None),
-        _observation_number(canonical.athlete_value(MetricKind.MAX_HR)),
+        (setting, ProviderId.INTERVALS),
+        best if best is not None else (None, ProviderId.INTERVALS),
+        (athlete, ProviderId.INTERVALS),
     )
-    for number in candidates:
+    for number, provider in candidates:
         if number is not None and 80 <= float(number) <= 260:
             return metric(
-                number, "bpm", PROVIDER_INTERVALS_NAME, provider=ProviderId.INTERVALS
+                number,
+                "bpm",
+                provider_label(provider, SourceView.CURRENT_METRIC),
+                provider=provider,
             )
     return metric(None, "bpm", None)
 

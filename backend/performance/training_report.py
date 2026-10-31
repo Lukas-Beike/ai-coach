@@ -96,6 +96,14 @@ def zone_distribution(summaries: Sequence[ActivitySummary]) -> list[dict[str, An
             ("pace_zone_times", "pace"),
         ):
             zones, measured_sessions = _sensor_zones(sport_rows, key)
+            sources = sorted(
+                {
+                    str(label)
+                    for row in sport_rows
+                    if _valid_zones(row.get(key))
+                    and (label := (row.get("sources") or {}).get(key))
+                }
+            )
             if zones:
                 reports.append(
                     {
@@ -106,7 +114,7 @@ def zone_distribution(summaries: Sequence[ActivitySummary]) -> list[dict[str, An
                         "training_seconds": duration,
                         "measured_sessions": measured_sessions,
                         "total_sessions": len(sport_rows),
-                        "source": "Intervals.icu",
+                        "source": ", ".join(sources),
                         "method": "Provider zones recorded for each activity; no recalculation using current thresholds",
                     }
                 )

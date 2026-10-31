@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Final
 
 from backend.canonical.coverage import MetricWindow
@@ -147,13 +147,22 @@ class CanonicalTableReader(
         *,
         start: date | None = None,
         end: date | None = None,
+        newest: int | None = None,
     ) -> tuple[SessionRecords, ...]:
         """Return each live session's id and its active records of every provider.
 
         Records of sessions merged into another are listed under the survivor.
         Records are in ``activity_order``; sessions in order of first record.
         Records of a provider that is not a known ``ProviderId`` are skipped.
+        ``newest`` bounds the read to the days of at least the newest that many
+        sessions (a day earlier, so their merged copies stay); the caller still
+        keeps only as many as it needs.
         """
+        if newest is not None:
+            bound = canonical_store.newest_sessions_start(db, newest)
+            if bound is not None:
+                earliest = date.fromisoformat(bound) - timedelta(days=1)
+                start = earliest if start is None else max(start, earliest)
         grouped: dict[str, list[ActivityRecord]] = {}
         for session_id, row in canonical_store.active_session_activity_rows(
             db, start=_iso(start), end=_iso(end)

@@ -136,7 +136,9 @@ class CanonicalReadSelector(
         is summarised from the legacy projection.
         """
         return activity_summaries(
-            self._row_source(db).activity_sessions(db, start=start, end=end),
+            self._row_source(db).activity_sessions(
+                db, start=start, end=end, newest=limit
+            ),
             self._legacy.zone(db),
             limit=limit,
         )

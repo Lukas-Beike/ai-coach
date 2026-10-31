@@ -56,6 +56,7 @@ _ELEVATION_LOW_KEY: Final = "elevation_low_m"
 _STEPS_KEY: Final = "steps"
 _DEVICE_TYPE_KEY: Final = "device_type"
 _PLANNED_EVENT_KEY: Final = "planned_event_id"
+_DEVICE_NAME_KEY: Final = "device_name"
 # ActivityRecord summary fields stored in the details under their own names.
 ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "intensity",
@@ -541,24 +542,13 @@ def active_activity_rows(
     Invalid and deleted activity records are never returned. ``start`` and ``end``
     are inclusive ISO dates on the stored athlete-local date.
     """
-    clauses = ["r.state = ?", "s.state <> ?"]
-    params: list[object] = [
-        ActivityRecordState.ACTIVE.value,
-        ActivitySessionState.DELETED.value,
-    ]
-    if start is not None:
-        clauses.append("r.local_date >= ?")
-        params.append(start)
-    if end is not None:
-        clauses.append("r.local_date <= ?")
-        params.append(end)
     return _fetch_all(
         db,
         f"SELECT {', '.join(_ACTIVITY_READ_COLUMNS)} FROM activity_records AS r "
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-        f"WHERE {' AND '.join(clauses)} ORDER BY r.started_at, r.provider, "
-        "r.provider_activity_id",
-        tuple(params),
+        f"WHERE {' AND '.join(_bounded_clauses(start, end))} "
+        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        _bounded_params(start, end),
     )
 
 
@@ -594,6 +584,25 @@ def active_session_activity_rows(
         if session_id not in deleted:
             grouped.append((session_id, row))
     return grouped
+
+
+def newest_sessions_start(db: Any, count: int) -> str | None:
+    """Return the local date of the ``count``-th newest live session, or None.
+
+    Live sessions are active or hidden; merged aliases and deleted sessions do not
+    count. None means there are at most ``count`` live sessions.
+    """
+    rows = _fetch_all(
+        db,
+        "SELECT local_date FROM activity_sessions WHERE state IN (?, ?) "
+        "AND local_date IS NOT NULL ORDER BY started_at DESC LIMIT 1 OFFSET ?",
+        (
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.HIDDEN.value,
+            max(count - 1, 0),
+        ),
+    )
+    return None if not rows else str(rows[0]["local_date"])
 
 
 def _bounded_clauses(start: str | None, end: str | None) -> list[str]:
@@ -1337,6 +1346,7 @@ def _activity_details(record: ActivityRecord) -> str:
                 None if record.device_type is None else record.device_type.value,
             ),
             (_PLANNED_EVENT_KEY, record.planned_event_id),
+            (_DEVICE_NAME_KEY, record.device_name),
             (_CONTEXT_KEY, record.provenance.context.as_details() or None),
             *(
                 (field, getattr(record, field))
@@ -1374,9 +1384,10 @@ def activity_summary_values(details: object) -> dict[str, Any]:
         zones = _stored_zones(loaded.get(field))
         if zones is not None:
             values[field] = zones
-    event_id = loaded.get(_PLANNED_EVENT_KEY)
-    if isinstance(event_id, str) and event_id.strip() and len(event_id) <= 200:
-        values[_PLANNED_EVENT_KEY] = event_id
+    for key in (_PLANNED_EVENT_KEY, _DEVICE_NAME_KEY):
+        text = loaded.get(key)
+        if isinstance(text, str) and text.strip() and len(text) <= 200:
+            values[key] = text
     return values
 
 

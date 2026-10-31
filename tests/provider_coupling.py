@@ -184,8 +184,9 @@ _DEAD_LEGACY = (
     "dead-legacy: no production caller; deleted with the read selector (#1416)"
 )
 _PLANNING_RECORDS = (
-    "planning-records: local planned units and library entries still store the "
-    "provider training-load and intensity keys (start and duration moved in #1507)"
+    "planning-records: local planned units, library entries and frozen target "
+    "snapshots still store the provider training-load, intensity and FTP keys "
+    "(start and duration moved in #1507)"
 )
 # repository-relative path -> (reason, field-name modules it may still import).
 # A new module in an allowlisted file fails the guard as well.
@@ -248,6 +249,10 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     "backend/performance/training_report.py": (
+        _PLANNING_RECORDS,
+        ("intervals_performance_fields",),
+    ),
+    "backend/performance/session_analysis.py": (
         _PLANNING_RECORDS,
         ("intervals_performance_fields",),
     ),
@@ -332,7 +337,6 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
             "backend/performance/report_service.py",
             "backend/performance/session_analysis.py",
             "backend/performance/training_focus.py",
-            "backend/performance/training_report.py",
         )
     },
     **{

@@ -185,3 +185,15 @@ class ActivitySessionReadTests(CanonicalReadFixture):
         after = self.read(make_selector(self).activity_summaries)
 
         self.assertEqual(len(before) - 1, len(after))
+
+    def test_a_limit_keeps_the_same_newest_summaries(self) -> None:
+        populate(self)
+        selector = make_selector(self)
+        everything = self.read(selector.activity_summaries)
+
+        for limit in (1, 2, 3, len(everything), len(everything) + 5):
+            with self.subTest(limit=limit):
+                self.assertEqual(
+                    everything[:limit],
+                    self.read(selector.activity_summaries, limit=limit),
+                )

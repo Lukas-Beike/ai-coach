@@ -51,6 +51,8 @@ class ActivitySessionReader(Protocol):
 
     Bounds are as in ``ActivityReader``. Deleted sessions are never returned; a
     merged duplicate's records are listed under the session it was merged into.
+    ``newest`` lets a source skip days older than at least that many newest
+    sessions; it never drops one of them.
     """
 
     def activity_sessions(
@@ -59,6 +61,7 @@ class ActivitySessionReader(Protocol):
         *,
         start: date | None = None,
         end: date | None = None,
+        newest: int | None = None,
     ) -> tuple[SessionRecords, ...]: ...
 
 

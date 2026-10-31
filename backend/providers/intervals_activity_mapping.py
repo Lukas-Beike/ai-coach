@@ -98,11 +98,10 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
-from backend.providers.intervals_performance_fields import CONFIGURED_FTP
 
 # Version 6: maps moving time, elevation gain, normalized power, cadence and the
 # summary values (intensity, RPE, feel, speeds, pace, FTP, eFTP, VO2max,
-# temperature, zone times and the paired calendar event).
+# temperature, zone times, the paired calendar event and the device name).
 # Version 5: maps the maximum speed, maximum power and recording device type.
 # Version 4: a source of exactly "manual" is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
@@ -417,11 +416,6 @@ def _classify(type_name: str | None, identity: str) -> tuple[Sport, Environment]
     return sport, environment
 
 
-def target_basis_ftp(basis: Mapping[str, object]) -> object:
-    """Return the FTP a frozen target basis stored under its Intervals.icu key."""
-    return basis.get(CONFIGURED_FTP)
-
-
 def intervals_analysis_sport(row: Mapping[str, object]) -> dict[str, object]:
     """Return the canonical sport, environment and trail-run flag of a raw row.
 
@@ -579,6 +573,11 @@ def _map_row(
         hr_zone_times_s=_zone_seconds(row.get(_HR_ZONES_KEY), positional=True),
         pace_zone_times_s=_zone_seconds(row.get(_PACE_ZONES_KEY), positional=False),
         planned_event_id=_planned_event_id(row.get(_PAIRED_EVENT_KEY)),
+        device_name=(
+            None
+            if provenance["device_name"] is None
+            else provenance["device_name"][:MAX_NAME_LENGTH] or None
+        ),
     )
 
 

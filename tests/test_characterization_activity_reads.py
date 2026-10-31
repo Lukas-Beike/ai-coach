@@ -775,7 +775,7 @@ class TrainingRecordObservationCharacterizationTests(_StorageCase):
         self.assertEqual("ride", record["sport"])
         self.assertEqual(3600, record["duration"])
         # Canonical: the device is the summary's recording origin.
-        self.assertEqual("wahoo", record["device"])
+        self.assertEqual("Wahoo ELEMNT", record["device"])
         self.assertEqual("Intervals.icu", record["source"])
         self.assertEqual({"status": "ok"}, record["aerobic"])
 
