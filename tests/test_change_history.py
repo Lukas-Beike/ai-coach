@@ -208,6 +208,22 @@ class ChangeHistoryTests(unittest.TestCase):
             {"starts_at_local": {"changed": True}, "name": {"changed": True}},
         )
 
+    def test_public_view_skips_fields_that_are_not_an_object(self):
+        for diff in ({"fields": ["name"]}, {"fields": "name"}):
+            with self.subTest(diff=diff):
+                row = {
+                    "id": "change-1",
+                    "entity_type": "planned_unit",
+                    "entity_id": "u1",
+                    "action": "update",
+                    "source": "local",
+                    "created_at": "2026-09-21T08:00:00+00:00",
+                    "before_hash": "a" * 64,
+                    "after_hash": "b" * 64,
+                    "diff": json.dumps(diff),
+                }
+                self.assertEqual(change_history.public_view(row)["diff"]["fields"], {})
+
     def test_legacy_hash_matches_projection_without_added_fields(self):
         value = {"name": "Ada", "sleep_target_hours": "7.5", "fueling_tolerance": "gel"}
         legacy = {"name": "Ada"}

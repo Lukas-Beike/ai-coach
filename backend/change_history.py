@@ -401,10 +401,12 @@ def public_view(row: dict[str, Any]) -> dict[str, Any]:
         diff = json.loads(row.get("diff") or "{}")
     except TypeError, ValueError:
         diff = {"fields": {}}
+    fields = diff.get("fields")
     safe_fields = {
         field: {"changed": True}
         for field in current_audit_fields(
-            str(row.get("entity_type") or ""), diff.get("fields") or {}
+            str(row.get("entity_type") or ""),
+            fields if isinstance(fields, dict) else {},
         )
         if isinstance(field, str) and re.fullmatch(r"[a-z_]+", field)
     }

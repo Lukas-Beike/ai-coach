@@ -60,8 +60,10 @@ and leaves every note's contents unchanged. Existing observations keep their
 keys and read with an unknown measurement context. The version 16 step renames
 only those two fields and keeps every value; the change history is not
 rewritten, so earlier changes stay undoable, and recorded Intervals.icu sync
-baselines still match. A sync confirmation that was prepared but not yet
-confirmed before the upgrade must be prepared again.
+baselines still match. A sync confirmation that was prepared before the
+upgrade, or a confirmed sync job still queued during it, no longer matches the
+renamed records: it reports them as changed since the preview and writes
+nothing, so prepare and confirm that sync again.
 
 Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types. Likewise only that adapter maps `starts_at_local` and `planned_duration_s` to the Intervals.icu event and workout fields, and Coach tools take `starts_at_local` and `planned_duration_s` as well.
 
