@@ -299,7 +299,6 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/sync/snapshot_reader.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/snapshot_storage.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/sync/state.py"): _SYNC_WRITER,
-    (RULE_SNAPSHOT_KEY, "backend/sync/canonical_projection_assembly.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/backup/export.py"): _BACKUP,
     (RULE_SNAPSHOT_KEY, "backend/privacy.py"): _BACKUP,
     (RULE_SNAPSHOT_KEY, "backend/activities/read_service.py"): _SYNC_STATUS,

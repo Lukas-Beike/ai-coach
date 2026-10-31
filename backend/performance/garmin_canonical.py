@@ -4,8 +4,8 @@ The Garmin snapshot sections that have canonical observations (sleep, HRV, resti
 HR, readiness, weight, FTP, VO2max, thresholds including the running threshold
 power, profile max HR and race predictions) are read here from the observations of
 the Garmin provider, so the readers no longer depend on those snapshot sections.
-Which source serves the observations (the legacy projection or the canonical
-tables) is decided by the injected reader.
+Which source serves the observations (the canonical tables, or nothing before
+the first completed backfill) is decided by the injected reader.
 
 Selection follows the legacy readers: the latest observed day wins, and on one day
 a timestamped record beats an untimed one and a later record beats an earlier one.

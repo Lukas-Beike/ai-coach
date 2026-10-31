@@ -122,7 +122,9 @@ class DuplicateRemovalTests(_ActivityCase):
             self.assertIn(WAHOO_ID, self.ids(rows))
         # The snapshot is an ingestion artefact and is not rewritten by a delete.
         self.assertEqual(self.intervals["synced_at"], snapshot)
-        self.assertIn(GARMIN_ID, self.ids(self.read(self.projection.activity_rows)))
+        self.assertIn(
+            GARMIN_ID, self.ids(self.intervals["raw_provider_data"]["activities"])
+        )
         recent = self.read_service(selector).recent(today=TODAY)["activities"]
         self.assertNotIn(GARMIN_ID, self.ids(recent))
 
@@ -170,29 +172,39 @@ class DuplicateRemovalTests(_ActivityCase):
         )
 
 
-class LegacyAndTableParityTests(_ActivityCase):
-    def test_read_service_matches_between_legacy_and_tables(self) -> None:
-        legacy = self.read_service(make_selector(self))
-        legacy_page = legacy.page(today=TODAY)
-        legacy_recent = legacy.recent(today=TODAY)
+class PendingAndTableReadTests(_ActivityCase):
+    def test_read_service_lists_nothing_until_the_tables_serve(self) -> None:
+        pending = self.read_service(make_selector(self))
+        self.assertEqual(pending.page(today=TODAY)["activities"], [])
+        self.assertEqual(pending.recent(today=TODAY)["activities"], [])
 
         populate(self)
         tables = self.read_service(make_selector(self))
 
-        self.assertEqual(tables.page(today=TODAY), legacy_page)
-        # recent() keeps the source order: snapshot order versus newest first.
-        table_recent = tables.recent(today=TODAY)
+        expected = [
+            GARMIN_ID,
+            WAHOO_ID,
+            "i-act-005",
+            "i-act-004",
+            "i-act-001",
+            "i-act-003",
+            "i-act-002",
+        ]
+        page = tables.page(today=TODAY)
+        self.assertEqual([row["id"] for row in page["activities"]], expected)
         self.assertEqual(
-            sorted(table_recent["activities"], key=_by_id),
-            sorted(legacy_recent["activities"], key=_by_id),
+            {k: v for k, v in page.items() if k != "activities"},
+            {"snapshot_synced_at": None, "next_cursor": None, "limit": 100, "days": -1},
         )
+        recent = tables.recent(today=TODAY)
+        self.assertEqual([row["id"] for row in recent["activities"]], expected)
         self.assertEqual(
-            {k: v for k, v in table_recent.items() if k != "activities"},
-            {k: v for k, v in legacy_recent.items() if k != "activities"},
+            {k: v for k, v in recent.items() if k != "activities"},
+            {"snapshot_synced_at": None, "days": -1},
         )
 
     def test_duplicate_inspection_reads_only_the_tables(self) -> None:
-        # While the selector still serves the snapshot, nothing is in the tables:
+        # Before the first backfill nothing is in the tables:
         # no pair is offered, so nothing can be deleted twice.
         self.assertIsNone(self.inspector(make_selector(self)).latest())
         populate(self)

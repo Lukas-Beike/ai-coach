@@ -208,4 +208,14 @@ class CanonicalTableServing(Protocol):
     def serves_tables(self, db: Any) -> bool: ...
 
 
+class CanonicalReadStatus(CanonicalTableServing, Protocol):
+    """Reports the read state a consumer marks: pending, or an activity gap.
+
+    ``activities_need_refresh`` is True while the stored Intervals.icu snapshot
+    lists activities only in compact form, which never reach the tables.
+    """
+
+    def activities_need_refresh(self, db: Any) -> bool: ...
+
+
 ProviderOperation = Callable[[], AbstractContextManager[None]]

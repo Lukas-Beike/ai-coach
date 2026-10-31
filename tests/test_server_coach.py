@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 from canonical_detail_support import NOW, seed_intervals_activity
 from garmin_support import read_garmin, save_garmin
 from server_test_support import ServerTestCase, server
+from support import complete_canonical_backfill, store_canonical_snapshot
 
 from backend.coach import context as coach_context
 from backend.coach import limits as coach_limits
@@ -253,7 +254,7 @@ class ServerCoachTests(ServerTestCase):
                     "wellness": [],
                     "upcoming_calendar": [],
                 },
-            }
+            },
         )
         manager = server.database_manager()
         seed_intervals_activity(manager, "activity-1", name="Tempo", type="Run")
@@ -263,6 +264,7 @@ class ServerCoachTests(ServerTestCase):
             name="Recovery",
             start_date_local="2026-09-11T07:00:00",
         )
+        complete_canonical_backfill(server)
         with server.DB_LOCK, manager.unit_of_work() as db:
             CanonicalDetailWriter().write_legacy(
                 db,
@@ -317,10 +319,11 @@ class ServerCoachTests(ServerTestCase):
         )
         self.assertNotIn("activity-2", json.dumps(result))
         self.assertNotIn("Recovery", json.dumps(result))
-        self.assertEqual(
-            result["activity_validation"]["activity"]["activity_id"], "activity-1"
-        )
-        self.assertEqual(result["activity_validation"]["activity"]["sport"], "Laufen")
+        # The tables name the validated activity by its local session id; the run
+        # is activity-1 (activity-2 is a ride).
+        validated = result["activity_validation"]["activity"]
+        self.assertTrue(validated["activity_id"].startswith("act_"))
+        self.assertEqual(validated["sport"], "Laufen")
 
         with self.assertRaises(server.AppError) as missing:
             server.ACTIVITY_READS.activity_read().detail(
@@ -650,7 +653,8 @@ class ServerCoachTests(ServerTestCase):
         self.assertNotIn("latlng", detail["streams"])
 
     def test_coach_activity_feedback_is_persisted_and_attached_to_activity(self):
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        store_canonical_snapshot(
+            server,
             {
                 "synced_at": "2026-08-30T08:00:00+00:00",
                 "athlete": {},
@@ -663,7 +667,7 @@ class ServerCoachTests(ServerTestCase):
                 ],
                 "recent_wellness": [],
                 "upcoming_calendar": [],
-            }
+            },
         )
         result = server.ATHLETE_DATA.activity_feedback().save_coach(
             "activity-1",
@@ -701,7 +705,8 @@ class ServerCoachTests(ServerTestCase):
             )
         self.assertEqual(raised.exception.status, 404)
 
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        store_canonical_snapshot(
+            server,
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -714,7 +719,7 @@ class ServerCoachTests(ServerTestCase):
                 ],
                 "recent_wellness": [],
                 "upcoming_calendar": [],
-            }
+            },
         )
         result = server.ATHLETE_DATA.activity_feedback().save_coach(
             "activity-2",
@@ -753,14 +758,15 @@ class ServerCoachTests(ServerTestCase):
         # Saving writes the canonical rows too; Garmin values are read only from
         # them (#1415), so the context reads the stored snapshot as production does.
         save_garmin(payload)
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        store_canonical_snapshot(
+            server,
             {
                 "synced_at": "now",
                 "athlete": {},
                 "recent_activities": [],
                 "recent_wellness": [],
                 "upcoming_calendar": [],
-            }
+            },
         )
         context = server.COACH_CONTEXT.structured_context_service().build()
 

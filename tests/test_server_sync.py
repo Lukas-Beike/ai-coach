@@ -27,6 +27,7 @@ from support import (
     IntervalsRequestRecorder,
     RecordedIntervalsClient,
     parsed_workout_fixture,
+    store_canonical_snapshot,
 )
 
 from backend.http_api import server as http_server_module
@@ -1450,7 +1451,7 @@ class ServerSyncTests(ServerTestCase):
             "recent_wellness": [],
             "upcoming_calendar": [],
         }
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
+        store_canonical_snapshot(server, snapshot)
         context = server.COACH_CONTEXT.training_context_service().build()
         self.assertIn("Ride 0", context)
         self.assertNotIn("Ride 5", context)

@@ -10,7 +10,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
@@ -43,8 +43,7 @@ from backend.sync.canonical_coverage_store import (
     wahoo_payload_coverage,
 )
 from backend.sync.canonical_ingest import ingest_intervals_snapshot
-from backend.sync.canonical_projection import CanonicalSnapshotProjection
-from backend.sync.canonical_read_selector import CanonicalReadSelector
+from backend.sync.canonical_read_selector import PENDING_READER, CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.performance import PerformanceRefreshService
 from backend.sync.state import SyncStateRepository
@@ -228,22 +227,17 @@ class PerformanceCanonicalIngestTests(unittest.TestCase):
         self.assertEqual(datetime.fromisoformat(NOW), stored.observations_retrieved_at)
         self.assertGreater(stored.observation_count, 0)
 
-    def test_refresh_persists_coverage_equal_to_the_legacy_projection(self) -> None:
+    def test_refresh_persists_the_coverage_of_the_stored_snapshot(self) -> None:
         self.service._refresh_inner()
-        projection = CanonicalSnapshotProjection(
-            intervals_snapshot=lambda db: self.sync_state.latest_snapshot(),
-            intervals_version=lambda db: "v",
-            garmin_payload=lambda db: {},
-            zone=lambda db: ZONE,
-            clock=lambda: datetime(2026, 10, 10, tzinfo=UTC),
+        expected = intervals_snapshot_coverage(
+            self.sync_state.latest_snapshot(), zone=ZONE
         )
         with self.manager.reader() as db:
             stored = CanonicalCoverageStore(self.key_values).load(
                 db, ProviderId.INTERVALS, zone=ZONE
             )
-            legacy = projection.coverage(db)[0]
         self.assertIsNotNone(stored)
-        self.assertEqual(stored, legacy)
+        self.assertEqual(stored, expected)
         self.assertGreater(stored.observation_count, 0)  # type: ignore[union-attr]
 
 
@@ -262,67 +256,67 @@ class PersistedCoverageTests(CanonicalReadFixture):
                 db, garmin_payload_coverage(self.garmin, zone=use), zone=use
             )
 
-    def strip_legacy_inputs(self) -> None:
+    def strip_snapshot_inputs(self) -> None:
         synced_at = self.intervals["synced_at"]
         self.intervals.clear()
         self.intervals["synced_at"] = synced_at
 
-    def test_without_persisted_data_coverage_is_the_legacy_computation(self) -> None:
-        selector = self.selector()
-        self.assertEqual(
-            self.read(selector.coverage), self.read(self.projection.coverage)
+    def summaries(self) -> tuple[Any, ...]:
+        """The Intervals.icu and Garmin summaries ``store`` persists."""
+        return (
+            intervals_snapshot_coverage(self.intervals, zone=ZONE),
+            garmin_payload_coverage(self.garmin, zone=ZONE),
         )
 
+    def test_without_persisted_data_coverage_is_empty(self) -> None:
+        self.assertEqual(self.read(self.selector().coverage), ())
+
     def test_persisted_coverage_is_read_instead_of_recomputed(self) -> None:
-        expected = self.read(self.projection.coverage)
+        expected = self.summaries()
         self.store()
-        # The legacy inputs change, but the persisted summary is what is served.
-        self.strip_legacy_inputs()
+        # The snapshot inputs change, but the persisted summary is what is served.
+        self.strip_snapshot_inputs()
         self.garmin.clear()
-        self.intervals_version = "row-2"
 
         self.assertEqual(self.read(self.selector().coverage), expected)
 
-    def test_a_provider_without_a_summary_falls_back_for_that_provider(self) -> None:
-        expected = self.read(self.projection.coverage)
+    def test_a_provider_without_a_summary_is_omitted(self) -> None:
+        intervals, _garmin = self.summaries()
         coverage = CanonicalCoverageStore(self.key_values)
         with self.manager.unit_of_work() as db:
-            coverage.persist(
-                db, intervals_snapshot_coverage(self.intervals, zone=ZONE), zone=ZONE
-            )
+            coverage.persist(db, intervals, zone=ZONE)
 
-        self.assertEqual(self.read(self.selector().coverage), expected)
+        self.assertEqual(self.read(self.selector().coverage), (intervals,))
         self.assertIsNone(
             self.read(self.key_values.get, coverage_key(ProviderId.GARMIN))
         )
 
     def test_outdated_or_corrupt_summaries_are_ignored(self) -> None:
-        expected = self.read(self.projection.coverage)
+        _intervals, garmin = self.summaries()
         self.store()
-        self.strip_legacy_inputs()
-        self.intervals_version = "row-2"
+        self.strip_snapshot_inputs()
 
         with patch(
             "backend.sync.canonical_coverage_store.current_mapper_versions",
             return_value={"changed": 1},
         ):
-            self.assertNotEqual(self.read(self.selector().coverage), expected)
+            self.assertEqual(self.read(self.selector().coverage), ())
 
         self.zone = ZoneInfo("America/New_York")
-        self.assertNotEqual(self.read(self.selector().coverage), expected)
+        self.assertEqual(self.read(self.selector().coverage), ())
         self.zone = ZONE
 
         with self.manager.unit_of_work() as db:
             self.key_values.set(db, coverage_key(ProviderId.INTERVALS), "{not json")
-        self.assertNotEqual(self.read(self.selector().coverage)[0], expected[0])
+        self.assertEqual(self.read(self.selector().coverage), (garmin,))
 
     def test_only_the_ingested_providers_are_consulted(self) -> None:
         self.assertEqual(
             CANONICAL_COVERAGE_PROVIDERS, (ProviderId.INTERVALS, ProviderId.GARMIN)
         )
-        expected = self.read(self.projection.coverage)
+        expected = self.summaries()
         self.store()
-        self.strip_legacy_inputs()
+        self.strip_snapshot_inputs()
         self.garmin.clear()
 
         loaded: list[ProviderId] = []
@@ -344,7 +338,7 @@ class PersistedCoverageTests(CanonicalReadFixture):
 
     def test_a_live_provider_summary_is_appended_without_gating(self) -> None:
         self.assertEqual(LIVE_COVERAGE_PROVIDERS, (ProviderId.WAHOO,))
-        expected = self.read(self.projection.coverage)
+        expected = self.summaries()
         self.store()
         wahoo = wahoo_payload_coverage(
             {
@@ -362,9 +356,7 @@ class PersistedCoverageTests(CanonicalReadFixture):
         self.assertEqual(result, (*expected, wahoo))
         with self.manager.unit_of_work() as db:
             self.key_values.set(db, coverage_key(ProviderId.INTERVALS), "{not json")
-        fallback = self.read(self.selector().coverage)
-        self.assertEqual(fallback[-1], wahoo)
-        self.assertEqual(len(fallback), len(expected) + 1)
+        self.assertEqual(self.read(self.selector().coverage), (expected[1], wahoo))
 
     def test_persisted_value_holds_counts_only(self) -> None:
         self.store()
@@ -448,7 +440,7 @@ class ReadsAfterBackfillTests(CanonicalReadFixture):
         return [(r.activity_id, r.provenance.provider.value) for r in records]
 
     def test_tables_keep_serving_through_mapper_and_zone_changes(self) -> None:
-        self.assertIs(self.read(make_selector(self).reader_for), self.projection)
+        self.assertIs(self.read(make_selector(self).reader_for), PENDING_READER)
 
         populate(self)  # ingests the snapshots and completes the backfill
         obsolete = {
@@ -477,7 +469,7 @@ class ReadsAfterBackfillTests(CanonicalReadFixture):
             return_value=bumped,
         ):
             self.assertTrue(self.read(selector.serves_tables))
-            self.assertIsNot(self.read(selector.reader_for), self.projection)
+            self.assertIsNot(self.read(selector.reader_for), PENDING_READER)
             self.assertEqual(
                 self.ids(self.read(selector.activities)),
                 self.ids(self.read(self.table.activities)),
@@ -487,7 +479,7 @@ class ReadsAfterBackfillTests(CanonicalReadFixture):
         self.assertTrue(self.read(selector.serves_tables))
         self.zone = ZoneInfo("America/Los_Angeles")
         self.assertTrue(self.read(selector.serves_tables))
-        self.assertIsNot(self.read(selector.reader_for), self.projection)
+        self.assertIsNot(self.read(selector.reader_for), PENDING_READER)
         backfill = new_backfill(self)
         for _ in range(MAX_BATCHES):
             with self.manager.unit_of_work() as db:

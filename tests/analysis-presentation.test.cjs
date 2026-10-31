@@ -185,3 +185,29 @@ test("body overview falls back to Garmin when the profile fat is absent", () => 
   assert.equal(row.children[1].text, "16 %");
   assert.deepEqual(point, { date: "2026-10-10", value: 16 });
 });
+
+test("performance status marks only the pending and compact-only activity states", () => {
+  const { performanceDataStatus } = loadFunctions("performance-view.js", ["performanceDataStatus"]);
+  assert.deepEqual(Array.from(performanceDataStatus({ available: false, reason: "canonical_pending" })), ["Daten werden vorbereitet"]);
+  assert.deepEqual(Array.from(performanceDataStatus({ available: true, activities_need_refresh: true })), ["Aktivitäten: Intervals.icu neu abrufen"]);
+  assert.deepEqual(Array.from(performanceDataStatus({ available: true, activities_need_refresh: false })), []);
+  assert.deepEqual(Array.from(performanceDataStatus({ available: false })), []);
+  assert.deepEqual(Array.from(performanceDataStatus(undefined)), []);
+});
+
+test("current performance shows the status lines below its heading", () => {
+  const root = { children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
+  const reportNode = (tag, text, className) => ({ tag, text, className, children: [], append(...nodes) { this.children.push(...nodes); }, get childElementCount() { return this.children.length; } });
+  const { renderCurrentPerformance } = loadFunctions("performance-view.js", ["currentPerformanceValues", "renderCurrentPerformance"], {
+    document: { getElementById: () => root },
+    reportNode,
+    rememberAnalysisSectionState() {},
+    makeAnalysisSectionCollapsible() {},
+    analysisValidPoint: () => true,
+    isPreferredSource: () => false,
+  });
+  renderCurrentPerformance({}, undefined, ["Daten werden vorbereitet"]);
+  assert.deepEqual(root.children.slice(0, 2).map((node) => [node.tag, node.text]), [["h3", "Aktuelle Leistungswerte"], ["p", "Daten werden vorbereitet"]]);
+  renderCurrentPerformance({}, undefined);
+  assert.equal(root.children.filter((node) => node.text === "Daten werden vorbereitet").length, 0);
+});

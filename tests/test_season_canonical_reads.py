@@ -1,4 +1,4 @@
-"""Season preparation inputs: tables and legacy agree and need no snapshot section."""
+"""Season preparation inputs: read only from the tables, without snapshot sections."""
 
 from __future__ import annotations
 
@@ -60,28 +60,20 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
                 snapshot, {}, today, {"end": "2026-10-20"}, inputs=inputs
             )
 
-    def _legacy_ids(self, selector: Any, value: Any) -> Any:
-        """Replace table session ids by the provider ids the legacy source names."""
-        with self.manager.reader() as db:
-            keys = {
-                summary["id"]: stored_activity_key(summary)
-                for summary in selector.activity_summaries(db)
-            }
-        return _replaced(value, keys)
-
     def _tables(self) -> Any:
         populate(self)
         selector = make_selector(self)
         self.assertTrue(self.write(selector.serves_tables))
         return selector
 
-    def test_season_from_tables_equals_the_legacy_projection(self) -> None:
-        legacy_selector = make_selector(self)
-        self.assertFalse(self.write(legacy_selector.serves_tables))
-        legacy = self._season(legacy_selector, self.intervals)
-        selector = self._tables()
-        served = self._season(selector, self.intervals)
-        self.assertEqual(self._legacy_ids(selector, served), legacy)
+    def test_season_reads_nothing_until_the_tables_serve(self) -> None:
+        pending_selector = make_selector(self)
+        self.assertFalse(self.write(pending_selector.serves_tables))
+        pending = self._season(pending_selector, self.intervals)
+        self.assertEqual(
+            "insufficient_data", pending["events"][0]["preparation"]["status"]
+        )
+        served = self._season(self._tables(), self.intervals)
         self.assertEqual("observations", served["events"][0]["preparation"]["status"])
 
     def test_season_does_not_need_the_snapshot_activity_sections(self) -> None:
@@ -91,22 +83,13 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
             self._season(selector, stripped), self._season(selector, self.intervals)
         )
 
-    def test_scenarios_from_tables_equal_the_legacy_projection(self) -> None:
-        days = (TODAY, ACTIVITY_DAY)
-        legacy_selector = make_selector(self)
-        self.assertFalse(self.write(legacy_selector.serves_tables))
-        legacy = [self._scenarios(legacy_selector, self.intervals, d) for d in days]
+    def test_scenarios_read_the_load_basis_only_from_the_tables(self) -> None:
+        pending_selector = make_selector(self)
+        self.assertFalse(self.write(pending_selector.serves_tables))
+        pending = self._scenarios(pending_selector, self.intervals, TODAY)["basis"]
+        self.assertEqual((None, None), (pending["ctl"], pending["atl"]))
         selector = self._tables()
-        for today, expected in zip(days, legacy, strict=True):
-            with self.subTest(today=today):
-                served = self._legacy_ids(
-                    selector, self._scenarios(selector, self.intervals, today)
-                )
-                # The input hash covers the session ids, which differ per source.
-                self.assertEqual(
-                    {**served, "input_sha256": None}, {**expected, "input_sha256": None}
-                )
-        basis = legacy[0]["basis"]
+        basis = self._scenarios(selector, self.intervals, TODAY)["basis"]
         self.assertEqual(
             ("2026-10-08", 52.1, 60.4), (basis["as_of"], basis["ctl"], basis["atl"])
         )
@@ -131,14 +114,6 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
         self.assertEqual(
             ["i-act-001"], [stored_activity_key(row) for row in inputs.completed_today]
         )
-
-
-def _replaced(value: Any, keys: dict[str, str]) -> Any:
-    if isinstance(value, dict):
-        return {key: _replaced(item, keys) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_replaced(item, keys) for item in value]
-    return keys.get(value, value) if isinstance(value, str) else value
 
 
 if __name__ == "__main__":

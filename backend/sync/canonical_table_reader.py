@@ -1,8 +1,7 @@
 """Canonical reader over the canonical tables, without any provider client or sync.
 
 Reads the stored rows only, so the last stored data stays readable with no provider
-configured and no sync performed. Served records are the ones the legacy projection
-would return for the same data:
+configured and no sync performed. Served records:
 
 - activities: ``active`` activity records whose session is not ``deleted``. Invalid
   and deleted records are never served.
@@ -19,8 +18,8 @@ would return for the same data:
   next to the new one until the re-projection completes, so that one measurement
   can briefly appear twice.
 
-Results use the same inclusive bounds and the same total order as
-``CanonicalSnapshotProjection``. Activity bounds filter the stored athlete-local
+Results use inclusive bounds and the canonical total order
+(``backend.canonical.ordering``). Activity bounds filter the stored athlete-local
 date, which the ingest computed with the athlete's zone at write time.
 
 Sleep periods, zone configurations, provider statuses and gear are served from

@@ -12,6 +12,7 @@ import test_coach_dialogue as dialogue
 from canonical_detail_support import seed_intervals_activity
 from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
+from support import store_canonical_snapshot
 
 from backend.activities.feedback import ActivityFeedbackService
 from backend.performance import garmin_metrics as performance_garmin_metrics
@@ -273,7 +274,8 @@ class DiagnosticFollowupTests(unittest.TestCase):
         self.assertIn("weight", read_garmin())
 
     def test_feedback_answer_after_plain_text_morning_question_is_saved_once(self):
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        store_canonical_snapshot(
+            server,
             {
                 "synced_at": runtime_clock.utc_now(),
                 "recent_activities": [
@@ -284,7 +286,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                         "start_date_local": "2026-09-06T10:00:00",
                     }
                 ],
-            }
+            },
         )
         self.turn(
             "Morgen-Check-in",

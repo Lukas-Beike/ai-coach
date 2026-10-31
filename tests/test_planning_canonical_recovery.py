@@ -116,7 +116,6 @@ class _FakeKeyValues:
         return self._values.get(key)
 
 
-
 class _NoBattery:
     def current(self, snapshot: Any) -> None:
         return None
@@ -381,11 +380,12 @@ class CanonicalPlanningEndToEndTests(CanonicalReadFixture):
         self.assertTrue(reference)
         self.assertEqual(self._served(selector), reference)
 
-    def test_recovery_from_the_legacy_projection_equals_the_reference(self) -> None:
-        # The backfill has not run, so the selector serves the legacy projection.
+    def test_recovery_before_the_first_backfill_is_empty(self) -> None:
+        # The backfill has not run, so the selector serves nothing yet.
         selector = make_selector(self)
         self.assertFalse(self.write(selector.serves_tables))
-        self.assertEqual(self._served(selector), self._reference())
+        self.assertTrue(self._reference())
+        self.assertEqual(self._served(selector), {})
 
     def test_tables_serve_the_context_without_canonical_snapshot_sections(
         self,

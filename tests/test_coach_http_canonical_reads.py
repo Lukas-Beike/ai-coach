@@ -1,9 +1,9 @@
 """Coach context, HTTP state and diagnostics read activities through the selector.
 
-Each consumer must give the same output while the selector serves the legacy
-projection and while it serves the canonical tables, and must not need the
+Each consumer reads nothing before the first completed backfill, reads the
+snapshot's activities from the canonical tables afterwards, and does not need the
 ``recent_activities`` / ``raw_provider_data`` / ``recent_wellness`` snapshot
-sections once the backfill is complete. All storage is temporary.
+sections then. All storage is temporary.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from unittest.mock import Mock
 from activity_row_support import summaries_of_rows
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
-from backend.activities.activity_summary import stored_activity_key
 from backend.canonical.vocabulary import ProviderId
 from backend.coach.context import CoachPerformanceContextReader
 from backend.diagnostics.canonical_counts import activity_count, wellness_day_count
@@ -36,17 +35,6 @@ from backend.sync.canonical_coverage_store import (
 TODAY = date(2026, 10, 13)
 CANONICAL_SECTIONS = ("recent_activities", "recent_wellness", "raw_provider_data")
 T = TypeVar("T")
-
-
-def _stored_ids(value: Any, ids: dict[str, str]) -> Any:
-    """Replace local session ids by stored activity keys throughout ``value``."""
-    if isinstance(value, str):
-        return ids.get(value, value)
-    if isinstance(value, dict):
-        return {key: _stored_ids(item, ids) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_stored_ids(item, ids) for item in value]
-    return value
 
 
 def _by_id(rows: Sequence[Any]) -> list[Any]:
@@ -99,51 +87,46 @@ class CanonicalContextReadCase(CanonicalReadFixture):
     def _source(self, selector: Any) -> ActivitySummarySource:
         return ActivitySummarySource(lambda: _Manager(self), lambda: selector)  # type: ignore[arg-type,return-value]
 
-    def _both(
-        self, read: Callable[[Any, dict[str, Any]], T], *, strip: bool = False
+    def _pending_and_tables(
+        self, read: Callable[[Any, dict[str, Any]], T]
     ) -> tuple[T, T]:
-        """Run ``read`` against the legacy projection, then against the tables.
+        """Run ``read`` before the first backfill, then against the filled tables.
 
-        ``read`` receives the selector and the stored Intervals snapshot. With
-        ``strip`` the canonical sections are removed from that snapshot before the
-        table read, proving the read no longer needs them.
+        ``read`` receives the selector and the stored Intervals snapshot.
         """
-        legacy = read(make_selector(self), self.intervals)
+        pending = read(make_selector(self), self.intervals)
+        populate(self)
+        return pending, read(make_selector(self), self.intervals)
+
+    def _with_and_without_sections(
+        self, read: Callable[[Any, dict[str, Any]], T]
+    ) -> tuple[T, T]:
+        """Run ``read`` against the tables, then again without the snapshot sections."""
         populate(self)
         selector = make_selector(self)
-        snapshot = self.intervals
-        if strip:
-            snapshot = {
-                key: value
-                for key, value in self.intervals.items()
-                if key not in CANONICAL_SECTIONS
-            }
-            self.intervals = snapshot
-        tables = read(selector, snapshot)
-        return legacy, _stored_ids(tables, self._local_to_stored(selector))
-
-    def _local_to_stored(self, selector: Any) -> dict[str, str]:
-        """Map each table summary id (a local session id) to its stored key.
-
-        The legacy projection keys sessions by the provider id; the tables key
-        them by the local session id. Both name the same stored activity.
-        """
-        with self.manager.reader() as db:
-            summaries = selector.activity_summaries(db)
-        # A Garmin-only session has no Intervals.icu id; the legacy side keys it by
-        # its Garmin id.
-        return {
-            str(item["id"]): (
-                stored_activity_key(item)
-                if "intervals" in item["record_ids"]
-                else str(next(iter(item["record_ids"].values())))
-            )
-            for item in summaries
+        full = read(selector, self.intervals)
+        self.intervals = {
+            key: value
+            for key, value in self.intervals.items()
+            if key not in CANONICAL_SECTIONS
         }
+        return full, read(selector, self.intervals)
+
+    def _snapshot_ids(self) -> list[str]:
+        return sorted(str(row["id"]) for row in self.intervals["recent_activities"])
+
+
+def _intervals_ids(rows: Sequence[Any]) -> list[str]:
+    return sorted(
+        str(row["record_ids"]["intervals"])
+        for row in rows
+        if "intervals" in row["record_ids"]
+    )
 
 
 class CompactActivityTests(CanonicalContextReadCase):
-    def test_legacy_rows_compact_to_the_snapshot_recent_activities(self) -> None:
+    def test_table_rows_compact_to_the_snapshot_recent_activities(self) -> None:
+        populate(self)
         compact = self._source(make_selector(self)).compact()
 
         self.assertTrue(compact)
@@ -180,11 +163,13 @@ class CompactActivityTests(CanonicalContextReadCase):
                     },
                 )
 
-    def test_tables_serve_the_same_compact_activities_as_legacy(self) -> None:
-        legacy, tables = self._both(lambda sel, _snap: self._source(sel).compact())
+    def test_compact_activities_are_empty_until_the_tables_serve(self) -> None:
+        pending, tables = self._pending_and_tables(
+            lambda sel, _snap: self._source(sel).compact()
+        )
 
-        self.assertTrue(legacy)
-        self.assertEqual(_by_id(tables), _by_id(legacy))
+        self.assertEqual(pending, [])
+        self.assertEqual(_intervals_ids(tables), self._snapshot_ids())
 
     def test_compaction_is_capped_like_the_snapshot_read_model(self) -> None:
         rows = [{"id": str(index), "name": "x"} for index in range(600)]
@@ -195,6 +180,7 @@ class CompactActivityTests(CanonicalContextReadCase):
         )
 
     def test_unit_of_work_connection_is_used_when_given(self) -> None:
+        populate(self)
         source = self._source(make_selector(self))
         with self.manager.unit_of_work() as db:
             self.assertEqual(source.compact(db), source.compact())
@@ -208,12 +194,12 @@ class ActivityRowLimitTests(CanonicalContextReadCase):
                 selector.activity_rows(db, limit=1),
             )
 
-    def test_limit_keeps_the_leading_rows_of_legacy_and_tables(self) -> None:
-        legacy, tables = self._both(self._limited)
+    def test_limit_keeps_the_leading_rows_of_the_tables(self) -> None:
+        pending, (full, limited) = self._pending_and_tables(self._limited)
 
-        for full, limited in (legacy, tables):
-            self.assertGreater(len(full), 1)
-            self.assertEqual(limited, full[:1])
+        self.assertEqual(pending, ((), ()))
+        self.assertGreater(len(full), 1)
+        self.assertEqual(limited, full[:1])
 
 
 class CoachActivitiesContextTests(CanonicalContextReadCase):
@@ -223,17 +209,17 @@ class CoachActivitiesContextTests(CanonicalContextReadCase):
         )
         return reader.activities([])
 
-    def test_activities_section_is_equal_from_legacy_and_from_tables(self) -> None:
-        legacy, tables = self._both(self._activities)
+    def test_activities_section_is_empty_until_the_tables_serve(self) -> None:
+        pending, tables = self._pending_and_tables(self._activities)
 
+        self.assertEqual(pending["recent_activities_by_sport"], {})
         self.assertTrue(tables["recent_activities_by_sport"])
-        self.assertEqual(tables, legacy)
 
     def test_activities_section_does_not_need_the_snapshot_sections(self) -> None:
-        legacy, tables = self._both(self._activities, strip=True)
+        full, stripped = self._with_and_without_sections(self._activities)
 
-        self.assertTrue(tables["recent_activities_by_sport"])
-        self.assertEqual(tables, legacy)
+        self.assertTrue(stripped["recent_activities_by_sport"])
+        self.assertEqual(stripped, full)
         self.assertNotIn("recent_activities", self.intervals)
 
     def test_activities_freshness_comes_from_the_stored_coverage(self) -> None:
@@ -338,17 +324,17 @@ class HttpStateReadTests(CanonicalContextReadCase):
         )
         return prelude.read(True).activities
 
-    def test_state_prelude_activities_are_equal_from_legacy_and_tables(self) -> None:
-        legacy, tables = self._both(self._prelude_activities)
+    def test_state_prelude_activities_come_from_the_tables(self) -> None:
+        pending, tables = self._pending_and_tables(self._prelude_activities)
 
-        self.assertTrue(legacy)
-        self.assertEqual(_by_id(tables), _by_id(legacy))
+        self.assertEqual(pending, [])
+        self.assertEqual(_intervals_ids(tables), self._snapshot_ids())
 
     def test_state_prelude_does_not_need_the_snapshot_sections(self) -> None:
-        legacy, tables = self._both(self._prelude_activities, strip=True)
+        full, stripped = self._with_and_without_sections(self._prelude_activities)
 
-        self.assertTrue(tables)
-        self.assertEqual(_by_id(tables), _by_id(legacy))
+        self.assertTrue(stripped)
+        self.assertEqual(_by_id(stripped), _by_id(full))
 
     def _plan_activities(
         self, selector: Any, snapshot: dict[str, Any]
@@ -409,17 +395,17 @@ class HttpStateReadTests(CanonicalContextReadCase):
         service.read(local_only=True)
         return feedback.attach_to_activities.call_args.args[0]
 
-    def test_plan_activities_are_equal_from_legacy_and_tables(self) -> None:
-        legacy, tables = self._both(self._plan_activities)
+    def test_plan_activities_come_from_the_tables(self) -> None:
+        pending, tables = self._pending_and_tables(self._plan_activities)
 
-        self.assertTrue(legacy)
-        self.assertEqual(_by_id(tables), _by_id(legacy))
+        self.assertEqual(pending, [])
+        self.assertEqual(_intervals_ids(tables), self._snapshot_ids())
 
     def test_plan_does_not_need_the_snapshot_sections(self) -> None:
-        legacy, tables = self._both(self._plan_activities, strip=True)
+        full, stripped = self._with_and_without_sections(self._plan_activities)
 
-        self.assertTrue(tables)
-        self.assertEqual(_by_id(tables), _by_id(legacy))
+        self.assertTrue(stripped)
+        self.assertEqual(_by_id(stripped), _by_id(full))
 
 
 class DiagnosticCountTests(CanonicalContextReadCase):
@@ -431,17 +417,16 @@ class DiagnosticCountTests(CanonicalContextReadCase):
         with self.manager.reader() as db:
             return self._counts(selector, db)
 
-    def test_counts_are_equal_from_legacy_and_tables(self) -> None:
-        legacy, tables = self._both(self._read_counts)
+    def test_counts_are_zero_until_the_tables_serve(self) -> None:
+        pending, tables = self._pending_and_tables(self._read_counts)
 
-        self.assertGreater(tables[0], 0)
-        self.assertGreater(tables[1], 0)
-        self.assertEqual(tables, legacy)
+        self.assertEqual(pending, (0, 0))
+        self.assertEqual(tables, (6, 3))
 
     def test_counts_do_not_need_the_snapshot_sections(self) -> None:
-        legacy, tables = self._both(self._read_counts, strip=True)
+        full, stripped = self._with_and_without_sections(self._read_counts)
 
-        self.assertEqual(tables, legacy)
+        self.assertEqual(stripped, full)
 
     def test_unwired_readers_count_zero(self) -> None:
         with self.manager.reader() as db:

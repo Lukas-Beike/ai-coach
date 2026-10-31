@@ -51,6 +51,7 @@ from backend.sync.garmin_projection_service import (
 TODAY = date(2026, 5, 4)
 GARMIN_SOURCE = "Garmin Connect"
 INTERVALS_SOURCE = "Intervals.icu"
+STORED_PROVIDERS_SOURCE = "Gespeicherte Provider-Daten"
 WELLNESS_SOURCE = "Intervals.icu Wellness"
 GENERIC_LTHR_SOURCE = "Intervals.icu (allgemein)"
 VENDOR_SENTINEL = "synthetic-vendor-blob"
@@ -272,13 +273,15 @@ def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionServ
 
 
 class CurrentPerformanceProvenanceTests(unittest.TestCase):
-    def test_unavailable_projection_garmin_balance_follows_freshness_and_presence(
+    def test_garmin_only_projection_balance_follows_freshness_and_presence(
         self,
     ) -> None:
         result = _context(None, _garmin_payload(), {}, TODAY)
 
-        self.assertFalse(result["available"])
-        self.assertEqual(result["source"], INTERVALS_SOURCE)
+        # Canonical Garmin observations make the context available without a
+        # snapshot; without an Intervals.icu sync it names the stored providers.
+        self.assertTrue(result["available"])
+        self.assertEqual(result["source"], STORED_PROVIDERS_SOURCE)
         balance = result["garmin_training_load"]["four_week_balance"]
         self.assertEqual(balance["source"], GARMIN_SOURCE)
         self.assertEqual(balance["freshness"], "current")
@@ -296,9 +299,8 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
 
         without_balance = _garmin_payload()
         del without_balance["training_load_balance"]
-        self.assertNotIn(
-            "garmin_training_load",
-            _context(None, without_balance, {}, TODAY),
+        self.assertEqual(
+            _context(None, without_balance, {}, TODAY)["garmin_training_load"], {}
         )
 
     def test_available_projection_always_has_garmin_training_load_key(self) -> None:
@@ -319,6 +321,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "training_focus",
                 "source",
                 "as_of",
+                "activities_need_refresh",
                 "metrics",
                 "thresholds",
                 "current_load",
@@ -329,7 +332,8 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "activity_validation",
             },
         )
-        self.assertEqual(result["as_of"], "2026-05-04T05:00:00Z")
+        # The canonical sync instant the fixture mapping stamps on the athlete record.
+        self.assertEqual(result["as_of"], "2026-10-12T08:00:00+00:00")
         self.assertEqual(
             set(result["thresholds"]),
             {"ftp_w", "w_prime_j", "max_hr", "lthr", "weight"},
@@ -493,13 +497,15 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
         )
 
         _, inputs = reader.read_snapshot(lambda: None)
-        unavailable = reader.current_performance(None, inputs)
+        performance = reader.current_performance(None, inputs)
         garmin_context = reader.recovery(None)
         reader.recovery(_intervals_snapshot())
 
-        self.assertFalse(unavailable["available"])
+        # Canonical Garmin observations make the context available without a
+        # snapshot.
+        self.assertTrue(performance["available"])
         self.assertEqual(
-            unavailable["garmin_training_load"]["four_week_balance"]["source"],
+            performance["garmin_training_load"]["four_week_balance"]["source"],
             GARMIN_SOURCE,
         )
         self.assertEqual(
@@ -626,8 +632,10 @@ class CoachStructuredContextSwitchTests(unittest.TestCase):
         garmin_projection.coach_context.assert_called_once_with(
             include_performance=True
         )
-        self.assertFalse(result["current_performance"]["available"])
-        self.assertEqual(result["current_performance"]["source"], INTERVALS_SOURCE)
+        self.assertTrue(result["current_performance"]["available"])
+        self.assertEqual(
+            result["current_performance"]["source"], STORED_PROVIDERS_SOURCE
+        )
         self.assertEqual(
             result["current_performance"]["garmin_training_load"]["four_week_balance"][
                 "source"
@@ -647,7 +655,8 @@ class CoachStructuredContextSwitchTests(unittest.TestCase):
 
         garmin_projection.coach_context.assert_not_called()
         self.assertEqual(set(result), {"activities", "current_performance"})
-        self.assertTrue(result["current_performance"]["available"])
+        # Without a canonical source there are no canonical values.
+        self.assertFalse(result["current_performance"]["available"])
 
 
 class GarminCoachContextFallbackProvenanceTests(unittest.TestCase):

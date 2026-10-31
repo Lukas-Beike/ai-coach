@@ -1,4 +1,4 @@
-"""Canonical read selector: legacy before the first backfill, tables from then on."""
+"""Canonical read selector: nothing before the first backfill, tables from then on."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from canonical_read_support import (
     MAX_BATCHES,
     CanonicalReadFixture,
     first_activity_name,
+    intervals_snapshot,
     make_selector,
     new_backfill,
     populate,
@@ -33,12 +34,13 @@ from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
     intervals_snapshot_coverage,
 )
+from backend.sync.canonical_read_selector import PENDING_READER
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 SECRET = "sk-test-SECRET-value-123"
 LEGACY_STATE_KEY = "canonical_read_state"
 TABLES = "tables"
-LEGACY = "legacy"
+PENDING = "pending"
 STATUS = "status"
 COMPLETED_ONCE = "completed_once"
 FIRST_COMPLETED_AT = "first_completed_at"
@@ -116,20 +118,27 @@ class SelectorTests(CanonicalReadFixture):
             ids(self.read(self.table.activities)),
         )
 
-    def _assert_serves_legacy(self, selector: Any) -> None:
+    def _assert_serves_nothing(self, selector: Any) -> None:
         summary = self.read(selector.summary)
-        self.assertEqual(summary[SERVING], LEGACY)
+        self.assertEqual(summary[SERVING], PENDING)
         self.assertEqual(summary[REASON], BACKFILL_PENDING)
         self.assertFalse(summary[DIGEST_CURRENT])
         self.assertFalse(self.read(selector.serves_tables))
-        self.assertIs(self.read(selector.reader_for), self.projection)
+        self.assertIs(self.read(selector.reader_for), PENDING_READER)
+        self.assertEqual(self.read(selector.activities), ())
+        self.assertEqual(self.read(selector.activity_rows), ())
+        self.assertEqual(self.read(selector.activity_summaries), ())
         self.assertEqual(
-            ids(self.read(selector.activities)),
-            ids(self.read(self.projection.activities)),
+            self.read(selector.activity_max_hr, ProviderId.INTERVALS, low=0, high=1000),
+            (),
         )
+        self.assertEqual(self.read(selector.metric_windows), ())
+        for kind in MetricKind:
+            with self.subTest(kind=kind):
+                self.assertEqual(self.read(selector.observations, kind), ())
 
-    def test_before_the_first_backfill_reads_come_from_legacy(self) -> None:
-        self._assert_serves_legacy(make_selector(self))
+    def test_before_the_first_backfill_every_read_is_empty(self) -> None:
+        self._assert_serves_nothing(make_selector(self))
 
     def test_completed_backfill_serves_tables_without_any_refresh(self) -> None:
         populate(self)
@@ -147,12 +156,14 @@ class SelectorTests(CanonicalReadFixture):
         state = self._backfill_state()
         self.assertFalse(state[COMPLETED_ONCE])
         self.assertIsNone(state[FIRST_COMPLETED_AT])
-        self._assert_serves_legacy(make_selector(self))
+        self._assert_serves_nothing(make_selector(self))
 
         self._run_to_completion(backfill)
         self.assertTrue(self._backfill_state()[COMPLETED_ONCE])
 
-    def test_first_backfill_not_complete_serves_legacy(self) -> None:
+    def test_first_backfill_not_complete_serves_nothing_from_filled_tables(
+        self,
+    ) -> None:
         populate(self)
         state = self._backfill_state()
         selector = make_selector(self)
@@ -161,14 +172,14 @@ class SelectorTests(CanonicalReadFixture):
                 self._store_backfill_state(
                     {**state, STATUS: status, COMPLETED_ONCE: False}
                 )
-                self._assert_serves_legacy(selector)
+                self._assert_serves_nothing(selector)
 
     def test_new_snapshot_after_completion_keeps_serving_tables(self) -> None:
         # Dual-write keeps the tables in step with each new snapshot.
         populate(self)
         selector = make_selector(self)
 
-        self.intervals_version = "row-2"
+        self.intervals = intervals_snapshot(athlete_weight=True)
 
         self._assert_serves_tables(selector)
         self.assertTrue(self.read(selector.summary)[DIGEST_CURRENT])
@@ -222,7 +233,7 @@ class SelectorTests(CanonicalReadFixture):
         self.assertEqual(summary[SERVING], TABLES)
         self.assertFalse(summary[DIGEST_CURRENT])
         self.assertTrue(self.read(selector.serves_tables))
-        self.assertIsNot(self.read(selector.reader_for), self.projection)
+        self.assertIsNot(self.read(selector.reader_for), PENDING_READER)
         self.assertEqual(
             ids(self.read(selector.activities)),
             ids(self.read(self.table.activities)),
@@ -358,6 +369,8 @@ class SelectorTests(CanonicalReadFixture):
         backfill = populate(self)
         selector = make_selector(self)
         before = self._session_dates()
+        served = ids(self.read(selector.activities))
+        self.assertTrue(served)
         # Stale dates stand in for rows written in the old zone.
         self.execute("UPDATE activity_sessions SET local_date = '1999-01-01'")
 
@@ -377,10 +390,7 @@ class SelectorTests(CanonicalReadFixture):
 
         self._assert_serves_tables(selector)
         self.assertEqual(self._session_dates(), before)
-        self.assertEqual(
-            ids(self.read(selector.activities)),
-            ids(self.read(self.projection.activities)),
-        )
+        self.assertEqual(ids(self.read(selector.activities)), served)
 
     def test_state_without_a_stored_zone_reprojects_once_on_the_tables(self) -> None:
         backfill = populate(self)
@@ -410,13 +420,13 @@ class SelectorTests(CanonicalReadFixture):
                 self.write(self.key_values.set, BACKFILL_STATE_KEY, raw)
                 with self.manager.reader() as db:
                     self.assertEqual(read_status(self.key_values, db), "pending")
-                self._assert_serves_legacy(selector)
+                self._assert_serves_nothing(selector)
 
     def test_an_old_read_state_with_parity_counts_is_ignored_and_kept(self) -> None:
         populate(self)
         old = json.dumps(
             {
-                "source": LEGACY,
+                "source": "legacy",
                 "reason": "error",
                 "digest": "0" * 64,
                 "error_class": "RuntimeError",
@@ -446,18 +456,29 @@ class SelectorTests(CanonicalReadFixture):
         self.assertTrue(self.read(readable.activities))
         self.assertEqual(self.read(readable.summary)[SERVING], TABLES)
 
-    def test_coverage_before_completion_is_the_legacy_projection(self) -> None:
+    def test_coverage_before_completion_reports_only_current_summaries(
+        self,
+    ) -> None:
         selector = make_selector(self)
+        self.assertEqual(self.read(selector.coverage), ())
 
-        self.assertEqual(
-            self.read(selector.coverage), self.read(self.projection.coverage)
+        summary = intervals_snapshot_coverage(self.intervals, zone=self.zone)
+        self.assertIsNotNone(summary)
+        self.write(
+            lambda db: CanonicalCoverageStore(self.key_values).persist(
+                db, summary, zone=self.zone
+            )
         )
+        self.assertEqual(self._intervals_coverage(selector), (summary,))
+
+        with bumped_intervals_mappers():
+            self.assertEqual(self._intervals_coverage(selector), ())
 
     def test_coverage_after_completion_has_no_legacy_fallback(self) -> None:
         populate(self)
         selector = make_selector(self)
 
-        # Garmin coverage is persisted by its writer; only Intervals.icu could fall back.
+        # Garmin coverage is persisted by its writer; Intervals.icu has none here.
         self.assertEqual(self._intervals_coverage(selector), ())
 
     def test_persisted_coverage_is_kept_after_a_mapper_bump(self) -> None:
@@ -484,7 +505,7 @@ class SelectorTests(CanonicalReadFixture):
 
     def test_reader_for_returns_the_source_that_serves_reads(self) -> None:
         selector = make_selector(self)
-        self.assertIs(self.read(selector.reader_for), self.projection)
+        self.assertIs(self.read(selector.reader_for), PENDING_READER)
 
         populate(self)
         self.assertIsInstance(self.read(selector.reader_for), CanonicalTableReader)
@@ -492,11 +513,8 @@ class SelectorTests(CanonicalReadFixture):
     def test_observations_come_from_the_same_source(self) -> None:
         selector = make_selector(self)
         for kind in MetricKind:
-            with self.subTest(phase=LEGACY, kind=kind):
-                self.assertEqual(
-                    self.read(selector.observations, kind),
-                    self.read(self.projection.observations, kind),
-                )
+            with self.subTest(phase=PENDING, kind=kind):
+                self.assertEqual(self.read(selector.observations, kind), ())
         populate(self)
         for kind in MetricKind:
             with self.subTest(phase=TABLES, kind=kind):
@@ -504,6 +522,34 @@ class SelectorTests(CanonicalReadFixture):
                     self.read(selector.observations, kind),
                     self.read(self.table.observations, kind),
                 )
+
+    def test_compact_only_snapshot_reads_tables_and_needs_a_refresh(self) -> None:
+        raw = self.intervals
+        self.intervals = {
+            key: value for key, value in raw.items() if key != "raw_provider_data"
+        }
+        populate(self)
+        selector = make_selector(self)
+
+        self._assert_serves_tables(selector)
+        self.assertTrue(self.read(selector.activities_need_refresh))
+        # The compact rows cannot be backfilled: no Intervals.icu activity is served.
+        self.assertEqual(self.read(selector.activity_rows), ())
+        self.assertNotIn(
+            ProviderId.INTERVALS.value,
+            {provider for _id, provider in ids(self.read(selector.activities))},
+        )
+
+        # A later sync stores the raw rows; the gap is closed.
+        self.intervals = raw
+        self.assertFalse(self.read(selector.activities_need_refresh))
+
+    def test_raw_snapshot_needs_no_refresh_before_or_after_completion(self) -> None:
+        selector = make_selector(self)
+        self.assertFalse(self.read(selector.activities_need_refresh))
+        populate(self)
+        self.assertFalse(self.read(selector.activities_need_refresh))
+        self.assertTrue(self.read(selector.activity_rows))
 
     def test_metric_windows_are_empty_before_the_first_backfill(self) -> None:
         self.assertEqual(self.read(make_selector(self).metric_windows), ())
@@ -542,12 +588,12 @@ class DiagnosticsTests(CanonicalReadFixture):
 
         self.assertEqual(self._summarize(malformed), UNAVAILABLE)
 
-    def test_before_the_first_backfill_the_summary_names_legacy(self) -> None:
+    def test_before_the_first_backfill_the_summary_names_pending(self) -> None:
         result = self._summarize(make_selector(self))
 
         self.assertEqual(
             result,
-            {SERVING: LEGACY, REASON: BACKFILL_PENDING, DIGEST_CURRENT: False},
+            {SERVING: PENDING, REASON: BACKFILL_PENDING, DIGEST_CURRENT: False},
         )
 
     def test_summary_has_no_parity_field_and_no_content(self) -> None:

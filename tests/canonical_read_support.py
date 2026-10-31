@@ -1,8 +1,7 @@
 """Shared fixture for canonical read and selector tests.
 
 Builds a real canonical database through the backfill over the read-only wire
-fixtures, and the legacy projection over the same in-memory data. This is a helper
-module, not a test module. All storage is temporary.
+fixtures. This is a helper module, not a test module. All storage is temporary.
 """
 
 from __future__ import annotations
@@ -27,11 +26,13 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.planning.context import compact_snapshot
+from backend.providers.snapshot_projection import (
+    intervals_snapshot_has_only_compact_rows,
+)
 from backend.sync.canonical_backfill import (
     DEFAULT_BATCH_SIZE,
     CanonicalBackfill,
 )
-from backend.sync.canonical_projection import CanonicalSnapshotProjection
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
@@ -43,7 +44,7 @@ MAX_BATCHES = 1000
 
 
 def intervals_snapshot(*, athlete_weight: bool) -> dict[str, Any]:
-    """One Intervals.icu snapshot: compact fields for the legacy and a raw section.
+    """One Intervals.icu snapshot: the compact fields and a raw section.
 
     The athlete weight is optional. It falls on the same day as a wellness weight
     and has its own observation key, so both values are kept in the tables.
@@ -82,6 +83,16 @@ class LatestSnapshot:
         return self._fixture.intervals
 
 
+class FixtureProfile:
+    """Stands in for the athlete profile; its time zone follows the fixture."""
+
+    def __init__(self, fixture: CanonicalReadFixture) -> None:
+        self._fixture = fixture
+
+    def get(self) -> dict[str, Any]:
+        return {"timezone": str(self._fixture.zone)}
+
+
 class CanonicalReadFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -95,15 +106,7 @@ class CanonicalReadFixture(unittest.TestCase):
             initialize_schema(db)
         self.intervals: dict[str, Any] = intervals_snapshot(athlete_weight=False)
         self.garmin: dict[str, Any] = garmin_payload_fixture()
-        self.intervals_version = "row-1"
         self.zone: ZoneInfo = ZONE
-        self.projection = CanonicalSnapshotProjection(
-            intervals_snapshot=lambda db: self.intervals,
-            intervals_version=lambda db: self.intervals_version,
-            garmin_payload=lambda db: self.garmin,
-            zone=lambda db: self.zone,
-            clock=lambda: CLOCK_AT,
-        )
         self.table = CanonicalTableReader()
 
     def read(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -124,7 +127,13 @@ class CanonicalReadFixture(unittest.TestCase):
 
 
 def make_selector(case: CanonicalReadFixture) -> Any:
-    return build_canonical_read(legacy=case.projection, key_values=case.key_values)
+    return build_canonical_read(
+        key_values=case.key_values,
+        profile=FixtureProfile(case),
+        compact_only=lambda db: intervals_snapshot_has_only_compact_rows(
+            case.intervals
+        ),
+    )
 
 
 def new_backfill(case: CanonicalReadFixture) -> CanonicalBackfill:

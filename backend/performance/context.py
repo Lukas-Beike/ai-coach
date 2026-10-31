@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import activity_validation, garmin_projection
@@ -16,7 +16,10 @@ from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import load as performance_load
 from backend.performance import load_context as performance_load_context
 from backend.performance import recovery_context as performance_recovery_context
-from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
+    CanonicalPerformanceInputs,
+)
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
@@ -28,6 +31,13 @@ _SUBJECTIVE_RATINGS = (
     ("stress", MetricKind.SUBJECTIVE_STRESS),
     ("mood", MetricKind.SUBJECTIVE_MOOD),
 )
+
+# The reason an unavailable context gives while the canonical source serves nothing yet.
+REASON_CANONICAL_PENDING: Final = "canonical_pending"
+PENDING_STATUS: Final = "Daten werden vorbereitet"
+INTERVALS_SNAPSHOT_SOURCE: Final = "Letzter gespeicherter Intervals.icu-Snapshot"
+# The source of a context without an Intervals.icu sync, e.g. a Garmin-only setup.
+STORED_PROVIDERS_SOURCE: Final = "Gespeicherte Provider-Daten"
 
 # Recovery sources whose freshness comes from the Garmin view, including the
 # labelled weekly HRV fallback.
@@ -44,9 +54,9 @@ def _activities(canonical: CanonicalPerformanceInputs) -> list[Any]:
     return list(canonical.activities or ())
 
 
-def _sleep_timing_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+def _sleep_timing_rows(snapshot: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Stored wellness rows for the pre-sleep-period timing fallback only (D7)."""
-    stored = snapshot.get("recent_wellness")
+    stored = (snapshot or {}).get("recent_wellness")
     if not isinstance(stored, list):
         return []
     return [row for row in stored if isinstance(row, dict)]
@@ -79,18 +89,34 @@ def _garmin_canonical(canonical: CanonicalPerformanceInputs) -> GarminCanonicalM
     return canonical.garmin or GarminCanonicalMetrics()
 
 
+def _as_of(canonical: CanonicalPerformanceInputs) -> str | None:
+    """The instant of the latest canonical Intervals.icu sync, None without one."""
+    synced_at = canonical.current.synced_at
+    return None if synced_at is None else synced_at.isoformat()
+
+
+def _pending_context(profile: dict[str, Any], today: date) -> dict[str, Any]:
+    """The context while the canonical source serves nothing yet: no values at all."""
+    return {
+        **_unavailable_context({}, profile, today, EMPTY_PERFORMANCE_INPUTS),
+        "reason": REASON_CANONICAL_PENDING,
+        "status": PENDING_STATUS,
+    }
+
+
 def _unavailable_context(
     garmin: dict[str, Any],
     profile: dict[str, Any],
     today: date,
     canonical: CanonicalPerformanceInputs,
 ) -> dict[str, Any]:
-    """Projection without an Intervals.icu snapshot: Garmin-only recovery and load."""
+    """Projection without canonical inputs: Garmin-only recovery and load."""
     unavailable = {
         "available": False,
         "source": performance_current_metrics.PROVIDER_INTERVALS_NAME,
         "as_of": None,
         "metrics": {},
+        "activities_need_refresh": canonical.activities_need_refresh,
         "personal_recovery": personal_recovery(
             [],
             garmin,
@@ -125,10 +151,14 @@ def current_performance_context(
 
     The canonical inputs supply activities, wellness, load, body, Garmin and
     athlete-setting values; ``EMPTY_PERFORMANCE_INPUTS`` stands for none. The
-    stored snapshot remains the source for sync status and the pre-sleep-period
-    timing fallback.
+    context is unavailable without canonical inputs, and marked
+    ``canonical_pending`` while the canonical source serves nothing yet. The
+    stored snapshot, which may be None, remains only the source of the
+    pre-sleep-period timing fallback.
     """
-    if not snapshot:
+    if canonical.pending:
+        return _pending_context(profile, today)
+    if canonical is EMPTY_PERFORMANCE_INPUTS:
         return _unavailable_context(garmin, profile, today, canonical)
 
     activities = _activities(canonical)
@@ -214,8 +244,11 @@ def current_performance_context(
             str(profile.get("timezone") or "UTC"),
             activities=_activities(canonical),
         ),
-        "source": "Letzter gespeicherter Intervals.icu-Snapshot",
-        "as_of": snapshot.get("synced_at"),
+        "source": INTERVALS_SNAPSHOT_SOURCE
+        if canonical.current.synced_at is not None
+        else STORED_PROVIDERS_SOURCE,
+        "as_of": _as_of(canonical),
+        "activities_need_refresh": canonical.activities_need_refresh,
         "metrics": metrics,
         "thresholds": {
             "ftp_w": metrics["cycling_ftp_watts"]["value"],

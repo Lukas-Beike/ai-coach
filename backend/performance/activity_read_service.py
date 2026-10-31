@@ -23,6 +23,7 @@ from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
     read_performance_inputs,
+    with_read_status,
 )
 from backend.performance.context import current_performance_context
 from backend.performance.detail_envelope import DetailEnvelopeReader
@@ -76,11 +77,15 @@ class ActivityAnalysisReadService(ActivityReadService):
         with source.database_manager().read_snapshot() as db:
             snapshot = self._snapshot()
             reader = source.activity_summary_reader()
-            canonical = read_performance_inputs(
-                source.observation_reader(),
+            canonical = with_read_status(
+                source,
                 db,
-                activity_reader=reader,
-                as_of=as_of,
+                read_performance_inputs(
+                    source.observation_reader(),
+                    db,
+                    activity_reader=reader,
+                    as_of=as_of,
+                ),
             )
             summaries = None if canonical is None else canonical.activities
             if reader is not None and (

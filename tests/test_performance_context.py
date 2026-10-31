@@ -1,5 +1,6 @@
 import copy
 import unittest
+from dataclasses import replace
 from datetime import date, timedelta
 
 from canonical_recovery_support import (
@@ -12,6 +13,7 @@ from performance_day_support import canonical_from_snapshot
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
+    PENDING_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
 )
 from backend.performance.context import current_performance_context
@@ -24,6 +26,7 @@ class PerformanceContextTests(unittest.TestCase):
             "source": "Intervals.icu",
             "as_of": None,
             "metrics": {},
+            "activities_need_refresh": False,
         }
         for snapshot in (None, {}):
             result = current_performance_context(
@@ -119,7 +122,9 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual(
             result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
         )
-        self.assertEqual(result["as_of"], snapshot["synced_at"])
+        # The canonical sync instant of the athlete record, not the snapshot text.
+        self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
+        self.assertFalse(result["activities_need_refresh"])
         self.assertEqual(result["thresholds"]["ftp_w"], 300)
         # Form and ramp rate come from canonical observations only (#1412): the
         # mapped row's form is shown; without a CTL seven days earlier there is no
@@ -222,7 +227,10 @@ class PerformanceContextTests(unittest.TestCase):
         snapshot = {
             "synced_at": "now",
             "athlete": "invalid",
-            "recent_wellness": [None, {"id": "2026-09-20", "readiness": "bad"}],
+            "recent_wellness": [
+                None,
+                {"id": "2026-09-20", "readiness": "bad", "ctl": 40},
+            ],
             "recent_activities": [None, "bad", {"type": "Unknown"}],
         }
         result = current_performance_context(
@@ -237,7 +245,7 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertIn("metrics", result)
         self.assertIn("activity_validation", result)
 
-    def test_missing_snapshot_keeps_garmin_baselines_from_observations(self):
+    def test_missing_snapshot_with_garmin_observations_is_available(self):
         today = date(2026, 9, 20)
         nights = [
             recovery_observation(
@@ -261,13 +269,85 @@ class PerformanceContextTests(unittest.TestCase):
             canonical=EMPTY_PERFORMANCE_INPUTS,
         )
 
-        self.assertFalse(result["available"])
+        # Canonical observations make the context available without a snapshot.
+        self.assertTrue(result["available"])
+        self.assertIsNone(result["as_of"])
+        self.assertFalse(raw_only["available"])
         baseline = result["personal_recovery"]["baselines"][0]
         self.assertEqual(baseline["source"], "Garmin Connect")
         self.assertEqual(baseline["metric"], "resting_hr")
         self.assertEqual(baseline["status"], "provisional")
         # The raw Garmin view alone no longer produces a baseline.
         self.assertEqual(raw_only["personal_recovery"]["baselines"], [])
+
+    def test_garmin_only_setup_gets_the_full_context_from_observations(self):
+        today = date(2026, 9, 20)
+        garmin = {
+            "sleep": [
+                {
+                    "calendarDate": today.isoformat(),
+                    "sleepTimeSeconds": 28800,
+                    "sleepScore": 90,
+                }
+            ],
+            "resting_hr": [{"calendarDate": today.isoformat(), "restingHR": 47}],
+        }
+
+        result = current_performance_context(
+            None, garmin, {}, today, canonical=recovery_only_inputs(garmin)
+        )
+
+        self.assertTrue(result["available"])
+        self.assertIsNone(result["as_of"])
+        self.assertEqual(result["recovery"]["sleep_hours"], 8.0)
+        self.assertEqual(result["recovery"]["sleep_score"], 90)
+        self.assertEqual(result["recovery"]["resting_hr_bpm"], 47)
+        self.assertEqual(result["recovery"]["sleep_source"], "Garmin Connect")
+        for key in ("metrics", "current_load", "rolling_training", "comparisons"):
+            self.assertIn(key, result)
+
+    def test_pending_canonical_source_reports_no_values(self):
+        today = date(2026, 9, 20)
+        garmin = {
+            "sleep": [{"calendarDate": today.isoformat(), "sleepScore": 90}],
+            "resting_hr": [{"calendarDate": today.isoformat(), "restingHR": 47}],
+        }
+        snapshot = {"synced_at": "2026-09-20T08:00:00Z", "recent_wellness": []}
+
+        result = current_performance_context(
+            snapshot, garmin, {}, today, canonical=PENDING_PERFORMANCE_INPUTS
+        )
+
+        self.assertFalse(result["available"])
+        self.assertEqual(result["reason"], "canonical_pending")
+        self.assertEqual(result["status"], "Daten werden vorbereitet")
+        self.assertIsNone(result["as_of"])
+        self.assertEqual(result["metrics"], {})
+        self.assertNotIn("garmin_training_load", result)
+        self.assertEqual(result["personal_recovery"]["baselines"], [])
+        self.assertEqual(result["training_focus"]["classified_sessions"], 0)
+
+    def test_compact_only_activity_gap_is_carried(self):
+        today = date(2026, 9, 20)
+        garmin = {"resting_hr": [{"calendarDate": today.isoformat(), "restingHR": 47}]}
+        canonical = replace(recovery_only_inputs(garmin), activities_need_refresh=True)
+
+        result = current_performance_context(
+            None, garmin, {}, today, canonical=canonical
+        )
+        empty = current_performance_context(
+            None,
+            {},
+            {},
+            today,
+            canonical=replace(EMPTY_PERFORMANCE_INPUTS, activities_need_refresh=True),
+        )
+
+        self.assertTrue(result["available"])
+        self.assertTrue(result["activities_need_refresh"])
+        # Inputs that only carry the gap still come from a canonical source.
+        self.assertTrue(empty["available"])
+        self.assertTrue(empty["activities_need_refresh"])
 
     def test_weekly_hrv_fallback_keeps_its_garmin_freshness(self):
         today = date(2026, 9, 7)

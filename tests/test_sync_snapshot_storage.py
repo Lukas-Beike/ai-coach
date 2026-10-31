@@ -31,10 +31,10 @@ from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND, HEALTH_RECOR
 from backend.providers.snapshot_projection import (
     CANONICAL_SECTIONS_KEY,
     CANONICAL_SECTIONS_TABLES,
+    intervals_snapshot_has_only_compact_rows,
     without_intervals_activities,
 )
 from backend.sync.canonical_backfill import STATE_KEY
-from backend.sync.canonical_projection import CanonicalSnapshotProjection
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import (
@@ -100,6 +100,11 @@ class FakeIntervalsApi:
         return load_provider_fixture("intervals/athlete.json")
 
 
+class _UtcProfile:
+    def get(self) -> dict[str, Any]:
+        return {"timezone": "UTC"}
+
+
 class Environment:
     """One database with the real sync services wired as the composition root does."""
 
@@ -120,15 +125,12 @@ class Environment:
             lambda: "2026-11-01T00:00:00+00:00",
         )
         self.today = FIRST_DAY
-        projection = CanonicalSnapshotProjection(
-            intervals_snapshot=lambda db: self.state.latest_snapshot(db),
-            intervals_version=lambda db: json.dumps(self.state.latest_metadata(db)),
-            garmin_payload=lambda db: {},
-            zone=lambda db: UTC,
-            clock=lambda: datetime(2026, 11, 20, tzinfo=UTC),
-        )
         self.selector = build_canonical_read(
-            legacy=projection, key_values=self.key_values
+            key_values=self.key_values,
+            profile=_UtcProfile(),
+            compact_only=lambda db: intervals_snapshot_has_only_compact_rows(
+                self.state.latest_snapshot(db)
+            ),
         )
         if tables:
             with self.manager.unit_of_work() as db:

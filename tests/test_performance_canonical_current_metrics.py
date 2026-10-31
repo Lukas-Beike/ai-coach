@@ -567,7 +567,7 @@ class CanonicalWeightTests(unittest.TestCase):
 
 
 class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
-    def test_populated_tables_reproduce_the_legacy_current_metrics(self) -> None:
+    def test_populated_tables_serve_the_current_metrics(self) -> None:
         populate(self)
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
@@ -592,7 +592,9 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
             ]
             if setting["types"] == ["Ride"]
         )
-        self.assertIsNone(legacy["metrics"]["cycling_eftp_watts"]["value"])
+        # Without canonical inputs the context is unavailable (#1416).
+        self.assertFalse(legacy["available"])
+        self.assertEqual(legacy["metrics"], {})
         self.assertEqual(
             canonical["metrics"]["cycling_eftp_watts"],
             {
@@ -603,30 +605,14 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
                 "note": "",
             },
         )
-        # Intended difference (#1415): Garmin values are read from canonical inputs
-        # only, so the context without them has none. Their parity with the stored
-        # payload is pinned in tests/test_garmin_canonical_reads.py.
-        garmin_keys = {
-            key
-            for key, value in canonical["metrics"].items()
-            if value.get("source_provider") == "garmin"
+        # Garmin values and the Intervals.icu athlete settings are read from the
+        # canonical inputs (#1415). Their parity with the stored payload is pinned
+        # in tests/test_garmin_canonical_reads.py.
+        providers = {
+            value.get("source_provider") for value in canonical["metrics"].values()
         }
-        self.assertTrue(garmin_keys)
-        for key in garmin_keys:
-            self.assertNotEqual(legacy["metrics"][key]["source_provider"], "garmin")
-        # Intended difference (#1415): the Intervals.icu athlete settings are read
-        # from canonical inputs only, so the context without them has none.
-        intervals_keys = {
-            key
-            for key, value in canonical["metrics"].items()
-            if value.get("source_provider") == "intervals"
-        } - {"cycling_eftp_watts"}
-        self.assertTrue(intervals_keys)
-        for key in intervals_keys:
-            self.assertIsNone(legacy["metrics"][key]["value"], key)
-        compared = legacy["metrics"].keys() - {"cycling_eftp_watts"} - garmin_keys
-        for key in compared - intervals_keys:
-            self.assertEqual(canonical["metrics"][key], legacy["metrics"][key], key)
+        self.assertIn("garmin", providers)
+        self.assertIn("intervals", providers)
 
 
 def _wahoo_ftp(value: float, sport_family: int = 0) -> Observation:

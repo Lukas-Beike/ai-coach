@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import server_test_support as fixtures
 from canonical_recovery_support import recovery_only_inputs
 from garmin_support import read_garmin, save_garmin
+from support import store_canonical_snapshot
 
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.http_api.auth import RATE_LIMITER
@@ -431,8 +432,8 @@ class ProviderReviewTests(unittest.TestCase):
             "moving_time": 3600,
             "distance": 30000,
         }
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
-            {"synced_at": "synthetic", "recent_activities": [intervals]}
+        store_canonical_snapshot(
+            server, {"synced_at": "synthetic", "recent_activities": [intervals]}
         )
         for fixture in (False, True):
             with self.subTest(fixture=fixture):
@@ -493,7 +494,11 @@ class ProviderReviewTests(unittest.TestCase):
                 )
                 context = server.COACH_CONTEXT.training_context_service().build()
                 self.assertNotIn("garmin_specific", context)
-                self.assertEqual(context.count('"id":"canonical"'), 1)
+                # The tables merge the Garmin copy into the Intervals.icu
+                # session, so the Coach sees the activity once.
+                self.assertEqual(
+                    context.count('"started_at_local":"2026-09-04T10:00:00"'), 1
+                )
 
     def test_retained_metric_freshness_reaches_coach_and_public_without_new_history(
         self,

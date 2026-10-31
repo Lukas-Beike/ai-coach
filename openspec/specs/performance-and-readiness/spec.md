@@ -390,7 +390,7 @@ The current Garmin performance metrics (weight, thresholds, VO2max, maximum hear
 
 Detailed contract: activity records exist only from the first canonical ingest or backfill onward, so a maximum the stored view retained from activities older than that is not kept (accepted by #1415's decision to derive the value from canonical records). The current maximum heart rate fallback has no day history; no comparison or chart reads one.
 
-Evidence: `backend/performance/garmin_metrics.py:garmin_performance_metrics`, `backend/performance/garmin_metrics.py:garmin_payload_performance_metrics`, `backend/performance/garmin_canonical.py:read_garmin_state`, `backend/db/canonical_store.py:activity_max_hr_rows`; `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_state_has_the_flags_and_values_of_the_snapshot_sections`, `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_table_and_legacy_observations_give_the_same_state`, `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_activity_max_hr_skips_deleted_sessions`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_activity_max_hr_is_read_from_the_same_source`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_profile_max_hr_skips_the_activity_read`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_only_the_sport_without_a_profile_value_is_labelled_activities`, `tests/test_performance_canonical_current_metrics.py:CanonicalCurrentFromTablesTests.test_populated_tables_reproduce_the_legacy_current_metrics`.
+Evidence: `backend/performance/garmin_metrics.py:garmin_performance_metrics`, `backend/performance/garmin_metrics.py:garmin_payload_performance_metrics`, `backend/performance/garmin_canonical.py:read_garmin_state`, `backend/db/canonical_store.py:activity_max_hr_rows`; `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_state_has_the_flags_and_values_of_the_snapshot_sections`, `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_table_observations_give_the_payload_state`, `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_activity_max_hr_skips_deleted_sessions`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_activity_max_hr_is_read_from_the_same_source`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_profile_max_hr_skips_the_activity_read`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_only_the_sport_without_a_profile_value_is_labelled_activities`, `tests/test_performance_canonical_current_metrics.py:CanonicalCurrentFromTablesTests.test_populated_tables_serve_the_current_metrics`.
 
 ### Requirement: Ramp rate is a labelled local derivation
 The system SHALL derive the ramp rate of the current load block as the latest wellness day's CTL minus the CTL of exactly seven days earlier, rounded to two decimals, from canonical Intervals.icu wellness-day CTL observations, and SHALL label it as derived through `current_load.ramp_rate_source`. Intervals.icu's own `rampRate` is not read and can differ from the derived number.
@@ -445,7 +445,7 @@ The system SHALL read the activities of period reports, the training-record obse
 
 #### Scenario: Copies stored by the first backfill
 - **WHEN** the first canonical backfill stores an Intervals.icu and a Garmin Connect copy of one activity
-- **THEN** it links them into one session, so these reads count the activity once, as the legacy projection bundles it.
+- **THEN** it links them into one session, so these reads count the activity once.
 
 Detailed contract: The services that run these reads require their canonical source at construction. Duplicates are merged by canonical session linking, not by row de-duplication; only the raw-row equipment read keeps the Wahoo/Garmin row de-duplication.
 
@@ -502,7 +502,15 @@ The system SHALL read every daily wellness value of the performance projection f
 
 #### Scenario: No canonical inputs
 - **WHEN** the performance context is composed without canonical inputs
-- **THEN** CTL, ATL, weight and body fat from wellness, subjective ratings, wellness-based trend averages and wellness body history are unknown instead of read from the snapshot. Sources other than wellness keep their behaviour.
+- **THEN** the context is unavailable: CTL, ATL, weight and body fat from wellness, subjective ratings, wellness-based trend averages and wellness body history are unknown instead of read from the snapshot.
+
+#### Scenario: Availability follows canonical data, not the snapshot
+- **WHEN** canonical observations or activities exist without a stored Intervals.icu snapshot, for example a Garmin-only setup after the backfill completed
+- **THEN** the context is available with its full metrics, `as_of` is the canonical Intervals.icu sync instant (none without one) and the context source names the stored provider data.
+
+#### Scenario: Canonical data is still being prepared
+- **WHEN** the first canonical backfill has not completed
+- **THEN** the context is unavailable with reason `canonical_pending` and the status "Daten werden vorbereitet", shows no values, and the Coach context carries the same reason and status.
 
 #### Scenario: Sport-scoped and athlete-record observations
 - **WHEN** athlete-record observations (thresholds, athlete weight) or sport-scoped wellness observations exist
@@ -510,7 +518,7 @@ The system SHALL read every daily wellness value of the performance projection f
 
 Detailed contract: the daily wellness values are CTL, ATL, form, weight, body fat, readiness, the subjective fatigue, soreness, stress and mood ratings, and the run eFTP of the trend averages. The snapshot rows not read are `recent_wellness` and `raw_provider_data.wellness`. The current-day window is the 90 days ending on the latest wellness day. The history view covers every stored wellness day.
 
-Evidence: `backend/performance/wellness_days.py:read_wellness_days`, `backend/performance/canonical_inputs.py:read_performance_inputs`; `tests/test_performance_wellness_days.py:WellnessDayTests`, `tests/test_performance_canonical_sections.py:SectionHelperTests` and `SectionReadTests`, `tests/test_performance_canonical_parity.py:CanonicalLoadEdgeTests`, `tests/test_performance_context.py:PerformanceContextTests`, and `tests/test_performance_canonical_body_history.py:CanonicalBodyLedgerCaseTests`.
+Evidence: `backend/performance/wellness_days.py:read_wellness_days`, `backend/performance/canonical_inputs.py:read_performance_inputs`; `tests/test_performance_wellness_days.py:WellnessDayTests`, `tests/test_performance_canonical_sections.py:SectionHelperTests` and `SectionReadTests`, `tests/test_performance_canonical_parity.py:CanonicalLoadEdgeTests`, `tests/test_performance_context.py:PerformanceContextTests`, `tests/test_performance_canonical_parity.py:CanonicalReadStatusEndToEndTests`, and `tests/test_performance_canonical_body_history.py:CanonicalBodyLedgerCaseTests`.
 
 ### Requirement: Wellness `sportInfo` threshold fallbacks are not read
 The system SHALL NOT read cycling or running FTP, LTHR, maximum heart rate, VO2max, threshold pace or Zone-2 pace from Intervals.icu wellness `sportInfo` entries. These values SHALL come only from their remaining sources: Garmin, athlete sport settings, the athlete record, Wahoo and the manual profile. The 30-day `run_threshold_watts` average SHALL read the run-scoped wellness-day eFTP observations, bounded as before.

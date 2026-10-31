@@ -516,32 +516,29 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             + "\n".join(f"server.py:{line}" for line in raw_access),
         )
 
-    def test_canonical_projection_is_composed_once_through_its_assembly(self) -> None:
+    def test_canonical_read_is_composed_once_through_its_assembly(self) -> None:
         server_tree = _parse(SERVER_PATH)
         constructed = [
             node.lineno
             for node in ast.walk(server_tree)
-            if isinstance(node, ast.Name) and node.id == "CanonicalSnapshotProjection"
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func) == "CanonicalReadSelector"
         ]
         self.assertEqual([], constructed)
 
-        projection = next(
+        read = next(
             node
             for node in server_tree.body
             if isinstance(node, ast.Assign)
             and any(
-                isinstance(target, ast.Name)
-                and target.id == "CANONICAL_SNAPSHOT_PROJECTION"
+                isinstance(target, ast.Name) and target.id == "CANONICAL_READ"
                 for target in node.targets
             )
         )
-        composed = projection.value
+        composed = read.value
         self.assertIsInstance(composed, ast.Call)
         assert isinstance(composed, ast.Call)
-        self.assertEqual(
-            "build_canonical_snapshot_projection",
-            ast.unparse(composed.func),
-        )
+        self.assertEqual("build_canonical_read", ast.unparse(composed.func))
 
         diagnostics = next(
             node

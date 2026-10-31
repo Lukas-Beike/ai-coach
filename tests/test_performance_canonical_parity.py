@@ -27,6 +27,7 @@ from canonical_read_support import (
     intervals_snapshot,
     make_selector,
     populate,
+    store_garmin,
 )
 from performance_day_support import current_days
 
@@ -280,16 +281,18 @@ def _assert_load_metric_split(
     The fixture's athlete Ride setting reports eFTP 258 and its latest wellness
     day (2026-10-10) a reported form of -3.6. No CTL exists seven days earlier,
     so the ramp rate stays unknown instead of using the carrier ``rampRate``.
+    A no-source state without canonical values is unavailable and shows none.
     """
     served = canonical["performance"]
     absent = legacy["performance"]
+    absent_load = absent.get("current_load", {})
     case.assertEqual(served["metrics"]["cycling_eftp_watts"]["value"], 258)
-    case.assertIsNone(absent["metrics"]["cycling_eftp_watts"]["value"])
+    case.assertIsNone(absent["metrics"].get("cycling_eftp_watts", {}).get("value"))
     case.assertEqual(served["current_load"]["tsb"], -3.6)
-    case.assertIsNone(absent["current_load"]["tsb"])
-    for state in (served, absent):
-        case.assertIsNone(state["current_load"]["ramp_rate"])
-        case.assertIsNone(state["current_load"]["ramp_rate_source"])
+    case.assertIsNone(absent_load.get("tsb"))
+    for load in (served["current_load"], absent_load):
+        case.assertIsNone(load.get("ramp_rate"))
+        case.assertIsNone(load.get("ramp_rate_source"))
 
 
 def _assert_recovery_split(
@@ -297,10 +300,10 @@ def _assert_recovery_split(
 ) -> None:
     """Canonical state shows recovery values; the no-source state shows none."""
     served = canonical["performance"]["recovery"]
-    absent = legacy["performance"]["recovery"]
+    absent = legacy["performance"].get("recovery", {})
     for key in ("resting_hr_bpm", "hrv_ms", "sleep_score", "readiness", "sleep_hours"):
         case.assertIsNotNone(served[key], key)
-        case.assertIsNone(absent[key], key)
+        case.assertIsNone(absent.get(key), key)
 
 
 class CanonicalLoadParityTests(unittest.TestCase):
@@ -916,8 +919,9 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         self.assertEqual(counting.calls, _UNIT_READS)
         self.assertEqual(canonical["performance"]["current_load"]["ctl"], 53.4)
         self.assertEqual(canonical["performance"]["current_load"]["atl"], 57.0)
-        self.assertIsNone(legacy["performance"]["current_load"]["ctl"])
-        self.assertIsNone(legacy["performance"]["current_load"]["atl"])
+        # Without a canonical source there are no canonical values: unavailable.
+        self.assertFalse(legacy["performance"]["available"])
+        self.assertNotIn("current_load", legacy["performance"])
         _assert_recovery_split(self, canonical, legacy)
         _assert_load_metric_split(self, canonical, legacy)
 
@@ -937,5 +941,71 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         read_state.assert_called_once()
         legacy = _service(self.intervals, None, self.garmin).performance_state()
         self.assertEqual(canonical["performance"]["current_load"]["ctl"], 53.4)
-        self.assertIsNone(legacy["performance"]["current_load"]["ctl"])
+        self.assertFalse(legacy["performance"]["available"])
         _assert_load_metric_split(self, canonical, legacy)
+
+
+class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
+    """The selector's read state reaches the performance and Coach contexts."""
+
+    def _source(self) -> CanonicalPerformanceSource:
+        selector = make_selector(self)
+        return CanonicalPerformanceSource(
+            database_manager=lambda: self.manager,
+            observation_reader=lambda: selector,
+            serving=lambda: selector,
+            activity_summaries=lambda: selector,
+        )
+
+    def _coach_performance(self, source: CanonicalPerformanceSource) -> Any:
+        reader = CoachPerformanceContextReader(
+            _profile_stub(),
+            _garmin_stub(),
+            Mock(),
+            lambda: PARITY_TODAY,
+            canonical=source,
+        )
+        snapshot, inputs = reader.read_snapshot(lambda: self.intervals)
+        return reader.current_performance(snapshot, inputs)
+
+    def test_before_the_first_backfill_performance_and_coach_are_pending(
+        self,
+    ) -> None:
+        # The data is stored but the backfill never completed: no partial values.
+        self.write(lambda db: store_garmin(self, db, self.garmin))
+        source = self._source()
+
+        public = _service(self.intervals, source, self.garmin).performance_state()
+        coach = self._coach_performance(source)
+
+        for performance in (public["performance"], coach):
+            self.assertFalse(performance["available"])
+            self.assertEqual(performance["reason"], "canonical_pending")
+            self.assertEqual(performance["status"], "Daten werden vorbereitet")
+            self.assertEqual(performance["metrics"], {})
+            self.assertIsNone(performance["as_of"])
+
+        populate(self)
+        served = _service(self.intervals, source, self.garmin).performance_state()
+        self.assertTrue(served["performance"]["available"])
+        self.assertNotIn("reason", served["performance"])
+        self.assertTrue(self._coach_performance(source)["available"])
+
+    def test_compact_only_snapshot_marks_the_activity_gap_until_a_raw_sync(
+        self,
+    ) -> None:
+        raw = self.intervals
+        self.intervals = {
+            key: value for key, value in raw.items() if key != "raw_provider_data"
+        }
+        populate(self)
+        source = self._source()
+
+        public = _service(self.intervals, source, self.garmin).performance_state()
+        self.assertTrue(public["performance"]["available"])
+        self.assertTrue(public["performance"]["activities_need_refresh"])
+        self.assertTrue(self._coach_performance(source)["activities_need_refresh"])
+
+        self.intervals = raw
+        refreshed = _service(self.intervals, source, self.garmin).performance_state()
+        self.assertFalse(refreshed["performance"]["activities_need_refresh"])
