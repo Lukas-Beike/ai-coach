@@ -31,7 +31,6 @@ from performance_day_support import latest_day, snapshot_metrics
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.coach.context import CoachPerformanceContextReader
-from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance.canonical_current import (
     NO_CURRENT_INPUTS,
     CanonicalCurrentInputs,
@@ -50,6 +49,7 @@ from backend.providers.wahoo_threshold_mapping import (
     map_wahoo_user,
 )
 from backend.runtime.ports import ObservationReader
+from backend.sync import garmin_payload_metrics
 
 SYNC_DAY = date(2026, 10, 12)
 SENSOR_KINDS = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX)
@@ -102,7 +102,7 @@ def _case(name: str) -> Case:
 
 def _legacy(case: Case) -> dict[str, Any]:
     """Current metrics of the case snapshot's own mapped observations."""
-    garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+    garmin = garmin_payload_metrics.garmin_payload_performance_metrics(
         case.garmin, TODAY
     )
     return snapshot_metrics(
@@ -122,7 +122,7 @@ def _read(
 
 
 def _canonical(case: Case, observations: tuple[Observation, ...] | None = None) -> Any:
-    garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+    garmin = garmin_payload_metrics.garmin_payload_performance_metrics(
         case.garmin, TODAY
     )
     reader = ObservationStub(
@@ -499,9 +499,7 @@ class CanonicalEftpInputTests(unittest.TestCase):
 
     def test_the_eftp_current_value_is_labelled_like_the_legacy_metric(self) -> None:
         case = _eftp_case(athlete=262, wellness=265)
-        garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
-            {}, TODAY
-        )
+        garmin = garmin_payload_metrics.garmin_payload_performance_metrics({}, TODAY)
         metrics = snapshot_metrics(
             case.intervals, {}, garmin, canonical=self._inputs(case)
         )

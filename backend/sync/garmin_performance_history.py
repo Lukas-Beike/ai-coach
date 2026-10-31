@@ -1,13 +1,17 @@
-"""Garmin performance-history merge and retention orchestration."""
+"""Garmin performance-history merge and retention at ingest.
+
+The sync runs this on a fetched payload before it is stored.
+"""
 
 from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.decimal_text import provider_number as _as_number
 from backend.performance import freshness as performance_freshness
-from backend.performance import garmin_metric_history
-from backend.performance import garmin_metrics as performance_garmin_metrics
-from backend.performance import wellness as performance_wellness
+from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.sync import garmin_metric_history
+from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 
 def append_garmin_performance_history(
@@ -19,13 +23,11 @@ def append_garmin_performance_history(
         payload.get("performance_history") or []
     )
     unique = _merged_history(history)
-    current = performance_garmin_metrics.garmin_payload_performance_metrics(
-        payload, current_date
-    )
+    current = garmin_payload_performance_metrics(payload, current_date)
     current["readiness"] = performance_freshness.garmin_metric_freshness(
         performance_freshness.GarminSyncStatus.from_state(payload),
         "readiness",
-        {"value": performance_wellness.readiness_score_value(payload.get("readiness"))},
+        {"value": readiness_score_value(payload.get("readiness"))},
         current_date,
     )
     for key, data in current.items():
@@ -128,3 +130,44 @@ def _provider_metric_state(
     if pagination.get("available") is False:
         return "unsupported"
     return "unknown"
+
+
+def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
+    if not isinstance(item, dict):
+        return None
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def readiness_score_value(value: Any) -> float | int | None:
+    """Extract a scalar readiness score from nested provider payloads."""
+    if isinstance(value, list):
+        dated = [item for item in value if isinstance(item, dict)]
+        if not dated:
+            return None
+        dated.sort(
+            key=lambda item: str(
+                _first_present(item, garmin_perf_fields.WELLNESS_ROW_DATE_KEYS) or ""
+            )
+        )
+        return readiness_score_value(dated[-1])
+    if isinstance(value, dict):
+        direct = _first_present(
+            value,
+            (
+                "readiness",
+                "readinessScore",
+                "readiness_score",
+                "trainingReadiness",
+                "training_readiness",
+                "score",
+                "value",
+            ),
+        )
+        if isinstance(direct, (dict, list)):
+            return readiness_score_value(direct)
+        return _as_number(direct)
+    return _as_number(value)

@@ -3,15 +3,15 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from backend.performance.garmin_metric_history import (
-    ftp_points,
-    metric_points,
-    projected_metric,
-)
 from backend.providers.garmin import (
     GarminCollectionOptions,
     _collect_daily_stats,
     collect_garmin_data,
+)
+from backend.sync.garmin_metric_history import (
+    ftp_points,
+    metric_points,
+    projected_metric,
 )
 
 TODAY = date(2026, 10, 6)

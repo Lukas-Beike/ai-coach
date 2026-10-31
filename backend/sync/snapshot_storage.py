@@ -32,7 +32,6 @@ from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
-from backend.planning.compact_activities import compact_activity_rows
 from backend.providers.snapshot_projection import (
     intervals_activity_sections_are_mapped,
     intervals_snapshot_is_stripped,
@@ -41,6 +40,7 @@ from backend.providers.snapshot_projection import (
     without_intervals_activities,
 )
 from backend.runtime.ports import ActivityRowReader, CanonicalTableServing
+from backend.sync.intervals_compaction import compact_activity_rows
 from backend.sync.state import SyncStateRepository
 
 

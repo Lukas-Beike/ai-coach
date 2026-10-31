@@ -25,7 +25,6 @@ from support import (
 from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
-from backend.planning.context import compact_snapshot
 from backend.providers.snapshot_projection import (
     intervals_snapshot_has_unmatched_compact_rows,
 )
@@ -36,6 +35,7 @@ from backend.sync.canonical_backfill import (
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.intervals_compaction import compact_snapshot
 
 NOW = "2026-09-20T08:00:00+00:00"
 CLOCK_AT = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)

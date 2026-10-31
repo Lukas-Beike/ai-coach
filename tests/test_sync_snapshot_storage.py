@@ -27,7 +27,6 @@ from backend.db import DatabaseManager, row_factory
 from backend.db.repositories import KeyValueRepository, SnapshotRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.planning.compact_activities import compact_activity_rows
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND, HEALTH_RECORD_KIND
 from backend.providers.snapshot_projection import (
     CANONICAL_SECTIONS_KEY,
@@ -42,6 +41,7 @@ from backend.sync.garmin_snapshot_writer import (
     GarminSnapshotWriter,
 )
 from backend.sync.intervals import IntervalsSnapshotReader, IntervalsSnapshotService
+from backend.sync.intervals_compaction import compact_activity_rows
 from backend.sync.performance import PerformanceRefreshService
 from backend.sync.snapshot_storage import SnapshotStorage
 from backend.sync.state import SyncStateRepository

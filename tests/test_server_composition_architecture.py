@@ -437,7 +437,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             )
         )
 
-    def test_snapshot_reader_and_intervals_operation_are_composed_explicitly(
+    def test_athlete_data_takes_no_snapshot_and_intervals_operation_is_explicit(
         self,
     ) -> None:
         server_tree = _parse(SERVER_PATH)
@@ -450,10 +450,9 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
                 for target in node.targets
             )
         )
-        self.assertIn(
-            "snapshot_reader=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY)",
-            ast.unparse(athlete_data.value),
-        )
+        # The athlete assembly reads canonical records only; its snapshot reader
+        # went with the dead training_snapshot reader (#1416).
+        self.assertNotIn("snapshot_reader", ast.unparse(athlete_data.value))
 
         provider_transport = next(
             node

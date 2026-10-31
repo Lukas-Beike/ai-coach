@@ -29,9 +29,9 @@ from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.planning import calendar_read_model
-from backend.planning.context import compact_sport_settings
 from backend.providers.intervals_zone_mapping import map_intervals_zone_configurations
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.intervals_compaction import compact_sport_settings
 
 RETRIEVED_AT = datetime(2026, 10, 11, 6, tzinfo=UTC)
 NOW = "2026-10-11T06:00:00+00:00"

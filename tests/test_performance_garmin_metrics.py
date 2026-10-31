@@ -7,10 +7,12 @@ from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.garmin_metrics import (
     GARMIN_PERFORMANCE_SOURCE,
     garmin_bounded_metric,
-    garmin_duration_seconds,
-    garmin_payload_performance_metrics,
     garmin_performance_context,
     garmin_performance_metrics,
+)
+from backend.sync.garmin_payload_metrics import (
+    garmin_duration_seconds,
+    garmin_payload_performance_metrics,
     garmin_profile_max_hr,
 )
 

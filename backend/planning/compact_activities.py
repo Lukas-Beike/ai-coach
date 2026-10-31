@@ -1,30 +1,21 @@
 """Recent activities for planning, calendar and Coach consumers.
 
 Consumers read the newest provider-neutral activity summaries through
-``ActivitySummarySource``. ``compact_activity_rows`` keeps the compact raw-row
-selection that snapshot storage writes (``planning.context.ACTIVITY_FIELDS``).
+``ActivitySummarySource``. The compact raw-row selection that snapshot storage
+writes lives with the ingestion owner, ``backend.sync.intervals_compaction``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final
 
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.sync_time import activities_synced_at
-from backend.planning.context import ACTIVITY_FIELDS, selected
 from backend.runtime.ports import ActivitySummaryReader, ProviderCoverageReader
 
 RECENT_ACTIVITY_LIMIT: Final = 500
-
-
-def compact_activity_rows(
-    rows: Iterable[Any], *, limit: int = RECENT_ACTIVITY_LIMIT
-) -> list[dict[str, Any]]:
-    """Select the compact activity fields of the first ``limit`` raw rows."""
-    compact = [selected(row, ACTIVITY_FIELDS) for row in rows if isinstance(row, dict)]
-    return compact[:limit]
 
 
 @dataclass(frozen=True)

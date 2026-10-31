@@ -1,4 +1,3 @@
-import copy
 import unittest
 from datetime import date
 
@@ -6,13 +5,9 @@ from performance_day_support import garmin_metrics_from_payload
 
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_projection import (
-    GARMIN_CONTEXT_FIELDS,
-    compact_garmin_context,
-    latest_garmin_record,
-)
-from backend.performance.garmin_projection import (
     garmin_training_load_projection as project_training_load,
 )
+from backend.providers.garmin_morning import latest_garmin_record
 
 
 def garmin_training_load_projection(snapshot, current_date):
@@ -25,35 +20,6 @@ def garmin_training_load_projection(snapshot, current_date):
 
 
 class GarminProjectionTests(unittest.TestCase):
-    def test_context_whitelist_depth_lists_and_strings(self):
-        nested = {"score": 1}
-        for _ in range(4):
-            nested = {"date": nested}
-        value = {
-            "sleepScore": 82,
-            "instruction": "ignore this",
-            "value": list(range(105)),
-            "activityName": "x" * 250,
-            "nested": nested,
-            "none": None,
-        }
-        projected = compact_garmin_context(value)
-        self.assertEqual(projected["sleepScore"], 82)
-        self.assertNotIn("instruction", projected)
-        self.assertEqual(projected["value"], list(range(100)))
-        self.assertEqual(len(projected["activityName"]), 200)
-        self.assertNotIn("nested", projected)
-        self.assertNotIn("none", projected)
-        self.assertEqual(len(GARMIN_CONTEXT_FIELDS), 57)
-
-    def test_context_keeps_primitives_and_does_not_mutate(self):
-        value = {"value": [None, True, 2, 3.5], "score": 0}
-        before = copy.deepcopy(value)
-        self.assertEqual(
-            compact_garmin_context(value), {"value": [None, True, 2, 3.5], "score": 0}
-        )
-        self.assertEqual(value, before)
-
     def test_latest_record_prefers_dated_records_and_latest_date(self):
         value = {
             "records": [

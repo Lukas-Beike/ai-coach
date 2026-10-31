@@ -22,9 +22,7 @@ from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.observability import Redactor
-from backend.performance import garmin_observations
 from backend.performance.freshness import GarminSyncStatus
-from backend.performance.history import append_garmin_performance_history
 from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
@@ -32,6 +30,8 @@ from backend.providers.garmin_gear_fields import garmin_gear_id
 from backend.runtime.ports import ActivityRowReader
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_activity_duplicates import garmin_activity_duplicates_intervals
+from backend.sync.garmin_payload_metrics import garmin_source_observed_at
+from backend.sync.garmin_performance_history import append_garmin_performance_history
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 from backend.sync.refresh import sync_job_error_class
 from backend.sync.state import SyncStateRepository
@@ -263,21 +263,6 @@ class GarminPayloadService:
         """
         with self._database_manager.reader() as db:
             return garmin_store.read_view(db, sources, start=start, end=end)
-
-    def recent_view(self, days: int = RECENT_VIEW_DAYS) -> dict[str, Any]:
-        """Return the Garmin state plus every section of the last ``days`` local days.
-
-        The sections holding the provider's current answer are always complete; the
-        read-window sections and the activities are cut to the window, so a read
-        costs the window and never the stored stock.
-        """
-        with self._database_manager.reader() as db:
-            return self.recent_view_in(db, days)
-
-    def recent_view_in(self, db: Any, days: int = RECENT_VIEW_DAYS) -> dict[str, Any]:
-        """Read ``recent_view`` inside the caller's transaction."""
-        start = (self._local_today() - timedelta(days=max(1, days) - 1)).isoformat()
-        return garmin_store.read_view(db, None, start=start)
 
     def sync_status(self) -> GarminSyncStatus:
         """Return the stored Garmin sync status; no section or value is read."""
@@ -566,7 +551,7 @@ def _merge_source_freshness(
         freshness[source] = {
             "freshness": "current" if complete else "partial",
             "fetched_at": payload["synced_at"],
-            "observed_at": garmin_observations.garmin_source_observed_at(incoming),
+            "observed_at": garmin_source_observed_at(incoming),
         }
     elif source in stored:
         freshness[source] = {**previous_freshness, "freshness": "stale"}

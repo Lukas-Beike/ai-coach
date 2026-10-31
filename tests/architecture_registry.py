@@ -1168,7 +1168,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        "backend.performance.history",
+        "backend.sync.garmin_performance_history",
         ("append_garmin_performance_history",),
     ),
     (
@@ -1208,7 +1208,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        "backend.performance.garmin_weight",
+        "backend.sync.garmin_weight",
         (
             "_garmin_weight_kg",
             "_garmin_record_date",

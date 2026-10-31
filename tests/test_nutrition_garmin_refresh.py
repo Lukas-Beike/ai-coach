@@ -12,13 +12,13 @@ from performance_day_support import garmin_body_from_payload
 from backend.errors import AppError
 from backend.performance.body import body_history
 from backend.performance.freshness import GarminSyncStatus
-from backend.performance.garmin_weight import garmin_weight_records
 from backend.providers.garmin import merge_weight_snapshots
 from backend.sync.garmin_service import (
     GarminNutritionRefreshService,
     GarminRemoteReader,
 )
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.garmin_weight import garmin_weight_records
 
 
 class GarminNutritionRefreshTests(unittest.TestCase):

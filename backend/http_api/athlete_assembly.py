@@ -17,11 +17,7 @@ from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
-from backend.runtime.ports import (
-    ActivityRowReader,
-    CanonicalTableServing,
-    ProviderSnapshotReader,
-)
+from backend.runtime.ports import ActivityRowReader, CanonicalTableServing
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_activity_duplicates import deduplicated_rows
 from backend.weather.cache import invalidate_for_location_change
@@ -33,7 +29,6 @@ class AthleteRepositories:
     checkin: Any
     profile: Any
     key_values: Any
-    snapshot_reader: ProviderSnapshotReader
     activity_rows: Callable[[], ActivityRowReader]
     table_serving: Callable[[], CanonicalTableServing]
     competition: Any
@@ -73,7 +68,6 @@ class AthleteDataAssembly:
         self._checkin_repository = repositories.checkin
         self._profile_repository = repositories.profile
         self._key_value_repository = repositories.key_values
-        self._snapshot_reader = repositories.snapshot_reader
         self._activity_rows = repositories.activity_rows
         self._table_serving = repositories.table_serving
         self._utc_now = runtime.utc_now
@@ -84,10 +78,6 @@ class AthleteDataAssembly:
         self._normalize_competition = runtime.normalize_competition
         self._uuid_factory = runtime.uuid_factory
         self._read_planned_units = runtime.read_planned_units
-
-    def training_snapshot(self) -> dict[str, Any]:
-        with self._database_manager().unit_of_work() as db:
-            return self._snapshot_reader.latest_snapshot(db) or {}
 
     def activity_rows(self) -> tuple[dict[str, Any], ...]:
         with self._database_manager().unit_of_work() as db:

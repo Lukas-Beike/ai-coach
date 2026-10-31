@@ -32,16 +32,14 @@ from support import (
 
 from backend.http_api import server as http_server_module
 from backend.http_api.static_assets import StaticAssetService
-from backend.performance import garmin_observations
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
-from backend.planning import context as planning_context
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import executor as sync_executor
-from backend.sync import garmin_service
+from backend.sync import garmin_payload_metrics, garmin_service, intervals_compaction
 from backend.sync import intervals_assembly as intervals_assembly_module
 from backend.sync import provider_resync_assembly as provider_resync_assembly_module
 from backend.sync import queue as sync_queue
@@ -821,7 +819,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(calls[0]["name"], "Krankheit")
 
     def test_compact_snapshot_drops_unknown_and_sensitive_fields(self):
-        result = planning_context.compact_snapshot(
+        result = intervals_compaction.compact_snapshot(
             {"id": "i1", "name": "Ada", "secret": "nope"},
             [
                 {
@@ -1317,7 +1315,7 @@ class ServerSyncTests(ServerTestCase):
         )
 
     def test_garmin_source_observed_at_uses_latest_nested_valid_date(self):
-        observed_at = garmin_observations.garmin_source_observed_at(
+        observed_at = garmin_payload_metrics.garmin_source_observed_at(
             {
                 "calendarDate": "invalid-date",
                 "nested": [
@@ -2282,7 +2280,7 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(read_garmin().get("source"), "fixture")
 
     def test_all_time_snapshot_does_not_truncate_activity_history(self):
-        snapshot = planning_context.compact_snapshot(
+        snapshot = intervals_compaction.compact_snapshot(
             {},
             [{"id": str(index), "name": f"Ride {index}"} for index in range(600)],
             [{"id": f"2026-01-{index:02d}", "ctl": index} for index in range(1, 4)],
@@ -2553,7 +2551,7 @@ class ServerSyncTests(ServerTestCase):
         self,
     ):
         today = _local_datetime.now().astimezone().date().isoformat()
-        snapshot = planning_context.compact_snapshot(
+        snapshot = intervals_compaction.compact_snapshot(
             {
                 "sportSettings": [{"types": ["Ride"], "ftp": 300, "eFTP": 309}],
             },

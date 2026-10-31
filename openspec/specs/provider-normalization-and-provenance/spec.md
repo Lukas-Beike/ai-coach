@@ -269,3 +269,22 @@ The system SHALL give activity consumers one provider-neutral summary per live c
 Detailed contract: summary keys follow `activity_detail.v1` (`started_at_local`, `moving_duration_s`, `elapsed_duration_s`, `distance_m`, `elevation_gain_m`, `avg_hr`, `max_hr`, `avg_power`, `normalized_power`, `avg_speed_mps`, `pace_mps`, `intensity`, `rpe`, `feel`, `ftp_w`, `eftp_w`, `vo2max`, `training_load`, `load_model`, zone times as `{id, secs}` lists, `planned_event_id`, `recorded_by`, `source`, `sources`, `record_ids`). The Intervals.icu (v6) and Garmin (v7) mappers store the summary values in the record details, so the existing backfill re-maps stored rows; no schema change.
 
 Evidence: `backend/activities/activity_summary.py`, `backend/sync/canonical_table_reader.py:CanonicalTableReader.activity_sessions`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector.activity_summaries`; `tests/test_activity_summary.py`, `tests/test_canonical_table_reader.py:ActivitySessionReadTests`, `tests/test_intervals_activity_mapping.py:SummaryValueTests`, `tests/test_garmin_activity_mapping.py:SummaryValueTests`, `tests/test_provider_coupling_guard.py`.
+
+### Requirement: Consumers read canonical records, not raw provider views
+Consumer packages (performance, Coach, HTTP API, planning, activities, athlete, nutrition) SHALL NOT read metric or detail values from the raw provider snapshot, its sections, the raw Garmin views or retired kv detail records; payload parsing SHALL live with its ingestion owner. An architecture guard SHALL enforce this with an explained allowlist that can only shrink.
+
+#### Scenario: Allowlist reasons
+- **WHEN** a consumer file keeps a raw read
+- **THEN** its allowlist entry names an ingestion, mapping, backup/export or sync-status reason, or a reported value read that waits for its canonical switch.
+
+#### Scenario: A consumer adds a raw view read
+- **WHEN** a module in a consumer package references `recent_wellness`, `raw_provider_data`, `read_view`, `recent_view`, `recent_view_in`, an `activity_detail:` key string or `latest_snapshot`
+- **THEN** the provider-coupling guard fails unless the file is allowlisted with an explained reason; docstrings and comments do not count.
+
+#### Scenario: A raw read is removed
+- **WHEN** an allowlisted file no longer makes the read
+- **THEN** the guard reports its allowlist entry as stale until it is removed.
+
+Detailed contract: rules `snapshot_key`, `legacy_read`, `source_label` and `field_module_import` in `tests/provider_coupling.py:OWNER_READ_ALLOWLIST`. Remaining value reads (#1416): the calendar projection's Intervals.icu sport-settings zone fallback (`backend/http_api/public_plan.py`, `backend/http_api/state_prelude.py`), Garmin gear sections (`backend/athlete/equipment.py`) and the daily-stats day presence of the energy views (`backend/nutrition/sync_status.py`).
+
+Evidence: `tests/provider_coupling.py:scan_owner_reads`, `backend/sync/garmin_payload_metrics.py:garmin_payload_performance_metrics`, `backend/sync/garmin_performance_history.py:append_garmin_performance_history`, `backend/sync/intervals_compaction.py:compact_snapshot`; `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_read_raw_provider_views`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_allowlisted_raw_view_owner_passes_and_a_stale_entry_fails`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_source_tree_reads_only_through_allowlisted_owners`.

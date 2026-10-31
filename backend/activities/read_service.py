@@ -114,11 +114,6 @@ class ActivityReadService:
         # Where the activities' sync time comes from; without it the time is unknown.
         self._coverage = coverage
 
-    def _snapshot(self) -> dict[str, Any]:
-        with self._database_manager.reader() as db:
-            snapshot = self._snapshot_reader.latest_snapshot(db)
-        return snapshot if isinstance(snapshot, dict) else {}
-
     def _read(self) -> tuple[Any, list[dict[str, Any]]]:
         """Read the sync time and the activity rows in one read snapshot."""
         with self._database_manager.read_snapshot() as db:

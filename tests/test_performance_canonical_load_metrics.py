@@ -32,8 +32,8 @@ from backend.performance.canonical_inputs import (
 from backend.performance.chart_history import analysis_history
 from backend.performance.context import current_performance_context
 from backend.performance.freshness import GarminSyncStatus
-from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.providers.snapshot_projection import project_intervals_snapshot
+from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 DAY = date(2026, 9, 20)
 RETRIEVED_AT = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)

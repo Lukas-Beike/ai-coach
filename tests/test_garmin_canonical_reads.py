@@ -44,6 +44,7 @@ from backend.performance.garmin_canonical import (
     read_garmin_state,
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
+from backend.sync import garmin_payload_metrics
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
@@ -174,7 +175,9 @@ class GarminStateEqualityTests(GarminReadFixture):
     def test_table_observations_give_the_payload_state(self) -> None:
         populate(self)
         table = self.read(lambda db: read_garmin_state(self.table, db))
-        payload = garmin_metrics.garmin_payload_performance_metrics(self.garmin, TODAY)
+        payload = garmin_payload_metrics.garmin_payload_performance_metrics(
+            self.garmin, TODAY
+        )
 
         self.assertTrue(table.has_sleep)
         self.assertIsNotNone(table.metrics.weight_kg)
@@ -183,7 +186,9 @@ class GarminStateEqualityTests(GarminReadFixture):
     def test_state_has_the_flags_and_values_of_the_snapshot_sections(self) -> None:
         populate(self)
         state = self.read(lambda db: read_garmin_state(self.table, db))
-        legacy = garmin_metrics.garmin_payload_performance_metrics(self.garmin, TODAY)
+        legacy = garmin_payload_metrics.garmin_payload_performance_metrics(
+            self.garmin, TODAY
+        )
         overlay = garmin_metrics.garmin_performance_metrics(
             GarminSyncStatus.from_state(self.garmin), TODAY, state.metrics
         )
@@ -227,7 +232,7 @@ class GarminStateEqualityTests(GarminReadFixture):
 
         self.assertIsNotNone(table)
         self.assertEqual(
-            garmin_observations.garmin_source_observed_at(self.garmin["sleep"]),
+            garmin_payload_metrics.garmin_source_observed_at(self.garmin["sleep"]),
             None if table is None else table.isoformat(),
         )
 
@@ -604,7 +609,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
         metrics = garmin_metrics.garmin_performance_metrics(
             GarminSyncStatus.from_state(payload), TODAY, canonical
         )
-        legacy = garmin_metrics.garmin_payload_performance_metrics(payload, TODAY)
+        legacy = garmin_payload_metrics.garmin_payload_performance_metrics(
+            payload, TODAY
+        )
 
         self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 279)
         self.assertEqual(

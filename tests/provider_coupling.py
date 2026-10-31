@@ -13,7 +13,7 @@ seen while comments are ignored. JavaScript literals come from a small lexer
 that consumes comments before strings, so comment text cannot hide later
 literals.
 
-Three owner-read rules, ``snapshot_key``, ``source_label`` and
+Four owner-read rules, ``snapshot_key``, ``legacy_read``, ``source_label`` and
 ``field_module_import``, are checked apart
 from the baseline against ``OWNER_READ_ALLOWLIST``: raw snapshot reads and provider
 display-name literals belong to the sync/provider owners, not to consumers.
@@ -114,6 +114,7 @@ ADAPTER_PREFIXES = ("backend/providers/", "backend/canonical/")
 PROVIDER_LITERAL_ALLOWED_FILES = frozenset({"backend/db/migrations.py"})
 
 RULE_SNAPSHOT_KEY = "snapshot_key"
+RULE_LEGACY_READ = "legacy_read"
 RULE_SOURCE_LABEL = "source_label"
 RULE_FIELD_MODULE_IMPORT = "field_module_import"
 
@@ -129,6 +130,35 @@ RULE_FIELD_MODULE_IMPORT = "field_module_import"
 SNAPSHOT_KEY_LITERALS = frozenset({"garmin_snapshot", "intervals_snapshot"})
 SNAPSHOT_KEY_PATTERN = re.compile(r"\b(garmin_snapshot|intervals_snapshot)\b")
 SNAPSHOT_READ_NAME = "latest_snapshot"
+# ``legacy_read`` flags, in the Epic A consumer packages (#1407), a reference to a
+# raw provider view: the snapshot sections ``recent_wellness`` and
+# ``raw_provider_data`` and the raw Garmin views ``read_view``, ``recent_view`` and
+# ``recent_view_in``, as a name, attribute, import alias or a word in a string, and
+# a string holding a kv ``activity_detail:`` record key. Docstrings do not count.
+# ``latest_snapshot`` is the ``snapshot_key`` rule, which covers these packages too.
+# Consumers read canonical records instead.
+LEGACY_READ_SCOPES = (
+    "backend/activities/",
+    "backend/athlete/",
+    "backend/coach/",
+    "backend/http_api/",
+    "backend/nutrition/",
+    "backend/performance/",
+    "backend/planning/",
+)
+LEGACY_READ_NAMES = frozenset(
+    {
+        "raw_provider_data",
+        "read_view",
+        "recent_view",
+        "recent_view_in",
+        "recent_wellness",
+    }
+)
+LEGACY_READ_PATTERN = re.compile(
+    r"\b(raw_provider_data|read_view|recent_view_in|recent_view|recent_wellness)\b"
+    r"|activity_detail:"
+)
 # ``source_label`` flags a quoted string that is exactly a provider display name.
 # Exact matches are data/source labels; prose such as "Mit Garmin Connect
 # verbinden" or "Garmin Connect Radaktivitäten" never matches. The rule covers
@@ -166,21 +196,31 @@ FIELD_MODULE_IMPORT_ALLOWED_PREFIXES = (*ADAPTER_PREFIXES, "backend/sync/")
 _SYNC_WRITER = "writer: persists or ingests the raw provider snapshot"
 _BACKUP = "export: backup/privacy export serializes the stored raw snapshot"
 _SYNC_STATUS = "sync-status: reads synced_at/freshness, not metric values"
-_AWAITING_PLANNING_READS = (
-    "awaiting-planning: the calendar window, snapshot sport settings and the "
-    "calendar projection still read the stored snapshot"
-)
 _LEGACY_LABEL = (
     "legacy-label: view still emits or compares the label itself; move it to "
     "backend/providers/source_labels.py"
 )
-
-_LEGACY_FALLBACK = (
-    "legacy-fallback: Garmin view, snapshot athlete or legacy wellness fallback "
-    "removed when the canonical record wins (#1415)"
+_DETAIL_RETIREMENT = (
+    "retirement: owns the scan of the retired kv activity_detail: records that "
+    "the sync backfill and retirement jobs drain"
 )
-_DEAD_LEGACY = (
-    "dead-legacy: no production caller; deleted with the read selector (#1416)"
+_SUMMARY_FINGERPRINT = (
+    "mapping: summary_fingerprint hashes the stored provider activity summary, "
+    "excluding the later-added zone-time keys, to detect stale details"
+)
+# Value reads reported in #1416 slice 3; each waits for its own canonical switch.
+_VALUE_READ_SPORT_SETTINGS = (
+    "value-read: the calendar projection takes the Intervals.icu sport settings "
+    "from the stored snapshot as the zone fallback behind the canonical zone "
+    "configurations; the calendar window is sync status"
+)
+_VALUE_READ_GEAR = (
+    "value-read: equipment reads the raw Garmin gear and activity_matches "
+    "sections for gear usage and session links"
+)
+_VALUE_READ_ENERGY_DAY = (
+    "value-read: the energy views drop canonical energy after a current targeted "
+    "refresh only when the raw Garmin daily_stats has no record of that day"
 )
 _PLANNING_RECORDS = (
     "planning-records: local planned units, library entries and frozen target "
@@ -191,10 +231,10 @@ _PLANNING_RECORDS = (
 # A new module in an allowlisted file fails the guard as well.
 _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "backend/activities/detail_store.py": (
-        _DEAD_LEGACY,
+        _SUMMARY_FINGERPRINT,
         ("intervals_performance_fields",),
     ),
-    "backend/athlete/equipment.py": (_LEGACY_FALLBACK, ("garmin_gear_fields",)),
+    "backend/athlete/equipment.py": (_VALUE_READ_GEAR, ("garmin_gear_fields",)),
     "backend/activities/matching.py": (
         _PLANNING_RECORDS,
         ("intervals_performance_fields",),
@@ -203,50 +243,7 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
         _PLANNING_RECORDS,
         ("intervals_performance_fields",),
     ),
-    "backend/nutrition/sync_status.py": (_LEGACY_FALLBACK, ("garmin_fields",)),
-    "backend/performance/garmin_metric_history.py": (
-        _LEGACY_FALLBACK,
-        ("garmin_performance_fields",),
-    ),
-    "backend/performance/garmin_metrics.py": (
-        _LEGACY_FALLBACK,
-        (
-            "garmin_fields",
-            "garmin_performance_fields",
-        ),
-    ),
-    "backend/performance/garmin_observations.py": (
-        _LEGACY_FALLBACK,
-        ("garmin_performance_fields",),
-    ),
-    "backend/performance/garmin_projection.py": (
-        _LEGACY_FALLBACK,
-        (
-            "garmin_fields",
-            "garmin_performance_fields",
-        ),
-    ),
-    "backend/performance/garmin_weight.py": (
-        _LEGACY_FALLBACK,
-        (
-            "garmin_fields",
-            "garmin_performance_fields",
-        ),
-    ),
-    "backend/performance/planning_recovery.py": (
-        _DEAD_LEGACY,
-        (
-            "garmin_fields",
-            "garmin_performance_fields",
-        ),
-    ),
-    "backend/performance/recovery.py": (
-        _LEGACY_FALLBACK,
-        (
-            "garmin_fields",
-            "garmin_performance_fields",
-        ),
-    ),
+    "backend/nutrition/sync_status.py": (_VALUE_READ_ENERGY_DAY, ("garmin_fields",)),
     "backend/performance/training_report.py": (
         _PLANNING_RECORDS,
         ("intervals_performance_fields",),
@@ -254,17 +251,6 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "backend/performance/session_analysis.py": (
         _PLANNING_RECORDS,
         ("intervals_performance_fields",),
-    ),
-    "backend/performance/wellness.py": (
-        _LEGACY_FALLBACK,
-        ("garmin_performance_fields",),
-    ),
-    "backend/planning/context.py": (
-        _PLANNING_RECORDS,
-        (
-            "intervals_activity_fields",
-            "intervals_performance_fields",
-        ),
     ),
     "backend/planning/library.py": (
         _PLANNING_RECORDS,
@@ -296,19 +282,22 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/sync/state.py"): _SYNC_WRITER,
     (RULE_SNAPSHOT_KEY, "backend/backup/export.py"): _BACKUP,
     (RULE_SNAPSHOT_KEY, "backend/privacy.py"): _BACKUP,
-    (RULE_SNAPSHOT_KEY, "backend/activities/read_service.py"): _SYNC_STATUS,
     (RULE_SOURCE_LABEL, "backend/athlete/equipment.py"): _LEGACY_LABEL,
     (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,
-    (RULE_SNAPSHOT_KEY, "backend/http_api/athlete_assembly.py"): _DEAD_LEGACY,
     (RULE_SNAPSHOT_KEY, "backend/http_api/bootstrap_state.py"): _SYNC_STATUS,
-    (RULE_SNAPSHOT_KEY, "backend/http_api/public_plan.py"): _AWAITING_PLANNING_READS,
-    (RULE_SNAPSHOT_KEY, "backend/http_api/state_prelude.py"): _AWAITING_PLANNING_READS,
+    (RULE_SNAPSHOT_KEY, "backend/http_api/public_plan.py"): _VALUE_READ_SPORT_SETTINGS,
+    (
+        RULE_SNAPSHOT_KEY,
+        "backend/http_api/state_prelude.py",
+    ): _VALUE_READ_SPORT_SETTINGS,
+    (RULE_LEGACY_READ, "backend/activities/detail_store.py"): _DETAIL_RETIREMENT,
+    (RULE_LEGACY_READ, "backend/athlete/equipment.py"): _VALUE_READ_GEAR,
+    (RULE_LEGACY_READ, "backend/nutrition/sync_status.py"): _VALUE_READ_ENERGY_DAY,
     **{
         (RULE_SOURCE_LABEL, path): _LEGACY_LABEL
         for path in (
             "backend/performance/body.py",
             "backend/performance/chart_history.py",
-            "backend/performance/garmin_metric_history.py",
             "backend/performance/garmin_projection.py",
             "backend/performance/morning_battery.py",
             "backend/performance/personal_recovery.py",
@@ -488,15 +477,20 @@ def scan_provider_coupling(root: Path = SOURCE_ROOT) -> list[CouplingEntry]:
     ]
 
 
-def _snapshot_key_tokens(text: str) -> list[str]:
-    tree = ast.parse(text)
-    docstrings = {
+def _docstring_ids(tree: ast.AST) -> set[int]:
+    """Ids of bare string expressions: docstrings and other unused literals."""
+    return {
         id(node.value)
         for node in ast.walk(tree)
         if isinstance(node, ast.Expr)
         and isinstance(node.value, ast.Constant)
         and isinstance(node.value.value, str)
     }
+
+
+def _snapshot_key_tokens(text: str) -> list[str]:
+    tree = ast.parse(text)
+    docstrings = _docstring_ids(tree)
     tokens: list[str] = []
     for node in ast.walk(tree):
         if (
@@ -515,8 +509,32 @@ def _snapshot_key_tokens(text: str) -> list[str]:
     return tokens
 
 
+def _legacy_read_tokens(text: str) -> list[str]:
+    """Raw provider view references: names, attributes, aliases and strings."""
+    tree = ast.parse(text)
+    docstrings = _docstring_ids(tree)
+    tokens: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in LEGACY_READ_NAMES:
+            tokens.append(node.attr)
+        elif isinstance(node, ast.Name) and node.id in LEGACY_READ_NAMES:
+            tokens.append(node.id)
+        elif isinstance(node, ast.alias) and node.name in LEGACY_READ_NAMES:
+            tokens.append(node.name)
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+        ):
+            tokens.extend(
+                match.group(1) or match.group(0)
+                for match in LEGACY_READ_PATTERN.finditer(node.value)
+            )
+    return tokens
+
+
 def scan_owner_reads(root: Path = SOURCE_ROOT) -> list[CouplingEntry]:
-    """Count raw snapshot reads, source-label literals and field-module imports."""
+    """Count raw snapshot and view reads, source labels and field-module imports."""
     findings: Counter[FindingKey] = Counter()
     for path in scanned_paths(root):
         relative_path = path.relative_to(root).as_posix()
@@ -524,6 +542,9 @@ def scan_owner_reads(root: Path = SOURCE_ROOT) -> list[CouplingEntry]:
         if path.suffix == ".py":
             for token in _snapshot_key_tokens(text):
                 findings[(RULE_SNAPSHOT_KEY, relative_path, token)] += 1
+            if relative_path.startswith(LEGACY_READ_SCOPES):
+                for token in _legacy_read_tokens(text):
+                    findings[(RULE_LEGACY_READ, relative_path, token)] += 1
             if not relative_path.startswith(FIELD_MODULE_IMPORT_ALLOWED_PREFIXES):
                 for module in _field_module_imports(text, relative_path):
                     findings[(RULE_FIELD_MODULE_IMPORT, relative_path, module)] += 1

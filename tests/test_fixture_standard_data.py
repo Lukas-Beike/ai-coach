@@ -38,10 +38,10 @@ from backend.performance.body import body_history
 from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.freshness import GarminSyncStatus
-from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.performance.wellness_days import wellness_day_values
 from backend.providers.calendar import parse_ical_calendar
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
+from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 # Importing the fixture rewrites os.environ and sys.path and replaces shared server
 # callables. Capture those replacements, restore the process state at once, and let
