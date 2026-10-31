@@ -28,6 +28,7 @@ from backend.performance.canonical_current import (
     NO_CURRENT_INPUTS,
     CanonicalCurrentInputs,
     read_current_inputs,
+    read_sport_thresholds,
 )
 from backend.performance.canonical_recovery import (
     CanonicalRecoveryInputs,
@@ -260,6 +261,14 @@ def inputs_for_snapshot(
             include_power_curve=include_power_curve,
         ),
     )
+
+
+def sport_thresholds(source: CanonicalPerformanceSource) -> tuple[Observation, ...]:
+    """Read the latest sync's sport thresholds; nothing while the tables are pending."""
+    with source.database_manager().reader() as db:
+        return read_sport_thresholds(
+            resolve_reader(source.observation_reader(), db), db
+        )
 
 
 def resolve_reader(reader: ObservationReader, db: Any) -> ObservationReader:

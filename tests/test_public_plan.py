@@ -44,7 +44,9 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             "adaptive": Mock(),
             "quick_actions": Mock(),
         }
-        services["sync"].latest_snapshot.return_value = snapshot
+        services["sync"].sync_metadata.return_value = {
+            "provider_sync": snapshot["provider_sync"]
+        }
         services["planned"].list.return_value = planned
         services["feedback"].attach_to_activities.side_effect = lambda rows: rows
         services["weather"].state.return_value = weather_state or {

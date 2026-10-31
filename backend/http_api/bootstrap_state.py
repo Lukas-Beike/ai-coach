@@ -76,7 +76,7 @@ class PublicBootstrapService:
         # the shared database lock. A hidden write fails on the query-only
         # connection instead of racing.
         with deps.database_manager().read_snapshot() as db:
-            snapshot = deps.sync_state_repository().latest_snapshot()
+            sync_metadata = deps.sync_state_repository().sync_metadata()
             local_planned = deps.planned_unit_service().list(250)
             competitions = deps.competition_service().list(limit=100)
             relevant_external = deps.external_calendar_reader().list_events(
@@ -181,7 +181,7 @@ class PublicBootstrapService:
                     pagination_value=deps.key_values.get_in_transaction(
                         db, "last_sync_pagination"
                     ),
-                    snapshot=snapshot,
+                    snapshot=sync_metadata,
                     library_sync_state=deps.workout_library_sync_state_service().summary(),
                     today=deps.local_date(),
                     history_days=deps.planned_calendar_history_days,

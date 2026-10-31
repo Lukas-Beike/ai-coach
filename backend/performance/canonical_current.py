@@ -67,6 +67,12 @@ _INSTANT_KINDS: Final = tuple(
     dict.fromkeys((*_SYNC_KINDS, MetricKind.EFTP, *_ATHLETE_RECORD_KINDS))
 )
 _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
+# Sport-scoped athlete settings that give the plan zones their thresholds.
+_ZONE_THRESHOLD_KINDS: Final = (
+    MetricKind.FTP,
+    MetricKind.THRESHOLD_HR,
+    MetricKind.MAX_HR,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +216,33 @@ def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None
         athlete_eftp=_athlete_eftp(eftps),
         athlete_record=athlete_record,
         synced_at=synced,
+    )
+
+
+def read_sport_thresholds(
+    reader: ObservationReader, db: Any
+) -> tuple[Observation, ...]:
+    """Return the latest sync's sport-scoped FTP, threshold HR and maximum HR.
+
+    They are the athlete-record values of each sport's first Intervals.icu sport
+    setting; wellness-day values and sport-less values are left out. Without a
+    sync nothing is returned.
+    """
+    synced = _latest_sync_instant(reader, db)
+    if synced is None:
+        return ()
+    try:
+        day = synced.astimezone(UTC).date()
+        start, end = day - timedelta(days=1), day + timedelta(days=1)
+    except OverflowError:
+        return ()
+    return tuple(
+        observation
+        for kind in _ZONE_THRESHOLD_KINDS
+        for observation in _sync_observations(
+            reader, db, kind, synced, start=start, end=end
+        )
+        if observation.sport is not None and _is_athlete_record(observation)
     )
 
 

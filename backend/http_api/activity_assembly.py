@@ -15,7 +15,6 @@ from backend.runtime.ports import (
     CanonicalReadStatus,
     ObservationReader,
     ProviderCoverageReader,
-    ProviderSnapshotReader,
 )
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
@@ -30,7 +29,6 @@ class ActivityReadSources:
     block is marked pending or carries the compact-only activity gap.
     """
 
-    snapshot_reader: ProviderSnapshotReader
     row_reader: Callable[[], ActivityRowAndSummaryReader]
     observation_reader: Callable[[], ObservationReader]
     coverage: Callable[[], ProviderCoverageReader]
@@ -49,7 +47,6 @@ class ActivityReadAssembly:
     ) -> None:
         """``refreshable_providers`` names the providers that can load details now."""
         self._database_manager = database_manager
-        self._snapshot_reader = sources.snapshot_reader
         self._row_reader = sources.row_reader
         self._observation_reader = sources.observation_reader
         self._coverage = sources.coverage
@@ -62,7 +59,6 @@ class ActivityReadAssembly:
         manager = self._database_manager()
         return ActivityAnalysisReadService(
             manager,
-            self._snapshot_reader,
             CompactActivityRows(self._row_reader()),
             self._feedback_service(),
             ActivityDetailStore(manager),

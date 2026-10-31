@@ -11,6 +11,7 @@ from backend.athlete.checkins import CheckinService
 from backend.calendar.external import ExternalCalendarReader
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.public_metrics import neutral_calendar_state
+from backend.canonical.records import Observation
 from backend.planning import calendar_read_model
 from backend.planning.competition_service import CompetitionService
 from backend.planning.daily_context_service import DailyPlanningContextService
@@ -42,6 +43,7 @@ class PublicStateCalendarProjection:
         default_workout_name: str,
         today: Callable[[], date],
         zone_configurations: Callable[[], Sequence[ZoneConfiguration]] = tuple,
+        sport_thresholds: Callable[[], Sequence[Observation]] = tuple,
     ) -> None:
         self._checkins = checkins
         self._competitions = competitions
@@ -53,10 +55,10 @@ class PublicStateCalendarProjection:
         self._default_workout_name = default_workout_name
         self._today = today
         self._zone_configurations = zone_configurations
+        self._sport_thresholds = sport_thresholds
 
     def read(
         self,
-        snapshot: dict[str, Any],
         canonical_planned: list[dict[str, Any]],
         local_planned: list[dict[str, Any]],
         activities: list[dict[str, Any]],
@@ -92,7 +94,7 @@ class PublicStateCalendarProjection:
             today=self._today(),
             provider_window=calendar_window,
             default_name=self._default_workout_name,
-            sport_settings=calendar_read_model.snapshot_sport_settings(snapshot),
+            sport_thresholds=self._sport_thresholds(),
             zone_configurations=self._zone_configurations(),
         )
         neutral_calendar_state(calendar_projection)

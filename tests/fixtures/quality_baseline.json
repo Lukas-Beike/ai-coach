@@ -506,12 +506,6 @@
     },
     {
       "tool": "mypy",
-      "path": "backend/http_api/state_prelude.py",
-      "code": "arg-type",
-      "message_sha256": "c5b10da3c1a67ec6fec8ae1b72aedf49046619ec7640adc1f88c80d760648235"
-    },
-    {
-      "tool": "mypy",
       "path": "tests/test_sync_garmin_service.py",
       "code": "arg-type",
       "message_sha256": "c7da7bf07f0bf1dfb1a8839132681b09f07fb2b9e13ff096b5a4e21072b6c46d"

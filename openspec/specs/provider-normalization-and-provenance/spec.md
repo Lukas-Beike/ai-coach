@@ -225,6 +225,14 @@ Canonical zone configuration SHALL retain sport, metric, boundaries in canonical
 - **WHEN** provider zones are refreshed after a confirmed local edit
 - **THEN** local values retain authority and the refreshed provider alternative remains available separately.
 
+#### Scenario: Thresholds without a zone configuration
+- **WHEN** a planned workout's sport has no configuration for a metric
+- **THEN** its FTP, threshold HR and maximum HR come from the latest Intervals.icu sync's sport-scoped canonical observations with the default limits, never from the stored snapshot, and nothing is served before the first completed backfill.
+
+Detailed contract (#1416): the indoor FTP is canonical only as the threshold of the INDOOR power configuration, so without a power zone list indoor workouts use the sport FTP; the Ride FTP falls back to the athlete's configured FTP as the canonical current metrics do; zone lists and values the mappers reject leave the default limits or no threshold.
+
+Evidence: `backend/performance/canonical_current.py:read_sport_thresholds`, `backend/activities/zone_settings.py:ZoneSettings.from_thresholds`, `backend/planning/calendar_read_model.py:project_planning_calendar`; `tests/test_plan_zone_canonical_parity.py`, `tests/test_zone_configuration_canonical.py:EffectiveZoneTests`, `tests/test_zone_settings.py`.
+
 ### Requirement: Retained provider domains and equipment links
 Training status and load balance, running tolerance, readiness history, endurance score details/history, performance history, Body Battery, stress, resting energy, subjective provider wellness and equipment SHALL have canonical representations. Their affected consumers SHALL read canonical values with provider labels. Proprietary scores SHALL not be rebuilt locally; equipment links SHALL resolve to canonical sessions.
 
@@ -285,6 +293,6 @@ Consumer packages (performance, Coach, HTTP API, planning, activities, athlete, 
 - **WHEN** an allowlisted file no longer makes the read
 - **THEN** the guard reports its allowlist entry as stale until it is removed.
 
-Detailed contract: rules `snapshot_key`, `legacy_read`, `source_label` and `field_module_import` in `tests/provider_coupling.py:OWNER_READ_ALLOWLIST`. Remaining value reads (#1416): the calendar projection's Intervals.icu sport-settings zone fallback (`backend/http_api/public_plan.py`, `backend/http_api/state_prelude.py`), Garmin gear sections (`backend/athlete/equipment.py`) and the daily-stats day presence of the energy views (`backend/nutrition/sync_status.py`).
+Detailed contract: rules `snapshot_key`, `legacy_read`, `source_label` and `field_module_import` in `tests/provider_coupling.py:OWNER_READ_ALLOWLIST`. No value read remains in the consumer packages (#1416): plan zones read canonical thresholds, equipment reads canonical gear items and links (stored `activity_matches` are no longer read; canonical sessions and `external_id` link activities), and the energy views take a day's presence after a targeted refresh from its canonical Garmin totals; the stored snapshot is read there only for sync status (`provider_sync`, Garmin state).
 
 Evidence: `tests/provider_coupling.py:scan_owner_reads`, `backend/sync/garmin_payload_metrics.py:garmin_payload_performance_metrics`, `backend/sync/garmin_performance_history.py:append_garmin_performance_history`, `backend/sync/intervals_compaction.py:compact_snapshot`; `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_read_raw_provider_views`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_allowlisted_raw_view_owner_passes_and_a_stale_entry_fails`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_source_tree_reads_only_through_allowlisted_owners`.

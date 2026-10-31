@@ -6,7 +6,7 @@ windows are sync status (``GarminSyncStatus``).
 """
 
 from collections.abc import Iterable, Mapping
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
@@ -74,6 +74,29 @@ def read_daily_health_by_date(
         health["source"] = _sources(values.values())
         health_by_date[record_date] = health
     return health_by_date
+
+
+def garmin_daily_health_retrievals(
+    reader: ObservationReader, db: Any, *, start: date, end: date
+) -> dict[str, datetime | None]:
+    """Return, per ISO day, the latest fetch time of a Garmin daily total.
+
+    A day appears once any Garmin daily-health observation is stored for it; its
+    value is None when no stored observation carries a fetch time.
+    """
+    retrievals: dict[str, datetime | None] = {}
+    for kind in DAILY_HEALTH_KINDS:
+        for item in reader.observations(db, kind, start=start, end=end):
+            if item.provenance.provider is not ProviderId.GARMIN:
+                continue
+            day = item.observed_on.isoformat()
+            retrieved = item.provenance.retrieved_at
+            current = retrievals.get(day)
+            if day not in retrievals or (
+                retrieved is not None and (current is None or retrieved > current)
+            ):
+                retrievals[day] = retrieved
+    return retrievals
 
 
 def daily_energy_expenditure(

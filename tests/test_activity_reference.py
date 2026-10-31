@@ -244,7 +244,6 @@ class ActivityReadReferenceTests(_Fixture):
         snapshot_reader = Mock(latest_snapshot=Mock(return_value=snapshot))
         return ActivityReadService(
             self.manager,
-            snapshot_reader,
             CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
             feedback,
             references=ActivityReferences(self.manager),
@@ -324,17 +323,6 @@ class ActivityCallerResolutionTests(_Fixture):
         }
         service = ActivityAnalysisReadService(
             self.manager,
-            Mock(
-                latest_snapshot=Mock(
-                    return_value={
-                        "synced_at": STAMP,
-                        "athlete": {},
-                        "recent_wellness": [],
-                        "recent_activities": [],
-                        "raw_provider_data": {"activities": [raw]},
-                    }
-                )
-            ),
             CompactActivityRows(FixedActivityRows()),
             Mock(
                 attach_to_activities=Mock(side_effect=lambda rows: list(rows)),

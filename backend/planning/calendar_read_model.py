@@ -12,6 +12,7 @@ from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import canonical, local
 from backend.canonical.domain_records import ZoneConfiguration
+from backend.canonical.records import Observation
 from backend.planning import calendar as planning_calendar
 from backend.planning.conflicts import calendar_items_share_local_day
 from backend.planning.sport import planned_sport_environment
@@ -87,12 +88,6 @@ def planned_unit_conflicts(
     return [{"code": code, "label": labels[code]} for code in dict.fromkeys(codes)]
 
 
-def snapshot_sport_settings(snapshot: Any) -> Any:
-    """The compact Intervals.icu sport settings of a provider snapshot."""
-    athlete = snapshot.get("athlete") if isinstance(snapshot, dict) else None
-    return athlete.get("sport_settings") if isinstance(athlete, dict) else ()
-
-
 def _row_day(row: dict[str, Any]) -> date | None:
     try:
         return date.fromisoformat(
@@ -104,20 +99,17 @@ def _row_day(row: dict[str, Any]) -> date | None:
 
 def _zone_settings(
     row: dict[str, Any],
-    sport_settings: Any,
+    sport_thresholds: Sequence[Observation],
     zone_configurations: Sequence[ZoneConfiguration],
 ) -> ZoneSettings:
     sport, environment = planned_sport_environment(row)
-    legacy = ZoneSettings.from_sport_settings(sport_settings, sport, environment)
-    if any(configuration.sport is sport for configuration in zone_configurations):
-        return ZoneSettings.from_configurations(
-            zone_configurations,
-            sport,
-            environment,
-            _row_day(row),
-            fallback=legacy,
-        )
-    return legacy
+    return ZoneSettings.from_configurations(
+        zone_configurations,
+        sport,
+        environment,
+        _row_day(row),
+        fallback=ZoneSettings.from_thresholds(sport_thresholds, sport),
+    )
 
 
 def project_planning_calendar(
@@ -130,14 +122,14 @@ def project_planning_calendar(
     today: date,
     provider_window: Any,
     default_name: str,
-    sport_settings: Any = (),
+    sport_thresholds: Sequence[Observation] = (),
     zone_configurations: Sequence[ZoneConfiguration] = (),
 ) -> dict[str, Any]:
     """Project supplied planning data into the six calendar read models.
 
     The canonical ``zone_configurations`` set the zone limits and thresholds of
-    the planned workout profiles; for a sport without any, the athlete's
-    Intervals.icu ``sport_settings`` do.
+    the planned workout profiles; a metric without one keeps the sport's canonical
+    ``sport_thresholds`` (``read_sport_thresholds``) and the default limits.
     """
     canonical_planned = canonical.canonical_planned_workouts([], local_planned)
     compliance_planned, planning_compliance = (
@@ -152,7 +144,7 @@ def project_planning_calendar(
         {**row, "workout_profile": profile}
         if (
             profile := planned_profile(
-                row, _zone_settings(row, sport_settings, zone_configurations)
+                row, _zone_settings(row, sport_thresholds, zone_configurations)
             )
         )
         else row

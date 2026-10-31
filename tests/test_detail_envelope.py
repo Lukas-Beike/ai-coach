@@ -74,7 +74,6 @@ class DetailEnvelopeTests(unittest.TestCase):
         self.assembly = ActivityReadAssembly(
             lambda: self.manager,
             ActivityReadSources(
-                snapshots,
                 lambda: SnapshotActivityRows(snapshots),
                 observation_reader=NoObservations,
                 coverage=lambda: StoredCoverage(None),

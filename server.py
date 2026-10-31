@@ -705,7 +705,6 @@ CANONICAL_READ: CanonicalReadSelector
 ACTIVITY_READS = ActivityReadAssembly(
     database_manager,
     ActivityReadSources(
-        SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
         lambda: CANONICAL_READ,
         observation_reader=lambda: CANONICAL_READ,
         coverage=lambda: CANONICAL_READ,

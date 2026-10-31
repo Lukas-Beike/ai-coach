@@ -127,7 +127,6 @@ class ActivityReadServiceTests(unittest.TestCase):
         kwargs.setdefault("summary_rows", rows)
         return ActivityAnalysisReadService(
             self.manager,
-            _Snapshots(snapshot),
             CompactActivityRows(rows),
             _Feedback(),
             references=ActivityReferences(self.manager),
@@ -166,7 +165,6 @@ class ActivityReadServiceTests(unittest.TestCase):
         rows = SnapshotActivityRows(_Snapshots(snapshot))
         return ActivityAnalysisReadService(
             _Manager(),
-            _Snapshots(snapshot),
             CompactActivityRows(rows),
             _Feedback(),
             detail_store,
@@ -345,7 +343,6 @@ class ActivityReadServiceTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             ActivityAnalysisReadService(  # type: ignore[call-arg]
                 _Manager(),
-                _Snapshots({}),
                 CompactActivityRows(SnapshotActivityRows(_Snapshots({}))),
                 _Feedback(),
             )

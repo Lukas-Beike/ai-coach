@@ -208,20 +208,6 @@ _SUMMARY_FINGERPRINT = (
     "mapping: summary_fingerprint hashes the stored provider activity summary, "
     "excluding the later-added zone-time keys, to detect stale details"
 )
-# Value reads reported in #1416 slice 3; each waits for its own canonical switch.
-_VALUE_READ_SPORT_SETTINGS = (
-    "value-read: the calendar projection takes the Intervals.icu sport settings "
-    "from the stored snapshot as the zone fallback behind the canonical zone "
-    "configurations; the calendar window is sync status"
-)
-_VALUE_READ_GEAR = (
-    "value-read: equipment reads the raw Garmin gear and activity_matches "
-    "sections for gear usage and session links"
-)
-_VALUE_READ_ENERGY_DAY = (
-    "value-read: the energy views drop canonical energy after a current targeted "
-    "refresh only when the raw Garmin daily_stats has no record of that day"
-)
 _PLANNING_RECORDS = (
     "planning-records: local planned units, library entries and frozen target "
     "snapshots still store the provider training-load, intensity and FTP keys "
@@ -234,7 +220,6 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
         _SUMMARY_FINGERPRINT,
         ("intervals_performance_fields",),
     ),
-    "backend/athlete/equipment.py": (_VALUE_READ_GEAR, ("garmin_gear_fields",)),
     "backend/activities/matching.py": (
         _PLANNING_RECORDS,
         ("intervals_performance_fields",),
@@ -243,7 +228,6 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
         _PLANNING_RECORDS,
         ("intervals_performance_fields",),
     ),
-    "backend/nutrition/sync_status.py": (_VALUE_READ_ENERGY_DAY, ("garmin_fields",)),
     "backend/performance/training_report.py": (
         _PLANNING_RECORDS,
         ("intervals_performance_fields",),
@@ -284,15 +268,7 @@ OWNER_READ_ALLOWLIST: Mapping[tuple[str, str], str] = {
     (RULE_SNAPSHOT_KEY, "backend/privacy.py"): _BACKUP,
     (RULE_SOURCE_LABEL, "backend/athlete/equipment.py"): _LEGACY_LABEL,
     (RULE_SNAPSHOT_KEY, "backend/diagnostics/report.py"): _SYNC_STATUS,
-    (RULE_SNAPSHOT_KEY, "backend/http_api/bootstrap_state.py"): _SYNC_STATUS,
-    (RULE_SNAPSHOT_KEY, "backend/http_api/public_plan.py"): _VALUE_READ_SPORT_SETTINGS,
-    (
-        RULE_SNAPSHOT_KEY,
-        "backend/http_api/state_prelude.py",
-    ): _VALUE_READ_SPORT_SETTINGS,
     (RULE_LEGACY_READ, "backend/activities/detail_store.py"): _DETAIL_RETIREMENT,
-    (RULE_LEGACY_READ, "backend/athlete/equipment.py"): _VALUE_READ_GEAR,
-    (RULE_LEGACY_READ, "backend/nutrition/sync_status.py"): _VALUE_READ_ENERGY_DAY,
     **{
         (RULE_SOURCE_LABEL, path): _LEGACY_LABEL
         for path in (

@@ -744,10 +744,9 @@ class GarminSyncStateService:
         with self._database_manager.unit_of_work() as db:
             self._snapshot_writer.write(db, payload)
         if self._sync_equipment is not None and source != "fixture":
-            # The fetch carries only new matches; the links need all stored ones.
-            with self._database_manager.reader() as db:
-                stored = garmin_store.read_sections(db, ("activity_matches",))
-            self._sync_equipment({**payload, **stored})
+            # Equipment reads the canonical gear just written; the payload gives
+            # only the gear's sync freshness.
+            self._sync_equipment(payload)
         self._set("last_garmin_sync_at", synced_at)
         if end_date is None:
             self._daily_sync_marker_service.mark(GARMIN_ID)

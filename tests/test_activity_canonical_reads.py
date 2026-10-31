@@ -78,7 +78,6 @@ class _ActivityCase(CanonicalReadFixture):
     def read_service(self, selector: Any) -> ActivityReadService:
         return ActivityReadService(
             self.manager,
-            self.snapshots,
             CompactActivityRows(selector),
             _Feedback(),
         )

@@ -28,14 +28,13 @@ from backend.performance.canonical_inputs import (
 from backend.performance.context import current_performance_context
 from backend.performance.detail_envelope import DetailEnvelopeReader
 from backend.performance.freshness import GarminSyncStatus
-from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
+from backend.runtime.ports import ActivityRowReader
 
 
 class ActivityAnalysisReadService(ActivityReadService):
     def __init__(
         self,
         database_manager: Any,
-        snapshot_reader: ProviderSnapshotReader,
         row_reader: ActivityRowReader,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
@@ -49,7 +48,6 @@ class ActivityAnalysisReadService(ActivityReadService):
     ) -> None:
         super().__init__(
             database_manager,
-            snapshot_reader,
             row_reader,
             feedback_service,
             detail_store,

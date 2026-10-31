@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from backend.canonical.records import Observation
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
@@ -22,7 +23,10 @@ from backend.http_api.state_prelude import (
     PublicStateWeatherPrelude,
 )
 from backend.http_api.state_versions import StateVersionService
-from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceSource,
+    sport_thresholds,
+)
 from backend.performance.season_inputs import SeasonSource
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.runtime.ports import (
@@ -204,6 +208,11 @@ class PublicStateAssembly:
             coverage=self._coverage,
         )
 
+    def _sport_thresholds(self) -> tuple[Observation, ...]:
+        """The canonical sport thresholds behind the plan zones; none without a reader."""
+        source = self.canonical_performance_source()
+        return () if source is None else sport_thresholds(source)
+
     def season_source(self) -> SeasonSource:
         if self._observation_reader is None or self._activity_summary_reader is None:
             raise RuntimeError(
@@ -353,6 +362,7 @@ class PublicStateAssembly:
                 activity_rows=self.activity_summary_source(),
                 activity_row_reader=self._activity_row_reader,
                 zone_configurations=athlete.zones().configurations,
+                sport_thresholds=self._sport_thresholds,
             )
         )
 
@@ -392,6 +402,7 @@ class PublicStateAssembly:
             default_workout_name=self._planned_workout_label(),
             today=self._local_date,
             zone_configurations=athlete.zones().configurations,
+            sport_thresholds=self._sport_thresholds,
         )
 
     def state_service(self) -> PublicStateService:

@@ -2,23 +2,21 @@
 
 Defaults follow Intervals.icu's standard zones. Canonical zone configurations
 replace them per metric: a confirmed local configuration valid on the day wins,
-then the provider's. Without canonical configurations the Intervals.icu sport
-settings of the snapshot are read as before.
+then the provider's. A metric without a configuration keeps the sport's canonical
+thresholds (``from_thresholds``) and the default limits.
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
-from itertools import pairwise
-from typing import Any
 
 from backend.canonical.domain_records import ZoneConfiguration
-from backend.canonical.sports import classify_sport_text
+from backend.canonical.records import Observation
 from backend.canonical.vocabulary import (
     Environment,
+    MetricKind,
     ProviderId,
     Sport,
     ZoneConfigurationMetric,
@@ -44,30 +42,6 @@ def percent_zone(percent: float, limits: tuple[float, ...]) -> int:
     )
 
 
-def _number(value: Any) -> float | None:
-    return (
-        float(value)
-        if type(value) in {int, float} and math.isfinite(value) and value > 0
-        else None
-    )
-
-
-def _limits(value: Any, divisor: float = 1.0) -> tuple[float, ...] | None:
-    """The ascending zone limits of an Intervals.icu zone list, or None.
-
-    The list has one entry per zone (3 to 7 zones are supported); the last entry
-    is the open upper end and is not needed.
-    """
-    if not isinstance(value, list) or not _MIN_ZONES <= len(value) <= _MAX_ZONES:
-        return None
-    numbers = [_number(item) for item in value[:-1]]
-    if any(item is None for item in numbers):
-        return None
-    limits = tuple(item / divisor for item in numbers if item is not None)
-    ascending = all(left < right for left, right in pairwise(limits))
-    return limits if ascending else None
-
-
 @dataclass(frozen=True)
 class ZoneSettings:
     """Thresholds and zone limits (percent of threshold) of one sport."""
@@ -80,44 +54,22 @@ class ZoneSettings:
     pace_limits: tuple[float, ...] = PACE_ZONE_LIMITS
 
     @classmethod
-    def from_sport_settings(
-        cls,
-        settings: Any,
-        sport: Sport,
-        environment: Environment = Environment.UNKNOWN,
+    def from_thresholds(
+        cls, observations: Iterable[Observation], sport: Sport
     ) -> ZoneSettings:
-        """Zone settings of the first Intervals.icu sport setting for ``sport``.
+        """Thresholds of ``sport`` from its canonical athlete settings, default limits.
 
-        Indoor and virtual workouts use the indoor FTP when the setting has one.
+        ``observations`` are the sport-scoped FTP, threshold and maximum heart rate
+        of the latest provider sync; the first of each kind for ``sport`` is used.
         """
-        for setting in settings if isinstance(settings, list) else ():
-            types = setting.get("types") if isinstance(setting, dict) else None
-            if isinstance(types, list) and any(
-                isinstance(item, str) and classify_sport_text(item) == sport
-                for item in types
-            ):
-                return cls._from_setting(setting, environment)
-        return cls()
-
-    @classmethod
-    def _from_setting(
-        cls, setting: dict[str, Any], environment: Environment
-    ) -> ZoneSettings:
-        lthr = _number(setting.get("lthr"))
-        indoor = environment in {Environment.INDOOR, Environment.VIRTUAL}
-        ftp = (_number(setting.get("indoor_ftp")) if indoor else None) or _number(
-            setting.get("ftp")
-        )
-        # Heart-rate zones arrive as bpm limits; they need a threshold to become
-        # a percentage of it.
-        hr_limits = _limits(setting.get("hr_zones"), lthr / 100) if lthr else None
+        values: dict[MetricKind, float] = {}
+        for observation in observations:
+            if observation.sport is sport:
+                values.setdefault(observation.kind, float(observation.value.value))
         return cls(
-            ftp=ftp,
-            lthr=lthr,
-            max_hr=_number(setting.get("max_hr")),
-            power_limits=_limits(setting.get("power_zones")) or POWER_ZONE_LIMITS,
-            hr_limits=hr_limits or HR_ZONE_LIMITS,
-            pace_limits=_limits(setting.get("pace_zones")) or PACE_ZONE_LIMITS,
+            ftp=values.get(MetricKind.FTP),
+            lthr=values.get(MetricKind.THRESHOLD_HR),
+            max_hr=values.get(MetricKind.MAX_HR),
         )
 
     @classmethod

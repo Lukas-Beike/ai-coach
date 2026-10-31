@@ -422,7 +422,7 @@ class ServerDatabaseTests(ServerTestCase):
         dependencies = SimpleNamespace(
             local_prelude=owner(
                 read=SimpleNamespace(
-                    snapshot={},
+                    sync_metadata={"provider_sync": {}},
                     activities=[],
                     local_planned=[],
                     canonical_planned=[],

@@ -113,7 +113,7 @@ class PublicStateService:
         deps = self._deps
         registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
         prelude = deps.local_prelude.read(local_only)
-        snapshot = prelude.snapshot
+        sync_metadata = prelude.sync_metadata
         activities = prelude.activities
         local_planned = prelude.local_planned
         canonical_planned = prelude.canonical_planned
@@ -122,7 +122,6 @@ class PublicStateService:
 
         with self._unit_of_work() as (manager, db):
             calendar_data = deps.calendar_projection.read(
-                snapshot,
                 canonical_planned,
                 local_planned,
                 activities,
@@ -179,7 +178,7 @@ class PublicStateService:
                     )
                     or None,
                     pagination_value=self._get_value("last_sync_pagination", manager),
-                    snapshot=snapshot,
+                    snapshot=sync_metadata,
                     library_sync_state=deps.workout_library_sync_state.summary(),
                     today=deps.local_now().date(),
                     history_days=deps.calendar_history_days,

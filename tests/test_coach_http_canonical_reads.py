@@ -295,7 +295,9 @@ class HttpStateReadTests(CanonicalContextReadCase):
         self, selector: Any, snapshot: dict[str, Any]
     ) -> list[dict[str, Any]]:
         state = Mock()
-        state.latest_snapshot.return_value = snapshot
+        state.sync_metadata.return_value = {
+            "provider_sync": snapshot.get("provider_sync", {})
+        }
         feedback = Mock()
         feedback.attach_to_activities.side_effect = lambda rows: rows
         planned = Mock()
@@ -333,7 +335,9 @@ class HttpStateReadTests(CanonicalContextReadCase):
         feedback = Mock()
         feedback.attach_to_activities.side_effect = lambda rows: rows
         sync_state = Mock()
-        sync_state.latest_snapshot.return_value = snapshot
+        sync_state.sync_metadata.return_value = {
+            "provider_sync": snapshot.get("provider_sync", {})
+        }
         planned = Mock()
         planned.list.return_value = []
         weather = Mock()
