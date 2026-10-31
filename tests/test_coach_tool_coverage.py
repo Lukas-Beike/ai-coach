@@ -1274,16 +1274,16 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
             workout_schema = tools[name]["parameters"]["properties"]["payload"][
                 "properties"
             ]["workouts"]["items"]
-            self.assertIn("start_date_local", workout_schema["required"])
+            self.assertIn("starts_at_local", workout_schema["required"])
             self.assertEqual(
-                workout_schema["properties"]["start_date_local"]["type"],
+                workout_schema["properties"]["starts_at_local"]["type"],
                 ["string", "null"],
             )
         changes_schema = tools["apply_training_changes"]["parameters"]["properties"][
             "changes"
         ]["items"]
         self.assertEqual(
-            changes_schema["properties"]["start_date_local"]["type"], "string"
+            changes_schema["properties"]["starts_at_local"]["type"], "string"
         )
 
     @covers("lookup_food:success", "calculate_food_nutrition:success")

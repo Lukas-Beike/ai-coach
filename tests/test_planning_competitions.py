@@ -13,25 +13,25 @@ class PlanningCompetitionTests(unittest.TestCase):
                 "id": "9dca66eb-f8a1-45c9-8481-fb584a08297c",
                 "name": "  Autumn Race  ",
                 "event_date": "2026-10-04",
-                "start_date_local": "2026-10-03T09:12:37+02:00",
+                "starts_at_local": "2026-10-03T09:12:37+02:00",
                 "sport": "Running",
                 "priority": "a",
                 "distance": "42.195 km",
                 "target": {"pace": "4:30/km"},
                 "notes": "Course notes",
-                "moving_time": "10800",
+                "planned_duration_s": "10800",
             }
         )
 
         self.assertEqual(result["name"], "Autumn Race")
         self.assertEqual(result["event_date"], "2026-10-04")
-        self.assertEqual(result["start_date_local"], "2026-10-04T09:12:00")
+        self.assertEqual(result["starts_at_local"], "2026-10-04T09:12:00")
         self.assertEqual(result["category"], "RACE_A")
         self.assertEqual(result["priority"], "A")
         self.assertEqual(result["distance"], "42195")
         self.assertEqual(json.loads(result["target"]), {"pace": "4:30/km"})
         self.assertEqual(result["description"], "Course notes")
-        self.assertEqual(result["moving_time"], 10800)
+        self.assertEqual(result["planned_duration_s"], 10800)
 
     def test_validation_rejects_missing_identity_and_invalid_bounds(self) -> None:
         cases = (
@@ -48,7 +48,7 @@ class PlanningCompetitionTests(unittest.TestCase):
                 {
                     "name": "Race",
                     "event_date": "2026-10-04",
-                    "moving_time": 604801,
+                    "planned_duration_s": 604801,
                 },
                 "Die Wettkampfdauer muss zwischen 0 und 604800 Sekunden liegen.",
             ),
@@ -100,7 +100,7 @@ class PlanningCompetitionTests(unittest.TestCase):
 
     def test_external_id_and_optional_payload_preserve_types_and_input(self) -> None:
         source = {
-            "moving_time": "3600",
+            "planned_duration_s": "3600",
             "distance": "42.5",
             "target": {"pace": "4:30/km"},
             "intervals_event_id": "00123",
@@ -118,7 +118,7 @@ class PlanningCompetitionTests(unittest.TestCase):
         self.assertEqual(
             competitions.competition_event_optional_payload(source),
             {
-                "moving_time": 3600,
+                "planned_duration_s": 3600,
                 "distance": 42.5,
                 "target": '{"pace":"4:30/km"}',
                 "id": 123,
@@ -139,7 +139,9 @@ class PlanningCompetitionTests(unittest.TestCase):
         )
         self.assertEqual(competitions.competition_event_optional_payload({}), {})
         with self.assertRaises(ValueError):
-            competitions.competition_event_optional_payload({"moving_time": "bad"})
+            competitions.competition_event_optional_payload(
+                {"planned_duration_s": "bad"}
+            )
 
     def test_event_payload_fallbacks_limits_and_input_immutability(self) -> None:
         source = {
@@ -150,7 +152,7 @@ class PlanningCompetitionTests(unittest.TestCase):
             "sport": "Running",
             "name": "N" * 210,
             "description": "D" * 12010,
-            "moving_time": 0,
+            "planned_duration_s": 0,
             "distance": "10,5",
             "target": ["finish"],
         }
@@ -189,7 +191,7 @@ class PlanningCompetitionTests(unittest.TestCase):
         self.assertEqual(
             competitions.remote_competition_date(
                 {
-                    "start_date_local": "2026-10-04T09:00:00+02:00",
+                    "starts_at_local": "2026-10-04T09:00:00+02:00",
                     "date": "2026-10-05",
                 }
             ),
@@ -197,13 +199,13 @@ class PlanningCompetitionTests(unittest.TestCase):
         )
         self.assertEqual(
             competitions.remote_competition_date(
-                {"start_date_local": "", "date": "2026-10-05T00:00:00Z"}
+                {"starts_at_local": "", "date": "2026-10-05T00:00:00Z"}
             ),
             "2026-10-05",
         )
         self.assertIsNone(
             competitions.remote_competition_date(
-                {"start_date_local": "invalid", "date": "2026-10-05"}
+                {"starts_at_local": "invalid", "date": "2026-10-05"}
             )
         )
         self.assertIsNone(competitions.remote_competition_date({"date": "2026-02-30"}))
@@ -234,11 +236,11 @@ class PlanningCompetitionTests(unittest.TestCase):
         source = {
             "id": 123,
             "name": "  R" + "x" * 205 + "  ",
-            "start_date_local": "2026-10-04T08:45:00+02:00",
+            "starts_at_local": "2026-10-04T08:45:00+02:00",
             "type": "Virtual_Ride",
             "category": "unusual_C",
             "distance": "trail",
-            "moving_time": "bad",
+            "planned_duration_s": "bad",
             "target": {"p": "z" * 1100},
             "description": "D" * 12050,
         }
@@ -250,13 +252,13 @@ class PlanningCompetitionTests(unittest.TestCase):
         self.assertEqual(result["intervals_event_id"], "123")
         self.assertEqual(result["name"], ("R" + "x" * 199))
         self.assertEqual(result["event_date"], "2026-10-04")
-        self.assertEqual(result["start_date_local"], "2026-10-04T08:45:00")
+        self.assertEqual(result["starts_at_local"], "2026-10-04T08:45:00")
         self.assertEqual(result["sport"], "ride")
         self.assertEqual(result["environment"], "virtual")
         self.assertEqual(result["priority"], "C")
         self.assertEqual(result["category"], "RACE_C")
         self.assertEqual(result["distance"], "trail")
-        self.assertEqual(result["moving_time"], None)
+        self.assertEqual(result["planned_duration_s"], None)
         self.assertEqual(len(result["target"]), 1000)
         self.assertEqual(len(result["description"]), 12000)
         self.assertEqual(len(result["notes"]), 2000)
@@ -272,7 +274,7 @@ class PlanningCompetitionTests(unittest.TestCase):
         )
         self.assertIsNotNone(fallback)
         assert fallback is not None
-        self.assertEqual(fallback["start_date_local"], "2026-10-04T00:00:00")
+        self.assertEqual(fallback["starts_at_local"], "2026-10-04T00:00:00")
         self.assertEqual(fallback["sport"], "ride")
         self.assertEqual(fallback["environment"], "unknown")
         self.assertEqual(fallback["category"], "RACE_B")

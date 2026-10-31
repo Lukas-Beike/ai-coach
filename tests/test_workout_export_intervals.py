@@ -139,6 +139,54 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
             self.export.verify_readback(workout(), {**saved, "type": "Ride"})
         self.assertEqual(caught.exception.reason, "intervals_workout_sport_mismatch")
 
+    def test_library_workouts_cross_the_adapter_with_planning_field_names(self):
+        client = Mock()
+        client.get_workout_library.return_value = [
+            {"id": 7, "name": "Tempo", "type": "Ride", "moving_time": 2700}
+        ]
+        client.create_library_workouts.return_value = [{"id": 8, "moving_time": 600}]
+        client.update_library_workout.return_value = {"id": 7, "moving_time": 900}
+        export = IntervalsWorkoutExport(lambda: client)
+
+        self.assertEqual(
+            export.library_list(),
+            [{"id": 7, "name": "Tempo", "type": "Ride", "planned_duration_s": 2700}],
+        )
+        self.assertEqual(
+            export.library_create([{"name": "Tempo"}]),
+            [{"id": 8, "planned_duration_s": 600}],
+        )
+        self.assertEqual(
+            export.library_update("7", {"name": "Tempo"}),
+            {"id": 7, "planned_duration_s": 900},
+        )
+        # The serialized library payload itself never names a duration field.
+        client.create_library_workouts.assert_called_once_with([{"name": "Tempo"}])
+
+    def test_library_readback_checks_the_remote_duration_under_its_wire_name(self):
+        local = {
+            "type": "Ride",
+            "description": "- 30m Z2",
+            "duration_minutes": 30,
+        }
+        remote = {
+            "type": "Ride",
+            "planned_duration_s": 1800,
+            "workout_doc": {"duration": 1800, "steps": [{"duration": 1800}]},
+        }
+        with patch.object(
+            planning_workouts, "validate_intervals_workout_result"
+        ) as validate:
+            self.export.verify_library_readback(local, remote)
+        validate.assert_called_once_with(
+            local,
+            {
+                "type": "Ride",
+                "moving_time": 1800,
+                "workout_doc": {"duration": 1800, "steps": [{"duration": 1800}]},
+            },
+        )
+
     def test_readback_and_delete_do_not_resolve_client_until_called(self):
         factory = Mock()
         export = IntervalsWorkoutExport(factory)

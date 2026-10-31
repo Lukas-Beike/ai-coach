@@ -21,6 +21,7 @@ from unittest.mock import Mock
 
 from backend.planning import workouts as planning_workouts
 from backend.planning.workout_export import build_planned_workout_export
+from backend.providers.intervals_workouts import intervals_fields_from_planning
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from tests import workout_export_parity_matrix as matrix
 
@@ -63,7 +64,11 @@ def _port_payload(workout_id, workout):
 
 
 def _normalize(draft):
-    return planning_workouts.normalize_workout(draft, today=TODAY)
+    # Schema version 16 renamed the planning start field; the golden records name
+    # it start_date_local, so only that key is mapped back before comparing.
+    return intervals_fields_from_planning(
+        planning_workouts.normalize_workout(draft, today=TODAY)
+    )
 
 
 def _facade_records():

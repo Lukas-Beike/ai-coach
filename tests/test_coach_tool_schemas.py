@@ -6,7 +6,7 @@ EXECUTOR_CHANGE_FIELDS = {
     "local_id",
     "action",
     "date",
-    "start_date_local",
+    "starts_at_local",
     "name",
     "description",
     "duration_minutes",

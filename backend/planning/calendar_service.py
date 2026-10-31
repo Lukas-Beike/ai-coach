@@ -92,7 +92,7 @@ class CalendarConflictService:
             competitions = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT id, name, event_date, start_date_local, moving_time "
+                    "SELECT id, name, event_date, starts_at_local, planned_duration_s "
                     "FROM competitions"
                 ).fetchall()
             ]

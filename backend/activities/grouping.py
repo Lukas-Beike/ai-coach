@@ -22,12 +22,12 @@ def _cycling_event_candidates(events: Any) -> list[dict[str, Any]]:
 def _cycling_event_interval(
     event: dict[str, Any],
 ) -> tuple[datetime, datetime, bool] | None:
-    raw_start = str(event.get("start_date_local") or event.get("date") or "")
+    raw_start = str(event.get("starts_at_local") or event.get("date") or "")
     start = activity_datetime(raw_start)
     if start is None:
         return None
     explicit_time = "T" in raw_start and start.time() != datetime.min.time()
-    duration = _as_number(event.get("moving_time"))
+    duration = _as_number(event.get("planned_duration_s"))
     seconds = (
         max(60, float(duration)) if duration is not None and duration > 0 else 3600
     )
@@ -81,7 +81,7 @@ def _cycling_event_group(
                 stack.append(neighbour)
     return sorted(
         group,
-        key=lambda event: str(event.get("start_date_local") or event.get("date") or ""),
+        key=lambda event: str(event.get("starts_at_local") or event.get("date") or ""),
     )
 
 

@@ -578,7 +578,7 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
     ) -> None:
         # Quirk: a planned item is accepted through its `date` key, but the
         # projection drops that key and keeps no date at all. Date filtering
-        # prefers start_date_local, so a past start with a future `date` is excluded.
+        # prefers starts_at_local, so a past start with a future `date` is excluded.
         events = [
             {
                 "id": "date-only",
@@ -590,7 +590,7 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
             },
             {
                 "id": "start-wins",
-                "start_date_local": "2026-05-01T06:00:00",
+                "starts_at_local": "2026-05-01T06:00:00",
                 "date": "2026-05-06",
                 "name": "Start wins",
             },

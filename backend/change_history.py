@@ -82,7 +82,7 @@ LIBRARY_FIELDS = {
     "name",
     "description",
     "duration_minutes",
-    "moving_time",
+    "planned_duration_s",
     "target",
     "date",
     "source",
@@ -103,10 +103,10 @@ PLANNED_UNIT_FIELDS = {
     "name",
     "description",
     "duration_minutes",
-    "moving_time",
+    "planned_duration_s",
     "target",
     "date",
-    "start_date_local",
+    "starts_at_local",
     "source",
     "origin",
     "rationale",
@@ -122,7 +122,7 @@ COMPETITION_FIELDS = {
     "id",
     "name",
     "event_date",
-    "start_date_local",
+    "starts_at_local",
     "sport",
     "environment",
     "sport_detail",
@@ -133,7 +133,7 @@ COMPETITION_FIELDS = {
     "course_profile",
     "notes",
     "description",
-    "moving_time",
+    "planned_duration_s",
     "sync_state",
 }
 PLAN_FIELDS = {"id", "name", "goal", "start_date", "end_date", "status"}
@@ -241,8 +241,35 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
             "training_preferences_mobility",
         ),
     ),
-    "planned_unit": (("start_date_local",),),
+    "planned_unit": (("starts_at_local",),),
 }
+
+# Planning fields renamed by schema version 16: current name -> the name rows
+# recorded before it carry in their diff and hashes. History rows are never
+# rewritten; they are translated on read and their hashes stay matchable.
+_PLANNING_FIELD_RENAMES = {
+    "starts_at_local": "start_date_local",
+    "planned_duration_s": "moving_time",
+}
+_FIELDS_RENAMED_IN_AUDIT: dict[str, dict[str, str]] = {
+    "workout_library": {"planned_duration_s": "moving_time"},
+    "planned_unit": _PLANNING_FIELD_RENAMES,
+    "competition": _PLANNING_FIELD_RENAMES,
+}
+
+
+def _renamed_keys(value: dict[str, Any], renames: dict[str, str]) -> dict[str, Any]:
+    return {renames.get(key, key): item for key, item in value.items()}
+
+
+def current_audit_fields(entity_type: str, value: dict[str, Any]) -> dict[str, Any]:
+    """Return recorded projection fields under their current names."""
+    renames = _FIELDS_RENAMED_IN_AUDIT.get(entity_type, {})
+    current_by_legacy = {old: new for new, old in renames.items()}
+    result: dict[str, Any] = {}
+    for key, item in value.items():
+        result.setdefault(current_by_legacy.get(key, key), item)
+    return result
 
 
 def accepted_audit_hashes(entity_type: str, value: dict[str, Any] | None) -> set[str]:
@@ -250,11 +277,16 @@ def accepted_audit_hashes(entity_type: str, value: dict[str, Any] | None) -> set
     accepted = {audit_hash(value)}
     if not value:
         return accepted
+    generations = [dict(value)]
     legacy = dict(value)
     for added in reversed(_FIELDS_ADDED_TO_AUDIT.get(entity_type, ())):
         if any(field in legacy for field in added):
             legacy = {key: item for key, item in legacy.items() if key not in added}
-            accepted.add(audit_hash(legacy))
+            generations.append(legacy)
+    renames = _FIELDS_RENAMED_IN_AUDIT.get(entity_type, {})
+    for generation in generations:
+        accepted.add(audit_hash(generation))
+        accepted.add(audit_hash(_renamed_keys(generation, renames)))
     return accepted
 
 
@@ -369,9 +401,13 @@ def public_view(row: dict[str, Any]) -> dict[str, Any]:
         diff = json.loads(row.get("diff") or "{}")
     except TypeError, ValueError:
         diff = {"fields": {}}
+    fields = diff.get("fields")
     safe_fields = {
         field: {"changed": True}
-        for field in (diff.get("fields") or {})
+        for field in current_audit_fields(
+            str(row.get("entity_type") or ""),
+            fields if isinstance(fields, dict) else {},
+        )
         if isinstance(field, str) and re.fullmatch(r"[a-z_]+", field)
     }
     return {

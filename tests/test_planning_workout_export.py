@@ -70,7 +70,7 @@ class BuildPlannedWorkoutExportTests(unittest.TestCase):
         self.assertEqual(
             export,
             PlannedWorkoutExport(
-                start_date_local="2026-09-20T00:00:00",
+                starts_at_local="2026-09-20T00:00:00",
                 sport=Sport.STRENGTH,
                 environment=Environment.UNKNOWN,
                 sport_token="WeightTraining",
@@ -84,9 +84,9 @@ class BuildPlannedWorkoutExportTests(unittest.TestCase):
     def test_explicit_start_time_is_kept_and_truncated_to_forty_characters(self):
         start = "2026-09-20T07:30:00+02:00" + "x" * 30
         export = build_planned_workout_export(
-            workout(start_date_local=start), today=TODAY
+            workout(starts_at_local=start), today=TODAY
         )
-        self.assertEqual(export.start_date_local, start[:40])
+        self.assertEqual(export.starts_at_local, start[:40])
 
     def test_structured_steps_drive_duration_and_known_target_is_kept(self):
         export = build_planned_workout_export(
@@ -154,7 +154,7 @@ class BuildPlannedWorkoutExportTests(unittest.TestCase):
         )
         yesterday = (TODAY - timedelta(days=1)).isoformat()
         export = build_planned_workout_export(workout(date=yesterday), today=TODAY)
-        self.assertEqual(export.start_date_local, f"{yesterday}T00:00:00")
+        self.assertEqual(export.starts_at_local, f"{yesterday}T00:00:00")
 
     def test_duration_outside_five_to_six_hundred_minutes_is_rejected(self):
         message = "Die Trainingsdauer muss zwischen 5 und 600 Minuten liegen."

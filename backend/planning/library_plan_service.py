@@ -143,7 +143,9 @@ class WorkoutLibraryPlanService:
                     "name": source.get("name") or "Bibliotheks-Einheit",
                     "description": source.get("description") or "",
                     "duration_minutes": source.get("duration_minutes")
-                    or max(5, round(float(source.get("moving_time") or 300) / 60)),
+                    or max(
+                        5, round(float(source.get("planned_duration_s") or 300) / 60)
+                    ),
                     "target": source.get("target") or "AUTO",
                     "source": "library",
                     "rationale": "Aus der lokalen Trainingsbibliothek übernommen.",

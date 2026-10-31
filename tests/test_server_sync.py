@@ -849,20 +849,20 @@ class ServerSyncTests(ServerTestCase):
             {
                 "name": "Alpenbrevet",
                 "event_date": "2026-09-20",
-                "start_date_local": "2026-09-20T06:30",
+                "starts_at_local": "2026-09-20T06:30",
                 "sport": "Radfahren",
                 "category": "RACE_A",
                 "description": "Lange Bergetappe",
-                "moving_time": "21600",
+                "planned_duration_s": "21600",
                 "distance": "250 km",
                 "target": "Finish",
                 "external_id": "alpenbrevet-2026",
             }
         )
         self.assertEqual(competition["event_date"], "2026-09-20")
-        self.assertEqual(competition["start_date_local"], "2026-09-20T06:30:00")
+        self.assertEqual(competition["starts_at_local"], "2026-09-20T06:30:00")
         self.assertEqual(competition["category"], "RACE_A")
-        self.assertEqual(competition["moving_time"], 21600)
+        self.assertEqual(competition["planned_duration_s"], 21600)
         self.assertEqual(competition["distance"], "250000")
         self.assertEqual(
             planning_competitions.competition_event_payload(competition)["type"], "Ride"
@@ -877,11 +877,11 @@ class ServerSyncTests(ServerTestCase):
             {
                 "id": 42,
                 "category": "RACE_C",
-                "start_date_local": "2026-09-20T07:15:00",
+                "starts_at_local": "2026-09-20T07:15:00",
                 "type": "Run",
                 "name": "Remote Race",
                 "description": "Remote description",
-                "moving_time": 7200,
+                "planned_duration_s": 7200,
                 "distance": 21097,
                 "target": "Sub 2:00",
             }
@@ -889,8 +889,8 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(data["intervals_event_id"], "42")
         self.assertEqual(data["category"], "RACE_C")
         self.assertEqual(data["priority"], "C")
-        self.assertEqual(data["start_date_local"], "2026-09-20T07:15:00")
-        self.assertEqual(data["moving_time"], 7200)
+        self.assertEqual(data["starts_at_local"], "2026-09-20T07:15:00")
+        self.assertEqual(data["planned_duration_s"], 7200)
         self.assertEqual(data["distance"], "21097")
         self.assertEqual(data["target"], "Sub 2:00")
 
@@ -2098,7 +2098,7 @@ class ServerSyncTests(ServerTestCase):
                     "name": "Local template",
                     "type": "Ride",
                     "description": "- 30m Z2",
-                    "moving_time": 1800,
+                    "planned_duration_s": 1800,
                 }
             ]
         )

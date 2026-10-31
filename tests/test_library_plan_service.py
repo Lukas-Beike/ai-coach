@@ -273,7 +273,7 @@ class LibraryPlanServiceTests(unittest.TestCase):
                 sport="Run",
                 description="- 10m 60%",
                 duration_minutes=None,
-                moving_time=600,
+                planned_duration_s=600,
                 target=None,
             ),
         ]

@@ -122,16 +122,16 @@ class PlanningComplianceTests(unittest.TestCase):
                 "id": "done",
                 "category": "WORKOUT",
                 "type": "Ride",
-                "start_date_local": today.isoformat(),
-                "moving_time": 3600,
+                "starts_at_local": today.isoformat(),
+                "planned_duration_s": 3600,
                 "icu_training_load": 50,
             },
             {
                 "id": "missed",
                 "category": "WORKOUT",
                 "type": "Ride",
-                "start_date_local": (today - timedelta(days=1)).isoformat(),
-                "moving_time": 3600,
+                "starts_at_local": (today - timedelta(days=1)).isoformat(),
+                "planned_duration_s": 3600,
                 "icu_training_load": 50,
             },
         ]
@@ -163,12 +163,12 @@ class PlanningComplianceTests(unittest.TestCase):
         }
 
         duration = workout_compliance(
-            {"start_date_local": today.isoformat(), "moving_time": 3600},
+            {"starts_at_local": today.isoformat(), "planned_duration_s": 3600},
             activity,
             today,
         )
         unavailable = workout_compliance(
-            {"start_date_local": today.isoformat()}, activity, today
+            {"starts_at_local": today.isoformat()}, activity, today
         )
 
         self.assertEqual((duration["basis"], duration["percentage"]), ("duration", 75))
@@ -181,7 +181,7 @@ class PlanningComplianceTests(unittest.TestCase):
         planned = [
             {
                 "id": "event",
-                "start_date_local": "2026-08-26",
+                "starts_at_local": "2026-08-26",
                 "compliance": {
                     "actual_activity": calendar_activity_payload(
                         {
@@ -217,8 +217,8 @@ class PlanningComplianceTests(unittest.TestCase):
                 "id": "planned-walk",
                 "category": "WORKOUT",
                 "type": "Walk",
-                "start_date_local": today.isoformat(),
-                "moving_time": 3600,
+                "starts_at_local": today.isoformat(),
+                "planned_duration_s": 3600,
             }
         ]
         activities = [

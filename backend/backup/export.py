@@ -50,7 +50,11 @@ TimeoutErrorFactory = Callable[[], Exception]
 # categorical_observations, gear_items and gear_activity_links, including
 # retired rows, plus activity_sessions.merged_into_retained and
 # activity_feedback.session_id (schema v15).
-PRIVACY_EXPORT_FORMAT_VERSION = 7
+# Version 8 names the start and planned duration of local planning records
+# starts_at_local and planned_duration_s instead of start_date_local and
+# moving_time: competitions, workouts, planned units and their stored conflicts,
+# Coach plan artifacts, adaptive previews and planning.json (schema v16).
+PRIVACY_EXPORT_FORMAT_VERSION = 8
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -153,7 +157,9 @@ class PrivacyArchiveExportService:
                 408, "Der Export überschreitet das Zeitlimit."
             ),
             max_bytes=self._config.maximum_bytes,
-            size_error=lambda: AppError(413, "Der Export überschreitet das Größenlimit."),
+            size_error=lambda: AppError(
+                413, "Der Export überschreitet das Größenlimit."
+            ),
         )
 
     def create_file(self) -> Path:
@@ -208,8 +214,8 @@ class PrivacyArchiveExportService:
                     (
                         dict(row)
                         for row in db.execute(
-                            "SELECT id, name, event_date, start_date_local, sport, environment, sport_detail, priority, category, distance, target, "
-                            "course_profile, notes, description, moving_time, external_id, intervals_event_id, sync_dirty, "
+                            "SELECT id, name, event_date, starts_at_local, sport, environment, sport_detail, priority, category, distance, target, "
+                            "course_profile, notes, description, planned_duration_s, external_id, intervals_event_id, sync_dirty, "
                             "sync_state, sync_conflict, last_synced_at FROM competitions ORDER BY event_date, priority, name"
                         )
                     ),
@@ -442,7 +448,10 @@ class PrivacyArchiveExportService:
                     deadline,
                 )
                 for table, order in (
-                    ("activity_detail_sets", "provider, provider_activity_id, detail_kind"),
+                    (
+                        "activity_detail_sets",
+                        "provider, provider_activity_id, detail_kind",
+                    ),
                     ("activity_laps", "provider, provider_activity_id, lap_index"),
                     (
                         "activity_zone_times",
@@ -454,7 +463,9 @@ class PrivacyArchiveExportService:
                         table + ".jsonl",
                         (
                             dict(row)
-                            for row in db.execute(f"SELECT * FROM {table} ORDER BY {order}")
+                            for row in db.execute(
+                                f"SELECT * FROM {table} ORDER BY {order}"
+                            )
                         ),
                         deadline,
                     )

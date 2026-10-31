@@ -17,6 +17,7 @@ from backend.planning.adaptive import AdaptiveReplanApplyService
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.competition_service import CompetitionService
 from backend.planning.season import planning_state
+from backend.providers.intervals_workouts import intervals_fields_from_planning
 
 ILLNESS_CALENDAR_CATEGORY = "SICK"
 ILLNESS_EVENT_EXTERNAL_PREFIX = "intervals-coach-sick-"
@@ -95,7 +96,9 @@ class IllnessPauseSyncService:
             external_prefix=ILLNESS_EVENT_EXTERNAL_PREFIX,
             midnight_suffix=ISO_MIDNIGHT_SUFFIX,
         )
-        pushed = self._calendar_event_writer.upsert_calendar_events(events)
+        pushed = self._calendar_event_writer.upsert_calendar_events(
+            [intervals_fields_from_planning(event) for event in events]
+        )
         return {
             "status": "ok",
             "synced": len(pushed),

@@ -74,6 +74,7 @@ class WorkoutLibrarySyncAssemblyTests(unittest.TestCase):
         self.assertIsInstance(port, IntervalsWorkoutExport)
         self.assertTrue(port.capabilities.library)
         callbacks["intervals_client"].assert_not_called()
+        callbacks["intervals_client"].return_value.get_workout_library.return_value = []
         port.library_list()
         callbacks["intervals_client"].assert_called_once_with()
         callbacks[

@@ -64,9 +64,9 @@ def workout_is_rest(workout: dict[str, Any]) -> bool:
     ):
         return False
     duration = workout.get("duration_minutes")
-    if duration in (None, "") and workout.get("moving_time") not in (None, ""):
+    if duration in (None, "") and workout.get("planned_duration_s") not in (None, ""):
         try:
-            duration = float(workout["moving_time"]) / 60
+            duration = float(workout["planned_duration_s"]) / 60
         except TypeError, ValueError:
             duration = None
     try:
@@ -91,7 +91,7 @@ _MARKER_BY_REASON = {
 
 
 def _workout_minutes(workout: dict[str, Any]) -> float | None:
-    for key, factor in (("duration_minutes", 1), ("moving_time", 1 / 60)):
+    for key, factor in (("duration_minutes", 1), ("planned_duration_s", 1 / 60)):
         value = workout.get(key)
         if value in (None, ""):
             continue

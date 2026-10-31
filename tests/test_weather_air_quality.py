@@ -16,7 +16,7 @@ LOCATION = {
     "timezone": "Europe/Berlin",
 }
 
-EVENT = {"type": "Run", "name": "Lauf", "start_date_local": "2026-10-17"}
+EVENT = {"type": "Run", "name": "Lauf", "starts_at_local": "2026-10-17"}
 
 
 def dwd_feed():

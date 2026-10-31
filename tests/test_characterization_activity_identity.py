@@ -64,8 +64,8 @@ def _planned(**overrides: Any) -> dict[str, Any]:
         "id": "event-1",
         "category": "WORKOUT",
         "type": "Ride",
-        "start_date_local": "2026-05-04T09:00:00",
-        "moving_time": 3600,
+        "starts_at_local": "2026-05-04T09:00:00",
+        "planned_duration_s": 3600,
         "name": "Endurance",
     }
     event.update(overrides)
@@ -89,10 +89,10 @@ def _unit(name: str, day: str, **overrides: Any) -> dict[str, Any]:
     unit: dict[str, Any] = {
         "id": f"unit-{name}",
         "date": day,
-        "start_date_local": f"{day}T09:00:00",
+        "starts_at_local": f"{day}T09:00:00",
         "name": name,
         "type": "Ride",
-        "moving_time": 3600,
+        "planned_duration_s": 3600,
     }
     unit.update(overrides)
     return unit
@@ -450,7 +450,7 @@ class DeleteConfirmationCharacterizationTests(unittest.TestCase):
 class MatchingPrecedenceCharacterizationTests(unittest.TestCase):
     def test_paired_activity_ignores_sport_and_calendar_day(self) -> None:
         # Quirk: paired_event_id is trusted without a sport or date check.
-        planned = [_planned(id="event", type="Ride", start_date_local="2026-05-04")]
+        planned = [_planned(id="event", type="Ride", starts_at_local="2026-05-04")]
         paired = _activity(
             id="paired",
             paired_event_id="event",
@@ -466,7 +466,7 @@ class MatchingPrecedenceCharacterizationTests(unittest.TestCase):
             "category": "WORKOUT",
             "type": "Workout",
             "date": "2026-05-04",
-            "moving_time": 3600,
+            "planned_duration_s": 3600,
         }
         unpaired = {
             "id": "unpaired",
@@ -507,8 +507,8 @@ class MatchingPrecedenceCharacterizationTests(unittest.TestCase):
                 unit = {
                     "category": "WORKOUT",
                     "type": "Ride",
-                    "start_date_local": start,
-                    "moving_time": 3_600,
+                    "starts_at_local": start,
+                    "planned_duration_s": 3_600,
                 }
                 matches = match_planned_workouts([unit], activities)
                 self.assertEqual(matches[0]["id"], expected_id)
@@ -564,9 +564,9 @@ class CalendarIdentityCharacterizationTests(unittest.TestCase):
 
 class CompliancePlanningCharacterizationTests(unittest.TestCase):
     def test_status_is_missed_only_for_past_units_without_an_activity(self) -> None:
-        past = _planned(start_date_local="2026-05-03T09:00:00")
-        today = _planned(start_date_local="2026-05-04T09:00:00")
-        future = _planned(start_date_local="2026-05-05T09:00:00")
+        past = _planned(starts_at_local="2026-05-03T09:00:00")
+        today = _planned(starts_at_local="2026-05-04T09:00:00")
+        future = _planned(starts_at_local="2026-05-05T09:00:00")
 
         self.assertEqual(workout_compliance(past, None, TODAY)["status"], "missed")
         self.assertEqual(workout_compliance(today, None, TODAY)["status"], "planned")
@@ -577,7 +577,7 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
 
     def test_missed_unit_scores_zero_and_has_no_basis(self) -> None:
         result = workout_compliance(
-            _planned(start_date_local="2026-05-03T09:00:00"), None, TODAY
+            _planned(starts_at_local="2026-05-03T09:00:00"), None, TODAY
         )
         self.assertEqual(result["percentage"], 0)
         self.assertIsNone(result["basis"])
@@ -587,7 +587,7 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         # Quirk: a planned load of 0 is not "unavailable" (that needs both planned
         # load and planned duration to be missing), and it is not a valid basis.
         result = workout_compliance(
-            _planned(icu_training_load=0, moving_time=None),
+            _planned(icu_training_load=0, planned_duration_s=None),
             _activity(icu_training_load=40),
             TODAY,
         )
@@ -599,7 +599,7 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         self,
     ) -> None:
         result = workout_compliance(
-            _planned(icu_training_load=50, moving_time=3_600),
+            _planned(icu_training_load=50, planned_duration_s=3_600),
             _activity(moving_time=1_800),
             TODAY,
         )
@@ -609,7 +609,7 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         # Quirk: an undated unit has an empty date, which sorts before today's
         # ISO string, so it is reported as missed. It cannot be placed in a week.
         enriched, weekly = planning_compliance_state(
-            [{"category": "WORKOUT", "type": "Ride", "moving_time": 3_600}],
+            [{"category": "WORKOUT", "type": "Ride", "planned_duration_s": 3_600}],
             [],
             TODAY,
         )
@@ -626,9 +626,9 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         self,
     ) -> None:
         planned = [
-            _planned(id="sunday", start_date_local="2026-05-03T09:00:00"),
-            _planned(id="monday", start_date_local="2026-05-04T09:00:00"),
-            _planned(id="next-sunday", start_date_local="2026-05-10T09:00:00"),
+            _planned(id="sunday", starts_at_local="2026-05-03T09:00:00"),
+            _planned(id="monday", starts_at_local="2026-05-04T09:00:00"),
+            _planned(id="next-sunday", starts_at_local="2026-05-10T09:00:00"),
         ]
         _enriched, weekly = planning_compliance_state(planned, [], TODAY)
         self.assertEqual(
@@ -643,12 +643,12 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         planned = [
             _planned(
                 id="done",
-                start_date_local="2026-04-27T09:00:00",
+                starts_at_local="2026-04-27T09:00:00",
                 icu_training_load=50,
             ),
             _planned(
                 id="missed",
-                start_date_local="2026-05-03T09:00:00",
+                starts_at_local="2026-05-03T09:00:00",
                 icu_training_load=50,
             ),
         ]
@@ -681,14 +681,14 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         planned = [
             _planned(
                 id="with-load",
-                start_date_local="2026-04-28T09:00:00",
-                moving_time=3_600,
+                starts_at_local="2026-04-28T09:00:00",
+                planned_duration_s=3_600,
                 icu_training_load=50,
             ),
             _planned(
                 id="duration-only",
-                start_date_local="2026-04-29T09:00:00",
-                moving_time=1_800,
+                starts_at_local="2026-04-29T09:00:00",
+                planned_duration_s=1_800,
             ),
         ]
         activities = [
@@ -709,7 +709,9 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
     def test_weekly_score_is_none_without_a_shared_basis(self) -> None:
         planned = [
             _planned(
-                id="bare", start_date_local="2026-04-28T09:00:00", moving_time=None
+                id="bare",
+                starts_at_local="2026-04-28T09:00:00",
+                planned_duration_s=None,
             )
         ]
         activities = [
@@ -736,7 +738,7 @@ class TrainingCalendarCharacterizationTests(unittest.TestCase):
         planned = [
             {
                 "id": "event",
-                "start_date_local": "2026-05-04T09:00:00",
+                "starts_at_local": "2026-05-04T09:00:00",
                 "compliance": {"actual_activity": calendar_activity_payload(activity)},
             }
         ]
@@ -757,7 +759,7 @@ class TrainingCalendarCharacterizationTests(unittest.TestCase):
             "distance": 30_000,
         }
         enriched, _weekly = planning_compliance_state(
-            [_planned(id="event", start_date_local="2026-05-04")], [activity], TODAY
+            [_planned(id="event", starts_at_local="2026-05-04")], [activity], TODAY
         )
         rows = training_calendar_items(enriched, [activity])
         self.assertEqual([row["id"] for row in rows if "id" in row], ["event"])
@@ -775,14 +777,14 @@ class TrainingCalendarCharacterizationTests(unittest.TestCase):
             "distance": 30_000,
         }
         enriched, _weekly = planning_compliance_state(
-            [_planned(id="event", start_date_local="2026-05-04")], [activity], TODAY
+            [_planned(id="event", starts_at_local="2026-05-04")], [activity], TODAY
         )
         rows = training_calendar_items(enriched, [activity])
         self.assertEqual(len(rows), 2)
 
     def test_rows_sort_by_start_then_casefolded_name_then_id(self) -> None:
         planned = [
-            {"id": "p", "name": "Zeta", "start_date_local": "2026-05-04T09:00:00"}
+            {"id": "p", "name": "Zeta", "starts_at_local": "2026-05-04T09:00:00"}
         ]
         activities = [
             {

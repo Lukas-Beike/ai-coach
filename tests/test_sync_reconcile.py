@@ -80,7 +80,7 @@ class SyncReconcileTests(unittest.TestCase):
     def test_synced_persists_remote_fields_hash_and_one_revision(self):
         original_payload = {
             "name": "Run",
-            "moving_time": 300,
+            "planned_duration_s": 300,
             "workout_doc": "old",
             "icu_training_load": 1,
             "icu_intensity": 2,
@@ -121,7 +121,7 @@ class SyncReconcileTests(unittest.TestCase):
                 "remote_event_id": "42",
                 "remote_event_external_id": "external-1",
                 "external_id": "external-1",
-                "moving_time": 600,
+                "planned_duration_s": 600,
                 "workout_doc": "new workout",
                 "icu_training_load": 4,
                 "icu_intensity": 5,
@@ -138,7 +138,7 @@ class SyncReconcileTests(unittest.TestCase):
         self.add_unit(
             "unit-1",
             {
-                "moving_time": 300,
+                "planned_duration_s": 300,
                 "workout_doc": "old",
                 "icu_training_load": 1,
                 "icu_intensity": 2,
@@ -151,7 +151,7 @@ class SyncReconcileTests(unittest.TestCase):
         )
 
         payload = json.loads(self.unit("unit-1")["payload"])
-        self.assertEqual(payload["moving_time"], 300)
+        self.assertEqual(payload["planned_duration_s"], 300)
         self.assertNotIn("workout_doc", payload)
         self.assertNotIn("icu_training_load", payload)
         self.assertNotIn("icu_intensity", payload)

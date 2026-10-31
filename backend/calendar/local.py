@@ -27,12 +27,12 @@ def _local_calendar_competition(competition: dict[str, Any]) -> dict[str, Any]:
     try:
         event_date = LocalDate.parse(competition.get("event_date")).isoformat()
     except TypeError, ValueError:
-        return {**competition, "date": "", "start_date_local": None}
+        return {**competition, "date": "", "starts_at_local": None}
     linked = bool(competition.get("external_id"))
     return {
         **competition,
         "date": event_date,
-        "start_date_local": competition.get("start_date_local")
+        "starts_at_local": competition.get("starts_at_local")
         or f"{event_date}{ISO_MIDNIGHT_SUFFIX}",
         "type": _competition_type(competition),
         "category": competition.get("category") or "RACE_B",
@@ -77,7 +77,7 @@ def _local_calendar_external_event(event: Any) -> dict[str, Any] | None:
 def _local_calendar_sort_key(item: dict[str, Any]) -> tuple[str, str]:
     return (
         str(
-            item.get("start_date_local")
+            item.get("starts_at_local")
             or item.get("date")
             or item.get("event_date")
             or "9999-12-31"

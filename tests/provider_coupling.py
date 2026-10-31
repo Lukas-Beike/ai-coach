@@ -188,8 +188,8 @@ _DEAD_LEGACY = (
     "dead-legacy: no production caller; deleted with the read selector (#1416)"
 )
 _PLANNING_RECORDS = (
-    "planning-records: local planned units and library entries keep stored keys "
-    "until they move (#1507)"
+    "planning-records: local planned units and library entries still store the "
+    "provider training-load and intensity keys (start and duration moved in #1507)"
 )
 # repository-relative path -> (reason, field-name modules it may still import).
 # A new module in an allowlisted file fails the guard as well.

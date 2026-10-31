@@ -37,19 +37,19 @@ def _project_existing_training_change(
     current: dict[str, Any], change: dict[str, Any], candidate_date: str
 ) -> dict[str, Any]:
     candidate = {**current, **change, "date": candidate_date}
-    start_date_local = current.get("start_date_local")
-    if not start_date_local or change.get("start_date_local"):
+    starts_at_local = current.get("starts_at_local")
+    if not starts_at_local or change.get("starts_at_local"):
         return candidate
     try:
-        parsed_start = datetime.fromisoformat(str(start_date_local).strip())
+        parsed_start = datetime.fromisoformat(str(starts_at_local).strip())
         target_date = LocalDate.parse(candidate_date).to_date()
-        candidate["start_date_local"] = parsed_start.replace(
+        candidate["starts_at_local"] = parsed_start.replace(
             year=target_date.year,
             month=target_date.month,
             day=target_date.day,
         ).isoformat()
     except TypeError, ValueError:
-        candidate.pop("start_date_local", None)
+        candidate.pop("starts_at_local", None)
     return candidate
 
 
@@ -118,9 +118,9 @@ def prepare_structured_training_change(
                 "duration_minutes",
                 "target",
                 "rationale",
-                "start_date_local",
+                "starts_at_local",
             )
-            if key != "start_date_local" or key in normalized
+            if key != "starts_at_local" or key in normalized
         },
     }
     if "plan_id" in change:

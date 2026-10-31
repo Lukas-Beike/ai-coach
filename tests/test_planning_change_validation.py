@@ -156,13 +156,13 @@ class StructuredTrainingChangeValidatorTests(unittest.TestCase):
                     {
                         "action": "create",
                         "date": "2031-06-03",
-                        "start_date_local": "2031-06-03T08:00:00",
+                        "starts_at_local": "2031-06-03T08:00:00",
                         "duration_minutes": 60,
                     },
                     {
                         "action": "create",
                         "date": "2031-06-03",
-                        "start_date_local": "2031-06-03T08:30:00",
+                        "starts_at_local": "2031-06-03T08:30:00",
                         "duration_minutes": 30,
                     },
                 ],
@@ -182,7 +182,7 @@ class StructuredTrainingChangeValidatorTests(unittest.TestCase):
             raw_payload=json.dumps(
                 {
                     "date": "2031-06-01",
-                    "start_date_local": "2031-06-01T08:00:00",
+                    "starts_at_local": "2031-06-01T08:00:00",
                     "duration_minutes": 60,
                 }
             ),
@@ -193,7 +193,7 @@ class StructuredTrainingChangeValidatorTests(unittest.TestCase):
             raw_payload=json.dumps(
                 {
                     "date": "2031-06-02",
-                    "start_date_local": "2031-06-02T08:30:00",
+                    "starts_at_local": "2031-06-02T08:30:00",
                     "duration_minutes": 30,
                 }
             ),

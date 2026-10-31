@@ -22,9 +22,9 @@ _COMPETITION_WRITE_FIELDS = (
     "course_profile",
     "notes",
     "category",
-    "start_date_local",
+    "starts_at_local",
     "description",
-    "moving_time",
+    "planned_duration_s",
     "external_id",
 )
 
@@ -154,7 +154,7 @@ class AthleteContextService:
         db.execute(
             "INSERT INTO competitions "
             "(id, name, event_date, sport, environment, sport_detail, priority, distance, target, course_profile, "
-            "notes, category, start_date_local, description, moving_time, external_id, "
+            "notes, category, starts_at_local, description, planned_duration_s, external_id, "
             "sync_dirty, sync_state, sync_conflict, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), 1, "
             "'local', '', ?, ?) "
@@ -164,8 +164,8 @@ class AthleteContextService:
             "priority=excluded.priority, distance=excluded.distance, "
             "target=excluded.target, course_profile=excluded.course_profile, "
             "notes=excluded.notes, category=excluded.category, "
-            "start_date_local=excluded.start_date_local, "
-            "description=excluded.description, moving_time=excluded.moving_time, "
+            "starts_at_local=excluded.starts_at_local, "
+            "description=excluded.description, planned_duration_s=excluded.planned_duration_s, "
             "external_id=COALESCE(excluded.external_id, competitions.external_id), "
             "sync_dirty=1, sync_state='local', sync_conflict='', "
             "updated_at=excluded.updated_at",
@@ -182,9 +182,9 @@ class AthleteContextService:
                 competition["course_profile"],
                 competition["notes"],
                 competition["category"],
-                competition["start_date_local"],
+                competition["starts_at_local"],
                 competition["description"],
-                competition["moving_time"],
+                competition["planned_duration_s"],
                 competition["external_id"],
                 now,
                 now,

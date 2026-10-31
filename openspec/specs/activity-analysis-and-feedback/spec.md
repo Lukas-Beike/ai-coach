@@ -198,7 +198,7 @@ Merge, provider deletion, restart and backup/restore SHALL preserve athlete feed
 Evidence baseline: `backend/activities/feedback.py`, `backend/activities/activity_reference.py`, `backend/db/repositories.py:ActivityFeedbackRepository`; `tests/test_activity_feedback.py`, `tests/test_activity_reference.py`. Canonical session resolution and lifecycle evidence are new acceptance checks.
 
 ### Requirement: Completed-activity summaries use provider-neutral keys over HTTP
-Every completed-activity object that the HTTP API returns SHALL carry provider-neutral keys produced by one translation, and SHALL NOT carry the former Intervals.icu activity keys. Values SHALL be unchanged. Local planning records keep their stored keys until #1507 and receive only the metric renames.
+Every completed-activity object that the HTTP API returns SHALL carry provider-neutral keys produced by one translation, and SHALL NOT carry the former Intervals.icu activity keys. Values SHALL be unchanged. Local planning records already carry the provider-neutral `starts_at_local` and `planned_duration_s` and receive only the metric renames.
 
 #### Scenario: Activity list row
 - **WHEN** `/api/activities` or `/api/bootstrap` returns an activity with start, duration, distance, heart-rate, power, speed, load, threshold and VO2max values
@@ -206,7 +206,7 @@ Every completed-activity object that the HTTP API returns SHALL carry provider-n
 
 #### Scenario: Calendar actual activity
 - **WHEN** `/api/bootstrap` or `/api/plan` returns, in `training_calendar`, `planned`, `calendar` or `planning_view.items`, a completed-activity calendar entry or a planned unit matched to an activity
-- **THEN** the completed entry and `compliance.actual_activity` use the neutral keys. The planned unit keeps its own `start_date_local` and `moving_time` unchanged, and its `icu_training_load` appears as `training_load`.
+- **THEN** the completed entry and `compliance.actual_activity` use the neutral keys. The planned unit keeps its own `starts_at_local` and `planned_duration_s` unchanged, and its `icu_training_load` appears as `training_load`.
 
 #### Scenario: Neutral value already present
 - **WHEN** a stored row carries both a provider key and its neutral counterpart, such as `icu_weighted_avg_watts` and `normalized_power`

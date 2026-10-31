@@ -104,7 +104,7 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
             "id": local_id,
             "type": "Run",
             "name": "Recreated",
-            "moving_time": 1800,
+            "planned_duration_s": 1800,
             "sync_status": "synced",
         }
 
@@ -274,7 +274,7 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
         self.assertEqual(entry["id"], "00000000-0000-0000-0000-000000000001")
         self.assertEqual((entry["sport"], entry["environment"]), ("ride", "unknown"))
         self.assertNotIn("type", entry)
-        self.assertEqual(entry["moving_time"], 1200)
+        self.assertEqual(entry["planned_duration_s"], 1200)
         self.assertEqual(entry["sync_status"], "local")
         with self.database_manager.reader() as db:
             row = db.execute(
@@ -384,7 +384,7 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
         self.assertEqual(entry["name"], "Coach-Vorlage")
         self.assertEqual(entry["description"], "")
         self.assertEqual(entry["duration_minutes"], 30)
-        self.assertEqual(entry["moving_time"], 1800)
+        self.assertEqual(entry["planned_duration_s"], 1800)
         self.assertEqual(entry["target"], "AUTO")
         self.assertEqual(entry["source"], "coach")
         self.assertEqual(self.service.list(), [with_activity_type(dict(entry))])
@@ -404,7 +404,7 @@ class WorkoutLibraryServiceTests(unittest.TestCase):
         )
         self.assertNotIn("type", entry)
         self.assertEqual(entry["duration_minutes"], 45)
-        self.assertEqual(entry["moving_time"], 2700)
+        self.assertEqual(entry["planned_duration_s"], 2700)
         self.assertEqual(entry["target"], "HR")
         self.assertEqual(entry["source"], "coach")
 

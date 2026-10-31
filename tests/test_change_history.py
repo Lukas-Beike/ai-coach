@@ -132,16 +132,97 @@ class ChangeHistoryTests(unittest.TestCase):
         before = {
             "id": "u1",
             "date": "2026-09-21",
-            "start_date_local": "2026-09-21T10:00:00",
+            "starts_at_local": "2026-09-21T10:00:00",
         }
-        after = {**before, "start_date_local": "2026-09-21T08:30:00"}
+        after = {**before, "starts_at_local": "2026-09-21T08:30:00"}
         record = change_history.record_change(
             self.db, "planned_unit", "u1", "update", before, after
         )
         self.assertIsNotNone(record)
         self.assertEqual(
-            list(json.loads(record["diff"])["fields"]), ["start_date_local"]
+            list(json.loads(record["diff"])["fields"]), ["starts_at_local"]
         )
+
+    def test_rows_recorded_before_the_planning_field_rename_stay_matchable(self):
+        value = {
+            "id": "u1",
+            "name": "Lauf",
+            "starts_at_local": "2026-09-21T10:00:00",
+            "planned_duration_s": 3600,
+        }
+        recorded = {
+            "id": "u1",
+            "name": "Lauf",
+            "start_date_local": "2026-09-21T10:00:00",
+            "moving_time": 3600,
+        }
+        before_start = {"id": "u1", "name": "Lauf", "moving_time": 3600}
+        self.assertEqual(
+            change_history.accepted_audit_hashes("planned_unit", value),
+            {
+                change_history.audit_hash(value),
+                change_history.audit_hash(recorded),
+                change_history.audit_hash(
+                    {"id": "u1", "name": "Lauf", "planned_duration_s": 3600}
+                ),
+                change_history.audit_hash(before_start),
+            },
+        )
+        library = {"id": "w1", "planned_duration_s": 600}
+        self.assertIn(
+            change_history.audit_hash({"id": "w1", "moving_time": 600}),
+            change_history.accepted_audit_hashes("workout_library", library),
+        )
+        self.assertEqual(
+            change_history.current_audit_fields("competition", recorded),
+            value,
+        )
+        self.assertEqual(
+            change_history.current_audit_fields("profile", {"moving_time": 1}),
+            {"moving_time": 1},
+        )
+
+    def test_public_view_names_recorded_planning_fields_with_current_names(self):
+        row = {
+            "id": "change-1",
+            "entity_type": "planned_unit",
+            "entity_id": "u1",
+            "action": "update",
+            "source": "local",
+            "created_at": "2026-09-21T08:00:00+00:00",
+            "before_hash": "a" * 64,
+            "after_hash": "b" * 64,
+            "diff": json.dumps(
+                {
+                    "fields": {
+                        "start_date_local": {"before": "x", "after": "y"},
+                        "name": {"before": "a", "after": "b"},
+                    },
+                    "before_present": True,
+                    "after_present": True,
+                }
+            ),
+        }
+        self.assertEqual(
+            change_history.public_view(row)["diff"]["fields"],
+            {"starts_at_local": {"changed": True}, "name": {"changed": True}},
+        )
+
+    def test_public_view_skips_fields_that_are_not_an_object(self):
+        for diff in ({"fields": ["name"]}, {"fields": "name"}):
+            with self.subTest(diff=diff):
+                row = {
+                    "id": "change-1",
+                    "entity_type": "planned_unit",
+                    "entity_id": "u1",
+                    "action": "update",
+                    "source": "local",
+                    "created_at": "2026-09-21T08:00:00+00:00",
+                    "before_hash": "a" * 64,
+                    "after_hash": "b" * 64,
+                    "diff": json.dumps(diff),
+                }
+                self.assertEqual(change_history.public_view(row)["diff"]["fields"], {})
 
     def test_legacy_hash_matches_projection_without_added_fields(self):
         value = {"name": "Ada", "sleep_target_hours": "7.5", "fueling_tolerance": "gel"}

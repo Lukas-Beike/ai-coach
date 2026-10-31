@@ -262,7 +262,7 @@ class CompetitionServiceTests(unittest.TestCase):
             "id": "81",
             "external_id": "remote-race",
             "name": "Remote Marathon",
-            "start_date_local": "2027-09-26T09:00:00",
+            "starts_at_local": "2027-09-26T09:00:00",
             "type": "Run",
             "category": "RACE_A",
             "description": "Remote notes",

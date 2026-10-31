@@ -215,18 +215,18 @@ class PlanningWorkoutTests(unittest.TestCase):
         normalized = normalize_workout(
             workout(
                 date="2031-06-10",
-                start_date_local="2031-06-10T08:30:00+02:00",
+                starts_at_local="2031-06-10T08:30:00+02:00",
             ),
             today=TODAY,
         )
-        self.assertEqual(normalized["start_date_local"], "2031-06-10T08:30:00+02:00")
-        for start_date_local in ("not-a-timestamp", "2031-06-09T08:00:00"):
-            with self.subTest(start_date_local=start_date_local):
+        self.assertEqual(normalized["starts_at_local"], "2031-06-10T08:30:00+02:00")
+        for starts_at_local in ("not-a-timestamp", "2031-06-09T08:00:00"):
+            with self.subTest(starts_at_local=starts_at_local):
                 self.assert_app_error(
-                    lambda start_date_local=start_date_local: normalize_workout(
+                    lambda starts_at_local=starts_at_local: normalize_workout(
                         workout(
                             date="2031-06-10",
-                            start_date_local=start_date_local,
+                            starts_at_local=starts_at_local,
                         ),
                         today=TODAY,
                     ),
