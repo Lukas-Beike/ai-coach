@@ -54,14 +54,6 @@ def _day(value: Any) -> date | None:
         return None
 
 
-def _rows(value: Any) -> list[dict[str, Any]]:
-    return (
-        [row for row in value if isinstance(row, dict)]
-        if isinstance(value, list)
-        else []
-    )
-
-
 def _bounded_weight(value: Any) -> float | None:
     number = _number(value)
     lower, upper = WEIGHT_BOUNDS
@@ -256,7 +248,7 @@ def _quotient_series(
 
 
 def _stamped(
-    values: dict[date, float], synced_at: Any
+    values: Mapping[date, float], synced_at: Any
 ) -> dict[date, tuple[float, str, Any]]:
     """Attach the legacy observed_at and synced_at stamps to canonical values."""
     return {day: (value, day.isoformat(), synced_at) for day, value in values.items()}

@@ -191,7 +191,11 @@ def current_performance_context(
         days,
         activities,
         today,
-        garmin_history=_garmin_canonical(canonical).performance_history,
+        # The weight trend uses the body history's per-day Garmin weights.
+        garmin_history={
+            **_garmin_canonical(canonical).performance_history,
+            "weight_kg": canonical.body.garmin_weight_kg,
+        },
         **_canonical_day_series(canonical),
     )
     activity_performance = activity_validation.activity_performance_validation(

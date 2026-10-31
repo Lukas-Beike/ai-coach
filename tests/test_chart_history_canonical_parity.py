@@ -106,7 +106,7 @@ class ChartParityTests(unittest.TestCase):
         sections = {
             key: value for key, value in GARMIN.items() if key != "training_status"
         }
-        canonical = chart_history._provider_metrics(
+        canonical = chart_history._canonical_provider_metrics(
             {"synced_at": GARMIN["synced_at"]},
             START,
             TODAY,
@@ -136,7 +136,7 @@ class ChartParityTests(unittest.TestCase):
             }
         }
         sections = {"synced_at": GARMIN["synced_at"], "provider_metrics": cached}
-        canonical = chart_history._provider_metrics(
+        canonical = chart_history._canonical_provider_metrics(
             sections, START, TODAY, self.canonical()
         )
         item = canonical["running_tolerance"]
@@ -149,7 +149,7 @@ class ChartParityTests(unittest.TestCase):
     def test_acute_load_is_one_quantity_across_garmin_sections(self) -> None:
         # The training-status history adds its day to the weekly acute-load chart
         # (one ACUTE_LOAD row per day, athlete decision 2026-10-25).
-        canonical = chart_history._provider_metrics(
+        canonical = chart_history._canonical_provider_metrics(
             {"synced_at": GARMIN["synced_at"]}, START, TODAY, self.canonical()
         )
         self.assertEqual(

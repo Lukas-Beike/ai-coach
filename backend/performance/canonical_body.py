@@ -12,9 +12,10 @@ legacy body history does.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, timedelta
+from types import MappingProxyType
 from typing import Any
 
 from backend.canonical.ordering import observation_order
@@ -34,11 +35,13 @@ BODY_FAT_BOUNDS = (2.0, 70.0)
 class CanonicalBodyInputs:
     """Per-day Garmin weight and body-fat values, bounded and rounded."""
 
-    garmin_weight_kg: dict[date, float]
-    garmin_body_fat_pct: dict[date, float]
+    garmin_weight_kg: Mapping[date, float]
+    garmin_body_fat_pct: Mapping[date, float]
 
 
-EMPTY_BODY_INPUTS = CanonicalBodyInputs(garmin_weight_kg={}, garmin_body_fat_pct={})
+EMPTY_BODY_INPUTS = CanonicalBodyInputs(
+    garmin_weight_kg=MappingProxyType({}), garmin_body_fat_pct=MappingProxyType({})
+)
 
 
 def read_body_inputs(

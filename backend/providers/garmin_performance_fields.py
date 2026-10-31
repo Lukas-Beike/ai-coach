@@ -26,7 +26,6 @@ HRV_NIGHT_AVERAGE: Final = "lastNightAvg"
 FTP_VALUE: Final = "functionalThresholdPower"
 
 # Date-bearing keys; each tuple keeps the lookup order it replaces.
-RECORD_DATE_KEYS: Final = GARMIN_DATE_ALIASES
 RECORD_TIMESTAMP_KEYS: Final = (*GARMIN_DATE_ALIASES, "timestamp")
 RECORD_IDENTITY_KEYS: Final = (*GARMIN_DATE_ALIASES, "timestamp", "id")
 METRIC_DATE_KEYS: Final = ("date", CALENDAR_DATE, SUMMARY_DATE, "from")
@@ -46,7 +45,6 @@ OBSERVATION_DATE_FIELDS: Final = (
 # Value aliases.
 SLEEP_DURATION_ALIASES: Final = GARMIN_SLEEP_DURATION_ALIASES
 ACTIVITY_FTP_ALIASES: Final = ("ftp", FTP_VALUE)
-DIRECT_FTP_VALUE_KEYS: Final = (FTP_VALUE, "ftp", "power")
 MAX_HEART_RATE_ALIASES: Final = ("maxHeartRateUsed", "maxHeartRate", "maxHR")
 WEIGHT_VALUE_ALIASES: Final = (WEIGHT_KG, "weight_kg", "weight", "value")
 WEIGHT_READING_ALIASES: Final = (WEIGHT_KG, "weight_kg", "weight")

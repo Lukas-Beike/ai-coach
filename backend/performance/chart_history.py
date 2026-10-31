@@ -194,7 +194,9 @@ def analysis_history(
                 and start <= day <= today
             ],
         },
-        "provider_metrics": _provider_metrics(garmin, start, today, garmin_canonical),
+        "provider_metrics": _canonical_provider_metrics(
+            garmin, start, today, garmin_canonical
+        ),
         "metrics": series,
         "preferred_providers": preferred_providers(),
     }
@@ -304,12 +306,3 @@ def _canonical_metric(
 
 def _number(value: float) -> float | int:
     return int(value) if float(value).is_integer() else value
-
-
-def _provider_metrics(
-    garmin: dict[str, Any],
-    start: date,
-    today: date,
-    canonical: GarminCanonicalMetrics,
-) -> dict[str, Any]:
-    return _canonical_provider_metrics(garmin, start, today, canonical)
