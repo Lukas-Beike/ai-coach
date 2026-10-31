@@ -11,9 +11,8 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from backend.canonical.sleep_bounds import bounds_fields, bounds_method
+from backend.canonical.sleep_bounds import bounds_fields, bounds_method, sleep_intervals
 from backend.canonical.vocabulary import ProviderId, SleepKind, SourceKind
-from backend.performance import personal_recovery
 from backend.providers import canonical_plans
 from backend.providers.sleep_period_mapping import map_sleep_periods
 
@@ -175,16 +174,19 @@ class BoundsMethodTests(unittest.TestCase):
 
     def test_regularity_reads_the_same_intervals(self) -> None:
         """The mapper and sleep-timing-variability-v1 find the same instants and field pairs."""
-        today = date(2026, 10, 12)
         nights = [
             garmin_night(datetime(2026, 10, day, 21, 0, tzinfo=UTC)) for day in (8, 9)
         ]
-        legacy = personal_recovery._sleep_intervals(nights, ZONE, today)
+        intervals = sleep_intervals(nights)
         mapped = [period for night in nights for period in garmin(night)]
         self.assertEqual(
             sorted(
-                (item["onset_at_utc"], item["wake_at_utc"], item["method"])
-                for item in legacy
+                (
+                    item.start.isoformat(),
+                    item.end.isoformat(),
+                    f"{item.start_field}/{item.end_field}",
+                )
+                for item in intervals
             ),
             sorted(
                 (

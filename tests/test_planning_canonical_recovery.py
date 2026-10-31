@@ -144,7 +144,6 @@ def _service(
 
 def _build(service: DailyPlanningContextService, snapshot: dict[str, Any]) -> Any:
     return service.build(
-        snapshot=snapshot,
         planned=[],
         weather={},
         checkins=[],

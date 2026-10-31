@@ -23,7 +23,6 @@ from backend.settings import SettingsService
 
 @dataclass(frozen=True)
 class CoachContextPerformanceSources:
-    sync_state_repository: Callable[[], Any]
     weather_service: Callable[[], Any]
     garmin_payload_service: Callable[[], Any]
     garmin_projection_service: Callable[[], Any]
@@ -74,7 +73,6 @@ class CoachContextAssembly:
         performance = dependencies.performance
         planning = dependencies.planning
         dialogue = dependencies.dialogue
-        self._sync_state_repository = performance.sync_state_repository
         self._weather_service = performance.weather_service
         self._garmin_payload_service = performance.garmin_payload_service
         self._garmin_projection_service = performance.garmin_projection_service
@@ -102,7 +100,6 @@ class CoachContextAssembly:
 
     def structured_context_service(self) -> CoachStructuredContextService:
         return CoachStructuredContextService(
-            self._sync_state_repository(),
             self._checkin_service(),
             self._weather_service(),
             self._activity_feedback_service(),
@@ -131,7 +128,6 @@ class CoachContextAssembly:
     def training_context_service(self) -> CoachTrainingContextService:
         limits = self._limits()
         return CoachTrainingContextService(
-            self._sync_state_repository(),
             self.structured_context_service(),
             self._workout_library_service(),
             local_planned_limit=limits["local_planned_limit"],
@@ -153,7 +149,6 @@ class CoachContextAssembly:
     def preview_service(self) -> CoachContextPreviewService:
         limits = self._limits()
         return CoachContextPreviewService(
-            self._sync_state_repository(),
             self._message_service(),
             self.training_context_service(),
             self.structured_context_service(),

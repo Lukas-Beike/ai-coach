@@ -44,7 +44,10 @@ from backend.canonical.vocabulary import ProviderId
 from backend.providers.garmin_activity_mapping import (
     MAPPER_VERSION as GARMIN_ACTIVITY_VERSION,
 )
-from backend.providers.garmin_activity_mapping import map_garmin_activities
+from backend.providers.garmin_activity_mapping import (
+    map_garmin_activities,
+    merge_training_load_rows,
+)
 from backend.providers.garmin_gear_mapping import map_garmin_gear
 from backend.providers.garmin_health_mapping import (
     GARMIN_HEALTH_SECTION_NAMES,
@@ -128,6 +131,8 @@ GARMIN_SYNCED_AT_KEY: Final = "synced_at"
 GARMIN_FRESHNESS_KEY: Final = "source_freshness"
 GARMIN_FETCHED_AT_KEY: Final = "fetched_at"
 GARMIN_ACTIVITIES_SECTION: Final = "activities"
+# Dedicated training-load rows merged into the activities before they are stored.
+GARMIN_TRAINING_LOAD_SECTION: Final = "training_load_activities"
 GARMIN_WEIGHT_SECTION: Final = "weight"
 GARMIN_BODY_BATTERY_SECTION: Final = "body_battery"
 GARMIN_MORNING_BATTERY_KEY: Final = "morning_body_battery"
@@ -469,11 +474,54 @@ def garmin_payload_retrieved_at(payload: object, *, zone: tzinfo) -> datetime | 
     return max(times, default=None)
 
 
-def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
+# Returns the stored dedicated training-load row of one Garmin activity id.
+type TrainingLoadLookup = Callable[[str], Any]
+
+
+def _garmin_activity_mapper(
+    *,
+    zone: tzinfo,
+    retrieved_at: datetime,
+    training_loads: TrainingLoadLookup | None,
+    payload_loads: object = None,
+) -> Callable[[list[Any]], MappingResult[ActivityRecord]]:
+    """Map Garmin activity rows with their dedicated training-load values merged in.
+
+    The stored, accumulated dedicated rows (``training_loads``) come first and the
+    rows of the same payload win, so the result does not depend on which sections
+    a sync fetched. The raw activity row itself stays as the provider sent it.
+    """
+
+    def mapper(rows: list[Any]) -> MappingResult[ActivityRecord]:
+        loads: list[Any] = []
+        if training_loads is not None:
+            for row in rows:
+                identity = _row_id(row, GARMIN_ACTIVITY_ID_KEY)
+                stored = None if identity is None else training_loads(identity)
+                if stored is not None:
+                    loads.append(stored)
+        if isinstance(payload_loads, list):
+            loads.extend(payload_loads)
+        return map_garmin_activities(
+            merge_training_load_rows(rows, loads),
+            zone=zone,
+            retrieved_at=retrieved_at,
+        )
+
+    return mapper
+
+
+def garmin_ingest_plan(
+    payload: object,
+    *,
+    zone: tzinfo,
+    training_loads: TrainingLoadLookup | None = None,
+) -> IngestPlan:
     """Plan the canonical rows of one stored Garmin payload.
 
     Every section is mapped with its own fetch time. A section whose fetch time
-    is unknown is left out.
+    is unknown is left out. ``training_loads`` returns the stored dedicated
+    training-load row of an activity id; the payload's own rows win over it.
     """
     if not isinstance(payload, Mapping):
         return IngestPlan(provider=ProviderId.GARMIN)
@@ -488,8 +536,11 @@ def garmin_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         activity_rows, raw_records, skipped, present = _activity_batch(
             payload.get(GARMIN_ACTIVITIES_SECTION),
             id_key=GARMIN_ACTIVITY_ID_KEY,
-            mapper=lambda rows: map_garmin_activities(
-                rows, zone=zone, retrieved_at=activities_at
+            mapper=_garmin_activity_mapper(
+                zone=zone,
+                retrieved_at=activities_at,
+                training_loads=training_loads,
+                payload_loads=payload.get(GARMIN_TRAINING_LOAD_SECTION),
             ),
             mapper_version=GARMIN_ACTIVITY_VERSION,
             zone=zone,
@@ -776,11 +827,17 @@ def observation_mapper_versions(versions: Mapping[str, Any]) -> dict[str, int]:
     return result
 
 
-def reprojection_plan(raw_row: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan | None:
+def reprojection_plan(
+    raw_row: Mapping[str, Any],
+    *,
+    zone: tzinfo,
+    training_loads: TrainingLoadLookup | None = None,
+) -> IngestPlan | None:
     """Plan the canonical rows that one stored raw record projects to today.
 
-    The stored payload and its fetch time are the only inputs, so the result equals
-    what the original ingest produced under the same mapper version. Returns None
+    The stored payload and its fetch time are the inputs, plus, for a Garmin
+    activity, its stored dedicated training-load row (``training_loads``), so the
+    result equals what an ingest produces under the same mapper version. Returns None
     when the record kind has no mapper. A row whose payload or fetch time is unusable
     counts as one invalid row.
     """
@@ -793,7 +850,13 @@ def reprojection_plan(raw_row: Mapping[str, Any], *, zone: tzinfo) -> IngestPlan
     if fetched is None or payload is None:
         return IngestPlan(provider=provider, skipped_invalid=1)
     if kind == ACTIVITY_RECORD_KIND:
-        return _reprojected_activities(provider, payload, zone=zone, fetched=fetched)
+        return _reprojected_activities(
+            provider,
+            payload,
+            zone=zone,
+            fetched=fetched,
+            training_loads=training_loads,
+        )
     if kind == WELLNESS_RECORD_KIND:
         wellness = map_intervals_wellness([payload], retrieved_at=fetched)
         return IngestPlan(
@@ -858,7 +921,12 @@ def _threshold_observation_plan(
 
 
 def _reprojected_activities(
-    provider: ProviderId, payload: Mapping[str, Any], *, zone: tzinfo, fetched: datetime
+    provider: ProviderId,
+    payload: Mapping[str, Any],
+    *,
+    zone: tzinfo,
+    fetched: datetime,
+    training_loads: TrainingLoadLookup | None = None,
 ) -> IngestPlan:
     """Re-map one stored activity row with the same mapper and fetch time as its ingest."""
     if provider is ProviderId.INTERVALS:
@@ -887,8 +955,8 @@ def _reprojected_activities(
         items, _raw, skipped, _present = _activity_batch(
             [payload],
             id_key=GARMIN_ACTIVITY_ID_KEY,
-            mapper=lambda rows: map_garmin_activities(
-                rows, zone=zone, retrieved_at=fetched
+            mapper=_garmin_activity_mapper(
+                zone=zone, retrieved_at=fetched, training_loads=training_loads
             ),
             mapper_version=GARMIN_ACTIVITY_VERSION,
             zone=zone,

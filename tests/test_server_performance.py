@@ -24,6 +24,7 @@ from server_test_support import (
     _garmin_metrics,
     server,
 )
+from support import complete_canonical_backfill
 
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import activity_validation, garmin_projection
@@ -33,6 +34,7 @@ from backend.performance import load as performance_load
 from backend.performance import max_hr as performance_max_hr
 from backend.performance import morning_battery as performance_morning_battery
 from backend.performance import planning_recovery as performance_planning_recovery
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.morning_battery_service import MORNING_BATTERY_HISTORY_KEY
 from backend.performance.wellness_days import series as wellness_series
 from backend.planning import context as planning_context
@@ -41,7 +43,6 @@ from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import queue as sync_queue
 from backend.sync.garmin_activity_duplicates import (
-    filter_garmin_activities,
     garmin_activity_duplicates_intervals,
 )
 from backend.sync.intervals import IntervalsSnapshotReader
@@ -54,8 +55,7 @@ def _mapped_performance_context(snapshot):
     canonical = canonical_from_snapshot(snapshot, today)
     garmin = read_garmin()
     return performance_context.current_performance_context(
-        snapshot,
-        garmin,
+        GarminSyncStatus.from_state(garmin),
         server.ATHLETE_DATA.profile().get(),
         today,
         canonical=None
@@ -129,7 +129,8 @@ class ServerPerformanceTests(ServerTestCase):
         earlier = latest - timedelta(days=1)
         save_garmin(
             {
-                "synced_at": "now",
+                # Canonical reads (#1416): a fetch time lets the canonical rows exist.
+                "synced_at": runtime_clock.utc_now(),
                 "sleep": [
                     {
                         "calendarDate": earlier.isoformat(),
@@ -162,24 +163,35 @@ class ServerPerformanceTests(ServerTestCase):
                 "race_predictions": {"5k": 1310},
             }
         )
+        complete_canonical_backfill(server)
         result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
+        # Canonical reads (#1416): the latest canonical record, neutral fields.
         self.assertEqual(
-            result["recovery"]["sleep"]["calendarDate"], latest.isoformat()
+            result["recovery"]["sleep"],
+            {"date": latest.isoformat(), "sleep_seconds": 27000, "sleep_score": 82},
         )
-        self.assertEqual(result["recovery"]["hrv"]["lastNightAvg"], 57)
-        self.assertEqual(result["recovery"]["readiness"]["score"], 78)
+        self.assertEqual(result["recovery"]["hrv"]["last_night_avg_ms"], 57)
+        self.assertEqual(result["recovery"]["hrv"]["weekly_avg_ms"], 54)
+        self.assertEqual(
+            result["recovery"]["readiness"],
+            {"date": latest.isoformat(), "score": 78, "level": "GREEN"},
+        )
         self.assertNotIn("activities", result)
         self.assertNotIn("performance", result)
         self.assertNotIn("race_predictions", result)
 
     def test_garmin_coach_context_extracts_nested_latest_recovery_record(self):
+        # Canonical reads (#1416): the recovery window ends today and the rows need
+        # a fetch time, so the record is dated yesterday.
+        day = (server.ATHLETE_CLOCK.now().date() - timedelta(days=1)).isoformat()
         save_garmin(
             {
+                "synced_at": runtime_clock.utc_now(),
                 "sleep": [
                     {
                         "id": "wrapper-z",
                         "dailySleepDTO": {
-                            "calendarDate": "2026-08-29",
+                            "calendarDate": day,
                             "sleepTimeSeconds": 27000,
                             "sleepScore": 82,
                         },
@@ -187,17 +199,21 @@ class ServerPerformanceTests(ServerTestCase):
                 ],
                 "readiness": {
                     "trainingReadiness": {
-                        "calendarDate": "2026-08-29",
+                        "calendarDate": day,
                         "trainingReadinessScore": 78,
                     }
                 },
             }
         )
 
+        complete_canonical_backfill(server)
         result = server.GARMIN_ASSEMBLY.projection_service().coach_context()
 
-        self.assertEqual(result["recovery"]["sleep"]["sleepScore"], 82)
-        self.assertEqual(result["recovery"]["readiness"]["trainingReadinessScore"], 78)
+        # Canonical reads (#1416): the mapper reads the nested sleep record; the
+        # synthetic "trainingReadiness" wrapper maps to no observation, so the
+        # readiness section stays empty instead of showing the raw record.
+        self.assertEqual(result["recovery"]["sleep"]["sleep_score"], 82)
+        self.assertEqual(result["recovery"]["readiness"], {})
 
     def test_garmin_performance_metrics_are_normalized_and_source_marked(self):
         result = _garmin_metrics(
@@ -339,7 +355,12 @@ class ServerPerformanceTests(ServerTestCase):
                 "distance": 5000,
             },
         ]
-        kept, skipped = filter_garmin_activities(garmin, intervals)
+        kept = [
+            item
+            for item in garmin
+            if not garmin_activity_duplicates_intervals(item, intervals)
+        ]
+        skipped = len(garmin) - len(kept)
         self.assertEqual(skipped, 2)
         self.assertEqual(kept, [])
         metrics = _garmin_metrics(
@@ -1013,11 +1034,19 @@ class ServerPerformanceTests(ServerTestCase):
         server.ATHLETE_DATA.profile().save(
             {"weight_kg": "71,4", "body_fat_pct": "10.5", "height_cm": "181"}
         )
+        # Canonical reads (#1416): the context needs some provider value; the
+        # manual profile values then fill what the providers leave absent. Profile
+        # values alone, without any synced provider data, keep it unavailable.
+        today = server.ATHLETE_CLOCK.now().date().isoformat()
+        alone = _current_performance_context(
+            {"synced_at": "now", "athlete": {}, "recent_wellness": []}
+        )
+        self.assertFalse(alone["available"])
         performance = _current_performance_context(
             {
                 "synced_at": "now",
                 "athlete": {},
-                "recent_wellness": [],
+                "recent_wellness": [{"id": today, "ctl": 40}],
                 "recent_activities": [],
             }
         )
@@ -1028,7 +1057,7 @@ class ServerPerformanceTests(ServerTestCase):
             {
                 "synced_at": "now",
                 "athlete": {"height": 1.83},
-                "recent_wellness": [],
+                "recent_wellness": [{"id": today, "ctl": 40}],
                 "recent_activities": [],
             }
         )["metrics"]["height_cm"]
@@ -1119,9 +1148,7 @@ class ServerPerformanceTests(ServerTestCase):
                 "distance": 10000,
             }
         ]
-        kept, skipped = filter_garmin_activities([garmin], intervals)
-        self.assertEqual(len(kept), 1)
-        self.assertEqual(skipped, 0)
+        self.assertFalse(garmin_activity_duplicates_intervals(garmin, intervals))
 
     def test_confirmed_duplicate_delete_removes_only_garmin_copy_and_keeps_the_snapshot(
         self,

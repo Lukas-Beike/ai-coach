@@ -43,6 +43,7 @@ from backend.performance.canonical_inputs import (
     read_performance_inputs,
 )
 from backend.performance.context import current_performance_context
+from backend.performance.freshness import GarminSyncStatus
 from backend.providers.source_labels import SourceView, observation_source_label
 from backend.providers.wahoo_threshold_mapping import (
     map_wahoo_power_zones,
@@ -577,10 +578,13 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         assert inputs is not None
         self.assertIsNotNone(inputs.current)
         legacy = current_performance_context(
-            self.intervals, self.garmin, {}, TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
+            GarminSyncStatus.from_state(self.garmin),
+            {},
+            TODAY,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
         )
         canonical = current_performance_context(
-            self.intervals, self.garmin, {}, TODAY, canonical=inputs
+            GarminSyncStatus.from_state(self.garmin), {}, TODAY, canonical=inputs
         )
         # Intended difference (#1412): eFTP is read from canonical observations only,
         # so it is absent without canonical inputs. The canonical value is the
@@ -804,6 +808,6 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         context = CoachPerformanceContextReader(
             None, None, None, today=lambda: AS_OF, canonical=source
         )
-        _snapshot, inputs = context.read_snapshot(lambda: self.SNAPSHOT)
+        inputs = context.read_inputs()
         assert inputs is not None
         self.assertEqual(inputs.current, NO_CURRENT_INPUTS)

@@ -19,6 +19,7 @@ from support import (
 from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
+from backend.performance.freshness import GarminSyncStatus
 
 # Give the application deterministic, fake configuration before importing it.
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="intervals-coach-test-")
@@ -105,8 +106,7 @@ def _current_performance_context(snapshot=None):
     # Recovery, form, ramp rate and eFTP come only from observations (#1411,
     # #1412); map the raw fixtures.
     return performance_context.current_performance_context(
-        effective_snapshot,
-        garmin,
+        GarminSyncStatus.from_state(garmin),
         server.ATHLETE_DATA.profile().get(),
         server.ATHLETE_CLOCK.now().date(),
         canonical=recovery_only_inputs(

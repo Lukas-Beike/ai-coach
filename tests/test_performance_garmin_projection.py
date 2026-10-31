@@ -4,11 +4,10 @@ from datetime import date
 
 from performance_day_support import garmin_metrics_from_payload
 
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_projection import (
     GARMIN_CONTEXT_FIELDS,
-    GARMIN_RECOVERY_FIELDS,
     compact_garmin_context,
-    compact_garmin_recovery,
     latest_garmin_record,
 )
 from backend.performance.garmin_projection import (
@@ -19,7 +18,9 @@ from backend.performance.garmin_projection import (
 def garmin_training_load_projection(snapshot, current_date):
     """Project the canonical values the production mapper makes of the snapshot."""
     return project_training_load(
-        snapshot, current_date, garmin_metrics_from_payload(snapshot)
+        GarminSyncStatus.from_state(snapshot),
+        current_date,
+        garmin_metrics_from_payload(snapshot),
     )
 
 
@@ -78,25 +79,6 @@ class GarminProjectionTests(unittest.TestCase):
         original = {"payload": {"unrelated": True}}
         self.assertIs(latest_garmin_record(original), original)
         self.assertEqual(latest_garmin_record([{"payload": True}]), {})
-
-    def test_recovery_scalar_and_selected_fields(self):
-        self.assertEqual(compact_garmin_recovery(7), {"value": 7})
-        self.assertEqual(compact_garmin_recovery(7.5), {"value": 7.5})
-        self.assertEqual(compact_garmin_recovery(True), {"value": True})
-        value = {
-            "calendarDate": "2026-08-30",
-            "sleepScore": 82,
-            "score": 0,
-            "unknown": "drop",
-            "recoveryTime": None,
-        }
-        before = copy.deepcopy(value)
-        self.assertEqual(
-            compact_garmin_recovery(value),
-            {"calendarDate": "2026-08-30", "sleepScore": 82, "score": 0},
-        )
-        self.assertEqual(value, before)
-        self.assertIn("sleepScore", GARMIN_RECOVERY_FIELDS)
 
     def test_training_load_projection_uses_verified_fields_and_provenance(self):
         snapshot = {

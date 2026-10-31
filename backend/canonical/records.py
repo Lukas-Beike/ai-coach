@@ -304,6 +304,7 @@ def _require_method_identity(method_version: object, input_fingerprint: object) 
 type ZoneSeconds = tuple[tuple[str, float], ...]
 
 MAX_ZONE_COUNT: Final = 20
+MAX_TRAINING_EFFECT_LABEL_LENGTH: Final = 50
 MAX_ZONE_ID_LENGTH: Final = 20
 _SUMMARY_VALUE_BOUNDS: Final = (
     ("intensity", 0.0, 1_000.0),
@@ -387,6 +388,9 @@ class ActivityRecord:
     planned_event_id: str | None = None
     # The recording device as the provider names it, for example "Garmin Edge 840".
     device_name: str | None = None
+    # The provider's training-effect category of the session, for example
+    # "AEROBIC_BASE", as an upper-case code.
+    training_effect_label: str | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -542,3 +546,8 @@ class ActivityRecord:
             object.__setattr__(self, field, _zone_seconds(getattr(self, field), field))
         optional_text(self.planned_event_id, "planned_event_id", max_length=200)
         optional_text(self.device_name, "device_name", max_length=200)
+        optional_text(
+            self.training_effect_label,
+            "training_effect_label",
+            max_length=MAX_TRAINING_EFFECT_LABEL_LENGTH,
+        )

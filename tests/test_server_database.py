@@ -463,7 +463,7 @@ class ServerDatabaseTests(ServerTestCase):
                     "activity_feedback": [],
                 }
             ),
-            public_performance=owner(from_snapshot={"performance": {}, "garmin": {}}),
+            public_performance=owner(from_inputs={"performance": {}, "garmin": {}}),
             sync_state=owner(sync_period=30),
             provider_freshness=owner(current={}),
             garmin_sync_state=owner(core_error_entries=[]),

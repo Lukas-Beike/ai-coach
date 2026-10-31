@@ -1203,10 +1203,8 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "backend.performance.garmin_projection",
         (
             "GARMIN_CONTEXT_FIELDS",
-            "GARMIN_RECOVERY_FIELDS",
             "compact_garmin_context",
             "latest_garmin_record",
-            "compact_garmin_recovery",
         ),
     ),
     (
@@ -1502,7 +1500,6 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "_garmin_duplicate_measurements",
             "_garmin_activity_matches",
             "garmin_activity_duplicates_intervals",
-            "filter_garmin_activities",
             "intervals_cycling_activities_match",
         ),
     ),

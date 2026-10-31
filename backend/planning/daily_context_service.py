@@ -73,7 +73,6 @@ class DailyPlanningContextService:
 
     def build(
         self,
-        snapshot: Any = None,
         planned: Any = None,
         weather: Any = None,
         checkins: Any = None,
@@ -81,10 +80,8 @@ class DailyPlanningContextService:
     ) -> list[dict[str, Any]]:
         """Build a daily context from explicit inputs and bounded local reads.
 
-        ``snapshot`` stays in the signature of the callers' shared read but is no
-        longer read: every recovery and daily-health value comes from observations.
+        Every recovery and daily-health value comes from observations.
         """
-        del snapshot
         today = self._today()
         planned = planned if isinstance(planned, list) else []
         checkins = (

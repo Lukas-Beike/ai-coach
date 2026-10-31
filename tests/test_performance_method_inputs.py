@@ -345,7 +345,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
         )
         canonical = recovery_inputs(observations, latest_wellness_day=TODAY)
 
-        served = personal_recovery(wellness, {}, {}, TODAY, canonical=canonical)
+        served = personal_recovery({}, TODAY, canonical=canonical)
 
         # The raw row says 45; the canonical observation (47) is the input (#1411).
         self.assertEqual(_baseline(served, "resting_hr", INTERVALS)["value"], 47.0)
@@ -361,7 +361,7 @@ class M2HrvRestingHrInputs(unittest.TestCase):
         )
         # A source without stored sleep periods leaves the regularity on raw rows.
         self.assertIsNone(inputs.sleep_periods)
-        served = personal_recovery([], {}, {}, TODAY, canonical=inputs)
+        served = personal_recovery({}, TODAY, canonical=inputs)
 
         self.assertIn(MetricKind.HRV_RMSSD, [call[0] for call in reader.calls])
         self.assertIn(MetricKind.HRV_SDNN, [call[0] for call in reader.calls])
@@ -496,7 +496,7 @@ class M3SleepInputs(unittest.TestCase):
         )
         # Since #1411 sleep duration is a canonical input of the baselines.
         self.assertIn(MetricKind.SLEEP_DURATION, [call[0] for call in reader.calls])
-        served = personal_recovery([], {}, {}, TODAY, canonical=inputs)
+        served = personal_recovery({}, TODAY, canonical=inputs)
         self.assertEqual(_baseline(served, "sleep", GARMIN)["value"], 8.0)
         timing = [
             kind.name

@@ -15,12 +15,14 @@ from performance_day_support import (
     garmin_body_from_payload,
     garmin_metrics_from_payload,
     intervals_activity_summaries,
+    snapshot_coverage_time,
 )
 
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance import body as _body
 from backend.performance import chart_history as _chart_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.wellness_days import wellness_day_values
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 
@@ -106,8 +108,8 @@ def body_history(
         rows += raw.get("wellness", []) if isinstance(raw, dict) else []
         rows += snapshot.get("recent_wellness", [])
     return _body.body_history(
-        snapshot,
-        garmin,
+        (snapshot or {}).get("synced_at"),
+        GarminSyncStatus.from_state(garmin),
         today,
         eftp_by_day=_eftp_by_day(snapshot),
         wellness_days=days_from_rows(rows),
@@ -131,13 +133,17 @@ def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
         wellness_day=None,
         ctl=None,
         atl=None,
+        # The Intervals.icu coverage time the snapshot's sync stored.
+        intervals_synced_at=snapshot_coverage_time(snapshot),
         eftp_by_day=_eftp_by_day(snapshot),
         history_wellness_days=days_from_rows(rows),
         activities=_activity_summaries(snapshot),
         garmin=garmin_metrics_from_payload(_payload(garmin)),
         body=garmin_body_from_payload(_payload(garmin), today),
     )
-    return _chart_history.analysis_history(snapshot, garmin, today, canonical=canonical)
+    return _chart_history.analysis_history(
+        GarminSyncStatus.from_state(garmin), today, canonical=canonical
+    )
 
 
 def _garmin_weight(day: str, kg: float) -> dict[str, Any]:
@@ -516,7 +522,7 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
 
     def test_body_section_is_identical_to_direct_body_history(self) -> None:
         snapshot = {
-            "synced_at": "sync",
+            "synced_at": "2026-05-04T05:00:00+00:00",
             "recent_wellness": [
                 _wellness("2026-05-03", weight=70),
                 _wellness("2026-05-04", eftp=280),

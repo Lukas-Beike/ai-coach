@@ -98,6 +98,10 @@ The system SHALL summarize the supported 28-day training focus from recorded hea
 - **WHEN** a session has only one sensor's zone times or lacks a supported category
 - **THEN** that sensor remains separate and missing category evidence increases unknown coverage rather than being inferred from another sensor.
 
+#### Scenario: Categories from canonical sessions
+- **WHEN** the training focus is composed
+- **THEN** the categories come only from the canonical activity summaries: each session with a Garmin Connect record in the window counts once, dated in the profile zone like the zone distribution and classified by its `training_effect_label` and `training_effect_load` (Garmin activity mapper version 8; at ingest and at re-projection the stored, accumulated dedicated training-load row of the activity is merged in, the same payload's rows winning, so the values do not depend on which sections a sync fetched); the Garmin sync status supplies only the category freshness and whether dedicated training-load rows are stored, and the raw Garmin view is not read.
+
 Evidence: `backend/performance/training_focus.py:training_focus`, `backend/performance/training_report.py:zone_distribution`; `tests/test_training_focus.py:test_recorded_hr_and_power_zones_remain_separate_and_bounded`, `tests/test_training_focus.py:test_activity_without_identity_is_not_classified_from_its_category`, `tests/test_training_report.py:test_sensor_zones_stay_separate_and_strength_is_not_classified_as_endurance`.
 
 ### Requirement: Dated history and comparisons
@@ -125,7 +129,7 @@ The system SHALL provide bounded dated performance and provider-metric histories
 
 #### Scenario: History, charts and comparisons read canonical inputs only
 - **WHEN** the analysis charts, the Garmin load, training-load projection and Garmin 30-day comparisons (including weight) are composed
-- **THEN** they read the canonical activity rows and the canonical Garmin day history only (the weight trend uses the body history's per-day Garmin weights); the stored Garmin view and Intervals snapshot supply sync times and a cached provider chart's fetch outcome (stale, failed or unsupported; never its points), and without canonical inputs (`EMPTY_PERFORMANCE_INPUTS`) every such value is unknown.
+- **THEN** they read the canonical activity rows and the canonical Garmin day history only (the weight trend uses the body history's per-day Garmin weights); the Garmin sync status supplies Garmin sync times and a cached provider chart's fetch outcome (stale, failed or unsupported; never its points), the canonical Intervals.icu sync instant the Intervals.icu sync time, and without canonical inputs (`EMPTY_PERFORMANCE_INPUTS`) every such value is unknown.
 
 #### Scenario: Power profile reads the canonical power curve
 - **WHEN** the analysis cycling power profile is composed
@@ -206,9 +210,9 @@ The system SHALL derive sleep timing variability (method `sleep-timing-variabili
 - **WHEN** a day has no explicit tag answer or no measured following night
 - **THEN** it is excluded from both groups rather than treated as a negative answer; insufficient groups expose no confident association statistic.
 
-#### Scenario: Sleep timing input before canonical sleep periods
-- **WHEN** sleep timing variability is computed before canonical sleep periods exist (#1419)
-- **THEN** onset and wake times are still read from the stored provider sleep and wellness records, as the only recovery input not yet read from canonical observations.
+#### Scenario: Source without canonical sleep periods
+- **WHEN** sleep timing variability is computed from a source that stores no canonical sleep periods
+- **THEN** the result is `insufficient_data`; the stored provider sleep and wellness records are not read (#1416).
 
 #### Scenario: Timing variability is not the Sleep Regularity Index
 - **WHEN** the timing variability result, its Coach report section or any description of it is produced
@@ -374,7 +378,7 @@ Affected history, recovery, nutrition and Coach reads SHALL obtain retained prov
 Evidence baseline: `backend/performance/personal_recovery.py`, `backend/performance/canonical_personal_recovery.py`, `backend/performance/chart_history.py`, `backend/performance/garmin_projection.py`; `tests/test_personal_recovery.py`, `tests/test_performance_chart_history.py`. Canonical-only reads and parity require new regression evidence.
 
 ### Requirement: Garmin current performance metrics are read from canonical data only
-The current Garmin performance metrics (weight, thresholds, VO2max, maximum heart rate and race predictions) SHALL be read from canonical Garmin data only. The stored Garmin view SHALL supply only source freshness on these read paths. Only the sync's performance-history merge SHALL parse a fetched Garmin payload, before it is stored.
+The current Garmin performance metrics (weight, thresholds, VO2max, maximum heart rate and race predictions) SHALL be read from canonical Garmin data only. The Garmin sync status SHALL supply only source freshness on these read paths. Only the sync's performance-history merge SHALL parse a fetched Garmin payload, before it is stored.
 
 #### Scenario: Activity maximum heart rate
 - **WHEN** a sport has neither its own nor a generic canonical Garmin profile maximum heart rate
@@ -505,12 +509,16 @@ The system SHALL read every daily wellness value of the performance projection f
 - **THEN** only the observations decide the values and the latest wellness day; snapshot-only days and fields have no effect.
 
 #### Scenario: No canonical inputs
-- **WHEN** the performance context is composed without canonical inputs, or without a stored snapshot and without any provider value in the canonical inputs (activities, wellness days, daily totals, an Intervals.icu athlete sync, Wahoo settings, Garmin or recovery observations, Garmin body values)
+- **WHEN** the performance context is composed without canonical inputs, or without any provider value in the canonical inputs (activities, wellness days, daily totals, an Intervals.icu athlete sync, Wahoo settings, Garmin or recovery observations, Garmin body values), also when a stored snapshot exists or only the athlete's manual profile holds values
 - **THEN** the context is unavailable: CTL, ATL, weight and body fat from wellness, subjective ratings, wellness-based trend averages and wellness body history are unknown instead of read from the snapshot.
 
 #### Scenario: Availability follows canonical data, not the snapshot
 - **WHEN** canonical observations or activities exist without a stored Intervals.icu snapshot, for example a Garmin-only setup after the backfill completed
-- **THEN** the context is available with its full metrics. With a stored snapshot, `as_of` is its sync time and the source names the snapshot; without one, `as_of` is the canonical Intervals.icu athlete-sync instant (none without one) and the source names the stored provider data.
+- **THEN** the context is available with its full metrics. With an Intervals.icu sync in the canonical provider coverage (also one that stored activities or wellness but no athlete record), `as_of` is its newest fetch time in ISO form, the one Intervals.icu sync time reports and the Coach use too, and the source keeps the label "Letzter gespeicherter Intervals.icu-Snapshot"; without one, `as_of` is null and the source names the stored provider data. The stored snapshot is never read for either.
+
+#### Scenario: Narrow Garmin sync status
+- **WHEN** the current context, the analysis history, the training focus, the body history, `/api/performance` or the Coach performance and recovery sections need Garmin freshness, fetch or sync times, read windows or a cached chart's fetch outcome
+- **THEN** they read one typed Garmin sync status built from the stored Garmin state and the names of the stored sections (no measured value), and never the Garmin view. While the canonical source is pending, the Garmin card gets the empty status, so it shows no freshness, source or pagination, only its connection status.
 
 #### Scenario: Pending state shows no partial values
 - **WHEN** the first canonical backfill has not completed and `/api/performance` is read

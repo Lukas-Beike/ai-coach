@@ -3,6 +3,7 @@ import unittest
 from datetime import date
 
 from backend.performance.freshness import (
+    GarminSyncStatus,
     garmin_metric_freshness,
     garmin_source_freshness,
     measurement_age,
@@ -35,9 +36,11 @@ class MeasurementAgeTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             measurement_age("2026-09-20")
         with self.assertRaises(TypeError):
-            garmin_source_freshness({})
+            garmin_source_freshness(GarminSyncStatus.from_state({}))
         with self.assertRaises(TypeError):
-            garmin_metric_freshness({}, "weight", {"value": 0})
+            garmin_metric_freshness(
+                GarminSyncStatus.from_state({}), "weight", {"value": 0}
+            )
 
 
 class GarminSourceFreshnessTests(unittest.TestCase):
@@ -50,7 +53,9 @@ class GarminSourceFreshnessTests(unittest.TestCase):
             }
         }
         self.assertEqual(
-            garmin_source_freshness(snapshot, date(2026, 9, 20)),
+            garmin_source_freshness(
+                GarminSyncStatus.from_state(snapshot), date(2026, 9, 20)
+            ),
             {
                 "sleep": {
                     "freshness": "current",
@@ -74,7 +79,7 @@ class GarminMetricFreshnessTests(unittest.TestCase):
             }
         }
         result = garmin_metric_freshness(
-            snapshot,
+            GarminSyncStatus.from_state(snapshot),
             "weight",
             {"value": 70, "observed_at": None},
             date(2026, 9, 20),
@@ -85,29 +90,38 @@ class GarminMetricFreshnessTests(unittest.TestCase):
 
     def test_current_stale_partial_unknown_and_notes(self):
         current = garmin_metric_freshness(
-            {"source_freshness": {"sleep": {"freshness": "current"}}},
+            GarminSyncStatus.from_state(
+                {"source_freshness": {"sleep": {"freshness": "current"}}}
+            ),
             "sleep",
             {"value": 8},
             date(2026, 9, 20),
         )
         stale = garmin_metric_freshness(
-            {
-                "source_freshness": {
-                    "weight": {"freshness": "stale", "observed_at": "2026-09-18"}
+            GarminSyncStatus.from_state(
+                {
+                    "source_freshness": {
+                        "weight": {"freshness": "stale", "observed_at": "2026-09-18"}
+                    }
                 }
-            },
+            ),
             "weight",
             {"value": 70, "note": "Vorhanden"},
             date(2026, 9, 20),
         )
         partial = garmin_metric_freshness(
-            {"source_freshness": {"hrv": {"freshness": "partial"}}},
+            GarminSyncStatus.from_state(
+                {"source_freshness": {"hrv": {"freshness": "partial"}}}
+            ),
             "hrv",
             {"value": 45},
             date(2026, 9, 20),
         )
         unknown = garmin_metric_freshness(
-            {}, "missing", {"value": None}, date(2026, 9, 20)
+            GarminSyncStatus.from_state({}),
+            "missing",
+            {"value": None},
+            date(2026, 9, 20),
         )
         self.assertEqual(current["freshness"], "current")
         self.assertEqual(stale["freshness"], "stale")
@@ -128,7 +142,9 @@ class GarminMetricFreshnessTests(unittest.TestCase):
         }
         value = {"value": 0}
         before = copy.deepcopy((snapshot, value))
-        result = garmin_metric_freshness(snapshot, "weight", value, date(2026, 9, 20))
+        result = garmin_metric_freshness(
+            GarminSyncStatus.from_state(snapshot), "weight", value, date(2026, 9, 20)
+        )
         self.assertIn("Letzter guter Wert", result["note"])
         self.assertEqual((snapshot, value), before)
 

@@ -281,6 +281,17 @@ def _items(
             yield decoded
 
 
+def read_item(db: Any, section: str, key: str) -> Any | None:
+    """Return the stored element ``key`` of ``section``, or None when none is stored."""
+    row = db.execute(
+        "SELECT source_record_id, payload FROM provider_records "
+        "WHERE provider = ? AND record_kind = ? AND state = ? AND source_record_id = ?",
+        (GARMIN_PROVIDER, HEALTH_RECORD_KIND, _ACTIVE, record_id(section, key)),
+    ).fetchone()
+    decoded = None if row is None else _decoded_item(row)
+    return None if decoded is None else decoded[1].value
+
+
 def section_names(db: Any) -> frozenset[str]:
     """Return the sections that hold at least one stored element."""
     rows = db.execute(

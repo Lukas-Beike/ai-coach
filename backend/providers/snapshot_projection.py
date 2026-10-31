@@ -22,7 +22,10 @@ from typing import Any, Final
 from backend.canonical.local_time import local_date, parse_provider_datetime
 from backend.canonical.mapping import MappingIssue, MappingResult
 from backend.canonical.records import ActivityRecord, Observation
-from backend.providers.garmin_activity_mapping import map_garmin_activities
+from backend.providers.garmin_activity_mapping import (
+    map_garmin_activities,
+    merge_training_load_rows,
+)
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.intervals_activity_mapping import map_intervals_activities
 from backend.providers.intervals_wellness_mapping import (
@@ -41,6 +44,7 @@ _INTERVALS_RAW_ACTIVITIES_KEY: Final = "activities"
 _INTERVALS_WELLNESS_KEY: Final = "recent_wellness"
 _INTERVALS_ATHLETE_KEY: Final = "athlete"
 _GARMIN_ACTIVITIES_KEY: Final = "activities"
+_GARMIN_TRAINING_LOAD_KEY: Final = "training_load_activities"
 # Content-free marker of a snapshot written without its activity sections.
 CANONICAL_SECTIONS_KEY: Final = "canonical_sections"
 CANONICAL_SECTIONS_TABLES: Final = "tables"
@@ -93,7 +97,12 @@ def project_garmin_snapshot(
     if not isinstance(payload, Mapping):
         return _empty_projection()
     activities = map_garmin_activities(
-        payload.get(_GARMIN_ACTIVITIES_KEY), zone=zone, retrieved_at=retrieved_at
+        merge_training_load_rows(
+            payload.get(_GARMIN_ACTIVITIES_KEY),
+            payload.get(_GARMIN_TRAINING_LOAD_KEY),
+        ),
+        zone=zone,
+        retrieved_at=retrieved_at,
     )
     health = map_garmin_health(payload, zone=zone, retrieved_at=retrieved_at)
     return activities, health

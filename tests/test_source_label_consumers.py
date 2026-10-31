@@ -83,6 +83,6 @@ class EmittedSourceOutputTests(unittest.TestCase):
             completed_today=(),
         )
         result = season_preparation.load_scenarios(
-            {}, {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
+            None, {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
         )
         self.assertEqual("Intervals.icu recorded wellness", result["basis"]["source"])

@@ -565,7 +565,7 @@ def _garmin_activity_observed_at(
 
 
 def _garmin_performance_freshness(
-    snapshot: dict[str, Any],
+    status: performance_freshness.GarminSyncStatus,
     metrics: dict[str, dict[str, Any]],
     source_keys: dict[str, str],
     race_values: dict[str, float | int | None],
@@ -581,13 +581,13 @@ def _garmin_performance_freshness(
             else:
                 source = "running_threshold"
         metrics[key] = performance_freshness.garmin_metric_freshness(
-            snapshot, source, value, current_date
+            status, source, value, current_date
         )
     return metrics
 
 
 def _garmin_metrics(
-    snapshot: dict[str, Any],
+    status: performance_freshness.GarminSyncStatus,
     current_date: date,
     weight: dict[str, Any],
     vo2: tuple[float | int | None, float | int | None],
@@ -625,25 +625,25 @@ def _garmin_metrics(
         if source_keys[key] == "activities":
             result[key]["observed_at"] = activity_observed_at[kind]
     return _garmin_performance_freshness(
-        snapshot, result, source_keys, race_values, current_date
+        status, result, source_keys, race_values, current_date
     )
 
 
 def garmin_performance_metrics(
-    snapshot: dict[str, Any],
+    status: performance_freshness.GarminSyncStatus,
     current_date: date,
     canonical: GarminCanonicalMetrics,
 ) -> dict[str, dict[str, Any]]:
     """Return the current Garmin performance metrics from the canonical values.
 
     Weight, FTP, VO2max, thresholds, profile max heart rate, race predictions and
-    the activity max heart rate fallback come from ``canonical``. The snapshot is
-    read only for freshness, which is sync status.
+    the activity max heart rate fallback come from ``canonical``; ``status``
+    supplies only the freshness.
     """
     races = _garmin_race_predictions(None)
     races.update(canonical.race_predictions)
     return _garmin_metrics(
-        snapshot,
+        status,
         current_date,
         {"value": canonical.weight_kg},
         (canonical.cycling_vo2max, canonical.running_vo2max),
@@ -663,7 +663,7 @@ def garmin_payload_performance_metrics(
     """
     max_metrics = payload.get("max_metrics")
     return _garmin_metrics(
-        payload,
+        performance_freshness.GarminSyncStatus.from_state(payload),
         current_date,
         garmin_weight.garmin_weight_metric(payload),
         _garmin_vo2_metrics(
@@ -676,12 +676,12 @@ def garmin_payload_performance_metrics(
 
 
 def garmin_performance_context(
-    snapshot: dict[str, Any],
+    status: performance_freshness.GarminSyncStatus,
     current_date: date,
     canonical: GarminCanonicalMetrics,
 ) -> dict[str, Any]:
     """Project normalized Garmin performance metrics for public contexts."""
-    metrics = garmin_performance_metrics(snapshot, current_date, canonical)
+    metrics = garmin_performance_metrics(status, current_date, canonical)
     return {
         "source": GARMIN_PERFORMANCE_SOURCE,
         "weight": metrics["weight_kg"],

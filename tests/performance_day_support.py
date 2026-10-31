@@ -19,12 +19,16 @@ from backend.performance.canonical_inputs import (
     read_performance_inputs,
 )
 from backend.performance.current_metrics import current_performance_metrics
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     read_garmin_state,
 )
 from backend.performance.wellness_days import WellnessDay, current_window, latest
-from backend.providers.garmin_activity_mapping import map_garmin_activities
+from backend.providers.garmin_activity_mapping import (
+    map_garmin_activities,
+    merge_training_load_rows,
+)
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.intervals_activity_mapping import map_intervals_activities
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
@@ -154,22 +158,46 @@ def snapshot_activity_summaries(
     return intervals_activity_summaries(snapshot.get("recent_activities") or [])
 
 
+def snapshot_coverage_time(snapshot: Any) -> str | None:
+    """The Intervals.icu coverage time a sync of the snapshot stores, if any."""
+    try:
+        synced = datetime.fromisoformat(str((snapshot or {}).get("synced_at") or ""))
+    except ValueError:
+        return None
+    return synced.isoformat() if synced.tzinfo is not None else None
+
+
+def snapshot_retrieved_at(
+    snapshot: dict[str, Any], default: datetime = SYNCED_AT
+) -> datetime:
+    """The fetch time a sync stamps a snapshot's observations with: its sync time."""
+    try:
+        synced = datetime.fromisoformat(str(snapshot.get("synced_at") or ""))
+    except ValueError:
+        return default
+    return synced if synced.tzinfo is not None else default
+
+
 def canonical_from_snapshot(snapshot: dict[str, Any], as_of: date):
     """Map synthetic snapshot rows through the production mapper and read ports."""
     _, mapped = project_intervals_snapshot(
-        snapshot, zone=ZoneInfo("UTC"), retrieved_at=SYNCED_AT
+        snapshot, zone=ZoneInfo("UTC"), retrieved_at=snapshot_retrieved_at(snapshot)
     )
 
     class ActivityReader:
         def activity_summaries(self, _db, *, start=None, end=None, limit=None):
             return snapshot_activity_summaries(snapshot)
 
-    return read_performance_inputs(
+    inputs = read_performance_inputs(
         StubReader(tuple(mapped.records)),
         object(),
         activity_reader=ActivityReader(),
         as_of=as_of,
     )
+    if inputs is None:
+        return None
+    # The sync stores its fetch time with the canonical coverage (#1416).
+    return replace(inputs, intervals_synced_at=snapshot_coverage_time(snapshot))
 
 
 def garmin_metrics_from_payload(
@@ -220,3 +248,26 @@ def garmin_inputs_from_payload(
         garmin=garmin_metrics_from_payload(payload),
         body=garmin_body_from_payload(payload, today),
     )
+
+
+def garmin_activity_summaries(
+    payload: dict[str, Any], zone: ZoneInfo = UTC_ZONE
+) -> tuple[ActivitySummary, ...]:
+    """Summaries of a synthetic Garmin payload's activities, as a sync stores them.
+
+    The dedicated training-load rows are merged in first, and one activity id is
+    one record, as in the activity tables.
+    """
+    rows = merge_training_load_rows(
+        payload.get("activities") or [], payload.get("training_load_activities")
+    )
+    mapped = map_garmin_activities(rows, zone=zone, retrieved_at=SYNCED_AT)
+    records = {record.activity_id: record for record in mapped.records}
+    return activity_summaries(
+        ((f"act_garmin_{key}", [record]) for key, record in records.items()), zone
+    )
+
+
+def garmin_sync_status(payload: dict[str, Any]) -> GarminSyncStatus:
+    """The sync status of a synthetic payload: its sections count as stored."""
+    return GarminSyncStatus.from_state(payload)

@@ -19,6 +19,7 @@ from typing import Any
 from server_test_support import ServerTestCase, server
 
 from backend.errors import AppError
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 
 WAIT_SECONDS = 15
 
@@ -162,7 +163,10 @@ class ReadPathWriterIndependenceTests(ServerTestCase):
             ),
             "activity_detail": lambda: outcome(
                 lambda: server.ACTIVITY_READS.activity_read().detail(
-                    "missing-activity", garmin_snapshot={}, profile={}, today=today
+                    "missing-activity",
+                    garmin_status=NO_GARMIN_SYNC_STATUS,
+                    profile={},
+                    today=today,
                 )
             ),
             "library_page": lambda: server.HTTP_API.library_page_service().page(

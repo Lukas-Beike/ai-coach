@@ -63,6 +63,8 @@ class ActivitySummary(TypedDict, total=False):
     vo2max: float
     training_load: float
     load_model: str
+    training_effect_label: str
+    training_effect_load: float
     power_zone_times: list[dict[str, Any]]
     heart_rate_zone_times: list[dict[str, Any]]
     pace_zone_times: list[dict[str, Any]]

@@ -9,6 +9,7 @@ from canonical_detail_support import add_session_record, open_manager
 
 from backend.canonical.vocabulary import ProviderId
 from backend.http_api.activity_assembly import ActivityReadAssembly, ActivityReadSources
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 
 TODAY = date(2026, 9, 20)
 ENVELOPE_KEYS = ("activity_feedback", "equipment", "activity_validation")
@@ -94,7 +95,7 @@ class DetailEnvelopeTests(unittest.TestCase):
 
     def detail(self, activity_id):
         return self.assembly.activity_read().detail(
-            activity_id, garmin_snapshot={}, profile={}, today=TODAY
+            activity_id, garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=TODAY
         )
 
     def test_envelope_is_filled_for_intervals_garmin_and_wahoo_sessions(self):

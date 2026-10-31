@@ -24,6 +24,7 @@ from backend.coach import context as coach_context
 from backend.coach import limits as coach_limits
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.performance.context import current_performance_context
+from backend.performance.freshness import GarminSyncStatus
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import (
     adaptive_preview_service,
@@ -3443,8 +3444,7 @@ class ServerPlanningTests(ServerTestCase):
             "recent_activities": [],
         }
         comparisons = current_performance_context(
-            snapshot,
-            read_garmin(),
+            GarminSyncStatus.from_state(read_garmin()),
             server.ATHLETE_DATA.profile().get(),
             today,
             canonical=canonical_from_snapshot(snapshot, today),

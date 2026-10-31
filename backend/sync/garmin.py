@@ -23,6 +23,7 @@ from backend.db.repositories import KeyValueRepository
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance import garmin_observations
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.history import append_garmin_performance_history
 from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_hr
 from backend.providers.descriptors import GARMIN_ID
@@ -277,6 +278,17 @@ class GarminPayloadService:
         """Read ``recent_view`` inside the caller's transaction."""
         start = (self._local_today() - timedelta(days=max(1, days) - 1)).isoformat()
         return garmin_store.read_view(db, None, start=start)
+
+    def sync_status(self) -> GarminSyncStatus:
+        """Return the stored Garmin sync status; no section or value is read."""
+        with self._database_manager.reader() as db:
+            return self.sync_status_in(db)
+
+    def sync_status_in(self, db: Any) -> GarminSyncStatus:
+        """Read ``sync_status`` inside the caller's transaction."""
+        return GarminSyncStatus.from_state(
+            garmin_store.read_state(db), stored_sections=garmin_store.section_names(db)
+        )
 
     def automatic_sync_days(self, minimum_days: int) -> int:
         return self.automatic_sync_window(minimum_days)[0]

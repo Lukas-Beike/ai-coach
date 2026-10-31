@@ -1,7 +1,7 @@
 import copy
 import unittest
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from canonical_recovery_support import (
     recovery_inputs,
@@ -10,13 +10,17 @@ from canonical_recovery_support import (
 )
 from performance_day_support import canonical_from_snapshot
 
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.coverage import ProviderCoverage
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
     PENDING_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
+    CanonicalPerformanceSource,
+    with_read_status,
 )
 from backend.performance.context import current_performance_context
+from backend.performance.freshness import GarminSyncStatus
 
 
 class PerformanceContextTests(unittest.TestCase):
@@ -30,7 +34,10 @@ class PerformanceContextTests(unittest.TestCase):
         }
         for snapshot in (None, {}):
             result = current_performance_context(
-                snapshot, {}, {}, date(2026, 9, 20), canonical=EMPTY_PERFORMANCE_INPUTS
+                GarminSyncStatus.from_state({}),
+                {},
+                date(2026, 9, 20),
+                canonical=EMPTY_PERFORMANCE_INPUTS,
             )
             recovery = result.pop("personal_recovery")
             focus = result.pop("training_focus")
@@ -109,8 +116,7 @@ class PerformanceContextTests(unittest.TestCase):
         # Athlete settings, recovery and Garmin values come only from canonical
         # observations (#1411, #1415); map the fixtures.
         result = current_performance_context(
-            snapshot,
-            garmin,
+            GarminSyncStatus.from_state(garmin),
             {},
             today,
             canonical=recovery_only_inputs(
@@ -122,8 +128,9 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual(
             result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
         )
-        # The stored snapshot's sync status names the sync time.
-        self.assertEqual(result["as_of"], snapshot["synced_at"])
+        # Canonical reads (#1416): the canonical Intervals.icu sync instant, in
+        # ISO form, replaces the stored snapshot's sync text.
+        self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
         self.assertFalse(result["activities_need_refresh"])
         self.assertEqual(result["thresholds"]["ftp_w"], 300)
         # Form and ramp rate come from canonical observations only (#1412): the
@@ -143,7 +150,6 @@ class PerformanceContextTests(unittest.TestCase):
 
     def test_garmin_source_freshness_and_daily_health_window_are_explicit(self):
         today = date(2026, 9, 20)
-        snapshot = {"recent_wellness": [], "recent_activities": []}
         garmin = {
             "sleep": [
                 {
@@ -171,7 +177,10 @@ class PerformanceContextTests(unittest.TestCase):
         }
 
         result = current_performance_context(
-            snapshot, garmin, {}, today, canonical=recovery_only_inputs(garmin)
+            GarminSyncStatus.from_state(garmin),
+            {},
+            today,
+            canonical=recovery_only_inputs(garmin),
         )
 
         self.assertEqual(result["metrics"]["steps_7d"]["value"], 100)
@@ -209,8 +218,7 @@ class PerformanceContextTests(unittest.TestCase):
         )
 
         result = current_performance_context(
-            snapshot,
-            garmin,
+            GarminSyncStatus.from_state(garmin),
             profile,
             today,
             canonical=canonical_from_snapshot(snapshot, today),
@@ -234,8 +242,7 @@ class PerformanceContextTests(unittest.TestCase):
             "recent_activities": [None, "bad", {"type": "Unknown"}],
         }
         result = current_performance_context(
-            snapshot,
-            {},
+            GarminSyncStatus.from_state({}),
             {},
             date(2026, 9, 20),
             canonical=canonical_from_snapshot(snapshot, date(2026, 9, 20)),
@@ -260,10 +267,13 @@ class PerformanceContextTests(unittest.TestCase):
             wellness_day=None, ctl=None, atl=None, recovery=recovery_inputs(nights)
         )
 
-        result = current_performance_context(None, {}, {}, today, canonical=canonical)
+        result = current_performance_context(
+            GarminSyncStatus.from_state({}), {}, today, canonical=canonical
+        )
         raw_only = current_performance_context(
-            None,
-            {"resting_hr": [{"calendarDate": "2026-09-20", "restingHR": 50}]},
+            GarminSyncStatus.from_state(
+                {"resting_hr": [{"calendarDate": "2026-09-20", "restingHR": 50}]}
+            ),
             {},
             today,
             canonical=EMPTY_PERFORMANCE_INPUTS,
@@ -294,7 +304,10 @@ class PerformanceContextTests(unittest.TestCase):
         }
 
         result = current_performance_context(
-            None, garmin, {}, today, canonical=recovery_only_inputs(garmin)
+            GarminSyncStatus.from_state(garmin),
+            {},
+            today,
+            canonical=recovery_only_inputs(garmin),
         )
 
         self.assertTrue(result["available"])
@@ -312,10 +325,12 @@ class PerformanceContextTests(unittest.TestCase):
             "sleep": [{"calendarDate": today.isoformat(), "sleepScore": 90}],
             "resting_hr": [{"calendarDate": today.isoformat(), "restingHR": 47}],
         }
-        snapshot = {"synced_at": "2026-09-20T08:00:00Z", "recent_wellness": []}
 
         result = current_performance_context(
-            snapshot, garmin, {}, today, canonical=PENDING_PERFORMANCE_INPUTS
+            GarminSyncStatus.from_state(garmin),
+            {},
+            today,
+            canonical=PENDING_PERFORMANCE_INPUTS,
         )
 
         self.assertFalse(result["available"])
@@ -333,11 +348,10 @@ class PerformanceContextTests(unittest.TestCase):
         canonical = replace(recovery_only_inputs(garmin), activities_need_refresh=True)
 
         result = current_performance_context(
-            None, garmin, {}, today, canonical=canonical
+            GarminSyncStatus.from_state(garmin), {}, today, canonical=canonical
         )
         empty = current_performance_context(
-            None,
-            {},
+            GarminSyncStatus.from_state({}),
             {},
             today,
             canonical=replace(EMPTY_PERFORMANCE_INPUTS, activities_need_refresh=True),
@@ -357,31 +371,42 @@ class PerformanceContextTests(unittest.TestCase):
             wellness_day=None, ctl=None, atl=None, activities=(), wellness_days=()
         )
 
-        result = current_performance_context(None, {}, {}, today, canonical=nothing)
+        result = current_performance_context(
+            GarminSyncStatus.from_state({}), {}, today, canonical=nothing
+        )
 
         self.assertFalse(result["available"])
         self.assertNotIn("status", result)
 
-    def test_sync_time_without_athlete_record_values_comes_from_the_snapshot(self):
+    def test_sync_time_without_athlete_record_values_comes_from_the_coverage(self):
+        # Canonical reads (#1416): a sync that stores wellness but no athlete
+        # record observation still names its sync: the Intervals.icu fetch time of
+        # the canonical coverage, the one sync time reports use too.
         today = date(2026, 9, 20)
-        # The athlete record has none of the sync-instant fields, so the canonical
-        # current inputs carry no sync time.
-        snapshot = {
-            "synced_at": "2026-09-20T08:00:00Z",
-            "athlete": {},
-            "recent_wellness": [{"id": today.isoformat(), "ctl": 40, "atl": 42}],
-        }
+        snapshot = {"recent_wellness": [{"id": today.isoformat(), "ctl": 40}]}
         canonical = canonical_from_snapshot(snapshot, today)
+        assert canonical is not None
         self.assertIsNone(canonical.current.synced_at)
-
-        with_snapshot = current_performance_context(
-            snapshot, {}, {}, today, canonical=canonical
+        coverage = _IntervalsCoverage(datetime(2026, 9, 20, 8, tzinfo=UTC))
+        source = CanonicalPerformanceSource(
+            database_manager=lambda: None,
+            observation_reader=lambda: None,  # type: ignore[arg-type, return-value]
+            coverage=lambda: coverage,
         )
-        without = current_performance_context(None, {}, {}, today, canonical=canonical)
 
-        self.assertEqual(with_snapshot["as_of"], "2026-09-20T08:00:00Z")
+        served = with_read_status(source, None, canonical)
+        assert served is not None
+        result = current_performance_context(
+            GarminSyncStatus(), {}, today, canonical=served
+        )
+        without = current_performance_context(
+            GarminSyncStatus(), {}, today, canonical=canonical
+        )
+
+        self.assertEqual(served.intervals_synced_at, "2026-09-20T08:00:00+00:00")
+        self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
         self.assertEqual(
-            with_snapshot["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
+            result["source"], "Letzter gespeicherter Intervals.icu-Snapshot"
         )
         self.assertTrue(without["available"])
         self.assertIsNone(without["as_of"])
@@ -395,10 +420,12 @@ class PerformanceContextTests(unittest.TestCase):
                 "hrv": {"freshness": "stale", "observed_at": "2026-09-07"}
             },
         }
-        snapshot = {"recent_wellness": [{"id": "2026-09-07"}], "recent_activities": []}
 
         recovery = current_performance_context(
-            snapshot, garmin, {}, today, canonical=recovery_only_inputs(garmin)
+            GarminSyncStatus.from_state(garmin),
+            {},
+            today,
+            canonical=recovery_only_inputs(garmin),
         )["recovery"]
 
         self.assertEqual(recovery["hrv_ms_source"], "Garmin Connect (Wochenmittel)")
@@ -420,7 +447,10 @@ class PerformanceContextTests(unittest.TestCase):
             ],
         }
         result = current_performance_context(
-            snapshot, {}, {}, today, canonical=canonical_from_snapshot(snapshot, today)
+            GarminSyncStatus.from_state({}),
+            {},
+            today,
+            canonical=canonical_from_snapshot(snapshot, today),
         )
 
         def keys(value):
@@ -445,3 +475,26 @@ class PerformanceContextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _IntervalsCoverage:
+    """Canonical coverage with one Intervals.icu fetch time and no metric windows."""
+
+    def __init__(self, retrieved_at: datetime) -> None:
+        self._retrieved_at = retrieved_at
+
+    def coverage(self, db):
+        return (
+            ProviderCoverage(
+                provider=ProviderId.INTERVALS,
+                retrieved_at=self._retrieved_at,
+                activity_count=0,
+                observation_count=1,
+                issue_counts={},
+                first_observed_on=None,
+                last_observed_on=None,
+            ),
+        )
+
+    def metric_windows(self, db):
+        return ()

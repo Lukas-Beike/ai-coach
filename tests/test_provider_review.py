@@ -20,6 +20,7 @@ from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
 from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import history as performance_history
+from backend.performance.freshness import GarminSyncStatus
 from backend.providers import garmin as garmin_provider
 from backend.providers.garmin import (
     GarminCollectionOptions,
@@ -545,8 +546,7 @@ class ProviderReviewTests(unittest.TestCase):
             )
             garmin = read_garmin()
             public = performance_context.current_performance_context(
-                server.SYNC_PERSISTENCE.state_repository().latest_snapshot(),
-                garmin,
+                GarminSyncStatus.from_state(garmin),
                 server.ATHLETE_DATA.profile().get(),
                 server.ATHLETE_CLOCK.now().date(),
                 # Recovery values come only from observations (#1411).

@@ -12,6 +12,7 @@ from backend.coach.context import (
     CoachPlanningContextReader,
     CoachStructuredContextService,
 )
+from backend.performance.freshness import GarminSyncStatus
 from backend.planning.compact_activities import ActivitySummarySource
 
 # The coverage time is deliberately not the snapshot's own `synced_at`.
@@ -51,8 +52,6 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
             "name": "Public event",
             "training_relevant": 1,
         }
-        self.sync_state_repository = Mock()
-        self.sync_state_repository.latest_snapshot.return_value = self.snapshot
         self.checkin_service = Mock()
         self.checkin_service.context.return_value = {
             "recent": [{"date": "2026-09-22", "mood": "good"}]
@@ -85,16 +84,10 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         }
         self.adaptive_replan_preview_service.status.return_value = {"available": False}
         self.garmin_payload_service = Mock()
-        self.garmin_payload_service.recent_view.return_value = {
-            "source": "garmin",
-            "sleep": [],
-            "hrv": [],
-            "resting_hr": [],
-        }
+        self.garmin_payload_service.sync_status.return_value = GarminSyncStatus()
         self.garmin_projection_service = Mock()
         self.garmin_projection_service.coach_context.return_value = {"recovery": {}}
         self.service = CoachStructuredContextService(
-            self.sync_state_repository,
             self.checkin_service,
             self.weather_service,
             self.activity_feedback_service,
@@ -127,13 +120,14 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
     ) -> None:
         result = self.service.build()
 
-        self.sync_state_repository.latest_snapshot.assert_called_once_with()
+        # Canonical reads (#1416): the service takes no snapshot reader, and without
+        # a canonical Intervals.icu sync the Garmin performance fallback is requested.
         self.planned_unit_service.list.assert_called_once_with(250, future_only=True)
         self.weather_service.state.assert_called_once_with(
             self.planned_unit_service.list.return_value, refresh=False
         )
         self.garmin_projection_service.coach_context.assert_called_once_with(
-            include_performance=False
+            include_performance=True
         )
         # No canonical source is wired here, so there are no canonical values.
         self.assertEqual(result["current_performance"]["available"], False)
@@ -180,32 +174,20 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
             "Vom Athleten bestätigte Werte, lokal in SQLite gespeichert",
         )
 
-    def test_explicit_snapshot_is_used_without_fallback_and_empty_snapshot_enables_garmin_fallback(
-        self,
-    ) -> None:
-        explicit = {
-            "synced_at": "explicit",
-            "recent_activities": [],
-            "raw_secret": "hidden",
-        }
-        result = self.service.build(explicit)
+    def test_daily_context_gets_the_planned_units_and_no_snapshot(self) -> None:
+        # Canonical reads (#1416): the daily planning context takes no snapshot.
+        result = self.service.build()
 
-        self.sync_state_repository.latest_snapshot.assert_not_called()
         self.daily_planning_context_service.build.assert_called_once()
         self.assertIs(
-            self.daily_planning_context_service.build.call_args.args[0], explicit
+            self.daily_planning_context_service.build.call_args.args[0],
+            self.planned_unit_service.list.return_value,
         )
         self.assertFalse(result["recovery"].get("performance"))
-
-        self.garmin_projection_service.coach_context.reset_mock()
-        empty_result = self.service.build({})
-        self.garmin_projection_service.coach_context.assert_called_once_with(
-            include_performance=True
-        )
-        self.assertFalse(empty_result["current_performance"]["available"])
+        self.assertFalse(result["current_performance"]["available"])
 
     def test_preserves_intended_repeated_reads_and_source_labels(self) -> None:
-        self.service.build(self.snapshot)
+        self.service.build()
 
         self.assertEqual(self.competition_service.list.call_count, 3)
         self.assertEqual(self.profile_service.get.call_count, 2)
@@ -222,7 +204,7 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
             self.training_plan_service.list.call_args.kwargs, {"limit": 100}
         )
         self.assertEqual(
-            self.daily_planning_context_service.build.call_args.args[3],
+            self.daily_planning_context_service.build.call_args.args[2],
             self.checkin_service.context.return_value["recent"],
         )
 

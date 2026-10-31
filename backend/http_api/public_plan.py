@@ -182,7 +182,6 @@ class PublicPlanStateService:
                 window_days=self._external_calendar_window_days,
             ),
             "daily_planning_context": self._daily_context.build(
-                snapshot,
                 canonical_planned,
                 weather,
                 self._checkins.list(365),

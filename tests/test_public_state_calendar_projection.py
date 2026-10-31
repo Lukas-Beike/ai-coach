@@ -103,7 +103,6 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
             (
                 "daily_context",
                 (
-                    snapshot,
                     canonical_planned,
                     weather,
                     checkins,
@@ -111,7 +110,7 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
                 ),
             ),
         )
-        self.assertIs(calls[5][1][1], canonical_planned)
+        self.assertIs(calls[5][1][0], canonical_planned)
         project_calendar.assert_called_once_with(
             local_planned,
             activities,

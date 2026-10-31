@@ -204,12 +204,11 @@ class CoachZoneTests(unittest.TestCase):
             Mock(),
             Mock(),
             Mock(),
-            Mock(),
             performance,
             zone_configurations=provider_configurations,
             today=lambda: date(2026, 10, 12),
         )
-        current = service._current_performance({}, None)
+        current = service._current_performance(None)
         self.assertEqual(current["ftp"], 260)
         self.assertIn(
             {"sport": "run", "metric": "pace", "source": "intervals"},

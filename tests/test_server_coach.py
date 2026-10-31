@@ -25,6 +25,7 @@ from backend.coach.context import (
 from backend.coach.morning import ManualMorningCheckinService
 from backend.coach.proposal_validation import validated_coach_action_preview_input
 from backend.http_api import server as http_server_module
+from backend.performance.freshness import GarminSyncStatus
 from backend.planning import competitions as planning_competitions
 from backend.providers import openai as openai_provider
 from backend.runtime import clock as runtime_clock
@@ -328,7 +329,7 @@ class ServerCoachTests(ServerTestCase):
         with self.assertRaises(server.AppError) as missing:
             server.ACTIVITY_READS.activity_read().detail(
                 "activity-3",
-                garmin_snapshot=read_garmin(),
+                garmin_status=GarminSyncStatus.from_state(read_garmin()),
                 profile=server.ATHLETE_DATA.profile().get(),
                 today=server.ATHLETE_CLOCK.now().date(),
             )
@@ -758,10 +759,13 @@ class ServerCoachTests(ServerTestCase):
         # Saving writes the canonical rows too; Garmin values are read only from
         # them (#1415), so the context reads the stored snapshot as production does.
         save_garmin(payload)
+        # Canonical reads (#1416): the Intervals.icu sync in the canonical
+        # coverage, here one without athlete-record values, turns the Garmin
+        # performance fallback off.
         store_canonical_snapshot(
             server,
             {
-                "synced_at": "now",
+                "synced_at": "2026-10-11T07:00:00+00:00",
                 "athlete": {},
                 "recent_activities": [],
                 "recent_wellness": [],

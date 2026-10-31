@@ -316,7 +316,7 @@ class TrainingReportReadService:
     def __init__(
         self,
         *,
-        read_snapshot: Callable[[], Any],
+        read_synced_at: Callable[[Any], str | None],
         read_plan: Callable[[], Any],
         read_checkins: Callable[[], Any],
         read_feedback: Callable[[], list[dict[str, Any]]],
@@ -325,7 +325,7 @@ class TrainingReportReadService:
         season_source: SeasonSource,
         canonical: CanonicalPerformanceSource,
     ) -> None:
-        self._read_snapshot = read_snapshot
+        self._read_synced_at = read_synced_at
         self._read_plan = read_plan
         self._read_checkins = read_checkins
         self._read_feedback = read_feedback
@@ -341,12 +341,12 @@ class TrainingReportReadService:
             raise AppError(400, "Das Szenario muss ein Objekt sein.")
         today = self._today()
         with self._season_source.database_manager().read_snapshot() as db:
-            snapshot = self._read_snapshot()
+            synced_at = self._read_synced_at(db)
             inputs = read_season_load_inputs(
                 self._season_source, db, today=today, timezone=timezone
             )
         return self._load_scenarios(
-            snapshot or {},
+            synced_at,
             self._read_plan() or {},
             today,
             values,
@@ -428,14 +428,14 @@ class TrainingSeasonReadService:
     def __init__(
         self,
         *,
-        read_snapshot: Callable[[], Any],
+        read_synced_at: Callable[[Any], str | None],
         read_competitions: Callable[[], list[dict[str, Any]]],
         read_observations: Callable[[], list[dict[str, Any]]],
         today: Callable[[], date],
         season_preparation: Callable[..., dict[str, Any]],
         season_source: SeasonSource,
     ) -> None:
-        self._read_snapshot = read_snapshot
+        self._read_synced_at = read_synced_at
         self._read_competitions = read_competitions
         self._read_observations = read_observations
         self._today = today
@@ -445,7 +445,7 @@ class TrainingSeasonReadService:
     def season(self, timezone: str = "UTC") -> dict[str, Any]:
         with self._season_source.database_manager().read_snapshot() as db:
             return self._season_preparation(
-                self._read_snapshot() or {},
+                self._read_synced_at(db),
                 self._read_competitions(),
                 self._today(),
                 timezone,

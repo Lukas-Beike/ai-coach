@@ -180,14 +180,19 @@ def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -
 
     Stands in for a sync of the snapshot: it is saved as given, its activity rows
     are ingested into the canonical tables (the raw rows, or else the compact rows
-    as their synthetic stand-in) and the backfill runs to completion, so reads come
-    from the tables. A snapshot without a usable sync time is ingested at the
-    current instant; the stored snapshot keeps its own value.
+    as their synthetic stand-in), its canonical coverage is stored as a sync stores
+    it, and the backfill runs to completion, so reads come from the tables. A
+    snapshot without a usable sync time is ingested at the current instant; the
+    stored snapshot keeps its own value.
     """
     from zoneinfo import ZoneInfo
 
     from backend.athlete.profile import timezone_name
     from backend.providers.snapshot_projection import stored_retrieved_at
+    from backend.sync.canonical_coverage_store import (
+        CanonicalCoverageStore,
+        intervals_snapshot_coverage,
+    )
     from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
 
     server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot, **options)
@@ -204,6 +209,9 @@ def store_canonical_snapshot(server, snapshot: dict[str, Any], **options: Any) -
         ingested["synced_at"] = runtime_clock.utc_now()
     with server.DB_LOCK, server.database_manager().unit_of_work() as db:
         ingest_intervals_partial_snapshot(db, ingested, zone=zone)
+        CanonicalCoverageStore(server.KEY_VALUE_REPOSITORY).persist(
+            db, intervals_snapshot_coverage(ingested, zone=zone), zone=zone
+        )
     complete_canonical_backfill(server)
 
 

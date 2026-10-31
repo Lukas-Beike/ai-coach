@@ -37,6 +37,7 @@ from backend.http_api import auth as http_auth
 from backend.performance.body import body_history
 from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.performance.wellness_days import wellness_day_values
 from backend.providers.calendar import parse_ical_calendar
@@ -148,8 +149,7 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         )
         metrics = garmin_payload_performance_metrics(garmin, self.today)
         history = analysis_history(
-            {},
-            garmin,
+            GarminSyncStatus.from_state(garmin),
             self.today,
             canonical=garmin_inputs_from_payload(
                 garmin, self.today, EMPTY_PERFORMANCE_INPUTS
@@ -279,8 +279,8 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
             (r for r in mapped.records if r.kind is MetricKind.EFTP), sport=Sport.RIDE
         )
         result = body_history(
-            snapshot,
-            garmin,
+            (snapshot or {}).get("synced_at"),
+            GarminSyncStatus.from_state(garmin),
             self.today,
             eftp_by_day=eftp_by_day,
             wellness_days=days_from_rows(wellness),
