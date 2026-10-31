@@ -1,4 +1,4 @@
-"""Persistence owner for canonical sleep, zone, provider status and gear rows.
+"""Persistence owner for canonical sleep, zone, status, gear and power curve rows.
 
 Every function writes through the connection of the caller's unit of work, which
 returns mapping rows, and never commits. A provider re-projection replaces the
@@ -20,6 +20,7 @@ from backend.canonical.domain_records import (
     CategoricalObservation,
     GearActivityLink,
     GearItem,
+    PowerCurvePoint,
     SleepPeriod,
     ZoneConfiguration,
 )
@@ -125,6 +126,20 @@ _GEAR_LINKS: Final = _Table(
     "gear_activity_links",
     ("provider", "gear_id", "provider_activity_id"),
     _PROVENANCE_COLUMNS,
+)
+_POWER_CURVE: Final = _Table(
+    "power_curve_points",
+    ("provider", "duration_s"),
+    (
+        "watts",
+        "observed_on",
+        "provider_activity_id",
+        "window_start",
+        "window_end",
+        "fetch_status",
+        *_PROVENANCE_COLUMNS,
+        "details",
+    ),
 )
 
 
@@ -309,7 +324,14 @@ def replace_gear_activity_links(
     )
 
 
-_SOURCE_TABLES: Final = (_SLEEP, _CATEGORICAL, _ZONES, _GEAR, _GEAR_LINKS)
+_SOURCE_TABLES: Final = (
+    _SLEEP,
+    _CATEGORICAL,
+    _ZONES,
+    _GEAR,
+    _GEAR_LINKS,
+    _POWER_CURVE,
+)
 
 
 def replace_source_rows(
@@ -324,6 +346,7 @@ def replace_source_rows(
     zones: Sequence[ZoneConfiguration] = (),
     gear_items: Sequence[GearItem] = (),
     gear_links: Sequence[GearActivityLink] = (),
+    power_curve: Sequence[PowerCurvePoint] = (),
 ) -> ReplaceResult:
     """Replace every domain row of one provider source record, in every table.
 
@@ -375,6 +398,15 @@ def replace_source_rows(
                 for link in gear_links
             ],
         ),
+        (
+            _POWER_CURVE,
+            [
+                _power_curve_row(
+                    require_instance(point, PowerCurvePoint, "point"), mapper_version
+                )
+                for point in power_curve
+            ],
+        ),
     )
     results = [
         _replace(
@@ -401,7 +433,7 @@ def retire_source_rows(
         _replace(
             db, table, [], provider=provider, source_record_id=source_record_id, now=now
         ).retired
-        for table in (_SLEEP, _CATEGORICAL, _ZONES, _GEAR, _GEAR_LINKS)
+        for table in _SOURCE_TABLES
     )
 
 
@@ -454,6 +486,11 @@ def active_gear_link_rows(db: Any) -> list[dict[str, Any]]:
     return _active_rows(
         db, _GEAR_LINKS, [], [], "provider, gear_id, provider_activity_id"
     )
+
+
+def active_power_curve_rows(db: Any) -> list[dict[str, Any]]:
+    """Return the active power curve rows by provider and duration."""
+    return _active_rows(db, _POWER_CURVE, [], [], "provider, duration_s")
 
 
 def zone_configuration_export_rows(db: Any) -> Iterable[dict[str, Any]]:
@@ -716,4 +753,18 @@ def _gear_link_row(link: GearActivityLink, mapper_version: int) -> dict[str, obj
         **_provenance_values(link.provenance, mapper_version),
         "gear_id": link.gear_id,
         "provider_activity_id": link.provider_activity_id,
+    }
+
+
+def _power_curve_row(point: PowerCurvePoint, mapper_version: int) -> dict[str, object]:
+    return {
+        **_provenance_values(point.provenance, mapper_version),
+        "duration_s": point.duration_s,
+        "watts": point.watts,
+        "observed_on": point.observed_on.isoformat(),
+        "provider_activity_id": point.provider_activity_id,
+        "window_start": point.window_start.isoformat(),
+        "window_end": point.window_end.isoformat(),
+        "fetch_status": point.fetch_status,
+        "details": _details(point.provenance),
     }

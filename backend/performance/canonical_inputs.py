@@ -15,6 +15,7 @@ from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.sync_time import activities_synced_at
+from backend.canonical.domain_records import PowerCurvePoint
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance import wellness_days
@@ -46,6 +47,7 @@ from backend.runtime.ports import (
     CanonicalReadStatus,
     ObservationReader,
     ObservationSourceSelector,
+    PowerCurveReader,
     ProviderCoverageReader,
     SleepPeriodReader,
 )
@@ -72,6 +74,8 @@ class CanonicalPerformanceInputs:
     Intervals.icu wellness-day form and sport-scoped eFTP series.
     ``ramp_rate`` is the latest wellness day's CTL minus the CTL of exactly seven
     days earlier, rounded to two decimals, or None when either day is missing.
+    ``power_curve`` holds the stored best power per duration, by provider and
+    duration; it is empty when none is stored or it was not read.
 
     ``pending`` is True while the canonical source serves nothing yet (the first
     backfill has not completed); every value is then empty.
@@ -95,6 +99,7 @@ class CanonicalPerformanceInputs:
     run_eftp_by_day: Mapping[date, float] | None = None
     ramp_rate: float | None = None
     body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
+    power_curve: tuple[PowerCurvePoint, ...] = ()
     pending: bool = False
     activities_need_refresh: bool = False
 
@@ -318,6 +323,12 @@ class ReadOnceObservationReader:
             return ()
         return self._reader.activity_max_hr(db, provider, low=low, high=high)
 
+    def power_curve(self, db: Any) -> tuple[PowerCurvePoint, ...]:
+        """Forward the power curve read; none for a source without it."""
+        if not isinstance(self._reader, PowerCurveReader):
+            return ()
+        return self._reader.power_curve(db)
+
     def observations(
         self,
         db: Any,
@@ -372,6 +383,7 @@ class _CarriedRows:
     form_by_day: Mapping[date, float]
     eftp_by_day: Mapping[date, float]
     run_eftp_by_day: Mapping[date, float]
+    power_curve: tuple[PowerCurvePoint, ...]
 
     def inputs(
         self,
@@ -398,6 +410,7 @@ class _CarriedRows:
             eftp_by_day=self.eftp_by_day,
             run_eftp_by_day=self.run_eftp_by_day,
             ramp_rate=ramp_rate,
+            power_curve=self.power_curve,
         )
 
 
@@ -448,6 +461,7 @@ def read_performance_inputs(
             reader.observations(db, MetricKind.EFTP, sport=Sport.RUN),
             sport=Sport.RUN,
         ),
+        power_curve=reader.power_curve(db),
     )
     if latest_day is None:
         return carried.inputs(

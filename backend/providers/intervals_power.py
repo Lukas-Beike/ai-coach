@@ -6,6 +6,7 @@ from typing import Any
 from backend.errors import AppError
 
 PROFILE_DURATIONS = (5, 60, 300, 1200, 3600)
+POWER_CURVE_LABEL = "Intervals.icu gemessene Leistungskurve"
 
 
 def _curve_day(curve: dict[str, Any], start: date, end: date) -> date | None:
@@ -57,7 +58,7 @@ def cycling_power_points(payload: Any, start: date, end: date) -> list[dict[str,
                     "watts": value,
                     "date": day.isoformat(),
                     "activity_id": str(curve.get("id") or "")[:200],
-                    "source": "Intervals.icu gemessene Leistungskurve",
+                    "source": POWER_CURVE_LABEL,
                     "status": "ok",
                 }
     return [best[key] for key in sorted(best)]

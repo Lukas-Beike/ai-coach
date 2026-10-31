@@ -10,10 +10,10 @@ row, live or deleted. A row that already exists counts as ``already_present``. A
 new activity gets a single-link session, as in ``upsert_activity_record``. Backfill
 never deletes. A snapshot without ``raw_provider_data`` is not mapped, because its
 ``recent_activities`` fallback is a compact read model with no mapper; such a
-snapshot counts as ``skipped_invalid``. The sleep, status, zone and gear rows of a
-raw record (its domain batch) are inserted only when that source record has no domain
-row at all, active or retired; otherwise the batch counts as ``already_present``. An
-empty batch inserts nothing and counts nothing.
+snapshot counts as ``skipped_invalid``. The sleep, status, zone, gear and power curve
+rows of a raw record (its domain batch) are inserted only when that source record has
+no domain row at all, active or retired; otherwise the batch counts as
+``already_present``. An empty batch inserts nothing and counts nothing.
 
 Supersession: the newest snapshot present when the run starts is the only one that
 may insert activities. Its activities and their raw ``activity`` records are inserted
@@ -711,6 +711,7 @@ def _replace_domain_rows(
         zones=batch.zones,
         gear_items=batch.gear_items,
         gear_links=batch.gear_links,
+        power_curve=batch.power_curve,
     ).retired
 
 
@@ -905,6 +906,7 @@ def _write_ingest(
                 zones=value.zones,
                 gear_items=value.gear_items,
                 gear_links=value.gear_links,
+                power_curve=value.power_curve,
             )
     else:
         inserted = canonical_store.insert_observation_if_absent(

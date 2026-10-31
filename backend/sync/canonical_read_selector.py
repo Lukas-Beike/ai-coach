@@ -43,7 +43,7 @@ from typing import Any, Final
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
-from backend.canonical.domain_records import SleepPeriod
+from backend.canonical.domain_records import PowerCurvePoint, SleepPeriod
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.db.repositories import KeyValueRepository
@@ -120,6 +120,10 @@ class _PendingReader:
         self, db: Any, *, start: date | None = None, end: date | None = None
     ) -> tuple[SleepPeriod, ...]:
         del start, end, db
+        return ()
+
+    def power_curve(self, db: Any) -> tuple[PowerCurvePoint, ...]:
+        del db
         return ()
 
     def metric_windows(self, db: Any) -> tuple[MetricWindow, ...]:

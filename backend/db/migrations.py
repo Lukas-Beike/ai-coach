@@ -15,12 +15,14 @@ from typing import Any, Final
 
 from backend.db.garmin_items_migration import split_garmin_snapshot
 from backend.db.planning_fields_migration import rename_planning_fields_in_database
+from backend.db.power_curve_migration import copy_power_curve_to_raw_record
 from backend.db.schema import (
     ACTIVITY_DETAIL_DDL,
     CANONICAL_EXTENSIONS_DDL,
     CURRENT_SCHEMA_VERSION,
     FOOD_DATABASE_DDL,
     NUTRITION_PRODUCTS_DDL,
+    POWER_CURVE_DDL,
     database_schema_is_current,
     database_schema_signature,
     execute_ddl,
@@ -35,6 +37,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V13,
     SHAPE_SCHEMA_V14,
     SHAPE_SCHEMA_V15,
+    SHAPE_SCHEMA_V16,
     released_shape,
 )
 
@@ -203,6 +206,13 @@ def _upgrade_v15_to_v16(db: Any) -> None:
     rename_planning_fields_in_database(db)
 
 
+def _upgrade_v16_to_v17(db: Any) -> None:
+    # Adds the canonical power curve table, then keeps the stored curve as a raw
+    # record the backfill projects (see power_curve_migration); no row changes.
+    execute_ddl(db, POWER_CURVE_DDL)
+    copy_power_curve_to_raw_record(db)
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V9: (SHAPE_SCHEMA_V10, _upgrade_v9_to_v10),
     SHAPE_SCHEMA_V10: (SHAPE_SCHEMA_V11, _upgrade_v10_to_v11),
@@ -210,5 +220,6 @@ UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V12: (SHAPE_SCHEMA_V13, _upgrade_v12_to_v13),
     SHAPE_SCHEMA_V13: (SHAPE_SCHEMA_V14, _upgrade_v13_to_v14),
     SHAPE_SCHEMA_V14: (SHAPE_SCHEMA_V15, _upgrade_v14_to_v15),
-    SHAPE_SCHEMA_V15: (SHAPE_CURRENT, _upgrade_v15_to_v16),
+    SHAPE_SCHEMA_V15: (SHAPE_SCHEMA_V16, _upgrade_v15_to_v16),
+    SHAPE_SCHEMA_V16: (SHAPE_CURRENT, _upgrade_v16_to_v17),
 }

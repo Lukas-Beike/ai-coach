@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v16 (v15 is the released canonical-extension schema); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v17 (v16 is the released planning-field schema); canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,17 +28,17 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from schema v9 through released v15 and the current schema v16, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from schema v9 through released v16 and the current schema v17, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Skipped-release upgrade
 - **WHEN** a populated released v9 database is opened by this build
 - **THEN** all intermediate migrations run to the exact current schema while preserving existing rows.
 
 #### Scenario: Later supported release
-- **WHEN** a populated v10, v11, v12, v13, v14 or v15 database is opened
+- **WHEN** a populated v10, v11, v12, v13, v14, v15 or v16 database is opened
 - **THEN** only remaining upgrade steps run and existing data remains intact.
 
-Evidence baseline: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py`. The outgoing v15 fixture is frozen (`tests/test_db_migrations.py::test_frozen_v15_fixture_is_the_recorded_released_shape`); freeze v16 before changing the live shape again.
+Evidence baseline: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py`. The outgoing v16 fixture is frozen (`tests/test_db_migrations.py::test_frozen_v16_fixture_is_the_recorded_released_shape`); freeze v17 before changing the live shape again.
 
 ### Requirement: Unknown schema preservation
 
@@ -176,3 +176,24 @@ The v15 to v16 upgrade SHALL rename the stored start and planned duration of loc
 - **THEN** the database returns to the unchanged v15 or v9 schema and rows.
 
 Evidence: `backend/db/planning_fields_migration.py::rename_planning_fields_in_database`; `backend/db/migrations.py::_upgrade_v15_to_v16`; `backend/planning/planned_units.py::planned_unit_payload_hash`; `backend/change_history.py::accepted_audit_hashes`, `backend/change_history.py::current_audit_fields`. Tests: `tests/test_db_planning_fields_migration.py::test_populated_releases_upgrade_every_planning_record_to_the_neutral_names`; `tests/test_db_planning_fields_migration.py::test_recorded_remote_baseline_still_matches_after_the_upgrade`; `tests/test_db_planning_fields_migration.py::test_failure_after_the_rewrite_rolls_back_to_the_unchanged_release`; `tests/test_db_planning_fields_migration.py::test_upgraded_database_restarts_with_the_same_build_unchanged`; `tests/test_db_planning_fields_migration.py::test_restore_of_a_populated_v15_backup_upgrades_through_validation`; `tests/test_db_planning_fields_migration.py::PreUpgradeUndoTests`; `tests/test_db_encrypted_upgrade_matrix.py`.
+
+### Requirement: Canonical power curve upgrade
+The v16 to v17 upgrade SHALL add the canonical `power_curve_points` table in one migration transaction and keep the Intervals.icu power curve of the newest stored snapshot as one unmapped `power_curve` raw record, so the canonical backfill projects it; every other row SHALL stay unchanged.
+
+#### Scenario: Populated upgrade
+- **WHEN** a populated v9 to v16 database whose newest snapshot stores a power curve is opened
+- **THEN** the empty table is added, the curve is kept as one raw record with mapped version 0, and every other table keeps its exact rows.
+
+#### Scenario: No stored curve
+- **WHEN** no snapshot or a snapshot without a power curve is stored
+- **THEN** only the empty table is added.
+
+#### Scenario: Completed backfill before the upgrade
+- **WHEN** an installation whose backfill completed under v16 finishes its next backfill run
+- **THEN** the chart shows the same power curve points as the former snapshot read.
+
+#### Scenario: Upgrade fails partway
+- **WHEN** an injected failure follows the table creation and the raw record copy
+- **THEN** the database returns to the unchanged v16 or v9 schema and rows.
+
+Evidence: `backend/db/power_curve_migration.py::copy_power_curve_to_raw_record`; `backend/db/migrations.py::_upgrade_v16_to_v17`. Tests: `tests/test_db_power_curve_migration.py::test_every_populated_release_keeps_its_rows_and_its_newest_curve`; `tests/test_db_power_curve_migration.py::test_a_release_without_a_stored_curve_only_adds_the_empty_table`; `tests/test_db_power_curve_migration.py::test_failure_after_the_step_rolls_back_to_the_unchanged_release`; `tests/test_db_power_curve_migration.py::test_upgraded_database_restarts_with_the_same_build_unchanged`; `tests/test_db_power_curve_migration.py::test_restore_of_a_populated_v16_backup_upgrades_through_validation`; `tests/test_db_power_curve_migration.py::CompletedBackfillUpgradeTests`; `tests/test_db_encrypted_upgrade_matrix.py`.

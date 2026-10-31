@@ -1,6 +1,7 @@
 """Immutable canonical records for provider domains that are not numeric metrics.
 
-Categorical provider statuses, sleep periods, zone configurations and gear.
+Categorical provider statuses, sleep periods, zone configurations, gear and the
+best power per duration of a provider's power curve.
 Validation runs when each record is constructed, as in ``backend.canonical.records``.
 Provider records name their provider and source record, because a re-projection
 replaces the rows of one source record; none of them is derived locally.
@@ -56,6 +57,7 @@ ZONE_VALUE_BOUNDS: Final = {
 }
 MAX_GEAR_DISTANCE_M: Final = 1_000_000_000.0
 MAX_GEAR_ACTIVITIES: Final = 1_000_000
+MAX_POWER_CURVE_DURATION_S: Final = 86_400
 
 
 def _require_provider_source(provenance: object) -> Provenance:
@@ -322,3 +324,46 @@ class GearActivityLink:
         require_text(self.provider_activity_id, "provider_activity_id")
         if not _require_provider_source(self.provenance).context.is_unknown:
             raise ValueError("gear activity links have no measurement context")
+
+
+@dataclass(frozen=True, slots=True)
+class PowerCurvePoint:
+    """The best mean power over one duration within a provider's fetch window.
+
+    ``observed_on`` is the day of the best effort and ``provider_activity_id``
+    the provider activity it came from, None when the provider names none.
+    ``window_start`` and ``window_end`` bound the days the provider searched;
+    ``fetch_status`` is the outcome of the fetch that last delivered the curve,
+    such as ``ok``, or ``failed`` when a later fetch failed and the earlier best
+    efforts were kept.
+    """
+
+    duration_s: int
+    watts: float
+    observed_on: date
+    provider_activity_id: str | None
+    window_start: date
+    window_end: date
+    fetch_status: str
+    provenance: Provenance
+
+    def __post_init__(self) -> None:
+        duration = self.duration_s
+        if isinstance(duration, bool) or not isinstance(duration, int):
+            raise TypeError("duration_s must be an integer")
+        if not 1 <= duration <= MAX_POWER_CURVE_DURATION_S:
+            raise ValueError("duration_s must be between 1 and 86400")
+        object.__setattr__(
+            self,
+            "watts",
+            bounded_number(self.watts, "watts", 0.0, MAX_ACTIVITY_POWER_W),
+        )
+        require_date(self.observed_on, "observed_on")
+        optional_text(self.provider_activity_id, "provider_activity_id")
+        require_date(self.window_start, "window_start")
+        require_date(self.window_end, "window_end")
+        if not self.window_start <= self.observed_on <= self.window_end:
+            raise ValueError("observed_on must lie within the fetch window")
+        if optional_slug(self.fetch_status, "fetch_status") is None:
+            raise TypeError("fetch_status must be text")
+        _require_provider_source(self.provenance)
