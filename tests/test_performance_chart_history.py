@@ -1,9 +1,30 @@
 import math
 import unittest
+from dataclasses import replace
 from datetime import date
 
-from backend.performance.canonical_inputs import CanonicalPerformanceInputs
-from backend.performance.chart_history import analysis_history
+from performance_day_support import canonical_from_snapshot, garmin_inputs_from_payload
+
+from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
+from backend.performance.chart_history import analysis_history as _analysis_history
+
+
+def analysis_history(snapshot, garmin, today, **overrides):
+    """The analysis history of the canonical inputs the real mappers make.
+
+    ``overrides`` replace fields of the inputs the snapshot's mapping reads.
+    """
+    base = (
+        canonical_from_snapshot(snapshot, today)
+        if snapshot
+        else EMPTY_PERFORMANCE_INPUTS
+    )
+    return _analysis_history(
+        snapshot,
+        garmin,
+        today,
+        canonical=garmin_inputs_from_payload(garmin, today, replace(base, **overrides)),
+    )
 
 
 class AnalysisHistoryTests(unittest.TestCase):
@@ -11,9 +32,10 @@ class AnalysisHistoryTests(unittest.TestCase):
         result = analysis_history(
             None,
             {
+                # Canonical reads (#1415): the mapper reads dated FTP records.
                 "cycling_ftp_history": [
-                    {"from": "2026-10-01", "value": 270},
-                    {"from": "2026-10-02", "value": 272},
+                    {"calendarDate": "2026-10-01", "functionalThresholdPower": 270},
+                    {"calendarDate": "2026-10-02", "functionalThresholdPower": 272},
                 ],
             },
             date(2026, 10, 2),
@@ -308,14 +330,11 @@ class AnalysisHistoryTests(unittest.TestCase):
         }
         # The wellness-day eFTP is a canonical observation (the mapper never stores
         # the plain ftp as eFTP); the snapshot's sport_info is not read (#1412).
-        canonical = CanonicalPerformanceInputs(
-            wellness_day=None,
-            ctl=None,
-            atl=None,
-            eftp_by_day={date(2026, 10, 1): 270.0},
-        )
         result = analysis_history(
-            snapshot, garmin, date(2026, 10, 2), canonical=canonical
+            snapshot,
+            garmin,
+            date(2026, 10, 2),
+            eftp_by_day={date(2026, 10, 1): 270.0},
         )["metrics"]
         points = result["cycling_eftp_watts"][0]["points"]
         self.assertEqual(result["cycling_eftp_watts"][0]["source"], "Intervals.icu")

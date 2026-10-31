@@ -217,14 +217,9 @@ _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
             "intervals_performance_fields",
         ),
     ),
-    "backend/performance/body.py": (_LEGACY_FALLBACK, ("garmin_performance_fields",)),
     "backend/performance/canonical_sections.py": (
         _ACTIVITY_ROWS,
         ("intervals_activity_fields",),
-    ),
-    "backend/performance/chart_history.py": (
-        _LEGACY_FALLBACK,
-        ("garmin_performance_fields",),
     ),
     "backend/performance/current_metrics.py": (
         _LEGACY_FALLBACK,

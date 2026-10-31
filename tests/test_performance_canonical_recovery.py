@@ -25,7 +25,10 @@ from canonical_recovery_support import (
 )
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance.canonical_inputs import read_performance_inputs
+from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
+    read_performance_inputs,
+)
 from backend.performance.canonical_recovery import (
     RECOVERY_KINDS,
     read_recovery_inputs,
@@ -164,7 +167,9 @@ class PopulatedRecoveryTests(CanonicalReadFixture):
         )
 
     def test_without_canonical_inputs_no_recovery_value_is_shown(self) -> None:
-        result = current_performance_context(self.intervals, self.garmin, {}, TODAY)
+        result = current_performance_context(
+            self.intervals, self.garmin, {}, TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
+        )
 
         recovery = result["recovery"]
         for key in (

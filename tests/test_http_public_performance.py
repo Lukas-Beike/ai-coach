@@ -6,6 +6,7 @@ from backend.http_api.public_performance import (
     PublicFeedbackStateService,
     PublicPerformanceStateService,
 )
+from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import analysis_history
 from backend.performance.training_focus import training_focus
 
@@ -45,7 +46,9 @@ class PublicPerformanceStateTests(unittest.TestCase):
             {
                 "performance": {
                     **performance,
-                    "history": analysis_history(snapshot, garmin, today),
+                    "history": analysis_history(
+                        snapshot, garmin, today, canonical=EMPTY_PERFORMANCE_INPUTS
+                    ),
                     "training_focus_periods": {
                         "fortnight": training_focus(
                             garmin,
@@ -66,7 +69,9 @@ class PublicPerformanceStateTests(unittest.TestCase):
                 "garmin": garmin_state,
             },
         )
-        project_performance.assert_called_once_with(snapshot, garmin, profile, today)
+        project_performance.assert_called_once_with(
+            snapshot, garmin, profile, today, canonical=EMPTY_PERFORMANCE_INPUTS
+        )
         sync_state_repository.latest_snapshot.assert_called_once_with()
         garmin_payload_service.recent_view.assert_called_once_with()
         profile_service.get.assert_called_once_with()

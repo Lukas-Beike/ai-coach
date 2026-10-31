@@ -38,6 +38,7 @@ from backend.performance.canonical_current import (
     read_current_inputs,
 )
 from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceSource,
     read_performance_inputs,
 )
@@ -575,7 +576,9 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         self.assertIsNotNone(inputs)
         assert inputs is not None
         self.assertIsNotNone(inputs.current)
-        legacy = current_performance_context(self.intervals, self.garmin, {}, TODAY)
+        legacy = current_performance_context(
+            self.intervals, self.garmin, {}, TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
+        )
         canonical = current_performance_context(
             self.intervals, self.garmin, {}, TODAY, canonical=inputs
         )

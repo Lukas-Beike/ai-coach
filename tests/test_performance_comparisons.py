@@ -2,7 +2,7 @@ import copy
 import unittest
 from datetime import date
 
-from performance_day_support import current_days
+from performance_day_support import current_days, garmin_metrics_from_payload
 
 from backend.performance.comparisons import (
     performance_comparisons,
@@ -27,17 +27,22 @@ class PerformanceTrendAverageTests(unittest.TestCase):
                 {"date": "2026-09-07", "metrics": {"cycling_ftp_watts": 300}},
             ],
         }
+        history = garmin_metrics_from_payload(garmin).performance_history
         metrics = {
             "weight_kg": {"source": GARMIN_SOURCE},
             "cycling_ftp_watts": {"source": GARMIN_SOURCE},
         }
 
         self.assertEqual(
-            performance_trend_average(garmin, metrics, "weight_kg", 7, TODAY),
+            performance_trend_average(
+                metrics, "weight_kg", 7, TODAY, garmin_history=history
+            ),
             71.0,
         )
         self.assertEqual(
-            performance_trend_average(garmin, metrics, "cycling_ftp_watts", 7, TODAY),
+            performance_trend_average(
+                metrics, "cycling_ftp_watts", 7, TODAY, garmin_history=history
+            ),
             290.0,
         )
 
@@ -53,40 +58,22 @@ class PerformanceTrendAverageTests(unittest.TestCase):
 
         self.assertEqual(
             performance_trend_average(
-                {},
                 metrics,
                 "readiness",
                 7,
                 TODAY,
                 wellness_days=current_days(snapshot["recent_wellness"]),
+                garmin_history={},
             ),
             75.0,
         )
-        self.assertIsNone(performance_trend_average({}, metrics, "readiness", 7, TODAY))
+        self.assertIsNone(
+            performance_trend_average(metrics, "readiness", 7, TODAY, garmin_history={})
+        )
 
 
 class PerformanceComparisonsTests(unittest.TestCase):
-    def _inputs(self):
-        metrics = {
-            "cycling_eftp_watts": {"value": 309, "source": "Intervals.icu"},
-            "weight_kg": {"value": 72, "source": GARMIN_SOURCE},
-            "readiness": {"value": 80, "source": GARMIN_SOURCE},
-            "cycling_ftp_watts": {"value": 300, "source": GARMIN_SOURCE},
-            "bike_threshold_hr_bpm": {"value": 170, "source": GARMIN_SOURCE},
-            "run_threshold_watts": {"value": 320, "source": GARMIN_SOURCE},
-            "run_threshold_pace_seconds_per_km": {
-                "value": 270,
-                "source": GARMIN_SOURCE,
-            },
-            "run_zone2_pace_seconds_per_km": {"value": 360, "source": GARMIN_SOURCE},
-            "run_threshold_hr_bpm": {"value": 175, "source": GARMIN_SOURCE},
-            "cycling_vo2max_ml_kg_min": {"value": 60, "source": GARMIN_SOURCE},
-            "running_vo2max_ml_kg_min": {"value": 58, "source": GARMIN_SOURCE},
-            "run_5k_seconds": {"value": 1_300, "source": GARMIN_SOURCE},
-            "run_10k_seconds": {"value": 2_700, "source": GARMIN_SOURCE},
-            "run_half_marathon_seconds": {"value": 5_800, "source": GARMIN_SOURCE},
-            "run_marathon_seconds": {"value": 12_000, "source": GARMIN_SOURCE},
-        }
+    def _history(self):
         history_metrics = {
             key: value
             for key, value in (
@@ -116,6 +103,29 @@ class PerformanceComparisonsTests(unittest.TestCase):
             "performance_history": [
                 {"date": "2026-09-01", "metrics": history_metrics},
             ],
+        }
+        return garmin_metrics_from_payload(garmin).performance_history
+
+    def _inputs(self):
+        metrics = {
+            "cycling_eftp_watts": {"value": 309, "source": "Intervals.icu"},
+            "weight_kg": {"value": 72, "source": GARMIN_SOURCE},
+            "readiness": {"value": 80, "source": GARMIN_SOURCE},
+            "cycling_ftp_watts": {"value": 300, "source": GARMIN_SOURCE},
+            "bike_threshold_hr_bpm": {"value": 170, "source": GARMIN_SOURCE},
+            "run_threshold_watts": {"value": 320, "source": GARMIN_SOURCE},
+            "run_threshold_pace_seconds_per_km": {
+                "value": 270,
+                "source": GARMIN_SOURCE,
+            },
+            "run_zone2_pace_seconds_per_km": {"value": 360, "source": GARMIN_SOURCE},
+            "run_threshold_hr_bpm": {"value": 175, "source": GARMIN_SOURCE},
+            "cycling_vo2max_ml_kg_min": {"value": 60, "source": GARMIN_SOURCE},
+            "running_vo2max_ml_kg_min": {"value": 58, "source": GARMIN_SOURCE},
+            "run_5k_seconds": {"value": 1_300, "source": GARMIN_SOURCE},
+            "run_10k_seconds": {"value": 2_700, "source": GARMIN_SOURCE},
+            "run_half_marathon_seconds": {"value": 5_800, "source": GARMIN_SOURCE},
+            "run_marathon_seconds": {"value": 12_000, "source": GARMIN_SOURCE},
         }
         wellness_rows = [
             {
@@ -164,7 +174,6 @@ class PerformanceComparisonsTests(unittest.TestCase):
             {"start_date_local": "2026-09-07T08:00:00", "type": "Ride", "icu_eftp": 290}
         ]
         return (
-            garmin,
             metrics,
             recovery,
             load_context,
@@ -174,8 +183,9 @@ class PerformanceComparisonsTests(unittest.TestCase):
 
     def test_comparisons_preserve_keys_units_labels_and_direction_flags(self):
         values = self._inputs()
+        history = self._history()
         before = copy.deepcopy(values)
-        result = performance_comparisons(*values, TODAY)
+        result = performance_comparisons(*values, TODAY, garmin_history=history)
 
         self.assertEqual(result["sleep_hours"]["unit"], "h")
         self.assertEqual(result["sleep_hours"]["days"], 7)
@@ -198,6 +208,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
 
     def test_eftp_and_form_comparisons_read_the_canonical_days_only(self):
         values = self._inputs()
+        history = self._history()
         # The rows carry sportInfo eFTP 290 and tsb -7/-8; they are not read.
         eftp_by_day = {date(2026, 9, 1): 250.0, date(2026, 8, 1): 999.0}
         form_by_day = {
@@ -207,7 +218,11 @@ class PerformanceComparisonsTests(unittest.TestCase):
             date(2026, 8, 31): 40.0,
         }
         result = performance_comparisons(
-            *values, TODAY, eftp_by_day=eftp_by_day, form_by_day=form_by_day
+            *values,
+            TODAY,
+            garmin_history=history,
+            eftp_by_day=eftp_by_day,
+            form_by_day=form_by_day,
         )
         # Wellness day 250 and the 2026-09-07 ride 290; the older day is outside.
         self.assertEqual(result["cycling_eftp_30d"]["average"], 270.0)
@@ -215,15 +230,18 @@ class PerformanceComparisonsTests(unittest.TestCase):
         self.assertEqual(result["form_tsb"]["current"], -5)
 
     def test_without_canonical_days_only_activity_eftp_and_no_form_remain(self):
-        result = performance_comparisons(*self._inputs(), TODAY)
+        result = performance_comparisons(
+            *self._inputs(), TODAY, garmin_history=self._history()
+        )
         self.assertEqual(result["cycling_eftp_30d"]["average"], 290.0)
         self.assertIsNone(result["form_tsb"])
 
     def test_missing_values_return_none_without_mutation(self):
         values = self._inputs()
+        history = self._history()
         values = list(values)
-        values[1] = {"cycling_eftp_watts": {"value": None, "source": None}}
-        values[2] = {
+        values[0] = {"cycling_eftp_watts": {"value": None, "source": None}}
+        values[1] = {
             "sleep_hours": None,
             "sleep_average": None,
             "readiness": None,
@@ -235,7 +253,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
             "hrv_average": None,
         }
         before = copy.deepcopy(values)
-        result = performance_comparisons(*values, TODAY)
+        result = performance_comparisons(*values, TODAY, garmin_history=history)
 
         self.assertIsNone(result["sleep_hours"])
         self.assertIsNone(result["readiness"])

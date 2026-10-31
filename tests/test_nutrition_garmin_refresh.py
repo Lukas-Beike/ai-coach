@@ -7,6 +7,8 @@ from datetime import date, timedelta
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
+from performance_day_support import garmin_body_from_payload
+
 from backend.errors import AppError
 from backend.performance.body import body_history
 from backend.performance.garmin_weight import garmin_weight_records
@@ -107,7 +109,16 @@ class GarminNutritionRefreshTests(unittest.TestCase):
             [{"dailyWeightSummaries": [correction]}],
             [{"dailyWeightSummaries": summaries}],
         )
-        projection = body_history({}, {"weight": merged}, today)
+        garmin = {"weight": merged}
+        projection = body_history(
+            {},
+            garmin,
+            today,
+            canonical=garmin_body_from_payload(garmin, today),
+            wellness_days=(),
+            activity_rows=(),
+            garmin_ftp={},
+        )
         metrics = projection["windows"]["14d"]["metrics"]
         weight_point = next(
             row

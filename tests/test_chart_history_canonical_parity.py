@@ -106,14 +106,21 @@ class ChartParityTests(unittest.TestCase):
         sections = {
             key: value for key, value in GARMIN.items() if key != "training_status"
         }
-        legacy = chart_history._provider_metrics(sections, START, TODAY)
         canonical = chart_history._provider_metrics(
             {"synced_at": GARMIN["synced_at"]},
             START,
             TODAY,
             read_garmin_state(MappedReader(sections), None).metrics,
         )
-        self.assertEqual(shown(canonical), shown(legacy))
+        self.assertEqual(
+            shown(canonical),
+            {
+                "endurance_score": [(day(14), 6800), (day(7), 6850)],
+                "running_tolerance": [(day(3), 72), (day(1), 0)],
+                "training_readiness_history": [(day(2), 64), (day(1), 70)],
+                "weekly_training_status": [(day(7), 410), (day(0), 455)],
+            },
+        )
         self.assertEqual(
             shown(canonical)["running_tolerance"], [(day(3), 72), (day(1), 0)]
         )
@@ -132,13 +139,9 @@ class ChartParityTests(unittest.TestCase):
         canonical = chart_history._provider_metrics(
             sections, START, TODAY, self.canonical()
         )
-        legacy = chart_history._provider_metrics(
-            {**GARMIN, "provider_metrics": cached}, START, TODAY
-        )
-        for metrics in (canonical, legacy):
-            item = metrics["running_tolerance"]
-            self.assertEqual(item["status"], "stale")
-            self.assertEqual(item["fetched_at"], GARMIN["synced_at"])
+        item = canonical["running_tolerance"]
+        self.assertEqual(item["status"], "stale")
+        self.assertEqual(item["fetched_at"], GARMIN["synced_at"])
         self.assertEqual(
             shown(canonical)["running_tolerance"], [(day(3), 72), (day(1), 0)]
         )
@@ -154,17 +157,15 @@ class ChartParityTests(unittest.TestCase):
             [(day(7), 410), (day(4), 380), (day(0), 455)],
         )
 
-    def test_acute_load_history_matches_and_skips_ambiguous_days(self) -> None:
+    def test_acute_load_history_skips_ambiguous_days(self) -> None:
         dates = [(START + timedelta(days=i)).isoformat() for i in range(90)]
-        legacy = chart_history._load_history(
-            dates, {"training_status": GARMIN["training_status"]}
-        )
         only_status = read_garmin_state(
             MappedReader({"training_status": GARMIN["training_status"]}), None
         ).metrics
-        self.assertEqual(chart_history._load_history(dates, {}, only_status), legacy)
-        self.assertIn({"date": day(4), "value": 380}, legacy)
-        self.assertIn({"date": day(5), "value": None}, legacy)
+        load = chart_history._load_history(dates, only_status)
+        self.assertIn({"date": day(4), "value": 380}, load)
+        self.assertIn({"date": day(5), "value": None}, load)
+        self.assertEqual(sum(point["value"] is not None for point in load), 1)
 
 
 if __name__ == "__main__":

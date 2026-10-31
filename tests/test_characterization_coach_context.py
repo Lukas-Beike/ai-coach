@@ -10,14 +10,20 @@ from __future__ import annotations
 
 import json
 import unittest
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import FixedActivityRows, NoObservations
-from canonical_recovery_support import recovery_only_inputs
-from performance_day_support import canonical_from_snapshot, garmin_metrics_from_payload
+from canonical_recovery_support import NoActivityRows, recovery_only_inputs
+from performance_day_support import (
+    SYNCED_AT,
+    StubReader,
+    canonical_from_snapshot,
+    garmin_metrics_from_payload,
+)
 
 from backend.coach.context import (
     COACH_CONTEXT_SECTION_LIMITS,
@@ -29,12 +35,14 @@ from backend.coach.context import (
     coach_context_json_size,
 )
 from backend.coach.context_selection import CoachContextSelection
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.context import current_performance_context
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     GarminCanonicalState,
 )
 from backend.planning.context import compact_snapshot
+from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
@@ -151,8 +159,27 @@ def _recovery(garmin: dict[str, Any], snapshot: dict[str, Any] | None) -> Any:
     )
 
 
+class _Manager:
+    @contextmanager
+    def read_snapshot(self):
+        yield None
+
+
+def _garmin_source(garmin_payload: dict[str, Any]) -> CanonicalPerformanceSource:
+    """A canonical source serving the observations the Garmin mapper makes."""
+    records = map_garmin_health(
+        dict(garmin_payload), zone=UTC, retrieved_at=SYNCED_AT
+    ).records
+    reader = StubReader(tuple(records))
+    return CanonicalPerformanceSource(
+        database_manager=_Manager,
+        observation_reader=lambda: reader,
+        activity_rows=NoActivityRows,
+    )
+
+
 def _performance_reader(
-    garmin_payload: dict[str, Any],
+    garmin_payload: dict[str, Any], *, canonical: bool = False
 ) -> tuple[CoachPerformanceContextReader, Mock]:
     profile_service = Mock()
     profile_service.get.return_value = {"name": "Athlete", "timezone": "UTC"}
@@ -161,7 +188,11 @@ def _performance_reader(
     garmin_projection = Mock()
     garmin_projection.coach_context.return_value = {"recovery": {}}
     reader = CoachPerformanceContextReader(
-        profile_service, payload_service, garmin_projection, lambda: TODAY
+        profile_service,
+        payload_service,
+        garmin_projection,
+        lambda: TODAY,
+        _garmin_source(garmin_payload) if canonical else None,
     )
     return reader, garmin_projection
 
@@ -169,6 +200,8 @@ def _performance_reader(
 def _structured_service(
     latest_snapshot: dict[str, Any] | None,
     garmin_payload: dict[str, Any],
+    *,
+    canonical: bool = False,
 ) -> tuple[CoachStructuredContextService, Mock]:
     sync_state_repository = Mock()
     sync_state_repository.latest_snapshot.return_value = latest_snapshot
@@ -191,7 +224,9 @@ def _structured_service(
     adaptive_preview_service = Mock()
     adaptive_preview_service.latest_preview.return_value = {"status": "none"}
     adaptive_preview_service.status.return_value = {"available": False}
-    performance_reader, garmin_projection = _performance_reader(garmin_payload)
+    performance_reader, garmin_projection = _performance_reader(
+        garmin_payload, canonical=canonical
+    )
     service = CoachStructuredContextService(
         sync_state_repository,
         checkin_service,
@@ -453,9 +488,12 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
     def test_garmin_context_requests_performance_only_without_intervals_snapshot(
         self,
     ) -> None:
-        reader, garmin_projection = _performance_reader(_garmin_payload())
+        reader, garmin_projection = _performance_reader(
+            _garmin_payload(), canonical=True
+        )
 
-        unavailable = reader.current_performance(None)
+        _, inputs = reader.read_snapshot(lambda: None)
+        unavailable = reader.current_performance(None, inputs)
         garmin_context = reader.recovery(None)
         reader.recovery(_intervals_snapshot())
 
@@ -583,7 +621,9 @@ class CoachStructuredContextSwitchTests(unittest.TestCase):
     def test_missing_intervals_snapshot_switches_garmin_to_performance_fallback(
         self,
     ) -> None:
-        service, garmin_projection = _structured_service(None, _garmin_payload())
+        service, garmin_projection = _structured_service(
+            None, _garmin_payload(), canonical=True
+        )
 
         result = service.build()
 

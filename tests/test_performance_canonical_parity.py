@@ -44,10 +44,10 @@ from backend.http_api.state_prelude import (
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_current import NO_CURRENT_INPUTS
 from backend.performance.canonical_inputs import (
+    EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
     load_performance_inputs,
-    performance_options,
     read_performance_inputs,
 )
 from backend.performance.canonical_recovery import (
@@ -238,7 +238,9 @@ def _load_pair(
         as_of=PARITY_TODAY,
     )
     days = current_days(rows)
-    legacy = performance_load_context([], days, PARITY_TODAY)["load"]
+    legacy = performance_load_context(
+        [], days, PARITY_TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
+    )["load"]
     canonical_load = performance_load_context(
         [], days, PARITY_TODAY, canonical=canonical
     )["load"]
@@ -335,9 +337,12 @@ class CanonicalLoadParityTests(unittest.TestCase):
 
     def test_comma_decimal_is_mapped_to_a_number(self) -> None:
         legacy_rows = [{"id": PARITY_DAY, "ctl": "58,2", "atl": 60}]
-        legacy = performance_load_context([], current_days(legacy_rows), PARITY_TODAY)[
-            "load"
-        ]
+        legacy = performance_load_context(
+            [],
+            current_days(legacy_rows),
+            PARITY_TODAY,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
+        )["load"]
         # The canonical value is the number the comma-decimal mapper fix yields.
         canonical_rows = [{"id": PARITY_DAY, "ctl": 58.2, "atl": 60}]
         canonical = read_performance_inputs(
@@ -476,10 +481,15 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         )
         self.assertEqual(reader.db_seen, ["db", "db"])
 
-    def test_performance_options_is_empty_without_canonical_inputs(self) -> None:
-        self.assertEqual(performance_options(None), {})
-        inputs = CanonicalPerformanceInputs(wellness_day=PARITY_TODAY, ctl=1.0, atl=2.0)
-        self.assertEqual(performance_options(inputs), {"canonical": inputs})
+    def test_empty_performance_inputs_stand_for_no_canonical_values(self) -> None:
+        rows = [{"id": PARITY_DAY, "ctl": "55", "atl": 65, "tsb": 3, "rampRate": "1.5"}]
+        load = performance_load_context(
+            [], current_days(rows), PARITY_TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
+        )["load"]
+        self.assertEqual(
+            (load["ctl"], load["atl"], load["tsb"], load["ramp_rate"]),
+            (None, None, None, None),
+        )
 
     def test_canonical_inputs_replace_only_ctl_and_atl_in_the_load_block(self) -> None:
         rows = [{"id": PARITY_DAY, "ctl": "55", "atl": 65, "tsb": 3, "rampRate": "1.5"}]
@@ -617,7 +627,13 @@ class CanonicalWiringTests(unittest.TestCase):
             return_value={},
         ) as project:
             service.performance_state()
-        project.assert_called_once_with(snapshot, {}, PARITY_PROFILE, PARITY_TODAY)
+        project.assert_called_once_with(
+            snapshot,
+            {},
+            PARITY_PROFILE,
+            PARITY_TODAY,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
+        )
         self.assertEqual(manager.events, ["enter", "exit"])
         # Only the unbounded wellness reads happen; no windowed read follows.
         self.assertEqual({(s, e) for _k, s, e in reader.calls}, {(None, None)})
@@ -630,7 +646,13 @@ class CanonicalWiringTests(unittest.TestCase):
             return_value={},
         ) as project:
             service.performance_state()
-        project.assert_called_once_with(snapshot, {}, PARITY_PROFILE, PARITY_TODAY)
+        project.assert_called_once_with(
+            snapshot,
+            {},
+            PARITY_PROFILE,
+            PARITY_TODAY,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
+        )
 
     def test_activity_performance_inputs_share_the_snapshot_unit(self) -> None:
         snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
@@ -795,7 +817,13 @@ class CanonicalWiringTests(unittest.TestCase):
             return_value={},
         ) as project:
             _service(snapshot, None).from_snapshot(snapshot)
-        project.assert_called_once_with(snapshot, {}, PARITY_PROFILE, PARITY_TODAY)
+        project.assert_called_once_with(
+            snapshot,
+            {},
+            PARITY_PROFILE,
+            PARITY_TODAY,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
+        )
 
     def test_coach_performance_without_a_source_keeps_the_legacy_call(self) -> None:
         snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
@@ -813,7 +841,13 @@ class CanonicalWiringTests(unittest.TestCase):
             ),
         ):
             coach.current_performance(snapshot)
-        project.assert_called_once_with(snapshot, {}, PARITY_PROFILE, PARITY_TODAY)
+        project.assert_called_once_with(
+            snapshot,
+            {},
+            PARITY_PROFILE,
+            PARITY_TODAY,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
+        )
 
 
 def _performance_selection() -> Mock:
