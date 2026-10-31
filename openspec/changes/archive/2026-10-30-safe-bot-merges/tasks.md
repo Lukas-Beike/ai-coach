@@ -17,7 +17,7 @@
 
 - An approved no-checkout probe in Actions run 41124099781 directly squash-merged Dependabot PR #1502 as the release app at its checked head, with non-Gitar checks passing and no unresolved review threads. Rule suite 4824127971 shows the Default rules passing and Gitar skipped. PR #1501 remains open and must not be merged with failing required checks.
 - Historical Default rule suite 4355093065 rejected a failing required check and an unresolved conversation, and 4355238064 rejected a pending required check. Those October 4 attempts used the repository owner, before the current ruleset configuration. GitHub enforcement of those negative cases has not been exercised directly with the release app after its Default exemption was removed.
-- The Python 3.14 Windows full suite passed 7,753 tests with 41 platform-dependent skips at base 92cb690f; the run on the subsequently rebased base b8ffec4d is pending. Linux container checks covered the 12 release-event tests and 13 bot-merge tests, not the full SQLCipher suite.
+- The Python 3.14 Windows full suite passed 7,771 tests with 37 platform-dependent skips on the rebased branch (base 1c95d39d). An earlier Linux container run covered the release-event and bot-merge tests, not the full SQLCipher suite.
 
 ## Workflow follow-up
 
