@@ -9,7 +9,7 @@ cover the year before ``as_of``, extended to the current window's first day.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields
 from datetime import date, timedelta
 from typing import Any, Final, cast
 
@@ -169,7 +169,15 @@ def with_read_status(
     synced = intervals_synced_at(source.coverage(), db)
     if synced is None:
         return marked
-    return replace(marked, intervals_synced_at=synced)
+    return _changed(marked, intervals_synced_at=synced)
+
+
+def _changed(
+    base: CanonicalPerformanceInputs, **changes: Any
+) -> CanonicalPerformanceInputs:
+    """Return a copy of ``base`` with ``changes`` applied."""
+    values = {field.name: getattr(base, field.name) for field in fields(base)}
+    return CanonicalPerformanceInputs(**{**values, **changes})
 
 
 def _read_state(
@@ -183,9 +191,9 @@ def _read_state(
     if not status.serves_tables(db):
         return PENDING_PERFORMANCE_INPUTS
     if status.activities_need_refresh(db):
-        base = inputs or EMPTY_PERFORMANCE_INPUTS
-        values = {field.name: getattr(base, field.name) for field in fields(base)}
-        return CanonicalPerformanceInputs(**{**values, "activities_need_refresh": True})
+        return _changed(
+            inputs or EMPTY_PERFORMANCE_INPUTS, activities_need_refresh=True
+        )
     return inputs
 
 

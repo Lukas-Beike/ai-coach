@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -299,6 +300,12 @@ def _provider_connection_routes(
     )
 
 
+def _report_synced_at(canonical: Any, db: Any) -> str | None:
+    """The Intervals.icu sync time of the canonical coverage, for reports and season."""
+    coverage = None if canonical.coverage is None else canonical.coverage()
+    return intervals_synced_at(coverage, db)
+
+
 class HttpApiAssembly:
     """Own eager HTTP route composition and lazy request-handler creation."""
 
@@ -463,11 +470,7 @@ class HttpApiAssembly:
 
         def training_report_services() -> TrainingReportServices:
             canonical = public.canonical_performance_source()
-
-            def report_synced_at(db: Any) -> str | None:
-                coverage = None if canonical.coverage is None else canonical.coverage()
-                return intervals_synced_at(coverage, db)
-
+            report_synced_at = partial(_report_synced_at, canonical)
             records = TrainingRecordsService(
                 database_manager=database_manager(),
                 read_equipment=lambda: (

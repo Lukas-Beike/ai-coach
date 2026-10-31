@@ -218,25 +218,49 @@ def read_garmin_recovery(
     reader = _resolved(reader, db)
     records: dict[str, dict[str, Any]] = {}
     for section, (fields, status) in _RECOVERY_RECORDS.items():
-        values: dict[date, dict[str, Any]] = {}
-        for name, kind in fields:
-            for day, value in _daily_values(
-                item
-                for item in reader.observations(db, kind, start=start)
-                if item.provenance.provider is ProviderId.GARMIN
-            ).items():
-                values.setdefault(day, {})[name] = _number(value)
+        values = _recovery_kind_values(reader, db, fields, start=start)
         if status is not None and isinstance(reader, CategoricalObservationReader):
-            name, domain = status
-            for item in reader.categorical_observations(db, domain, start=start):
-                if item.provenance.provider is ProviderId.GARMIN:
-                    values.setdefault(item.observed_on, {})[name] = item.code
+            _add_recovery_status(reader, db, status, values, start=start)
         if not values:
             records[section] = {}
             continue
         day = max(values)
         records[section] = {"date": day.isoformat(), **values[day]}
     return records
+
+
+def _recovery_kind_values(
+    reader: ObservationReader,
+    db: Any,
+    fields: tuple[tuple[str, MetricKind], ...],
+    *,
+    start: date,
+) -> dict[date, dict[str, Any]]:
+    """Each day's latest Garmin value of every field, keyed by day."""
+    values: dict[date, dict[str, Any]] = {}
+    for name, kind in fields:
+        for day, value in _daily_values(
+            item
+            for item in reader.observations(db, kind, start=start)
+            if item.provenance.provider is ProviderId.GARMIN
+        ).items():
+            values.setdefault(day, {})[name] = _number(value)
+    return values
+
+
+def _add_recovery_status(
+    reader: CategoricalObservationReader,
+    db: Any,
+    status: tuple[str, CategoricalDomain],
+    values: dict[date, dict[str, Any]],
+    *,
+    start: date,
+) -> None:
+    """Add each day's Garmin status code of ``status`` to ``values``."""
+    name, domain = status
+    for item in reader.categorical_observations(db, domain, start=start):
+        if item.provenance.provider is ProviderId.GARMIN:
+            values.setdefault(item.observed_on, {})[name] = item.code
 
 
 def _number(value: float) -> float | int:
