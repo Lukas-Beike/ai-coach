@@ -70,6 +70,7 @@ _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
 # Sport-scoped athlete settings that give the plan zones their thresholds.
 _ZONE_THRESHOLD_KINDS: Final = (
     MetricKind.FTP,
+    MetricKind.INDOOR_FTP,
     MetricKind.THRESHOLD_HR,
     MetricKind.MAX_HR,
 )
@@ -222,7 +223,7 @@ def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None
 def read_sport_thresholds(
     reader: ObservationReader, db: Any
 ) -> tuple[Observation, ...]:
-    """Return the latest sync's sport-scoped FTP, threshold HR and maximum HR.
+    """Return the latest sync's sport-scoped FTP, indoor FTP, threshold and max HR.
 
     They are the athlete-record values of each sport's first Intervals.icu sport
     setting; wellness-day values and sport-less values are left out. Without a

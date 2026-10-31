@@ -124,8 +124,9 @@ from backend.providers.intervals_zone_mapping import type_sports
 # versions. Version 9: the athlete record's W′, height, body fat and generic
 # VO2max, the Run setting's Zone-2 pace, and the athlete's sport VO2max field of
 # a sport without a setting value are mapped, so current metrics need no snapshot
-# section.
-MAPPER_VERSION: Final = 9
+# section. Version 10: a sport setting's ``indoor_ftp`` is also mapped as
+# INDOOR_FTP, so the plan zones of indoor workouts need no snapshot section.
+MAPPER_VERSION: Final = 10
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
@@ -189,6 +190,7 @@ _EFTP_ALIASES: Final = ("eftp", "eFTP")
 _SPORT_INFO_TYPE_KEYS: Final = ("type", "sport", "sport_type")
 _LTHR_ALIASES: Final = ("lthr",)
 _MAX_HR_ALIASES: Final = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
+_INDOOR_FTP_ALIASES: Final = ("indoor_ftp",)
 _SPORT_SETTING_FIELDS: Final[tuple[tuple[MetricKind, tuple[str, ...]], ...]] = (
     (MetricKind.FTP, ("ftp", "indoor_ftp")),
     (MetricKind.THRESHOLD_HR, _LTHR_ALIASES),
@@ -493,6 +495,9 @@ def _map_sport_setting(
 ) -> None:
     for kind, aliases in _SPORT_SETTING_FIELDS:
         _add_field(collector, scope, entry, kind, aliases, sport=sport)
+    _add_field(
+        collector, scope, entry, MetricKind.INDOOR_FTP, _INDOOR_FTP_ALIASES, sport=sport
+    )
     _add_eftp(collector, scope, entry, sport)
     vo2max_aliases = _VO2MAX_ALIASES_BY_SPORT.get(sport)
     if vo2max_aliases is not None:

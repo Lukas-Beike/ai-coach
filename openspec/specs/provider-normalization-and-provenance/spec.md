@@ -161,6 +161,10 @@ The system SHALL map dated Intervals wellness body, HRV, sleep, readiness, VO2ma
 - **WHEN** wellness `sportInfo` entries and athlete sport settings carry eFTP
 - **THEN** each sport's first `sportInfo` entry yields one wellness-day eFTP observation, and each sport's first sport setting yields the athlete-record eFTP observation; every sport that a `types` text classifies to counts, as for the zone configurations (or, for a `sportInfo` entry without a `types` list, its `type`, `sport` and `sport_type`), with OTHER only when no text names a known sport, `mmp_model` eFTP wins over the entry's own eFTP, and zero means unset.
 
+#### Scenario: Indoor FTP since mapper version 10
+- **WHEN** a sport setting carries `indoor_ftp`
+- **THEN** it is stored as that sport's INDOOR_FTP observation next to its FTP, so only indoor and virtual plan zones read it and FTP readers never take it for the sport FTP; stored athlete records are reprojected without a provider refetch.
+
 #### Scenario: Athlete settings since mapper version 9
 - **WHEN** the athlete record carries W′, height, body fat or a generic VO2max, a Run setting carries a Zone-2 pace, or the athlete record carries a sport VO2max for a sport whose setting has none
 - **THEN** they are stored as athlete-record observations: W′ in J, height in cm (1.2–2.5 is read as metres), body fat in % and the generic VO2max without a sport; the Zone-2 pace in m/s for Run; the sport VO2max for that sport. The athlete body fat and generic VO2max keep their own athlete series next to the same day's wellness values, as weight and eFTP do, so neither replaces the other. Re-projection applies this to stored records without a refetch.
@@ -229,7 +233,7 @@ Canonical zone configuration SHALL retain sport, metric, boundaries in canonical
 - **WHEN** a planned workout's sport has no configuration for a metric
 - **THEN** its FTP, threshold HR and maximum HR come from the latest Intervals.icu sync's sport-scoped canonical observations with the default limits, never from the stored snapshot, and nothing is served before the first completed backfill.
 
-Detailed contract (#1416): the indoor FTP is canonical only as the threshold of the INDOOR power configuration, so without a power zone list indoor workouts use the sport FTP; the Ride FTP falls back to the athlete's configured FTP as the canonical current metrics do; zone lists and values the mappers reject leave the default limits or no threshold.
+Detailed contract (#1416): indoor and virtual workouts use the INDOOR power configuration's threshold, else the sport's INDOOR_FTP, else its FTP, as the snapshot rule did; the Ride FTP falls back to the athlete's configured FTP as the canonical current metrics do; zone lists and values the mappers reject leave the default limits or no threshold.
 
 Evidence: `backend/performance/canonical_current.py:read_sport_thresholds`, `backend/activities/zone_settings.py:ZoneSettings.from_thresholds`, `backend/planning/calendar_read_model.py:project_planning_calendar`; `tests/test_plan_zone_canonical_parity.py`, `tests/test_zone_configuration_canonical.py:EffectiveZoneTests`, `tests/test_zone_settings.py`.
 
@@ -293,6 +297,6 @@ Consumer packages (performance, Coach, HTTP API, planning, activities, athlete, 
 - **WHEN** an allowlisted file no longer makes the read
 - **THEN** the guard reports its allowlist entry as stale until it is removed.
 
-Detailed contract: rules `snapshot_key`, `legacy_read`, `source_label` and `field_module_import` in `tests/provider_coupling.py:OWNER_READ_ALLOWLIST`. No value read remains in the consumer packages (#1416): plan zones read canonical thresholds, equipment reads canonical gear items and links (stored `activity_matches` are no longer read; canonical sessions and `external_id` link activities), and the energy views take a day's presence after a targeted refresh from its canonical Garmin totals; the stored snapshot is read there only for sync status (`provider_sync`, Garmin state).
+Detailed contract: rules `snapshot_key`, `legacy_read`, `source_label` and `field_module_import` in `tests/provider_coupling.py:OWNER_READ_ALLOWLIST`. No value read remains in the consumer packages (#1416): plan zones read canonical thresholds, equipment reads canonical gear items and links (stored `activity_matches` are no longer read; a gear-listed Garmin activity links the rows of its canonical session and a row whose `external_id` is the Garmin id), and the energy views take a day's presence after a targeted refresh from its canonical Garmin totals; the stored snapshot is read there only for sync status (`provider_sync`, Garmin state).
 
 Evidence: `tests/provider_coupling.py:scan_owner_reads`, `backend/sync/garmin_payload_metrics.py:garmin_payload_performance_metrics`, `backend/sync/garmin_performance_history.py:append_garmin_performance_history`, `backend/sync/intervals_compaction.py:compact_snapshot`; `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_read_raw_provider_views`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_allowlisted_raw_view_owner_passes_and_a_stale_entry_fails`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_source_tree_reads_only_through_allowlisted_owners`.

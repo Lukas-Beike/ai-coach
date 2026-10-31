@@ -86,16 +86,19 @@ class ZoneSettingsTests(unittest.TestCase):
         ):
             settings = canonical_zone_settings([setting], Sport.RIDE, environment)
             self.assertEqual(ftp, settings.ftp, environment)
-        # Canonical reads (#1416): the indoor FTP is canonical only as the
-        # threshold of the INDOOR power configuration. Without a power zone list
-        # indoor workouts use the sport FTP; the snapshot reader used indoor_ftp.
+        # Without a power zone list the indoor FTP comes from its own canonical
+        # kind (INDOOR_FTP), as the snapshot reader took indoor_ftp.
         without_zones = {"types": ["Ride"], "ftp": 250, "indoor_ftp": 200}
-        self.assertEqual(
-            250,
-            canonical_zone_settings(
-                [without_zones], Sport.RIDE, Environment.INDOOR
-            ).ftp,
-        )
+        for environment, ftp in (
+            (Environment.OUTDOOR, 250),
+            (Environment.INDOOR, 200),
+            (Environment.VIRTUAL, 200),
+        ):
+            self.assertEqual(
+                ftp,
+                canonical_zone_settings([without_zones], Sport.RIDE, environment).ftp,
+                environment,
+            )
         no_indoor = canonical_zone_settings(
             [{"types": ["Ride"], "ftp": 250}], Sport.RIDE, Environment.INDOOR
         )

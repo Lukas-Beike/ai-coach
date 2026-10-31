@@ -205,6 +205,26 @@ class CanonicalCurrentParityTests(unittest.TestCase):
         self.assertEqual(metrics, _legacy(case))
         self.assertNotEqual(metrics, _legacy(variant))
 
+    def test_an_indoor_ftp_never_becomes_the_current_cycling_ftp(self) -> None:
+        # INDOOR_FTP (mapper version 10) is its own kind: only the plan zones of
+        # indoor workouts read it, so the current metrics stay unchanged.
+        case = _case("intervals_only")
+        with_indoor = copy.deepcopy(case.intervals)
+        with_indoor["athlete"]["sport_settings"][0]["indoor_ftp"] = 230
+        variant = replace(case, intervals=with_indoor)
+        observations = _observations(variant)
+        self.assertIn(
+            (MetricKind.INDOOR_FTP, Sport.RIDE, 230.0),
+            {(item.kind, item.sport, item.value.value) for item in observations},
+        )
+        inputs = _read(ObservationStub(observations), variant.intervals)
+        assert inputs is not None
+        self.assertNotIn(
+            MetricKind.INDOOR_FTP, {item.kind for item in inputs.athlete_record}
+        )
+        self.assertEqual(_canonical(variant), _canonical(case))
+        self.assertEqual(_canonical(variant), _legacy(case))
+
     def test_athlete_wide_threshold_is_the_fallback_with_the_general_label(
         self,
     ) -> None:

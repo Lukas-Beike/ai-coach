@@ -34,7 +34,7 @@ RETRIEVED_AT = datetime(2026, 10, 11, 6, tzinfo=UTC)
 _MIN_ZONES = 3
 _MAX_ZONES = 7
 _THRESHOLD_KINDS = frozenset(
-    {MetricKind.FTP, MetricKind.THRESHOLD_HR, MetricKind.MAX_HR}
+    {MetricKind.FTP, MetricKind.INDOOR_FTP, MetricKind.THRESHOLD_HR, MetricKind.MAX_HR}
 )
 
 
@@ -133,5 +133,5 @@ def canonical_zone_settings(
         configurations,
         sport,
         environment,
-        fallback=ZoneSettings.from_thresholds(thresholds, sport),
+        fallback=ZoneSettings.from_thresholds(thresholds, sport, environment),
     )

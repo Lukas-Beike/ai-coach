@@ -55,19 +55,25 @@ class ZoneSettings:
 
     @classmethod
     def from_thresholds(
-        cls, observations: Iterable[Observation], sport: Sport
+        cls,
+        observations: Iterable[Observation],
+        sport: Sport,
+        environment: Environment = Environment.UNKNOWN,
     ) -> ZoneSettings:
         """Thresholds of ``sport`` from its canonical athlete settings, default limits.
 
-        ``observations`` are the sport-scoped FTP, threshold and maximum heart rate
-        of the latest provider sync; the first of each kind for ``sport`` is used.
+        ``observations`` are the sport-scoped FTP, indoor FTP, threshold and maximum
+        heart rate of the latest provider sync; the first of each kind for ``sport``
+        is used. Indoor and virtual workouts use the indoor FTP when there is one.
         """
         values: dict[MetricKind, float] = {}
         for observation in observations:
             if observation.sport is sport:
                 values.setdefault(observation.kind, float(observation.value.value))
+        indoor = environment in {Environment.INDOOR, Environment.VIRTUAL}
         return cls(
-            ftp=values.get(MetricKind.FTP),
+            ftp=(values.get(MetricKind.INDOOR_FTP) if indoor else None)
+            or values.get(MetricKind.FTP),
             lthr=values.get(MetricKind.THRESHOLD_HR),
             max_hr=values.get(MetricKind.MAX_HR),
         )

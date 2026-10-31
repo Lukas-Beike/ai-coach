@@ -13,7 +13,11 @@ import unittest
 from datetime import date
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
-from zone_settings_reference import legacy_zone_settings
+from zone_settings_reference import (
+    canonical_zone_settings,
+    legacy_sport_settings,
+    legacy_zone_settings,
+)
 
 from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.vocabulary import Environment, MetricKind, Sport
@@ -24,6 +28,36 @@ from backend.performance.canonical_inputs import (
 from backend.planning.calendar_read_model import project_planning_calendar
 
 SPORTS = (Sport.RIDE, Sport.RUN, Sport.SWIM)
+# Sport settings whose canonical form must choose the snapshot rule's zones.
+SETTING_VARIANTS = (
+    # Indoor FTP without a power zone list: the INDOOR_FTP kind carries it.
+    [{"types": ["Ride", "VirtualRide"], "ftp": 250, "indoor_ftp": 200}],
+    # Indoor FTP with a power zone list: the INDOOR configuration carries it.
+    [
+        {
+            "types": ["Ride", "VirtualRide"],
+            "ftp": 250,
+            "indoor_ftp": 200,
+            "power_zones": [55, 75, 90, 105, 120, 150, 999],
+        }
+    ],
+    [{"types": ["Ride"], "ftp": 250, "lthr": 160, "max_hr": 190}],
+    [{"types": ["Run"], "lthr": 170, "hr_zones": [120, 140, 155, 170, 180, 195]}],
+)
+
+
+class SettingVariantParityTests(unittest.TestCase):
+    def test_canonical_settings_choose_the_snapshot_zones(self) -> None:
+        for settings in SETTING_VARIANTS:
+            for sport in SPORTS:
+                for environment in Environment:
+                    with self.subTest(
+                        settings=settings, sport=sport, environment=environment
+                    ):
+                        self.assertEqual(
+                            canonical_zone_settings(settings, sport, environment),
+                            legacy_sport_settings(settings, sport, environment),
+                        )
 
 
 class PlanZoneParityTests(CanonicalReadFixture):
@@ -47,7 +81,9 @@ class PlanZoneParityTests(CanonicalReadFixture):
                             configurations,
                             sport,
                             environment,
-                            fallback=ZoneSettings.from_thresholds(thresholds, sport),
+                            fallback=ZoneSettings.from_thresholds(
+                                thresholds, sport, environment
+                            ),
                         ),
                         legacy_zone_settings(
                             settings, configurations, sport, environment
