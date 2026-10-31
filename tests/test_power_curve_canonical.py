@@ -254,6 +254,17 @@ class PowerCurveMappingTests(unittest.TestCase):
                 self.assertEqual(self.mapped(envelope), PowerCurveMapping())
 
 
+def stored_points(db: sqlite3.Connection) -> tuple[PowerCurvePoint, ...]:
+    return CanonicalTableReader().power_curve(db).points
+
+
+def active_point_count(db: sqlite3.Connection) -> int:
+    row = db.execute(
+        "SELECT COUNT(*) AS n FROM power_curve_points WHERE state = 'active'"
+    ).fetchone()
+    return int(row["n"])
+
+
 class IngestFixture(unittest.TestCase):
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory()
@@ -280,15 +291,6 @@ class IngestFixture(unittest.TestCase):
 
     def curve(self) -> PowerCurve:
         return CanonicalTableReader().power_curve(self.db)
-
-    def points(self) -> tuple[PowerCurvePoint, ...]:
-        return self.curve().points
-
-    def active_points(self) -> int:
-        row = self.db.execute(
-            "SELECT COUNT(*) AS n FROM power_curve_points WHERE state = 'active'"
-        ).fetchone()
-        return int(row["n"])
 
 
 class PowerCurveIngestTests(IngestFixture):
@@ -317,10 +319,10 @@ class PowerCurveIngestTests(IngestFixture):
 
     def test_a_failure_without_a_curve_keeps_the_points_and_records_it(self) -> None:
         self.ingest(snapshot())
-        before = self.points()
+        before = stored_points(self.db)
         self.ingest(snapshot({"status": "failed"}), partial=True)
-        self.assertEqual(self.points(), before)
-        self.assertEqual(self.active_points(), 5)
+        self.assertEqual(stored_points(self.db), before)
+        self.assertEqual(active_point_count(self.db), 5)
         shown = chart(self.curve())
         self.assertEqual(shown["status"], "failed")
         self.assertNotIn("start", shown)
@@ -343,7 +345,7 @@ class PowerCurveIngestTests(IngestFixture):
                 self.setUp()
                 stored = snapshot(envelope)
                 self.ingest(stored)
-                self.assertEqual(self.points(), ())
+                self.assertEqual(stored_points(self.db), ())
                 shown = chart(self.curve())
                 self.assertEqual(shown["status"], envelope["status"])
                 self.assertEqual(shown, legacy_chart(stored, CHART_START, TODAY))
@@ -354,14 +356,16 @@ class PowerCurveIngestTests(IngestFixture):
         self.ingest(snapshot())
         self.ingest(snapshot(None), partial=True)
         self.ingest(snapshot({}))
-        self.assertEqual(len(self.points()), 5)
+        self.assertEqual(len(stored_points(self.db)), 5)
         smaller = {**ENVELOPE, "points": [point(5, 920, "2026-10-18", "i9")]}
         self.ingest(snapshot(smaller))
-        self.assertEqual([(p.duration_s, p.watts) for p in self.points()], [(5, 920.0)])
+        self.assertEqual(
+            [(p.duration_s, p.watts) for p in stored_points(self.db)], [(5, 920.0)]
+        )
         self.assertEqual(
             chart(self.curve()), legacy_chart(snapshot(smaller), CHART_START, TODAY)
         )
-        self.assertEqual(self.active_points(), 1)
+        self.assertEqual(active_point_count(self.db), 1)
 
     def test_no_stored_curve_shows_no_points(self) -> None:
         self.assertEqual(
@@ -383,7 +387,7 @@ class PowerCurveIngestTests(IngestFixture):
         plan = reprojection_plan(dict(row), zone=ZONE)
         assert plan is not None
         batch = plan.domain_batches[0]
-        self.assertEqual(batch.power_curve, self.points())
+        self.assertEqual(batch.power_curve, stored_points(self.db))
         self.assertEqual((batch.power_curve_fetch,), self.curve().fetches)
 
     def test_the_stored_rows_are_listed(self) -> None:
