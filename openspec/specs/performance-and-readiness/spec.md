@@ -121,7 +121,7 @@ The system SHALL provide bounded dated performance and provider-metric histories
 
 #### Scenario: History, charts and comparisons read canonical inputs only
 - **WHEN** the analysis charts, the Garmin load, training-load projection and Garmin 30-day comparisons (including weight) are composed
-- **THEN** they read the canonical activity rows and the canonical Garmin day history only (the weight trend uses the body history's per-day Garmin weights); the stored Garmin view and Intervals snapshot supply sync times, the power curve and the cached provider-chart status, and without canonical inputs (`EMPTY_PERFORMANCE_INPUTS`) every such value is unknown.
+- **THEN** they read the canonical activity rows and the canonical Garmin day history only (the weight trend uses the body history's per-day Garmin weights); the stored Garmin view and Intervals snapshot supply sync times, the power curve and the cached provider-chart status (never its points), and without canonical inputs (`EMPTY_PERFORMANCE_INPUTS`) every such value is unknown.
 
 Detailed contract: Intervals eFTP averages SHALL use actual Intervals estimates rather than configured FTP; race predictions, endurance scores, running tolerance, readiness history, and weekly training status SHALL retain their supported observation dates and aggregation metadata.
 

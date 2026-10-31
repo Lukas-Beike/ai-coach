@@ -235,12 +235,12 @@ def _canonical_provider_metrics(
     """Build the provider charts from the canonical Garmin history.
 
     A day with an endurance group value shows the group values only, as the
-    group map wins over the overall score in the snapshot reader. A cached chart
-    keeps its status, as the snapshot path does, and takes the sync time.
+    group map wins over the overall score in the snapshot reader. The points come
+    only from canonical data; a cached chart supplies its sync status only.
     """
-    cached = garmin.get("provider_metrics") or {}
+    cached = garmin.get("provider_metrics")
     cached = cached if isinstance(cached, dict) else {}
-    metrics = dict(cached)
+    metrics: dict[str, Any] = {}
     for key, (aggregation, fields) in _CANONICAL_PROVIDER_METRICS.items():
         data = _canonical_metric(
             key,
@@ -248,13 +248,9 @@ def _canonical_provider_metrics(
             _canonical_values_by_day(fields, canonical, start, today),
             garmin.get("synced_at"),
         )
-        if data["points"] or (not cached and key not in metrics):
-            previous = metrics.get(key, {})
-            metrics[key] = {
-                **previous,
-                **data,
-                "status": previous.get("status", data["status"]),
-            }
+        previous = cached.get(key)
+        status = previous.get("status") if isinstance(previous, dict) else None
+        metrics[key] = {**data, "status": status or data["status"]}
     return metrics
 
 

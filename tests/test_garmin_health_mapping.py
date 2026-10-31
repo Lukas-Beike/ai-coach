@@ -552,6 +552,26 @@ class AliasAndUnitTests(unittest.TestCase):
             [("cycling_ftp_history[0]", "calendarDate", IssueReason.MISSING)],
         )
 
+    def test_ftp_history_reads_biometric_range_records(self) -> None:
+        result = _map(
+            {
+                "cycling_ftp_history": [
+                    {"from": "2026-10-01", "until": "2026-10-01", "value": 270},
+                    {"from": "2026-10-02T00:00:00.0", "value": 272.5},
+                    {"calendarDate": "2026-10-03", "value": 999},
+                ]
+            }
+        )
+
+        self.assertEqual(
+            _rows(result),
+            [
+                ("ftp", 270.0, "2026-10-01", "ride"),
+                ("ftp", 272.5, "2026-10-02", "ride"),
+            ],
+        )
+        self.assertEqual(_issues(result), [])
+
     def test_latest_ftp_with_an_invalid_date_is_not_replaced_by_the_sync_day(
         self,
     ) -> None:
@@ -1534,7 +1554,7 @@ class PerformanceHistoryTests(unittest.TestCase):
 
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 13)
+        self.assertEqual(MAPPER_VERSION, 14)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):
