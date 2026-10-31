@@ -67,7 +67,6 @@ def file_content(section: bytes) -> tuple[str, str, bytes]:
     if not body:
         return suffix, whole, b""
     # Combined diffs prefix one column per parent; keep lines new to all.
-    columns = head.rsplit(b"\n", 1)[-1].count(b"@") - 1 if False else 0
     rows = []
     for hunk in re.split(rb"(?m)^(?=@@)", b"@@" + body)[1:]:
         header, _, lines = hunk.partition(b"\n")
