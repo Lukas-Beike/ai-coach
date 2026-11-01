@@ -10,26 +10,27 @@ LEGACY_PLANNING_METRICS = {
 LEGACY_TARGET_BASIS = {"icu_ftp": "ftp"}
 
 
+def _normalize_target(value: object) -> object:
+    if not isinstance(value, dict) or not isinstance(value.get("basis"), dict):
+        return value
+    basis = dict(value["basis"])
+    for old, new in LEGACY_TARGET_BASIS.items():
+        if old in basis:
+            if new in basis and (
+                type(basis[new]) is not type(basis[old]) or basis[new] != basis[old]
+            ):
+                raise RuntimeError(f"Conflicting planning fields: {old} and {new}")
+            old_value = basis.pop(old)
+            basis.setdefault(new, old_value)
+    return {**value, "basis": basis}
+
+
 def normalize_legacy_detail_targets(record: Mapping[str, Any]) -> dict[str, Any]:
     """Translate frozen target bases while leaving the original record untouched."""
 
-    def target(value: object) -> object:
-        if not isinstance(value, dict) or not isinstance(value.get("basis"), dict):
-            return value
-        basis = dict(value["basis"])
-        for old, new in LEGACY_TARGET_BASIS.items():
-            if old in basis:
-                if new in basis and (
-                    type(basis[new]) is not type(basis[old]) or basis[new] != basis[old]
-                ):
-                    raise RuntimeError(f"Conflicting planning fields: {old} and {new}")
-                old_value = basis.pop(old)
-                basis.setdefault(new, old_value)
-        return {**value, "basis": basis}
-
     result = dict(record)
     if "target_snapshot" in result:
-        result["target_snapshot"] = target(result["target_snapshot"])
+        result["target_snapshot"] = _normalize_target(result["target_snapshot"])
     analysis = result.get("session_analysis")
     if isinstance(analysis, dict) and isinstance(
         analysis.get("interval_quality"), dict
@@ -40,7 +41,7 @@ def normalize_legacy_detail_targets(record: Mapping[str, Any]) -> dict[str, Any]
                 **analysis,
                 "interval_quality": {
                     **quality,
-                    "target_snapshot": target(quality["target_snapshot"]),
+                    "target_snapshot": _normalize_target(quality["target_snapshot"]),
                 },
             }
     return result
