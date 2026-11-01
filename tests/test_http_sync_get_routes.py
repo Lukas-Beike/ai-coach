@@ -221,8 +221,8 @@ class _Feedback:
     def list(self, _limit: int = 100) -> list:
         return []
 
-    def for_activity_ids(self, _activity_ids: list) -> list:
-        return []
+    def for_activity_ids(self, _activity_ids: object) -> tuple[()]:
+        return ()
 
 
 class ActivityDetailRouteTests(unittest.TestCase):

@@ -72,10 +72,12 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
                 db, [session]
             ).get(session, session)
             recorded, _projection = self.service.current(db, entity)
+        assert recorded is not None
         self.assertNotIn("session_rpe_rated_at", recorded["rows"][0])
         rated = self.service.save(INTERVALS_ID, {"session_rpe": 6})
         with self.manager.reader() as db:
             recorded, _projection = self.service.current(db, entity)
+        assert recorded is not None
         self.assertEqual(
             recorded["rows"][0]["session_rpe_rated_at"], "2026-09-20T12:00:01+00:00"
         )

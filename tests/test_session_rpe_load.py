@@ -10,11 +10,11 @@ database and synthetic rows only.
 from __future__ import annotations
 
 import copy
+import threading
 import unittest
 from datetime import date
 from typing import Any
 
-import test_feedback_history as history
 from test_feedback_session_identity import (
     GARMIN_ID,
     INTERVALS_ID,
@@ -23,6 +23,8 @@ from test_feedback_session_identity import (
 )
 
 from backend.activities.activity_summary import activity_summaries
+from backend.history.service import ChangeHistoryService
+from backend.history.undo_service import HistoryUndoService
 from backend.performance.session_rpe_load import (
     REASON_CONFLICTING_PROVIDER_RATINGS,
     REASON_INVALID_DURATION,
@@ -249,7 +251,22 @@ class PeriodSumTests(unittest.TestCase):
 class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
     """Edits, undo and the two provider copies of one session, end to end."""
 
-    undo = history.FeedbackHistoryTests.undo
+    def undo(self, change: dict[str, Any]) -> None:
+        unused: Any = None
+        HistoryUndoService(
+            self.manager,
+            ChangeHistoryService(self.manager, unused, feedback_service=self.service),
+            unused,
+            unused,
+            unused,
+            unused,
+            unused,
+            unused,
+            feedback_service=self.service,
+            profile_mutation_coordinator=threading.RLock(),
+        ).apply(
+            {"change_id": change["id"], "expected_current_hash": change["after_hash"]}
+        )
 
     def load(self) -> dict[str, Any]:
         with self.manager.reader() as db:
