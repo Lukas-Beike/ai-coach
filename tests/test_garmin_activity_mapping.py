@@ -28,6 +28,7 @@ from backend.providers.garmin_activity_mapping import (
     MAX_ACTIVITY_ID_LENGTH,
     MAX_NAME_LENGTH,
     map_garmin_activities,
+    merge_training_load_rows,
 )
 
 FIXTURE_PATH = (
@@ -80,8 +81,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_six(self) -> None:
-        self.assertEqual(6, MAPPER_VERSION)
+    def test_mapper_version_is_eight(self) -> None:
+        self.assertEqual(8, MAPPER_VERSION)
 
     def test_fixture_maps_every_record_without_issues(self) -> None:
         result = _map(*_fixture_rows())
@@ -892,5 +893,76 @@ class RetrievedAtTests(unittest.TestCase):
             map_garmin_activities([], zone=untyped(None), retrieved_at=RETRIEVED)
 
 
+class TrainingEffectTests(unittest.TestCase):
+    """Version 8 maps the training-effect label (#1416)."""
+
+    def test_label_is_stripped_and_upper_cased(self) -> None:
+        record, issues = _one(trainingEffectLabel=" aerobic_base ")
+
+        self.assertEqual((), issues)
+        assert record is not None
+        self.assertEqual("AEROBIC_BASE", record.training_effect_label)
+        self.assertEqual(50.0, record.load)
+        self.assertIs(LoadModel.GARMIN_TRAINING_LOAD, record.load_model)
+
+    def test_fixture_labels_reach_the_records(self) -> None:
+        first, second = _map(*_fixture_rows()).records
+
+        self.assertEqual("AEROBIC_BASE", first.training_effect_label)
+        self.assertEqual("RECOVERY", second.training_effect_label)
+
+    def test_absent_label_is_none_and_a_non_text_label_is_an_issue(self) -> None:
+        absent, absent_issues = _one(trainingEffectLabel=" ")
+        invalid, invalid_issues = _one(trainingEffectLabel=7)
+
+        self.assertEqual((), absent_issues)
+        assert absent is not None and invalid is not None
+        self.assertIsNone(absent.training_effect_label)
+        self.assertIsNone(invalid.training_effect_label)
+        self.assertEqual(
+            (MappingIssue("910009", "trainingEffectLabel", IssueReason.INVALID_TYPE),),
+            invalid_issues,
+        )
+
+    def test_dedicated_training_load_rows_override_per_field(self) -> None:
+        rows = merge_training_load_rows(
+            [
+                _row(activityId=1, trainingEffectLabel="TEMPO"),
+                _row(activityId=2, trainingEffectLabel="TEMPO"),
+                "invalid",
+            ],
+            [
+                {"activityId": 1, "trainingEffectLabel": "VO2_MAX"},
+                {"id": 2, "activityTrainingLoad": 80, "trainingEffectLabel": None},
+                {"activityId": 3, "trainingEffectLabel": "SPEED"},
+            ],
+        )
+        first, second = _map(*untyped(rows)).records
+
+        self.assertEqual(("VO2_MAX", 50.0), (first.training_effect_label, first.load))
+        self.assertEqual(("TEMPO", 80.0), (second.training_effect_label, second.load))
+        self.assertEqual("invalid", untyped(rows)[2])
+
+    def test_without_training_load_rows_the_activities_are_unchanged(self) -> None:
+        rows = [_row()]
+
+        self.assertIs(rows, merge_training_load_rows(rows, None))
+        self.assertIs(rows, merge_training_load_rows(rows, []))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class SummaryValueTests(unittest.TestCase):
+    def test_speed_elevation_normalized_power_and_vo2max_are_mapped(self) -> None:
+        record, issues = _one(
+            averageSpeed=7.5, elevationGain=310, normPower=240, vO2MaxValue=54
+        )
+
+        self.assertEqual((), issues)
+        assert record is not None
+        self.assertEqual(7.5, record.avg_speed_mps)
+        self.assertEqual(310.0, record.elevation_gain_m)
+        self.assertEqual(240.0, record.normalized_power)
+        self.assertEqual(54.0, record.vo2max)

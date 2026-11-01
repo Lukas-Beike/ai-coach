@@ -23,6 +23,7 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_SPEED_MPS,
     MAX_ACTIVITY_STEPS,
     MIN_ACTIVITY_ALTITUDE_M,
+    bounded_number,
     finite_number,
     optional_aware_datetime,
     optional_bounded_number,
@@ -300,6 +301,44 @@ def _require_method_identity(method_version: object, input_fingerprint: object) 
         raise ValueError("input_fingerprint must be a lowercase SHA-256 hex digest")
 
 
+type ZoneSeconds = tuple[tuple[str, float], ...]
+
+MAX_ZONE_COUNT: Final = 20
+MAX_TRAINING_EFFECT_LABEL_LENGTH: Final = 50
+MAX_ZONE_ID_LENGTH: Final = 20
+_SUMMARY_VALUE_BOUNDS: Final = (
+    ("intensity", 0.0, 1_000.0),
+    ("rpe", 0.0, 10.0),
+    ("feel", 0.0, 10.0),
+    ("avg_speed_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
+    ("weighted_avg_speed_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
+    ("pace_mps", 0.0, MAX_ACTIVITY_SPEED_MPS),
+    ("ftp_w", 0.0, MAX_ACTIVITY_POWER_W),
+    ("eftp_w", 0.0, MAX_ACTIVITY_POWER_W),
+    ("vo2max", 0.0, 100.0),
+    ("avg_temp_c", -60.0, 70.0),
+)
+_ZONE_FIELDS: Final = ("power_zone_times_s", "hr_zone_times_s", "pace_zone_times_s")
+
+
+def _zone_seconds(value: object, field: str) -> ZoneSeconds | None:
+    """Validate (zone id, seconds) pairs; an empty tuple is None."""
+    if value is None:
+        return None
+    if not isinstance(value, tuple) or len(value) > MAX_ZONE_COUNT:
+        raise ValueError(f"{field} must be a tuple of at most {MAX_ZONE_COUNT} zones")
+    zones: list[tuple[str, float]] = []
+    for item in value:
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise ValueError(f"{field} items must be (zone id, seconds) pairs")
+        zone_id, seconds = item
+        require_text(zone_id, field, max_length=MAX_ZONE_ID_LENGTH)
+        zones.append(
+            (zone_id, bounded_number(seconds, field, 0.0, MAX_ACTIVITY_DURATION_S))
+        )
+    return tuple(zones) or None
+
+
 @dataclass(frozen=True, slots=True)
 class ActivityRecord:
     activity_id: str
@@ -329,6 +368,29 @@ class ActivityRecord:
     elevation_low_m: float | None = None
     steps: float | None = None
     device_type: DeviceType | None = None
+    # Summary values a provider reports besides the measurements above.
+    # Intensity is the provider's intensity factor in percent of FTP.
+    intensity: float | None = None
+    rpe: float | None = None
+    feel: float | None = None
+    avg_speed_mps: float | None = None
+    weighted_avg_speed_mps: float | None = None
+    pace_mps: float | None = None
+    ftp_w: float | None = None
+    eftp_w: float | None = None
+    vo2max: float | None = None
+    avg_temp_c: float | None = None
+    # Seconds per zone as (zone id, seconds) pairs, ids such as "Z1".
+    power_zone_times_s: ZoneSeconds | None = None
+    hr_zone_times_s: ZoneSeconds | None = None
+    pace_zone_times_s: ZoneSeconds | None = None
+    # The provider calendar event the activity was paired with, if any.
+    planned_event_id: str | None = None
+    # The recording device as the provider names it, for example "Garmin Edge 840".
+    device_name: str | None = None
+    # The provider's training-effect category of the session, for example
+    # "AEROBIC_BASE", as an upper-case code.
+    training_effect_label: str | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -474,3 +536,18 @@ class ActivityRecord:
         if self.device_type is not None:
             require_instance(self.device_type, DeviceType, "device_type")
         optional_text(self.name, "name", max_length=200)
+        for field, lower, upper in _SUMMARY_VALUE_BOUNDS:
+            object.__setattr__(
+                self,
+                field,
+                optional_bounded_number(getattr(self, field), field, lower, upper),
+            )
+        for field in _ZONE_FIELDS:
+            object.__setattr__(self, field, _zone_seconds(getattr(self, field), field))
+        optional_text(self.planned_event_id, "planned_event_id", max_length=200)
+        optional_text(self.device_name, "device_name", max_length=200)
+        optional_text(
+            self.training_effect_label,
+            "training_effect_label",
+            max_length=MAX_TRAINING_EFFECT_LABEL_LENGTH,
+        )

@@ -255,7 +255,7 @@ from backend.planning.assembly import (
 from backend.planning.assembly import (
     PlanningRuntime as PlanningDataRuntime,
 )
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -319,9 +319,6 @@ from backend.sync.assembly import (
     ProviderSyncRuntime,
 )
 from backend.sync.canonical_backfill_assembly import build_canonical_backfill
-from backend.sync.canonical_projection_assembly import (
-    build_canonical_snapshot_projection,
-)
 from backend.sync.canonical_read_assembly import build_canonical_read
 from backend.sync.canonical_read_selector import CanonicalReadSelector
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -469,7 +466,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.32"
+APP_VERSION = "1.13.33"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -684,7 +681,6 @@ ATHLETE_DATA = AthleteDataAssembly(
             checkin=CHECKIN_REPOSITORY,
             profile=PROFILE_REPOSITORY,
             key_values=KEY_VALUE_REPOSITORY,
-            snapshot_reader=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
             activity_rows=lambda: CANONICAL_READ,
             table_serving=lambda: CANONICAL_READ,
             competition=COMPETITION_REPOSITORY,
@@ -709,10 +705,10 @@ CANONICAL_READ: CanonicalReadSelector
 ACTIVITY_READS = ActivityReadAssembly(
     database_manager,
     ActivityReadSources(
-        SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
         lambda: CANONICAL_READ,
         observation_reader=lambda: CANONICAL_READ,
         coverage=lambda: CANONICAL_READ,
+        serving=lambda: CANONICAL_READ,
     ),
     ATHLETE_DATA.activity_feedback,
     lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
@@ -1054,6 +1050,7 @@ GARMIN_ASSEMBLY: GarminAssembly = GarminAssembly(
         canonical=GarminCanonicalSources(
             activity_rows=lambda: CANONICAL_READ,
             observations=lambda: CANONICAL_READ,
+            activity_summaries=lambda: CANONICAL_READ,
         ),
         tokens=GARMIN_TOKENS,
     )
@@ -1427,7 +1424,6 @@ WEATHER_ASSEMBLY = WeatherAssembly(
 COACH_CONTEXT = CoachContextAssembly(
     dependencies=CoachContextAssembly.Inputs(
         performance=CoachContextPerformanceSources(
-            sync_state_repository=sync_state_repository,
             weather_service=WEATHER_ASSEMBLY.service,
             garmin_payload_service=GARMIN_ASSEMBLY.payload_service,
             garmin_projection_service=GARMIN_ASSEMBLY.projection_service,
@@ -1439,10 +1435,10 @@ COACH_CONTEXT = CoachContextAssembly(
                 database_manager=lambda: database_manager(),
                 observation_reader=lambda: CANONICAL_READ,
                 serving=lambda: CANONICAL_READ,
-                activity_rows=lambda: CANONICAL_READ,
+                activity_summaries=lambda: CANONICAL_READ,
                 coverage=lambda: CANONICAL_READ,
             ),
-            activity_rows=ActivityRowSource(
+            activity_rows=ActivitySummarySource(
                 database_manager=lambda: database_manager(),
                 reader=lambda: CANONICAL_READ,
                 coverage=lambda: CANONICAL_READ,
@@ -1922,7 +1918,7 @@ PUBLIC_STATE = PublicStateAssembly(
             key_value_service=key_value_service,
             observation_reader=lambda: CANONICAL_READ,
             canonical_serving=lambda: CANONICAL_READ,
-            activity_row_reader=lambda: CANONICAL_READ,
+            activity_summary_reader=lambda: CANONICAL_READ,
             coverage=lambda: CANONICAL_READ,
         ),
         owners=PublicStateOwnerAssemblies(
@@ -1974,16 +1970,12 @@ PUBLIC_STATE = PublicStateAssembly(
     provider_credentials=lambda: PROVIDER_CREDENTIAL_SERVICE,
 )
 
-CANONICAL_SNAPSHOT_PROJECTION = build_canonical_snapshot_projection(
-    intervals_snapshots=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
-    snapshot_payloads=SNAPSHOT_REPOSITORY,
-    profile=ATHLETE_PROFILE_SERVICE,
-    clock=ATHLETE_CLOCK.now,
-)
-
 CANONICAL_READ = build_canonical_read(
-    legacy=CANONICAL_SNAPSHOT_PROJECTION,
     key_values=KEY_VALUE_REPOSITORY,
+    profile=ATHLETE_PROFILE_SERVICE,
+    compact_only=SnapshotRepositoryReader(
+        SNAPSHOT_REPOSITORY
+    ).has_unmatched_compact_activity_rows,
 )
 METRIC_EXPORT: MetricExportService = build_metric_export_service(
     database_manager,

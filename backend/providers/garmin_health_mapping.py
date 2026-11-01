@@ -69,8 +69,8 @@ athlete-zone date of ``retrieved_at``. Undated ``heart_rate_zones`` and
 value also uses the sync day when it has no date; dated FTP history still
 requires a provider date and is never backdated from an undated current value.
 
-Weight and body fat follow the legacy reader ``backend/performance/garmin_weight``
-for record shapes. A record's day is the first present of calendarDate,
+Weight and body fat follow the legacy reader, now the ingest weight parser
+``backend/sync/garmin_weight``, for record shapes. A record's day is the first present of calendarDate,
 summaryDate, date, timestampGMT or timestamp. Epoch milliseconds are read as a UTC
 date, as the legacy reader does. A record with no date of its own inherits its
 nearest dated ancestor's day. A present but unreadable ISO date is not inherited: a record under it with no
@@ -82,8 +82,9 @@ timestamp
 aware datetime (UTC when naive), so consumers can choose the latest value per day.
 
 Alias precedence: the first present, non-empty name in each field's tuple wins.
-The tuples follow today's readers in ``backend/performance`` (``recovery_context``,
-``planning_recovery``, ``garmin_weight``, ``garmin_metrics``).
+The tuples follow the readers they replaced (``recovery_context``, the deleted
+``planning_recovery`` snapshot reader, and the ingest parsers
+``backend/sync/garmin_weight`` and ``backend/sync/garmin_payload_metrics``).
 
 Weight units: ``gram``/``grams``/``g`` are divided by 1000, ``kilogram``/
 ``kilograms``/``kg`` are kept, and any unit containing ``lb`` or ``pound`` is

@@ -1,6 +1,7 @@
 """Immutable canonical records for provider domains that are not numeric metrics.
 
-Categorical provider statuses, sleep periods, zone configurations and gear.
+Categorical provider statuses, sleep periods, zone configurations, gear and the
+best power per duration of a provider's power curve.
 Validation runs when each record is constructed, as in ``backend.canonical.records``.
 Provider records name their provider and source record, because a re-projection
 replaces the rows of one source record; none of them is derived locally.
@@ -56,6 +57,7 @@ ZONE_VALUE_BOUNDS: Final = {
 }
 MAX_GEAR_DISTANCE_M: Final = 1_000_000_000.0
 MAX_GEAR_ACTIVITIES: Final = 1_000_000
+MAX_POWER_CURVE_DURATION_S: Final = 86_400
 
 
 def _require_provider_source(provenance: object) -> Provenance:
@@ -322,3 +324,74 @@ class GearActivityLink:
         require_text(self.provider_activity_id, "provider_activity_id")
         if not _require_provider_source(self.provenance).context.is_unknown:
             raise ValueError("gear activity links have no measurement context")
+
+
+@dataclass(frozen=True, slots=True)
+class PowerCurvePoint:
+    """The best mean power over one duration, as a provider's power curve reports it.
+
+    ``observed_on`` is the day of the best effort and ``provider_activity_id``
+    the provider activity it came from, None when the provider names none. The
+    fetch the point came from is described once by its ``PowerCurveFetch``.
+    """
+
+    duration_s: int
+    watts: float
+    observed_on: date
+    provider_activity_id: str | None
+    provenance: Provenance
+
+    def __post_init__(self) -> None:
+        duration = self.duration_s
+        if isinstance(duration, bool) or not isinstance(duration, int):
+            raise TypeError("duration_s must be an integer")
+        if not 1 <= duration <= MAX_POWER_CURVE_DURATION_S:
+            raise ValueError("duration_s must be between 1 and 86400")
+        object.__setattr__(
+            self,
+            "watts",
+            bounded_number(self.watts, "watts", 0.0, MAX_ACTIVITY_POWER_W),
+        )
+        require_date(self.observed_on, "observed_on")
+        optional_text(self.provider_activity_id, "provider_activity_id")
+        _require_provider_source(self.provenance)
+
+
+@dataclass(frozen=True, slots=True)
+class PowerCurveFetch:
+    """The outcome of a provider's latest power curve fetch, once per source record.
+
+    ``fetch_status`` is the provider fetch outcome, such as ``ok``,
+    ``insufficient_data`` or ``failed`` (the earlier best efforts are kept).
+    ``window_start`` and ``window_end`` bound the days the fetch searched; both
+    are None when the outcome names no window. ``provenance.retrieved_at`` is
+    when the reported points were fetched, None when unknown.
+    """
+
+    fetch_status: str
+    window_start: date | None
+    window_end: date | None
+    provenance: Provenance
+
+    def __post_init__(self) -> None:
+        if optional_slug(self.fetch_status, "fetch_status") is None:
+            raise TypeError("fetch_status must be text")
+        if (self.window_start is None) != (self.window_end is None):
+            raise ValueError("window_start and window_end go together")
+        _require_validity(self.window_start, self.window_end)
+        _require_provider_source(self.provenance)
+
+
+@dataclass(frozen=True, slots=True)
+class PowerCurve:
+    """The stored power curve: each provider's latest fetch and its best efforts."""
+
+    fetches: tuple[PowerCurveFetch, ...] = ()
+    points: tuple[PowerCurvePoint, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.fetches or self.points)
+
+
+EMPTY_POWER_CURVE: Final = PowerCurve()

@@ -4,14 +4,28 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.providers.intervals_activity_mapping import map_intervals_activities
 from backend.providers.snapshot_projection import intervals_activity_rows
+
+
+def summaries_of_rows(rows: Any) -> tuple[ActivitySummary, ...]:
+    """Summaries of raw Intervals.icu rows, one session per row, UTC local time."""
+    zone = ZoneInfo("UTC")
+    mapped = map_intervals_activities(
+        list(rows), zone=zone, retrieved_at=datetime(2026, 10, 12, 8, tzinfo=UTC)
+    )
+    return activity_summaries(
+        ((f"act_{record.activity_id}", [record]) for record in mapped.records), zone
+    )
 
 
 class SnapshotActivityRows:
@@ -31,6 +45,17 @@ class SnapshotActivityRows:
         rows = intervals_activity_rows(self._snapshot_reader.latest_snapshot(db))
         return rows if limit is None else rows[:limit]
 
+    def activity_summaries(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        limit: int | None = None,
+    ) -> tuple[ActivitySummary, ...]:
+        summaries = summaries_of_rows(self.activity_rows(db))
+        return summaries if limit is None else summaries[:limit]
+
 
 class FixedActivityRows:
     """Serve a fixed list of raw rows."""
@@ -47,6 +72,21 @@ class FixedActivityRows:
         limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
         return self.rows if limit is None else self.rows[:limit]
+
+    def activity_summaries(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        limit: int | None = None,
+    ) -> tuple[ActivitySummary, ...]:
+        """Serve summary dicts as given; raw rows go through the Intervals mapper."""
+        if all("started_at_local" in row for row in self.rows):
+            summaries: tuple[Any, ...] = self.rows
+        else:
+            summaries = summaries_of_rows(self.rows)
+        return summaries if limit is None else summaries[:limit]
 
 
 class NoObservations:
@@ -100,7 +140,7 @@ def canonical_source(
     return CanonicalPerformanceSource(
         database_manager,
         NoObservations,
-        activity_rows=lambda: rows,
+        activity_summaries=lambda: rows,
         coverage=None if fetched_at is None else lambda: StoredCoverage(fetched_at),
     )
 

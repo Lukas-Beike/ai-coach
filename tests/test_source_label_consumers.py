@@ -15,10 +15,10 @@ from backend.performance import (
     current_metrics,
     daily_health,
     garmin_metrics,
-    garmin_weight,
 )
 from backend.performance.season_inputs import SeasonLoadInputs
 from backend.planning import season_preparation
+from backend.sync import garmin_weight
 
 SEASON_VALUES = {"end": "2026-10-04", "load_scale": 0.8, "taper_days": 2}
 
@@ -83,6 +83,6 @@ class EmittedSourceOutputTests(unittest.TestCase):
             completed_today=(),
         )
         result = season_preparation.load_scenarios(
-            {}, {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
+            None, {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
         )
         self.assertEqual("Intervals.icu recorded wellness", result["basis"]["source"])

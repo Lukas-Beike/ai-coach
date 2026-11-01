@@ -1,15 +1,19 @@
 """Bounded, content-free historical series for the public analysis view."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
+from backend.activities.activity_summary import summary_duration_s
 from backend.athlete.local_date import LocalDate
+from backend.canonical.domain_records import PowerCurve
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance import activity_validation, body, eftp, garmin_metric_history
+from backend.performance import activity_validation, body, eftp
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.display_sources import preferred_providers
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
+from backend.providers.garmin_health_mapping import GARMIN_LABEL
 
 INTERVALS_SOURCE = "Intervals.icu"
 
@@ -33,12 +37,38 @@ def _day(value: Any) -> date | None:
         return None
 
 
-def _rows(value: Any) -> list[dict[str, Any]]:
-    return (
-        [row for row in value if isinstance(row, dict)]
-        if isinstance(value, list)
-        else []
-    )
+# Every stored power curve point is a measured best effort.
+_POWER_POINT_STATUS: Final = "ok"
+
+
+def _power_curve(curve: PowerCurve, start: date, today: date) -> dict[str, Any]:
+    """The canonical power curve in the stored fetch envelope shape.
+
+    The status, window and fetch time are those of the latest fetch, also when
+    it delivered no points; only best efforts of the chart's days are listed.
+    """
+    envelope: dict[str, Any] = {}
+    if curve.fetches:
+        fetch = curve.fetches[0]
+        envelope["status"] = fetch.fetch_status
+        if fetch.window_start is not None and fetch.window_end is not None:
+            envelope["start"] = fetch.window_start.isoformat()
+            envelope["end"] = fetch.window_end.isoformat()
+        if fetch.provenance.retrieved_at is not None:
+            envelope["synced_at"] = fetch.provenance.retrieved_at.isoformat()
+    envelope["points"] = [
+        {
+            "duration_seconds": point.duration_s,
+            "watts": _number(point.watts),
+            "date": point.observed_on.isoformat(),
+            "activity_id": point.provider_activity_id or "",
+            "source": point.provenance.label,
+            "status": _POWER_POINT_STATUS,
+        }
+        for point in curve.points
+        if start <= point.observed_on <= today
+    ]
+    return envelope
 
 
 def _load_history(
@@ -51,26 +81,16 @@ def _load_history(
 
 
 def _training_time_history(
-    rows: list[dict[str, Any]], dates: list[str]
+    summaries: Sequence[Mapping[str, Any]], dates: list[str]
 ) -> list[dict[str, Any]]:
-    """Daily moving time in hours; each activity counts once, unknown stays a gap."""
+    """Daily moving time in hours; unknown stays a gap."""
     seconds: dict[str, float] = {}
-    seen: set[str] = set()
-    for row in rows:
-        key = str(row.get("id") or "")
-        day = _day(row.get("start_date_local"))
-        value = row.get("moving_time")
-        if (
-            day is None
-            or isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not 0 < value <= 86400
-            or (key and key in seen)
-        ):
+    for summary in summaries:
+        day = _day(summary.get("started_at_local"))
+        value = summary_duration_s(summary)
+        if day is None or value is None or not 0 < value <= 86400:
             continue
-        if key:
-            seen.add(key)
-        seconds[day.isoformat()] = seconds.get(day.isoformat(), 0) + float(value)
+        seconds[day.isoformat()] = seconds.get(day.isoformat(), 0) + value
     return [
         {
             "date": day,
@@ -94,7 +114,7 @@ def _garmin_values(
 
 def _metric_series(
     key: str,
-    activities: list[dict[str, Any]],
+    activities: Sequence[Mapping[str, Any]],
     eftp_by_day: Mapping[date, float] | None,
     dates: list[str],
     start: date,
@@ -124,26 +144,24 @@ def _metric_series(
 
 
 def analysis_history(
-    snapshot: dict[str, Any] | None,
-    garmin: dict[str, Any],
+    garmin: GarminSyncStatus,
     today: date,
     *,
     canonical: CanonicalPerformanceInputs,
 ) -> dict[str, Any]:
     """Use dated provider history, never backfill today's settings into the past.
 
-    ``canonical`` supplies the activity rows, wellness days and Garmin history read
-    through the canonical ports. The snapshot supplies sync times and the power
-    curve, which has no metric kind yet.
+    ``canonical`` supplies the activity summaries, wellness days, Garmin history,
+    the power curve and the Intervals.icu sync time read through the canonical
+    ports; ``garmin`` is the Garmin sync status.
     """
-    snapshot = snapshot or {}
     start = today - timedelta(days=89)
     dates = [(start + timedelta(days=i)).isoformat() for i in range(90)]
     load_end = today
     load_start = load_end - timedelta(days=89)
     load_dates = [(load_start + timedelta(days=i)).isoformat() for i in range(90)]
     eftp_by_day = canonical.eftp_by_day
-    activities = list(canonical.activity_rows or ())
+    activities = list(canonical.activities or ())
     garmin_canonical = canonical.garmin or GarminCanonicalMetrics()
     load = _load_history(load_dates, garmin_canonical)
     series = {
@@ -171,29 +189,18 @@ def analysis_history(
         # PublicPerformanceStateService exposes this as performance.history.body;
         # the UI can render it in the separate Body tab without another request.
         "body": body.body_history(
-            snapshot,
+            canonical.intervals_synced_at,
             garmin,
             today,
             canonical=canonical.body,
             wellness_days=canonical.history_wellness_days or (),
-            activity_rows=activities,
+            activities=activities,
             garmin_ftp=garmin_canonical.performance_history.get(
                 "cycling_ftp_watts", {}
             ),
             eftp_by_day=eftp_by_day,
         ),
-        # Remaining snapshot read: the power curve has no metric kind.
-        "cycling_power_profile": {
-            **(snapshot.get("cycling_power_profile") or {}),
-            "points": [
-                point
-                for point in _rows(
-                    (snapshot.get("cycling_power_profile") or {}).get("points")
-                )
-                if (day := _day(point.get("date"))) is not None
-                and start <= day <= today
-            ],
-        },
+        "cycling_power_profile": _power_curve(canonical.power_curve, start, today),
         "provider_metrics": _canonical_provider_metrics(
             garmin, start, today, garmin_canonical
         ),
@@ -231,7 +238,7 @@ _FETCH_OUTCOMES: Final = frozenset({"stale", "failed", "unsupported"})
 
 
 def _canonical_provider_metrics(
-    garmin: dict[str, Any],
+    garmin: GarminSyncStatus,
     start: date,
     today: date,
     canonical: GarminCanonicalMetrics,
@@ -243,18 +250,15 @@ def _canonical_provider_metrics(
     only from canonical data. A cached chart supplies its fetch outcome (stale,
     failed or unsupported); otherwise the status follows the canonical points.
     """
-    cached = garmin.get("provider_metrics")
-    cached = cached if isinstance(cached, dict) else {}
     metrics: dict[str, Any] = {}
     for key, (aggregation, fields) in _CANONICAL_PROVIDER_METRICS.items():
         data = _canonical_metric(
             key,
             aggregation,
             _canonical_values_by_day(fields, canonical, start, today),
-            garmin.get("synced_at"),
+            garmin.synced_at,
         )
-        previous = cached.get(key)
-        status = previous.get("status") if isinstance(previous, dict) else None
+        status = garmin.chart_status.get(key)
         if status not in _FETCH_OUTCOMES:
             status = data["status"]
         metrics[key] = {**data, "status": status}
@@ -290,7 +294,7 @@ def _canonical_metric(
         point: dict[str, Any] = {
             "date": day.isoformat(),
             "values": values,
-            "source": garmin_metric_history.GARMIN_SOURCE,
+            "source": GARMIN_LABEL,
         }
         if key in ("training_readiness_history", "weekly_training_status"):
             point["value"] = next(iter(values.values()))
@@ -298,7 +302,7 @@ def _canonical_metric(
     return {
         "status": "current" if points else "unavailable",
         "aggregation": aggregation,
-        "source": garmin_metric_history.GARMIN_SOURCE,
+        "source": GARMIN_LABEL,
         "unit": "unknown",
         "points": points,
         "observed_at": points[-1]["date"] if points else None,

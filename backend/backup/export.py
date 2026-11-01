@@ -54,7 +54,10 @@ TimeoutErrorFactory = Callable[[], Exception]
 # starts_at_local and planned_duration_s instead of start_date_local and
 # moving_time: competitions, workouts, planned units and their stored conflicts,
 # Coach plan artifacts, adaptive previews and planning.json (schema v16).
-PRIVACY_EXPORT_FORMAT_VERSION = 8
+# Version 9 adds power_curve_points and power_curve_fetches, including retired
+# rows (schema v17).
+# Version 10 adds activity_feedback.session_rpe_rated_at (schema v18).
+PRIVACY_EXPORT_FORMAT_VERSION = 10
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -70,6 +73,8 @@ PRIVACY_EXPORT_JSONL_FILES = {
     "categorical_observations.jsonl",
     "gear_items.jsonl",
     "gear_activity_links.jsonl",
+    "power_curve_points.jsonl",
+    "power_curve_fetches.jsonl",
     "athlete_checkins.jsonl",
     "activity_feedback.jsonl",
     "external_calendar_events.jsonl",
@@ -485,6 +490,8 @@ class PrivacyArchiveExportService:
                     ("sleep_periods", "started_at, provider"),
                     ("categorical_observations", "observed_on, domain, natural_key"),
                     ("gear_items", "provider, gear_id"),
+                    ("power_curve_points", "provider, duration_s"),
+                    ("power_curve_fetches", "provider, source_record_id"),
                 ):
                     self._write_jsonl(
                         archive,

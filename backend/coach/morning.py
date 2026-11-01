@@ -18,9 +18,6 @@ from backend.runtime.ports import ObservationReader
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_service import GARMIN_AUTOMATIC_SYNC_DAYS, GarminSyncService
 
-# The check-in waits for last night's sleep; a week covers a late sync.
-SLEEP_READY_DAYS = 7
-
 
 @dataclass(frozen=True)
 class GarminSleepObservations:
@@ -78,11 +75,12 @@ class ManualMorningCheckinService:
         self._morning_battery.refresh(checkin_date)
 
     def _sleep_ready(self, checkin_date: date) -> bool:
-        snapshot = self._garmin_payload.recent_view(SLEEP_READY_DAYS)
+        # Only the stored sleep freshness is read, never a Garmin section.
+        state = self._garmin_payload.state()
         with self._observations.database_manager.reader() as db:
             day = read_garmin_sleep_day(self._observations.reader(), db)
         return garmin_observations.garmin_sleep_ready_for_checkin(
-            checkin_date, snapshot, None if day is None else day.isoformat()
+            checkin_date, state, None if day is None else day.isoformat()
         )
 
 

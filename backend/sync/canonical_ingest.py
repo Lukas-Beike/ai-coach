@@ -12,19 +12,21 @@ replaced, so Garmin never deletes.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
 from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.local_time import local_date
-from backend.db import canonical_domain_store, canonical_store
+from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.canonical_domain_store import ReplaceResult
 from backend.db.canonical_store import WriteOutcome
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
+    GARMIN_TRAINING_LOAD_SECTION,
+    INTERVALS_POWER_CURVE_KEY,
     IngestPlan,
     garmin_ingest_plan,
     garmin_payload_retrieved_at,
@@ -117,7 +119,7 @@ def ingest_intervals_snapshot(
     all_sync_days: int,
     earliest_date: date,
 ) -> CanonicalIngestCounters:
-    """Write the Intervals.icu raw block of a snapshot.
+    """Write the Intervals.icu raw block and the stored power curve of a snapshot.
 
     ``activity_days`` is None for historical fetches, which never delete. An
     incremental snapshot never deletes either. A snapshot without a sync time
@@ -127,7 +129,12 @@ def ingest_intervals_snapshot(
     if retrieved_at is None:
         return CanonicalIngestCounters()
     raw = snapshot.get("raw_provider_data")
-    plan = intervals_ingest_plan(raw, zone=zone, retrieved_at=retrieved_at)
+    plan = intervals_ingest_plan(
+        raw,
+        zone=zone,
+        retrieved_at=retrieved_at,
+        power_curve=snapshot.get(INTERVALS_POWER_CURVE_KEY),
+    )
     deletion_window = None
     if (
         activity_days is not None
@@ -161,7 +168,10 @@ def ingest_intervals_partial_snapshot(
     if retrieved_at is None:
         return CanonicalIngestCounters()
     plan = intervals_ingest_plan(
-        snapshot.get("raw_provider_data"), zone=zone, retrieved_at=retrieved_at
+        snapshot.get("raw_provider_data"),
+        zone=zone,
+        retrieved_at=retrieved_at,
+        power_curve=snapshot.get(INTERVALS_POWER_CURVE_KEY),
     )
     return ingest_plan(
         db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=zone
@@ -179,9 +189,18 @@ def ingest_garmin_payload(
     retrieved_at = garmin_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None:
         return CanonicalIngestCounters()
-    plan = garmin_ingest_plan(payload, zone=zone)
+    plan = garmin_ingest_plan(
+        payload, zone=zone, training_loads=stored_training_loads(db)
+    )
     return ingest_plan(
         db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=zone
+    )
+
+
+def stored_training_loads(db: Any) -> Callable[[str], Any]:
+    """Look up the stored dedicated Garmin training-load row of an activity id."""
+    return lambda activity_id: garmin_store.read_item(
+        db, GARMIN_TRAINING_LOAD_SECTION, activity_id
     )
 
 
@@ -261,6 +280,8 @@ def ingest_plan(
                 zones=batch.zones,
                 gear_items=batch.gear_items,
                 gear_links=batch.gear_links,
+                power_curve=batch.power_curve,
+                power_curve_fetch=batch.power_curve_fetch,
             )
         )
     if deletion_window is not None:

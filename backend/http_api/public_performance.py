@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import context as performance_context
 from backend.performance.canonical_inputs import (
@@ -16,8 +17,15 @@ from backend.performance.canonical_inputs import (
     read_once,
     read_performance_inputs,
     resolve_reader,
+    with_read_status,
 )
 from backend.performance.chart_history import analysis_history
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
+from backend.performance.session_rpe_load import (
+    FeedbackLookup,
+    feedback_by_session,
+    session_rpe_load,
+)
 from backend.performance.training_focus import training_focus
 from backend.runtime.ports import ObservationReader
 
@@ -27,90 +35,99 @@ class PublicPerformanceStateService:
 
     def __init__(
         self,
-        sync_state_repository: Any,
         garmin_payload_service: Any,
         profile_service: Any,
         garmin_projection_service: Any,
         today: Callable[[], date],
         canonical: CanonicalPerformanceSource | None = None,
+        *,
+        session_feedback: FeedbackLookup | None = None,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
-        self._sync_state_repository = sync_state_repository
         self._garmin_payload_service = garmin_payload_service
         self._profile_service = profile_service
         self._garmin_projection_service = garmin_projection_service
         self._today = today
         self._canonical = canonical
+        self._session_feedback = session_feedback
+        self._now = now
 
     def performance_state(self) -> dict[str, Any]:
         source = self._canonical
         if source is None:
-            return self.from_snapshot(self._sync_state_repository.latest_snapshot())
+            return self.from_inputs(None)
         today = self._today()
-        # One read-only snapshot: the performance snapshot, the Garmin snapshot,
-        # the canonical reads and the profile/Garmin projection share one
-        # connection, so a concurrent sync cannot mix revisions and the request
-        # never waits for the writer. The chosen source serves both body and
-        # load reads.
+        # One read-only snapshot: the canonical reads, the Garmin sync status and
+        # the profile/Garmin projection share one connection, so a concurrent sync
+        # cannot mix revisions and the request never waits for the writer. The
+        # chosen source serves both body and load reads.
         with source.database_manager().read_snapshot() as db:
-            snapshot = self._sync_state_repository.latest_snapshot()
-            garmin = self._garmin_payload_service.recent_view_in(db)
+            garmin = self._garmin_payload_service.sync_status_in(db)
             reader = read_once(resolve_reader(source.observation_reader(), db))
-            canonical = read_performance_inputs(
-                reader,
+            canonical = with_read_status(
+                source,
                 db,
-                activity_reader=source.activity_row_reader(),
-                as_of=today,
+                read_performance_inputs(
+                    reader,
+                    db,
+                    activity_reader=source.activity_summary_reader(),
+                    as_of=today,
+                    include_power_curve=True,
+                ),
             )
-            return self._project(
-                snapshot, garmin, canonical, today, observations=reader
-            )
+            return self._project(garmin, canonical, today, observations=reader)
 
     def canonical_inputs(self, db: Any) -> CanonicalPerformanceInputs | None:
         """Read the load inputs inside the caller's snapshot transaction."""
-        return inputs_for_snapshot(self._canonical, db, as_of=self._today())
+        return inputs_for_snapshot(
+            self._canonical, db, as_of=self._today(), include_power_curve=True
+        )
 
-    def from_snapshot(
-        self,
-        snapshot: dict[str, Any],
-        canonical: CanonicalPerformanceInputs | None = None,
+    def from_inputs(
+        self, canonical: CanonicalPerformanceInputs | None
     ) -> dict[str, Any]:
-        """Project a snapshot and the inputs a larger state request read with it."""
+        """Project the inputs a larger state request read in its own transaction."""
         return self._project(
-            snapshot,
-            self._garmin_payload_service.recent_view(),
+            self._garmin_payload_service.sync_status(),
             canonical,
             self._today(),
         )
 
     def _project(
         self,
-        snapshot: dict[str, Any],
-        garmin: dict[str, Any],
+        garmin: GarminSyncStatus,
         canonical: CanonicalPerformanceInputs | None,
         today: date,
         *,
         observations: ObservationReader | None = None,
     ) -> dict[str, Any]:
+        """Project canonical values into the public performance state."""
         profile = self._profile_service.get()
         inputs = canonical or EMPTY_PERFORMANCE_INPUTS
+        if inputs.pending:
+            # Nothing is served before the first completed backfill: no history,
+            # focus or Garmin values, no power curve and no Garmin freshness,
+            # source or pagination. Only the Garmin connection status stays.
+            garmin = NO_GARMIN_SYNC_STATUS
         performance = performance_context.current_performance_context(
-            snapshot,
-            garmin,
-            profile,
-            today,
-            canonical=inputs,
+            garmin, profile, today, canonical=inputs
         )
         timezone = str(profile.get("timezone") or "UTC")
         performance = {
             **performance,
-            "history": analysis_history(snapshot, garmin, today, canonical=inputs),
+            "history": {
+                **analysis_history(garmin, today, canonical=inputs),
+                "session_rpe_load": None
+                if inputs.pending
+                else self._session_rpe_load(inputs, today, timezone),
+            },
             # UI-only: the load tab's period selection picks the matching window.
             "training_focus_periods": {
                 period: training_focus(
                     garmin,
                     today,
                     timezone,
-                    activity_rows=inputs.activity_rows or (),
+                    activities=inputs.activities or (),
                     days=days,
                 )
                 for period, days in (("fortnight", 14), ("twelveWeeks", 84))
@@ -126,6 +143,32 @@ class PublicPerformanceStateService:
                 )
             ),
         }
+
+    def _session_rpe_load(
+        self, inputs: CanonicalPerformanceInputs, today: date, timezone: str
+    ) -> dict[str, Any]:
+        """Daily and weekly session-RPE load of the load tab's 12-week window."""
+        start = today - timedelta(days=_SESSION_RPE_LOAD_DAYS - 1)
+        summaries = [
+            summary
+            for summary in inputs.activities or ()
+            if start.isoformat() <= summary_local_date(summary, timezone)
+        ]
+        return session_rpe_load(
+            summaries,
+            feedback_by_session(summaries, self._session_feedback),
+            start=start,
+            end=today,
+            timezone=timezone,
+            computed_at=None
+            if self._now is None
+            else self._now().isoformat(timespec="seconds"),
+            session_limit=0,
+        )
+
+
+# The load tab's longest window: the current and the 11 previous ISO weeks.
+_SESSION_RPE_LOAD_DAYS = 84
 
 
 class PublicFeedbackStateService:

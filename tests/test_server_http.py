@@ -21,6 +21,7 @@ from server_test_support import (
     create_test_session,
     server,
 )
+from support import store_canonical_snapshot
 
 from backend.coach import streams as coach_streams
 from backend.errors import ClientDisconnected, public_error_contract
@@ -526,7 +527,8 @@ class ServerHttpTests(ServerTestCase):
 
     def test_activity_pagination_has_stable_cursor_without_duplicates(self):
         today = server.ATHLETE_CLOCK.now().date()
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(
+        store_canonical_snapshot(
+            server,
             {
                 "synced_at": "now",
                 "athlete": {},
@@ -537,7 +539,7 @@ class ServerHttpTests(ServerTestCase):
                         "id": f"activity-{index}",
                         "name": f"Activity {index}",
                         "type": "Ride",
-                        "start_date_local": today.isoformat(),
+                        "start_date_local": f"{today.isoformat()}T08:0{index}:00",
                     }
                     for index in range(5)
                 ]
@@ -546,10 +548,10 @@ class ServerHttpTests(ServerTestCase):
                         "id": "old",
                         "name": "Old",
                         "type": "Ride",
-                        "start_date_local": "2000-01-01",
+                        "start_date_local": "2000-01-01T08:00:00",
                     }
                 ],
-            }
+            },
         )
         service = server.ACTIVITY_READS.activity_read()
         first = service.page(limit=2, days=1, today=today)
@@ -1619,11 +1621,18 @@ class ServerHttpTests(ServerTestCase):
         snapshot = {
             "synced_at": "now",
             "athlete": {},
-            "recent_activities": [{"name": "Morgenlauf"}],
+            "recent_activities": [
+                {
+                    "id": "run-1",
+                    "name": "Morgenlauf",
+                    "type": "Run",
+                    "start_date_local": "2026-08-25T07:00:00",
+                }
+            ],
             "recent_wellness": [],
             "upcoming_calendar": [],
         }
-        server.SYNC_PERSISTENCE.state_repository().save_snapshot(snapshot)
+        store_canonical_snapshot(server, snapshot)
         state = server.PUBLIC_STATE.state_service().read()
         self.assertEqual(state["app"]["name"], "Intervals Coach")
         self.assertEqual(state["app"]["version"], server.APP_VERSION)

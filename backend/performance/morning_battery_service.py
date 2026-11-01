@@ -12,8 +12,8 @@ from typing import Any, Protocol
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.db import garmin_store
-from backend.performance import garmin_projection, morning_battery
-from backend.providers.garmin_morning import morning_sleep_element
+from backend.performance import morning_battery
+from backend.providers.garmin_morning import latest_garmin_record, morning_sleep_element
 from backend.runtime.ports import ObservationReader, SleepPeriodReader
 from backend.weather import history as weather_history
 
@@ -208,11 +208,7 @@ class MorningBatterySource:
             payload = self._fixture_loader.load(2)
             payload = payload if isinstance(payload, dict) else {}
             return (
-                {
-                    "dailySleepDTO": garmin_projection.latest_garmin_record(
-                        payload.get("sleep")
-                    )
-                },
+                {"dailySleepDTO": latest_garmin_record(payload.get("sleep"))},
                 payload.get("body_battery"),
             )
         return self.fetch_remote(checkin_date)

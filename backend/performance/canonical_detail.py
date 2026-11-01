@@ -71,6 +71,7 @@ class EnvelopeReader(Protocol):
         activity_id: str,
         provider_activity_id: str | None,
         summary: Mapping[str, Any] | None,
+        /,
     ) -> Mapping[str, Any]: ...
 
 

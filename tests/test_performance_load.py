@@ -16,19 +16,19 @@ class PerformanceLoadTests(unittest.TestCase):
         result = activity_rollup(
             [
                 {
-                    "start_date_local": "2026-09-11T07:00:00",
-                    "moving_time": 1800,
-                    "icu_training_load": 10,
+                    "started_at_local": "2026-09-11T07:00:00",
+                    "moving_duration_s": 1800,
+                    "training_load": 10,
                 },
                 {
-                    "start_date_local": "2026-09-12",
-                    "moving_time": "3600",
-                    "icu_training_load": "42.5",
+                    "started_at_local": "2026-09-12",
+                    "moving_duration_s": "3600",
+                    "training_load": "42.5",
                 },
                 {
-                    "start_date_local": "2026-09-10",
-                    "moving_time": 999,
-                    "icu_training_load": 99,
+                    "started_at_local": "2026-09-10",
+                    "moving_duration_s": 999,
+                    "training_load": 99,
                 },
             ],
             2,
@@ -43,24 +43,24 @@ class PerformanceLoadTests(unittest.TestCase):
         anchor = date(2026, 9, 12)
         activities = [
             {
-                "start_date_local": "2026-09-12",
-                "moving_time": "invalid",
-                "icu_training_load": None,
+                "started_at_local": "2026-09-12",
+                "moving_duration_s": "invalid",
+                "training_load": None,
             },
             {
-                "start_date_local": "not-a-date",
-                "moving_time": 7200,
-                "icu_training_load": 90,
+                "started_at_local": "not-a-date",
+                "moving_duration_s": 7200,
+                "training_load": 90,
             },
             {
-                "start_date_local": "2026-09-11",
-                "moving_time": 1800,
-                "icu_training_load": 10,
+                "started_at_local": "2026-09-11",
+                "moving_duration_s": 1800,
+                "training_load": 10,
             },
             {
-                "start_date_local": "2026-09-11",
-                "moving_time": 1800,
-                "icu_training_load": 15,
+                "started_at_local": "2026-09-11",
+                "moving_duration_s": 1800,
+                "training_load": 15,
             },
             "not-an-activity",
         ]
@@ -85,7 +85,7 @@ class PerformanceLoadTests(unittest.TestCase):
         self.assertEqual(
             actual_atl_series(
                 {},
-                [{"start_date_local": end_date.isoformat(), "icu_training_load": 20}],
+                [{"started_at_local": end_date.isoformat(), "training_load": 20}],
                 end_date,
             ),
             {},
@@ -96,10 +96,10 @@ class PerformanceLoadTests(unittest.TestCase):
         end_date = date(2026, 9, 12)
         wellness = {date(2026, 9, 10): 10.0, date(2026, 9, 12): 20.0}
         activities = [
-            {"start_date_local": "2026-09-12T08:00:00", "icu_training_load": 50},
-            {"start_date_local": "2026-09-12T18:00:00", "icu_training_load": 20},
-            {"start_date_local": "2026-09-13", "icu_training_load": 999},
-            {"start_date_local": "not-a-date", "icu_training_load": 999},
+            {"started_at_local": "2026-09-12T08:00:00", "training_load": 50},
+            {"started_at_local": "2026-09-12T18:00:00", "training_load": 20},
+            {"started_at_local": "2026-09-13", "training_load": 999},
+            {"started_at_local": "not-a-date", "training_load": 999},
         ]
         retention = math.exp(-1 / 7)
         decay = 1 - retention
@@ -115,7 +115,7 @@ class PerformanceLoadTests(unittest.TestCase):
     def test_actual_atl_applies_load_from_days_without_wellness_rows(self):
         end_date = date(2026, 9, 12)
         wellness = {date(2026, 9, 1): 10.0, date(2026, 9, 4): 10.0}
-        activities = [{"start_date_local": "2026-09-02", "icu_training_load": 100}]
+        activities = [{"started_at_local": "2026-09-02", "training_load": 100}]
         retention = math.exp(-1 / 7)
         decay = 1 - retention
         expected = (10 * retention + 100 * decay) * retention**2

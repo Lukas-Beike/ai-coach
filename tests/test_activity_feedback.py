@@ -276,6 +276,17 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(result[0]["activity_feedback"]["notes"], "note")
         self.assertEqual(self.service.attach_to_activities("not a list"), [])
 
+    def test_attach_uses_the_stored_key_of_a_summary(self) -> None:
+        self.service.save("i7", {"notes": "intervals note"})
+        summary = {"id": "act_1", "record_ids": {"intervals": "i7"}}
+        no_intervals = {"id": "act_2", "record_ids": {"garmin": "g1"}}
+
+        result = self.service.attach_to_activities([summary, no_intervals])
+
+        self.assertEqual(result[0]["activity_feedback"]["notes"], "intervals note")
+        self.assertEqual(result[0]["id"], "act_1")
+        self.assertNotIn("activity_feedback", result[1])
+
     def test_attach_finds_feedback_older_than_the_newest_500_rows(self) -> None:
         rows = [("oldest", "2026-09-20T00:00:00+00:00")] + [
             (

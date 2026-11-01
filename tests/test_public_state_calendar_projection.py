@@ -15,7 +15,6 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
         external_state = {"events": [{"name": "Camp"}], "running": True}
         daily_context = [{"date": "2026-09-23"}]
         calendar_result = {"calendar": [{"name": "Camp"}]}
-        snapshot = {"recent_activities": [{"id": "activity-1"}]}
         canonical_planned = [{"canonical": True}]
         local_planned = [{"id": "planned-1"}]
         activities = [{"id": "activity-1"}]
@@ -70,7 +69,6 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
             return_value=calendar_result,
         ) as project_calendar:
             result = projection.read(
-                snapshot,
                 canonical_planned,
                 local_planned,
                 activities,
@@ -103,7 +101,6 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
             (
                 "daily_context",
                 (
-                    snapshot,
                     canonical_planned,
                     weather,
                     checkins,
@@ -111,7 +108,7 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
                 ),
             ),
         )
-        self.assertIs(calls[5][1][1], canonical_planned)
+        self.assertIs(calls[5][1][0], canonical_planned)
         project_calendar.assert_called_once_with(
             local_planned,
             activities,
@@ -121,7 +118,7 @@ class PublicStateCalendarProjectionTests(unittest.TestCase):
             today=date(2026, 9, 23),
             provider_window=calendar_window,
             default_name="Geplante Einheit",
-            sport_settings=(),
+            sport_thresholds=(),
             zone_configurations=(),
         )
         self.assertEqual(result.checkins, checkins)

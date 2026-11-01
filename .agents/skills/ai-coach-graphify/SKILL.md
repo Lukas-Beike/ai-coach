@@ -18,6 +18,9 @@ environment per version and lock hash. The base is `%LOCALAPPDATA%/ai-coach/grap
 on Windows and `$XDG_DATA_HOME/ai-coach/graphify` (default
 `~/.local/share/ai-coach/graphify`) on POSIX. Graph state and isolated home stay
 under each worktree's `.graphify-local/`; app dependencies are separate.
+Run the tooling scripts with Python 3.14 or newer. Setup requires Python 3.14
+for its environment; it selects `py -3.14` on Windows or `python3.14` on POSIX
+when called with a newer interpreter.
 Preparation uses `update --preparation` with a 600-second budget; hooks and
 plain `update` retain 180 seconds. Graphify does not require Sonar or scan
 prompts/source for secrets. Source allowlists,
@@ -46,11 +49,13 @@ Commands (run from the repository root):
 - `python scripts/graphify_local.py explain <symbol>` inspects structural links.
 - `python scripts/graphify_local.py export html --output .graphify-local/exports/graph.html` creates a local HTML view.
 - `python scripts/graphify_local.py export wiki --output .graphify-local/exports/wiki` creates a local wiki view.
-- `python scripts/graphify_local.py mcp` starts an optional local stdio MCP
-  server; configure it explicitly in a local client if needed. The core CLI
-  delegates exports to the separate export helper. Its read-only snapshot
+- `python scripts/graphify_local.py mcp` starts a local stdio MCP server. The
+  core CLI delegates exports to the separate export helper. Its read-only snapshot
   exposes `graph_query`, `graph_node`, `graph_path`, and `graph_stats`, with no
   upstream PR tools; restart the server after graph edits to refresh the snapshot.
+  The Claude `explorer` subagent starts it inline as `graphify-local` from the
+  repository root on each run. It refuses to start while sources are newer than
+  the graph, so run `update` after edits before delegating to `explorer`.
 
 Codex requires repository trust and approval for the hook in `/hooks`. Claude
 Code requires repository trust for the checked-in hook settings. Do not bypass

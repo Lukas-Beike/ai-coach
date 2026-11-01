@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Final
+from typing import Any, Final
 
 from backend.canonical.decimal_text import is_grouped_thousands
 from backend.canonical.validation import (
@@ -104,3 +104,10 @@ def coerce_comma_decimal_number(value: object) -> float | None:
             return None
         return coerce_number(value.replace(",", "."))
     return coerce_number(value)
+
+
+def selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:
+    """Return the non-null ``fields`` of a mapping, or an empty dict for non-mappings."""
+    if not isinstance(item, dict):
+        return {}
+    return {key: item[key] for key in fields if key in item and item[key] is not None}

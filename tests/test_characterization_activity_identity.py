@@ -20,13 +20,15 @@ from backend.activities.calendar_projection import (
 )
 from backend.activities.duplicates import (
     duplicate_delete_action,
-    garmin_activity_duplicates_intervals,
-    intervals_cycling_activities_match,
     validate_duplicate_delete,
 )
 from backend.activities.matching import match_planned_workouts
 from backend.errors import AppError
 from backend.planning.calendar_read_model import project_planning_calendar
+from backend.sync.garmin_activity_duplicates import (
+    garmin_activity_duplicates_intervals,
+    intervals_cycling_activities_match,
+)
 
 TODAY = date(2026, 5, 4)
 STALE_DUPLICATE_MESSAGE = (
@@ -75,10 +77,10 @@ def _planned(**overrides: Any) -> dict[str, Any]:
 def _activity(**overrides: Any) -> dict[str, Any]:
     activity: dict[str, Any] = {
         "id": "activity-1",
-        "type": "Ride",
-        "start_date_local": "2026-05-04T07:00:00",
-        "moving_time": 3600,
-        "distance": 30_000,
+        "sport": "ride",
+        "started_at_local": "2026-05-04T07:00:00",
+        "moving_duration_s": 3600,
+        "distance_m": 30_000,
         "name": "Morning ride",
     }
     activity.update(overrides)
@@ -453,9 +455,9 @@ class MatchingPrecedenceCharacterizationTests(unittest.TestCase):
         planned = [_planned(id="event", type="Ride", starts_at_local="2026-05-04")]
         paired = _activity(
             id="paired",
-            paired_event_id="event",
-            type="Run",
-            start_date_local="2026-05-06T07:00:00",
+            planned_event_id="event",
+            sport="run",
+            started_at_local="2026-05-06T07:00:00",
         )
         self.assertEqual(match_planned_workouts(planned, [paired]), {0: paired})
 
@@ -470,12 +472,12 @@ class MatchingPrecedenceCharacterizationTests(unittest.TestCase):
         }
         unpaired = {
             "id": "unpaired",
-            "type": "Workout",
-            "start_date_local": "2026-05-04T07:00:00",
+            "sport": "other",
+            "started_at_local": "2026-05-04T07:00:00",
         }
         self.assertEqual(match_planned_workouts([unit], [unpaired]), {})
 
-        paired_unknown = {**unpaired, "id": "paired", "paired_event_id": "unit-id"}
+        paired_unknown = {**unpaired, "id": "paired", "planned_event_id": "unit-id"}
         matched = match_planned_workouts([{**unit, "id": "unit-id"}], [paired_unknown])
         self.assertEqual(matched, {0: paired_unknown})
 
@@ -486,13 +488,13 @@ class MatchingPrecedenceCharacterizationTests(unittest.TestCase):
         activities = [
             _activity(
                 id="early",
-                start_date_local="2026-05-04T09:00:00",
-                moving_time=1_800,
+                started_at_local="2026-05-04T09:00:00",
+                moving_duration_s=1_800,
             ),
             _activity(
                 id="late",
-                start_date_local="2026-05-04T14:00:00",
-                moving_time=3_600,
+                started_at_local="2026-05-04T14:00:00",
+                moving_duration_s=3_600,
             ),
         ]
         expectations = (
@@ -518,23 +520,22 @@ class MatchingPrecedenceCharacterizationTests(unittest.TestCase):
         # 2026-05-04 with a +02:00 offset is attributed to 2026-05-03 because day
         # matching uses the UTC date.
         unit = {"category": "WORKOUT", "type": "Ride", "date": "2026-05-04"}
-        shifted = _activity(start_date_local="2026-05-04T01:00:00+02:00")
-        local = _activity(id="local", start_date_local="2026-05-04T01:00:00")
+        shifted = _activity(started_at_local="2026-05-04T01:00:00+02:00")
+        local = _activity(id="local", started_at_local="2026-05-04T01:00:00")
         self.assertEqual(match_planned_workouts([unit], [shifted]), {})
         self.assertEqual(match_planned_workouts([unit], [local]), {0: local})
 
 
 class CalendarIdentityCharacterizationTests(unittest.TestCase):
-    def test_fallback_identity_prefers_type_over_sport_and_drops_negative_metrics(
+    def test_fallback_identity_uses_the_sport_and_drops_negative_metrics(
         self,
     ) -> None:
         identity = calendar_activity_identity(
             {
-                "start_date_local": "2026-05-04T07:00:00",
-                "type": "Ride",
-                "sport": "Run",
-                "moving_time": -1,
-                "distance": "12.5",
+                "started_at_local": "2026-05-04T07:00:00",
+                "sport": "ride",
+                "moving_duration_s": -1,
+                "distance_m": "12.5",
             }
         )
         self.assertEqual(
@@ -546,19 +547,24 @@ class CalendarIdentityCharacterizationTests(unittest.TestCase):
         self,
     ) -> None:
         upper = calendar_activity_identity(
-            {"start_date": "2026-05-04T07:00:00", "date": "2026-05-01", "type": "RIDE"}
+            {
+                "started_at_local": "2026-05-04T07:00:00",
+                "date": "2026-05-01",
+                "sport": "RIDE",
+            }
         )
         assert upper is not None
         lower = calendar_activity_identity(
-            {"start_date": "2026-05-04T07:00:00", "type": "ride"}
+            {"started_at_local": "2026-05-04T07:00:00", "sport": "ride"}
         )
         self.assertEqual(upper, lower)
         self.assertEqual(upper[1], "2026-05-04T07:00:00")
 
-    def test_empty_id_is_skipped_and_activity_id_alias_is_used(self) -> None:
+    def test_empty_id_is_skipped(self) -> None:
+        self.assertIsNone(calendar_activity_identity({"id": "", "activityId": "x"}))
         self.assertEqual(
-            calendar_activity_identity({"id": "", "activityId": "provider-7"}),
-            ("id", "provider-7", "", "", ""),
+            calendar_activity_identity({"id": "act_7"}),
+            ("id", "act_7", "", "", ""),
         )
 
 
@@ -588,7 +594,7 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         # load and planned duration to be missing), and it is not a valid basis.
         result = workout_compliance(
             _planned(icu_training_load=0, planned_duration_s=None),
-            _activity(icu_training_load=40),
+            _activity(training_load=40),
             TODAY,
         )
         self.assertEqual(result["status"], "completed")
@@ -600,7 +606,7 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
     ) -> None:
         result = workout_compliance(
             _planned(icu_training_load=50, planned_duration_s=3_600),
-            _activity(moving_time=1_800),
+            _activity(moving_duration_s=1_800),
             TODAY,
         )
         self.assertEqual((result["basis"], result["percentage"]), ("duration", 50))
@@ -655,9 +661,9 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         activities = [
             _activity(
                 id="done-activity",
-                paired_event_id="done",
-                start_date_local="2026-04-27T09:00:00",
-                icu_training_load=40,
+                planned_event_id="done",
+                started_at_local="2026-04-27T09:00:00",
+                training_load=40,
             )
         ]
         _enriched, weekly = planning_compliance_state(planned, activities, TODAY)
@@ -694,10 +700,10 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         activities = [
             _activity(
                 id="done",
-                paired_event_id="with-load",
-                start_date_local="2026-04-28T09:00:00",
-                moving_time=3_000,
-                icu_training_load=40,
+                planned_event_id="with-load",
+                started_at_local="2026-04-28T09:00:00",
+                moving_duration_s=3_000,
+                training_load=40,
             )
         ]
         _enriched, weekly = planning_compliance_state(planned, activities, TODAY)
@@ -717,8 +723,8 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         activities = [
             _activity(
                 id="done",
-                paired_event_id="bare",
-                start_date_local="2026-04-28T09:00:00",
+                planned_event_id="bare",
+                started_at_local="2026-04-28T09:00:00",
             )
         ]
         _enriched, weekly = planning_compliance_state(planned, activities, TODAY)
@@ -730,10 +736,10 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
 class TrainingCalendarCharacterizationTests(unittest.TestCase):
     def test_fallback_identity_hides_a_matched_activity_without_an_id(self) -> None:
         activity = {
-            "start_date_local": "2026-05-04T07:00:00",
-            "type": "Ride",
-            "moving_time": 3_600,
-            "distance": 30_000,
+            "started_at_local": "2026-05-04T07:00:00",
+            "sport": "ride",
+            "moving_duration_s": 3_600,
+            "distance_m": 30_000,
         }
         planned = [
             {
@@ -748,39 +754,35 @@ class TrainingCalendarCharacterizationTests(unittest.TestCase):
     def test_completed_activity_without_a_start_is_omitted(self) -> None:
         self.assertEqual(training_calendar_items([], [{"id": "a", "type": "Ride"}]), [])
 
-    def test_sport_only_activity_is_listed_twice_after_matching(self) -> None:
-        # Quirk: the matched copy is projected through calendar_activity_payload,
-        # which keeps "type" but not "sport". Its fallback identity therefore
-        # differs from the raw activity and the activity is not de-duplicated.
+    def test_matched_activity_without_an_id_is_listed_once(self) -> None:
+        # The matched copy keeps the sport, so its fallback identity equals the
+        # activity's and the activity is not listed a second time.
         activity = {
-            "start_date_local": "2026-05-04T07:00:00",
-            "sport": "Ride",
-            "moving_time": 3_600,
-            "distance": 30_000,
+            "started_at_local": "2026-05-04T07:00:00",
+            "sport": "ride",
+            "moving_duration_s": 3_600,
+            "distance_m": 30_000,
         }
         enriched, _weekly = planning_compliance_state(
             [_planned(id="event", starts_at_local="2026-05-04")], [activity], TODAY
         )
+        self.assertIn("actual_activity", enriched[0]["compliance"])
         rows = training_calendar_items(enriched, [activity])
-        self.assertEqual([row["id"] for row in rows if "id" in row], ["event"])
-        self.assertEqual(len(rows), 2)
+        self.assertEqual([row["id"] for row in rows], ["event"])
 
-    def test_activity_id_alias_is_listed_twice_after_matching(self) -> None:
-        # Quirk: calendar_activity_payload keeps "id" and "external_id" but not
-        # "activityId", so an activityId-only record loses its stable identity
-        # when it is matched and is listed a second time.
+    def test_matched_activity_with_an_id_is_listed_once(self) -> None:
         activity = {
-            "activityId": "provider-1",
-            "start_date_local": "2026-05-04T07:00:00",
-            "type": "Ride",
-            "moving_time": 3_600,
-            "distance": 30_000,
+            "id": "act_1",
+            "started_at_local": "2026-05-04T07:00:00",
+            "sport": "ride",
+            "moving_duration_s": 3_600,
+            "distance_m": 30_000,
         }
         enriched, _weekly = planning_compliance_state(
             [_planned(id="event", starts_at_local="2026-05-04")], [activity], TODAY
         )
         rows = training_calendar_items(enriched, [activity])
-        self.assertEqual(len(rows), 2)
+        self.assertEqual([row["id"] for row in rows], ["event"])
 
     def test_rows_sort_by_start_then_casefolded_name_then_id(self) -> None:
         planned = [
@@ -790,14 +792,14 @@ class TrainingCalendarCharacterizationTests(unittest.TestCase):
             {
                 "id": "a-9",
                 "name": "alpha",
-                "start_date_local": "2026-05-04T09:00:00",
-                "type": "Run",
+                "started_at_local": "2026-05-04T09:00:00",
+                "sport": "run",
             },
             {
                 "id": "a-1",
                 "name": "Beta",
-                "start_date_local": "2026-05-04T08:00:00",
-                "type": "Run",
+                "started_at_local": "2026-05-04T08:00:00",
+                "sport": "run",
             },
         ]
         rows = training_calendar_items(planned, activities)
@@ -808,14 +810,14 @@ class TrainingCalendarCharacterizationTests(unittest.TestCase):
             {
                 "id": "a-2",
                 "name": "Same",
-                "start_date_local": "2026-05-04T09:00:00",
-                "type": "Run",
+                "started_at_local": "2026-05-04T09:00:00",
+                "sport": "run",
             },
             {
                 "id": "a-1",
                 "name": "same",
-                "start_date_local": "2026-05-04T09:00:00",
-                "type": "Run",
+                "started_at_local": "2026-05-04T09:00:00",
+                "sport": "run",
             },
         ]
         rows = training_calendar_items([], activities)

@@ -13,26 +13,26 @@ class CoachIntervalsContextTests(unittest.TestCase):
         rides = [
             {
                 "id": f"ride-{index}",
-                "type": "Ride",
+                "sport": "ride",
                 "name": f"Ride {index}",
-                "start_date_local": (self.today - timedelta(days=index)).isoformat(),
-                "moving_time": 3600,
-                "icu_training_load": 50,
+                "started_at_local": (self.today - timedelta(days=index)).isoformat(),
+                "moving_duration_s": 3600,
+                "training_load": 50,
             }
             for index in range(7)
         ]
         same_day = [
             {
                 "id": "a",
-                "type": "Run",
+                "sport": "run",
                 "name": "A",
-                "start_date_local": self.today.isoformat(),
+                "started_at_local": self.today.isoformat(),
             },
             {
                 "id": "b",
-                "type": "Run",
+                "sport": "run",
                 "name": "B",
-                "start_date_local": self.today.isoformat(),
+                "started_at_local": self.today.isoformat(),
             },
         ]
         result = self.service.project(
@@ -64,12 +64,14 @@ class CoachIntervalsContextTests(unittest.TestCase):
         result = self.service.project(
             None,
             self.today,
-            [None, {"name": "No sport", "start_date_local": "bad-date"}],
+            [None, {"name": "No sport", "started_at_local": "bad-date"}],
         )
 
-        self.assertEqual(list(result["recent_activities_by_sport"]), ["No sport"])
+        # Canonical: a summary without a sport falls under the "other" label
+        # instead of being grouped by its name.
+        self.assertEqual(list(result["recent_activities_by_sport"]), ["Sonstiges"])
         self.assertEqual(
-            result["activity_rollups_by_sport"]["No sport"]["last_7_days"]["sessions"],
+            result["activity_rollups_by_sport"]["Sonstiges"]["last_7_days"]["sessions"],
             0,
         )
 

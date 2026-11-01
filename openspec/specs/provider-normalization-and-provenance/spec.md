@@ -109,7 +109,7 @@ Detailed contract: Body-fat current composition uses Intervals and manual profil
 Evidence: `backend/performance/source_policy.py:CURRENT_RULES`, `backend/performance/source_policy.py:DAILY_RULES`, `backend/performance/current_metrics.py:current_performance_metrics`, `backend/sync/authority.py:PlanningAuthorityService`; `tests/test_performance_current_metrics.py:test_garmin_ftp_beats_intervals_and_wahoo_ftp`, `tests/test_performance_current_metrics.py:test_manual_profile_weight_beats_wahoo_weight`, `tests/test_sync_authority.py:test_revision_failure_rolls_back_planning_update_atomically`.
 
 ### Requirement: Correction and reprojection continuity
-The system SHALL preserve provider raw-record identity and mapper version, ingest canonical data with the owning provider transaction, and reproject stored records on mapper/timezone changes. Before first successful canonical backfill, reads SHALL use legacy projection; after first completion, reads SHALL continue from tables during later reprojection/failure rather than disappearing or reverting wholesale to legacy.
+The system SHALL preserve provider raw-record identity and mapper version, ingest canonical data with the owning provider transaction, and reproject stored records on mapper/timezone changes. Before the first successful canonical backfill, canonical reads SHALL return no values and consumers SHALL report a pending state; after first completion, reads SHALL continue from tables during later reprojection/failure rather than disappearing or becoming pending again.
 
 #### Scenario: Mapper update after completed backfill
 - **WHEN** a new mapper version requires reprojection
@@ -117,11 +117,15 @@ The system SHALL preserve provider raw-record identity and mapper version, inges
 
 #### Scenario: First backfill has not completed
 - **WHEN** initial backfill is pending, running, or failed
-- **THEN** consumers use the supported legacy source instead of claiming table coverage that has never completed.
+- **THEN** activities, activity rows and summaries, observations, metric windows and the chosen reader return nothing, coverage reports only current persisted summaries, and performance and Coach contexts report that data is being prepared instead of partial values.
 
-Detailed contract: Compact-only activity snapshots retain their implemented activity-row fallback. Reprojection SHALL preserve session ownership and mark retired or invalid mapped records without deleting original provider evidence.
+#### Scenario: Compact-only Intervals.icu snapshot
+- **WHEN** the stored Intervals.icu snapshot lists activities only in compact form (from a release before raw provider data) and the backfill has completed
+- **THEN** activity reads come from the tables without those compact rows, and the gap is reported as `activities_need_refresh` and marked in the PWA while any stored compact row has no raw row with its id. An incremental sync keeps the older compact rows and the mark; only the full read-only Intervals.icu reload (`POST /api/intervals/full-resync`) that returns raw rows for them closes it. No remote write or implicit refetch happens.
 
-Evidence: `backend/sync/canonical_ingest.py:ingest_plan`, `backend/sync/canonical_backfill.py:CanonicalBackfill`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector`; `tests/test_canonical_read_selector.py:test_observations_stay_available_until_the_reprojection_completes`, `tests/test_canonical_backfill.py:test_a_dropped_activity_is_invalid_and_a_later_version_restores_it`.
+Detailed contract: No legacy snapshot projection serves reads. Reprojection SHALL preserve session ownership and mark retired or invalid mapped records without deleting original provider evidence.
+
+Evidence: `backend/sync/canonical_ingest.py:ingest_plan`, `backend/sync/canonical_backfill.py:CanonicalBackfill`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector`; `tests/test_canonical_read_selector.py:test_observations_stay_available_until_the_reprojection_completes`, `tests/test_canonical_read_selector.py:test_first_backfill_not_complete_serves_nothing_from_filled_tables`, `tests/test_canonical_read_selector.py:test_compact_only_snapshot_reads_tables_and_needs_a_refresh`, `tests/test_canonical_backfill.py:test_a_dropped_activity_is_invalid_and_a_later_version_restores_it`.
 
 ### Requirement: Provenance and incomplete coverage remain visible
 The system SHALL expose source labels, observation dates, retrieval freshness, and missing or unsupported coverage without synthesizing measurements. Canonically mapped Garmin status, load balance and Body Battery SHALL retain provider-estimate labels, their supported measurement windows and explicit partial coverage.
@@ -156,6 +160,10 @@ The system SHALL map dated Intervals wellness body, HRV, sleep, readiness, VO2ma
 #### Scenario: eFTP observations and their classification
 - **WHEN** wellness `sportInfo` entries and athlete sport settings carry eFTP
 - **THEN** each sport's first `sportInfo` entry yields one wellness-day eFTP observation, and each sport's first sport setting yields the athlete-record eFTP observation; every sport that a `types` text classifies to counts, as for the zone configurations (or, for a `sportInfo` entry without a `types` list, its `type`, `sport` and `sport_type`), with OTHER only when no text names a known sport, `mmp_model` eFTP wins over the entry's own eFTP, and zero means unset.
+
+#### Scenario: Indoor FTP since mapper version 10
+- **WHEN** a sport setting carries `indoor_ftp`
+- **THEN** it is stored as that sport's INDOOR_FTP observation, which only the plan zones of indoor and virtual workouts read; the sport FTP stays the setting's `ftp`, and only a setting whose `ftp` is absent or null also stores its `indoor_ftp` as FTP (the current-metrics fallback); a zero `indoor_ftp` stores nothing; stored athlete records are reprojected without a provider refetch.
 
 #### Scenario: Athlete settings since mapper version 9
 - **WHEN** the athlete record carries W′, height, body fat or a generic VO2max, a Run setting carries a Zone-2 pace, or the athlete record carries a sport VO2max for a sport whose setting has none
@@ -221,6 +229,14 @@ Canonical zone configuration SHALL retain sport, metric, boundaries in canonical
 - **WHEN** provider zones are refreshed after a confirmed local edit
 - **THEN** local values retain authority and the refreshed provider alternative remains available separately.
 
+#### Scenario: Thresholds without a zone configuration
+- **WHEN** a planned workout's sport has no configuration for a metric
+- **THEN** its FTP, threshold HR and maximum HR come from the latest Intervals.icu sync's sport-scoped canonical observations with the default limits, never from the stored snapshot, and nothing is served before the first completed backfill.
+
+Detailed contract (#1416): indoor and virtual workouts use the INDOOR power configuration's threshold, else the sport's INDOOR_FTP, else its FTP, as the snapshot rule did; the Ride FTP falls back to the athlete's configured FTP as the canonical current metrics do; zone lists and values the mappers reject leave the default limits or no threshold.
+
+Evidence: `backend/performance/canonical_current.py:read_sport_thresholds`, `backend/activities/zone_settings.py:ZoneSettings.from_thresholds`, `backend/planning/calendar_read_model.py:project_planning_calendar`; `tests/test_plan_zone_canonical_parity.py`, `tests/test_zone_configuration_canonical.py:EffectiveZoneTests`, `tests/test_zone_settings.py`.
+
 ### Requirement: Retained provider domains and equipment links
 Training status and load balance, running tolerance, readiness history, endurance score details/history, performance history, Body Battery, stress, resting energy, subjective provider wellness and equipment SHALL have canonical representations. Their affected consumers SHALL read canonical values with provider labels. Proprietary scores SHALL not be rebuilt locally; equipment links SHALL resolve to canonical sessions.
 
@@ -246,3 +262,41 @@ Every metric kind SHALL have an implemented provider producer or a documented lo
 #### Scenario: Unsupported vocabulary addition
 - **WHEN** a kind is added without a producer/method or consumer/retention purpose
 - **THEN** the vocabulary consistency check fails.
+
+### Requirement: Provider-neutral activity summary per session
+The system SHALL give activity consumers one provider-neutral summary per live canonical session, built from the active records of every provider in it. Each value SHALL come from the best-ranked record that has it (measured values from the recording platform's own copy first, derived values by provider rank) and name its source label. Consumers outside the provider adapters, sync and canonical owners SHALL NOT read provider activity field names.
+
+#### Scenario: Copies of one session
+- **WHEN** Intervals.icu and Garmin Connect both report a session that canonical linking bundled
+- **THEN** consumers receive one summary with the local session id, the canonical sport and environment, and each value's source label.
+
+#### Scenario: Load on different scales
+- **WHEN** a session has only a Garmin training load
+- **THEN** the summary has no `training_load`, still counts its duration and distance, and loads of TSS-like models (Intervals.icu training load, TSS) keep their `load_model`.
+
+#### Scenario: Stored keys of a session
+- **WHEN** a consumer looks up feedback, workout profiles or analyses of a summary
+- **THEN** it uses the session's Intervals.icu activity id when it holds one, else the local session id, as the reference resolver does.
+
+Detailed contract: summary keys follow `activity_detail.v1` (`started_at_local`, `moving_duration_s`, `elapsed_duration_s`, `distance_m`, `elevation_gain_m`, `avg_hr`, `max_hr`, `avg_power`, `normalized_power`, `avg_speed_mps`, `pace_mps`, `intensity`, `rpe`, `feel`, `ftp_w`, `eftp_w`, `vo2max`, `training_load`, `load_model`, zone times as `{id, secs}` lists, `planned_event_id`, `recorded_by`, `source`, `sources`, `record_ids`). The Intervals.icu (v6) and Garmin (v7) mappers store the summary values in the record details, so the existing backfill re-maps stored rows; no schema change.
+
+Evidence: `backend/activities/activity_summary.py`, `backend/sync/canonical_table_reader.py:CanonicalTableReader.activity_sessions`, `backend/sync/canonical_read_selector.py:CanonicalReadSelector.activity_summaries`; `tests/test_activity_summary.py`, `tests/test_canonical_table_reader.py:ActivitySessionReadTests`, `tests/test_intervals_activity_mapping.py:SummaryValueTests`, `tests/test_garmin_activity_mapping.py:SummaryValueTests`, `tests/test_provider_coupling_guard.py`.
+
+### Requirement: Consumers read canonical records, not raw provider views
+Consumer packages (performance, Coach, HTTP API, planning, activities, athlete, nutrition) SHALL NOT read metric or detail values from the raw provider snapshot, its sections, the raw Garmin views or retired kv detail records; payload parsing SHALL live with its ingestion owner. An architecture guard SHALL enforce this with an explained allowlist that can only shrink.
+
+#### Scenario: Allowlist reasons
+- **WHEN** a consumer file keeps a raw read
+- **THEN** its allowlist entry names an ingestion, mapping, backup/export or sync-status reason, or a reported value read that waits for its canonical switch.
+
+#### Scenario: A consumer adds a raw view read
+- **WHEN** a module in a consumer package references `recent_wellness`, `raw_provider_data`, `read_view`, `recent_view`, `recent_view_in`, an `activity_detail:` key string or `latest_snapshot`
+- **THEN** the provider-coupling guard fails unless the file is allowlisted with an explained reason; docstrings and comments do not count.
+
+#### Scenario: A raw read is removed
+- **WHEN** an allowlisted file no longer makes the read
+- **THEN** the guard reports its allowlist entry as stale until it is removed.
+
+Detailed contract: rules `snapshot_key`, `legacy_read`, `source_label` and `field_module_import` in `tests/provider_coupling.py:OWNER_READ_ALLOWLIST`. No value read remains in the consumer packages (#1416): plan zones read canonical thresholds, equipment reads canonical gear items and links (a gear-listed Garmin activity links the rows of its canonical session, every Intervals.icu row whose canonical record the pairwise Garmin duplicate rule pairs with it, also when bundling kept them apart, and a row whose `external_id` is the Garmin id; the sync no longer computes or reads `activity_matches`), and the energy views take a day's presence after a targeted refresh from its canonical Garmin totals; the stored snapshot is read there only for sync status (`provider_sync`, Garmin state).
+
+Evidence: `tests/provider_coupling.py:scan_owner_reads`, `backend/sync/garmin_payload_metrics.py:garmin_payload_performance_metrics`, `backend/sync/garmin_performance_history.py:append_garmin_performance_history`, `backend/sync/intervals_compaction.py:compact_snapshot`; `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_read_raw_provider_views`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_allowlisted_raw_view_owner_passes_and_a_stale_entry_fails`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_source_tree_reads_only_through_allowlisted_owners`.

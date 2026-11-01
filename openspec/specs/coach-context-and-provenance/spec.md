@@ -85,6 +85,10 @@ The system SHALL build ordinary Coach context from saved provider observations a
 - **WHEN** the saved Intervals snapshot is empty
 - **THEN** the context permits the implemented Garmin performance fallback while keeping provider recovery separate and unavailable evidence explicit.
 
+#### Scenario: Recovery section from canonical records
+- **WHEN** the Coach recovery section is built
+- **THEN** sleep, HRV, resting HR and readiness each show the latest canonical Garmin record of the last 14 days (`date` plus neutral fields such as `sleep_seconds`, `sleep_score`, `last_night_avg_ms`, `weekly_avg_ms`, `resting_hr_bpm`, `score`, and the provider status codes `status` and `level`), Body Battery the stored morning record, and the sync time, window, freshness and errors come from the Garmin sync status, read in the same read transaction as the records; the raw Garmin view is not read, and the Garmin performance fallback is requested only when the canonical provider coverage holds no Intervals.icu sync.
+
 #### Scenario: Local calendar planning
 - **WHEN** context combines planned units, competitions and external calendar entries
 - **THEN** calendar items identify their local-plan, competition or external-calendar origin; external calendar context is read-only.
@@ -166,3 +170,16 @@ The system SHALL expose an authenticated bounded preview of the Coach context an
 - **THEN** it explains dialogue continuity independently from authoritative local profile and competition facts.
 
 Evidence: `backend/http_api/athlete_get.py:AthleteGetRoutes.handle`; `backend/coach/context.py:CoachContextPreviewService.preview`; `tests/test_coach_context_preview.py:test_preview_layout_snapshot_last_message_and_read_calls`, `tests/test_coach_context_preview.py:test_projection_bounds_and_privacy`, `tests/test_coach_context_preview.py:test_conversation_preview_documents_responses_chain`.
+
+### Requirement: Coach activity context uses neutral activity summaries
+The Coach context SHALL list recent activities from the neutral activity summaries of every provider, one per session, with the local session id, canonical sport and environment, neutral value keys, `load_model` and source labels, and SHALL NOT expose provider field names or type names. For Intervals.icu-only data the values and source labels SHALL stay as before.
+
+#### Scenario: Intervals.icu-only parity
+- **WHEN** the Coach context is built from Intervals.icu-only synthetic activities
+- **THEN** each activity's values, the per-sport rollups and the source labels equal the former context, under the neutral keys.
+
+#### Scenario: Garmin-only session
+- **WHEN** a recent session has only a Garmin Connect record
+- **THEN** it appears in the Coach context with its Garmin values and source label and without a training load.
+
+Evidence: `backend/coach/context.py:compact_coach_activity`, `backend/coach/context.py:CoachIntervalsContextService`; `tests/test_coach_activity_summary_parity.py`, `tests/test_coach_intervals_context.py`.

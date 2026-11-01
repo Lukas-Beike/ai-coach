@@ -51,6 +51,7 @@ import server
 from backend.db import garmin_store
 from backend.errors import COACH_ABORTED_ERROR
 from backend.http_api import auth as http_auth
+from backend.providers.snapshot_projection import stored_retrieved_at
 from backend.sync.canonical_ingest import ingest_intervals_partial_snapshot
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
@@ -505,9 +506,23 @@ def demo_performance_history(today):
 
 
 def _save_intervals_snapshot(db, snapshot):
-    """Store a fixture snapshot and ingest its raw block like a partial sync does."""
+    """Store a fixture snapshot and ingest its raw block like a partial sync does.
+
+    The canonical backfill then runs to completion in the same transaction, so the
+    fixture app reads its data from the canonical tables instead of the pending
+    state an installation shows before its first completed backfill.
+    """
     server.SNAPSHOT_REPOSITORY.save(db, snapshot, snapshot["synced_at"])
     ingest_intervals_partial_snapshot(db, snapshot, zone=UTC)
+    if stored_retrieved_at(
+        snapshot, zone=UTC
+    ) is None or server.CANONICAL_READ.serves_tables(db):
+        return
+    backfill = server.CANONICAL_BACKFILL.status_reader
+    for _ in range(1000):
+        if backfill.run_batch(db).done:
+            return
+    raise RuntimeError("fixture canonical backfill did not finish")
 
 
 def _save_garmin_snapshot(db, payload):
@@ -593,7 +608,9 @@ def _save_activity_detail(activity_id, record):
             db, record=record, now=server.runtime_clock.utc_now()
         )
     if result.outcome not in (DetailWriteOutcome.WRITTEN, DetailWriteOutcome.UNCHANGED):
-        raise RuntimeError(f"Fixture detail for {activity_id} not stored: {result.outcome}")
+        raise RuntimeError(
+            f"Fixture detail for {activity_id} not stored: {result.outcome}"
+        )
 
 
 def _fixture_seed_fueling_ride(today):
@@ -623,6 +640,9 @@ def seed_training_features():
     from backend.activities.detail_store import summary_fingerprint
     from backend.performance.power_profile import power_profile
     from backend.performance.session_analysis import aerobic_analysis, interval_quality
+    from backend.providers.intervals_activity_mapping import (
+        intervals_analysis_sport,
+    )
 
     now = server.ATHLETE_CLOCK.now()
     rows = [
@@ -770,6 +790,7 @@ def seed_training_features():
             },
             "laps": [{"start_time": 0, "end_time": 3600}],
         }
+        analysed = {**detailed, **intervals_analysis_sport(detailed)}
         _save_activity_detail(
             activity["id"],
             {
@@ -778,9 +799,9 @@ def seed_training_features():
                 "summary_sha256": summary_fingerprint(activity),
                 "target_snapshot": targets,
                 "session_analysis": {
-                    "aerobic": aerobic_analysis(detailed),
+                    "aerobic": aerobic_analysis(analysed),
                     "interval_quality": interval_quality(detailed, targets),
-                    "power_profile": power_profile(detailed),
+                    "power_profile": power_profile(analysed),
                 },
                 "source": "Intervals.icu synthetic fixture",
                 "observed_at": server.runtime_clock.utc_now(),
@@ -1466,7 +1487,9 @@ def _fixture_seed_wave2(today, snapshot, garmin):
     garmin["morning_body_battery"] = morning_body_battery_record(
         today, sleep, garmin["body_battery"], attempted_at=attempted_at.isoformat()
     )
-    from backend.performance.history import append_garmin_performance_history
+    from backend.sync.garmin_performance_history import (
+        append_garmin_performance_history,
+    )
 
     append_garmin_performance_history(garmin, None, today)
     with server.database_manager().unit_of_work() as db:
@@ -1605,6 +1628,8 @@ def _fixture_wave2_summaries(today, snapshot):
             }[sport],
             "start_date_local": f"{day.isoformat()}T{('06:30:00' if sport == 'Run' else '18:00:00')}",
             "moving_time": (35 + offset % 5 * 10) * 60,
+            # Whole-session duration incl. pauses, the session-RPE load input.
+            "elapsed_time": (40 + offset % 5 * 10) * 60,
             "distance": (6000 + offset * 37)
             if sport == "Run"
             else (24000 + offset * 111),
@@ -1658,6 +1683,9 @@ def _fixture_wave2_details(by_id):
     from backend.activities.detail_store import summary_fingerprint
     from backend.performance.power_profile import power_profile, running_profile
     from backend.performance.session_analysis import aerobic_analysis, interval_quality
+    from backend.providers.intervals_activity_mapping import (
+        intervals_analysis_sport,
+    )
 
     targets = {
         "steps": [{"duration": 300, "target": "200W", "kind": "power"}],
@@ -1706,6 +1734,7 @@ def _fixture_wave2_details(by_id):
             "streams": streams,
             "laps": [{"start_time": 0, "end_time": n - 1}],
         }
+        analysed = {**detailed, **intervals_analysis_sport(detailed)}
         _save_activity_detail(
             activity["id"],
             {
@@ -1714,10 +1743,10 @@ def _fixture_wave2_details(by_id):
                 "summary_sha256": summary_fingerprint(activity),
                 "target_snapshot": targets,
                 "session_analysis": {
-                    "aerobic": aerobic_analysis(detailed),
+                    "aerobic": aerobic_analysis(analysed),
                     "interval_quality": interval_quality(detailed, targets),
-                    "power_profile": power_profile(detailed),
-                    "running_profile": running_profile(detailed),
+                    "power_profile": power_profile(analysed),
+                    "running_profile": running_profile(analysed),
                 },
                 "source": FIXTURE_SOURCE,
                 "observed_at": server.runtime_clock.utc_now(),
@@ -2137,6 +2166,9 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 aerobic_analysis,
                 interval_quality,
             )
+            from backend.providers.intervals_activity_mapping import (
+                intervals_analysis_sport,
+            )
 
             today = server.ATHLETE_CLOCK.now().date().isoformat()
             activity = {
@@ -2145,6 +2177,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 "type": "Ride",
                 "start_date_local": f"{today}T08:00:00",
                 "moving_time": 3600,
+                "elapsed_time": 3720,
                 "distance": 25000,
                 "icu_training_load": 50,
                 # Intervals.icu reports a fractional intensity and its own NP key.
@@ -2171,7 +2204,9 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                     "activity": detailed,
                     "summary_sha256": summary_fingerprint(activity),
                     "session_analysis": {
-                        "aerobic": aerobic_analysis(detailed),
+                        "aerobic": aerobic_analysis(
+                            {**detailed, **intervals_analysis_sport(detailed)}
+                        ),
                         "interval_quality": interval_quality(detailed, None),
                     },
                     "source": "Intervals.icu",

@@ -14,12 +14,15 @@ from performance_day_support import (
     days_from_rows,
     garmin_body_from_payload,
     garmin_metrics_from_payload,
+    intervals_activity_summaries,
+    snapshot_coverage_time,
 )
 
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance import body as _body
 from backend.performance import chart_history as _chart_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.wellness_days import wellness_day_values
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 
@@ -79,18 +82,20 @@ def _payload(garmin: Any) -> dict[str, Any]:
     return garmin if isinstance(garmin, dict) else {}
 
 
-def _activity_rows(snapshot: Any) -> tuple[Any, ...]:
-    """The raw activity rows, then the compact ones, as the activity reader serves."""
+def _activity_summaries(snapshot: Any) -> tuple[Any, ...]:
+    """The activity summaries of the raw, then the compact rows, as the reader serves."""
     if not isinstance(snapshot, dict):
         return ()
     raw = snapshot.get("raw_provider_data")
     raw = raw if isinstance(raw, dict) else {}
-    return tuple(
-        row
-        for rows in (raw.get("activities"), snapshot.get("recent_activities"))
-        if isinstance(rows, list)
-        for row in rows
-        if isinstance(row, dict)
+    return intervals_activity_summaries(
+        [
+            row
+            for rows in (raw.get("activities"), snapshot.get("recent_activities"))
+            if isinstance(rows, list)
+            for row in rows
+            if isinstance(row, dict)
+        ]
     )
 
 
@@ -103,15 +108,15 @@ def body_history(
         rows += raw.get("wellness", []) if isinstance(raw, dict) else []
         rows += snapshot.get("recent_wellness", [])
     return _body.body_history(
-        snapshot,
-        garmin,
+        (snapshot or {}).get("synced_at"),
+        GarminSyncStatus.from_state(garmin),
         today,
         eftp_by_day=_eftp_by_day(snapshot),
         wellness_days=days_from_rows(rows),
         canonical=garmin_body_from_payload(
             _payload(garmin), today, retrieved_at=retrieved_at
         ),
-        activity_rows=_activity_rows(snapshot),
+        activities=_activity_summaries(snapshot),
         garmin_ftp=garmin_metrics_from_payload(
             _payload(garmin), retrieved_at=retrieved_at
         ).performance_history.get("cycling_ftp_watts", {}),
@@ -128,13 +133,17 @@ def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
         wellness_day=None,
         ctl=None,
         atl=None,
+        # The Intervals.icu coverage time the snapshot's sync stored.
+        intervals_synced_at=snapshot_coverage_time(snapshot),
         eftp_by_day=_eftp_by_day(snapshot),
         history_wellness_days=days_from_rows(rows),
-        activity_rows=_activity_rows(snapshot),
+        activities=_activity_summaries(snapshot),
         garmin=garmin_metrics_from_payload(_payload(garmin)),
         body=garmin_body_from_payload(_payload(garmin), today),
     )
-    return _chart_history.analysis_history(snapshot, garmin, today, canonical=canonical)
+    return _chart_history.analysis_history(
+        GarminSyncStatus.from_state(garmin), today, canonical=canonical
+    )
 
 
 def _garmin_weight(day: str, kg: float) -> dict[str, Any]:
@@ -513,7 +522,7 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
 
     def test_body_section_is_identical_to_direct_body_history(self) -> None:
         snapshot = {
-            "synced_at": "sync",
+            "synced_at": "2026-05-04T05:00:00+00:00",
             "recent_wellness": [
                 _wellness("2026-05-03", weight=70),
                 _wellness("2026-05-04", eftp=280),
@@ -528,9 +537,7 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             body_history(snapshot, garmin, TODAY),
         )
 
-    def test_training_time_counts_duplicate_ids_once_and_first_occurrence_wins(
-        self,
-    ) -> None:
+    def test_training_time_sums_raw_and_compact_activities(self) -> None:
         snapshot = {
             "raw_provider_data": {
                 "activities": [
@@ -543,11 +550,6 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             },
             "recent_activities": [
                 {
-                    "id": "a1",
-                    "start_date_local": "2026-05-03T07:00:00",
-                    "moving_time": 7200,
-                },
-                {
                     "id": "a2",
                     "start_date_local": "2026-05-03T18:00:00",
                     "moving_time": 1800,
@@ -555,7 +557,6 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             ],
         }
         result = analysis_history(snapshot, {}, TODAY)
-        # Raw rows come first, so the raw moving_time of a1 is the one counted.
         self.assertEqual(
             _point_value(result["training_time"]["points"], "2026-05-03"), 1.5
         )
@@ -596,15 +597,16 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
                 # Only start_date_local is trusted; start_date alone is ignored.
                 {"id": "z6", "start_date": "2026-05-04T07:00:00", "moving_time": 3600},
                 {"id": "z7", "start_date_local": "not a date", "moving_time": 3600},
-                # Quirk: activities without an id are never deduplicated.
+                # Rows without an id are not mapped into sessions at all.
                 {"start_date_local": "2026-05-02T08:00:00", "moving_time": 1800},
                 {"start_date_local": "2026-05-02T09:00:00", "moving_time": 1800},
             ]
         }
         points = analysis_history(snapshot, {}, TODAY)["training_time"]["points"]
         self.assertEqual(_point_value(points, "2026-05-01"), 0.5)
-        self.assertEqual(_point_value(points, "2026-05-02"), 25.0)
-        self.assertIsNone(_point_value(points, "2026-05-03"))
+        self.assertEqual(_point_value(points, "2026-05-02"), 24.0)
+        # Over-long and boolean durations are dropped; the numeric string maps.
+        self.assertEqual(_point_value(points, "2026-05-03"), 1.0)
         self.assertIsNone(_point_value(points, "2026-05-04"))
 
     def test_training_load_row_without_acute_load_keeps_a_valid_value(
@@ -654,16 +656,19 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
         # rule would be distinguishable from the observed latest-start rule.
         activities = [
             {
+                "id": "e0",
                 "start_date_local": "2026-05-02T08:00:00",
                 "type": "Ride",
                 "icu_eftp": 240,
             },
             {
+                "id": "e1",
                 "start_date_local": "2026-05-03T08:00:00",
                 "type": "Ride",
                 "icu_eftp": 250,
             },
             {
+                "id": "e2",
                 "start_date_local": "2026-05-03T16:00:00",
                 "type": "Ride",
                 "icu_eftp": 260,

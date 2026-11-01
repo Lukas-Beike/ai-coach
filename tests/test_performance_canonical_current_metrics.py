@@ -31,7 +31,6 @@ from performance_day_support import latest_day, snapshot_metrics
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.coach.context import CoachPerformanceContextReader
-from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance.canonical_current import (
     NO_CURRENT_INPUTS,
     CanonicalCurrentInputs,
@@ -43,12 +42,14 @@ from backend.performance.canonical_inputs import (
     read_performance_inputs,
 )
 from backend.performance.context import current_performance_context
+from backend.performance.freshness import GarminSyncStatus
 from backend.providers.source_labels import SourceView, observation_source_label
 from backend.providers.wahoo_threshold_mapping import (
     map_wahoo_power_zones,
     map_wahoo_user,
 )
 from backend.runtime.ports import ObservationReader
+from backend.sync import garmin_payload_metrics
 
 SYNC_DAY = date(2026, 10, 12)
 SENSOR_KINDS = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX)
@@ -101,7 +102,7 @@ def _case(name: str) -> Case:
 
 def _legacy(case: Case) -> dict[str, Any]:
     """Current metrics of the case snapshot's own mapped observations."""
-    garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+    garmin = garmin_payload_metrics.garmin_payload_performance_metrics(
         case.garmin, TODAY
     )
     return snapshot_metrics(
@@ -121,7 +122,7 @@ def _read(
 
 
 def _canonical(case: Case, observations: tuple[Observation, ...] | None = None) -> Any:
-    garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
+    garmin = garmin_payload_metrics.garmin_payload_performance_metrics(
         case.garmin, TODAY
     )
     reader = ObservationStub(
@@ -203,6 +204,26 @@ class CanonicalCurrentParityTests(unittest.TestCase):
         metrics = _canonical(variant, _observations(case))
         self.assertEqual(metrics, _legacy(case))
         self.assertNotEqual(metrics, _legacy(variant))
+
+    def test_an_indoor_ftp_never_becomes_the_current_cycling_ftp(self) -> None:
+        # INDOOR_FTP (mapper version 10) is its own kind: only the plan zones of
+        # indoor workouts read it, so the current metrics stay unchanged.
+        case = _case("intervals_only")
+        with_indoor = copy.deepcopy(case.intervals)
+        with_indoor["athlete"]["sport_settings"][0]["indoor_ftp"] = 230
+        variant = replace(case, intervals=with_indoor)
+        observations = _observations(variant)
+        self.assertIn(
+            (MetricKind.INDOOR_FTP, Sport.RIDE, 230.0),
+            {(item.kind, item.sport, item.value.value) for item in observations},
+        )
+        inputs = _read(ObservationStub(observations), variant.intervals)
+        assert inputs is not None
+        self.assertNotIn(
+            MetricKind.INDOOR_FTP, {item.kind for item in inputs.athlete_record}
+        )
+        self.assertEqual(_canonical(variant), _canonical(case))
+        self.assertEqual(_canonical(variant), _legacy(case))
 
     def test_athlete_wide_threshold_is_the_fallback_with_the_general_label(
         self,
@@ -324,6 +345,7 @@ class CanonicalCurrentInputTests(unittest.TestCase):
                 (MetricKind.WEIGHT, *window, None),
                 (MetricKind.EFTP, *window, None),
                 *((kind, *window, None) for kind in ATHLETE_RECORD_KINDS),
+                (MetricKind.INDOOR_FTP, *window, None),
                 (MetricKind.FTP, None, None, None),
                 (MetricKind.WEIGHT, None, None, None),
                 (MetricKind.WEIGHT, latest, latest, None),
@@ -498,9 +520,7 @@ class CanonicalEftpInputTests(unittest.TestCase):
 
     def test_the_eftp_current_value_is_labelled_like_the_legacy_metric(self) -> None:
         case = _eftp_case(athlete=262, wellness=265)
-        garmin = performance_garmin_metrics.garmin_payload_performance_metrics(
-            {}, TODAY
-        )
+        garmin = garmin_payload_metrics.garmin_payload_performance_metrics({}, TODAY)
         metrics = snapshot_metrics(
             case.intervals, {}, garmin, canonical=self._inputs(case)
         )
@@ -567,7 +587,7 @@ class CanonicalWeightTests(unittest.TestCase):
 
 
 class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
-    def test_populated_tables_reproduce_the_legacy_current_metrics(self) -> None:
+    def test_populated_tables_serve_the_current_metrics(self) -> None:
         populate(self)
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
@@ -577,10 +597,13 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         assert inputs is not None
         self.assertIsNotNone(inputs.current)
         legacy = current_performance_context(
-            self.intervals, self.garmin, {}, TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
+            GarminSyncStatus.from_state(self.garmin),
+            {},
+            TODAY,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
         )
         canonical = current_performance_context(
-            self.intervals, self.garmin, {}, TODAY, canonical=inputs
+            GarminSyncStatus.from_state(self.garmin), {}, TODAY, canonical=inputs
         )
         # Intended difference (#1412): eFTP is read from canonical observations only,
         # so it is absent without canonical inputs. The canonical value is the
@@ -592,7 +615,9 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
             ]
             if setting["types"] == ["Ride"]
         )
-        self.assertIsNone(legacy["metrics"]["cycling_eftp_watts"]["value"])
+        # Without canonical inputs the context is unavailable (#1416).
+        self.assertFalse(legacy["available"])
+        self.assertEqual(legacy["metrics"], {})
         self.assertEqual(
             canonical["metrics"]["cycling_eftp_watts"],
             {
@@ -603,30 +628,14 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
                 "note": "",
             },
         )
-        # Intended difference (#1415): Garmin values are read from canonical inputs
-        # only, so the context without them has none. Their parity with the stored
-        # payload is pinned in tests/test_garmin_canonical_reads.py.
-        garmin_keys = {
-            key
-            for key, value in canonical["metrics"].items()
-            if value.get("source_provider") == "garmin"
+        # Garmin values and the Intervals.icu athlete settings are read from the
+        # canonical inputs (#1415). Their parity with the stored payload is pinned
+        # in tests/test_garmin_canonical_reads.py.
+        providers = {
+            value.get("source_provider") for value in canonical["metrics"].values()
         }
-        self.assertTrue(garmin_keys)
-        for key in garmin_keys:
-            self.assertNotEqual(legacy["metrics"][key]["source_provider"], "garmin")
-        # Intended difference (#1415): the Intervals.icu athlete settings are read
-        # from canonical inputs only, so the context without them has none.
-        intervals_keys = {
-            key
-            for key, value in canonical["metrics"].items()
-            if value.get("source_provider") == "intervals"
-        } - {"cycling_eftp_watts"}
-        self.assertTrue(intervals_keys)
-        for key in intervals_keys:
-            self.assertIsNone(legacy["metrics"][key]["value"], key)
-        compared = legacy["metrics"].keys() - {"cycling_eftp_watts"} - garmin_keys
-        for key in compared - intervals_keys:
-            self.assertEqual(canonical["metrics"][key], legacy["metrics"][key], key)
+        self.assertIn("garmin", providers)
+        self.assertIn("intervals", providers)
 
 
 def _wahoo_ftp(value: float, sport_family: int = 0) -> Observation:
@@ -742,6 +751,9 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
     SNAPSHOT: Final = {"recent_wellness": [{"id": AS_OF.isoformat()}]}
 
     class ActivityReader:
+        def activity_summaries(self, _db, *, start=None, end=None, limit=None):
+            return ()
+
         def activity_rows(self, _db, *, start=None, end=None, limit=None):
             return ()
 
@@ -810,11 +822,11 @@ class WahooAgeLimitProductionReadTests(unittest.TestCase):
         source = CanonicalPerformanceSource(
             database_manager=_UnitOfWorkManager,
             observation_reader=lambda: reader,
-            activity_rows=self.ActivityReader,
+            activity_summaries=self.ActivityReader,
         )
         context = CoachPerformanceContextReader(
             None, None, None, today=lambda: AS_OF, canonical=source
         )
-        _snapshot, inputs = context.read_snapshot(lambda: self.SNAPSHOT)
+        inputs = context.read_inputs()
         assert inputs is not None
         self.assertEqual(inputs.current, NO_CURRENT_INPUTS)

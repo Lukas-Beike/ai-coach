@@ -437,7 +437,7 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             )
         )
 
-    def test_snapshot_reader_and_intervals_operation_are_composed_explicitly(
+    def test_athlete_data_takes_no_snapshot_and_intervals_operation_is_explicit(
         self,
     ) -> None:
         server_tree = _parse(SERVER_PATH)
@@ -450,10 +450,9 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
                 for target in node.targets
             )
         )
-        self.assertIn(
-            "snapshot_reader=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY)",
-            ast.unparse(athlete_data.value),
-        )
+        # The athlete assembly reads canonical records only; its snapshot reader
+        # went with the dead training_snapshot reader (#1416).
+        self.assertNotIn("snapshot_reader", ast.unparse(athlete_data.value))
 
         provider_transport = next(
             node
@@ -467,6 +466,21 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
         self.assertIn(
             "operation=INTERVALS_RESYNC_GATE.operation",
             ast.unparse(provider_transport.value),
+        )
+
+    def test_activity_reads_receive_the_canonical_read_state(self) -> None:
+        server_tree = _parse(SERVER_PATH)
+        activity_reads = next(
+            node
+            for node in server_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "ACTIVITY_READS"
+                for target in node.targets
+            )
+        )
+        self.assertIn(
+            "serving=lambda: CANONICAL_READ", ast.unparse(activity_reads.value)
         )
 
         transport_tree = _parse(BACKEND_ROOT / "providers" / "transport_assembly.py")
@@ -516,32 +530,29 @@ class ServerCompositionArchitectureTests(unittest.TestCase):
             + "\n".join(f"server.py:{line}" for line in raw_access),
         )
 
-    def test_canonical_projection_is_composed_once_through_its_assembly(self) -> None:
+    def test_canonical_read_is_composed_once_through_its_assembly(self) -> None:
         server_tree = _parse(SERVER_PATH)
         constructed = [
             node.lineno
             for node in ast.walk(server_tree)
-            if isinstance(node, ast.Name) and node.id == "CanonicalSnapshotProjection"
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func) == "CanonicalReadSelector"
         ]
         self.assertEqual([], constructed)
 
-        projection = next(
+        read = next(
             node
             for node in server_tree.body
             if isinstance(node, ast.Assign)
             and any(
-                isinstance(target, ast.Name)
-                and target.id == "CANONICAL_SNAPSHOT_PROJECTION"
+                isinstance(target, ast.Name) and target.id == "CANONICAL_READ"
                 for target in node.targets
             )
         )
-        composed = projection.value
+        composed = read.value
         self.assertIsInstance(composed, ast.Call)
         assert isinstance(composed, ast.Call)
-        self.assertEqual(
-            "build_canonical_snapshot_projection",
-            ast.unparse(composed.func),
-        )
+        self.assertEqual("build_canonical_read", ast.unparse(composed.func))
 
         diagnostics = next(
             node

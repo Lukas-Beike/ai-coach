@@ -26,6 +26,7 @@ from backend.coach.context import (
 from backend.coach.context_selection import CoachContextSelection
 from backend.coach.prompt import COACH_PROMPT
 from backend.db.repositories import CheckinRepository
+from backend.performance.freshness import GarminSyncStatus
 
 TODAY = date(2026, 10, 2)
 NO_CLEARANCE = "Keine Diagnose, keine Trainingsfreigabe und keine Trainingsänderung"
@@ -57,8 +58,8 @@ class _StoredRecoveryReader(CoachPerformanceContextReader):
         super().__init__(*args)
         self._inputs = inputs
 
-    def read_sources(self, read_snapshot: Any) -> Any:
-        return None, self._inputs, None
+    def read_sources(self) -> Any:
+        return self._inputs, None
 
 
 def _coach_context(wellness: list[dict[str, Any]], checkins: CheckinService) -> Any:
@@ -66,7 +67,7 @@ def _coach_context(wellness: list[dict[str, Any]], checkins: CheckinService) -> 
     profile = Mock()
     profile.get.return_value = {"name": "Athlete", "timezone": "UTC"}
     garmin_payload = Mock()
-    garmin_payload.recent_view.return_value = {}
+    garmin_payload.sync_status.return_value = GarminSyncStatus()
     reader = _StoredRecoveryReader(
         recovery_only_inputs({}, wellness),
         profile,
@@ -75,7 +76,6 @@ def _coach_context(wellness: list[dict[str, Any]], checkins: CheckinService) -> 
         lambda: TODAY,
     )
     service = CoachStructuredContextService(
-        Mock(),
         checkins,
         Mock(),
         Mock(),

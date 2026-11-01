@@ -90,7 +90,7 @@ def sport_records(
 
 class ModuleContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 9)
+        self.assertEqual(MAPPER_VERSION, 10)
 
     def test_naive_retrieved_at_is_a_programming_error_for_both_mappers(self) -> None:
         naive_time = naive("2026-10-11T08:00:00")
@@ -880,7 +880,11 @@ class AthleteFallbackTests(unittest.TestCase):
             {"sportSettings": [{"types": ["Ride"], "indoor_ftp": 240}]}
         )
         self.assertEqual(
-            sport_records(only_indoor), {(MetricKind.FTP, Sport.RIDE, 240)}
+            sport_records(only_indoor),
+            {
+                (MetricKind.FTP, Sport.RIDE, 240),
+                (MetricKind.INDOOR_FTP, Sport.RIDE, 240),
+            },
         )
         both = thresholds(
             {
@@ -889,7 +893,14 @@ class AthleteFallbackTests(unittest.TestCase):
                 ]
             }
         )
-        self.assertEqual(sport_records(both), {(MetricKind.FTP, Sport.RIDE, 260)})
+        # The indoor FTP is its own kind, so the sport FTP stays the outdoor one.
+        self.assertEqual(
+            sport_records(both),
+            {
+                (MetricKind.FTP, Sport.RIDE, 260),
+                (MetricKind.INDOOR_FTP, Sport.RIDE, 240),
+            },
+        )
 
 
 class ThresholdPaceTests(unittest.TestCase):
@@ -1134,6 +1145,19 @@ class SportSettingValueTests(unittest.TestCase):
                     {"types": ["Ride"], "ftp": 0, "indoor_ftp": 240},
                 ],
             }
+        )
+        self.assertEqual(
+            sport_records(result),
+            {
+                (MetricKind.FTP, Sport.RIDE, 260),
+                (MetricKind.INDOOR_FTP, Sport.RIDE, 240),
+            },
+        )
+        self.assertEqual(result.issues, ())
+
+    def test_zero_indoor_ftp_stores_nothing(self) -> None:
+        result = thresholds(
+            {"sportSettings": [{"types": ["Ride"], "ftp": 260, "indoor_ftp": 0}]}
         )
         self.assertEqual(sport_records(result), {(MetricKind.FTP, Sport.RIDE, 260)})
         self.assertEqual(result.issues, ())

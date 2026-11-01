@@ -10,10 +10,11 @@ row, live or deleted. A row that already exists counts as ``already_present``. A
 new activity gets a single-link session, as in ``upsert_activity_record``. Backfill
 never deletes. A snapshot without ``raw_provider_data`` is not mapped, because its
 ``recent_activities`` fallback is a compact read model with no mapper; such a
-snapshot counts as ``skipped_invalid``. The sleep, status, zone and gear rows of a
-raw record (its domain batch) are inserted only when that source record has no domain
-row at all, active or retired; otherwise the batch counts as ``already_present``. An
-empty batch inserts nothing and counts nothing.
+snapshot counts as ``skipped_invalid``. The sleep, status, zone, gear and power curve
+rows of a raw record (its domain batch) are inserted only when that source record has
+no domain row at all, active or retired; otherwise the batch counts as
+``already_present``. An empty batch inserts nothing and counts nothing. Only the
+newest snapshot (the one that may insert activities) plans its power curve.
 
 Supersession: the newest snapshot present when the run starts is the only one that
 may insert activities. Its activities and their raw ``activity`` records are inserted
@@ -50,7 +51,8 @@ nothing, so the activity it owns is marked ``invalid`` as well, and a later mapp
 restores it. In the same transaction, the sessions near the re-projected activities
 are linked to duplicates from other providers (``link_activity_sessions``), so a
 mapper fix that lets two copies match merges stored history without a new provider
-refresh. Observations have no state column and no exact ownership for athlete and
+refresh. The first ingest links the same way when each source finishes, so copies
+stored by Garmin and Intervals.icu snapshots form one session. Observations have no state column and no exact ownership for athlete and
 health records, so observations that an upgraded mapper no longer emits are not retired;
 they keep their old ``mapper_version``. The table reader that follows this phase serves
 only observations whose ``mapper_version`` equals the current version of their mapper,
@@ -75,8 +77,8 @@ the marker existed) counts as completed once, and the marker is added when the n
 re-projection starts. From then on reads come from the tables (``read_state``): a
 mapper-version bump or a zone change re-projects as described above, but reads stay
 on the tables meanwhile and serve each observation's newest stored version, so
-nothing vanishes. Only an installation whose backfill never completed reads the
-legacy snapshot projection. Nothing is deleted.
+nothing vanishes. An installation whose backfill never completed reads nothing
+until it does. Nothing is deleted.
 
 Each batch writes at most ``batch_size`` plan items in one writer transaction. The
 cursor and the content-free counters are one kv value written in that same
@@ -120,6 +122,7 @@ from backend.providers.snapshot_projection import (
     CANONICAL_SECTIONS_KEY,
     stored_retrieved_at,
 )
+from backend.sync.canonical_ingest import stored_training_loads
 
 STATE_KEY: Final = "canonical_backfill_state"
 DEFAULT_BATCH_SIZE: Final = 200
@@ -199,7 +202,7 @@ def read_status(key_values: KeyValueRepository, db: Any) -> str:
     try:
         state = json.loads(raw)
     except ValueError:
-        # A corrupt backfill record reads as not started, so the switch stays on legacy.
+        # A corrupt backfill record reads as not started, so reads stay pending.
         return BackfillStatus.PENDING.value
     status = state.get("status") if isinstance(state, dict) else None
     return status if isinstance(status, str) else BackfillStatus.PENDING.value
@@ -208,7 +211,7 @@ def read_status(key_values: KeyValueRepository, db: Any) -> str:
 class ReadState(StrEnum):
     """Which source serves canonical reads, decided from the backfill state alone."""
 
-    LEGACY = "legacy"
+    PENDING = "pending"
     TABLES = "tables"
     TABLES_REPROJECTING = "tables_reprojecting"
 
@@ -269,10 +272,10 @@ def backfill_complete(key_values: KeyValueRepository, db: Any, *, zone: tzinfo) 
 
 
 def read_state(key_values: KeyValueRepository, db: Any, *, zone: tzinfo) -> ReadState:
-    """Return which source serves reads: legacy only before the first completion."""
+    """Return which source serves reads: pending until the first completion."""
     state = _stored_state(key_values, db)
     if not _completed_once(state):
-        return ReadState.LEGACY
+        return ReadState.PENDING
     if _is_current(state, zone):
         return ReadState.TABLES
     return ReadState.TABLES_REPROJECTING
@@ -363,7 +366,7 @@ class CanonicalBackfill:
         state = self._load(db, self._zone_provider() or UTC)
         if state["status"] == BackfillStatus.COMPLETE:
             # A completion that predates the marker must survive the failure, or
-            # reads would fall back to legacy.
+            # reads would become pending again.
             self._mark_completed_once(state, now=self._clock())
         state["status"] = BackfillStatus.FAILED
         self._save(db, state)
@@ -412,6 +415,8 @@ class CanonicalBackfill:
             written += count
             if not finished:
                 return written, False
+            # Copies another provider's source already stored join their session.
+            _link_work_sessions(db, work, zone=zone, now=now)
             _finish_source(state, current, work, counters)
 
     def _ingest_source_work(
@@ -456,11 +461,12 @@ class CanonicalBackfill:
                 continue
             current = state["reproject_current"]
             row, version = pending
+            loads = stored_training_loads(db)
             work = self._work_for(
                 f"row:{current['id']}",
                 current,
-                f"{version}:{zone}:{row['payload']}",
-                partial(_reprojection_work, row, zone),
+                f"{version}:{zone}:{row['payload']}:{_training_load_text(row, loads)}",
+                partial(_reprojection_work, row, zone, loads),
             )
             count, finished = _drain(
                 work,
@@ -633,6 +639,18 @@ def _complete_reprojection(
     bucket["retired"] += _retire_unemitted(db, row, work, now=now)
     bucket["retired"] += _replace_domain_rows(db, row, work, version=version, now=now)
     # After the retirement, so an activity the new projection drops is never bundled.
+    _link_work_sessions(db, work, zone=zone, now=now)
+    canonical_store.set_mapped_version(
+        db, record_id=current["id"], mapper_version=version, now=now
+    )
+    bucket["reprojected"] += 1
+    bucket["skipped_invalid"] += work.skipped_invalid
+    bucket["duplicates"] += work.duplicates
+    _leave_reprojection(state, current)
+
+
+def _link_work_sessions(db: Any, work: _Work, *, zone: tzinfo, now: str) -> None:
+    """Link the sessions near the activities of ``work`` to other providers' copies."""
     link_activity_sessions(
         db,
         touched_dates={
@@ -643,13 +661,6 @@ def _complete_reprojection(
         zone=zone,
         now=now,
     )
-    canonical_store.set_mapped_version(
-        db, record_id=current["id"], mapper_version=version, now=now
-    )
-    bucket["reprojected"] += 1
-    bucket["skipped_invalid"] += work.skipped_invalid
-    bucket["duplicates"] += work.duplicates
-    _leave_reprojection(state, current)
 
 
 def _retire_unemitted(db: Any, row: Mapping[str, Any], work: _Work, *, now: str) -> int:
@@ -703,6 +714,8 @@ def _replace_domain_rows(
         zones=batch.zones,
         gear_items=batch.gear_items,
         gear_links=batch.gear_links,
+        power_curve=batch.power_curve,
+        power_curve_fetch=batch.power_curve_fetch,
     ).retired
 
 
@@ -751,16 +764,29 @@ def _ingest_work(
     payload = json.loads(text)
     if not isinstance(payload, dict):
         return _Work(skipped_invalid=1)
+    # Only the newest snapshot plans the power curve: an older one's curve is
+    # superseded and must not fill the table with stale best efforts.
     return _work_from_plan(
-        intervals_snapshot_ingest_plan(payload, zone=zone),
+        intervals_snapshot_ingest_plan(
+            payload, zone=zone, include_power_curve=may_insert_activities
+        ),
         stored_retrieved_at(payload, zone=zone),
         may_insert_activities=may_insert_activities,
         domain_items=True,
     )
 
 
-def _reprojection_work(row: Mapping[str, Any], zone: tzinfo) -> _Work:
-    plan = reprojection_plan(row, zone=zone)
+def _training_load_text(row: Mapping[str, Any], loads: Callable[[str], Any]) -> str:
+    """The stored dedicated training-load row a Garmin activity re-projects with."""
+    if row["provider"] != _GARMIN or row["record_kind"] != ACTIVITY_RECORD_KIND:
+        return ""
+    return json.dumps(loads(str(row["source_record_id"])), sort_keys=True)
+
+
+def _reprojection_work(
+    row: Mapping[str, Any], zone: tzinfo, loads: Callable[[str], Any] | None = None
+) -> _Work:
+    plan = reprojection_plan(row, zone=zone, training_loads=loads)
     if plan is None:
         return _Work()
     return _work_from_plan(plan, None, may_insert_activities=True, domain_items=False)
@@ -897,6 +923,8 @@ def _write_ingest(
                 zones=value.zones,
                 gear_items=value.gear_items,
                 gear_links=value.gear_links,
+                power_curve=value.power_curve,
+                power_curve_fetch=value.power_curve_fetch,
             )
     else:
         inserted = canonical_store.insert_observation_if_absent(

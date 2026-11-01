@@ -33,7 +33,7 @@ from backend.providers.garmin import GarminClientFactory
 from backend.providers.state import ProviderStateService
 from backend.runtime.memory import process_memory
 from backend.runtime.ports import (
-    ActivityRowReader,
+    ActivityRowAndSummaryReader,
     ObservationReader,
     ProviderCoverageReader,
 )
@@ -76,7 +76,7 @@ class DiagnosticReportDependencies:
     diagnostic_capture: DiagnosticCapture
     canonical_backfill: CanonicalBackfillStatusReader | None = None
     canonical_read: CanonicalReadStatusReader | None = None
-    activity_rows: ActivityRowReader | None = None
+    activity_rows: ActivityRowAndSummaryReader | None = None
     observations: ObservationReader | None = None
 
 

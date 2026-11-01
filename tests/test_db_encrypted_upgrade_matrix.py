@@ -1,6 +1,6 @@
 """SQLCipher upgrade, rollback, restart and backup/restore from every released schema.
 
-Each released schema (v9 to v15) is populated in an encrypted temporary database
+Each released schema (v9 to v17) is populated in an encrypted temporary database
 with the rows of the native migration tests. The upgrade keeps every original
 value, the file stays encrypted, a failing upgrade leaves the database exactly as
 it was, a restart with the same build changes nothing, a wrong key reads nothing,
@@ -20,8 +20,10 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+import test_db_feedback_rating_time_migration as rating_time
 import test_db_migrations as gate
 import test_db_planning_fields_migration as planning
+import test_db_power_curve_migration as power_curve
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
 from backend.backup.restore_validation import (
@@ -36,7 +38,7 @@ from backend.db.schema import (
     configure_cipher,
     database_schema_is_current,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V15
+from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V17
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -60,6 +62,8 @@ def builders() -> dict[int, Callable[[Any], None]]:
         13: released.populated_v13_database,
         14: lambda db: released.populated_v13_database(db, gate.V14_FIXTURE),
         15: planning.populated_planning_database,
+        16: power_curve.populated_power_curve_database,
+        17: rating_time.populated_feedback_database,
     }
 
 
@@ -156,7 +160,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
 
     def test_a_failing_upgrade_leaves_every_released_schema_unchanged(self) -> None:
         def failing_last_step(connection: Any) -> None:
-            migrations._upgrade_v15_to_v16(connection)
+            migrations._upgrade_v17_to_v18(connection)
             raise RuntimeError("injected migration failure")
 
         for version in builders():
@@ -167,7 +171,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                     with (
                         mock.patch.dict(
                             migrations.UPGRADE_STEPS,
-                            {SHAPE_SCHEMA_V15: (SHAPE_CURRENT, failing_last_step)},
+                            {SHAPE_SCHEMA_V17: (SHAPE_CURRENT, failing_last_step)},
                         ),
                         self.assertRaisesRegex(RuntimeError, "injected"),
                     ):

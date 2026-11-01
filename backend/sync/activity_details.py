@@ -13,6 +13,7 @@ import math
 import re
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
+from datetime import date, timedelta
 from itertools import islice, pairwise
 from typing import Any
 from urllib.parse import quote
@@ -20,11 +21,6 @@ from urllib.parse import quote
 from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
-)
-from backend.activities.detail_projection import (
-    COACH_ACTIVITY_DETAIL_STREAM_FIELDS,
-    DETAIL_PROJECTION_VERSION,
-    detailed_activity,
 )
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
 from backend.activities.workout_profile import recorded_profile
@@ -36,13 +32,19 @@ from backend.errors import AppError, public_error_contract
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.planning.target_snapshot import freeze_targets
+from backend.providers.intervals_activity_detail_projection import (
+    COACH_ACTIVITY_DETAIL_STREAM_FIELDS,
+    DETAIL_PROJECTION_VERSION,
+    detailed_activity,
+)
 from backend.providers.intervals_activity_fields import (
     ACTIVITY_DETAIL_PARAMS,
     ACTIVITY_DETAIL_STREAM_ALIASES,
     ACTIVITY_DETAIL_STREAM_TYPES,
     activity_detail_laps,
 )
-from backend.runtime.ports import ActivityRowReader
+from backend.providers.intervals_activity_mapping import intervals_analysis_sport
+from backend.runtime.ports import ActivityRowAndSummaryReader
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
     DetailWriteOutcome,
@@ -84,6 +86,15 @@ def normalize_streams(value: Any) -> dict[str, list[Any]]:
     return streams
 
 
+def _local_day(row: dict[str, Any] | None) -> date | None:
+    """Return the athlete-local day of a raw Intervals.icu activity row."""
+    text = str((row or {}).get("start_date_local") or "")[:10]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 class ActivityDetailRefreshService:
     """Validate a locally known activity before fetching and committing details."""
 
@@ -92,7 +103,7 @@ class ActivityDetailRefreshService:
         *,
         api_client: Any,
         database_manager: Any,
-        row_reader: ActivityRowReader,
+        row_reader: ActivityRowAndSummaryReader,
         store: ActivityDetailStore,
         utc_now: Callable[[], str],
         configured: bool,
@@ -112,6 +123,21 @@ class ActivityDetailRefreshService:
         self._canonical = canonical
         self._local_date = local_date
 
+    def _target_candidates(self, db: Any, summary: dict[str, Any] | None) -> list[Any]:
+        """Return the summaries around the activity's day that target freezing compares.
+
+        Matching only pairs activities of the same local day, so a day either side
+        is enough.
+        """
+        day = _local_day(summary)
+        if day is None:
+            return []
+        return list(
+            self._row_reader.activity_summaries(
+                db, start=day - timedelta(days=1), end=day + timedelta(days=1)
+            )
+        )
+
     def refresh(self, activity_id: str) -> dict[str, Any]:
         activity_id = normalize_activity_id(
             self._references.resolve_reference(
@@ -120,10 +146,11 @@ class ActivityDetailRefreshService:
         )
         with self._database_manager.unit_of_work() as db:
             rows = self._row_reader.activity_rows(db)
-        summary = next(
-            (row for row in rows if str(row.get("id")) == activity_id),
-            None,
-        )
+            summary = next(
+                (row for row in rows if str(row.get("id")) == activity_id),
+                None,
+            )
+            summaries = self._target_candidates(db, summary)
         if summary is None:
             raise AppError(
                 404,
@@ -146,9 +173,10 @@ class ActivityDetailRefreshService:
         )
         projected = detailed_activity({**detail, "laps": activity_detail_laps(detail)})
         projected["streams"] = streams
+        analysed = {**projected, **intervals_analysis_sport(projected)}
         observed_at = self._utc_now()
         targets = self._stored_targets(activity_id) or freeze_targets(
-            self._read_planned_units(), rows, activity_id, projected, observed_at
+            self._read_planned_units(), summaries, activity_id, projected, observed_at
         )
         record = {
             "activity_id": activity_id,
@@ -159,9 +187,9 @@ class ActivityDetailRefreshService:
             "target_snapshot": targets,
             "session_analysis": {
                 "interval_quality": interval_quality(projected, targets),
-                "aerobic": aerobic_analysis(projected),
-                "power_profile": power_profile(projected),
-                "running_profile": running_profile(projected),
+                "aerobic": aerobic_analysis(analysed),
+                "power_profile": power_profile(analysed),
+                "running_profile": running_profile(analysed),
             },
             "full_resolution": True,
             "available_streams": sorted(streams),

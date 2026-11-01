@@ -21,10 +21,10 @@ from zoneinfo import ZoneInfo
 from canonical_recovery_support import mapped_recovery_inputs
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.performance.garmin_weight import garmin_weight_metric
 from backend.performance.recovery_context import performance_recovery_context
-from backend.planning.context import compact_snapshot
 from backend.providers.garmin import collect_garmin_data
+from backend.sync.garmin_weight import garmin_weight_metric
+from backend.sync.intervals_compaction import compact_snapshot
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
 INTERVALS_ROOT = FIXTURE_ROOT / "intervals"

@@ -10,6 +10,7 @@ from backend.activities.matching import (
     match_planned_workouts,
     record_date,
 )
+from backend.canonical.sports import classify_sport_text
 
 
 class ActivityMatchingTests(unittest.TestCase):
@@ -55,14 +56,14 @@ class ActivityMatchingTests(unittest.TestCase):
         activities = [
             {
                 "id": "fallback",
-                "type": "Run",
-                "start_date_local": "2026-09-20T08:00:00",
+                "sport": "run",
+                "started_at_local": "2026-09-20T08:00:00",
             },
             {
                 "id": "paired",
-                "paired_event_id": "event-1",
-                "type": "Run",
-                "start_date_local": "2026-09-20T20:00:00",
+                "planned_event_id": "event-1",
+                "sport": "run",
+                "started_at_local": "2026-09-20T20:00:00",
             },
         ]
         result = match_planned_workouts(planned, activities)
@@ -85,9 +86,9 @@ class ActivityMatchingTests(unittest.TestCase):
         ]
         protected = {
             "id": "protected",
-            "paired_event_id": "event-2",
-            "type": "Ride",
-            "start_date_local": "2026-09-20T08:00:00",
+            "planned_event_id": "event-2",
+            "sport": "ride",
+            "started_at_local": "2026-09-20T08:00:00",
         }
         self.assertEqual(match_planned_workouts(planned, [protected]), {1: protected})
 
@@ -103,10 +104,10 @@ class ActivityMatchingTests(unittest.TestCase):
         }
         remote_paired = {
             "id": "ride",
-            "paired_event_id": "remote-event",
-            "type": "VirtualRide",
-            "start_date_local": "2026-09-20T09:00:00",
-            "moving_time": 2760,
+            "planned_event_id": "remote-event",
+            "sport": "ride",
+            "started_at_local": "2026-09-20T09:00:00",
+            "moving_duration_s": 2760,
         }
         self.assertEqual(
             match_planned_workouts([unit], [remote_paired]), {0: remote_paired}
@@ -119,18 +120,18 @@ class ActivityMatchingTests(unittest.TestCase):
             "starts_at_local": "2026-09-20T10:00:00",
         }
         activities = [
-            {"id": "far", "type": "Run", "start_date_local": "2026-09-20T12:00:00"},
+            {"id": "far", "sport": "run", "started_at_local": "2026-09-20T12:00:00"},
             {
                 "id": "wrong-date",
-                "type": "Run",
-                "start_date_local": "2026-09-21T09:59:00",
+                "sport": "run",
+                "started_at_local": "2026-09-21T09:59:00",
             },
             {
                 "id": "wrong-sport",
-                "type": "Ride",
-                "start_date_local": "2026-09-20T10:01:00",
+                "sport": "ride",
+                "started_at_local": "2026-09-20T10:01:00",
             },
-            {"id": "near", "type": "Run", "start_date_local": "2026-09-20T10:01:00"},
+            {"id": "near", "sport": "run", "started_at_local": "2026-09-20T10:01:00"},
         ]
         self.assertEqual(
             _unpaired_activity_match(
@@ -142,8 +143,8 @@ class ActivityMatchingTests(unittest.TestCase):
     def test_unpaired_matching_has_deterministic_index_tie_break(self):
         event = {"type": "Run", "date": "2026-09-20"}
         activities = [
-            {"id": "first", "type": "Run", "start_date_local": "2026-09-20"},
-            {"id": "second", "type": "Run", "start_date_local": "2026-09-20"},
+            {"id": "first", "sport": "run", "started_at_local": "2026-09-20"},
+            {"id": "second", "sport": "run", "started_at_local": "2026-09-20"},
         ]
         self.assertEqual(
             _unpaired_activity_match(event, activities, {0, 1}, frozenset()), 0
@@ -160,8 +161,8 @@ class ActivityMatchingTests(unittest.TestCase):
                     }
                     activity = {
                         "id": "done",
-                        "type": sport,
-                        "start_date_local": "2026-09-20T10:30:00",
+                        "sport": classify_sport_text(sport.casefold()).value,
+                        "started_at_local": "2026-09-20T10:30:00",
                     }
                     self.assertEqual(
                         match_planned_workouts([event], [activity]), {0: activity}
@@ -177,8 +178,8 @@ class ActivityMatchingTests(unittest.TestCase):
                 }
                 activity = {
                     "id": "done",
-                    "type": "Workout",
-                    "start_date_local": "2026-09-20T10:30:00",
+                    "sport": "other",
+                    "started_at_local": "2026-09-20T10:30:00",
                 }
                 self.assertEqual(match_planned_workouts([event], [activity]), {})
 
@@ -197,8 +198,8 @@ class ActivityMatchingTests(unittest.TestCase):
                     }
                     activity = {
                         "id": "done",
-                        "type": actual,
-                        "start_date_local": "2026-09-20T10:30:00",
+                        "sport": classify_sport_text(actual.casefold()).value,
+                        "started_at_local": "2026-09-20T10:30:00",
                     }
                     self.assertEqual(match_planned_workouts([event], [activity]), {})
 
@@ -207,13 +208,13 @@ class ActivityMatchingTests(unittest.TestCase):
         activities = [
             {
                 "id": "later",
-                "paired_event_id": "event",
-                "start_date_local": "2026-09-20T10:00:00",
+                "planned_event_id": "event",
+                "started_at_local": "2026-09-20T10:00:00",
             },
             {
                 "id": "earlier",
-                "paired_event_id": "event",
-                "start_date_local": "2026-09-20T09:00:00",
+                "planned_event_id": "event",
+                "started_at_local": "2026-09-20T09:00:00",
             },
         ]
         self.assertEqual(
@@ -225,7 +226,10 @@ class ActivityMatchingTests(unittest.TestCase):
 
     def test_invalid_timestamps_are_safe_and_inputs_are_not_mutated(self):
         planned = [{"category": "WORKOUT", "type": "Run", "start": "invalid"}]
-        activities = [{"id": "bad", "type": "Run", "start": "invalid"}, "ignored"]
+        activities = [
+            {"id": "bad", "sport": "run", "started_at_local": "invalid"},
+            "ignored",
+        ]
         before = copy.deepcopy((planned, activities))
         self.assertEqual(record_date("not-a-date"), "not-a-date")
         self.assertEqual(

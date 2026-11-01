@@ -120,7 +120,9 @@ outgoing commits for secrets; never bypass either.
   the branch and existing diff before editing and preserve prior work; keep
   runtime files and worktrees out of commits.
   `python scripts/prepare_worktree.py` installs Node dependencies and Graphify;
-  the SessionStart hook keeps the graph current. Verify graph results in source.
+  the SessionStart hook keeps the graph current. For symbol, caller, or
+  dependency lookups, query Graphify (`python scripts/graphify_local.py query`)
+  before Grep. Verify graph results in source.
 - Skills live only in [`.agents/skills/`](.agents/skills/README.md); read the
   relevant one when a task needs it. Never install them globally. Coding uses the
   [Ponytail](.agents/skills/ai-coach-ponytail/SKILL.md) smallest-complete-change

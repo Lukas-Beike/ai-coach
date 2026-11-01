@@ -21,6 +21,7 @@ from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
 )
+from backend.activities.activity_summary import stored_activity_key
 from backend.db import canonical_store
 from backend.errors import AppError
 from backend.runtime.ports import ActivityRowReader
@@ -38,6 +39,7 @@ _STORED_FIELDS: Final = (
     "updated_at",
     "provider",
     "session_id",
+    "session_rpe_rated_at",
 )
 FEEDBACK_CONTENT_FIELDS: Final = ("notes", "session_rpe", "deviation_reason")
 _PUBLIC_FIELDS: Final = (
@@ -49,6 +51,7 @@ _PUBLIC_FIELDS: Final = (
     "deviation_reason",
     "created_at",
     "updated_at",
+    "session_rpe_rated_at",
 )
 
 ACTIVITY_FEEDBACK_TEXT_LIMITS = {
@@ -101,6 +104,13 @@ def _activity_id(activity: Any) -> Any:
     return None
 
 
+def _feedback_key(activity: Any) -> Any:
+    """The key an activity's feedback is stored under."""
+    if not isinstance(activity, dict):
+        return None
+    return stored_activity_key(activity) or _activity_id(activity)
+
+
 def _group_key(row: dict[str, Any], effective: dict[str, str]) -> tuple[str, str]:
     session = row.get("session_id")
     if session:
@@ -121,9 +131,16 @@ def _audit_value(group: builtins.list[dict[str, Any]] | None) -> dict[str, Any] 
     if not group:
         return None
     rows = sorted(group, key=lambda row: str(row["activity_id"]))
-    return {
-        "rows": [{field: row.get(field) for field in _STORED_FIELDS} for row in rows]
-    }
+    return {"rows": [_audit_row(row) for row in rows]}
+
+
+def _audit_row(row: dict[str, Any]) -> dict[str, Any]:
+    """One stored row; an unknown rating time is left out, as rows recorded
+    before schema version 18 have no such field and keep their audit hash."""
+    recorded = {field: row.get(field) for field in _STORED_FIELDS}
+    if recorded["session_rpe_rated_at"] is None:
+        del recorded["session_rpe_rated_at"]
+    return recorded
 
 
 def _ordered(group: Iterable[dict[str, Any]]) -> builtins.list[dict[str, Any]]:
@@ -220,13 +237,14 @@ class ActivityFeedbackService:
         return views[:bounded_limit]
 
     def for_activity_ids(
-        self, activity_ids: builtins.list[str]
+        self, activity_ids: builtins.list[str], *, sessions_only: bool = False
     ) -> builtins.list[dict[str, Any]]:
         """The effective feedback of each id's session, keyed by the requested id.
 
         An id reaches a group through its own feedback row or through the session
         of its only activity record, so every provider copy of one session shows
-        the same feedback.
+        the same feedback. ``sessions_only`` leaves out feedback that stands
+        alone because its session is unknown or ambiguous.
         """
         requested = list(
             dict.fromkeys(
@@ -254,6 +272,15 @@ class ActivityFeedbackService:
             if key is None and activity_id in origins:
                 session = origins[activity_id]
                 key = ("session", effective.get(session, session))
+            # A row without a stored session still counts when its id now
+            # resolves to exactly one session.
+            if (
+                sessions_only
+                and key is not None
+                and key[0] != "session"
+                and activity_id not in origins
+            ):
+                continue
             if key is not None and key in groups:
                 found.append(
                     {**_effective_view(groups[key]), "activity_id": activity_id}
@@ -417,7 +444,7 @@ class ActivityFeedbackService:
         activity_items = activities if isinstance(activities, list) else []
         activity_ids: builtins.list[str] = []
         for activity in activity_items:
-            activity_id = _activity_id(activity)
+            activity_id = _feedback_key(activity)
             if activity_id not in (None, ""):
                 activity_ids.append(str(activity_id))
         feedback_by_activity = {
@@ -428,7 +455,7 @@ class ActivityFeedbackService:
             if not isinstance(activity, dict):
                 continue
             activity_copy = dict(activity)
-            activity_id = _activity_id(activity)
+            activity_id = _feedback_key(activity)
             if (
                 activity_id not in (None, "")
                 and str(activity_id) in feedback_by_activity

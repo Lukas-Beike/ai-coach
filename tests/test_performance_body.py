@@ -11,11 +11,8 @@ from performance_day_support import (
 
 from backend.performance.body import body_history as _body_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
-from backend.performance.garmin_weight import (
-    garmin_body_fat_daily_records,
-    garmin_body_fat_records,
-    garmin_weight_daily_records,
-)
+from backend.performance.freshness import GarminSyncStatus
+from backend.sync.garmin_weight import garmin_weight_daily_records
 
 TODAY = date(2026, 10, 6)
 
@@ -35,9 +32,13 @@ def body_history(snapshot, garmin, today, **kwargs):
             "cycling_ftp_watts", {}
         ),
     )
-    kwargs.setdefault("activity_rows", ())
+    kwargs.setdefault("activities", ())
     return _body_history(
-        snapshot, garmin, today, wellness_days=days_from_rows(rows), **kwargs
+        (snapshot or {}).get("synced_at"),
+        GarminSyncStatus.from_state(garmin),
+        today,
+        wellness_days=days_from_rows(rows),
+        **kwargs,
     )
 
 
@@ -194,32 +195,6 @@ class BodyHistoryTests(unittest.TestCase):
             )
         )
 
-    def test_garmin_body_fat_uses_dated_weigh_ins(self):
-        self.assertEqual(
-            garmin_body_fat_records(
-                {"weigh_ins": [{"date": "2026-10-01", "bodyFatPercent": 18.5}]}
-            ),
-            [("2026-10-01", 18.5)],
-        )
-
-    def test_garmin_body_fat_unit_and_weigh_in_unit_do_not_conflict(self):
-        rows = [
-            {
-                "date": "2026-10-01",
-                "unitKey": "kg",
-                "weight": 70,
-                "bodyFat": 18.5,
-            },
-            {
-                "date": "2026-10-02",
-                "bodyFat": {"value": 0.185, "unitKey": "FRACTION"},
-            },
-        ]
-        self.assertEqual(
-            garmin_body_fat_records({"weight": rows}),
-            [("2026-10-01", 18.5), ("2026-10-02", 18.5)],
-        )
-
     def test_garmin_daily_record_uses_latest_timestamp_and_converts_pounds(self):
         snapshot = {
             "weight": [
@@ -238,9 +213,6 @@ class BodyHistoryTests(unittest.TestCase):
             ]
         }
         self.assertEqual(garmin_weight_daily_records(snapshot), [("2026-10-01", 69.99)])
-        self.assertEqual(
-            garmin_body_fat_daily_records(snapshot), [("2026-10-01", 18.0)]
-        )
 
     def test_weekly_quotient_median_counts_dates_and_chart_history_integration(self):
         from backend.performance.chart_history import analysis_history
@@ -258,7 +230,9 @@ class BodyHistoryTests(unittest.TestCase):
             eftp_by_day={date(2026, 10, 5): 280.0, date(2026, 10, 6): 300.0},
             history_wellness_days=days_from_rows(snapshot["recent_wellness"]),
         )
-        result = analysis_history(snapshot, {}, TODAY, canonical=canonical)
+        result = analysis_history(
+            GarminSyncStatus.from_state({}), TODAY, canonical=canonical
+        )
         self.assertIn("body", result)
         series = _series(result["body"], "12w", "cycling_w_per_kg", "Intervals.icu")
         self.assertEqual(len(series["weekly"]), 12)

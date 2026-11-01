@@ -38,18 +38,18 @@ def _inputs(ctl=50, atl=60, completed=()):
 def _season(rows, events, today, observations=None, snapshot=None):
     """Run season_preparation over fixed activity rows."""
     return season_preparation(
-        SNAPSHOT if snapshot is None else snapshot,
+        (SNAPSHOT if snapshot is None else snapshot).get("synced_at"),
         events,
         today,
         "UTC",
         observations,
-        activity_rows=lambda start, end: rows,
+        activity_summaries=lambda start, end: rows,
     )
 
 
 def _scenarios(plan, values, inputs=None, snapshot=None):
     return load_scenarios(
-        SNAPSHOT if snapshot is None else snapshot,
+        (SNAPSHOT if snapshot is None else snapshot).get("synced_at"),
         plan,
         TODAY,
         values,
@@ -74,9 +74,9 @@ class SeasonPreparationTests(unittest.TestCase):
         rows = [
             {
                 "id": "run",
-                "type": "Run",
-                "start_date_local": "2026-10-01T10:00:00",
-                "moving_time": 3600,
+                "sport": "run",
+                "started_at_local": "2026-10-01T10:00:00",
+                "moving_duration_s": 3600,
             }
         ]
         result = _season(rows, [event], self.today)["events"][0]
@@ -84,6 +84,56 @@ class SeasonPreparationTests(unittest.TestCase):
         self.assertEqual(
             "run", result["preparation"]["long_sessions"][0]["activity_id"]
         )
+
+    def test_competition_sport_matches_canonical_sport_and_indoor_environment(self):
+        ride = {"id": "a", "sport": "ride", "started_at_local": "2026-10-01T10:00:00"}
+        rows = [
+            {**ride, "moving_duration_s": 3600, "environment": "outdoor"},
+            {**ride, "id": "b", "moving_duration_s": 1800, "environment": "virtual"},
+            {**ride, "id": "c", "sport": "run", "moving_duration_s": 900},
+        ]
+        base = {
+            "id": "race",
+            "event_date": "2026-10-10",
+            "priority": "A",
+            "name": "Synthetic",
+        }
+        for event, expected in (
+            ({"sport": "Cycling"}, ("ride", ["a"])),
+            ({"sport": "VirtualRide"}, ("ride", ["b"])),
+            ({"sport": "ride", "environment": "indoor"}, ("ride", ["b"])),
+            ({"sport": "Running"}, ("run", ["c"])),
+        ):
+            with self.subTest(event=event):
+                result = _season(rows, [{**base, **event}], self.today)["events"][0]
+                preparation = result["preparation"]
+                self.assertEqual(expected[0], preparation["sport"])
+                self.assertEqual(
+                    expected[1],
+                    [item["activity_id"] for item in preparation["long_sessions"]],
+                )
+
+    def test_analyses_are_found_under_the_stored_activity_key(self):
+        event = {
+            "id": "race",
+            "event_date": "2026-10-10",
+            "sport": "Running",
+            "priority": "A",
+            "name": "Synthetic",
+        }
+        row = {
+            "id": "act_1",
+            "sport": "run",
+            "started_at_local": "2026-10-01T10:00:00",
+            "moving_duration_s": 3600,
+            "record_ids": {"intervals": "i-1"},
+        }
+        analyses = [{"activity_id": "i-1", "aerobic": {"status": "ok"}}]
+        result = _season([row], [event], self.today, analyses)["events"][0]
+        preparation = result["preparation"]
+        self.assertEqual("act_1", preparation["long_sessions"][0]["activity_id"])
+        self.assertEqual({"status": "ok"}, preparation["long_sessions"][0]["aerobic"])
+        self.assertEqual(1, preparation["source_counts"]["cached activity analyses"])
 
     def test_scenarios_are_deterministic_nonmutating_and_taper_changes_load(self):
         plan = {
@@ -123,7 +173,7 @@ class SeasonPreparationTests(unittest.TestCase):
             **SNAPSHOT,
             "recent_wellness": [{"id": "2026-10-01", "ctl": 1, "atl": 2}],
             "recent_activities": [
-                {"id": "x", "start_date_local": "2026-10-02T08:00:00"}
+                {"id": "x", "started_at_local": "2026-10-02T08:00:00"}
             ],
             "raw_provider_data": {"activities": [{"id": "y"}]},
         }
@@ -159,8 +209,8 @@ class SeasonPreparationTests(unittest.TestCase):
     def test_completed_today_load_is_fixed_and_not_double_counted_or_scaled(self):
         activity = {
             "id": "done",
-            "start_date_local": "2026-10-02T08:00:00",
-            "icu_training_load": 60,
+            "started_at_local": "2026-10-02T08:00:00",
+            "training_load": 60,
         }
         plan = {
             "training_calendar": [
@@ -179,7 +229,7 @@ class SeasonPreparationTests(unittest.TestCase):
         changed = _scenarios(
             plan,
             values,
-            _inputs(completed=[{**activity, "icu_training_load": 70}]),
+            _inputs(completed=[{**activity, "training_load": 70}]),
         )
         self.assertNotEqual(result["input_sha256"], changed["input_sha256"])
 
@@ -195,10 +245,10 @@ class SeasonPreparationTests(unittest.TestCase):
         }
         activity = {
             "id": "run",
-            "type": "Run",
-            "start_date_local": "2026-10-01T07:00:00",
-            "moving_time": 7200,
-            "distance": 18000,
+            "sport": "run",
+            "started_at_local": "2026-10-01T07:00:00",
+            "moving_duration_s": 7200,
+            "distance_m": 18000,
         }
         analyses = [
             {
@@ -273,27 +323,27 @@ class SeasonPreparationTests(unittest.TestCase):
         rows = [
             {
                 "id": "before",
-                "type": "Run",
-                "start_date_local": "2026-06-14T09:00:00",
-                "moving_time": 1800,
+                "sport": "run",
+                "started_at_local": "2026-06-14T09:00:00",
+                "moving_duration_s": 1800,
             },
             {
                 "id": "first-week",
-                "type": "Run",
-                "start_date_local": "2026-06-15T09:00:00",
-                "moving_time": 1800,
+                "sport": "run",
+                "started_at_local": "2026-06-15T09:00:00",
+                "moving_duration_s": 1800,
             },
             {
                 "id": "sunday",
-                "type": "Run",
-                "start_date_local": "2026-08-30T09:00:00",
-                "moving_time": 1800,
+                "sport": "run",
+                "started_at_local": "2026-08-30T09:00:00",
+                "moving_duration_s": 1800,
             },
             {
                 "id": "after",
-                "type": "Run",
-                "start_date_local": "2026-09-02T09:00:00",
-                "moving_time": 1800,
+                "sport": "run",
+                "started_at_local": "2026-09-02T09:00:00",
+                "moving_duration_s": 1800,
             },
         ]
         preparation = _season(rows, [event], self.today)["events"][0]["preparation"]
@@ -324,9 +374,9 @@ class SeasonPreparationTests(unittest.TestCase):
         rows = [
             {
                 "id": "run",
-                "type": "Run",
-                "start_date_local": "2026-10-01T09:00:00",
-                "moving_time": 1800,
+                "sport": "run",
+                "started_at_local": "2026-10-01T09:00:00",
+                "moving_duration_s": 1800,
             },
         ]
         preparation = _season(rows, [event], self.today)["events"][0]["preparation"]
@@ -348,9 +398,9 @@ class SeasonPreparationTests(unittest.TestCase):
         rows = [
             {
                 "id": "run",
-                "type": "Run",
-                "start_date_local": "2026-10-01T09:00:00",
-                "moving_time": 1800,
+                "sport": "run",
+                "started_at_local": "2026-10-01T09:00:00",
+                "moving_duration_s": 1800,
             },
         ]
         preparation = _season(rows, [event], self.today)["events"][0]["preparation"]

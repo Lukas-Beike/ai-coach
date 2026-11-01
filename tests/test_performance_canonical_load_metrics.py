@@ -31,8 +31,9 @@ from backend.performance.canonical_inputs import (
 )
 from backend.performance.chart_history import analysis_history
 from backend.performance.context import current_performance_context
-from backend.performance.garmin_metrics import garmin_payload_performance_metrics
+from backend.performance.freshness import GarminSyncStatus
 from backend.providers.snapshot_projection import project_intervals_snapshot
+from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 DAY = date(2026, 9, 20)
 RETRIEVED_AT = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
@@ -62,12 +63,6 @@ def _snapshot(
     }
 
 
-def _stripped(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """The same snapshot without wellness rows and sport settings (the carriers)."""
-    athlete = {k: v for k, v in snapshot["athlete"].items() if k != "sport_settings"}
-    return {**snapshot, "athlete": athlete, "recent_wellness": []}
-
-
 def _observations(snapshot: dict[str, Any]) -> tuple[Observation, ...]:
     _activities, mapped = project_intervals_snapshot(
         snapshot, zone=ZONE, retrieved_at=RETRIEVED_AT
@@ -93,8 +88,7 @@ def _context(
 ) -> dict[str, Any]:
     canonical = _inputs(snapshot, carrier)
     return current_performance_context(
-        _stripped(snapshot) if carrier is None else carrier,
-        {},
+        GarminSyncStatus.from_state({}),
         {},
         DAY,
         canonical=canonical,
@@ -365,19 +359,17 @@ class EftpTests(unittest.TestCase):
         self.assertEqual(len(inputs.current.bike_threshold_hr), 1)
 
     def test_without_canonical_inputs_no_eftp_remains(self) -> None:
-        snapshot = _snapshot(
-            [_row(_day(), sportInfo=[_ride(265)])],
-            settings=[_ride(262)],
-            activities=[self.ACTIVITY],
-        )
+        # Canonical reads (#1416): the context takes no snapshot at all.
         context = current_performance_context(
-            snapshot, {}, {}, DAY, canonical=EMPTY_PERFORMANCE_INPUTS
+            GarminSyncStatus.from_state({}), {}, DAY, canonical=EMPTY_PERFORMANCE_INPUTS
         )
         # Canonical reads (#1415): the snapshot's ride activity is no longer read
-        # either (was 270 for both values).
-        self.assertIsNone(context["metrics"]["cycling_eftp_watts"]["value"])
-        self.assertIsNone(context["comparisons"]["cycling_eftp_30d"])
-        self.assertIsNone(context["current_load"]["tsb"])
+        # either (was 270 for both values). Without canonical values the context
+        # is unavailable (#1416).
+        self.assertFalse(context["available"])
+        self.assertEqual(context["metrics"], {})
+        self.assertNotIn("comparisons", context)
+        self.assertNotIn("current_load", context)
 
     def test_chart_and_body_history_read_the_canonical_series(self) -> None:
         rows = [
@@ -386,7 +378,9 @@ class EftpTests(unittest.TestCase):
         ]
         snapshot = _snapshot(rows)
         history = analysis_history(
-            _stripped(snapshot), {}, DAY, canonical=_inputs(snapshot)
+            GarminSyncStatus.from_state({}),
+            DAY,
+            canonical=_inputs(snapshot),
         )
         points = history["metrics"]["cycling_eftp_watts"][0]["points"]
         self.assertEqual([point["value"] for point in points[-2:]], [250.0, 260.0])

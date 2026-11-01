@@ -10,17 +10,12 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance import recovery as performance_recovery
-from backend.performance import wellness as performance_wellness
 from backend.performance.source_policy import select_daily
-from backend.providers import garmin_performance_fields as garmin_perf_fields
-from backend.providers.garmin_fields import GARMIN_RESTING_HR_ALIASES
 from backend.runtime.ports import ObservationReader
 
 GARMIN_SOURCE = "Garmin Connect"
 INTERVALS_WELLNESS_SOURCE = "Intervals.icu Wellness"
 UTC_OFFSET_SUFFIX = "+00:00"
-_ROW_DATE_KEYS = garmin_perf_fields.PLANNING_ROW_DATE_KEYS
 _SOURCE_BY_PROVIDER: dict[ProviderId | None, str] = {
     ProviderId.GARMIN: GARMIN_SOURCE,
     ProviderId.INTERVALS: INTERVALS_WELLNESS_SOURCE,
@@ -37,16 +32,6 @@ _LOAD_FIELDS: tuple[tuple[str, MetricKind], ...] = (
     ("atl", MetricKind.ATL),
     ("tsb", MetricKind.FORM),
 )
-
-
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
 
 
 def _planning_context_date(value: Any) -> str:
@@ -69,147 +54,6 @@ def _add_planning_recovery_value(
         return
     recovery[metric_name] = value
     recovery.setdefault("sources", {})[metric_name] = source
-
-
-def _planning_sleep_hours(
-    record: dict[str, Any], seconds_fields: tuple[str, ...]
-) -> float | None:
-    sleep_hours = _as_number(record.get("sleep_hours"))
-    sleep_seconds = _first_present(record, seconds_fields)
-    if sleep_hours is not None or sleep_seconds in (None, ""):
-        return sleep_hours
-    try:
-        return round(float(sleep_seconds) / 3600, 1)
-    except TypeError, ValueError:
-        return None
-
-
-def _add_intervals_planning_recovery(
-    recovery_by_date: dict[str, dict[str, Any]], rows: Any
-) -> None:
-    if not isinstance(rows, list):
-        return
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        record_date = _planning_context_date(_first_present(row, _ROW_DATE_KEYS))
-        if not record_date:
-            continue
-        recovery = recovery_by_date.setdefault(record_date, {})
-        _add_planning_recovery_value(
-            recovery,
-            "sleep_hours",
-            _planning_sleep_hours(row, ("sleepSecs", "sleep_seconds")),
-            INTERVALS_WELLNESS_SOURCE,
-        )
-        _add_planning_recovery_value(
-            recovery,
-            "sleep_score",
-            _first_present(row, ("sleepScore", "overallSleepScore")),
-            INTERVALS_WELLNESS_SOURCE,
-        )
-        _add_planning_recovery_value(
-            recovery,
-            "hrv",
-            _first_present(row, ("hrv", "hrv_ms")),
-            INTERVALS_WELLNESS_SOURCE,
-        )
-        _add_planning_recovery_value(
-            recovery,
-            "readiness",
-            performance_wellness.readiness_score_value(
-                _first_present(
-                    row,
-                    (
-                        "readiness",
-                        "readinessScore",
-                        "readiness_score",
-                        "trainingReadiness",
-                        "training_readiness",
-                    ),
-                )
-            ),
-            INTERVALS_WELLNESS_SOURCE,
-        )
-        _add_planning_recovery_value(
-            recovery,
-            "resting_hr",
-            _first_present(row, ("restingHR", "resting_hr")),
-            INTERVALS_WELLNESS_SOURCE,
-        )
-        for metric_name, keys in (
-            ("ctl", ("ctl", "ctLoad")),
-            ("atl", ("atl", "atlLoad")),
-            ("tsb", ("tsb", "form")),
-        ):
-            _add_planning_recovery_value(
-                recovery,
-                metric_name,
-                _first_present(row, keys),
-                INTERVALS_WELLNESS_SOURCE,
-            )
-
-
-def _add_garmin_planning_recovery_record(
-    recovery: dict[str, Any], section: str, record: dict[str, Any]
-) -> None:
-    if section == "sleep":
-        _add_planning_recovery_value(
-            recovery,
-            "sleep_hours",
-            _planning_sleep_hours(record, garmin_perf_fields.SLEEP_DURATION_ALIASES),
-            GARMIN_SOURCE,
-            overwrite=True,
-        )
-        _add_planning_recovery_value(
-            recovery,
-            "sleep_score",
-            _first_present(record, ("sleepScore", "overallSleepScore")),
-            GARMIN_SOURCE,
-            overwrite=True,
-        )
-    elif section == "hrv":
-        _add_planning_recovery_value(
-            recovery,
-            "hrv",
-            _first_present(record, garmin_perf_fields.HRV_WITH_WEEKLY_ALIASES),
-            GARMIN_SOURCE,
-            overwrite=True,
-        )
-    elif section == "resting_hr":
-        _add_planning_recovery_value(
-            recovery,
-            "resting_hr",
-            _first_present(record, GARMIN_RESTING_HR_ALIASES),
-            GARMIN_SOURCE,
-            overwrite=True,
-        )
-    else:
-        _add_planning_recovery_value(
-            recovery,
-            "readiness",
-            performance_wellness.readiness_score_value(
-                _first_present(
-                    record,
-                    garmin_perf_fields.PLANNING_READINESS_ALIASES,
-                )
-            ),
-            GARMIN_SOURCE,
-        )
-
-
-def _add_garmin_planning_recovery(
-    recovery_by_date: dict[str, dict[str, Any]], garmin: Any
-) -> None:
-    if not isinstance(garmin, dict):
-        return
-    for section in ("sleep", "hrv", "resting_hr", "readiness"):
-        for record_date, record in performance_recovery.dated_garmin_recovery_records(
-            garmin.get(section)
-        ):
-            _add_garmin_planning_recovery_record(
-                recovery_by_date.setdefault(record_date, {}), section, record
-            )
 
 
 def _add_morning_battery_recovery(
@@ -241,27 +85,6 @@ def _add_morning_battery_recovery(
                 GARMIN_SOURCE,
                 overwrite=True,
             )
-
-
-def planning_recovery_by_date(
-    wellness_rows: Any,
-    garmin: Any,
-    morning_battery_history: Any,
-    morning_body_battery: Any,
-) -> dict[str, dict[str, Any]]:
-    """Build a date-indexed recovery view from stored provider snapshots.
-
-    This is the reference reader of the stored-snapshot shape. The planning context
-    reads ``planning_recovery_view`` instead, and the source-policy tests compare
-    the two on the same data.
-    """
-    recovery_by_date: dict[str, dict[str, Any]] = {}
-    _add_intervals_planning_recovery(recovery_by_date, wellness_rows)
-    _add_garmin_planning_recovery(recovery_by_date, garmin)
-    _add_morning_battery_recovery(
-        recovery_by_date, morning_battery_history, morning_body_battery
-    )
-    return recovery_by_date
 
 
 def _canonical_value(kind: MetricKind, observation: Observation) -> float | int:

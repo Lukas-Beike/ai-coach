@@ -2,7 +2,6 @@ import unittest
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from backend.activities.detail_projection import detailed_activity
 from backend.canonical.activity_detail import (
     MAX_LAPS,
     ActivityLapSet,
@@ -28,6 +27,7 @@ from backend.providers.intervals_activity_detail_mapping import (
     map_legacy_activity_detail,
     zone_times,
 )
+from backend.providers.intervals_activity_detail_projection import detailed_activity
 from backend.providers.intervals_activity_fields import activity_detail_laps
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 from backend.sync.activity_details import normalize_streams

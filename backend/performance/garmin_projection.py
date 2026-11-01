@@ -1,4 +1,4 @@
-"""Compact projections for Garmin context and recovery payloads."""
+"""Canonical Garmin training-load projection."""
 
 from collections.abc import Mapping
 from datetime import date
@@ -8,91 +8,8 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import freshness as performance_freshness
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
-from backend.providers import garmin_performance_fields as garmin_perf_fields
-from backend.providers.garmin_fields import (
-    GARMIN_FTP_ALIASES,
-    GARMIN_HRV_LAST_NIGHT_ALIASES,
-    GARMIN_SLEEP_DURATION_ALIASES,
-    GARMIN_SLEEP_SCORE_ALIASES,
-)
-from backend.providers.garmin_fields import (
-    first_present as _first_present,
-)
 
 GARMIN_SOURCE = "Garmin Connect"
-GARMIN_CONTEXT_FIELDS = {
-    "date",
-    garmin_perf_fields.CALENDAR_DATE,
-    "start",
-    "end",
-    *GARMIN_SLEEP_DURATION_ALIASES,
-    *GARMIN_SLEEP_SCORE_ALIASES,
-    "deepSleepSeconds",
-    "lightSleepSeconds",
-    "remSleepSeconds",
-    "awakeSleepSeconds",
-    "value",
-    "score",
-    "status",
-    "hrvStatus",
-    garmin_perf_fields.WEEKLY_HRV_AVERAGE,
-    garmin_perf_fields.WEEKLY_AVERAGE,
-    *GARMIN_HRV_LAST_NIGHT_ALIASES,
-    "bodyBattery",
-    "body_battery",
-    "charged",
-    "drained",
-    "qualifier",
-    "racePredictionTime",
-    "distance",
-    "activityId",
-    "activityName",
-    "activityType",
-    garmin_perf_fields.ACTIVITY_START_LOCAL,
-    "duration",
-    "averageHR",
-    "maxHR",
-    "maxHeartRate",
-    "calories",
-    "trainingEffect",
-    "trainingEffectLabel",
-    "activityTrainingLoad",
-    garmin_perf_fields.VO2_MAX_VALUE,
-    "trainingReadiness",
-    "recoveryTime",
-    "weight",
-    garmin_perf_fields.WEIGHT_KG,
-    "weight_kg",
-    garmin_perf_fields.SUMMARY_DATE,
-    "latestWeight",
-    garmin_perf_fields.RESTING_HEART_RATE,
-    "restingHR",
-    *GARMIN_FTP_ALIASES,
-    "power",
-    "speed",
-    "heartRate",
-    "hearRate",
-    "heartRateCycling",
-    "heartRateRunning",
-}
-
-
-def compact_garmin_context(value: Any, depth: int = 0) -> Any:
-    """Keep measured Garmin metrics while dropping free-form/vendor payloads."""
-    if depth > 3:
-        return None
-    if isinstance(value, dict):
-        return {
-            str(key): compact_garmin_context(item, depth + 1)
-            for key, item in value.items()
-            if str(key) in GARMIN_CONTEXT_FIELDS
-            and compact_garmin_context(item, depth + 1) is not None
-        }
-    if isinstance(value, list):
-        return [compact_garmin_context(item, depth + 1) for item in value[:100]]
-    if isinstance(value, (int, float, bool)) or value is None:
-        return value
-    return str(value)[:200]
 
 
 _BALANCE_FIELDS: Final = {
@@ -158,16 +75,16 @@ def _canonical_load_projection(
 
 
 def garmin_training_load_projection(
-    snapshot: dict[str, Any],
+    status: performance_freshness.GarminSyncStatus,
     current_date: date,
     canonical: GarminCanonicalMetrics,
 ) -> dict[str, Any]:
     """Project the canonical Garmin training load and load balance.
 
     The values come from the canonical training-load and load-balance
-    observations; freshness is sync status and stays on the snapshot.
+    observations; ``status`` supplies only the freshness.
     """
-    freshness = performance_freshness.garmin_source_freshness(snapshot, current_date)
+    freshness = performance_freshness.garmin_source_freshness(status, current_date)
     return _canonical_load_projection(freshness, current_date, canonical.training_load)
 
 
@@ -189,80 +106,3 @@ def _date(value: Any) -> str | None:
         return date.fromisoformat(candidate).isoformat()
     except ValueError:
         return None
-
-
-GARMIN_RECOVERY_FIELDS = (
-    "date",
-    garmin_perf_fields.CALENDAR_DATE,
-    garmin_perf_fields.SUMMARY_DATE,
-    *GARMIN_SLEEP_DURATION_ALIASES,
-    *GARMIN_SLEEP_SCORE_ALIASES,
-    "hrvStatus",
-    garmin_perf_fields.WEEKLY_HRV_AVERAGE,
-    garmin_perf_fields.WEEKLY_AVERAGE,
-    *GARMIN_HRV_LAST_NIGHT_ALIASES,
-    "bodyBattery",
-    "body_battery",
-    "charged",
-    "drained",
-    "score",
-    "status",
-    "level",
-    "qualifier",
-    "trainingReadiness",
-    garmin_perf_fields.READINESS_SCORE,
-    "trainingReadinessLevel",
-    "overallReadinessScore",
-    "overallReadinessLevel",
-    "readinessScore",
-    "recoveryTime",
-)
-
-
-def _selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:
-    if not isinstance(item, dict):
-        return {}
-    return {key: item[key] for key in fields if key in item and item[key] is not None}
-
-
-def latest_garmin_record(value: Any) -> dict[str, Any]:
-    """Return one dated Garmin record without exposing the complete range payload."""
-    if not isinstance(value, (dict, list)):
-        return {}
-    records: list[dict[str, Any]] = []
-    pending: list[Any] = [value]
-    visited = 0
-    while pending and visited < 2000:
-        current = pending.pop()
-        visited += 1
-        if isinstance(current, dict):
-            if _first_present(current, garmin_perf_fields.RECORD_IDENTITY_KEYS):
-                records.append(current)
-            pending.extend(
-                item for item in current.values() if isinstance(item, (dict, list))
-            )
-        elif isinstance(current, list):
-            pending.extend(
-                item for item in current[:500] if isinstance(item, (dict, list))
-            )
-    if records:
-        return max(
-            records,
-            key=lambda item: (
-                1
-                if _first_present(item, garmin_perf_fields.RECORD_TIMESTAMP_KEYS)
-                else 0,
-                str(
-                    _first_present(item, garmin_perf_fields.RECORD_IDENTITY_KEYS) or ""
-                ),
-            ),
-            default={},
-        )
-    return value if isinstance(value, dict) else {}
-
-
-def compact_garmin_recovery(value: Any) -> dict[str, Any]:
-    if isinstance(value, (int, float, bool)):
-        return {"value": value}
-    record = latest_garmin_record(value)
-    return _selected(record, GARMIN_RECOVERY_FIELDS)

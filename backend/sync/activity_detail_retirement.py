@@ -18,7 +18,6 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Final
 
-from backend.activities.detail_projection import _downsample_series
 from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.activity_detail import (
     LAP_METRIC_FIELDS,
@@ -46,6 +45,7 @@ from backend.providers.intervals_activity_detail_mapping import (
     STREAM_KEY_CHANNELS,
     map_legacy_activity_detail,
 )
+from backend.providers.intervals_activity_detail_projection import _downsample_series
 from backend.sync.activity_detail_canonical import recording_origin
 from backend.sync.canonical_backfill import BackfillStatus, BatchReport
 

@@ -1,8 +1,8 @@
 """Counts-only summary of the canonical read switch for diagnostics.
 
-The summary names the serving source, the reason word (``backfill_complete`` while
-the tables serve, ``backfill_pending`` while legacy serves before the first
-completed backfill) and whether the tables are projected with the current mappers
+The summary names the serving source (``tables``, or ``pending`` while nothing is
+served before the first completed backfill), the reason word (``backfill_complete``
+or ``backfill_pending``) and whether the tables are projected with the current mappers
 and time zone. It never carries ids, dates, names, values, digests or exception
 text.
 """

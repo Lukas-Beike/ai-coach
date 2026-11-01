@@ -76,10 +76,10 @@ def load_fixture_rows() -> list[dict[str, Any]]:
 
 
 class ModuleContractTests(unittest.TestCase):
-    def test_mapper_version_is_five(self) -> None:
+    def test_mapper_version_is_six(self) -> None:
         # Version 2 keeps elapsed_time as elapsed_duration_s; version 3 max_hr;
         # version 4 manual source origin; version 5 extremes and device type.
-        self.assertEqual(5, MAPPER_VERSION)
+        self.assertEqual(6, MAPPER_VERSION)
 
     def test_retrieved_at_must_be_timezone_aware(self) -> None:
         with self.assertRaises(ValueError):
@@ -899,3 +899,67 @@ class MalformedInputTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SummaryValueTests(unittest.TestCase):
+    def test_summary_values_are_mapped_in_the_legacy_alias_order(self) -> None:
+        mapped = map_one(
+            moving_time=3500,
+            total_elevation_gain=420,
+            weighted_average_watts=230,
+            icu_weighted_avg_watts=235,
+            average_cadence=88,
+            icu_intensity=81.5,
+            rpe=5,
+            icu_rpe=6,
+            feel=2,
+            average_speed=8.1,
+            icu_weighted_avg_speed=8.3,
+            icu_pace=8.2,
+            icu_ftp=280,
+            eFTP=275,
+            vO2MaxValue=55,
+            average_temp=18.5,
+            paired_event_id=91,
+        )
+
+        self.assertEqual(3500.0, mapped.moving_duration_s)
+        self.assertEqual(420.0, mapped.elevation_gain_m)
+        self.assertEqual(235.0, mapped.normalized_power)
+        self.assertEqual(88.0, mapped.avg_cadence)
+        self.assertEqual(81.5, mapped.intensity)
+        self.assertEqual(6.0, mapped.rpe)
+        self.assertEqual(2.0, mapped.feel)
+        self.assertEqual(8.1, mapped.avg_speed_mps)
+        self.assertEqual(8.3, mapped.weighted_avg_speed_mps)
+        self.assertEqual(8.2, mapped.pace_mps)
+        self.assertEqual(280.0, mapped.ftp_w)
+        self.assertEqual(275.0, mapped.eftp_w)
+        self.assertEqual(55.0, mapped.vo2max)
+        self.assertEqual(18.5, mapped.avg_temp_c)
+        self.assertEqual("91", mapped.planned_event_id)
+
+    def test_zone_times_keep_z_zones_and_heart_rate_positions(self) -> None:
+        mapped = map_one(
+            icu_zone_times=[
+                {"id": "Z1", "secs": 600},
+                {"id": "SS", "secs": 300},
+                {"id": "Z2", "secs": -5},
+                "bad",
+            ],
+            icu_hr_zone_times=[600, None, 900],
+            pace_zone_times=[100, 200],
+        )
+
+        self.assertEqual((("Z1", 600.0),), mapped.power_zone_times_s)
+        self.assertEqual((("Z1", 600.0), ("Z3", 900.0)), mapped.hr_zone_times_s)
+        self.assertIsNone(mapped.pace_zone_times_s)
+
+    def test_out_of_range_summary_value_is_an_issue_not_a_dropped_record(
+        self,
+    ) -> None:
+        result = map_rows([row(icu_rpe=11)])
+
+        self.assertEqual(1, len(result.records))
+        self.assertIsNone(result.records[0].rpe)
+        self.assertIn("icu_rpe", [issue.field for issue in result.issues])

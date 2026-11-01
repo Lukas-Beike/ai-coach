@@ -14,6 +14,7 @@ from backend.activities.zone_settings import effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.zones import EDITABLE_SPORTS, public_configuration
 from backend.calendar import local as calendar_local
+from backend.canonical.activity_summary import ActivitySummary
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.vocabulary import ProviderId, ZoneConfigurationMetric
 from backend.coach.context_selection import (
@@ -32,26 +33,20 @@ from backend.performance.canonical_inputs import (
     EMPTY_PERFORMANCE_INPUTS,
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
-    snapshot_with_inputs,
+    inputs_for_snapshot,
 )
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import context as planning_context
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.library_service import WorkoutLibraryService
-from backend.providers.intervals_performance_fields import (
-    INTENSITY,
-    PACE,
-    RPE,
-    TRAINING_LOAD,
-    WEIGHTED_AVG_SPEED,
-    WEIGHTED_AVG_WATTS,
-)
+from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 from backend.providers.source_labels import SourceView, provider_label
-from backend.sync.state import SyncStateRepository
 
+# INTENSITY and TRAINING_LOAD name the stored keys of planned units and library
+# entries; activities use summary keys.
 COACH_RECENT_ACTIVITIES_PER_SPORT = 5
 COACH_PLANNED_EVENT_LIMIT = 50
 COACH_LOCAL_PLANNED_LIMIT = 50
@@ -74,7 +69,7 @@ COACH_CONTEXT_SECTION_LIMITS = {
 LOGGER = logging.getLogger("intervals_coach")
 
 # Compact recent activities with the sync time of the activities.
-type RecentActivities = tuple[list[dict[str, Any]], str | None]
+type RecentActivities = tuple[list[ActivitySummary], str | None]
 
 
 def _source_label(provider: ProviderId) -> str:
@@ -99,25 +94,26 @@ PLANNED_WORKOUTS_SOURCE = {
 
 COACH_ACTIVITY_FIELDS = (
     "id",
-    "start_date_local",
+    "started_at_local",
     "name",
-    "type",
-    "moving_time",
-    "distance",
-    "total_elevation_gain",
-    TRAINING_LOAD,
-    INTENSITY,
-    "average_heartrate",
-    "max_heartrate",
-    "average_watts",
-    "weighted_average_watts",
-    WEIGHTED_AVG_WATTS,
+    "sport",
+    "environment",
+    "moving_duration_s",
+    "distance_m",
+    "elevation_gain_m",
+    "training_load",
+    "load_model",
+    "intensity",
+    "avg_hr",
+    "max_hr",
+    "avg_power",
     "normalized_power",
-    "average_speed",
-    WEIGHTED_AVG_SPEED,
-    PACE,
-    RPE,
+    "avg_speed_mps",
+    "weighted_avg_speed_mps",
+    "pace_mps",
+    "rpe",
     "feel",
+    "source",
 )
 COACH_LIBRARY_FIELDS = (
     "id",
@@ -201,10 +197,21 @@ def _truncate_values(
 def compact_coach_activity(
     activity: Any, *, select: Callable[[Any, tuple[str, ...]], dict[str, Any]]
 ) -> dict[str, Any]:
-    return _truncate_values(
+    compacted = _truncate_values(
         select(activity, COACH_ACTIVITY_FIELDS),
-        {"id": 200, "name": 200, "type": 80, "feel": 120},
+        {"id": 200, "name": 200, "sport": 80},
     )
+    # Values of a merged session may come from another provider than the primary.
+    sources = activity.get("sources") if isinstance(activity, Mapping) else None
+    if isinstance(sources, Mapping):
+        differing = {
+            key: label
+            for key, label in sources.items()
+            if key in compacted and label != compacted.get("source")
+        }
+        if differing:
+            compacted["sources"] = differing
+    return compacted
 
 
 def compact_coach_planned_event(
@@ -274,13 +281,15 @@ class CoachIntervalsContextService:
         self,
         planned_units: list[dict[str, Any]] | None,
         today: date,
-        activities: list[dict[str, Any]] | None = None,
+        activities: Sequence[Mapping[str, Any]] | None = None,
         *,
         synced_at: str | None = None,
     ) -> dict[str, Any]:
-        activities = [item for item in activities or [] if isinstance(item, dict)]
+        summaries: list[dict[str, Any]] = [
+            dict(item) for item in activities or [] if isinstance(item, Mapping)
+        ]
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for activity in activities:
+        for activity in summaries:
             grouped.setdefault(activity_validation.activity_sport(activity), []).append(
                 activity
             )
@@ -291,8 +300,8 @@ class CoachIntervalsContextService:
                 for activity in sorted(
                     rows,
                     key=lambda item: (
-                        str(item.get("start_date_local") or ""),
-                        str(item.get("id") or item.get("activityId") or ""),
+                        str(item.get("started_at_local") or ""),
+                        str(item.get("id") or ""),
                         str(item.get("name") or ""),
                     ),
                     reverse=True,
@@ -354,9 +363,8 @@ class CoachPlanningContextReader:
     def planned(self) -> list[dict[str, Any]]:
         return self._planned_unit_service.list(250, future_only=True)
 
-    def daily(self, snapshot: Any, planned: Any, weather: Any, checkins: Any) -> Any:
+    def daily(self, planned: Any, weather: Any, checkins: Any) -> Any:
         return self._daily_planning_context_service.build(
-            snapshot,
             planned,
             weather,
             checkins.get("recent", []),
@@ -471,7 +479,7 @@ class CoachPerformanceContextReader:
         garmin_projection_service: Any,
         today: Callable[[], date],
         canonical: CanonicalPerformanceSource | None = None,
-        activity_rows: ActivityRowSource | None = None,
+        activity_rows: ActivitySummarySource | None = None,
     ) -> None:
         self._profile_service = profile_service
         self._garmin_payload_service = garmin_payload_service
@@ -494,43 +502,48 @@ class CoachPerformanceContextReader:
             planned, self._today(), rows, synced_at=synced_at
         )
 
-    def read_snapshot(
-        self, read_snapshot: Callable[[], Any]
-    ) -> tuple[Any, CanonicalPerformanceInputs | None]:
-        """Read the snapshot and its canonical load inputs in one unit of work."""
-        return snapshot_with_inputs(self._canonical, read_snapshot, as_of=self._today())
+    def read_inputs(self) -> CanonicalPerformanceInputs | None:
+        """Read the canonical performance inputs in one read snapshot."""
+        if self._canonical is None:
+            return None
+        with self._canonical.database_manager().read_snapshot() as db:
+            return inputs_for_snapshot(self._canonical, db, as_of=self._today())
 
     def read_sources(
-        self, read_snapshot: Callable[[], Any]
-    ) -> tuple[Any, CanonicalPerformanceInputs | None, RecentActivities | None]:
-        """Read the snapshot, its load inputs and compact activities in one read snapshot.
+        self,
+    ) -> tuple[CanonicalPerformanceInputs | None, RecentActivities | None]:
+        """Read the canonical inputs and compact activities in one read snapshot.
 
         A sync that commits in between can then not pair newer activities with an
         older sync time. Without an activity source the rows stay None.
         The reads never wait for the writer.
         """
         if self._activity_rows is None:
-            return (*self.read_snapshot(read_snapshot), None)
+            return self.read_inputs(), None
         with self._activity_rows.database_manager().read_snapshot() as db:
-            snapshot, inputs = self.read_snapshot(read_snapshot)
-            return snapshot, inputs, self._activity_rows.read(db)
+            inputs = self.read_inputs()
+            return inputs, self._activity_rows.read(db)
 
     def current_performance(
-        self, snapshot: Any, canonical: CanonicalPerformanceInputs | None = None
+        self, canonical: CanonicalPerformanceInputs | None = None
     ) -> Any:
         return coach_performance_projection(
             performance_context.current_performance_context(
-                snapshot,
-                self._garmin_payload_service.recent_view(),
+                self._garmin_payload_service.sync_status(),
                 self._profile_service.get(),
                 self._today(),
                 canonical=canonical or EMPTY_PERFORMANCE_INPUTS,
             )
         )
 
-    def recovery(self, snapshot: Any) -> dict[str, Any]:
+    def recovery(
+        self, canonical: CanonicalPerformanceInputs | None = None
+    ) -> dict[str, Any]:
+        """The Garmin recovery section; without an Intervals.icu sync also Garmin's
+        performance values."""
         projection = self._garmin_projection_service.coach_context(
-            include_performance=not snapshot
+            include_performance=canonical is None
+            or canonical.intervals_synced_at is None
         )
         return {
             "source": _section_source(ProviderId.GARMIN, projection.get("synced_at")),
@@ -585,7 +598,6 @@ class CoachStructuredContextService:
 
     def __init__(
         self,
-        sync_state_repository: Any,
         checkin_service: Any,
         weather_service: Any,
         activity_feedback_service: Any,
@@ -598,7 +610,6 @@ class CoachStructuredContextService:
         self._nutrition_meal_library = nutrition_meal_library
         self._zone_configurations = zone_configurations
         self._today = today
-        self._sync_state_repository = sync_state_repository
         self._checkin_service = checkin_service
         self._weather_service = weather_service
         self._activity_feedback_service = activity_feedback_service
@@ -607,23 +618,14 @@ class CoachStructuredContextService:
 
     def build(
         self,
-        snapshot: dict[str, Any] | None = None,
         *,
         selection: CoachContextSelection | None = None,
     ) -> dict[str, Any]:
         """Assemble the bounded structured context using explicit read services.
 
-        Canonical load inputs and compact activities are only captured when this
-        call reads the snapshot itself, so all come from one transaction.
+        The canonical inputs and compact activities come from one transaction.
         """
-        performance_inputs: CanonicalPerformanceInputs | None = None
-        activity_rows: RecentActivities | None = None
-        if snapshot is None:
-            snapshot, performance_inputs, activity_rows = (
-                self._performance_reader.read_sources(
-                    self._sync_state_repository.latest_snapshot
-                )
-            )
+        performance_inputs, activity_rows = self._performance_reader.read_sources()
         included = selection.sections if selection else FULL_SECTIONS
         checkins = (
             self._checkin_service.context()
@@ -648,15 +650,12 @@ class CoachStructuredContextService:
             else {}
         )
         daily_context = (
-            self._planning_reader.daily(
-                snapshot, local_planned_workouts, weather, checkins
-            )
+            self._planning_reader.daily(local_planned_workouts, weather, checkins)
             if "daily_planning_context" in included
             else []
         )
         return self._selected_sections(
             included,
-            snapshot,
             checkins,
             local_planned_workouts,
             weather,
@@ -666,11 +665,9 @@ class CoachStructuredContextService:
         )
 
     def _current_performance(
-        self, snapshot: Any, performance_inputs: CanonicalPerformanceInputs | None
+        self, performance_inputs: CanonicalPerformanceInputs | None
     ) -> Any:
-        current = self._performance_reader.current_performance(
-            snapshot, performance_inputs
-        )
+        current = self._performance_reader.current_performance(performance_inputs)
         if self._zone_configurations is None or not isinstance(current, dict):
             return current
         zones = coach_training_zones(self._zone_configurations(), self._today())
@@ -679,7 +676,6 @@ class CoachStructuredContextService:
     def _selected_sections(
         self,
         included: frozenset[str],
-        snapshot: Any,
         checkins: Any,
         local_planned_workouts: Any,
         weather: Any,
@@ -719,12 +715,10 @@ class CoachStructuredContextService:
             )
             if "activities" in included
             else None,
-            "current_performance": self._current_performance(
-                snapshot, performance_inputs
-            )
+            "current_performance": self._current_performance(performance_inputs)
             if "current_performance" in included
             else None,
-            "recovery": self._performance_reader.recovery(snapshot)
+            "recovery": self._performance_reader.recovery(performance_inputs)
             if "recovery" in included
             else None,
             "weather": weather,
@@ -771,6 +765,19 @@ class CoachStructuredContextService:
                 break
             items.append(item)
         return {"truncated": truncated, "items": items}
+
+
+def _intervals_sync_compacted(context: Mapping[str, Any]) -> bool:
+    """Whether the context holds a canonical Intervals.icu sync: its activities or
+    its athlete settings carry a sync time."""
+    return any(
+        isinstance(section := context.get(key), Mapping)
+        and section.get(field) is not None
+        for key, field in (
+            ("activities", "synced_at"),
+            ("current_performance", "as_of"),
+        )
+    )
 
 
 def compact_coach_local_planned_workout(
@@ -999,7 +1006,6 @@ class CoachTrainingContextService:
 
     def __init__(
         self,
-        sync_state_repository: SyncStateRepository,
         structured_context_service: CoachStructuredContextService,
         workout_library_service: WorkoutLibraryService,
         *,
@@ -1011,7 +1017,6 @@ class CoachTrainingContextService:
         activity_limit_per_sport: int,
         planned_event_limit: int,
     ) -> None:
-        self._sync_state_repository = sync_state_repository
         self._structured_context_service = structured_context_service
         self._workout_library_service = workout_library_service
         self._local_planned_limit = local_planned_limit
@@ -1192,7 +1197,6 @@ class CoachContextPreviewService:
 
     def __init__(
         self,
-        sync_state_repository: SyncStateRepository,
         coach_message_service: CoachMessageService,
         coach_training_context_service: CoachTrainingContextService,
         coach_structured_context_service: CoachStructuredContextService,
@@ -1201,7 +1205,6 @@ class CoachContextPreviewService:
         *,
         utc_now: Callable[[], datetime],
     ) -> None:
-        self._sync_state_repository = sync_state_repository
         self._coach_message_service = coach_message_service
         self._coach_training_context_service = coach_training_context_service
         self._coach_structured_context_service = coach_structured_context_service
@@ -1211,7 +1214,6 @@ class CoachContextPreviewService:
 
     def preview(self) -> dict[str, Any]:
         """Return the exact user-inspectable preview without mutating state."""
-        snapshot = self._sync_state_repository.latest_snapshot()
         last_user_message = next(
             (
                 str(message.get("content") or "")
@@ -1256,7 +1258,7 @@ class CoachContextPreviewService:
         return {
             "generated_at": self._utc_now().isoformat(),
             "snapshot_truncated": False,
-            "snapshot_compacted": bool(snapshot),
+            "snapshot_compacted": _intervals_sync_compacted(preview_structured_context),
             "assembly": [
                 "COACH_PROMPT: feste Coaching-Regeln und Sicherheitsvorgaben",
                 "STRUCTURED ATHLETE CONTEXT: Profil, Zielwettkämpfe, Leistungsdaten und Garmin",

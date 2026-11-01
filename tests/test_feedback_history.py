@@ -62,6 +62,30 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
             {"change_id": change["id"], "expected_current_hash": change["after_hash"]}
         )
 
+    def test_changes_recorded_before_schema_v18_keep_their_undo(self) -> None:
+        # A v17 build recorded each row without the rating time; such a row
+        # (here: notes only, so no rating time) still matches its hash.
+        created = self.service.save(INTERVALS_ID, {"notes": "Before the upgrade"})
+        with self.manager.reader() as db:
+            session = self.sessions["intervals"]
+            entity = "session:" + canonical_store.effective_session_ids(
+                db, [session]
+            ).get(session, session)
+            recorded, _projection = self.service.current(db, entity)
+        assert recorded is not None
+        self.assertNotIn("session_rpe_rated_at", recorded["rows"][0])
+        rated = self.service.save(INTERVALS_ID, {"session_rpe": 6})
+        with self.manager.reader() as db:
+            recorded, _projection = self.service.current(db, entity)
+        assert recorded is not None
+        self.assertEqual(
+            recorded["rows"][0]["session_rpe_rated_at"], "2026-09-20T12:00:01+00:00"
+        )
+        self.undo(rated["change"])
+        self.assertIsNone(stored_rows(self)[0]["session_rpe_rated_at"])
+        self.undo(created["change"])
+        self.assertEqual(stored_rows(self), [])
+
     def test_undo_restores_the_previous_feedback(self) -> None:
         created = self.service.save(INTERVALS_ID, {"notes": "First", "session_rpe": 6})
         before = stored_rows(self)

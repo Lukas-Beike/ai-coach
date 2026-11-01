@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
+from backend.canonical.records import Observation
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
@@ -22,12 +24,17 @@ from backend.http_api.state_prelude import (
     PublicStateWeatherPrelude,
 )
 from backend.http_api.state_versions import StateVersionService
-from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.canonical_current import read_zone_thresholds
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceSource,
+    resolve_reader,
+)
 from backend.performance.season_inputs import SeasonSource
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.runtime.ports import (
+    ActivityRowAndSummaryReader,
     ActivityRowReader,
-    CanonicalTableServing,
+    CanonicalReadStatus,
     ObservationReader,
     ProviderCoverageReader,
 )
@@ -50,10 +57,10 @@ class PublicStateCoreInputs:
     observation_reader: Callable[[], ObservationReader] | None = None
     # When set, body history reads weight and body fat from canonical tables while
     # the tables serve reads.
-    canonical_serving: Callable[[], CanonicalTableServing] | None = None
+    canonical_serving: Callable[[], CanonicalReadStatus] | None = None
     # When set, season preparation, load scenarios, the performance readers and
     # the state and plan endpoints read activity rows from it.
-    activity_row_reader: Callable[[], ActivityRowReader] | None = None
+    activity_summary_reader: Callable[[], ActivityRowAndSummaryReader] | None = None
     # When set, the activities' sync time comes from the canonical provider coverage.
     coverage: Callable[[], ProviderCoverageReader] | None = None
 
@@ -140,7 +147,7 @@ class PublicStateAssembly:
         self._key_value_service = core.key_value_service
         self._observation_reader = core.observation_reader
         self._canonical_serving = core.canonical_serving
-        self._activity_row_reader = core.activity_row_reader
+        self._activity_summary_reader = core.activity_summary_reader
         self._coverage = core.coverage
         self._snapshot_repository = owners.snapshot_repository
         self._sync_persistence = owners.sync_persistence
@@ -182,16 +189,18 @@ class PublicStateAssembly:
         self._provider_credentials = provider_credentials
 
     def performance_state_service(self) -> PublicPerformanceStateService:
-        sync = self._sync_persistence()
         garmin = self._garmin()
         athlete = self._athlete_data()
         return PublicPerformanceStateService(
-            sync.state_repository(),
             garmin.payload_service(),
             athlete.profile(),
             garmin.projection_service(),
             self._local_date,
             self.canonical_performance_source(),
+            session_feedback=partial(
+                athlete.activity_feedback().for_activity_ids, sessions_only=True
+            ),
+            now=self._local_now(),
         )
 
     def canonical_performance_source(self) -> CanonicalPerformanceSource | None:
@@ -201,25 +210,39 @@ class PublicStateAssembly:
             self._database_manager,
             self._observation_reader,
             serving=self._canonical_serving,
-            activity_rows=self._activity_row_reader,
+            activity_summaries=self._activity_summary_reader,
             coverage=self._coverage,
         )
 
+    def _plan_zone_thresholds(self, db: Any) -> tuple[Observation, ...]:
+        """The plan-zone thresholds inside the plan's read; none without a reader."""
+        if self._observation_reader is None:
+            return ()
+        return read_zone_thresholds(resolve_reader(self._observation_reader(), db), db)
+
     def season_source(self) -> SeasonSource:
-        if self._observation_reader is None or self._activity_row_reader is None:
+        if self._observation_reader is None or self._activity_summary_reader is None:
             raise RuntimeError(
-                "The season views need an observation reader and an activity row reader."
+                "The season views need an observation reader and an activity summary reader."
             )
         return SeasonSource(
             self._database_manager,
             self._observation_reader,
-            self._activity_row_reader,
+            self._activity_summary_reader,
         )
 
-    def activity_row_source(self) -> ActivityRowSource | None:
-        if self._activity_row_reader is None:
+    def _activity_row_reader(self) -> ActivityRowReader:
+        """The canonical read selector, which serves summaries and raw rows alike."""
+        if self._activity_summary_reader is None:
+            raise RuntimeError("The plan state needs an activity summary reader.")
+        return self._activity_summary_reader()
+
+    def activity_summary_source(self) -> ActivitySummarySource | None:
+        if self._activity_summary_reader is None:
             return None
-        return ActivityRowSource(self._database_manager, self._activity_row_reader)
+        return ActivitySummarySource(
+            self._database_manager, self._activity_summary_reader
+        )
 
     def state_version_service(self) -> StateVersionService:
         return StateVersionService(
@@ -343,8 +366,10 @@ class PublicStateAssembly:
                 external_calendar_configured=bool(config.calendar_ical_url),
                 external_calendar_window_days=self._external_calendar_window_days(),
                 default_workout_name=self._planned_workout_label(),
-                activity_rows=self.activity_row_source(),
+                activity_rows=self.activity_summary_source(),
+                activity_row_reader=self._activity_row_reader,
                 zone_configurations=athlete.zones().configurations,
+                sport_thresholds=self._plan_zone_thresholds,
             )
         )
 
@@ -360,7 +385,7 @@ class PublicStateAssembly:
                 self._calendar_history_days(), self._calendar_future_days()
             ),
             self.performance_state_service().canonical_inputs,
-            self.activity_row_source(),
+            self.activity_summary_source(),
         )
 
     def weather_prelude_service(self) -> PublicStateWeatherPrelude:

@@ -45,9 +45,7 @@ class ServerAthleteTests(ServerTestCase):
             }
         )
         self.assertNotIn("availability_schedule", server.ATHLETE_DATA.profile().get())
-        context = server.COACH_CONTEXT.structured_context_service().build(
-            {"recent_activities": [], "recent_wellness": [], "upcoming_calendar": []}
-        )
+        context = server.COACH_CONTEXT.structured_context_service().build()
         self.assertNotIn("weekly_availability", context)
 
     def test_checkin_uses_local_date_and_rejects_future_dates(self):

@@ -54,15 +54,9 @@ class GarminCanonicalEncryptedEndToEndTests(garmin_reads.GarminReadFixture):
         legacy_context = self._projection_service().coach_context(
             include_performance=True
         )
-        legacy_matches = self._payload_service(canonical=False).prepare_fixture(
-            {"activities": self.garmin["activities"], "synced_at": "2026-10-11T07:00Z"}
-        )["activity_matches"]
 
         self._strip_canonical_sections()
         migrated = self._projection_service()
-        migrated_matches = self._payload_service(canonical=True).prepare_fixture(
-            {"activities": self.garmin["activities"], "synced_at": "2026-10-11T07:00Z"}
-        )["activity_matches"]
 
         state = migrated.public_state()
         self.assertEqual(
@@ -73,7 +67,6 @@ class GarminCanonicalEncryptedEndToEndTests(garmin_reads.GarminReadFixture):
             migrated.coach_context(include_performance=True)["performance"],
             legacy_context["performance"],
         )
-        self.assertEqual(migrated_matches, legacy_matches)
         self.assertTrue(all(state[key] for key in PUBLIC_KEYS))
 
     def test_sleep_day_comes_from_the_encrypted_tables(self) -> None:

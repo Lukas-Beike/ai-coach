@@ -6,9 +6,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.activities.activity_reference import ActivityReferenceResolver
+from backend.activities.activity_summary import ActivitySummary
 from backend.activities.detail_contract import measured_order
 from backend.activities.detail_store import ActivityDetailStore
-from backend.activities.read_service import ActivityReadService, _first_present
+from backend.activities.read_service import ActivityReadService
 from backend.athlete.profile import timezone_name
 from backend.canonical.records import ActivityRecord
 from backend.errors import AppError
@@ -22,17 +23,18 @@ from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
     read_performance_inputs,
+    with_read_status,
 )
 from backend.performance.context import current_performance_context
 from backend.performance.detail_envelope import DetailEnvelopeReader
-from backend.runtime.ports import ActivityRowReader, ProviderSnapshotReader
+from backend.performance.freshness import GarminSyncStatus
+from backend.runtime.ports import ActivityRowReader
 
 
 class ActivityAnalysisReadService(ActivityReadService):
     def __init__(
         self,
         database_manager: Any,
-        snapshot_reader: ProviderSnapshotReader,
         row_reader: ActivityRowReader,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
@@ -46,7 +48,6 @@ class ActivityAnalysisReadService(ActivityReadService):
     ) -> None:
         super().__init__(
             database_manager,
-            snapshot_reader,
             row_reader,
             feedback_service,
             detail_store,
@@ -61,38 +62,44 @@ class ActivityAnalysisReadService(ActivityReadService):
 
     def _performance_inputs(
         self, as_of: date, activity_id: str | None = None
-    ) -> tuple[dict[str, Any], CanonicalPerformanceInputs | None, Sequence[Any] | None]:
-        """Read the snapshot, CTL and ATL, and the activity's rows in one read snapshot.
+    ) -> tuple[
+        CanonicalPerformanceInputs | None,
+        Sequence[ActivitySummary] | None,
+    ]:
+        """Read the performance inputs and the activity summaries in one read snapshot.
 
         The performance inputs cover only the recent year, so an older activity
         is looked up in the full history of the same read snapshot.
         """
         source = self._canonical
         with source.database_manager().read_snapshot() as db:
-            snapshot = self._snapshot()
-            reader = source.activity_row_reader()
-            canonical = read_performance_inputs(
-                source.observation_reader(),
+            reader = source.activity_summary_reader()
+            canonical = with_read_status(
+                source,
                 db,
-                activity_reader=reader,
-                as_of=as_of,
+                read_performance_inputs(
+                    source.observation_reader(),
+                    db,
+                    activity_reader=reader,
+                    as_of=as_of,
+                ),
             )
-            rows = None if canonical is None else canonical.activity_rows
+            summaries = None if canonical is None else canonical.activities
             if reader is not None and (
-                rows is None
+                summaries is None
                 or (
                     activity_id is not None
-                    and _find_activity(rows, activity_id) is None
+                    and _find_summary(summaries, activity_id) is None
                 )
             ):
-                rows = tuple(reader.activity_rows(db))
-        return snapshot, canonical, rows
+                summaries = tuple(reader.activity_summaries(db))
+        return canonical, summaries
 
     def detail(
         self,
         activity_id: Any,
         *,
-        garmin_snapshot: dict[str, Any],
+        garmin_status: GarminSyncStatus,
         profile: dict[str, Any],
         today: date,
     ) -> dict[str, Any]:
@@ -107,21 +114,27 @@ class ActivityAnalysisReadService(ActivityReadService):
             raise RuntimeError("activity detail reads need the session records")
         inputs: dict[str, Any] = {}
 
-        def summary_row(_db: Any, provider_activity_id: str) -> dict | None:
-            # Recent canonical rows first, then the full local history.
-            snapshot, canonical, rows = self._performance_inputs(
-                today, provider_activity_id
-            )
-            inputs.update(snapshot=snapshot, canonical=canonical)
-            return _find_activity(rows, provider_activity_id)
+        def load_inputs(activity_id: str) -> Sequence[ActivitySummary] | None:
+            # Recent canonical summaries first, then the full local history.
+            canonical, summaries = self._performance_inputs(today, activity_id)
+            inputs.update(canonical=canonical)
+            return summaries
+
+        def summary_row(db: Any, provider_activity_id: str) -> dict | None:
+            # The stored Intervals.icu row the detail document fingerprints.
+            if self._summary_rows is None:
+                return None
+            return _find_row(self._summary_rows.activity_rows(db), provider_activity_id)
+
+        def requested_summary() -> ActivitySummary | None:
+            return _find_summary(load_inputs(normalized_id), normalized_id)
 
         def performance() -> Mapping[str, Any]:
             if not inputs:
-                snapshot, canonical, _rows = self._performance_inputs(today)
-                inputs.update(snapshot=snapshot, canonical=canonical)
+                canonical, _rows = self._performance_inputs(today)
+                inputs.update(canonical=canonical)
             return current_performance_context(
-                inputs["snapshot"],
-                garmin_snapshot,
+                garmin_status,
                 profile,
                 today,
                 canonical=inputs["canonical"] or EMPTY_PERFORMANCE_INPUTS,
@@ -139,6 +152,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 read_equipment=self._read_equipment,
                 references=self._references,
                 performance=performance,
+                summary=requested_summary,
             ),
             zone=ZoneInfo(timezone_name(profile.get("timezone"))),
         )
@@ -154,16 +168,30 @@ class ActivityAnalysisReadService(ActivityReadService):
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
 
 
-def _find_activity(raw_activities: Any, normalized_id: str) -> dict | None:
-    if not isinstance(raw_activities, list | tuple):
+def _find_row(raw_rows: Any, provider_activity_id: str) -> dict | None:
+    if not isinstance(raw_rows, list | tuple):
         return None
     return next(
         (
             item
-            for item in raw_activities
+            for item in raw_rows
             if isinstance(item, dict)
-            and str(_first_present(item, ("id", "activityId", "external_id")) or "")
-            == normalized_id
+            and str(item.get("id") or "") == provider_activity_id
+        ),
+        None,
+    )
+
+
+def _find_summary(
+    summaries: Sequence[ActivitySummary] | None, activity_id: str
+) -> ActivitySummary | None:
+    """Return the summary whose session id or any provider id is ``activity_id``."""
+    return next(
+        (
+            summary
+            for summary in summaries or ()
+            if summary.get("id") == activity_id
+            or activity_id in (summary.get("record_ids") or {}).values()
         ),
         None,
     )

@@ -27,7 +27,7 @@ class PublicStatePreludeTests(unittest.TestCase):
 
         self.manager.read_snapshot.side_effect = read_snapshot
         self.state = Mock()
-        self.state.latest_snapshot.return_value = {"recent_activities": []}
+        self.state.sync_metadata.return_value = {"provider_sync": {}}
         self.feedback = Mock()
         self.feedback.attach_to_activities.return_value = []
         self.planned = Mock()
@@ -68,8 +68,7 @@ class PublicStatePreludeTests(unittest.TestCase):
         self.followup.check.assert_not_called()
 
     def test_provider_refresh_and_adaptive_followup_happen_after_local_lock(self):
-        self.state.latest_snapshot.return_value = {
-            "recent_activities": [],
+        self.state.sync_metadata.return_value = {
             "provider_sync": {
                 "calendar_window": {"start": "2020-01-01", "end": "2020-02-01"}
             },

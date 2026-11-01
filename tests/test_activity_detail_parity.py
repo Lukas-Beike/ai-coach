@@ -18,17 +18,18 @@ from canonical_detail_support import (
     seed_intervals_activity,
 )
 
-from backend.activities.detail_projection import detailed_activity
 from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin, SourceKind
 from backend.db.activity_detail_store import replace_detail_set
 from backend.http_api.activity_assembly import ActivityReadAssembly, ActivityReadSources
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.providers.fit_activity_detail_mapping import map_fit_activity_detail
 from backend.providers.garmin_activity_detail_mapping import (
     map_garmin_activity_detail,
 )
 from backend.providers.intervals_activity_detail_mapping import STREAM_KEY_CHANNELS
+from backend.providers.intervals_activity_detail_projection import detailed_activity
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from tests import test_fit_file as fit_builder
 
@@ -76,6 +77,9 @@ class _Snapshots:
 
 class _Feedback:
     def list(self, _limit=100):
+        return []
+
+    def for_activity_ids(self, _activity_ids, **_options):
         return []
 
 
@@ -135,7 +139,6 @@ class ActivityDetailParityTests(unittest.TestCase):
         self.assembly = ActivityReadAssembly(
             lambda: self.manager,
             ActivityReadSources(
-                snapshots,
                 lambda: SnapshotActivityRows(snapshots),
                 observation_reader=NoObservations,
                 coverage=lambda: StoredCoverage(None),
@@ -149,7 +152,7 @@ class ActivityDetailParityTests(unittest.TestCase):
 
     def detail(self, activity_id):
         return self.assembly.activity_read().detail(
-            activity_id, garmin_snapshot={}, profile={}, today=TODAY
+            activity_id, garmin_status=NO_GARMIN_SYNC_STATUS, profile={}, today=TODAY
         )
 
     def store_intervals(self, summary_sha256):

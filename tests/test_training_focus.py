@@ -1,6 +1,9 @@
 import unittest
 from datetime import date
 
+from performance_day_support import garmin_activity_summaries, garmin_sync_status
+
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.training_focus import training_focus
 
 
@@ -35,7 +38,9 @@ class TrainingFocusTests(unittest.TestCase):
             {**rows[0], "activityId": 6, "startTimeLocal": "2026-10-03T08:00:00"}
         )
         result = training_focus(
-            {"activities": rows}, date(2026, 10, 2), activity_rows=()
+            garmin_sync_status({"activities": rows}),
+            date(2026, 10, 2),
+            activities=garmin_activity_summaries({"activities": rows}),
         )
         self.assertEqual(3, result["classified_sessions"])
         self.assertEqual(2, result["unclassified_sessions"])
@@ -55,23 +60,36 @@ class TrainingFocusTests(unittest.TestCase):
         rows = [
             {
                 "id": "ride",
-                "type": "Ride",
-                "start_date_local": "2026-10-02T08:00:00",
-                "moving_time": 3600,
-                "icu_hr_zone_times": [600, 1800, 1200, -1],
-                "icu_zone_times": [
+                "sport": "ride",
+                "started_at_local": "2026-10-02T08:00:00",
+                "moving_duration_s": 3600,
+                "sources": {
+                    "heart_rate_zone_times": "Intervals.icu",
+                    "power_zone_times": "Intervals.icu",
+                },
+                "heart_rate_zone_times": [
+                    {"id": "Z1", "secs": 600},
+                    {"id": "Z2", "secs": 1800},
+                    {"id": "Z3", "secs": 1200},
+                    {"id": "Z4", "secs": -1},
+                ],
+                "power_zone_times": [
                     {"id": "Z1", "secs": 1000},
                     {"id": "Z2", "secs": 2600},
                 ],
             }
         ]
-        rows.append({**rows[0], "id": "old", "start_date_local": "2026-01-01T08:00:00"})
-        result = training_focus({}, date(2026, 10, 2), activity_rows=rows)
+        rows.append({**rows[0], "id": "old", "started_at_local": "2026-01-01T08:00:00"})
+        result = training_focus(
+            garmin_sync_status({}), date(2026, 10, 2), activities=rows
+        )
         zones = {row["sensor"]: row for row in result["zones"]}
         self.assertEqual(
             {"Z1": 600, "Z2": 1800, "Z3": 1200}, zones["heart_rate"]["seconds"]
         )
         self.assertEqual({"Z1": 1000, "Z2": 2600}, zones["power"]["seconds"])
+        self.assertEqual("ride", zones["power"]["sport"])
+        self.assertEqual("Intervals.icu", zones["power"]["source"])
         self.assertEqual(0, result["classified_sessions"])
 
     def test_focus_uses_exactly_four_weeks_including_today(self):
@@ -87,7 +105,9 @@ class TrainingFocusTests(unittest.TestCase):
             )
         ]
         result = training_focus(
-            {"activities": rows}, date(2026, 10, 2), activity_rows=()
+            garmin_sync_status({"activities": rows}),
+            date(2026, 10, 2),
+            activities=garmin_activity_summaries({"activities": rows}),
         )
         self.assertEqual(result["start"], "2026-09-05")
         self.assertEqual(result["end"], "2026-10-02")
@@ -105,27 +125,49 @@ class TrainingFocusTests(unittest.TestCase):
             {"activityId": "unmatched", "startTimeLocal": "2026-10-02T09:00:00"},
         ]
         result = training_focus(
-            {
-                "activities": base,
-                "training_load_activities": [
-                    {
-                        "activityId": "matched",
-                        "trainingEffectLabel": "VO2_MAX",
-                        "activityTrainingLoad": 80,
+            garmin_sync_status(
+                {
+                    "activities": base,
+                    "training_load_activities": [
+                        {
+                            "activityId": "matched",
+                            "trainingEffectLabel": "VO2_MAX",
+                            "activityTrainingLoad": 80,
+                        },
+                        {
+                            "activityId": "without-base",
+                            "trainingEffectLabel": "TEMPO",
+                            "activityTrainingLoad": 900,
+                        },
+                    ],
+                    "source_freshness": {
+                        "activities": {"freshness": "current"},
+                        "training_load_activities": {"freshness": "partial"},
                     },
-                    {
-                        "activityId": "without-base",
-                        "trainingEffectLabel": "TEMPO",
-                        "activityTrainingLoad": 900,
-                    },
-                ],
-                "source_freshness": {
-                    "activities": {"freshness": "current"},
-                    "training_load_activities": {"freshness": "partial"},
-                },
-            },
+                }
+            ),
             date(2026, 10, 2),
-            activity_rows=(),
+            activities=garmin_activity_summaries(
+                {
+                    "activities": base,
+                    "training_load_activities": [
+                        {
+                            "activityId": "matched",
+                            "trainingEffectLabel": "VO2_MAX",
+                            "activityTrainingLoad": 80,
+                        },
+                        {
+                            "activityId": "without-base",
+                            "trainingEffectLabel": "TEMPO",
+                            "activityTrainingLoad": 900,
+                        },
+                    ],
+                    "source_freshness": {
+                        "activities": {"freshness": "current"},
+                        "training_load_activities": {"freshness": "partial"},
+                    },
+                }
+            ),
         )
         self.assertEqual(result["coverage"]["known_sessions"], 2)
         self.assertEqual(result["classified_sessions"], 1)
@@ -136,21 +178,59 @@ class TrainingFocusTests(unittest.TestCase):
             "partial",
         )
 
-    def test_activity_without_identity_is_not_classified_from_its_category(self):
+    def test_activity_without_identity_is_not_a_session(self):
+        # Canonical reads (#1416): the mapper drops a row without an activity id,
+        # so it is neither a known nor an unclassified session.
         result = training_focus(
-            {
-                "activities": [
-                    {
-                        "startTimeLocal": "2026-10-02T09:00:00",
-                        "trainingEffectLabel": "TEMPO",
-                        "activityTrainingLoad": 40,
-                    }
-                ]
-            },
+            garmin_sync_status(
+                {
+                    "activities": [
+                        {
+                            "startTimeLocal": "2026-10-02T09:00:00",
+                            "trainingEffectLabel": "TEMPO",
+                            "activityTrainingLoad": 40,
+                        }
+                    ]
+                }
+            ),
             date(2026, 10, 2),
-            activity_rows=(),
+            activities=garmin_activity_summaries(
+                {
+                    "activities": [
+                        {
+                            "startTimeLocal": "2026-10-02T09:00:00",
+                            "trainingEffectLabel": "TEMPO",
+                            "activityTrainingLoad": 40,
+                        }
+                    ]
+                }
+            ),
         )
-        self.assertEqual(result["coverage"]["known_sessions"], 1)
+        self.assertEqual(result["coverage"]["known_sessions"], 0)
         self.assertEqual(result["classified_sessions"], 0)
-        self.assertEqual(result["unclassified_sessions"], 1)
+        self.assertEqual(result["unclassified_sessions"], 0)
         self.assertEqual(result["categories"]["high_aerobic"]["sessions"], 0)
+
+    def test_dedicated_loads_follow_the_stored_rows_not_the_last_run(self):
+        # #1416: a last run that read no dedicated rows (a rest day or a skipped
+        # fetch) keeps the dedicated source while stored rows exist.
+        state = {
+            "provider_sync": {
+                "pagination": {"training_load_activities": {"records": 0}}
+            },
+            "source_freshness": {"training_load_activities": {"freshness": "current"}},
+        }
+        stored = GarminSyncStatus.from_state(
+            state, stored_sections=frozenset({"training_load_activities"})
+        )
+        none_stored = GarminSyncStatus.from_state(state, stored_sections=frozenset())
+        today = date(2026, 10, 2)
+
+        self.assertEqual(
+            training_focus(stored, today, activities=())["category_source_key"],
+            "training_load_activities+activities",
+        )
+        self.assertEqual(
+            training_focus(none_stored, today, activities=())["category_source_key"],
+            "activities",
+        )

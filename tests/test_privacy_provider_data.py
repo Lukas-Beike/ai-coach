@@ -91,6 +91,8 @@ DOMAIN_FILES = (
     "categorical_observations.jsonl",
     "gear_items.jsonl",
     "gear_activity_links.jsonl",
+    "power_curve_points.jsonl",
+    "power_curve_fetches.jsonl",
 )
 DOMAIN_TABLES = tuple(name.removesuffix(".jsonl") for name in DOMAIN_FILES)
 SECRET_PAYLOAD = {
@@ -362,8 +364,8 @@ class PrivacyExportProviderTests(ProviderDataFixture):
     def lines(archive, name):
         return [json.loads(line) for line in archive.read(name).splitlines() if line]
 
-    def test_format_version_eight_lists_provider_detail_domain_and_link_files(self):
-        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 8)
+    def test_format_version_ten_lists_provider_detail_domain_and_link_files(self):
+        self.assertEqual(PRIVACY_EXPORT_FORMAT_VERSION, 10)
         expected = {
             *PROVIDER_FILES,
             *DETAIL_FILES,
@@ -373,7 +375,7 @@ class PrivacyExportProviderTests(ProviderDataFixture):
         self.assertLessEqual(expected, PRIVACY_EXPORT_JSONL_FILES)
         with self.export() as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            self.assertEqual(manifest["format_version"], 8)
+            self.assertEqual(manifest["format_version"], 10)
             self.assertLessEqual(expected, set(manifest["jsonl_files"]))
             self.assertLessEqual(expected, set(archive.namelist()))
 
@@ -549,11 +551,13 @@ class PrivacyExportProviderTests(ProviderDataFixture):
                 "updated_at",
                 "provider",
                 "session_id",
+                "session_rpe_rated_at",
             },
         )
         self.assertEqual(rows[0]["notes"], "felt good")
         self.assertEqual(rows[0]["provider"], "intervals")
         self.assertIsNone(rows[0]["session_id"])
+        self.assertIsNone(rows[0]["session_rpe_rated_at"])
 
 
 class SanitizedProviderPayloadTests(unittest.TestCase):

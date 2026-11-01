@@ -11,7 +11,7 @@ from backend.activities.feedback import ActivityFeedbackService
 from backend.calendar import canonical as calendar_canonical
 from backend.db.manager import DatabaseManager
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
-from backend.planning.compact_activities import ActivityRowSource
+from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.sync.adaptive import AdaptivePreviewFollowupService
 from backend.sync.state import SyncStateRepository
@@ -26,7 +26,8 @@ class CalendarWindowRange:
 
 @dataclass
 class LocalStatePrelude:
-    snapshot: dict[str, Any]
+    # The stored snapshot's sync status (``provider_sync``) only.
+    sync_metadata: dict[str, Any]
     activities: list[dict[str, Any]]
     local_planned: list[dict[str, Any]]
     canonical_planned: list[dict[str, Any]]
@@ -49,7 +50,7 @@ class PublicStateLocalPrelude:
         window: CalendarWindowRange,
         performance_inputs: Callable[[Any], CanonicalPerformanceInputs | None]
         | None = None,
-        activity_rows: ActivityRowSource | None = None,
+        activity_rows: ActivitySummarySource | None = None,
     ) -> None:
         self._sync_state = sync_state
         self._activity_feedback = activity_feedback
@@ -64,7 +65,7 @@ class PublicStateLocalPrelude:
     def read(self, local_only: bool) -> LocalStatePrelude:
         # One WAL snapshot serves every local read; a writer never blocks it.
         with self._database_manager.read_snapshot() as db:
-            snapshot = self._sync_state.latest_snapshot()
+            sync_metadata = self._sync_state.sync_metadata(db)
             performance_inputs = (
                 self._performance_inputs(db)
                 if self._performance_inputs is not None
@@ -77,9 +78,7 @@ class PublicStateLocalPrelude:
             canonical_planned = calendar_canonical.canonical_planned_workouts(
                 [], local_planned
             )
-            provider_sync = (
-                snapshot.get("provider_sync", {}) if isinstance(snapshot, dict) else {}
-            )
+            provider_sync = sync_metadata["provider_sync"]
             calendar_window = (
                 provider_sync.get("calendar_window")
                 if isinstance(provider_sync, dict)
@@ -101,7 +100,7 @@ class PublicStateLocalPrelude:
                 else None
             )
         return LocalStatePrelude(
-            snapshot,
+            sync_metadata,
             activities,
             local_planned,
             canonical_planned,

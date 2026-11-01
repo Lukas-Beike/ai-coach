@@ -16,7 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
-from activity_row_support import FixedActivityRows, NoObservations
+from activity_row_support import FixedActivityRows
 from canonical_recovery_support import NoActivityRows, recovery_only_inputs
 from performance_day_support import (
     SYNCED_AT,
@@ -37,20 +37,22 @@ from backend.coach.context import (
 from backend.coach.context_selection import CoachContextSelection
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.context import current_performance_context
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     GarminCanonicalState,
 )
-from backend.planning.context import compact_snapshot
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
 )
+from backend.sync.intervals_compaction import compact_snapshot
 
 TODAY = date(2026, 5, 4)
 GARMIN_SOURCE = "Garmin Connect"
 INTERVALS_SOURCE = "Intervals.icu"
+STORED_PROVIDERS_SOURCE = "Gespeicherte Provider-Daten"
 WELLNESS_SOURCE = "Intervals.icu Wellness"
 GENERIC_LTHR_SOURCE = "Intervals.icu (allgemein)"
 VENDOR_SENTINEL = "synthetic-vendor-blob"
@@ -137,8 +139,7 @@ def _context(
     """Current performance with recovery observations mapped from the fixtures."""
     canonical = canonical_from_snapshot(snapshot, today) if snapshot else None
     return current_performance_context(
-        snapshot,
-        garmin,
+        GarminSyncStatus.from_state(garmin),
         profile,
         today,
         canonical=replace(
@@ -174,7 +175,7 @@ def _garmin_source(garmin_payload: dict[str, Any]) -> CanonicalPerformanceSource
     return CanonicalPerformanceSource(
         database_manager=_Manager,
         observation_reader=lambda: reader,
-        activity_rows=NoActivityRows,
+        activity_summaries=NoActivityRows,
     )
 
 
@@ -184,7 +185,9 @@ def _performance_reader(
     profile_service = Mock()
     profile_service.get.return_value = {"name": "Athlete", "timezone": "UTC"}
     payload_service = Mock()
-    payload_service.recent_view.return_value = garmin_payload
+    payload_service.sync_status.return_value = GarminSyncStatus.from_state(
+        garmin_payload
+    )
     garmin_projection = Mock()
     garmin_projection.coach_context.return_value = {"recovery": {}}
     reader = CoachPerformanceContextReader(
@@ -228,7 +231,6 @@ def _structured_service(
         garmin_payload, canonical=canonical
     )
     service = CoachStructuredContextService(
-        sync_state_repository,
         checkin_service,
         weather_service,
         activity_feedback_service,
@@ -248,7 +250,8 @@ def _structured_service(
 
 def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionService:
     payload_service = Mock()
-    payload_service.recent_view.return_value = snapshot
+    payload_service.sync_status.return_value = GarminSyncStatus.from_state(snapshot)
+    payload_service.sync_status_in.return_value = GarminSyncStatus.from_state(snapshot)
     battery_service = Mock()
     battery_service.current.return_value = None
     redactor = Mock()
@@ -266,19 +269,28 @@ def _garmin_projection_service(snapshot: dict[str, Any]) -> GarminProjectionServ
         local_now=lambda: datetime(2026, 5, 4, 8, tzinfo=UTC),
         canonical=GarminCanonicalSources(
             activity_rows=lambda: FixedActivityRows(),
-            observations=lambda: NoObservations(),
+            observations=lambda: StubReader(
+                tuple(
+                    map_garmin_health(
+                        dict(snapshot), zone=UTC, retrieved_at=SYNCED_AT
+                    ).records
+                )
+            ),
+            activity_summaries=NoActivityRows,
         ),
     )
 
 
 class CurrentPerformanceProvenanceTests(unittest.TestCase):
-    def test_unavailable_projection_garmin_balance_follows_freshness_and_presence(
+    def test_garmin_only_projection_balance_follows_freshness_and_presence(
         self,
     ) -> None:
         result = _context(None, _garmin_payload(), {}, TODAY)
 
-        self.assertFalse(result["available"])
-        self.assertEqual(result["source"], INTERVALS_SOURCE)
+        # Canonical Garmin observations make the context available without a
+        # snapshot; without an Intervals.icu sync it names the stored providers.
+        self.assertTrue(result["available"])
+        self.assertEqual(result["source"], STORED_PROVIDERS_SOURCE)
         balance = result["garmin_training_load"]["four_week_balance"]
         self.assertEqual(balance["source"], GARMIN_SOURCE)
         self.assertEqual(balance["freshness"], "current")
@@ -296,9 +308,8 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
 
         without_balance = _garmin_payload()
         del without_balance["training_load_balance"]
-        self.assertNotIn(
-            "garmin_training_load",
-            _context(None, without_balance, {}, TODAY),
+        self.assertEqual(
+            _context(None, without_balance, {}, TODAY)["garmin_training_load"], {}
         )
 
     def test_available_projection_always_has_garmin_training_load_key(self) -> None:
@@ -319,6 +330,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "training_focus",
                 "source",
                 "as_of",
+                "activities_need_refresh",
                 "metrics",
                 "thresholds",
                 "current_load",
@@ -329,7 +341,8 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "activity_validation",
             },
         )
-        self.assertEqual(result["as_of"], "2026-05-04T05:00:00Z")
+        # Canonical reads (#1416): the canonical sync instant in ISO form.
+        self.assertEqual(result["as_of"], "2026-05-04T05:00:00+00:00")
         self.assertEqual(
             set(result["thresholds"]),
             {"ftp_w", "w_prime_j", "max_hr", "lthr", "weight"},
@@ -459,7 +472,7 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
         reader, _ = _performance_reader(garmin)
         snapshot = _intervals_snapshot()
 
-        result = reader.current_performance(snapshot, _recovery(garmin, snapshot))
+        result = reader.current_performance(_recovery(garmin, snapshot))
 
         self.assertEqual(
             result["metrics"]["cycling_ftp_watts"]["source"], GARMIN_SOURCE
@@ -481,7 +494,7 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
         reader, _ = _performance_reader(garmin)
         snapshot = _intervals_snapshot()
 
-        result = reader.current_performance(snapshot, _recovery(garmin, snapshot))
+        result = reader.current_performance(_recovery(garmin, snapshot))
 
         self.assertNotIn(VENDOR_SENTINEL, json.dumps(result, ensure_ascii=False))
 
@@ -492,14 +505,18 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
             _garmin_payload(), canonical=True
         )
 
-        _, inputs = reader.read_snapshot(lambda: None)
-        unavailable = reader.current_performance(None, inputs)
-        garmin_context = reader.recovery(None)
-        reader.recovery(_intervals_snapshot())
+        inputs = reader.read_inputs()
+        performance = reader.current_performance(inputs)
+        garmin_context = reader.recovery(inputs)
+        # Canonical reads (#1416): an Intervals.icu sync in the canonical inputs,
+        # not a stored snapshot, turns the Garmin performance fallback off.
+        reader.recovery(canonical_from_snapshot(_intervals_snapshot(), TODAY))
 
-        self.assertFalse(unavailable["available"])
+        # Canonical Garmin observations make the context available without a
+        # snapshot.
+        self.assertTrue(performance["available"])
         self.assertEqual(
-            unavailable["garmin_training_load"]["four_week_balance"]["source"],
+            performance["garmin_training_load"]["four_week_balance"]["source"],
             GARMIN_SOURCE,
         )
         self.assertEqual(
@@ -522,48 +539,44 @@ class CoachIntervalsProjectionTests(unittest.TestCase):
     def test_activity_projection_is_allowlisted_and_truncates_text(self) -> None:
         activity = {
             "id": "ride-9",
-            "type": "Ride",
+            "sport": "ride",
             "name": "N" * 250,
-            "start_date_local": "2026-05-03T07:00:00",
-            "moving_time": 3600,
-            "distance": None,
-            "icu_eftp": 265,
-            "max_speed": 12.5,
-            "description": "private coach note",
-            "feel": "F" * 200,
-            "icu_rpe": 6,
+            "started_at_local": "2026-05-03T07:00:00",
+            "moving_duration_s": 3600,
+            "distance_m": None,
+            "eftp_w": 265,
+            "max_speed_mps": 12.5,
+            "record_ids": {"intervals": "ride-9"},
+            "feel": 4.0,
+            "rpe": 6,
         }
 
         result = CoachIntervalsContextService().project([], TODAY, [activity])
 
         row = result["recent_activities_by_sport"]["Radfahren"][0]
-        # Fields outside COACH_ACTIVITY_FIELDS (icu_eftp, max_speed, description)
+        # Fields outside COACH_ACTIVITY_FIELDS (eftp_w, max_speed_mps, record_ids)
         # and None-valued fields are dropped.
         self.assertEqual(
             set(row),
             {
                 "id",
-                "start_date_local",
+                "started_at_local",
                 "name",
-                "type",
-                "moving_time",
+                "sport",
+                "moving_duration_s",
                 "feel",
-                "icu_rpe",
+                "rpe",
             },
         )
         self.assertEqual(len(row["name"]), 200)
-        self.assertEqual(len(row["feel"]), 120)
+        # Feel is a number in the summary: it passes through, not truncated as text.
+        self.assertEqual(row["feel"], 4.0)
 
-    def test_activity_without_id_loses_its_id_when_only_activity_id_exists(
-        self,
-    ) -> None:
-        # Quirk: sorting falls back to activityId, but the projection selects only
-        # `id`, so the row is kept without an identifier.
+    def test_activity_without_id_is_kept_without_an_identifier(self) -> None:
         activity = {
-            "activityId": "legacy-7",
-            "type": "Run",
+            "sport": "run",
             "name": "Legacy",
-            "start_date_local": "2026-05-03T07:00:00",
+            "started_at_local": "2026-05-03T07:00:00",
         }
 
         result = CoachIntervalsContextService().project([], TODAY, [activity])
@@ -630,8 +643,10 @@ class CoachStructuredContextSwitchTests(unittest.TestCase):
         garmin_projection.coach_context.assert_called_once_with(
             include_performance=True
         )
-        self.assertFalse(result["current_performance"]["available"])
-        self.assertEqual(result["current_performance"]["source"], INTERVALS_SOURCE)
+        self.assertTrue(result["current_performance"]["available"])
+        self.assertEqual(
+            result["current_performance"]["source"], STORED_PROVIDERS_SOURCE
+        )
         self.assertEqual(
             result["current_performance"]["garmin_training_load"]["four_week_balance"][
                 "source"
@@ -647,11 +662,12 @@ class CoachStructuredContextSwitchTests(unittest.TestCase):
             "focused", frozenset({"activities", "current_performance"})
         )
 
-        result = service.build(_intervals_snapshot(), selection=selection)
+        result = service.build(selection=selection)
 
         garmin_projection.coach_context.assert_not_called()
         self.assertEqual(set(result), {"activities", "current_performance"})
-        self.assertTrue(result["current_performance"]["available"])
+        # Without a canonical source there are no canonical values.
+        self.assertFalse(result["current_performance"]["available"])
 
 
 class GarminCoachContextFallbackProvenanceTests(unittest.TestCase):
@@ -681,17 +697,20 @@ class GarminCoachContextFallbackProvenanceTests(unittest.TestCase):
         result = _garmin_projection_service(_garmin_payload()).coach_context()
 
         serialized = json.dumps(result, ensure_ascii=False)
-        self.assertEqual(result["recovery"]["sleep"]["sleepScore"], 84)
+        # Canonical reads (#1416): neutral field names of the canonical record.
+        self.assertEqual(result["recovery"]["sleep"]["sleep_score"], 84)
         self.assertNotIn(VENDOR_SENTINEL, serialized)
         self.assertNotIn("vendorBlob", serialized)
 
-    def test_scalar_recovery_values_are_wrapped_with_value_key(self) -> None:
+    def test_undated_scalar_recovery_values_are_not_records(self) -> None:
+        # Canonical reads (#1416): an undated scalar maps to no canonical
+        # observation, so the section stays empty instead of {"value": ...}.
         result = _garmin_projection_service(
             {"hrv": 57, "resting_hr": 48}
         ).coach_context()
 
-        self.assertEqual(result["recovery"]["hrv"], {"value": 57})
-        self.assertEqual(result["recovery"]["resting_hr"], {"value": 48})
+        self.assertEqual(result["recovery"]["hrv"], {})
+        self.assertEqual(result["recovery"]["resting_hr"], {})
 
     def test_source_freshness_gets_measurement_age_and_drops_non_mappings(
         self,
@@ -814,7 +833,7 @@ class CoachPerformanceBudgetTests(unittest.TestCase):
         garmin = _eighty_four_day_garmin_payload()
         reader, _ = _performance_reader(garmin)
 
-        performance = reader.current_performance(snapshot, _recovery(garmin, snapshot))
+        performance = reader.current_performance(_recovery(garmin, snapshot))
         limit = COACH_CONTEXT_SECTION_LIMITS["current_performance"]
         bounded, truncations = bounded_coach_context_sections(
             {"current_performance": performance},
@@ -844,7 +863,7 @@ class CoachPerformanceBudgetTests(unittest.TestCase):
         garmin = _eighty_four_day_garmin_payload()
         reader, _ = _performance_reader(garmin)
 
-        coach = reader.current_performance(snapshot, _recovery(garmin, snapshot))
+        coach = reader.current_performance(_recovery(garmin, snapshot))
         ui = _context(snapshot, garmin, {"timezone": "UTC"}, TODAY)
 
         for row in coach["personal_recovery"]["baselines"]:

@@ -7,6 +7,9 @@ from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from activity_row_support import summaries_of_rows
+
+from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
     MetricKind,
@@ -21,6 +24,7 @@ from backend.performance.canonical_recovery import (
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
+from backend.providers.sleep_period_mapping import map_sleep_periods
 
 RETRIEVED = datetime(2026, 9, 20, 8, 0, tzinfo=UTC)
 UNITS = {
@@ -92,6 +96,7 @@ def recovery_inputs(
     observations: Iterable[Observation] = (),
     *,
     latest_wellness_day: date | None = None,
+    sleep_periods: tuple[SleepPeriod, ...] | None = None,
 ) -> CanonicalRecoveryInputs:
     """Group synthetic recovery observations into canonical recovery inputs."""
     by_kind: dict[MetricKind, list[Observation]] = {}
@@ -100,7 +105,38 @@ def recovery_inputs(
     return CanonicalRecoveryInputs(
         observations={kind: tuple(by_kind.get(kind, ())) for kind in RECOVERY_KINDS},
         latest_wellness_day=latest_wellness_day,
+        sleep_periods=sleep_periods,
     )
+
+
+def mapped_sleep_periods(
+    garmin: Mapping[str, Any] | None, wellness: list[dict[str, Any]] | None
+) -> tuple[SleepPeriod, ...]:
+    """Map the raw Garmin sleep elements and wellness rows to canonical periods."""
+    sleep = (garmin or {}).get("sleep")
+    elements = sleep if isinstance(sleep, list) else [sleep] if sleep else []
+    periods: list[SleepPeriod] = []
+    for index, element in enumerate(elements):
+        periods.extend(
+            map_sleep_periods(
+                element,
+                provider=ProviderId.GARMIN,
+                source_record_id=f"sleep/{index}",
+                retrieved_at=RETRIEVED,
+                zone=ZoneInfo("Europe/Berlin"),
+            )
+        )
+    for index, row in enumerate(wellness or []):
+        periods.extend(
+            map_sleep_periods(
+                row,
+                provider=ProviderId.INTERVALS,
+                source_record_id=str(row.get("id") or index),
+                retrieved_at=RETRIEVED,
+                zone=ZoneInfo("Europe/Berlin"),
+            )
+        )
+    return tuple(periods)
 
 
 def mapped_recovery_inputs(
@@ -132,7 +168,11 @@ def mapped_recovery_inputs(
         latest_wellness_day = max(
             (day for day in map(_row_day, rows) if day is not None), default=None
         )
-    return recovery_inputs(observations, latest_wellness_day=latest_wellness_day)
+    return recovery_inputs(
+        observations,
+        latest_wellness_day=latest_wellness_day,
+        sleep_periods=mapped_sleep_periods(garmin, rows),
+    )
 
 
 def _row_day(row: Mapping[str, Any]) -> date | None:
@@ -151,18 +191,11 @@ def mapped_personal_recovery(
     profile: dict[str, Any],
     today: date,
 ) -> dict[str, Any]:
-    """Run personal recovery on the observations the raw fixtures map to.
-
-    Sleep timing variability still reads the raw records (#1419), so they are passed too.
-    """
+    """Run personal recovery on the observations and sleep periods the raw fixtures map to."""
     from backend.performance.personal_recovery import personal_recovery
 
     return personal_recovery(
-        wellness,
-        garmin,
-        profile,
-        today,
-        canonical=mapped_recovery_inputs(garmin, wellness),
+        profile, today, canonical=mapped_recovery_inputs(garmin, wellness)
     )
 
 
@@ -182,7 +215,11 @@ def recovery_only_inputs(
     from dataclasses import replace
 
     from canonical_daily_health_support import mapped_health
-    from performance_day_support import garmin_metrics_from_payload
+    from performance_day_support import (
+        garmin_metrics_from_payload,
+        snapshot_coverage_time,
+        snapshot_retrieved_at,
+    )
 
     from backend.performance.canonical_inputs import (
         CanonicalPerformanceInputs,
@@ -202,7 +239,9 @@ def recovery_only_inputs(
     if snapshot is None:
         return inputs
     _activities, mapped = project_intervals_snapshot(
-        snapshot, zone=ZoneInfo("Europe/Berlin"), retrieved_at=RETRIEVED
+        snapshot,
+        zone=ZoneInfo("Europe/Berlin"),
+        retrieved_at=snapshot_retrieved_at(dict(snapshot), RETRIEVED),
     )
     full = read_performance_inputs(
         FilteringReader(tuple(mapped.records)),
@@ -220,7 +259,10 @@ def recovery_only_inputs(
         ramp_rate=full.ramp_rate,
         current=full.current,
         activities=full.activities,
-        activity_rows=full.activity_rows,
+        # The stored wellness days mark the provider data as present (#1416).
+        history_wellness_days=full.history_wellness_days,
+        # The sync stores its fetch time with the canonical coverage (#1416).
+        intervals_synced_at=snapshot_coverage_time(snapshot),
     )
 
 
@@ -230,14 +272,17 @@ class SnapshotActivityRows:
     def __init__(self, snapshot: Mapping[str, Any]) -> None:
         self._rows = tuple(snapshot.get("recent_activities") or ())
 
-    def activity_rows(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
-        return self._rows
+    def activity_summaries(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
+        return summaries_of_rows(self._rows)
 
 
 class NoActivityRows:
     """An activity row reader without rows: the activities stay on the snapshot."""
 
-    def activity_rows(self, db: Any, **bounds: Any) -> tuple[dict[str, Any], ...]:
+    def activity_summaries(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
+        return ()
+
+    def activity_rows(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
         return ()
 
 

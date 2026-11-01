@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from backend.canonical.public_metrics import neutral_activity_records
+from backend.canonical.records import Observation
 from backend.canonical.vocabulary import ProviderId
 from backend.db.manager import DatabaseManager
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
@@ -87,6 +87,12 @@ class PublicStateDependencies:
     provider_credentials: Callable[[], Any] | None = None
 
 
+def _zone_thresholds(inputs: Any) -> tuple[Observation, ...]:
+    """The plan-zone thresholds of the prelude's canonical current inputs."""
+    current = getattr(inputs, "current", None)
+    return tuple(getattr(current, "zone_thresholds", ()))
+
+
 class PublicStateService:
     """Own the full public state orchestration and response contract."""
 
@@ -114,7 +120,7 @@ class PublicStateService:
         deps = self._deps
         registry = getattr(deps, "provider_registry", DEFAULT_PROVIDER_REGISTRY)
         prelude = deps.local_prelude.read(local_only)
-        snapshot = prelude.snapshot
+        sync_metadata = prelude.sync_metadata
         activities = prelude.activities
         local_planned = prelude.local_planned
         canonical_planned = prelude.canonical_planned
@@ -123,12 +129,12 @@ class PublicStateService:
 
         with self._unit_of_work() as (manager, db):
             calendar_data = deps.calendar_projection.read(
-                snapshot,
                 canonical_planned,
                 local_planned,
                 activities,
                 weather,
                 calendar_window,
+                _zone_thresholds(getattr(prelude, "performance_inputs", None)),
             )
             checkins = calendar_data.checkins
             competitions = calendar_data.competitions
@@ -150,7 +156,7 @@ class PublicStateService:
                 "messages": deps.coach_messages.list(),
                 "plans": deps.training_plans.list(),
                 "library": deps.workout_library.list(include_archived=True),
-                "activities": neutral_activity_records(activities),
+                "activities": activities,
                 **calendar_projection,
                 "weather": weather,
                 "profile": deps.profile.get(),
@@ -164,8 +170,8 @@ class PublicStateService:
                 ),
                 "external_calendar": external_calendar,
                 "daily_planning_context": daily_context,
-                **deps.public_performance.from_snapshot(
-                    snapshot, getattr(prelude, "performance_inputs", None)
+                **deps.public_performance.from_inputs(
+                    getattr(prelude, "performance_inputs", None)
                 ),
                 ProviderId.INTERVALS.value: intervals_state.public_state(
                     configured=bool(deps.config.intervals_api_key),
@@ -180,7 +186,7 @@ class PublicStateService:
                     )
                     or None,
                     pagination_value=self._get_value("last_sync_pagination", manager),
-                    snapshot=snapshot,
+                    snapshot=sync_metadata,
                     library_sync_state=deps.workout_library_sync_state.summary(),
                     today=deps.local_now().date(),
                     history_days=deps.calendar_history_days,

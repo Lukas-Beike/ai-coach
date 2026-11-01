@@ -139,7 +139,7 @@ function changedSyncAreas(nextVersions) {
     chat: ["chat"],
     library: ["library", "plan"],
     checkins: ["feedback", "plan"],
-    activity_feedback: ["feedback", "plan"],
+    activity_feedback: ["feedback", "plan", "performance"],
     profile: ["profile"],
     plan: ["plan"],
   };

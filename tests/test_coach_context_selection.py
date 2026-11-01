@@ -192,11 +192,10 @@ class CoachContextSelectionTests(unittest.TestCase):
             Mock(),
             Mock(),
             Mock(),
-            Mock(),
             lambda: library,
         )
         section = service._selected_sections(
-            frozenset({"nutrition_products"}), {}, {}, [], {}, []
+            frozenset({"nutrition_products"}), {}, [], {}, []
         )["nutrition_products"]
         self.assertEqual(
             section,
@@ -222,10 +221,10 @@ class CoachContextSelectionTests(unittest.TestCase):
             {"id": f"p{index}", "name": f"Produkt {index}"} for index in range(81)
         ]
         service = CoachStructuredContextService(
-            Mock(), Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
+            Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
         )
         section = service._selected_sections(
-            frozenset({"nutrition_products"}), {}, {}, [], {}, []
+            frozenset({"nutrition_products"}), {}, [], {}, []
         )["nutrition_products"]
         self.assertTrue(section["truncated"])
         self.assertEqual(len(section["items"]), 80)
@@ -244,10 +243,10 @@ class CoachContextSelectionTests(unittest.TestCase):
             for index in range(80)
         ]
         service = CoachStructuredContextService(
-            Mock(), Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
+            Mock(), Mock(), Mock(), Mock(), Mock(), lambda: library
         )
         section = service._selected_sections(
-            frozenset({"nutrition_products"}), {}, {}, [], {}, []
+            frozenset({"nutrition_products"}), {}, [], {}, []
         )["nutrition_products"]
         self.assertTrue(section["truncated"])
         self.assertLess(len(section["items"]), 80)

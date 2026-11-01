@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
@@ -16,12 +17,16 @@ from enum import StrEnum
 from typing import Any, Final, NamedTuple
 
 from backend.canonical.records import (
+    MAX_TRAINING_EFFECT_LABEL_LENGTH,
+    MAX_ZONE_COUNT,
+    MAX_ZONE_ID_LENGTH,
     UNKNOWN_CONTEXT,
     ActivityRecord,
     MeasurementContext,
     Observation,
     ObservationPeriod,
 )
+from backend.canonical.validation import MAX_ACTIVITY_DURATION_S
 from backend.canonical.vocabulary import (
     ActivityLinkKind,
     ActivityRecordState,
@@ -51,6 +56,27 @@ _ELEVATION_HIGH_KEY: Final = "elevation_high_m"
 _ELEVATION_LOW_KEY: Final = "elevation_low_m"
 _STEPS_KEY: Final = "steps"
 _DEVICE_TYPE_KEY: Final = "device_type"
+_PLANNED_EVENT_KEY: Final = "planned_event_id"
+_DEVICE_NAME_KEY: Final = "device_name"
+_TRAINING_EFFECT_LABEL_KEY: Final = "training_effect_label"
+# ActivityRecord summary fields stored in the details under their own names.
+ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
+    "intensity",
+    "rpe",
+    "feel",
+    "avg_speed_mps",
+    "weighted_avg_speed_mps",
+    "pace_mps",
+    "ftp_w",
+    "eftp_w",
+    "vo2max",
+    "avg_temp_c",
+)
+ACTIVITY_ZONE_DETAIL_FIELDS: Final = (
+    "power_zone_times_s",
+    "hr_zone_times_s",
+    "pace_zone_times_s",
+)
 _CONTEXT_KEY: Final = "context"
 _METHOD_VERSION_KEY: Final = "method_version"
 _INPUT_FINGERPRINT_KEY: Final = "input_fingerprint"
@@ -330,14 +356,16 @@ def reproject_activity_record(
         now=now,
     )
     db.execute(
+        # A merged alias still names its own record's start, so it moves too.
         "UPDATE activity_sessions SET started_at = ?, local_date = ?, updated_at = ? "
-        "WHERE activity_id = ? AND state = ?",
+        "WHERE activity_id = ? AND state IN (?, ?)",
         (
             values["started_at"],
             values["local_date"],
             now,
             existing["activity_id"],
             ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.DUPLICATE.value,
         ),
     )
     return WriteOutcome.UPDATED
@@ -516,25 +544,88 @@ def active_activity_rows(
     Invalid and deleted activity records are never returned. ``start`` and ``end``
     are inclusive ISO dates on the stored athlete-local date.
     """
-    clauses = ["r.state = ?", "s.state <> ?"]
-    params: list[object] = [
-        ActivityRecordState.ACTIVE.value,
-        ActivitySessionState.DELETED.value,
-    ]
-    if start is not None:
-        clauses.append("r.local_date >= ?")
-        params.append(start)
-    if end is not None:
-        clauses.append("r.local_date <= ?")
-        params.append(end)
     return _fetch_all(
         db,
         f"SELECT {', '.join(_ACTIVITY_READ_COLUMNS)} FROM activity_records AS r "
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-        f"WHERE {' AND '.join(clauses)} ORDER BY r.started_at, r.provider, "
-        "r.provider_activity_id",
-        tuple(params),
+        f"WHERE {' AND '.join(_bounded_clauses(start, end))} "
+        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        _bounded_params(start, end),
     )
+
+
+def active_session_activity_rows(
+    db: Any, *, start: str | None = None, end: str | None = None
+) -> list[tuple[str, dict[str, Any]]]:
+    """Return (summary session id, row) for the active records of live sessions.
+
+    A record of a duplicate (merged) session is listed under the session its
+    merges lead to, so each activity appears once with all its copies. Records
+    whose own or effective session is deleted are left out. Bounds and order are
+    those of ``active_activity_rows``.
+    """
+    rows = _fetch_all(
+        db,
+        f"SELECT {', '.join(_ACTIVITY_READ_COLUMNS)}, r.activity_id AS session_id "
+        "FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        f"WHERE {' AND '.join(_bounded_clauses(start, end))} "
+        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        _bounded_params(start, end),
+    )
+    effective = effective_session_ids(db, [row["session_id"] for row in rows])
+    targets = {effective.get(row["session_id"], row["session_id"]) for row in rows}
+    deleted = {
+        activity_id
+        for activity_id, session in activity_sessions_by_ids(db, list(targets)).items()
+        if session["state"] == ActivitySessionState.DELETED.value
+    }
+    grouped: list[tuple[str, dict[str, Any]]] = []
+    for row in rows:
+        session_id = effective.get(row["session_id"], row["session_id"])
+        if session_id not in deleted:
+            grouped.append((session_id, row))
+    return grouped
+
+
+def newest_sessions_start(db: Any, count: int) -> str | None:
+    """Return the local date of the ``count``-th newest live session, or None.
+
+    Live sessions are active or hidden and own an active record; merged aliases
+    and deleted sessions do not count. None means there are at most ``count``.
+    """
+    rows = _fetch_all(
+        db,
+        "SELECT s.local_date FROM activity_sessions AS s WHERE s.state IN (?, ?) "
+        "AND s.local_date IS NOT NULL AND EXISTS (SELECT 1 FROM activity_records "
+        "AS r WHERE r.activity_id = s.activity_id AND r.state = ?) "
+        "ORDER BY s.started_at DESC LIMIT 1 OFFSET ?",
+        (
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.HIDDEN.value,
+            ActivityRecordState.ACTIVE.value,
+            max(count - 1, 0),
+        ),
+    )
+    return None if not rows else str(rows[0]["local_date"])
+
+
+def _bounded_clauses(start: str | None, end: str | None) -> list[str]:
+    clauses = ["r.state = ?", "s.state <> ?"]
+    if start is not None:
+        clauses.append("r.local_date >= ?")
+    if end is not None:
+        clauses.append("r.local_date <= ?")
+    return clauses
+
+
+def _bounded_params(start: str | None, end: str | None) -> tuple[object, ...]:
+    params: list[object] = [
+        ActivityRecordState.ACTIVE.value,
+        ActivitySessionState.DELETED.value,
+    ]
+    params.extend(bound for bound in (start, end) if bound is not None)
+    return tuple(params)
 
 
 def activity_max_hr_rows(
@@ -1259,13 +1350,80 @@ def _activity_details(record: ActivityRecord) -> str:
                 _DEVICE_TYPE_KEY,
                 None if record.device_type is None else record.device_type.value,
             ),
+            (_PLANNED_EVENT_KEY, record.planned_event_id),
+            (_DEVICE_NAME_KEY, record.device_name),
+            (_TRAINING_EFFECT_LABEL_KEY, record.training_effect_label),
             (_CONTEXT_KEY, record.provenance.context.as_details() or None),
+            *(
+                (field, getattr(record, field))
+                for field in ACTIVITY_SUMMARY_DETAIL_FIELDS
+            ),
+            *(
+                (field, _zone_details(getattr(record, field)))
+                for field in ACTIVITY_ZONE_DETAIL_FIELDS
+            ),
         )
         if value is not None
     }
     if not details:
         return ACTIVITY_DETAILS
     return json.dumps(details, separators=(",", ":"))
+
+
+def _zone_details(zones: Any) -> list[list[Any]] | None:
+    return None if zones is None else [[zone_id, seconds] for zone_id, seconds in zones]
+
+
+def activity_summary_values(details: object) -> dict[str, Any]:
+    """Return the stored summary values of ``ActivityRecord`` from the details.
+
+    Keys are ``ActivityRecord`` field names. A missing or malformed value is left
+    out, so the record keeps its default; it never raises.
+    """
+    loaded = _activity_details_object(details)
+    values: dict[str, Any] = {}
+    for field in ACTIVITY_SUMMARY_DETAIL_FIELDS:
+        number = loaded.get(field)
+        if not isinstance(number, bool) and isinstance(number, int | float):
+            values[field] = float(number)
+    for field in ACTIVITY_ZONE_DETAIL_FIELDS:
+        zones = _stored_zones(loaded.get(field))
+        if zones is not None:
+            values[field] = zones
+    for key in (_PLANNED_EVENT_KEY, _DEVICE_NAME_KEY):
+        text = loaded.get(key)
+        if isinstance(text, str) and text.strip() and len(text) <= 200:
+            values[key] = text
+    label = loaded.get(_TRAINING_EFFECT_LABEL_KEY)
+    if (
+        isinstance(label, str)
+        and label.strip()
+        and len(label) <= MAX_TRAINING_EFFECT_LABEL_LENGTH
+    ):
+        values[_TRAINING_EFFECT_LABEL_KEY] = label
+    return values
+
+
+def _stored_zones(value: object) -> tuple[tuple[str, float], ...] | None:
+    if not isinstance(value, list) or not value or len(value) > MAX_ZONE_COUNT:
+        return None
+    zones: list[tuple[str, float]] = []
+    for item in value:
+        if not (isinstance(item, list) and len(item) == 2):
+            return None
+        zone_id, seconds = item
+        if (
+            not isinstance(zone_id, str)
+            or not zone_id.strip()
+            or len(zone_id) > MAX_ZONE_ID_LENGTH
+            or isinstance(seconds, bool)
+            or not isinstance(seconds, int | float)
+            or not math.isfinite(seconds)
+            or not 0 <= seconds <= MAX_ACTIVITY_DURATION_S
+        ):
+            return None
+        zones.append((zone_id, float(seconds)))
+    return tuple(zones)
 
 
 def activity_elapsed_duration(details: object) -> float | None:
@@ -1379,13 +1537,17 @@ def _activity_detail_number(details: object, key: str) -> float | None:
 
 
 def _activity_detail_value(details: object, key: str) -> object:
+    return _activity_details_object(details).get(key)
+
+
+def _activity_details_object(details: object) -> dict[str, Any]:
     if not isinstance(details, str):
-        return None
+        return {}
     try:
         loaded = json.loads(details)
     except ValueError, RecursionError:
-        return None
-    return loaded.get(key) if isinstance(loaded, dict) else None
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
 
 
 def _observation_values(
@@ -1520,6 +1682,27 @@ def linkable_activity_rows(db: Any, *, start: str, end: str) -> list[dict[str, A
             end,
         ),
     )
+
+
+def provider_activity_record_rows(
+    db: Any, provider: str, provider_activity_ids: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Return the active records of the given provider activity ids, linkable columns.
+
+    Unknown and deleted records are absent; the session state is not filtered.
+    """
+    rows: list[dict[str, Any]] = []
+    for chunk in _chunked(list(dict.fromkeys(provider_activity_ids))):
+        rows.extend(
+            _fetch_all(
+                db,
+                f"SELECT {', '.join(_LINKABLE_COLUMNS)} FROM activity_records AS r "
+                "WHERE r.provider = ? AND r.state = ? "
+                f"AND r.provider_activity_id IN ({_placeholders(chunk)})",
+                (provider, ActivityRecordState.ACTIVE.value, *chunk),
+            )
+        )
+    return rows
 
 
 def activity_session_link_rows(

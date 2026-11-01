@@ -33,6 +33,10 @@ SHAPE_SCHEMA_V13: Final = "schema-v13"
 SHAPE_SCHEMA_V14: Final = "schema-v14"
 # Schema version 15: the canonical model extensions of Epic B.
 SHAPE_SCHEMA_V15: Final = "schema-v15"
+# Schema version 16: provider-neutral planning field names.
+SHAPE_SCHEMA_V16: Final = "schema-v16"
+# Schema version 17: the canonical power curve.
+SHAPE_SCHEMA_V17: Final = "schema-v17"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
 
@@ -44,6 +48,8 @@ RELEASED_SHAPE_DIGESTS: Final[Mapping[str, str]] = {
     SHAPE_SCHEMA_V13: "f1fc5172dc01f2dec8a0f1a73387a7b1916652355e684d9b7d5d0ff277fef5c1",
     SHAPE_SCHEMA_V14: "36b275450a46830a245d882bc18b621104413d1f2f6b84fd721befdcd903746e",
     SHAPE_SCHEMA_V15: "ef7832ee261bf45df2cd429bffd549fdb90aa3841a8baea411bec3ce150025c7",
+    SHAPE_SCHEMA_V16: "3f68b3c7b91a0882c930e93acab9e560ebf9d53ae3fa9befe118fa8b4a633131",
+    SHAPE_SCHEMA_V17: "68d69b318f579be15d6bf15eeebccbffac66480296ffc46b876ac0858043c9ee",
 }
 
 # Stored PRAGMA user_version -> schema shapes that version is allowed to hold.
@@ -58,6 +64,8 @@ ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
     13: frozenset({SHAPE_SCHEMA_V13}),
     14: frozenset({SHAPE_SCHEMA_V14}),
     15: frozenset({SHAPE_SCHEMA_V15}),
+    16: frozenset({SHAPE_SCHEMA_V16}),
+    17: frozenset({SHAPE_SCHEMA_V17}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.measurements import number
@@ -12,7 +12,6 @@ from backend.http_api.athlete_assembly import (
     AthleteRepositories,
     AthleteRuntime,
 )
-from backend.performance.training_report import deduplicated_rows
 from backend.planning.assembly import (
     PlanningDataAssembly,
     PlanningMutations,
@@ -20,6 +19,7 @@ from backend.planning.assembly import (
     PlanningRuntime,
 )
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.garmin_activity_duplicates import deduplicated_rows
 from backend.weather.cache import invalidate_for_location_change
 
 
@@ -28,7 +28,6 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         manager = Mock(name="manager")
         event_buffer = Mock(name="event_buffer")
         repositories = [Mock(name=f"repository_{index}") for index in range(4)]
-        snapshot_reader = Mock(name="snapshot_reader")
         row_reader = Mock(name="row_reader")
         serving = Mock(name="serving")
         now = Mock(name="utc_now")
@@ -42,7 +41,6 @@ class AthleteDataAssemblyTests(unittest.TestCase):
                     checkin=repositories[1],
                     profile=repositories[3],
                     key_values=Mock(name="key_values"),
-                    snapshot_reader=snapshot_reader,
                     activity_rows=lambda: row_reader,
                     table_serving=lambda: serving,
                     competition=repositories[2],
@@ -76,43 +74,6 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         self.assertFalse(hasattr(assembly, "activity_read"))
         self.assertIsInstance(duplicate._inspector._activities, CanonicalTableReader)
         self.assertIs(duplicate._inspector._serving, serving)
-
-    def test_training_snapshot_uses_injected_reader_without_changing_provenance(self):
-        manager = MagicMock()
-        db = manager.unit_of_work.return_value.__enter__.return_value
-        snapshot = {
-            "synced_at": "2026-09-20T08:00:00+00:00",
-            "source_freshness": {"intervals": {"freshness": "current"}},
-            "provider_sync": {"source": "intervals", "cursor": "synthetic"},
-        }
-        reader = Mock(latest_snapshot=Mock(return_value=snapshot))
-        assembly = AthleteDataAssembly(
-            dependencies=AthleteDataAssembly.Inputs(
-                profile_mutation_coordinator=threading.RLock(),
-                database_manager=lambda: manager,
-                repositories=AthleteRepositories(
-                    activity_feedback=Mock(),
-                    checkin=Mock(),
-                    profile=Mock(),
-                    key_values=Mock(),
-                    snapshot_reader=reader,
-                    activity_rows=Mock(),
-                    table_serving=Mock(),
-                    competition=Mock(),
-                ),
-                runtime=AthleteRuntime(
-                    utc_now=Mock(),
-                    local_date=Mock(),
-                    event_buffer=Mock(),
-                    normalize_profile=Mock(),
-                    normalize_competition=Mock(),
-                    uuid_factory=Mock(),
-                ),
-            )
-        )
-
-        self.assertIs(assembly.training_snapshot(), snapshot)
-        reader.latest_snapshot.assert_called_once_with(db)
 
 
 class EquipmentDependencyTests(unittest.TestCase):

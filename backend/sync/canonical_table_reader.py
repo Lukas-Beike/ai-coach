@@ -1,8 +1,7 @@
 """Canonical reader over the canonical tables, without any provider client or sync.
 
 Reads the stored rows only, so the last stored data stays readable with no provider
-configured and no sync performed. Served records are the ones the legacy projection
-would return for the same data:
+configured and no sync performed. Served records:
 
 - activities: ``active`` activity records whose session is not ``deleted``. Invalid
   and deleted records are never served.
@@ -19,12 +18,12 @@ would return for the same data:
   next to the new one until the re-projection completes, so that one measurement
   can briefly appear twice.
 
-Results use the same inclusive bounds and the same total order as
-``CanonicalSnapshotProjection``. Activity bounds filter the stored athlete-local
+Results use inclusive bounds and the canonical total order
+(``backend.canonical.ordering``). Activity bounds filter the stored athlete-local
 date, which the ingest computed with the athlete's zone at write time.
 
-Sleep periods, zone configurations, provider statuses and gear are served from
-their active rows; rows a re-projection retired are not served.
+Sleep periods, zone configurations, provider statuses, gear and the power curve
+are served from their active rows; rows a re-projection retired are not served.
 
 Mapping issue counts are not stored in the tables, so this reader does not
 implement ``coverage``. It serves ``metric_windows`` from the same rows as
@@ -36,7 +35,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Final
 
 from backend.canonical.coverage import MetricWindow
@@ -44,6 +43,9 @@ from backend.canonical.domain_records import (
     CategoricalObservation,
     GearActivityLink,
     GearItem,
+    PowerCurve,
+    PowerCurveFetch,
+    PowerCurvePoint,
     SleepPeriod,
     ZoneConfiguration,
 )
@@ -79,7 +81,14 @@ from backend.providers.canonical_plans import (
 from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
-from backend.runtime.ports import ActivityReader, ActivityRowReader, ObservationReader
+from backend.runtime.ports import (
+    ActivityReader,
+    ActivityRowReader,
+    ActivitySessionReader,
+    ObservationReader,
+    PowerCurveReader,
+    SessionRecords,
+)
 
 _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
     ProviderId.INTERVALS: INTERVALS_LABEL,
@@ -88,7 +97,13 @@ _ACTIVITY_LABELS: Final[Mapping[ProviderId, str]] = {
 }
 
 
-class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader):
+class CanonicalTableReader(
+    ActivityReader,
+    ActivityRowReader,
+    ActivitySessionReader,
+    ObservationReader,
+    PowerCurveReader,
+):
     """Serves canonical activities, raw activity rows and observations from the tables."""
 
     def __init__(
@@ -132,6 +147,51 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
         """
         rows = canonical_store.session_activity_rows(db, activity_id)
         return tuple(sorted((_activity(row) for row in rows), key=activity_order))
+
+    def activity_sessions(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        newest: int | None = None,
+    ) -> tuple[SessionRecords, ...]:
+        """Return each live session's id and its active records of every provider.
+
+        Records of sessions merged into another are listed under the survivor.
+        Records are in ``activity_order``; sessions in order of first record.
+        Records of a provider that is not a known ``ProviderId`` are skipped.
+        ``newest`` bounds the read to the days of at least the newest that many
+        sessions (a day earlier, so their merged copies stay); the caller still
+        keeps only as many as it needs.
+        """
+        if newest is not None:
+            bound = canonical_store.newest_sessions_start(db, newest)
+            if bound is not None:
+                earliest = date.fromisoformat(bound) - timedelta(days=1)
+                bounded = self._sessions(
+                    db,
+                    start=earliest if start is None else max(start, earliest),
+                    end=end,
+                )
+                # A session whose records were all skipped would leave too few.
+                if len(bounded) >= newest:
+                    return bounded
+        return self._sessions(db, start=start, end=end)
+
+    def _sessions(
+        self, db: Any, *, start: date | None, end: date | None
+    ) -> tuple[SessionRecords, ...]:
+        grouped: dict[str, list[ActivityRecord]] = {}
+        for session_id, row in canonical_store.active_session_activity_rows(
+            db, start=_iso(start), end=_iso(end)
+        ):
+            if _provider_or_none(row["provider"]) is not None:
+                grouped.setdefault(session_id, []).append(_activity(row))
+        return tuple(
+            (session_id, tuple(sorted(records, key=activity_order)))
+            for session_id, records in grouped.items()
+        )
 
     def activity_rows(
         self,
@@ -236,6 +296,19 @@ class CanonicalTableReader(ActivityReader, ActivityRowReader, ObservationReader)
         rows = canonical_domain_store.active_gear_link_rows(db)
         return tuple(_gear_activity_link(row) for row in rows)
 
+    def power_curve(self, db: Any) -> PowerCurve:
+        """Return each provider's latest power curve fetch and its best efforts."""
+        return PowerCurve(
+            fetches=tuple(
+                _power_curve_fetch(row)
+                for row in canonical_domain_store.active_power_curve_fetch_rows(db)
+            ),
+            points=tuple(
+                _power_curve_point(row)
+                for row in canonical_domain_store.active_power_curve_rows(db)
+            ),
+        )
+
 
 def _payload_object(text: str) -> dict[str, Any] | None:
     try:
@@ -291,6 +364,7 @@ def _activity(row: Mapping[str, Any]) -> ActivityRecord:
         elevation_low_m=canonical_store.activity_elevation_low(row["details"]),
         steps=canonical_store.activity_steps(row["details"]),
         device_type=canonical_store.activity_device_type(row["details"]),
+        **canonical_store.activity_summary_values(row["details"]),
     )
 
 
@@ -447,5 +521,24 @@ def _gear_activity_link(row: Mapping[str, Any]) -> GearActivityLink:
     return GearActivityLink(
         gear_id=row["gear_id"],
         provider_activity_id=row["provider_activity_id"],
+        provenance=_domain_provenance(row),
+    )
+
+
+def _power_curve_point(row: Mapping[str, Any]) -> PowerCurvePoint:
+    return PowerCurvePoint(
+        duration_s=int(row["duration_s"]),
+        watts=row["watts"],
+        observed_on=date.fromisoformat(str(row["observed_on"])),
+        provider_activity_id=row["provider_activity_id"],
+        provenance=_domain_provenance(row),
+    )
+
+
+def _power_curve_fetch(row: Mapping[str, Any]) -> PowerCurveFetch:
+    return PowerCurveFetch(
+        fetch_status=row["fetch_status"],
+        window_start=_optional_date(row["window_start"]),
+        window_end=_optional_date(row["window_end"]),
         provenance=_domain_provenance(row),
     )

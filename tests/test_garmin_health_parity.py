@@ -21,8 +21,9 @@ from canonical_recovery_support import mapped_recovery_inputs
 from backend.canonical.mapping import IssueReason, MappingResult
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, Sport
-from backend.performance import garmin_metrics, garmin_weight, recovery_context
+from backend.performance import recovery_context
 from backend.providers.garmin_health_mapping import map_garmin_health
+from backend.sync import garmin_payload_metrics, garmin_weight
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers" / "garmin"
 ZONE = ZoneInfo("Europe/Berlin")
@@ -246,7 +247,7 @@ class WeightParityTests(unittest.TestCase):
 
 
 class BodyFatParityTests(unittest.TestCase):
-    def test_body_fat_units_and_comma_decimals_match_legacy(self) -> None:
+    def test_body_fat_units_and_comma_decimals_are_mapped(self) -> None:
         snapshot: dict[str, Any] = {
             "weight": [
                 {
@@ -264,20 +265,16 @@ class BodyFatParityTests(unittest.TestCase):
         }
 
         mapped = _latest_by_day(_map(snapshot), MetricKind.BODY_FAT)
-        legacy = dict(garmin_weight.garmin_body_fat_daily_records(snapshot))
 
-        self.assertEqual(mapped, legacy)
         self.assertEqual(mapped, {DAY: 18.4, "2026-10-11": 18.5})
 
-    def test_body_fat_without_unit_is_taken_as_percent_like_legacy(self) -> None:
+    def test_body_fat_without_unit_is_taken_as_percent(self) -> None:
         snapshot: dict[str, Any] = {
             "weight": {"calendarDate": DAY, "bodyFatPercentage": 21.25}
         }
 
         mapped = _latest_by_day(_map(snapshot), MetricKind.BODY_FAT)
-        legacy = dict(garmin_weight.garmin_body_fat_daily_records(snapshot))
 
-        self.assertEqual(mapped, legacy)
         self.assertEqual(mapped, {DAY: 21.25})
 
 
@@ -290,7 +287,7 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
         self.context = recovery_context.performance_recovery_context(
             mapped_recovery_inputs(self.snapshot), TODAY
         )
-        self.metrics = garmin_metrics.garmin_payload_performance_metrics(
+        self.metrics = garmin_payload_metrics.garmin_payload_performance_metrics(
             self.snapshot, TODAY
         )
 
@@ -336,7 +333,9 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
         mapped = _max_hr_by_category(self.result)
 
         self.assertEqual(mapped, {"generic": 190.0})
-        self.assertEqual(mapped, garmin_metrics.garmin_profile_max_hr(self.snapshot))
+        self.assertEqual(
+            mapped, garmin_payload_metrics.garmin_profile_max_hr(self.snapshot)
+        )
 
     def test_max_hr_per_category_matches_legacy(self) -> None:
         snapshot: dict[str, Any] = {
@@ -348,7 +347,7 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
             ]
         }
 
-        legacy = garmin_metrics.garmin_profile_max_hr(snapshot)
+        legacy = garmin_payload_metrics.garmin_profile_max_hr(snapshot)
         mapped = _max_hr_by_category(_map(snapshot))
 
         self.assertEqual(legacy, {"cycling": 188, "running": 194, "generic": 186})
@@ -460,7 +459,7 @@ class NamedDeviationTests(unittest.TestCase):
             ]
         }
 
-        legacy = garmin_metrics.garmin_profile_max_hr(snapshot)
+        legacy = garmin_payload_metrics.garmin_profile_max_hr(snapshot)
         result = _map(snapshot)
 
         self.assertEqual(legacy, {"cycling": 255})

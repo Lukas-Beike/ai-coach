@@ -88,8 +88,8 @@ function calendarActualActivity(entry) {
   return actual && typeof actual === "object" ? actual : null;
 }
 
-// Sports that normally record a distance; only these count as "ohne Distanz" when the distance is missing.
-const DISTANCE_SPORT_TYPES = new Set(["ride", "virtualride", "gravelride", "mountainbikeride", "emountainbikeride", "ebikeride", "run", "virtualrun", "trailrun", "walk", "hike", "swim", "openwaterswim", "nordicski", "rollerski", "rowing", "virtualrow", "canoeing", "kayaking", "standuppaddling", "snowshoe"]);
+// Canonical sports that normally record a distance; only these count as "ohne Distanz" when the distance is missing.
+const DISTANCE_SPORTS = new Set(["ride", "run", "walk", "hike", "swim", "nordic_ski", "row"]);
 
 function calendarMetricNumber(value, suffix = "") {
   if (value == null || value === "") return null;
@@ -148,7 +148,7 @@ function calendarWeekDistanceLabel(activities) {
     const distance = Number(entry.distance_m);
     return distance <= 0 || Number.isNaN(distance);
   });
-  const missing = unmeasured.filter((entry) => DISTANCE_SPORT_TYPES.has(String(entry.type || "").toLowerCase())).length;
+  const missing = unmeasured.filter((entry) => DISTANCE_SPORTS.has(String(entry.sport || "").toLowerCase())).length;
   if (!measured.length && !missing) return "–";
   const total = measured.length
     ? AppFormat.distance(measured.reduce((sum, entry) => sum + Number(entry.distance_m), 0))
@@ -382,6 +382,13 @@ function adaptiveCaption(illnessPending, count) {
   return `${count} zukünftige Entwürfe brauchen eine Anpassung.`;
 }
 
+// Completed activities carry a canonical sport and environment; planned units keep their type.
+function calendarSportType(item) {
+  if (!item || item.type || !item.sport) return item;
+  const indoor = item.sport === "ride" && ["indoor", "virtual"].includes(item.environment);
+  return { type: indoor ? "VirtualRide" : item.sport };
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
@@ -547,7 +554,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
   }
 
   function calendarPaceLabel(activity) {
-    if (activitySportLabel(activity) !== "Laufen") return null;
+    if (activitySportLabel(calendarSportType(activity)) !== "Laufen") return null;
     const duration = Number(activity?.moving_duration_s);
     const distance = Number(activity?.distance_m);
     return duration > 0 && distance > 0 ? formatPace(duration / (distance / 1000)) : null;
@@ -598,7 +605,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     appendCalendarFact(facts, "RPE", rpe != null ? `${rpe}/10` : "nicht angegeben");
     appendCalendarFact(facts, "Intensität", calendarIntensityLabel(actual.intensity));
     appendCalendarFact(facts, "Ø Puls", calendarMetricNumber(actual.avg_hr, " bpm"));
-    appendCalendarFact(facts, "Ø Leistung", calendarMetricNumber(actual.weighted_avg_power ?? actual.avg_power, " W"));
+    appendCalendarFact(facts, "Ø Leistung", calendarMetricNumber(actual.avg_power, " W"));
     appendCalendarFact(facts, "Pace", calendarPaceLabel(actual));
     appendCalendarFact(facts, "Höhenmeter", calendarMetricNumber(actual.elevation_gain_m, " hm"));
     details.append(primaryMetrics, facts);
@@ -609,7 +616,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const header = document.createElement("span");
     header.className = "planned-session-header";
     const sport = document.createElement("span");
-    sport.textContent = [activitySportLabel(displayed), actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local)].filter(Boolean).join(" · ");
+    sport.textContent = [activitySportLabel(calendarSportType(displayed)), actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local)].filter(Boolean).join(" · ");
     const duration = document.createElement("strong");
     duration.textContent = plannedEntryDurationLabel(actual, entry);
     const distance = document.createElement("span");
@@ -620,7 +627,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     metrics.className = "planned-session-metrics";
     metrics.textContent = [
       actual ? calendarMetricNumber(actual.avg_hr, " bpm") : null,
-      actual ? calendarMetricNumber(actual.avg_power ?? actual.weighted_avg_power, " W") : null,
+      actual ? calendarMetricNumber(actual.avg_power, " W") : null,
       calendarMetricNumber(displayed.training_load) != null ? `Belastung ${calendarMetricNumber(displayed.training_load)}` : null,
     ].filter(Boolean).join(" · ");
     cardSummary.append(header);
@@ -677,9 +684,9 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const meta = document.createElement("span");
     meta.className = "planned-meta";
     const displayed = actual || entry;
-    card.dataset.sport = activitySportLabel(displayed);
+    card.dataset.sport = activitySportLabel(calendarSportType(displayed));
     meta.textContent = [
-      activitySportLabel(displayed),
+      activitySportLabel(calendarSportType(displayed)),
       actual ? calendarStartTime(actual.started_at_local) : plannedUnitStartTime(entry.starts_at_local),
       plannedEntryDurationLabel(actual, entry),
     ].filter(Boolean).join(" · ");

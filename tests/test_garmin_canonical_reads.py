@@ -1,15 +1,14 @@
-"""Garmin readers on the canonical selector: equality with the legacy snapshot reads.
+"""Garmin readers on the canonical selector: the tables against the payload readers.
 
 The Garmin sections that have canonical observations are read through the injected
 selector. These tests run the real backfill over the wire fixtures, then compare the
-migrated readers with the legacy snapshot readers, first while the selector still
-serves the legacy projection and then from the tables after the canonical sections
-were removed from the stored Garmin snapshot. All storage is temporary.
+migrated readers with the payload readers, also after the canonical sections were
+removed from the stored Garmin snapshot. Before the first completed backfill the
+selector serves nothing. All storage is temporary.
 """
 
 from __future__ import annotations
 
-import copy
 import logging
 import unittest
 from datetime import UTC, date, datetime
@@ -37,12 +36,14 @@ from backend.db.garmin_store import prune_section
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance import garmin_metrics, garmin_observations
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     read_garmin_sleep_day,
     read_garmin_state,
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
+from backend.sync import garmin_payload_metrics
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
@@ -88,7 +89,7 @@ class _LegacyActivities:
 
 
 class _Battery:
-    def current(self, snapshot: Any = None) -> dict[str, Any]:
+    def current(self) -> dict[str, Any]:
         return BODY_BATTERY
 
 
@@ -113,14 +114,12 @@ class _Observations:
 class GarminReadFixture(CanonicalReadFixture):
     """Garmin services over the temporary database and the fixture selector."""
 
-    def _payload_service(self, *, canonical: bool) -> GarminPayloadService:
-        selector = make_selector(self)
+    def _payload_service(self) -> GarminPayloadService:
         return GarminPayloadService(
             self.manager,
             self.key_values,
             _LegacyActivities(self),  # type: ignore[arg-type]
             lambda: TODAY,
-            activity_rows=(lambda: selector) if canonical else None,
         )
 
     def _projection_service(self) -> GarminProjectionService:
@@ -137,7 +136,7 @@ class GarminReadFixture(CanonicalReadFixture):
         )
         return GarminProjectionService(
             config=config,
-            garmin_payload_service=self._payload_service(canonical=True),
+            garmin_payload_service=self._payload_service(),
             garmin_sync_service=_Flag(True),  # type: ignore[arg-type]
             garmin_sync_state_service=_CoreErrors(),  # type: ignore[arg-type]
             morning_body_battery_service=_Battery(),  # type: ignore[arg-type]
@@ -147,12 +146,14 @@ class GarminReadFixture(CanonicalReadFixture):
             redactor=Redactor(lambda: config),
             local_now=lambda: LOCAL_NOW,
             canonical=GarminCanonicalSources(
-                activity_rows=lambda: selector, observations=lambda: selector
+                activity_rows=lambda: selector,
+                observations=lambda: selector,
+                activity_summaries=lambda: selector,
             ),
         )
 
     def _store_snapshot(self) -> None:
-        """Store the Garmin payload without a backfill, so the selector serves legacy."""
+        """Store the Garmin payload without a backfill, so the selector serves nothing."""
         self.write(lambda db: store_garmin(self, db, self.garmin))
 
     def _strip_canonical_sections(self) -> None:
@@ -168,21 +169,25 @@ class GarminReadFixture(CanonicalReadFixture):
 
 
 class GarminStateEqualityTests(GarminReadFixture):
-    def test_table_and_legacy_observations_give_the_same_state(self) -> None:
+    def test_table_observations_give_the_payload_state(self) -> None:
         populate(self)
-        legacy = self.read(lambda db: read_garmin_state(self.projection, db))
         table = self.read(lambda db: read_garmin_state(self.table, db))
+        payload = garmin_payload_metrics.garmin_payload_performance_metrics(
+            self.garmin, TODAY
+        )
 
-        self.assertEqual(legacy, table)
         self.assertTrue(table.has_sleep)
         self.assertIsNotNone(table.metrics.weight_kg)
+        self.assertEqual(table.metrics.weight_kg, payload["weight_kg"]["value"])
 
     def test_state_has_the_flags_and_values_of_the_snapshot_sections(self) -> None:
         populate(self)
         state = self.read(lambda db: read_garmin_state(self.table, db))
-        legacy = garmin_metrics.garmin_payload_performance_metrics(self.garmin, TODAY)
+        legacy = garmin_payload_metrics.garmin_payload_performance_metrics(
+            self.garmin, TODAY
+        )
         overlay = garmin_metrics.garmin_performance_metrics(
-            self.garmin, TODAY, state.metrics
+            GarminSyncStatus.from_state(self.garmin), TODAY, state.metrics
         )
 
         for section, flag in (
@@ -209,7 +214,8 @@ class GarminStateEqualityTests(GarminReadFixture):
         self.assertIn(Sport.RIDE, before)
         self.write(
             lambda db: db.execute(
-                "UPDATE activity_sessions SET state = 'deleted' WHERE activity_id IN "
+                "UPDATE activity_sessions SET state = 'deleted', merged_into = NULL "
+                "WHERE activity_id IN "
                 "(SELECT activity_id FROM activity_records "
                 "WHERE provider = 'garmin' AND sport = 'ride')"
             )
@@ -217,15 +223,13 @@ class GarminStateEqualityTests(GarminReadFixture):
 
         self.assertNotIn(Sport.RIDE, self.read(read))
 
-    def test_sleep_day_matches_between_sources(self) -> None:
+    def test_sleep_day_matches_the_payload_section(self) -> None:
         populate(self)
-        legacy = self.read(lambda db: read_garmin_sleep_day(self.projection, db))
         table = self.read(lambda db: read_garmin_sleep_day(self.table, db))
 
         self.assertIsNotNone(table)
-        self.assertEqual(legacy, table)
         self.assertEqual(
-            garmin_observations.garmin_source_observed_at(self.garmin["sleep"]),
+            garmin_payload_metrics.garmin_source_observed_at(self.garmin["sleep"]),
             None if table is None else table.isoformat(),
         )
 
@@ -246,18 +250,20 @@ class GarminStateEqualityTests(GarminReadFixture):
 
 
 class GarminServiceEqualityTests(GarminReadFixture):
-    def test_services_are_unchanged_when_the_tables_take_over(self) -> None:
+    def test_services_read_no_table_values_until_the_backfill_completes(
+        self,
+    ) -> None:
         self._store_snapshot()
-        service = self._projection_service()
-        legacy_state = service.public_state()
-        legacy_context = service.coach_context(include_performance=True)
+        pending = self._projection_service().public_state()
+        # No Intervals.icu activity is served yet, so no Garmin copy is a duplicate.
+        self.assertEqual(pending["duplicate_activities_skipped"], 0)
 
         populate(self)
         state = self._projection_service().public_state()
-        context = self._projection_service().coach_context(include_performance=True)
 
-        self.assertEqual(state, legacy_state)
-        self.assertEqual(context["performance"], legacy_context["performance"])
+        self.assertEqual(state["duplicate_activities_skipped"], 1)
+        for key in ("has_sleep", "has_hrv", "has_resting_hr", "has_readiness"):
+            self.assertTrue(state[key], key)
 
     def test_services_are_unchanged_once_tables_serve_without_the_sections(
         self,
@@ -277,6 +283,30 @@ class GarminServiceEqualityTests(GarminReadFixture):
         for key in ("has_sleep", "has_hrv", "has_resting_hr", "has_readiness"):
             self.assertTrue(state[key], key)
         self.assertTrue(state["has_weight"])
+
+    def test_coach_recovery_comes_from_the_canonical_records(self) -> None:
+        # Canonical reads (#1416): the Coach recovery section shows the latest
+        # canonical record of each section, its values and status codes.
+        populate(self)
+        recovery = self._projection_service().coach_context()["recovery"]
+
+        self.assertEqual(recovery["body_battery"], BODY_BATTERY)
+        self.assertEqual(
+            recovery["hrv"],
+            {
+                "date": "2026-10-10",
+                "last_night_avg_ms": 61,
+                "weekly_avg_ms": 58,
+                "status": "BALANCED",
+            },
+        )
+        self.assertEqual(
+            recovery["readiness"], {"date": "2026-10-10", "score": 75, "level": "HIGH"}
+        )
+        for section in ("sleep", "resting_hr"):
+            self.assertEqual(recovery[section]["date"], "2026-10-10", section)
+        self.assertIn("sleep_seconds", recovery["sleep"])
+        self.assertIn("resting_hr_bpm", recovery["resting_hr"])
 
     def test_sections_without_observations_are_reported_missing(self) -> None:
         self.garmin = {
@@ -305,33 +335,14 @@ class GarminServiceEqualityTests(GarminReadFixture):
             for key, value in self.garmin.items()
             if key not in CANONICAL_SECTIONS
         }
-        self.garmin["hrv"] = {"weeklyAvg": 48}
+        # Canonical reads (#1416): the dated weekly average is a canonical
+        # observation; an undated weekly value no longer counts.
+        self.garmin["hrv"] = {"calendarDate": "2026-10-10", "weeklyAvg": 48}
         populate(self)
 
         state = self._projection_service().public_state()
 
         self.assertTrue(state["has_hrv"])
-
-    def test_activity_matches_are_equal_between_sources(self) -> None:
-        populate(self)
-        garmin_activities = copy.deepcopy(self.garmin["activities"])
-        legacy = self._payload_service(canonical=False)
-        migrated = self._payload_service(canonical=True)
-
-        stamp = {"synced_at": "2026-10-11T07:00:00Z"}
-        legacy_matches = legacy.prepare_fixture(
-            {"activities": garmin_activities, **stamp}
-        )["activity_matches"]
-        migrated_matches = migrated.prepare_fixture(
-            {"activities": copy.deepcopy(garmin_activities), **stamp}
-        )["activity_matches"]
-
-        self.assertEqual(migrated_matches, legacy_matches)
-        self.assertTrue(migrated_matches)
-        self.assertEqual(
-            {row["id"] for row in migrated.intervals_activities()},
-            {row["id"] for row in legacy.intervals_activities()},
-        )
 
 
 class GarminSleepReadinessTests(GarminReadFixture):
@@ -394,7 +405,7 @@ class GarminMorningCheckinTests(GarminReadFixture):
         battery = _MorningBattery()
         service = ManualMorningCheckinService(
             _MorningSync(),  # type: ignore[arg-type]
-            self._payload_service(canonical=False),
+            self._payload_service(),
             battery,  # type: ignore[arg-type]
             lambda: today,
             logging.getLogger("test-garmin-morning"),
@@ -480,7 +491,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
             (Sport.RUN, 192.0, date(2026, 10, 2)),
         )
         state = read_garmin_state(reader, object())
-        metrics = garmin_metrics.garmin_performance_metrics({}, TODAY, state.metrics)
+        metrics = garmin_metrics.garmin_performance_metrics(
+            GarminSyncStatus.from_state({}), TODAY, state.metrics
+        )
 
         cycling = metrics["cycling_max_hr_bpm"]
         self.assertEqual(cycling["value"], 186)
@@ -494,7 +507,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
             (Sport.RIDE, 199.0, date(2026, 10, 1)),
         )
         state = read_garmin_state(reader, object())
-        metrics = garmin_metrics.garmin_performance_metrics({}, TODAY, state.metrics)
+        metrics = garmin_metrics.garmin_performance_metrics(
+            GarminSyncStatus.from_state({}), TODAY, state.metrics
+        )
 
         self.assertEqual(type(reader).calls, 0)
         self.assertEqual(metrics["cycling_max_hr_bpm"]["value"], 188)
@@ -510,7 +525,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
             (Sport.RIDE, 186.0, date(2026, 10, 5)),
         )
         state = read_garmin_state(reader, object())
-        metrics = garmin_metrics.garmin_performance_metrics({}, TODAY, state.metrics)
+        metrics = garmin_metrics.garmin_performance_metrics(
+            GarminSyncStatus.from_state({}), TODAY, state.metrics
+        )
 
         self.assertEqual(metrics["running_max_hr_bpm"]["value"], 188)
         self.assertEqual(
@@ -565,8 +582,12 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
         }
         mapped = map_garmin_health(payload, zone=UTC, retrieved_at=LOCAL_NOW)
         canonical = self._metrics(list(mapped.records))
-        metrics = garmin_metrics.garmin_performance_metrics(payload, TODAY, canonical)
-        legacy = garmin_metrics.garmin_payload_performance_metrics(payload, TODAY)
+        metrics = garmin_metrics.garmin_performance_metrics(
+            GarminSyncStatus.from_state(payload), TODAY, canonical
+        )
+        legacy = garmin_payload_metrics.garmin_payload_performance_metrics(
+            payload, TODAY
+        )
 
         self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 279)
         self.assertEqual(

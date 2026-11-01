@@ -3,9 +3,11 @@ import unittest
 from datetime import UTC, date, datetime
 
 from backend.performance.garmin_observations import (
-    garmin_record_observation_date,
     garmin_sleep_observation_date,
     garmin_sleep_ready_for_checkin,
+)
+from backend.sync.garmin_payload_metrics import (
+    garmin_record_observation_date,
     garmin_source_observed_at,
 )
 

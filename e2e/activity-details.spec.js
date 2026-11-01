@@ -28,11 +28,14 @@ test("@responsive activity details preserve calendar without Coach shortcuts", a
   await expect(entry).toHaveAttribute("open", "");
   await open.click();
   await expect(dialog.getByRole("button", { name: "Feedback speichern" })).toBeVisible();
-  await dialog.getByLabel("Session-RPE (0–10)").fill("6.5");
+  const rpe = dialog.getByLabel("Session-RPE (0–10)");
+  await expect(rpe.locator("option", { hasText: "5 · Schwer" })).toHaveCount(1);
+  await rpe.selectOption("6.5");
   await dialog.getByLabel("Abweichungsgrund").fill("Heat");
   await dialog.getByLabel("Notizen").fill("Synthetic feedback");
   await dialog.getByRole("button", { name: "Feedback speichern" }).click();
   await expect(dialog.locator('[role="status"]').filter({ hasText: "Feedback gespeichert" })).toBeVisible();
+  await expect(dialog.getByText("Session-RPE-Last: 403 AU · RPE 6,5 (Athletenfeedback) × 62 min")).toBeVisible();
   await dialog.getByRole("button", { name: "Zurück zum Kalender" }).click();
   await page.reload();
   const response = await request.get("/api/activities/FixtureCase-1");
@@ -43,6 +46,14 @@ test("@responsive activity details preserve calendar without Coach shortcuts", a
   expect(payload.session.started_at_local).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
   expect(payload.activity_feedback.session_rpe).toBe(6.5);
   expect(payload.activity_feedback.notes).toBe("Synthetic feedback");
+});
+
+
+test("@responsive load tab shows the session-RPE load with its coverage", async ({ page }) => {
+  await page.goto("/#analysis/load");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const heading = page.locator("#analysisLoadCharts").getByRole("heading", { name: /^Session-RPE-Last · \d+\/\d+ bewertet/ });
+  await expect(heading).toBeVisible();
 });
 
 

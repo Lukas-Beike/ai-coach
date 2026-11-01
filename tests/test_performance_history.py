@@ -2,7 +2,7 @@ import copy
 import unittest
 from datetime import date, timedelta
 
-from backend.performance.history import append_garmin_performance_history
+from backend.sync.garmin_performance_history import append_garmin_performance_history
 
 
 def current_source(observed_at="2026-08-31"):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -84,6 +85,19 @@ class SyncStateRepository:
             return latest_snapshot(db, self._snapshot_repository)
         with self._database_manager.reader() as own:
             return latest_snapshot(own, self._snapshot_repository)
+
+    def sync_metadata(self, db: Any | None = None) -> dict[str, Any]:
+        """Return the snapshot's ``provider_sync`` status only; no section is read.
+
+        Only that member is extracted from the stored payload, inside the caller's
+        transaction when given.
+        """
+        if db is None:
+            with self._database_manager.reader() as own:
+                return self.sync_metadata(own)
+        text = self._snapshot_repository.latest_provider_sync(db)
+        value = json.loads(text) if isinstance(text, str) else None
+        return {"provider_sync": value if isinstance(value, dict) else {}}
 
     def latest_metadata(self, db: Any | None = None) -> dict[str, Any]:
         """Read the scalar markers committed with the provider snapshot."""

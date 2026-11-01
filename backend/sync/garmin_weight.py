@@ -1,24 +1,20 @@
-"""Garmin body-weight normalization and projections."""
+"""Ingest-time Garmin body-weight normalization for the performance-history merge."""
 
-import math
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.vocabulary import ProviderId
 from backend.providers import garmin_performance_fields as garmin_perf_fields
 from backend.providers.garmin_fields import (
-    GARMIN_BODY_FAT_ALIASES,
     GARMIN_WEIGHT_UNIT_ALIASES,
 )
 from backend.providers.garmin_fields import (
     first_present as _first_present,
 )
 from backend.providers.garmin_weight_walk import (
-    BODY_FAT_SKIP_KEYS,
     WALK_DATE_KEYS,
     WEIGHT_SKIP_KEYS,
     walk_records,
@@ -28,7 +24,7 @@ from backend.providers.source_labels import SourceView, provider_label
 
 UTC_OFFSET_SUFFIX = "+00:00"
 GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.BODY_HISTORY)
-# (day, value, timestamp, traversal ordinal) of one accepted weight or body-fat value.
+# (day, value, timestamp, traversal ordinal) of one accepted weight value.
 _Accepted = tuple[str | None, float, float | None, int]
 
 
@@ -165,51 +161,6 @@ def garmin_weight_daily_records(
 ) -> list[tuple[str | None, float]]:
     return _daily_records(
         _accepted_readings(snapshot, WEIGHT_SKIP_KEYS, _weight_reading)
-    )
-
-
-def _garmin_body_fat_pct(value: Any, unit: Any = None) -> float | None:
-    try:
-        number = comma_decimal_float(value)
-    except TypeError, ValueError:
-        return None
-    if not math.isfinite(number):
-        return None
-    unit_key = _garmin_key(unit) if unit else ""
-    if any(term in unit_key for term in ("fraction", "ratio")):
-        number *= 100
-    if (
-        any(term in unit_key for term in ("fraction", "ratio", "percent"))
-        or "%" in str(unit or "")
-        or not unit_key
-    ):
-        return round(number, 2) if 2 <= number <= 70 else None
-    return None
-
-
-def _body_fat_reading(record: Mapping[str, Any]) -> float | None:
-    direct = _first_present(record, GARMIN_BODY_FAT_ALIASES)
-    if direct in (None, ""):
-        return None
-    raw_value = direct
-    unit = _first_present(record, ("bodyFatUnit", "bodyFatUnitKey"))
-    if isinstance(direct, dict):
-        unit = _first_present(direct, ("unitKey", "unit", "bodyFatUnit")) or unit
-        raw_value = _first_present(direct, ("value", "val", "amount"))
-    pct = _garmin_body_fat_pct(raw_value, unit)
-    return None if pct is None else float(pct)
-
-
-def garmin_body_fat_records(snapshot: dict[str, Any]) -> list[tuple[str | None, float]]:
-    accepted = _accepted_readings(snapshot, BODY_FAT_SKIP_KEYS, _body_fat_reading)
-    return list(dict.fromkeys((day, value) for day, value, _, _ in accepted))
-
-
-def garmin_body_fat_daily_records(
-    snapshot: dict[str, Any],
-) -> list[tuple[str | None, float]]:
-    return _daily_records(
-        _accepted_readings(snapshot, BODY_FAT_SKIP_KEYS, _body_fat_reading)
     )
 
 

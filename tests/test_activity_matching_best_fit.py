@@ -2,6 +2,7 @@ import itertools
 import unittest
 
 from backend.activities.matching import match_planned_workouts
+from backend.canonical.sports import classify_sport_text
 
 DAY = "2026-09-20"
 
@@ -22,12 +23,12 @@ def _unit(unit_id, sport, minutes, load=None):
 def _activity(activity_id, sport, minutes, start="08:00:00", load=None):
     activity = {
         "id": activity_id,
-        "type": sport,
-        "start_date_local": f"{DAY}T{start}",
-        "moving_time": minutes * 60,
+        "sport": classify_sport_text(sport.casefold()).value,
+        "started_at_local": f"{DAY}T{start}",
+        "moving_duration_s": minutes * 60,
     }
     if load is not None:
-        activity["icu_training_load"] = load
+        activity["training_load"] = load
     return activity
 
 

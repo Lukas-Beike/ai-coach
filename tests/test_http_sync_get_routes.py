@@ -14,6 +14,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.http_api.activity_assembly import ActivityReadAssembly, ActivityReadSources
 from backend.http_api.sync_get import SyncGetRoutes
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 
 
 class FakeHandler:
@@ -141,7 +142,10 @@ class SyncGetRoutesTests(unittest.TestCase):
         )
         self.auth.require_auth.assert_called_once_with(self.handler)
         self.activities.detail.assert_called_once_with(
-            "CaseSensitive-1", garmin_snapshot={}, profile={}, today=date(2026, 9, 24)
+            "CaseSensitive-1",
+            garmin_status=NO_GARMIN_SYNC_STATUS,
+            profile={},
+            today=date(2026, 9, 24),
         )
         self.queue_factory.assert_not_called()
         self.assertEqual(
@@ -217,6 +221,9 @@ class _Feedback:
     def list(self, _limit: int = 100) -> list:
         return []
 
+    def for_activity_ids(self, _activity_ids: object, **_options: object) -> tuple[()]:
+        return ()
+
 
 class ActivityDetailRouteTests(unittest.TestCase):
     """Serve canonical detail documents through the production read assembly."""
@@ -234,7 +241,6 @@ class ActivityDetailRouteTests(unittest.TestCase):
         self.assembly = ActivityReadAssembly(
             lambda: self.manager,
             ActivityReadSources(
-                snapshots,
                 lambda: SnapshotActivityRows(snapshots),
                 observation_reader=NoObservations,
                 coverage=lambda: StoredCoverage(None),

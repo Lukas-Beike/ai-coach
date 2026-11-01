@@ -5,10 +5,20 @@ from contextlib import AbstractContextManager
 from datetime import date
 from typing import Any, Protocol, runtime_checkable
 
+from backend.canonical.activity_summary import ActivitySummary
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
-from backend.canonical.domain_records import SleepPeriod
+from backend.canonical.domain_records import (
+    CategoricalObservation,
+    PowerCurve,
+    SleepPeriod,
+)
 from backend.canonical.records import ActivityRecord, Observation
-from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.canonical.vocabulary import (
+    CategoricalDomain,
+    MetricKind,
+    ProviderId,
+    Sport,
+)
 
 
 class ProviderSnapshotReader(Protocol):
@@ -41,6 +51,46 @@ class ActivityReader(Protocol):
     ) -> tuple[ActivityRecord, ...]: ...
 
 
+# One canonical session: its local id and its active records of every provider.
+type SessionRecords = tuple[str, tuple[ActivityRecord, ...]]
+
+
+class ActivitySessionReader(Protocol):
+    """Reads canonical activity sessions with all their active records.
+
+    Bounds are as in ``ActivityReader``. Deleted sessions are never returned; a
+    merged duplicate's records are listed under the session it was merged into.
+    ``newest`` lets a source skip days older than at least that many newest
+    sessions; it never drops one of them.
+    """
+
+    def activity_sessions(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        newest: int | None = None,
+    ) -> tuple[SessionRecords, ...]: ...
+
+
+class ActivitySummaryReader(Protocol):
+    """Reads provider-neutral activity summaries, one per canonical session.
+
+    Newest first. Bounds are as in ``ActivityReader``; ``limit`` keeps only the
+    newest summaries. See ``backend.activities.activity_summary``.
+    """
+
+    def activity_summaries(
+        self,
+        db: Any,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        limit: int | None = None,
+    ) -> tuple[ActivitySummary, ...]: ...
+
+
 class ActivityRowReader(Protocol):
     """Reads the raw Intervals.icu activity payloads behind the canonical records.
 
@@ -61,6 +111,10 @@ class ActivityRowReader(Protocol):
         end: date | None = None,
         limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]: ...
+
+
+class ActivityRowAndSummaryReader(ActivityRowReader, ActivitySummaryReader, Protocol):
+    """Raw activity rows for provider-side reads and summaries for consumers."""
 
 
 class ObservationReader(Protocol):
@@ -97,6 +151,35 @@ class SleepPeriodReader(Protocol):
 
 
 @runtime_checkable
+class PowerCurveReader(Protocol):
+    """Reads the stored power curve: each provider's latest fetch and best efforts.
+
+    Fetches are ordered by provider and source record, points by provider and
+    duration. Only a source that stores the power curve implements it; a reader
+    without it means no power curve is available from the serving source.
+    """
+
+    def power_curve(self, db: Any) -> PowerCurve: ...
+
+
+@runtime_checkable
+class CategoricalObservationReader(Protocol):
+    """Reads canonical provider status codes of one domain by inclusive day.
+
+    Oldest first. Only a source that stores them implements it.
+    """
+
+    def categorical_observations(
+        self,
+        db: Any,
+        domain: CategoricalDomain,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> tuple[CategoricalObservation, ...]: ...
+
+
+@runtime_checkable
 class ActivityMaxHrReader(Protocol):
     """Reads each sport's highest stored activity max heart rate of one provider.
 
@@ -114,6 +197,7 @@ class CanonicalReader(
     ActivityReader,
     ActivityMaxHrReader,
     ActivityRowReader,
+    ActivitySessionReader,
     ObservationReader,
     Protocol,
 ):
@@ -160,6 +244,16 @@ class CanonicalTableServing(Protocol):
     """
 
     def serves_tables(self, db: Any) -> bool: ...
+
+
+class CanonicalReadStatus(CanonicalTableServing, Protocol):
+    """Reports the read state a consumer marks: pending, or an activity gap.
+
+    ``activities_need_refresh`` is True while a compact activity row of the stored
+    Intervals.icu snapshot has no raw counterpart; such rows never reach the tables.
+    """
+
+    def activities_need_refresh(self, db: Any) -> bool: ...
 
 
 ProviderOperation = Callable[[], AbstractContextManager[None]]

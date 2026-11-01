@@ -22,10 +22,6 @@ from backend.activities.detail_merge import (
     clock_offset,
     stream_average,
 )
-from backend.activities.detail_projection import (
-    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
-    _downsample_series,
-)
 from backend.canonical.activity_detail import (
     LAP_METRIC_FIELDS,
     ActivityLap,
@@ -36,10 +32,19 @@ from backend.canonical.activity_detail import (
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import ProviderId, StreamChannel, ZoneMetric
 from backend.db.activity_detail_store import StoredDetailSet
+from backend.providers.intervals_activity_detail_projection import (
+    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
+    _downsample_series,
+)
 
 ACTIVITY_DETAIL_CONTRACT: Final = "activity_detail.v1"
 
-_ENVELOPE_KEYS: Final = ("activity_feedback", "equipment", "activity_validation")
+_ENVELOPE_KEYS: Final = (
+    "activity_feedback",
+    "equipment",
+    "activity_validation",
+    "session_rpe_load",
+)
 _PROVIDER_ORDER: Final[tuple[ProviderId, ...]] = (
     ProviderId.INTERVALS,
     ProviderId.GARMIN,
@@ -95,7 +100,7 @@ def measured_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
     return sorted(records, key=lambda record: (_own_rank(record), *_tie_break(record)))
 
 
-def _derived_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
+def derived_order(records: Sequence[ActivityRecord]) -> list[ActivityRecord]:
     """Order records for derived values: provider rank, newest retrieval, id."""
     return sorted(records, key=_tie_break)
 
@@ -116,14 +121,15 @@ def activity_detail_contract(
     """Assemble the ``activity_detail.v1`` document of one canonical session.
 
     ``status`` adds stale, load error and coverage to each provider entry.
-    ``envelope`` adds the feedback, equipment and activity validation blocks.
+    ``envelope`` adds the feedback, equipment, activity validation and
+    session-RPE load blocks.
     ``summary_metrics`` fill metrics that no measured or derived value provides.
     ``zone`` is the athlete's zone for ``session.started_at_local``.
     """
     if not records:
         raise ValueError("records must not be empty")
     measured = measured_order(records)
-    metrics = _metrics(measured, _derived_order(records), merged)
+    metrics = _metrics(measured, derived_order(records), merged)
     for key, entry in (summary_metrics or {}).items():
         metrics.setdefault(key, dict(entry))
     document = {

@@ -35,6 +35,7 @@ METRIC_BOUNDS: Final[Mapping[MetricKind, tuple[float, float]]] = {
     MetricKind.WEIGHT: (20.0, 400.0),
     MetricKind.BODY_FAT: (1.0, 80.0),
     MetricKind.FTP: (0.0, 2_500.0),
+    MetricKind.INDOOR_FTP: (0.0, 2_500.0),
     MetricKind.THRESHOLD_HR: HEART_RATE_BOUNDS,
     MetricKind.MAX_HR: HEART_RATE_BOUNDS,
     MetricKind.RESTING_HR: HEART_RATE_BOUNDS,

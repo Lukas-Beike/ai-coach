@@ -20,10 +20,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.canonical.vocabulary import MetricKind
-from backend.performance import body, chart_history, garmin_metric_history, trends
+from backend.performance import body, chart_history, trends
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.performance.garmin_canonical import read_garmin_state
-from backend.performance.history import append_garmin_performance_history
 from backend.providers.garmin_health_mapping import map_garmin_health
+from backend.sync import garmin_metric_history
+from backend.sync.garmin_performance_history import append_garmin_performance_history
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "providers" / "garmin"
 TODAY = date(2026, 10, 11)
@@ -250,7 +252,9 @@ class PerformanceHistoryTests(unittest.TestCase):
             },
         )
         canonical_ftp = body._garmin_ftp(
-            {}, TODAY, metrics.performance_history["cycling_ftp_watts"]
+            NO_GARMIN_SYNC_STATUS,
+            TODAY,
+            metrics.performance_history["cycling_ftp_watts"],
         )
         self.assertEqual(
             {day: value[0] for day, value in canonical_ftp.items()},

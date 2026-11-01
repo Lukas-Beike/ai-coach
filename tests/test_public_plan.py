@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, Mock, patch
 
+from backend.activities.detail_store import summary_fingerprint
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 
 
@@ -43,7 +44,9 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             "adaptive": Mock(),
             "quick_actions": Mock(),
         }
-        services["sync"].latest_snapshot.return_value = snapshot
+        services["sync"].sync_metadata.return_value = {
+            "provider_sync": snapshot["provider_sync"]
+        }
         services["planned"].list.return_value = planned
         services["feedback"].attach_to_activities.side_effect = lambda rows: rows
         services["weather"].state.return_value = weather_state or {
@@ -234,3 +237,34 @@ class PublicPlanStateServiceTests(unittest.TestCase):
 
         services["manager"].read_snapshot.assert_called_once_with()
         services["manager"].unit_of_work.assert_not_called()
+
+
+class WorkoutProfileAttachmentTests(unittest.TestCase):
+    ROW: ClassVar[dict[str, Any]] = {"id": "i7", "name": "Ride", "moving_time": 3600}
+    SUMMARY: ClassVar[dict[str, Any]] = {
+        "id": "act_1",
+        "record_ids": {"intervals": "i7"},
+        "started_at_local": "2026-01-01T07:00:00",
+    }
+
+    def profiles(self, fingerprint):
+        return {"i7": {"fingerprint": fingerprint, "profile": {"zones": [1]}}}
+
+    def test_profile_attaches_under_the_stored_key_when_the_raw_row_matches(self):
+        fingerprint = summary_fingerprint(self.ROW)
+        result = PublicPlanStateService._with_profile(
+            self.SUMMARY, self.profiles(fingerprint), {"i7": fingerprint}
+        )
+        self.assertEqual(result["workout_profile"], {"zones": [1]})
+        self.assertNotIn("workout_profile", self.SUMMARY)
+
+    def test_stale_or_unverifiable_profile_is_not_attached(self):
+        stale = self.profiles("old")
+        current = {"i7": summary_fingerprint(self.ROW)}
+        for profiles, fingerprints in ((stale, current), (stale, {}), ({}, current)):
+            self.assertEqual(
+                PublicPlanStateService._with_profile(
+                    self.SUMMARY, profiles, fingerprints
+                ),
+                self.SUMMARY,
+            )

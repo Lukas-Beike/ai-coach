@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import unittest
-from copy import deepcopy
 
 from backend.activities.duplicates import (
     deduplicate_api_records,
-    filter_garmin_activities,
+)
+from backend.sync.garmin_activity_duplicates import (
     garmin_activity_duplicates_intervals,
     intervals_cycling_activities_match,
 )
@@ -176,87 +176,6 @@ class GarminDuplicateTests(unittest.TestCase):
             movingTime=3600,
         )
         self.assertTrue(garmin_activity_duplicates_intervals(garmin, [_intervals()]))
-
-    def test_filter_keeps_dict_entries_and_counts_only_removed_duplicates(self):
-        activities = [
-            _garmin(),
-            "not-an-activity",
-            _garmin(activityId="other", distance=1),
-        ]
-        original = deepcopy(activities)
-        kept, removed = filter_garmin_activities(activities, [_intervals()])
-        self.assertEqual(
-            kept,
-            [
-                {
-                    "activityId": "other",
-                    "activityType": "cycling",
-                    "startTimeLocal": "2026-08-29T07:05:00",
-                    "duration": 3600,
-                    "distance": 1,
-                }
-            ],
-        )
-        self.assertEqual(removed, 1)
-        self.assertEqual(activities, original)
-
-    def test_filter_compares_only_starts_in_the_window_with_the_pairwise_result(self):
-        intervals = [
-            _intervals(id="late", start_date_local="2026-08-29T08:10:00"),
-            _intervals(
-                id="alias", start_date_local=None, start_date="2026-08-29T10:00:00Z"
-            ),
-            _intervals(id="no-start", start_date_local="not-a-date"),
-            _intervals(id="edge", start_date_local="2026-08-29T12:00:00"),
-            _intervals(id="run", type="Run", start_date_local="2026-08-29T14:00:00"),
-        ]
-        activities = [
-            _garmin(activityId=f"g-{minute}", startTimeLocal=start)
-            for minute, start in enumerate(
-                (
-                    "2026-08-29T07:39:59",
-                    "2026-08-29T07:40:00",
-                    "2026-08-29T08:40:00",
-                    "2026-08-29T08:40:01",
-                    "2026-08-29T10:20:00",
-                    "2026-08-29T11:30:00",
-                    "2026-08-29T12:30:00",
-                    "2026-08-29T12:30:00.000001",
-                    "2026-08-29T14:00:00",
-                    "not-a-date",
-                )
-            )
-        ]
-        expected = [
-            item
-            for item in activities
-            if not garmin_activity_duplicates_intervals(item, intervals)
-        ]
-
-        kept, removed = filter_garmin_activities(activities, intervals)
-
-        self.assertEqual(kept, expected)
-        self.assertEqual(
-            [item["activityId"] for item in kept],
-            ["g-0", "g-3", "g-7", "g-8", "g-9"],
-        )
-        self.assertEqual(removed, 5)
-
-    def test_filter_clamps_the_window_at_the_datetime_limits(self):
-        intervals = [
-            _intervals(id="first", start_date_local="0001-01-01T00:10:00"),
-            _intervals(id="last", start_date_local="9999-12-31T23:40:00"),
-        ]
-        activities = [
-            _garmin(activityId="g-first", startTimeLocal="0001-01-01T00:00:00"),
-            _garmin(activityId="g-last", startTimeLocal="9999-12-31T23:59:59"),
-            _garmin(activityId="g-kept", startTimeLocal="2026-08-29T07:00:00"),
-        ]
-
-        kept, removed = filter_garmin_activities(activities, intervals)
-
-        self.assertEqual([item["activityId"] for item in kept], ["g-kept"])
-        self.assertEqual(removed, 2)
 
 
 class IntervalsCyclingMatchTests(unittest.TestCase):

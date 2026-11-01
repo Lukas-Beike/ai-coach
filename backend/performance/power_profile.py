@@ -23,11 +23,7 @@ def power_profile(
     }
     streams = activity.get("streams") or {}
     times, watts = streams.get("time") or [], streams.get("watts") or []
-    if (
-        activity.get("type") not in {"Ride", "VirtualRide"}
-        or len(times) < 2
-        or len(times) != len(watts)
-    ):
+    if activity.get("sport") != "ride" or len(times) < 2 or len(times) != len(watts):
         return {
             **base,
             "status": "insufficient_data",
@@ -65,7 +61,7 @@ def running_profile(
         "source": f"{source_label} original speed/distance streams",
         "scope": "Beobachtete Laufbelastungen; Lücken und Pausen bleiben unbekannt.",
     }
-    if activity.get("type") not in {"Run", "VirtualRun", "TrailRun"}:
+    if activity.get("sport") != "run":
         return {
             **base,
             "status": "insufficient_data",

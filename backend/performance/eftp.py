@@ -1,37 +1,24 @@
 """Thirty-day cycling eFTP aggregation."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
-from backend.athlete.local_date import iso_date_prefix
+from backend.activities.activity_summary import summary_local_date
 from backend.performance import activity_validation
-from backend.providers import intervals_performance_fields as intervals_perf_fields
-from backend.providers.garmin_fields import first_present as _first_present
 
 
 def _activity_eftp_value(activity: Any, cutoff: date, anchor: date) -> float | None:
-    if not isinstance(activity, dict):
+    if not isinstance(activity, dict) or activity.get("sport") != "ride":
         return None
     try:
-        activity_date = date.fromisoformat(
-            iso_date_prefix(str(activity.get("start_date_local") or ""))
-        )
-    except TypeError, ValueError:
+        activity_date = date.fromisoformat(summary_local_date(activity))
+    except ValueError:
         return None
     if not cutoff <= activity_date <= anchor:
         return None
-    raw_type = str(
-        _first_present(
-            activity, ("type", "sport", "sport_type", "activity_type", "name")
-        )
-        or ""
-    ).casefold()
-    if not any(term in raw_type for term in ("ride", "rad", "bike", "cycling")):
-        return None
     value = activity_validation.bounded_performance_metric(
-        "cycling_eftp_watts",
-        _first_present(activity, intervals_perf_fields.ESTIMATED_FTP_ALIASES),
+        "cycling_eftp_watts", activity.get("eftp_w")
     )
     return float(value) if value is not None else None
 
@@ -46,24 +33,24 @@ def eftp_30_day_average(
 
 def eftp_daily_values(
     eftp_by_day: Mapping[date, float] | None,
-    activities: list[Any],
+    activities: Sequence[Any],
     start: date,
     end: date,
 ) -> dict[str, float]:
-    """Prefer the canonical wellness-day eFTP, else the day's latest cycling activity.
+    """Prefer the canonical wellness-day eFTP, else the day's latest ride summary.
 
     ``eftp_by_day`` holds the ride eFTP observations of Intervals.icu wellness days.
     Each day contributes at most one value, so a same-day wellness and activity
     eFTP are not both counted.
     """
     observations: dict[str, float] = {}
-    activity_rows = [row for row in activities if isinstance(row, dict)]
+    summaries = [row for row in activities if isinstance(row, dict)]
     for activity in sorted(
-        activity_rows, key=lambda row: str(row.get("start_date_local") or "")
+        summaries, key=lambda row: str(row.get("started_at_local") or "")
     ):
         value = _activity_eftp_value(activity, start, end)
         if value is not None:
-            observations[iso_date_prefix(str(activity["start_date_local"]))] = value
+            observations[summary_local_date(activity)] = value
     for day, raw in (eftp_by_day or {}).items():
         if not start <= day <= end:
             continue

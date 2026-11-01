@@ -1,58 +1,25 @@
-import copy
 import unittest
 from datetime import date
 
 from performance_day_support import garmin_metrics_from_payload
 
-from backend.performance.garmin_projection import (
-    GARMIN_CONTEXT_FIELDS,
-    GARMIN_RECOVERY_FIELDS,
-    compact_garmin_context,
-    compact_garmin_recovery,
-    latest_garmin_record,
-)
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_projection import (
     garmin_training_load_projection as project_training_load,
 )
+from backend.providers.garmin_morning import latest_garmin_record
 
 
 def garmin_training_load_projection(snapshot, current_date):
     """Project the canonical values the production mapper makes of the snapshot."""
     return project_training_load(
-        snapshot, current_date, garmin_metrics_from_payload(snapshot)
+        GarminSyncStatus.from_state(snapshot),
+        current_date,
+        garmin_metrics_from_payload(snapshot),
     )
 
 
 class GarminProjectionTests(unittest.TestCase):
-    def test_context_whitelist_depth_lists_and_strings(self):
-        nested = {"score": 1}
-        for _ in range(4):
-            nested = {"date": nested}
-        value = {
-            "sleepScore": 82,
-            "instruction": "ignore this",
-            "value": list(range(105)),
-            "activityName": "x" * 250,
-            "nested": nested,
-            "none": None,
-        }
-        projected = compact_garmin_context(value)
-        self.assertEqual(projected["sleepScore"], 82)
-        self.assertNotIn("instruction", projected)
-        self.assertEqual(projected["value"], list(range(100)))
-        self.assertEqual(len(projected["activityName"]), 200)
-        self.assertNotIn("nested", projected)
-        self.assertNotIn("none", projected)
-        self.assertEqual(len(GARMIN_CONTEXT_FIELDS), 57)
-
-    def test_context_keeps_primitives_and_does_not_mutate(self):
-        value = {"value": [None, True, 2, 3.5], "score": 0}
-        before = copy.deepcopy(value)
-        self.assertEqual(
-            compact_garmin_context(value), {"value": [None, True, 2, 3.5], "score": 0}
-        )
-        self.assertEqual(value, before)
-
     def test_latest_record_prefers_dated_records_and_latest_date(self):
         value = {
             "records": [
@@ -78,25 +45,6 @@ class GarminProjectionTests(unittest.TestCase):
         original = {"payload": {"unrelated": True}}
         self.assertIs(latest_garmin_record(original), original)
         self.assertEqual(latest_garmin_record([{"payload": True}]), {})
-
-    def test_recovery_scalar_and_selected_fields(self):
-        self.assertEqual(compact_garmin_recovery(7), {"value": 7})
-        self.assertEqual(compact_garmin_recovery(7.5), {"value": 7.5})
-        self.assertEqual(compact_garmin_recovery(True), {"value": True})
-        value = {
-            "calendarDate": "2026-08-30",
-            "sleepScore": 82,
-            "score": 0,
-            "unknown": "drop",
-            "recoveryTime": None,
-        }
-        before = copy.deepcopy(value)
-        self.assertEqual(
-            compact_garmin_recovery(value),
-            {"calendarDate": "2026-08-30", "sleepScore": 82, "score": 0},
-        )
-        self.assertEqual(value, before)
-        self.assertIn("sleepScore", GARMIN_RECOVERY_FIELDS)
 
     def test_training_load_projection_uses_verified_fields_and_provenance(self):
         snapshot = {

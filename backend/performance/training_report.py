@@ -2,120 +2,49 @@
 
 from __future__ import annotations
 
-from bisect import bisect_left, bisect_right
 from collections import defaultdict
-from collections.abc import Sequence
-from datetime import date, datetime, timedelta
+from collections.abc import Mapping, Sequence
+from datetime import date, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from backend.activities.duplicates import (
-    deduplicate_api_records,
-    intervals_cycling_activities_match,
+from backend.activities.activity_summary import (
+    ActivitySummary,
+    stored_activity_key,
+    summary_local_date,
 )
-from backend.activities.identity import activity_datetime
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.vocabulary import RecordingOrigin
-from backend.providers import intervals_performance_fields as intervals_perf_fields
-from backend.providers.intervals_activity_fields import (
-    intervals_activity_device_source,
-    intervals_activity_recorded_by_wahoo,
+from backend.performance.session_rpe_load import session_rpe_load
+from backend.providers.intervals_performance_fields import (
+    TRAINING_LOAD as PLANNED_LOAD_KEY,
 )
 
 METHOD = "local-training-report-v1"
+_SUMMARY_METRICS = ("moving_duration_s", "distance_m", "training_load")
 
 
-def deduplicated_rows(rows: Sequence[Any]) -> tuple[list[dict[str, Any]], int]:
-    """Drop duplicate rows and Garmin rows that a matching Wahoo row duplicates.
-
-    Returns the kept rows and how many rows were dropped.
-    """
-    unique = [
-        row for row in deduplicate_api_records(list(rows)) if isinstance(row, dict)
-    ]
-    wahoo = [row for row in unique if intervals_activity_recorded_by_wahoo(row)]
-    indexed = sorted(
-        (started, index)
-        for index, row in enumerate(wahoo)
-        if (
-            started := activity_datetime(
-                row.get("start_date_local") or row.get("start_date")
-            )
-        )
-        is not None
-    )
-    starts = [started for started, _ in indexed]
-    window = timedelta(minutes=30)
-
-    def matches_wahoo(row: dict[str, Any]) -> bool:
-        started = activity_datetime(
-            row.get("start_date_local") or row.get("start_date")
-        )
-        if started is None:
-            return False
-        minimum = datetime.min.replace(tzinfo=started.tzinfo)
-        maximum = datetime.max.replace(tzinfo=started.tzinfo)
-        low = bisect_left(
-            starts,
-            started - window if started >= minimum + window else minimum,
-        )
-        high = bisect_right(
-            starts,
-            started + window if started <= maximum - window else maximum,
-        )
-        return any(
-            intervals_cycling_activities_match(wahoo[index], row)
-            for _, index in indexed[low:high]
-        )
-
-    kept = [
-        row
-        for row in unique
-        if not (
-            intervals_activity_device_source(row) == RecordingOrigin.GARMIN
-            and matches_wahoo(row)
-        )
-    ]
-    return kept, len(unique) - len(kept)
+def _planned_day(row: Mapping[str, Any]) -> str:
+    return iso_date_prefix(str(row.get("starts_at_local") or row.get("date") or ""))
 
 
-def activity_day(row: dict[str, Any], timezone: str = "UTC") -> str:
-    absolute = row.get("start_date")
-    if absolute:
-        try:
-            started = datetime.fromisoformat(str(absolute))
-            if started.tzinfo is not None:
-                return started.astimezone(ZoneInfo(timezone)).date().isoformat()
-        except ValueError, ZoneInfoNotFoundError:
-            pass
-    # Activities keep their stored start; planned rows name it starts_at_local.
-    return iso_date_prefix(
-        str(
-            row.get("start_date_local")
-            or row.get("starts_at_local")
-            or row.get("date")
-            or ""
-        )
-    )
+def _metric(rows: Sequence[Mapping[str, Any]], key: str) -> dict[str, Any]:
+    measured = [value for row in rows if (value := number(row.get(key))) is not None]
+    return {
+        "value": round(sum(measured), 2) if measured else None,
+        "measured_sessions": len(measured),
+        "total_sessions": len(rows),
+    }
 
 
-def _totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {"sessions": len(rows)}
-    for key in ("moving_time", "distance", intervals_perf_fields.TRAINING_LOAD):
-        measured = [
-            value for row in rows if (value := number(row.get(key))) is not None
-        ]
-        result[key] = {
-            "value": round(sum(measured), 2) if measured else None,
-            "measured_sessions": len(measured),
-            "total_sessions": len(rows),
-        }
+def _totals(summaries: Sequence[ActivitySummary]) -> dict[str, Any]:
+    result: dict[str, Any] = {"sessions": len(summaries)}
+    for key in _SUMMARY_METRICS:
+        result[key] = _metric(summaries, key)
     return result
 
 
 def _weekly_load_history(
-    rows: list[dict[str, Any]], today: date, timezone: str
+    summaries: Sequence[ActivitySummary], today: date, timezone: str
 ) -> list[dict[str, Any]]:
     monday = today - timedelta(days=today.weekday())
     weeks = []
@@ -123,10 +52,10 @@ def _weekly_load_history(
         start = monday - timedelta(weeks=offset)
         end = start + timedelta(days=6)
         activities = [
-            row
-            for row in rows
+            summary
+            for summary in summaries
             if start.isoformat()
-            <= activity_day(row, timezone)
+            <= summary_local_date(summary, timezone)
             <= min(end, today).isoformat()
         ]
         weeks.append(
@@ -134,38 +63,48 @@ def _weekly_load_history(
                 "start": start.isoformat(),
                 "end": end.isoformat(),
                 "partial_period": end >= today,
-                "training_load": _totals(activities)[
-                    intervals_perf_fields.TRAINING_LOAD
-                ],
+                "training_load": _totals(activities)["training_load"],
             }
         )
     return weeks
 
 
 def _cumulative_load(
-    rows: list[dict[str, Any]], day: date, timezone: str
+    summaries: Sequence[ActivitySummary], day: date, timezone: str
 ) -> dict[str, Any]:
     metric = _totals(
-        [row for row in rows if activity_day(row, timezone) <= day.isoformat()]
-    )[intervals_perf_fields.TRAINING_LOAD]
+        [
+            summary
+            for summary in summaries
+            if summary_local_date(summary, timezone) <= day.isoformat()
+        ]
+    )["training_load"]
     if not metric["total_sessions"]:
         metric["value"] = 0
     return metric
 
 
-def zone_distribution(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def zone_distribution(summaries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     reports = []
-    for sport in sorted({str(row.get("type") or "Unknown") for row in rows}):
-        if sport in {"WeightTraining", "StrengthTraining"}:
+    for sport in sorted({_sport(summary) for summary in summaries}):
+        if sport == "strength":
             continue
-        sport_rows = [row for row in rows if str(row.get("type") or "Unknown") == sport]
-        duration = sum(number(row.get("moving_time")) or 0 for row in sport_rows)
+        sport_rows = [summary for summary in summaries if _sport(summary) == sport]
+        duration = sum(number(row.get("moving_duration_s")) or 0 for row in sport_rows)
         for key, sensor in (
-            (intervals_perf_fields.ZONE_TIMES, "power"),
-            (intervals_perf_fields.HEART_RATE_ZONE_TIMES, "heart_rate"),
+            ("power_zone_times", "power"),
+            ("heart_rate_zone_times", "heart_rate"),
             ("pace_zone_times", "pace"),
         ):
-            zones, measured_sessions = _sensor_zones(sport_rows, key, sensor)
+            zones, measured_sessions = _sensor_zones(sport_rows, key)
+            sources = sorted(
+                {
+                    str(label)
+                    for row in sport_rows
+                    if _valid_zones(row.get(key))
+                    and (label := (row.get("sources") or {}).get(key))
+                }
+            )
             if zones:
                 reports.append(
                     {
@@ -176,7 +115,7 @@ def zone_distribution(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         "training_seconds": duration,
                         "measured_sessions": measured_sessions,
                         "total_sessions": len(sport_rows),
-                        "source": "Intervals.icu",
+                        "source": ", ".join(sources),
                         "method": "Provider zones recorded for each activity; no recalculation using current thresholds",
                     }
                 )
@@ -193,36 +132,45 @@ def training_report(
     checkins: list[dict[str, Any]] | None = None,
     activity_feedback: list[dict[str, Any]] | None = None,
     timezone: str = "UTC",
-    activity_rows: Sequence[Any],
+    activity_summaries: Sequence[ActivitySummary],
     observed_at: str | None = None,
+    session_feedback: Mapping[str, Mapping[str, Any]] | None = None,
+    computed_at: str | None = None,
 ) -> dict[str, Any]:
-    """Build the report from the raw rows of the activity reader.
+    """Build the report from the activity summaries, one per canonical session.
 
-    ``observed_at`` is the sync time of those rows (canonical coverage).
+    ``sport`` is ``"all"`` or a canonical sport. ``observed_at`` is the sync time
+    of the summaries (canonical coverage). ``session_feedback`` maps a summary's
+    stored key to its session's effective feedback for the session-RPE load.
     """
-    rows, duplicates = deduplicated_rows(activity_rows)
     end = start + timedelta(days=days - 1)
     effective_end = min(today, end)
-    eligible = [row for row in rows if sport == "all" or str(row.get("type")) == sport]
+    eligible = [
+        summary
+        for summary in activity_summaries
+        if sport == "all" or _sport(summary) == sport
+    ]
     current = [
-        row
-        for row in eligible
-        if start.isoformat() <= activity_day(row, timezone) <= effective_end.isoformat()
+        summary
+        for summary in eligible
+        if start.isoformat()
+        <= summary_local_date(summary, timezone)
+        <= effective_end.isoformat()
     ]
     previous_start = start - timedelta(days=days)
     previous = [
-        row
-        for row in eligible
-        if previous_start.isoformat() <= activity_day(row, timezone) < start.isoformat()
+        summary
+        for summary in eligible
+        if previous_start.isoformat()
+        <= summary_local_date(summary, timezone)
+        < start.isoformat()
     ]
-    sports = _sport_totals(current)
-    refs = _key_sessions(current, timezone)
     planned = [
         row
         for row in (plan or {}).get("training_calendar", [])
         if not row.get("is_completed_activity")
-        and start.isoformat() <= activity_day(row) <= effective_end.isoformat()
-        and (sport == "all" or str(row.get("type") or row.get("sport")) == sport)
+        and start.isoformat() <= _planned_day(row) <= effective_end.isoformat()
+        and (sport == "all" or str(row.get("sport")) == sport)
     ]
     feedback = [
         row
@@ -248,15 +196,22 @@ def training_report(
             "end": (start - timedelta(days=1)).isoformat(),
             "totals": _totals(previous),
         },
-        "sports": sports,
+        "sports": _sport_totals(current),
         "weekly_load": _weekly_load_history(eligible, today, timezone),
         "daily": [
             _daily_report(current, start + timedelta(days=offset), today, timezone)
             for offset in range(days)
         ],
         "zones": zone_distribution(current),
-        "key_sessions": refs,
-        "excluded_duplicates": duplicates,
+        "session_rpe_load": session_rpe_load(
+            current,
+            session_feedback or {},
+            start=start,
+            end=effective_end,
+            timezone=timezone,
+            computed_at=computed_at,
+        ),
+        "key_sessions": _key_sessions(current, timezone),
         "planning": {
             "available": plan is not None,
             "sessions": len(planned),
@@ -267,7 +222,7 @@ def training_report(
             "missed": sum(
                 row.get("compliance", {}).get("status") == "missed" for row in planned
             ),
-            "load": _totals(planned)[intervals_perf_fields.TRAINING_LOAD],
+            "load": _metric(planned, PLANNED_LOAD_KEY),
         },
         "checkins": [
             {
@@ -280,49 +235,45 @@ def training_report(
         ],
         "activity_feedback": [
             {
-                "activity_id": str(activity["id"]),
-                "date": activity_day(activity, timezone),
-                "name": str(activity.get("name") or "Training")[:200],
+                "activity_id": summary["id"],
+                "date": summary_local_date(summary, timezone),
+                "name": str(summary.get("name") or "Training")[:200],
                 "notes": str(item.get("notes") or "")[:500],
                 "session_rpe": item.get("session_rpe"),
                 "deviation_reason": str(item.get("deviation_reason") or "")[:500],
             }
-            for activity in current
+            for summary in current
             for item in (activity_feedback or [])
-            if str(item.get("activity_id")) == str(activity.get("id"))
+            if str(item.get("activity_id")) == stored_activity_key(summary)
         ][:100],
         "coverage_note": "Summen enthalten nur bekannte lokale Einträge. Fehlende Belastungen bleiben unbekannt; ein leerer Tag belegt keine Ruhe oder Trainingspause. Die laufende Woche ist nicht mit einer abgeschlossenen Vorwoche vergleichbar.",
     }
 
 
-def _valid_zones(values: Any, sensor: str) -> list[dict]:
+def _sport(summary: Mapping[str, Any]) -> str:
+    return str(summary.get("sport") or "other")
+
+
+def _valid_zones(values: Any) -> list[dict]:
     if not isinstance(values, list):
         return []
-    normalized = [
-        {"id": f"Z{index + 1}", "secs": value}
-        if sensor == "heart_rate" and number(value) is not None
-        else value
-        for index, value in enumerate(values)
-    ]
-    valid = [
+    return [
         value
-        for value in normalized
+        for value in values
         if isinstance(value, dict)
         and number(value.get("secs")) is not None
         and float(value["secs"]) >= 0
         and str(value.get("id", "")).startswith("Z")
     ]
 
-    return valid
-
 
 def _sensor_zones(
-    sport_rows: list[dict], key: str, sensor: str
+    sport_rows: Sequence[Mapping[str, Any]], key: str
 ) -> tuple[dict[str, float], int]:
     zones: dict[str, float] = defaultdict(float)
     measured_sessions = 0
     for row in sport_rows:
-        valid = _valid_zones(row.get(key), sensor)
+        valid = _valid_zones(row.get(key))
         if valid:
             measured_sessions += 1
             for value in valid:
@@ -331,55 +282,55 @@ def _sensor_zones(
     return zones, measured_sessions
 
 
-def _sport_totals(rows: list[dict]) -> dict[str, Any]:
-    sports = {
-        name: _totals(
-            [row for row in rows if str(row.get("type") or "Unknown") == name]
-        )
-        for name in sorted({str(row.get("type") or "Unknown") for row in rows})
+def _sport_totals(summaries: Sequence[ActivitySummary]) -> dict[str, Any]:
+    return {
+        name: _totals([summary for summary in summaries if _sport(summary) == name])
+        for name in sorted({_sport(summary) for summary in summaries})
     }
 
-    return sports
 
-
-def _key_sessions(current: list[dict], timezone: str) -> list[dict]:
-    refs = [
+def _key_sessions(
+    current: Sequence[ActivitySummary], timezone: str
+) -> list[dict[str, Any]]:
+    return [
         {
-            "activity_id": str(row.get("id") or ""),
-            "name": str(row.get("name") or "Training")[:200],
-            "date": activity_day(row, timezone),
-            "sport": row.get("type"),
-            "training_load": number(row.get(intervals_perf_fields.TRAINING_LOAD)),
+            "activity_id": summary["id"],
+            "name": str(summary.get("name") or "Training")[:200],
+            "date": summary_local_date(summary, timezone),
+            "sport": _sport(summary),
+            "training_load": number(summary.get("training_load")),
         }
-        for row in sorted(
+        for summary in sorted(
             current,
-            key=lambda row: number(row.get(intervals_perf_fields.TRAINING_LOAD)) or -1,
+            key=lambda summary: number(summary.get("training_load")) or -1,
             reverse=True,
         )[:3]
     ]
 
-    return refs
-
 
 def _daily_report(
-    rows: list[dict], day: date, today: date, timezone: str
+    summaries: Sequence[ActivitySummary], day: date, today: date, timezone: str
 ) -> dict[str, Any]:
-    activities = [row for row in rows if activity_day(row, timezone) == day.isoformat()]
+    activities = [
+        summary
+        for summary in summaries
+        if summary_local_date(summary, timezone) == day.isoformat()
+    ]
     cumulative = {"value": None, "measured_sessions": 0, "total_sessions": 0}
     if day <= today:
-        cumulative = _cumulative_load(rows, day, timezone)
+        cumulative = _cumulative_load(summaries, day, timezone)
     return {
         "date": day.isoformat(),
         "future": day > today,
         "cumulative_training_load": cumulative,
         "activities": [
             {
-                "activity_id": str(row.get("id") or ""),
-                "name": str(row.get("name") or "Training")[:200],
-                "sport": str(row.get("type") or "Unknown"),
-                "training_load": number(row.get(intervals_perf_fields.TRAINING_LOAD)),
+                "activity_id": summary["id"],
+                "name": str(summary.get("name") or "Training")[:200],
+                "sport": _sport(summary),
+                "training_load": number(summary.get("training_load")),
             }
-            for row in activities
+            for summary in activities
         ],
         "totals": _totals(activities),
         "sports": _sport_totals(activities),

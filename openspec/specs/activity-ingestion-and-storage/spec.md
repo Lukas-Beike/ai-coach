@@ -238,14 +238,14 @@ Detailed contract: The manifest key `snapshot_synced_at` is kept for contract st
 Evidence: `backend/activities/duplicate_inspection.py:DuplicateInspector.latest`, `backend/activities/canonical_sessions.py` (Wahoo/Garmin ride rule), `tests/test_sync_snapshot_storage.py:LegacyStateDuplicateTests`; `tests/test_activity_duplicates.py:WahooGarminDuplicateTests` (raw-row rule being ported), `tests/test_coach_tool_coverage.py:test_duplicate_inspection_returns_preview_without_deleting_provider_data`. Missing evidence (planned in this change): detection from canonical records with an absent snapshot, token change on refetch, and parity of sport and duration handling.
 
 ### Requirement: Garmin status compares against canonical Intervals rows
-The system SHALL compute the Garmin status counts `activities` and `duplicate_activities_skipped` by comparing the raw Garmin payload activities with the canonical Intervals.icu activity rows only.
+The system SHALL compute the Garmin status counts `activities` and `duplicate_activities_skipped` from the canonical sessions of the recent window only: a session with a Garmin Connect record counts as an activity, or as a skipped duplicate when an Intervals.icu record shares the session; a Garmin copy beside a Wahoo record alone stays an activity.
 
 #### Scenario: Canonical source
 - **WHEN** the Garmin public state is built
-- **THEN** the Intervals.icu rows come from the canonical row port and the stored snapshot is not read for activities.
+- **THEN** the counts come from the canonical activity summaries and neither the stored snapshot nor the raw Garmin view is read for activities.
 
 #### Scenario: No Intervals rows
-- **WHEN** the canonical row port holds no Intervals.icu activities
+- **WHEN** no session bundles a Garmin record with an Intervals.icu record
 - **THEN** no Garmin activity is skipped as a duplicate.
 
-Evidence: `backend/sync/garmin_projection_service.py:GarminProjectionService._canonical_read`, `backend/activities/duplicates.py:filter_garmin_activities`; `tests/test_garmin_canonical_reads.py`, `tests/test_sync_garmin_projection_service.py:test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors`. Missing evidence (planned in this change): construction without canonical sources is rejected and no snapshot activity fallback remains.
+Evidence: `backend/sync/garmin_projection_service.py:GarminProjectionService._canonical_read`, `backend/sync/garmin_projection_service.py:_garmin_sessions`; `tests/test_garmin_canonical_reads.py`, `tests/test_sync_garmin_projection_service.py:test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors`, `tests/test_sync_garmin_projection_service.py:test_duplicates_are_counted_against_the_canonical_sessions_only`. Missing evidence (planned in this change): construction without canonical sources is rejected and no snapshot activity fallback remains.

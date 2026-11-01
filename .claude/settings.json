@@ -1,6 +1,12 @@
 {
   "effortLevel": "medium",
   "permissions": {
+    "allow": [
+      "mcp__graphify-local__graph_query",
+      "mcp__graphify-local__graph_node",
+      "mcp__graphify-local__graph_path",
+      "mcp__graphify-local__graph_stats"
+    ],
     "deny": [
       "Read(//**/.env)",
       "Read(//**/.env.local)",

@@ -24,6 +24,7 @@ from backend.coach import context as coach_context
 from backend.coach import limits as coach_limits
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.performance.context import current_performance_context
+from backend.performance.freshness import GarminSyncStatus
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import (
     adaptive_preview_service,
@@ -684,14 +685,14 @@ class ServerPlanningTests(ServerTestCase):
         activities = [
             {
                 "id": "activity-1",
-                "paired_event_id": "event-done",
-                "type": "Ride",
+                "planned_event_id": "event-done",
+                "sport": "ride",
                 "name": "Tempo gefahren",
-                "start_date_local": f"{today.isoformat()}T07:00:00",
-                "moving_time": 3300,
-                "distance": 25000,
-                "icu_training_load": 40,
-                "icu_rpe": 6,
+                "started_at_local": f"{today.isoformat()}T07:00:00",
+                "moving_duration_s": 3300,
+                "distance_m": 25000,
+                "training_load": 40,
+                "rpe": 6,
                 "private_note": "must stay out of calendar",
             }
         ]
@@ -707,9 +708,9 @@ class ServerPlanningTests(ServerTestCase):
 
         self.assertEqual(enriched[0]["compliance"]["status"], "completed")
         self.assertEqual(enriched[0]["compliance"]["percentage"], 80)
-        self.assertEqual(enriched[0]["compliance"]["actual_activity"]["icu_rpe"], 6)
+        self.assertEqual(enriched[0]["compliance"]["actual_activity"]["rpe"], 6)
         self.assertEqual(
-            enriched[0]["compliance"]["actual_activity"]["icu_training_load"], 40
+            enriched[0]["compliance"]["actual_activity"]["training_load"], 40
         )
         self.assertNotIn("private_note", enriched[0]["compliance"]["actual_activity"])
         self.assertEqual(enriched[1]["compliance"]["status"], "missed")
@@ -753,8 +754,8 @@ class ServerPlanningTests(ServerTestCase):
         }
         duration_activity = {
             "id": "done",
-            "start_date_local": today.isoformat(),
-            "moving_time": 2700,
+            "started_at_local": today.isoformat(),
+            "moving_duration_s": 2700,
         }
         duration = activity_calendar_projection.workout_compliance(
             duration_event, duration_activity, today
@@ -782,9 +783,9 @@ class ServerPlanningTests(ServerTestCase):
             [
                 {
                     "id": "activity-1",
-                    "type": "Run",
-                    "start_date_local": f"{today}T08:00:00",
-                    "moving_time": 1500,
+                    "sport": "run",
+                    "started_at_local": f"{today}T08:00:00",
+                    "moving_duration_s": 1500,
                 }
             ],
             date.fromisoformat(today),
@@ -3443,8 +3444,7 @@ class ServerPlanningTests(ServerTestCase):
             "recent_activities": [],
         }
         comparisons = current_performance_context(
-            snapshot,
-            read_garmin(),
+            GarminSyncStatus.from_state(read_garmin()),
             server.ATHLETE_DATA.profile().get(),
             today,
             canonical=canonical_from_snapshot(snapshot, today),

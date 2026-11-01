@@ -14,7 +14,7 @@ from typing import Any
 
 from canonical_recovery_support import mapped_personal_recovery, mapped_recovery_inputs
 
-from backend.performance.planning_recovery import planning_recovery_by_date
+from backend.performance.planning_recovery import planning_recovery_view
 from backend.performance.recovery_context import performance_recovery_context
 
 TODAY = date(2026, 5, 4)
@@ -64,6 +64,23 @@ def _context(
 ) -> dict[str, Any]:
     """Run the recovery context on the observations the raw fixtures map to."""
     return performance_recovery_context(mapped_recovery_inputs(garmin, rows), TODAY)
+
+
+class _NoObservations:
+    def observations(self, db: Any, kind: Any, **kwargs: Any) -> tuple[()]:
+        return ()
+
+
+def _battery(history: Any, morning: Any) -> dict[str, Any]:
+    """Run the planning view with body battery input only."""
+    return planning_recovery_view(
+        _NoObservations(),
+        None,
+        start=TODAY - timedelta(days=7),
+        end=TODAY,
+        morning_battery_history=history,
+        morning_body_battery=morning,
+    )
 
 
 class RecoveryContextPrecedenceTests(unittest.TestCase):
@@ -292,81 +309,9 @@ class RecoveryContextPrecedenceTests(unittest.TestCase):
         self.assertEqual(garmin_only["readiness_average"], 60.0)
 
 
-class PlanningRecoveryPrecedenceTests(unittest.TestCase):
-    def test_garmin_overwrites_intervals_sleep_and_resting_hr_without_bounds(
-        self,
-    ) -> None:
-        # Quirk: planning applies no plausibility bounds to Garmin overwrites,
-        # unlike the performance recovery context and personal baselines.
-        wellness = [
-            _wellness_row("2026-05-04", sleepSecs=25_200, sleepScore=70, restingHR=55)
-        ]
-        garmin = {
-            "sleep": [
-                _garmin_record("2026-05-04", sleepTimeSeconds=90_000, sleepScore=150)
-            ],
-            "resting_hr": [_garmin_record("2026-05-04", restingHeartRate=15)],
-        }
-
-        day = planning_recovery_by_date(wellness, garmin, {}, None)["2026-05-04"]
-
-        self.assertEqual(day["sleep_hours"], 25.0)
-        self.assertEqual(day["sleep_score"], 150)
-        self.assertEqual(day["resting_hr"], 15)
-        self.assertEqual(
-            day["sources"],
-            {"sleep_hours": GARMIN, "sleep_score": GARMIN, "resting_hr": GARMIN},
-        )
-
-    def test_garmin_zero_sleep_seconds_overwrites_intervals_sleep_hours(self) -> None:
-        # Quirk: zero seconds are not treated as missing, so they overwrite.
-        wellness = [_wellness_row("2026-05-04", sleepSecs=25_200)]
-        garmin = {"sleep": [_garmin_record("2026-05-04", sleepTimeSeconds=0)]}
-
-        day = planning_recovery_by_date(wellness, garmin, {}, None)["2026-05-04"]
-
-        self.assertEqual(day["sleep_hours"], 0.0)
-        self.assertEqual(day["sources"]["sleep_hours"], GARMIN)
-
-    def test_garmin_sleep_hours_text_takes_precedence_over_seconds(self) -> None:
-        garmin = {
-            "sleep": [
-                _garmin_record("2026-05-04", sleep_hours="7,5", sleepTimeSeconds=28_800)
-            ]
-        }
-
-        day = planning_recovery_by_date([], garmin, {}, None)["2026-05-04"]
-
-        self.assertEqual(day["sleep_hours"], 7.5)
-
-    def test_readiness_only_fills_days_without_an_intervals_value(self) -> None:
-        wellness = [
-            _wellness_row("2026-05-04", readiness=80),
-            _wellness_row("2026-05-05"),
-        ]
-        garmin = {
-            "readiness": [
-                _garmin_record("2026-05-04", score=65),
-                _garmin_record("2026-05-05", score=61),
-                _garmin_record("2026-05-06", score=58),
-            ]
-        }
-
-        result = planning_recovery_by_date(wellness, garmin, {}, None)
-
-        self.assertEqual(result["2026-05-04"]["readiness"], 80)
-        self.assertEqual(result["2026-05-04"]["sources"]["readiness"], INTERVALS)
-        self.assertEqual(result["2026-05-05"]["readiness"], 61)
-        self.assertEqual(result["2026-05-05"]["sources"]["readiness"], GARMIN)
-        self.assertEqual(result["2026-05-06"]["readiness"], 58)
-        self.assertEqual(result["2026-05-06"]["sources"]["readiness"], GARMIN)
-
-    def test_intervals_day_without_metrics_is_kept_as_empty_entry(self) -> None:
-        # Quirk: a dated row with no usable metric still creates an empty day.
-        result = planning_recovery_by_date([_wellness_row("2026-05-06")], {}, {}, None)
-
-        self.assertEqual(result, {"2026-05-06": {}})
-
+class PlanningBodyBatteryPrecedenceTests(unittest.TestCase):
+    # Sleep, HRV, resting HR and readiness precedence of the planning view is
+    # the canonical daily source rule; see test_planning_canonical_recovery.
     def test_saved_battery_keeps_raw_values_and_ready_morning_overrides(self) -> None:
         # Quirk: saved history values keep their raw type ("72" stays a string).
         history = {"2026-05-02": "72", "2026-05-03": 70, "2026-05-04": "n/a"}
@@ -376,7 +321,7 @@ class PlanningRecoveryPrecedenceTests(unittest.TestCase):
             "morning": {"value": 66},
         }
 
-        result = planning_recovery_by_date([], {}, history, morning)
+        result = _battery(history, morning)
 
         self.assertEqual(result["2026-05-02"]["body_battery"], "72")
         self.assertEqual(result["2026-05-03"]["body_battery"], 70)
@@ -392,7 +337,7 @@ class PlanningRecoveryPrecedenceTests(unittest.TestCase):
             "morning": {"value": "n/a"},
         }
 
-        result = planning_recovery_by_date([], {}, {"2026-05-04": 70}, morning)
+        result = _battery({"2026-05-04": 70}, morning)
 
         self.assertEqual(result["2026-05-04"]["body_battery"], "n/a")
 
@@ -409,7 +354,7 @@ class PlanningRecoveryPrecedenceTests(unittest.TestCase):
         )
         for morning in incomplete:
             with self.subTest(morning=morning):
-                result = planning_recovery_by_date([], {}, history, morning)
+                result = _battery(history, morning)
 
                 self.assertEqual(result["2026-05-04"]["body_battery"], 70)
 

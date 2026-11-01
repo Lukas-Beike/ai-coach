@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 from canonical_recovery_support import mapped_recovery_inputs
 from performance_day_support import current_days, latest_day, snapshot_metrics
 
+from backend.activities.activity_summary import activity_summaries
 from backend.activities.identity import activity_kind
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.mapping import IssueReason, MappingResult
@@ -34,12 +35,12 @@ from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.load import activity_rollup
 from backend.performance.load_context import performance_load_context
 from backend.performance.recovery_context import performance_recovery_context
-from backend.planning.context import compact_snapshot
 from backend.providers.intervals_activity_mapping import map_intervals_activities
 from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
+from backend.sync.intervals_compaction import compact_snapshot
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "providers" / "intervals"
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -217,6 +218,17 @@ def expect_value(
     return value
 
 
+def summaries(rows: object) -> tuple[Any, ...]:
+    """Neutral summaries of mapped rows, one session per record."""
+    return activity_summaries(
+        (
+            (f"act_{record.activity_id}", [record])
+            for record in map_activities(rows).records
+        ),
+        BERLIN,
+    )
+
+
 def records_by_id(result: MappingResult[ActivityRecord]) -> dict[str, ActivityRecord]:
     return {record.activity_id: record for record in result.records}
 
@@ -263,7 +275,7 @@ class ActivityParityTests(unittest.TestCase):
 
     def test_rollup_totals_match_the_mapped_records(self) -> None:
         records = map_activities(self.compact).records
-        rollup = activity_rollup(self.compact, 400, ROLLUP_END)
+        rollup = activity_rollup(list(summaries(self.compact)), 400, ROLLUP_END)
         self.assertEqual(rollup["sessions"], len(records))
         self.assertEqual(
             rollup["duration_hours"],
@@ -352,7 +364,7 @@ class ActivityParityTests(unittest.TestCase):
     # Known deviations, named so that each one stays visible.
 
     def test_start_precedence_prefers_the_exact_instant(self) -> None:
-        # Deviation: the legacy readers bucket days by start_date_local, while the
+        # Deviation: the legacy readers bucketed days by start_date_local, while the
         # mapper uses an aware start_date when one is sent. The rows are deliberately
         # inconsistent so that the two readings differ.
         row = {
@@ -363,8 +375,10 @@ class ActivityParityTests(unittest.TestCase):
         }
         record = records_by_id(map_activities([row]))["syn-act-903"]
         self.assertEqual(record.started_at, datetime(2026, 9, 30, 12, 0, tzinfo=UTC))
-        self.assertEqual(activity_rollup([row], 1, date(2026, 10, 7))["sessions"], 1)
-        self.assertEqual(activity_rollup([row], 1, date(2026, 9, 30))["sessions"], 0)
+        # The summaries carry the exact instant's wall time, so the rollup follows it.
+        found = list(summaries([row]))
+        self.assertEqual(activity_rollup(found, 1, date(2026, 10, 7))["sessions"], 0)
+        self.assertEqual(activity_rollup(found, 1, date(2026, 9, 30))["sessions"], 1)
 
     def test_type_table_wins_over_name_text_where_legacy_text_order_differs(
         self,
@@ -388,9 +402,8 @@ class ActivityParityTests(unittest.TestCase):
                 self.assertEqual(activity_kind(row), legacy_family)
                 self.assertNotEqual(legacy_activity_family(sport), legacy_family)
 
-    def test_elapsed_time_fills_duration_where_the_rollup_counts_zero(self) -> None:
-        # Deviation: the mapper follows activity_validation and falls back to
-        # elapsed_time, but the load rollup reads moving_time only.
+    def test_elapsed_time_fills_the_rollup_duration(self) -> None:
+        # The summaries keep the elapsed time apart, and the rollup falls back to it.
         row = {
             "id": "syn-act-905",
             "start_date_local": "2026-10-07T06:30:00",
@@ -399,9 +412,9 @@ class ActivityParityTests(unittest.TestCase):
         }
         record = records_by_id(map_activities([row]))["syn-act-905"]
         self.assertEqual(record.duration_s, 1800)
-        rollup = activity_rollup([row], 7, date(2026, 10, 10))
+        rollup = activity_rollup(list(summaries([row])), 7, date(2026, 10, 10))
         self.assertEqual(rollup["sessions"], 1)
-        self.assertEqual(rollup["duration_hours"], 0.0)
+        self.assertEqual(rollup["duration_hours"], 0.5)
 
 
 class WellnessParityTests(unittest.TestCase):

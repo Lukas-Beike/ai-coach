@@ -1,9 +1,8 @@
 """Personal recovery distributions, separated by provider and measurement method.
 
 The comparisons and sleep goal shortfalls read the daily canonical observations of
-each provider. Sleep timing variability reads the canonical sleep periods when the
-serving source stores them (#1419) and otherwise the stored provider sleep and
-wellness records, through the same interval reader.
+each provider. Sleep timing variability reads the canonical sleep periods only
+(#1419, #1416); without them it has no data.
 """
 
 import math
@@ -15,7 +14,7 @@ from typing import Any, Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.canonical.domain_records import SleepPeriod
-from backend.canonical.sleep_bounds import bounds_fields, sleep_intervals
+from backend.canonical.sleep_bounds import bounds_fields
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.canonical_recovery import CanonicalRecoveryInputs
 from backend.performance.display_sources import preferred_providers
@@ -67,17 +66,12 @@ def _number(value: Any) -> float | None:
 
 
 def personal_recovery(
-    wellness: list[dict[str, Any]],
-    garmin: dict[str, Any],
     profile: dict[str, Any],
     today: date,
     *,
     canonical: CanonicalRecoveryInputs | None = None,
 ) -> dict[str, Any]:
-    """Return comparisons, shortfalls and timing variability from ``canonical``.
-
-    ``wellness`` and ``garmin`` feed only the sleep timing variability (#1419).
-    """
+    """Return comparisons, shortfalls and timing variability from ``canonical``."""
     cutoff = (today - timedelta(days=42)).isoformat()
     history_start = (today - timedelta(days=83)).isoformat()
     current_day = today.isoformat()
@@ -99,8 +93,6 @@ def personal_recovery(
         target = float("nan")
     deficits = _sleep_deficits(groups, target, today)
     regularity = sleep_timing_variability(
-        wellness,
-        garmin,
         str(profile.get("timezone") or "UTC"),
         today,
         periods=None if canonical is None else canonical.sleep_periods,
@@ -223,8 +215,6 @@ def _sleep_deficits(
 
 
 def sleep_timing_variability(
-    wellness: list[dict[str, Any]],
-    garmin: dict[str, Any],
     timezone_name: str,
     today: date,
     *,
@@ -235,30 +225,18 @@ def sleep_timing_variability(
     Compares onset and wake with the athlete's own earlier nights; this is not the
     Sleep Regularity Index.
 
-    ``periods`` are the canonical sleep periods when the serving source stores
-    them; they replace the walk over the legacy rows. Both read the same
-    intervals (``backend.canonical.sleep_bounds``), keep each provider and field
-    pair apart, date an interval by its end in the profile zone and keep the
-    latest interval of a day.
+    ``periods`` are the canonical sleep periods; None means the serving source
+    stores none, and there is no data. Each provider and field pair is kept
+    apart, an interval is dated by its end in the profile zone and the latest
+    interval of a day is kept.
     """
     try:
         zone: tzinfo = ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError, ValueError:
         zone = UTC
     groups: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
-    if periods is not None:
-        for source, item in _period_items(periods, zone, today):
-            groups.setdefault((source, item["method"]), {})[item["date"]] = item
-    else:
-        for row in wellness:
-            for item in _sleep_intervals(row, zone, today):
-                groups.setdefault(("Intervals.icu", item["method"]), {})[
-                    item["date"]
-                ] = item
-        for item in _sleep_intervals(garmin.get("sleep"), zone, today):
-            groups.setdefault(("Garmin Connect", item["method"]), {})[item["date"]] = (
-                item
-            )
+    for source, item in _period_items(periods or (), zone, today):
+        groups.setdefault((source, item["method"]), {})[item["date"]] = item
     series = []
     for (source, method), records in sorted(groups.items()):
         series.append(_sleep_series(source, method, records, today))
@@ -320,21 +298,6 @@ def _interval_item(
         "onset_minutes_local": local_start.hour * 60 + local_start.minute,
         "wake_minutes_local": local_end.hour * 60 + local_end.minute,
     }
-
-
-def _sleep_intervals(payload: Any, zone: tzinfo, today: date) -> list[dict[str, Any]]:
-    result: dict[tuple[str, str], dict[str, Any]] = {}
-    for interval in sleep_intervals(payload):
-        item = _interval_item(
-            interval.start,
-            interval.end,
-            f"{interval.start_field}/{interval.end_field}",
-            zone,
-            today,
-        )
-        if item is not None:
-            result[(interval.start.isoformat(), interval.end.isoformat())] = item
-    return list(result.values())
 
 
 def _period_items(

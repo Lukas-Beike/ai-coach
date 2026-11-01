@@ -14,11 +14,11 @@ from canonical_detail_support import (
     seed_intervals_activity,
 )
 
-from backend.activities.detail_projection import _downsample_series
 from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.vocabulary import LapKind
 from backend.db.activity_detail_store import detail_sets_for
 from backend.db.repositories import KeyValueRepository
+from backend.providers.intervals_activity_detail_projection import _downsample_series
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync import activity_detail_retirement
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter

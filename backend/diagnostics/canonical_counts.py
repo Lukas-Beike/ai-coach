@@ -9,11 +9,8 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.planning.compact_activities import (
-    RECENT_ACTIVITY_LIMIT,
-    compact_activity_rows,
-)
-from backend.runtime.ports import ActivityRowReader, ObservationReader
+from backend.planning.compact_activities import RECENT_ACTIVITY_LIMIT
+from backend.runtime.ports import ActivitySummaryReader, ObservationReader
 
 # The snapshot kept a bounded recent wellness list; count the same recent window.
 _WELLNESS_WINDOW_DAYS: Final = 91
@@ -33,13 +30,11 @@ _WELLNESS_DAY_KINDS: Final = (
 )
 
 
-def activity_count(reader: ActivityRowReader | None, db: Any) -> int:
-    """Return how many compact recent activities the canonical source serves."""
+def activity_count(reader: ActivitySummaryReader | None, db: Any) -> int:
+    """Return how many recent activity summaries the canonical source serves."""
     if reader is None:
         return 0
-    return len(
-        compact_activity_rows(reader.activity_rows(db, limit=RECENT_ACTIVITY_LIMIT))
-    )
+    return len(reader.activity_summaries(db, limit=RECENT_ACTIVITY_LIMIT))
 
 
 def wellness_day_count(reader: ObservationReader | None, db: Any, today: date) -> int:

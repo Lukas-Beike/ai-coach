@@ -20,6 +20,7 @@ from backend.performance.canonical_body import (
     CanonicalBodyInputs,
 )
 from backend.performance.display_sources import preferred_providers
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.wellness_days import WellnessDay
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -66,17 +67,11 @@ def _bounded_body_fat(value: Any) -> float | None:
     return round(number, 2) if number is not None and lower <= number <= upper else None
 
 
-def _sync_timestamp(payload: dict[str, Any], source: str) -> Any:
-    freshness = payload.get("source_freshness")
-    details = freshness.get(source) if isinstance(freshness, dict) else None
-    if isinstance(details, dict):
-        return (
-            details.get("fetched_at")
-            or details.get("synced_at")
-            or payload.get("synced_at")
-            or payload.get("fetched_at")
-        )
-    return payload.get("synced_at") or payload.get("fetched_at")
+def _sync_timestamp(status: GarminSyncStatus, source: str) -> Any:
+    details = status.source_freshness.get(source)
+    if details is not None:
+        return details.get("fetched_at") or details.get("synced_at") or status.synced_at
+    return status.synced_at
 
 
 def _intervals_measurements(
@@ -108,7 +103,7 @@ def _intervals_measurements(
 
 
 def _garmin_ftp(
-    garmin: dict[str, Any], today: date, history: Mapping[date, float]
+    garmin: GarminSyncStatus, today: date, history: Mapping[date, float]
 ) -> dict[date, tuple[float, str, Any]]:
     """Garmin's cycling FTP per day from the canonical history."""
     synced_at = _sync_timestamp(garmin, "cycling_ftp_history")
@@ -255,13 +250,13 @@ def _stamped(
 
 
 def body_history(
-    snapshot: dict[str, Any] | None,
-    garmin: dict[str, Any] | None,
+    intervals_synced_at: str | None,
+    garmin: GarminSyncStatus,
     today: date,
     *,
     canonical: CanonicalBodyInputs,
     wellness_days: Sequence[WellnessDay],
-    activity_rows: Sequence[dict[str, Any]],
+    activities: Sequence[Mapping[str, Any]],
     garmin_ftp: Mapping[date, float],
     eftp_by_day: Mapping[date, float] | None = None,
 ) -> dict[str, Any]:
@@ -273,10 +268,9 @@ def body_history(
 
     Wellness measurements come solely from canonical days, Garmin weight, body fat
     and FTP solely from canonical observations, and activity eFTP from the canonical
-    activity rows. The stored views supply only sync times.
+    activity summaries. ``intervals_synced_at`` (the canonical Intervals.icu
+    sync time) and the Garmin sync status supply only sync times.
     """
-    snapshot = snapshot if isinstance(snapshot, dict) else {}
-    garmin = garmin if isinstance(garmin, dict) else {}
     intervals = _intervals_measurements(today, wellness_days)
     garmin_synced_at = _sync_timestamp(garmin, "weight")
     garmin_values = {
@@ -290,7 +284,7 @@ def body_history(
     intervals_ftp: dict[date, tuple[float, str, Any]] = {}
     for observed_at, value in eftp.eftp_daily_values(
         eftp_by_day,
-        list(activity_rows),
+        list(activities),
         today - timedelta(days=83),
         today,
     ).items():
@@ -299,7 +293,7 @@ def body_history(
             intervals_ftp[observed] = (
                 value,
                 observed.isoformat(),
-                snapshot.get("synced_at"),
+                intervals_synced_at,
             )
     ftp: dict[ProviderId, dict[date, tuple[float, str, Any]]] = {
         ProviderId.GARMIN: _garmin_ftp(garmin, today, garmin_ftp),

@@ -31,17 +31,21 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
         }
         result = activity_performance_validation(
             [
-                {"id": "old", "type": "Run", "start_date_local": "2026-09-14T08:00:00"},
+                {
+                    "id": "old",
+                    "sport": "run",
+                    "started_at_local": "2026-09-14T08:00:00",
+                },
                 {
                     "id": "run-b",
-                    "type": "Run",
+                    "sport": "run",
                     "name": "Tempo",
-                    "start_date_local": "2026-09-15T08:00:00",
-                    "moving_time": 3600,
-                    "average_speed": 3.2,
-                    "average_heartrate": 166,
+                    "started_at_local": "2026-09-15T08:00:00",
+                    "moving_duration_s": 3600,
+                    "avg_speed_mps": 3.2,
+                    "avg_hr": 166,
                 },
-                {"id": "no-date", "type": "Run"},
+                {"id": "no-date", "sport": "run"},
             ],
             metrics,
             {
@@ -65,13 +69,13 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
             [
                 {
                     "id": "ride",
-                    "type": "Ride",
-                    "start_date_local": "2026-09-15T08:00:00",
-                    "moving_time": 3600,
-                    "average_watts": 200,
+                    "sport": "ride",
+                    "started_at_local": "2026-09-15T08:00:00",
+                    "moving_duration_s": 3600,
+                    "avg_power": 200,
                     "normalized_power": 270,
-                    "icu_intensity": 0.9,
-                    "icu_ftp": 300,
+                    "intensity": 0.9,
+                    "ftp_w": 300,
                 }
             ],
             {
@@ -103,11 +107,17 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
 
     def test_unknown_sport_and_no_activity_are_explicit(self):
         unknown = activity_performance_validation(
-            [{"id": "hike", "type": "Hike", "start_date_local": "2026-09-15T08:00:00"}],
+            [
+                {
+                    "id": "hike",
+                    "sport": "hike",
+                    "started_at_local": "2026-09-15T08:00:00",
+                }
+            ],
             {"running_vo2max_ml_kg_min": {"value": 55}},
             {},
         )
-        self.assertEqual(unknown["activity"]["sport"], "Hike")
+        self.assertEqual(unknown["activity"]["sport"], "Wandern")
         self.assertEqual(unknown["provider_references"], [])
         self.assertEqual(
             activity_performance_validation([], {}, {}),
@@ -117,8 +127,8 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
                 "scope": "Keine abgeschlossene Einheit mit verwertbarem Zeitstempel vorhanden.",
             },
         )
-        self.assertEqual(activity_sport({"type": "Swim"}), "Schwimmen")
-        self.assertEqual(activity_sport({"type": "Strength"}), "Krafttraining")
+        self.assertEqual(activity_sport({"sport": "swim"}), "Schwimmen")
+        self.assertEqual(activity_sport({"sport": "strength"}), "Krafttraining")
 
     def test_bounds_reject_nested_and_oversized_values(self):
         self.assertEqual(bounded_activity_metric(10, 1, 10), 10)
@@ -133,26 +143,26 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
         self.assertIsNone(
             bounded_performance_metric("cycling_ftp_watts", {"value": 300})
         )
-        self.assertIsNone(activity_pace_seconds_per_km({"pace": [300]}))
+        self.assertIsNone(activity_pace_seconds_per_km({"pace_mps": [300]}))
         self.assertEqual(
             activity_direct_estimates(
-                {"ftp": 300, "eFTP": [300], "vo2max": {"value": 60}}
+                {"ftp_w": 300, "eftp_w": [300], "vo2max": {"value": 60}}
             ),
-            {"activity_ftp_watts": 300},
+            {"activity_configured_ftp_watts": 300},
         )
 
     def test_latest_timestamp_uses_id_tiebreak_and_inputs_are_not_mutated(self):
         activities = [
             {
                 "id": "same-a",
-                "type": "Ride",
-                "start_date_local": "2026-09-15T08:00:00",
+                "sport": "ride",
+                "started_at_local": "2026-09-15T08:00:00",
                 "normalized_power": 250,
             },
             {
                 "id": "same-b",
-                "type": "Ride",
-                "start_date_local": "2026-09-15T08:00:00",
+                "sport": "ride",
+                "started_at_local": "2026-09-15T08:00:00",
                 "normalized_power": 270,
             },
         ]

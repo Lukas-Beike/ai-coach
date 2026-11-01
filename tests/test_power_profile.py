@@ -8,7 +8,7 @@ class PowerProfileTests(unittest.TestCase):
         watts = [200] * 2001
         watts[777:782] = [900] * 5
         result = power_profile(
-            {"type": "Ride", "streams": {"time": list(range(2001)), "watts": watts}}
+            {"sport": "ride", "streams": {"time": list(range(2001)), "watts": watts}}
         )
         self.assertEqual(900, result["points"][0]["watts"])
         self.assertAlmostEqual(
@@ -17,11 +17,11 @@ class PowerProfileTests(unittest.TestCase):
 
     def test_irregular_sample_intervals_are_weighted_and_zero_is_measured(self):
         result = power_profile(
-            {"type": "Ride", "streams": {"time": [0, 1, 5], "watts": [100, 200, 200]}}
+            {"sport": "ride", "streams": {"time": [0, 1, 5], "watts": [100, 200, 200]}}
         )
         self.assertEqual(180, result["points"][0]["watts"])
         zero = power_profile(
-            {"type": "Ride", "streams": {"time": [0, 5], "watts": [0, 0]}}
+            {"sport": "ride", "streams": {"time": [0, 5], "watts": [0, 0]}}
         )
         self.assertEqual(0, zero["points"][0]["watts"])
 
@@ -33,13 +33,13 @@ class PowerProfileTests(unittest.TestCase):
         ):
             self.assertEqual(
                 "insufficient_data",
-                power_profile({"type": "Ride", "streams": streams})["status"],
+                power_profile({"sport": "ride", "streams": streams})["status"],
             )
 
     def test_duration_curve_and_running_efforts_keep_unknown_gaps(self):
         result = power_profile(
             {
-                "type": "Ride",
+                "sport": "ride",
                 "streams": {"time": list(range(3601)), "watts": [250] * 3601},
             }
         )
@@ -54,17 +54,17 @@ class PowerProfileTests(unittest.TestCase):
             "moving": [1] * len(times),
         }
         streams["distance"][400] = None
-        running = running_profile({"type": "Run", "streams": streams})
+        running = running_profile({"sport": "run", "streams": streams})
         self.assertEqual("unknown", running["distance"][1]["status"])
 
     def test_source_label_names_the_stream_provider(self):
-        ride = {"type": "Ride", "streams": {"time": [0, 5], "watts": [200, 200]}}
+        ride = {"sport": "ride", "streams": {"time": [0, 5], "watts": [200, 200]}}
         self.assertEqual(
             "Wahoo original watts stream",
             power_profile(ride, source_label="Wahoo")["source"],
         )
         run = {
-            "type": "Run",
+            "sport": "run",
             "streams": {"time": [0, 1], "velocity_smooth": [3, 3], "distance": [0, 3]},
         }
         self.assertEqual(

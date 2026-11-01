@@ -2,14 +2,17 @@ import copy
 import unittest
 from datetime import date
 
+from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.garmin_metrics import (
     GARMIN_PERFORMANCE_SOURCE,
     garmin_bounded_metric,
-    garmin_duration_seconds,
-    garmin_payload_performance_metrics,
     garmin_performance_context,
     garmin_performance_metrics,
+)
+from backend.sync.garmin_payload_metrics import (
+    garmin_duration_seconds,
+    garmin_payload_performance_metrics,
     garmin_profile_max_hr,
 )
 
@@ -64,11 +67,13 @@ class GarminMetricHelperTests(unittest.TestCase):
 class GarminPerformanceMetricTests(unittest.TestCase):
     def test_context_projects_normalized_metrics_without_raw_payload(self):
         result = garmin_performance_context(
-            {
-                "weight": {"calendarDate": "2026-09-07", "weight": 72},
-                "cycling_ftp": {"functionalThresholdPower": 302},
-                "race_predictions": {"5k": 1320},
-            },
+            GarminSyncStatus.from_state(
+                {
+                    "weight": {"calendarDate": "2026-09-07", "weight": 72},
+                    "cycling_ftp": {"functionalThresholdPower": 302},
+                    "race_predictions": {"5k": 1320},
+                }
+            ),
             CURRENT_DATE,
             GarminCanonicalMetrics(
                 weight_kg=72,
@@ -268,7 +273,7 @@ class GarminPerformanceMetricTests(unittest.TestCase):
 
     def test_current_date_is_required(self):
         with self.assertRaises(TypeError):
-            garmin_performance_metrics({})  # type: ignore[call-arg]
+            garmin_performance_metrics(GarminSyncStatus.from_state({}))  # type: ignore[call-arg]
 
 
 if __name__ == "__main__":

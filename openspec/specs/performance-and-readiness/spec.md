@@ -65,11 +65,11 @@ The system SHALL calculate explicit current/previous 7- and 30-day completed-act
 Evidence: `backend/performance/load.py:activity_rollup`, `backend/performance/load.py:actual_atl_series`, `backend/performance/load_context.py:performance_load_context`, `backend/performance/garmin_load.py:acute_load_value`; `tests/test_performance_load.py:test_actual_atl_decays_across_missing_days_and_is_sorted`, `tests/test_performance_chart_history.py:test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load`, `tests/test_performance_chart_history.py:test_acute_load_rejects_invalid_and_conflicting_device_values`. The form scenarios are verified by `tests/test_performance_canonical_load_metrics.py:FormTests`, `tests/test_performance_load_context.py:test_form_and_ramp_rate_come_from_the_canonical_inputs` and `tests/test_characterization_load_focus.py:test_carrier_form_fields_are_not_read_without_canonical_inputs`.
 
 ### Requirement: Training reports retain coverage and actual execution
-The system SHALL build local period reports from deduplicated canonical activity rows using athlete-local dates, exclude future completed data, and expose measured-session coverage for duration, distance, and load. Reports SHALL include supported period comparisons, daily/cumulative load, eight calendar weeks of load, sports, key sessions, feedback, and plan-execution context with a common period. Unknown values SHALL stay unknown while valid zero load remains measured.
+The system SHALL build local period reports from the neutral activity summaries, one per canonical session, using athlete-local dates, exclude future completed data, and expose measured-session coverage for duration, distance, and load. Reports SHALL include supported period comparisons, daily/cumulative load, eight calendar weeks of load, sports, key sessions, feedback, and plan-execution context with a common period. Unknown values SHALL stay unknown while valid zero load remains measured.
 
 #### Scenario: Partial current week
 - **WHEN** a report includes the current calendar week with measured, zero, and missing load rows
-- **THEN** it reports the partial period and measured/total-session counts, deduplicates copies, and includes valid zero contributions.
+- **THEN** it reports the partial period and measured/total-session counts, counts each session once across providers, and includes valid zero contributions.
 
 #### Scenario: Timezone boundary or future record
 - **WHEN** an absolute start crosses an athlete-local midnight or an activity is dated in the future
@@ -77,11 +77,15 @@ The system SHALL build local period reports from deduplicated canonical activity
 
 #### Scenario: Report without snapshot rows
 - **WHEN** a report is requested and the stored snapshot holds no activity rows
-- **THEN** the report is built from the canonical activity rows and its `observed_at` comes from canonical coverage, null when none is stored.
+- **THEN** the report is built from the canonical activity summaries and its `observed_at` comes from canonical coverage, null when none is stored.
 
-Detailed contract: The report `observed_at` SHALL be the Intervals.icu activity fetch time of the canonical provider coverage, or null when none is stored.
+#### Scenario: Garmin-only session
+- **WHEN** a session in the period has only a Garmin Connect record with a Garmin training load
+- **THEN** it counts as a session with its duration and distance but adds no training load.
 
-Evidence: `backend/performance/training_report.py:training_report`, `backend/performance/training_report.py:activity_day`, `backend/performance/report_service.py:TrainingReportReadService`; `tests/test_training_report.py:test_eight_week_load_totals_keep_missing_zero_duplicates_and_boundaries`, `tests/test_training_report.py:test_sport_filter_and_plan_execution_use_the_same_period`, `tests/test_training_report.py:test_timezone_boundary_and_future_records_are_handled_without_provider_reads`. Missing evidence (planned in this change): report, observation list, tag impact and focus tests with an empty snapshot, and `observed_at` from coverage.
+Detailed contract: The report `observed_at` SHALL be the Intervals.icu activity fetch time of the canonical provider coverage, or null when none is stored. Totals are named `moving_duration_s`, `distance_m` and `training_load`; `sports` and sport filters use canonical sports (`ride`, `run`, ...).
+
+Evidence: `backend/performance/training_report.py:training_report`; `tests/test_training_report.py`.
 
 ### Requirement: Training focus and recorded sensor zones
 The system SHALL summarize the supported 28-day training focus from recorded heart-rate and power zones and Garmin activity training-effect categories with source freshness and classification coverage. Heart-rate and power zones SHALL remain separate and bounded by session coverage. Unknown categories, missing identities/load, and unsupported strength classification SHALL remain unclassified rather than becoming assumed endurance training.
@@ -93,6 +97,10 @@ The system SHALL summarize the supported 28-day training focus from recorded hea
 #### Scenario: Sensor or category gap
 - **WHEN** a session has only one sensor's zone times or lacks a supported category
 - **THEN** that sensor remains separate and missing category evidence increases unknown coverage rather than being inferred from another sensor.
+
+#### Scenario: Categories from canonical sessions
+- **WHEN** the training focus is composed
+- **THEN** the categories come only from the canonical activity summaries: each session with a Garmin Connect record in the window counts once, dated in the profile zone like the zone distribution and classified by its `training_effect_label` and `training_effect_load` (Garmin activity mapper version 8; at ingest and at re-projection the stored, accumulated dedicated training-load row of the activity is merged in, the same payload's rows winning, so the values do not depend on which sections a sync fetched); the Garmin sync status supplies only the category freshness and whether dedicated training-load rows are stored, and the raw Garmin view is not read.
 
 Evidence: `backend/performance/training_focus.py:training_focus`, `backend/performance/training_report.py:zone_distribution`; `tests/test_training_focus.py:test_recorded_hr_and_power_zones_remain_separate_and_bounded`, `tests/test_training_focus.py:test_activity_without_identity_is_not_classified_from_its_category`, `tests/test_training_report.py:test_sensor_zones_stay_separate_and_strength_is_not_classified_as_endurance`.
 
@@ -121,11 +129,15 @@ The system SHALL provide bounded dated performance and provider-metric histories
 
 #### Scenario: History, charts and comparisons read canonical inputs only
 - **WHEN** the analysis charts, the Garmin load, training-load projection and Garmin 30-day comparisons (including weight) are composed
-- **THEN** they read the canonical activity rows and the canonical Garmin day history only (the weight trend uses the body history's per-day Garmin weights); the stored Garmin view and Intervals snapshot supply sync times, the power curve and a cached provider chart's fetch outcome (stale, failed or unsupported; never its points), and without canonical inputs (`EMPTY_PERFORMANCE_INPUTS`) every such value is unknown.
+- **THEN** they read the canonical activity rows and the canonical Garmin day history only (the weight trend uses the body history's per-day Garmin weights); the Garmin sync status supplies Garmin sync times and a cached provider chart's fetch outcome (stale, failed or unsupported; never its points), the canonical Intervals.icu sync instant the Intervals.icu sync time, and without canonical inputs (`EMPTY_PERFORMANCE_INPUTS`) every such value is unknown.
+
+#### Scenario: Power profile reads the canonical power curve
+- **WHEN** the analysis cycling power profile is composed
+- **THEN** its best power per duration, the day and activity of each best effort, the fetch window, fetch status and fetch time come from the canonical power curve rows (fetch-level facts once per source record), with the same points and source label the stored snapshot curve showed; a fetch that reports no usable curve keeps the stored points and still shows its status, and before the first completed backfill it shows no points.
 
 Detailed contract: Intervals eFTP averages SHALL use actual Intervals estimates rather than configured FTP; race predictions, endurance scores, running tolerance, readiness history, and weekly training status SHALL retain their supported observation dates and aggregation metadata.
 
-Evidence: `backend/performance/chart_history.py:analysis_history`, `backend/performance/comparisons.py:performance_comparisons`, `backend/performance/eftp.py:eftp_30_day_average`, `backend/performance/report_service.py:TrainingProfileSelectionService`; `tests/test_performance_chart_history.py:test_sources_remain_separate_with_no_backdating_of_current_settings`, `tests/test_performance_chart_history.py:test_race_prediction_history_does_not_backfill_current_estimates`, `tests/test_training_report.py:test_running_speed_selects_fastest_effort_and_distance_selects_shortest`. The canonical-inputs scenario is verified by `tests/test_chart_history_canonical_parity.py`, `tests/test_garmin_training_load_canonical_parity.py`, `tests/test_performance_comparisons.py` and `tests/test_performance_canonical_parity.py:test_empty_performance_inputs_stand_for_no_canonical_values`. The canonical eFTP and form scenarios are verified by `tests/test_performance_eftp.py`, `tests/test_performance_comparisons.py:test_eftp_and_form_comparisons_read_the_canonical_days_only`, `tests/test_performance_wellness.py:WellnessFormTests`, `tests/test_characterization_body_history.py` and `tests/test_performance_canonical_load_metrics.py:test_chart_and_body_history_read_the_canonical_series`.
+Evidence: `backend/performance/chart_history.py:analysis_history`, `backend/performance/comparisons.py:performance_comparisons`, `backend/performance/eftp.py:eftp_30_day_average`, `backend/performance/report_service.py:TrainingProfileSelectionService`; `tests/test_performance_chart_history.py:test_sources_remain_separate_with_no_backdating_of_current_settings`, `tests/test_performance_chart_history.py:test_race_prediction_history_does_not_backfill_current_estimates`, `tests/test_training_report.py:test_running_speed_selects_fastest_effort_and_distance_selects_shortest`. The canonical-inputs scenario is verified by `tests/test_chart_history_canonical_parity.py`, `tests/test_garmin_training_load_canonical_parity.py`, `tests/test_performance_comparisons.py` and `tests/test_performance_canonical_parity.py:test_empty_performance_inputs_stand_for_no_canonical_values`. The power profile scenario is verified by `tests/test_power_curve_canonical.py` and `tests/test_db_power_curve_migration.py::CompletedBackfillUpgradeTests`. The canonical eFTP and form scenarios are verified by `tests/test_performance_eftp.py`, `tests/test_performance_comparisons.py:test_eftp_and_form_comparisons_read_the_canonical_days_only`, `tests/test_performance_wellness.py:WellnessFormTests`, `tests/test_characterization_body_history.py` and `tests/test_performance_canonical_load_metrics.py:test_chart_and_body_history_read_the_canonical_series`.
 
 ### Requirement: Current and planning recovery sources
 The system SHALL compose sleep duration/score, resting HR, HRV, readiness, supported averages, and planning day recovery with explicit source/date. Sleep/HRV/resting HR prefer supported Garmin values and readiness prefers eligible Intervals values. Per-day planning values SHALL use their date-specific source priority, preserve absent days, and include available saved/current morning Body Battery through its dedicated path. Source freshness SHALL distinguish measurement date from fetch time.
@@ -150,7 +162,7 @@ The system SHALL compose sleep duration/score, resting HR, HRV, readiness, suppo
 - **WHEN** no usable Intervals wellness day exists but Garmin recovery observations do
 - **THEN** the Garmin values are still selected for the current recovery context and personal baselines.
 
-Evidence: `backend/performance/recovery_context.py:performance_recovery_context`, `backend/performance/planning_recovery.py:planning_recovery_view`, `backend/performance/freshness.py:garmin_source_freshness`; `tests/test_performance_planning_recovery.py:test_intervals_values_keep_sources_and_garmin_priority`, `tests/test_performance_planning_recovery.py:test_saved_and_current_morning_body_battery`, `tests/test_performance_freshness.py:test_current_stale_partial_unknown_and_notes`, `tests/test_performance_recovery_context.py`, `tests/test_characterization_recovery.py`.
+Evidence: `backend/performance/recovery_context.py:performance_recovery_context`, `backend/performance/planning_recovery.py:planning_recovery_view`, `backend/performance/freshness.py:garmin_source_freshness`; `tests/test_planning_canonical_recovery.py:CanonicalPlanningRecoveryTests.test_garmin_wins_sleep_and_intervals_wins_readiness`, `tests/test_performance_planning_recovery.py:test_saved_and_current_morning_body_battery`, `tests/test_performance_freshness.py:test_current_stale_partial_unknown_and_notes`, `tests/test_performance_recovery_context.py`, `tests/test_characterization_recovery.py`.
 
 ### Requirement: Personal recovery comparison and sleep goal shortfall
 The system SHALL form personal recovery distributions separately by provider and measurement method, exclude the current reading from its comparison distribution, require at least 14 prior matching nights for provisional classification and 28 for full classification, and leave stale/future evidence unclassified. RMSSD and SDNN SHALL not be pooled.
@@ -198,9 +210,9 @@ The system SHALL derive sleep timing variability (method `sleep-timing-variabili
 - **WHEN** a day has no explicit tag answer or no measured following night
 - **THEN** it is excluded from both groups rather than treated as a negative answer; insufficient groups expose no confident association statistic.
 
-#### Scenario: Sleep timing input before canonical sleep periods
-- **WHEN** sleep timing variability is computed before canonical sleep periods exist (#1419)
-- **THEN** onset and wake times are still read from the stored provider sleep and wellness records, as the only recovery input not yet read from canonical observations.
+#### Scenario: Source without canonical sleep periods
+- **WHEN** sleep timing variability is computed from a source that stores no canonical sleep periods
+- **THEN** the result is `insufficient_data`; the stored provider sleep and wellness records are not read (#1416).
 
 #### Scenario: Timing variability is not the Sleep Regularity Index
 - **WHEN** the timing variability result, its Coach report section or any description of it is produced
@@ -304,6 +316,10 @@ Every method with an evidence card SHALL have synthetic input fixtures for one c
 - **WHEN** two providers report different values for the same input
 - **THEN** the fixture asserts that the values stay separate per provider and method and are not averaged.
 
+#### Scenario: Canonical provider RPE
+- **WHEN** an Intervals.icu activity reports `icu_rpe` beside a local session RPE
+- **THEN** the canonical activity record keeps the provider RPE with its provenance and the M1 result uses the local rating.
+
 Evidence: `tests/test_performance_method_inputs.py`.
 
 ### Requirement: Method input trace and gaps
@@ -366,7 +382,7 @@ Affected history, recovery, nutrition and Coach reads SHALL obtain retained prov
 Evidence baseline: `backend/performance/personal_recovery.py`, `backend/performance/canonical_personal_recovery.py`, `backend/performance/chart_history.py`, `backend/performance/garmin_projection.py`; `tests/test_personal_recovery.py`, `tests/test_performance_chart_history.py`. Canonical-only reads and parity require new regression evidence.
 
 ### Requirement: Garmin current performance metrics are read from canonical data only
-The current Garmin performance metrics (weight, thresholds, VO2max, maximum heart rate and race predictions) SHALL be read from canonical Garmin data only. The stored Garmin view SHALL supply only source freshness on these read paths. Only the sync's performance-history merge SHALL parse a fetched Garmin payload, before it is stored.
+The current Garmin performance metrics (weight, thresholds, VO2max, maximum heart rate and race predictions) SHALL be read from canonical Garmin data only. The Garmin sync status SHALL supply only source freshness on these read paths. Only the sync's performance-history merge SHALL parse a fetched Garmin payload, before it is stored.
 
 #### Scenario: Activity maximum heart rate
 - **WHEN** a sport has neither its own nor a generic canonical Garmin profile maximum heart rate
@@ -386,7 +402,7 @@ The current Garmin performance metrics (weight, thresholds, VO2max, maximum hear
 
 Detailed contract: activity records exist only from the first canonical ingest or backfill onward, so a maximum the stored view retained from activities older than that is not kept (accepted by #1415's decision to derive the value from canonical records). The current maximum heart rate fallback has no day history; no comparison or chart reads one.
 
-Evidence: `backend/performance/garmin_metrics.py:garmin_performance_metrics`, `backend/performance/garmin_metrics.py:garmin_payload_performance_metrics`, `backend/performance/garmin_canonical.py:read_garmin_state`, `backend/db/canonical_store.py:activity_max_hr_rows`; `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_state_has_the_flags_and_values_of_the_snapshot_sections`, `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_table_and_legacy_observations_give_the_same_state`, `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_activity_max_hr_skips_deleted_sessions`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_activity_max_hr_is_read_from_the_same_source`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_profile_max_hr_skips_the_activity_read`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_only_the_sport_without_a_profile_value_is_labelled_activities`, `tests/test_performance_canonical_current_metrics.py:CanonicalCurrentFromTablesTests.test_populated_tables_reproduce_the_legacy_current_metrics`.
+Evidence: `backend/performance/garmin_metrics.py:garmin_performance_metrics`, `backend/sync/garmin_payload_metrics.py:garmin_payload_performance_metrics`, `backend/performance/garmin_canonical.py:read_garmin_state`, `backend/db/canonical_store.py:activity_max_hr_rows`; `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_state_has_the_flags_and_values_of_the_snapshot_sections`, `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_table_observations_give_the_payload_state`, `tests/test_garmin_canonical_reads.py:GarminStateEqualityTests.test_activity_max_hr_skips_deleted_sessions`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_activity_max_hr_is_read_from_the_same_source`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_profile_max_hr_skips_the_activity_read`, `tests/test_garmin_canonical_reads.py:GarminCanonicalReaderUnitTests.test_only_the_sport_without_a_profile_value_is_labelled_activities`, `tests/test_performance_canonical_current_metrics.py:CanonicalCurrentFromTablesTests.test_populated_tables_serve_the_current_metrics`.
 
 ### Requirement: Ramp rate is a labelled local derivation
 The system SHALL derive the ramp rate of the current load block as the latest wellness day's CTL minus the CTL of exactly seven days earlier, rounded to two decimals, from canonical Intervals.icu wellness-day CTL observations, and SHALL label it as derived through `current_load.ramp_rate_source`. Intervals.icu's own `rampRate` is not read and can differ from the derived number.
@@ -429,19 +445,23 @@ Detailed contract: since wellness mapper version 8 the eFTP classification follo
 Evidence: `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`, `backend/providers/intervals_wellness_mapping.py:map_intervals_athlete_thresholds`; `tests/test_intervals_wellness_mapping.py` (EFTP and FORM mapping), `tests/test_performance_canonical_parity.py`. The strict-read scenarios are verified by `tests/test_performance_canonical_load_metrics.py` (carrier rows are stripped or contradicting), `tests/test_performance_canonical_parity.py:_assert_load_metric_split` and `tests/test_server_performance.py`.
 
 ### Requirement: Report-family reads use canonical activity rows only
-The system SHALL read the activity rows of period reports, the training-record observation list, tag impact and training focus from the canonical activity row port only, and SHALL NOT fall back to the stored snapshot's `raw_provider_data.activities` or `recent_activities`.
+The system SHALL read the activities of period reports, the training-record observation list, tag impact, training focus, load rollups, eFTP and season preparation from the canonical activity summary port only, and SHALL NOT fall back to the stored snapshot's `raw_provider_data.activities` or `recent_activities`.
 
 #### Scenario: Canonical rows with an empty snapshot
-- **WHEN** any of these reads runs with canonical activity rows and a snapshot without activity sections
-- **THEN** it computes from the canonical rows exactly as it would with the rows in the snapshot.
+- **WHEN** any of these reads runs with canonical activity summaries and a snapshot without activity sections
+- **THEN** it computes from the summaries exactly as it would with the rows in the snapshot.
 
 #### Scenario: No activity rows
-- **WHEN** the canonical row port returns no rows
+- **WHEN** the canonical summary port returns no summaries
 - **THEN** the read returns its existing empty-data result (no sessions, insufficient data) instead of an error or snapshot data.
 
-Detailed contract: The services that run these reads require their canonical source at construction. Duplicate Garmin copies are still removed from the rows by the existing Wahoo/Garmin de-duplication.
+#### Scenario: Copies stored by the first backfill
+- **WHEN** the first canonical backfill stores an Intervals.icu and a Garmin Connect copy of one activity
+- **THEN** it links them into one session, so these reads count the activity once.
 
-Evidence: `backend/performance/training_report.py:canonical_rows`, `backend/performance/report_service.py:TrainingRecordsService.observations`, `backend/performance/tag_impact.py:_day_loads`, `backend/performance/training_focus.py:training_focus`, `backend/performance/canonical_inputs.py:activity_rows_for`; `tests/test_training_report.py:test_derived_and_season_reads_keep_missing_data_fallbacks`, `tests/test_training_focus.py:test_recorded_hr_and_power_zones_remain_separate_and_bounded`. Missing evidence (planned in this change): tests that the snapshot is never read for activities and that construction without a canonical source is rejected.
+Detailed contract: The services that run these reads require their canonical source at construction. Duplicates are merged by canonical session linking, not by row de-duplication; only the raw-row equipment read keeps the Wahoo/Garmin row de-duplication.
+
+Evidence: `backend/performance/training_report.py`, `backend/performance/report_service.py:TrainingRecordsService.observations`, `backend/performance/tag_impact.py`, `backend/performance/training_focus.py:training_focus`, `backend/performance/canonical_inputs.py:activity_summaries_for`, `backend/sync/canonical_backfill.py:_link_work_sessions`; `tests/test_training_report.py`, `tests/test_training_focus.py`, `tests/test_season_canonical_reads.py`, `tests/test_canonical_table_reader.py:ActivitySessionReadTests`.
 
 ### Requirement: Current Garmin endurance-score history
 The system SHALL request the bounded Garmin endurance-score history as daily dated readings and SHALL label that history with daily aggregation. The analysis view SHALL show, for each calendar week, the newest valid reading of that week, and its current value SHALL carry the date of the newest stored Garmin measurement. A week-start bucket SHALL never stand in for a later dated measurement.
@@ -466,7 +486,7 @@ The system SHALL request the bounded Garmin endurance-score history as daily dat
 - **WHEN** a calendar week has no dated endurance-score reading
 - **THEN** that week remains a gap and no value is carried forward or interpolated into it.
 
-Evidence: observed defect from athlete diagnostics 2026-10-24 (`garmin.source_freshness.endurance_score.observed_at` = 2026-10-23 while the chart's latest point stayed at 2026-10-18); `backend/providers/garmin.py:_collect_historic_metrics`, `backend/providers/garmin.py:targeted_analysis_sources`, `backend/performance/garmin_metric_history.py:_records`, `backend/performance/chart_history.py:_provider_metrics`, `backend/performance/history.py:_provider_metrics`, `public/analysis.js:analysisWeeklyPerformancePoints`; `tests/test_provider_garmin_metric_history.py:test_known_sdk_methods_get_bounded_dates_and_explicit_aggregation`, `tests/test_performance_chart_history.py:test_saved_endurance_group_map_repairs_previously_empty_projection`, `tests/test_performance_chart_history.py:test_daily_weekly_view_metrics_reach_the_newest_measurement`, `tests/test_garmin_analysis_refresh.py:test_targeted_weekly_view_metrics_request_daily_readings`; running tolerance shares the weekly grouping in `public/analysis.js`. Gap: the exact daily `groupMap` key shape is inferred from the SDK docstring and existing weekly handling, not from a captured live payload.
+Evidence: observed defect from athlete diagnostics 2026-10-24 (`garmin.source_freshness.endurance_score.observed_at` = 2026-10-23 while the chart's latest point stayed at 2026-10-18); `backend/providers/garmin.py:_collect_historic_metrics`, `backend/providers/garmin.py:targeted_analysis_sources`, `backend/sync/garmin_metric_history.py:_records`, `backend/performance/chart_history.py:_provider_metrics`, `backend/sync/garmin_performance_history.py:_provider_metrics`, `public/analysis.js:analysisWeeklyPerformancePoints`; `tests/test_provider_garmin_metric_history.py:test_known_sdk_methods_get_bounded_dates_and_explicit_aggregation`, `tests/test_performance_chart_history.py:test_saved_endurance_group_map_repairs_previously_empty_projection`, `tests/test_performance_chart_history.py:test_daily_weekly_view_metrics_reach_the_newest_measurement`, `tests/test_garmin_analysis_refresh.py:test_targeted_weekly_view_metrics_request_daily_readings`; running tolerance shares the weekly grouping in `public/analysis.js`. Gap: the exact daily `groupMap` key shape is inferred from the SDK docstring and existing weekly handling, not from a captured live payload.
 
 ### Requirement: Profile body fat is shown in the Body overview
 The Body overview SHALL show a valid saved body-fat profile value labelled as profile data, without projecting it into dated measurement history.
@@ -493,8 +513,24 @@ The system SHALL read every daily wellness value of the performance projection f
 - **THEN** only the observations decide the values and the latest wellness day; snapshot-only days and fields have no effect.
 
 #### Scenario: No canonical inputs
-- **WHEN** the performance context is composed without canonical inputs
-- **THEN** CTL, ATL, weight and body fat from wellness, subjective ratings, wellness-based trend averages and wellness body history are unknown instead of read from the snapshot. Sources other than wellness keep their behaviour.
+- **WHEN** the performance context is composed without canonical inputs, or without any provider value in the canonical inputs (activities, wellness days, daily totals, an Intervals.icu athlete sync, Wahoo settings, Garmin or recovery observations, Garmin body values), also when a stored snapshot exists or only the athlete's manual profile holds values
+- **THEN** the context is unavailable: CTL, ATL, weight and body fat from wellness, subjective ratings, wellness-based trend averages and wellness body history are unknown instead of read from the snapshot.
+
+#### Scenario: Availability follows canonical data, not the snapshot
+- **WHEN** canonical observations or activities exist without a stored Intervals.icu snapshot, for example a Garmin-only setup after the backfill completed
+- **THEN** the context is available with its full metrics. With an Intervals.icu sync in the canonical provider coverage (also one that stored activities or wellness but no athlete record), `as_of` is its newest fetch time in ISO form, the one Intervals.icu sync time reports and the Coach use too, and the source keeps the label "Letzter gespeicherter Intervals.icu-Snapshot"; without one, `as_of` is null and the source names the stored provider data. The stored snapshot is never read for either.
+
+#### Scenario: Narrow Garmin sync status
+- **WHEN** the current context, the analysis history, the training focus, the body history, `/api/performance` or the Coach performance and recovery sections need Garmin freshness, fetch or sync times, read windows or a cached chart's fetch outcome
+- **THEN** they read one typed Garmin sync status built from the stored Garmin state and the names of the stored sections (no measured value), and never the Garmin view. While the canonical source is pending, the Garmin card gets the empty status, so it shows no freshness, source or pagination, only its connection status.
+
+#### Scenario: Pending state shows no partial values
+- **WHEN** the first canonical backfill has not completed and `/api/performance` is read
+- **THEN** history and training focus are built from empty inputs, without the stored snapshot or the raw Garmin view; the Garmin connection status stays, and the server's `status` text is the only status the PWA shows.
+
+#### Scenario: Canonical data is still being prepared
+- **WHEN** the first canonical backfill has not completed
+- **THEN** the context is unavailable with reason `canonical_pending` and the status "Daten werden vorbereitet", shows no values, and the Coach context carries the same reason and status.
 
 #### Scenario: Sport-scoped and athlete-record observations
 - **WHEN** athlete-record observations (thresholds, athlete weight) or sport-scoped wellness observations exist
@@ -502,7 +538,7 @@ The system SHALL read every daily wellness value of the performance projection f
 
 Detailed contract: the daily wellness values are CTL, ATL, form, weight, body fat, readiness, the subjective fatigue, soreness, stress and mood ratings, and the run eFTP of the trend averages. The snapshot rows not read are `recent_wellness` and `raw_provider_data.wellness`. The current-day window is the 90 days ending on the latest wellness day. The history view covers every stored wellness day.
 
-Evidence: `backend/performance/wellness_days.py:read_wellness_days`, `backend/performance/canonical_inputs.py:read_performance_inputs`; `tests/test_performance_wellness_days.py:WellnessDayTests`, `tests/test_performance_canonical_sections.py:SectionHelperTests` and `SectionReadTests`, `tests/test_performance_canonical_parity.py:CanonicalLoadEdgeTests`, `tests/test_performance_context.py:PerformanceContextTests`, and `tests/test_performance_canonical_body_history.py:CanonicalBodyLedgerCaseTests`.
+Evidence: `backend/performance/wellness_days.py:read_wellness_days`, `backend/performance/canonical_inputs.py:read_performance_inputs`; `tests/test_performance_wellness_days.py:WellnessDayTests`, `tests/test_performance_canonical_sections.py:SectionHelperTests` and `SectionReadTests`, `tests/test_performance_canonical_parity.py:CanonicalLoadEdgeTests`, `tests/test_performance_context.py:PerformanceContextTests`, `tests/test_performance_canonical_parity.py:CanonicalReadStatusEndToEndTests`, and `tests/test_performance_canonical_body_history.py:CanonicalBodyLedgerCaseTests`.
 
 ### Requirement: Wellness `sportInfo` threshold fallbacks are not read
 The system SHALL NOT read cycling or running FTP, LTHR, maximum heart rate, VO2max, threshold pace or Zone-2 pace from Intervals.icu wellness `sportInfo` entries. These values SHALL come only from their remaining sources: Garmin, athlete sport settings, the athlete record, Wahoo and the manual profile. The 30-day `run_threshold_watts` average SHALL read the run-scoped wellness-day eFTP observations, bounded as before.
@@ -548,3 +584,34 @@ Personal recovery baselines, sleep goal shortfalls and tag-impact reports SHALL 
 - **THEN** both baselines are labelled `RMSSD`, stay two series distinguished by their source label, and the HRV chart heading shows `RMSSD` after the source.
 
 Evidence: `backend/performance/personal_recovery.py:personal_recovery`, `backend/performance/tag_impact.py:tag_impact`; `tests/test_personal_recovery.py:PersonalRecoveryTests`, `tests/test_characterization_recovery.py`, `tests/test_training_record_features.py`, `e2e/analysis-info.spec.js`.
+
+### Requirement: Session-RPE load is a descriptive local method
+The system SHALL compute the M1 session-RPE load (`session-rpe-load` v1) as elapsed minutes × whole-session RPE in AU for each canonical session, and sum it per athlete-local day, ISO week and sport with the known partial value, rated and total session counts and RPE source counts. AU SHALL never be added to or converted into TSS, provider load or TRIMP.
+
+#### Scenario: Acceptance values
+- **WHEN** a session of 60 minutes has local RPE 5, one of 30 minutes has RPE 0 and one has no RPE
+- **THEN** they give 300 AU, 0 AU and no value with reason `no_rating`.
+
+#### Scenario: Partial sum
+- **WHEN** two rated sessions of 300 and 120 AU and one unrated session fall in a period
+- **THEN** the period reports 420 AU known load with 2 of 3 sessions rated.
+
+#### Scenario: Provider fallback
+- **WHEN** a session has no local RPE and its Intervals.icu record reports RPE 6 over 50 minutes
+- **THEN** it gives 300 AU labelled with the Intervals.icu source; a local RPE 5 of the same session would win instead.
+
+#### Scenario: No valid input
+- **WHEN** the session's provider records disagree on RPE without a local one, it has only a moving time, or its duration is not positive
+- **THEN** it gives no value with reason `conflicting_provider_ratings`, `no_elapsed_duration` or `invalid_duration` and stays an open session in the sums.
+
+#### Scenario: Ambiguous feedback assignment
+- **WHEN** a local rating is stored under an id that matches activities of several sessions, so it has no session
+- **THEN** it is not used as any session's rating; the session uses its provider fallback or stays open.
+
+#### Scenario: Duplicate imports and edits
+- **WHEN** one session is imported from two providers, or its RPE is edited, cleared or the edit undone
+- **THEN** it counts once, and the next read reflects the effective feedback or the provider fallback.
+
+Detailed contract: each result names `metric_id`, `method_id`, `method_version`, unit, status (`descriptive` or `insufficient_data`), period with timezone, computation time, method note, limits and the evidence card `docs/performance-methods/m1-session-rpe-load.md`. Per session it lists RPE, source and label, duration in minutes and, for a local rating with a recorded rating time, `rated_minutes_after_end`. Values are rounded to one decimal only for output. The Coach training report carries it for the report period, the public performance history for the load tab's 84 days, where the PWA draws a separate AU chart with its coverage. The Coach SHALL name the inputs and source and SHALL NOT derive injury risk, readiness or ramp statements from AU.
+
+Evidence: `backend/performance/session_rpe_load.py`, `backend/performance/training_report.py:training_report`, `backend/performance/report_service.py:TrainingReportReadService`, `backend/http_api/public_performance.py:PublicPerformanceStateService`, `backend/coach/prompt.py`, `public/analysis.js:appendSessionRpeLoadChart`; `tests/test_session_rpe_load.py`, `e2e/activity-details.spec.js`.

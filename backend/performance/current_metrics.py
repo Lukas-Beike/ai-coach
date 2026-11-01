@@ -14,7 +14,6 @@ from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.canonical_current import CanonicalCurrentInputs
 from backend.performance.wellness_days import WellnessDay
-from backend.providers import intervals_performance_fields as intervals_perf_fields
 from backend.providers.source_labels import (
     SourceView,
     observation_source_label,
@@ -27,6 +26,11 @@ PROVIDER_INTERVALS_NAME = provider_label(
 # provider_label has no view for this wellness label, so it stays a literal.
 PROVIDER_INTERVALS_WELLNESS_NAME = "Intervals.icu Wellness"
 GARMIN_PERFORMANCE_SOURCE = provider_label(ProviderId.GARMIN, SourceView.CURRENT_METRIC)
+# Activity summaries name each value's source by the provider's activity label.
+_ACTIVITY_LABEL_PROVIDERS = {
+    provider_label(provider, SourceView.ACTIVITY_DETAIL): provider
+    for provider in ProviderId
+}
 VO2MAX_UNIT = "ml/kg/min"
 
 
@@ -121,30 +125,49 @@ def _canonical_eftp_value(canonical: CanonicalCurrentInputs) -> float | None:
     return None
 
 
+def _activity_max_hr(activity: Any) -> tuple[float, ProviderId] | None:
+    """Return a summary's plausible max HR and the provider that reported it."""
+    sources = activity.get("sources") if isinstance(activity, dict) else None
+    if not isinstance(sources, dict):
+        return None
+    provider = _ACTIVITY_LABEL_PROVIDERS.get(str(sources.get("max_hr")))
+    value = as_number(activity.get("max_hr"))
+    if provider is None or value is None or not 80 <= float(value) <= 260:
+        return None
+    return float(value), provider
+
+
 def _intervals_max_hr_metric(
     category: str,
     sport: Sport,
     activities: list[Any],
     canonical: CanonicalCurrentInputs,
 ) -> dict[str, Any]:
-    """Return sport max HR: setting, then activities, then the athlete record."""
-    max_hr_keys = ("max_hr", "maxHR", "maxHeartRate", "max_heartrate")
-    activity_values: list[float | int] = []
-    for activity in activities:
-        if activity_kind(activity) != category:
-            continue
-        value = as_number(_first_present(activity, max_hr_keys))
-        if value is not None and 80 <= float(value) <= 260:
-            activity_values.append(value)
+    """Return sport max HR: setting, then activities, then the athlete record.
+
+    An activity value keeps the provider its summary names for ``max_hr``.
+    """
+    activity_values = [
+        found
+        for activity in activities
+        if activity_kind(activity) == category
+        and (found := _activity_max_hr(activity)) is not None
+    ]
+    setting = _observation_number(canonical.athlete_value(MetricKind.MAX_HR, sport))
+    athlete = _observation_number(canonical.athlete_value(MetricKind.MAX_HR))
+    best = max(activity_values, default=None, key=lambda item: item[0])
     candidates = (
-        _observation_number(canonical.athlete_value(MetricKind.MAX_HR, sport)),
-        max(activity_values, default=None),
-        _observation_number(canonical.athlete_value(MetricKind.MAX_HR)),
+        (setting, ProviderId.INTERVALS),
+        best if best is not None else (None, ProviderId.INTERVALS),
+        (athlete, ProviderId.INTERVALS),
     )
-    for number in candidates:
+    for number, provider in candidates:
         if number is not None and 80 <= float(number) <= 260:
             return metric(
-                number, "bpm", PROVIDER_INTERVALS_NAME, provider=ProviderId.INTERVALS
+                number,
+                "bpm",
+                provider_label(provider, SourceView.CURRENT_METRIC),
+                provider=provider,
             )
     return metric(None, "bpm", None)
 
@@ -167,34 +190,17 @@ def _height_in_cm(value: Any) -> float | int | None:
     return number
 
 
-def _latest_ride_activity(activities: list[Any]) -> dict[str, Any]:
-    ride_terms = ("ride", "rad", "bike", "cycling")
-    valid_activities = (
-        activity for activity in activities if isinstance(activity, dict)
+def _latest_ride_eftp(activities: list[Any]) -> Any:
+    """Return the eFTP of the newest ride summary, or None."""
+    rides = (
+        activity
+        for activity in activities
+        if isinstance(activity, dict) and activity.get("sport") == Sport.RIDE.value
     )
-    ordered = sorted(
-        valid_activities,
-        key=lambda item: str(item.get("start_date_local") or ""),
-        reverse=True,
+    latest = max(
+        rides, key=lambda item: str(item.get("started_at_local") or ""), default={}
     )
-    return next(
-        (
-            activity
-            for activity in ordered
-            if any(
-                term
-                in str(
-                    _first_present(
-                        activity,
-                        ("type", "sport", "sport_type", "activity_type", "name"),
-                    )
-                    or ""
-                ).casefold()
-                for term in ride_terms
-            )
-        ),
-        {},
-    )
+    return latest.get("eftp_w")
 
 
 def _first_performance_source(
@@ -397,10 +403,7 @@ def current_performance_metrics(
     latest_wellness: WellnessDay | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Compose current metrics from canonical inputs, Garmin metrics and the profile."""
-    latest_ride_activity = _latest_ride_activity(activities)
-    latest_ride_eftp = _first_present(
-        latest_ride_activity, intervals_perf_fields.ESTIMATED_FTP_ALIASES
-    )
+    latest_ride_eftp = _latest_ride_eftp(activities)
     current_ride_eftp = _canonical_eftp_value(canonical)
     cycling_max_hr = _intervals_max_hr_metric(
         "cycling", Sport.RIDE, activities, canonical

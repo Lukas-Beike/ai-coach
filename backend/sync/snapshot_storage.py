@@ -5,7 +5,7 @@ transaction as the snapshot. Once the tables serve reads (``CanonicalTableServin
 the snapshot no longer needs its activity sections: ``recent_activities`` and
 ``raw_provider_data.activities``. They are left out of the stored row and the row is
 marked (``canonical_sections``). Until the tables serve, for example right after an
-upgrade, the snapshot is stored in full, because the legacy projection reads it.
+upgrade, the snapshot is stored in full, because the backfill still reads it.
 
 Sections that stay in the snapshot, and why:
 
@@ -32,7 +32,6 @@ from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
-from backend.planning.compact_activities import compact_activity_rows
 from backend.providers.snapshot_projection import (
     intervals_activity_sections_are_mapped,
     intervals_snapshot_is_stripped,
@@ -41,6 +40,7 @@ from backend.providers.snapshot_projection import (
     without_intervals_activities,
 )
 from backend.runtime.ports import ActivityRowReader, CanonicalTableServing
+from backend.sync.intervals_compaction import compact_activity_rows
 from backend.sync.state import SyncStateRepository
 
 

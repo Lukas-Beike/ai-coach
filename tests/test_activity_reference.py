@@ -50,6 +50,7 @@ from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.detail_envelope import DetailEnvelopeReader
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
 from backend.sync.activity_details import ActivityDetailRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -158,12 +159,17 @@ class ActivityReferenceResolverTests(_Fixture):
         garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
         self.merge(intervals, garmin)
         feedback = Mock()
-        feedback.list.return_value = [{"activity_id": "ride-merged", "session_rpe": 6}]
+        feedback.for_activity_ids.side_effect = lambda ids, **_options: [
+            {"activity_id": key, "session_rpe": 6}
+            for key in ids
+            if key == "ride-merged"
+        ]
         envelope = DetailEnvelopeReader(
             feedback_service=feedback,
             read_equipment=lambda reference: {},
             references=ActivityReferences(self.manager),
             performance=dict,
+            summary=lambda: None,
         )
         with self.manager.reader() as db:
             block = envelope(db, garmin, "ride-merged", None)
@@ -242,7 +248,6 @@ class ActivityReadReferenceTests(_Fixture):
         snapshot_reader = Mock(latest_snapshot=Mock(return_value=snapshot))
         return ActivityReadService(
             self.manager,
-            snapshot_reader,
             CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
             feedback,
             references=ActivityReferences(self.manager),
@@ -322,21 +327,11 @@ class ActivityCallerResolutionTests(_Fixture):
         }
         service = ActivityAnalysisReadService(
             self.manager,
-            Mock(
-                latest_snapshot=Mock(
-                    return_value={
-                        "synced_at": STAMP,
-                        "athlete": {},
-                        "recent_wellness": [],
-                        "recent_activities": [],
-                        "raw_provider_data": {"activities": [raw]},
-                    }
-                )
-            ),
             CompactActivityRows(FixedActivityRows()),
             Mock(
                 attach_to_activities=Mock(side_effect=lambda rows: list(rows)),
                 list=Mock(return_value=[]),
+                for_activity_ids=Mock(return_value=[]),
             ),
             ActivityDetailStore(self.manager),
             references=ActivityReferences(self.manager),
@@ -346,7 +341,10 @@ class ActivityCallerResolutionTests(_Fixture):
         for requested in (local, "ride-1"):
             with self.subTest(requested):
                 result = service.detail(
-                    requested, garmin_snapshot={}, profile={}, today=TODAY
+                    requested,
+                    garmin_status=NO_GARMIN_SYNC_STATUS,
+                    profile={},
+                    today=TODAY,
                 )
                 self.assertEqual(local, result["session"]["activity_id"])
                 self.assertEqual(3600, result["metrics"]["duration_s"]["value"])
@@ -572,6 +570,7 @@ class ActivityFeedbackProviderColumnTests(_Fixture):
                 "deviation_reason",
                 "created_at",
                 "updated_at",
+                "session_rpe_rated_at",
             },
             set(saved["activity_feedback"]),
         )

@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.activities.activity_reference import ActivityReferenceResolver
 from backend.performance.activity_validation import activity_performance_validation
+from backend.performance.session_rpe_load import session_load
 
 
 class DetailEnvelopeReader:
@@ -14,8 +15,8 @@ class DetailEnvelopeReader:
 
     Feedback and equipment are keyed by the resolved session reference, the id
     that feedback writes and gear assignments use. Validation compares the
-    current Intervals.icu summary with the performance context; a session
-    without one gets the validation's explicit no-data result.
+    session's activity summary with the performance context; a session without
+    one gets the validation's explicit no-data result and no session-RPE load.
     """
 
     def __init__(
@@ -25,29 +26,33 @@ class DetailEnvelopeReader:
         read_equipment: Callable[[str], dict[str, Any]],
         references: ActivityReferenceResolver,
         performance: Callable[[], Mapping[str, Any]],
+        summary: Callable[[], Mapping[str, Any] | None],
     ) -> None:
         self._feedback_service = feedback_service
         self._read_equipment = read_equipment
         self._references = references
         self._performance = performance
+        self._summary = summary
 
     def __call__(
         self,
-        db: Any,
+        _db: Any,
         activity_id: str,
-        provider_activity_id: str | None,
-        summary: Mapping[str, Any] | None,
+        _provider_activity_id: str | None,
+        _raw_summary: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         reference = str(self._references.resolve_reference(activity_id).activity_id)
-        items = self._feedback_service.list(500)
-        # Feedback saved under the requested id before the merged record resolved.
-        feedback = next(
-            (item for item in items if item.get("activity_id") == reference),
-            None,
-        ) or next(
-            (item for item in items if item.get("activity_id") == str(activity_id)),
+        # The session's effective feedback, through the reference or, for
+        # feedback saved before the merged record resolved, the requested id.
+        ids = [reference, str(activity_id)]
+        feedback = next(iter(self._feedback_service.for_activity_ids(ids)), None)
+        # A rating whose session is ambiguous stays shown but gives no load.
+        rated = next(
+            iter(self._feedback_service.for_activity_ids(ids, sessions_only=True)),
             None,
         )
+        summary = self._summary()
+        load = None if summary is None else session_load(summary, rated)[0]
         if summary is None:
             validation = activity_performance_validation([], {}, {})
         else:
@@ -61,6 +66,7 @@ class DetailEnvelopeReader:
             "activity_feedback": feedback,
             "equipment": activity_equipment(self._read_equipment(reference), reference),
             "activity_validation": validation,
+            "session_rpe_load": load,
         }
 
 

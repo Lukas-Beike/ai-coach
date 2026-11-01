@@ -13,10 +13,6 @@ from activity_row_support import SnapshotActivityRows, canonical_source
 from canonical_detail_support import NOW, open_manager, seed_intervals_activity
 
 from backend.activities.activity_reference import ActivityReferences
-from backend.activities.detail_projection import (
-    COACH_ACTIVITY_DETAIL_MAX_LAPS,
-    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
-)
 from backend.canonical.vocabulary import MetricKind
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import coach_context_json_size
@@ -24,6 +20,11 @@ from backend.errors import AppError
 from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
+from backend.providers.intervals_activity_detail_projection import (
+    COACH_ACTIVITY_DETAIL_MAX_LAPS,
+    COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
+)
 from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.runtime.ports import ObservationSourceSelector
 from backend.sync.activity_detail_canonical import CanonicalDetailWriter
@@ -167,7 +168,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         other = {**raw_activity, "id": "synthetic-2", "name": "Other run"}
         manager = _sessions(self, raw_activity, other)
         _store_streams(manager, "synthetic-1", {"time": [0, 1], "watts": [200, 250]})
-        garmin = Mock(recent_view=Mock(return_value={"recent_wellness": []}))
+        garmin = Mock(sync_status=Mock(return_value=NO_GARMIN_SYNC_STATUS))
         profile = Mock(get=Mock(return_value={"weight_kg": "70"}))
         service = _detail_tool(manager, [raw_activity, other], garmin, profile)
 
@@ -183,8 +184,10 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             result["data_scope"],
         )
         self.assertTrue(result["activity_validation"]["available"])
+        # The validation evidence names the summary by its local session id
+        # (the test summaries serve "act_" + the provider id).
         self.assertEqual(
-            "synthetic-1", result["activity_validation"]["activity"]["activity_id"]
+            "act_synthetic-1", result["activity_validation"]["activity"]["activity_id"]
         )
         self.assertEqual(
             {"activity_feedback", "equipment", "activity_validation"},
@@ -195,7 +198,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         self.assertNotIn("provider_extra", text)
         self.assertNotIn("synthetic-2", text)
         self.assertNotIn("Other run", text)
-        garmin.recent_view.assert_called_once_with()
+        garmin.sync_status.assert_called_once_with()
         profile.get.assert_called_once_with()
 
     def test_detail_result_size_does_not_grow_with_the_recording(self):
@@ -229,7 +232,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
                 service = _detail_tool(
                     manager,
                     [raw_activity],
-                    Mock(recent_view=Mock(return_value={})),
+                    Mock(sync_status=Mock(return_value=NO_GARMIN_SYNC_STATUS)),
                     Mock(get=Mock(return_value={})),
                 )
                 result = service.execute(
@@ -297,7 +300,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             service.execute("get_activity_details", {"activity_id": "synthetic-1"})
         canonical = project.call_args.kwargs["canonical"]
         self.assertIsNone(canonical.wellness_day)
-        self.assertEqual(len(canonical.activity_rows), 1)
+        self.assertEqual(len(canonical.activities or ()), 1)
         # The wellness observations are read to find the days, once per call.
         selector.reader_for.assert_called_once()
 
@@ -354,9 +357,9 @@ def _detail_tool(manager, activities: list[dict], garmin, profile):
     }
     feedback = Mock()
     feedback.list.return_value = []
+    feedback.for_activity_ids.return_value = []
     activity_read = ActivityAnalysisReadService(
         manager,
-        snapshot_repository,
         CompactActivityRows(SnapshotActivityRows(snapshot_repository)),
         feedback,
         canonical=canonical_source(
@@ -386,21 +389,21 @@ def _canonical_activity_tool(case: unittest.TestCase, snapshot: dict):
     snapshot_reader.latest_snapshot.return_value = snapshot
     feedback = Mock()
     feedback.list.return_value = []
+    feedback.for_activity_ids.return_value = []
     manager = MagicMock()
     activity_read = ActivityAnalysisReadService(
         sessions,
-        snapshot_reader,
         CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
         feedback,
         canonical=CanonicalPerformanceSource(
             database_manager=lambda: manager,
             observation_reader=lambda: selector,
-            activity_rows=lambda: SnapshotActivityRows(snapshot_reader),
+            activity_summaries=lambda: SnapshotActivityRows(snapshot_reader),
         ),
         references=ActivityReferences(sessions),
         session_records=CanonicalTableReader().session_activities,
     )
-    garmin = Mock(recent_view=Mock(return_value={}))
+    garmin = Mock(sync_status=Mock(return_value=NO_GARMIN_SYNC_STATUS))
     profile = Mock(get=Mock(return_value={}))
     service = CoachActivityReadToolService(
         activity_read, garmin, profile, lambda: date(2026, 9, 23)
