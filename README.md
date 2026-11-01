@@ -775,7 +775,9 @@ specs, and the `pr` workflow blocks a push while a touched change is still activ
 #### Local code graph
 
 Worktree preparation uses `python scripts/prepare_worktree.py` to install Node
-development dependencies, set up Graphify and generate the first graph.
+development dependencies, the hash-locked `ruff` and `mypy` pins from
+`requirements-dev.txt` into that interpreter (`tools/quality_baseline.py` runs
+them as `python -m`), set up Graphify and generate the first graph.
 Graphify's version comes from the hash-locked `requirements-graphify.txt`.
 Run the tooling scripts with Python 3.14 or newer. Setup requires Python 3.14
 for its environment and selects it explicitly (`py -3.14` on Windows,

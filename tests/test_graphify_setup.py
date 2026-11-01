@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -470,7 +471,7 @@ class WorktreePreparationTests(unittest.TestCase):
                 self.assertEqual(update.call_args.args[2], 100 + seconds)
 
     def test_all_steps_and_failure_propagation(self):
-        for results in ([0, 0, 0], [1, 0, 0], [0, 1, 2]):
+        for results in ([0, 0, 0, 0], [1, 0, 0, 0], [0, 1, 2, 3]):
             with (
                 self.subTest(results=results),
                 patch.object(prepare.shutil, "which", return_value="npm.cmd"),
@@ -486,9 +487,11 @@ class WorktreePreparationTests(unittest.TestCase):
                 calls = [call.args[0] for call in run.call_args_list]
                 self.assertEqual(calls[0], ["npm.cmd", "ci", "--ignore-scripts"])
                 self.assertEqual(
-                    [command[2:] for command in calls[1:]],
+                    [command[2:] for command in calls[1:3]],
                     [["setup"], ["update", "--preparation"]],
                 )
+                self.assertEqual(calls[3][1:3], ["-m", "pip"])
+                self.assertIn("--require-hashes", calls[3])
                 self.assertTrue(
                     all(
                         call.kwargs["cwd"]
@@ -496,6 +499,18 @@ class WorktreePreparationTests(unittest.TestCase):
                         for call in run.call_args_list
                     )
                 )
+
+    def test_quality_tools_install_only_hash_locked_ruff_mypy_and_dependencies(self):
+        root = Path(prepare.__file__).resolve().parents[1]
+        lock = (root / "requirements-dev.txt").read_text(encoding="utf-8")
+        selected = prepare.quality_requirements(lock)
+        names = set(re.findall(r"(?m)^([A-Za-z0-9][\w.-]*)==", selected))
+        self.assertLessEqual({"ruff", "mypy", "librt", "pathspec"}, names)
+        self.assertNotIn("sqlcipher3-binary", names)
+        blocks = re.split(r"(?m)^(?=[A-Za-z0-9][\w.-]*==)", selected)[1:]
+        self.assertTrue(all("--hash=sha256:" in block for block in blocks))
+        with self.assertRaises(OSError):
+            prepare.quality_requirements("requests==2.0.0\n")
 
     def test_missing_npm_and_launch_errors_still_attempt_remaining_steps(self):
         with (
@@ -506,11 +521,12 @@ class WorktreePreparationTests(unittest.TestCase):
                 side_effect=[
                     OSError("synthetic launch failure"),
                     subprocess.CompletedProcess([], 0),
+                    subprocess.CompletedProcess([], 0),
                 ],
             ) as run,
         ):
             self.assertEqual(prepare.main(), 1)
-            self.assertEqual(run.call_count, 2)
+            self.assertEqual(run.call_count, 3)
 
 
 if __name__ == "__main__":

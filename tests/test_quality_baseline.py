@@ -121,8 +121,12 @@ class QualityBaselineTests(unittest.TestCase):
                 ]
                 quality_baseline.collect(root)
             commands = [call.args[0] for call in mocked_run.call_args_list]
-        self.assertTrue(any(command[:2] == ["ruff", "check"] for command in commands))
-        self.assertTrue(any(command[0] == "mypy" for command in commands))
+        ruff = quality_baseline.tool_command("ruff")
+        mypy = quality_baseline.tool_command("mypy")
+        self.assertTrue(
+            any(command[: len(ruff) + 1] == [*ruff, "check"] for command in commands)
+        )
+        self.assertTrue(any(command[: len(mypy)] == mypy for command in commands))
         self.assertFalse(any("format" in command for command in commands))
 
     def test_commands_stay_under_the_windows_command_line_limit(self):
@@ -135,10 +139,10 @@ class QualityBaselineTests(unittest.TestCase):
             self.assertLess(len(subprocess.list2cmdline(command)), 32767)
             if "--version" in command:
                 return f"{command[0]} 2.4.0\n"
-            if command[:2] == ["ruff", "check"]:
+            if command[:4] == [*quality_baseline.tool_command("ruff"), "check"]:
                 ruff_commands.append(command)
                 return "[]"
-            self.assertEqual(command[0], "mypy")
+            self.assertEqual(command[:3], quality_baseline.tool_command("mypy"))
             self.assertFalse(set(files) & set(command))
             [list_arg] = [arg for arg in command if arg.startswith("@")]
             mypy_files.extend(
