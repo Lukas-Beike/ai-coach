@@ -97,27 +97,29 @@ and no competing interests.
   context (device model, firmware, algorithm, sensor, window, protocol) within a
   provider series restarts the comparison. Only values since the latest change
   count; older values stay in the history and the change day is reported
-  (`context_changed_on`). Below 14 values since the change: no position, reason
-  "Messkontext am … geändert; mindestens 14 passende Nächte seitdem
-  erforderlich."
+  (`context_changed_on`) while it lies inside the 42-day window. Below 14 values
+  since the change: no position, reason "Messkontext geändert; mindestens 14
+  passende Nächte seitdem erforderlich." The rule covers HRV and resting HR, not
+  sleep duration (M3).
 - A switch between unknown and known metadata is a change. Without a reported
   device model a device change cannot be seen: `continuity` is `unknown` and
-  shown as "Messkontext unbekannt"; the comparison is still made.
+  shown as "Messkontext unbekannt"; the comparison is still made. The Coach
+  receives continuity and the change day, not the provider's device text.
 
 ## Numeric rules
 
 | Rule | Value | Tag | Rationale |
 | --- | --- | --- | --- |
-| Comparison window | 42 days | product assumption | Existing rule, `personal_recovery.py:40`; R9 names no single window, R7 used a 4-week reference. |
-| History loaded | 83 days | product assumption | Existing rule, `personal_recovery.py:41`; covers the 42-day window plus display history. |
-| Minimum earlier values for a position | 14 | product assumption | Existing rule, `personal_recovery.py:147`; no source fixes a minimum. |
-| Values for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:150`. |
-| Quartile method | inclusive, n = 4 | product assumption | Existing rule, `personal_recovery.py:148`; the middle quartiles hold about half of the values by definition, so "outside" is not rare. |
-| Current value counts as fresh | observed today or yesterday | product assumption | Existing rule, `personal_recovery.py:131`. |
-| Resting HR plausibility | 20 to 230 bpm | product assumption | Existing filter, `personal_recovery.py:99`; data-entry guard, not a physiological range. |
-| HRV plausibility | greater than 0 ms | product assumption | Existing filter, `personal_recovery.py:92`. |
+| Comparison window | 42 days | product assumption | Existing rule, `personal_recovery.py:83`; R9 names no single window, R7 used a 4-week reference. |
+| History loaded | 83 days | product assumption | Existing rule, `personal_recovery.py:84`; covers the 42-day window plus display history. |
+| Minimum earlier values for a position | 14 | product assumption | Existing rule, `personal_recovery.py:214`; no source fixes a minimum. |
+| Values for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:217`. |
+| Quartile method | inclusive, n = 4 | product assumption | Existing rule, `personal_recovery.py:215`; the middle quartiles hold about half of the values by definition, so "outside" is not rare. |
+| Current value counts as fresh | observed today or yesterday | product assumption | Existing rule, `personal_recovery.py:191`. |
+| Resting HR plausibility | 20 to 230 bpm | product assumption | Existing filter, `personal_recovery.py:144`; data-entry guard, not a physiological range. |
+| HRV plausibility | greater than 0 ms | product assumption | Existing filter, `personal_recovery.py:137`. |
 | RMSSD and SDNN kept separate | yes | source | Different metrics; R8 pools them separately, R10 and R11 report RMSSD. |
-| Measurement change | restart, 14 values since the change | product assumption | R10 validates specific models and firmware; values across a device or window change are not assumed comparable. Chosen by the athlete 2026-11-01. |
+| Measurement change | restart, 14 values since the change | product assumption | `_segment_start`, `personal_recovery.py:161`; R10 validates specific models and firmware; values across a device or window change are not assumed comparable. Chosen by the athlete 2026-11-01. |
 
 ## Allowed statements
 

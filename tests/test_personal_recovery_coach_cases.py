@@ -177,7 +177,9 @@ class RecoveryCoachCases(unittest.TestCase):
                 item["continuity"],
             ),
         )
-        self.assertIn("Messkontext am 2026-09-30 geändert", item["reason"])
+        self.assertIn("Messkontext geändert", item["reason"])
+        self.assertNotIn("measurement_context", item)
+        self.assertIn("Forerunner 965", json.dumps(recovery, ensure_ascii=False))
         self.assertNotIn("position", item)
         self.assert_coach_text_is_clean(view)
 

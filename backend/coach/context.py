@@ -428,9 +428,10 @@ class CoachPlanningContextReader:
 def coach_performance_projection(performance: Any) -> Any:
     """Keep baseline and sleep timing summaries, without repeated per-day arrays.
 
-    The UI keeps the full history. The Coach receives each baseline's summary and
-    each timing series' summary, so an 84-day window fits the section budget
-    without dropping other performance keys.
+    The UI keeps the full history and the provider-reported measurement context;
+    the Coach receives continuity without that provider text. It receives each
+    baseline's summary and each timing series' summary, so an 84-day window fits
+    the section budget without dropping other performance keys.
     """
     if not isinstance(performance, dict):
         return performance
@@ -441,7 +442,11 @@ def coach_performance_projection(performance: Any) -> Any:
     baselines = recovery.get("baselines")
     if isinstance(baselines, list):
         projected_recovery["baselines"] = [
-            {key: value for key, value in row.items() if key != "history"}
+            {
+                key: value
+                for key, value in row.items()
+                if key not in {"history", "measurement_context"}
+            }
             if isinstance(row, dict)
             else row
             for row in baselines

@@ -4,7 +4,7 @@ The comparisons and sleep goal shortfalls read the daily canonical observations 
 each provider. Sleep timing variability reads the canonical sleep periods only
 (#1419, #1416); without them it has no data.
 
-Segment rule (M2, #1428): within one provider series, a change of the
+Segment rule (M2, #1428): within one HRV or resting HR series, a change of the
 observation's method, aggregation or measurement context (device model,
 firmware, algorithm, sensor, window, protocol) restarts the comparison; only
 values since the latest change count. A switch between unknown and known
@@ -91,14 +91,13 @@ def personal_recovery(
     if canonical is not None:
         for (provider, kind), (metric, field, scale) in _SERIES.items():
             key = (provider, metric, field)
-            for observation in canonical.of(kind):
-                day = observation.observed_on.isoformat()
-                if observation.provenance.provider is not provider or day in (
-                    contexts.get(key) or {}
-                ):
-                    continue
-                contexts.setdefault(key, {})[day] = observation
-                add(key, day, observation.value.value, scale)
+            daily = canonical.daily_observations(kind, provider)
+            for day, observation in sorted(daily.items()):
+                add(key, day.isoformat(), observation.value.value, scale)
+            if metric != "sleep":
+                contexts[key] = {
+                    day.isoformat(): observation for day, observation in daily.items()
+                }
     baselines = [
         _baseline(key, records, cutoff, today, contexts.get(key, {}))
         for key, records in sorted(groups.items())
@@ -155,7 +154,7 @@ def _comparability(observation: Observation | None) -> tuple[Any, ...]:
     return (
         observation.method,
         observation.aggregation,
-        observation.provenance.context.identity,
+        observation.provenance.context,
     )
 
 
@@ -182,17 +181,13 @@ def _baseline(
     provider, metric, field = key
     observed = max(records)
     changed_on = _segment_start(records, observations, observed)
+    if changed_on is not None and changed_on <= cutoff:
+        changed_on = None  # The change lies before the window and has no effect.
     # Today's value never influences its own comparison distribution, and a
     # measurement change restarts it.
-    first = max(cutoff, changed_on or cutoff)
+    first = changed_on or cutoff
     prior = [value for day, value in records.items() if first <= day < observed]
     latest = records[observed]
-    current_observation = observations.get(observed)
-    context = (
-        {}
-        if current_observation is None
-        else current_observation.provenance.context.as_details()
-    )
     current = observed >= (today - timedelta(days=1)).isoformat()
     baseline: dict[str, Any] = {
         "source": provider_label(provider, SourceView.DAILY_HEALTH),
@@ -205,13 +200,17 @@ def _baseline(
         "nights": len(prior),
         "unit": {"sleep": "h", "hrv": "ms", "resting_hr": "bpm"}[metric],
         "status": "insufficient_data",
-        "measurement_context": context,
-        "continuity": "known" if "device_model" in context else "unknown",
-        "context_changed_on": changed_on,
         "history": [
             {"date": day, "value": value} for day, value in sorted(records.items())
         ],
     }
+    if observed in observations:
+        context = observations[observed].provenance.context.as_details()
+        baseline.update(
+            measurement_context=context,
+            continuity="known" if "device_model" in context else "unknown",
+            context_changed_on=changed_on,
+        )
     if len(prior) >= 14 and current:
         lower, _, upper = quantiles(prior, n=4, method="inclusive")
         baseline.update(
@@ -225,8 +224,8 @@ def _baseline(
         baseline["reason"] = "Mindestens 14 frühere passende Nächte erforderlich."
         if changed_on:
             baseline["reason"] = (
-                f"Messkontext am {changed_on} geändert; mindestens 14 passende "
-                "Nächte seitdem erforderlich."
+                "Messkontext geändert; mindestens 14 passende Nächte seitdem "
+                "erforderlich."
             )
         if not current:
             baseline["reason"] = "Messung veraltet."

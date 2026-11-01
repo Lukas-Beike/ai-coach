@@ -1187,8 +1187,8 @@ function renderRecoveryCharts(report, root) {
     const position = { below: "Unter dem Bereich deiner früheren Werte", within: "Im Bereich deiner früheren Werte", above: "Über dem Bereich deiner früheren Werte" }[item.position];
     const measurement = metric === "hrv" ? " · " + item.measurement : "";
     const rangeDescription = range ? " Vergleich mit " + item.nights + " früheren Nächten." : "";
-    let continuity = item.continuity === "unknown" ? " Messkontext unbekannt." : "";
-    if (item.context_changed_on) continuity = ` Messkontext geändert am ${dateLabel(item.context_changed_on)}.`;
+    const changed = item.context_changed_on ? ` Messkontext geändert am ${dateLabel(item.context_changed_on)}.` : "";
+    const continuity = `${changed}${item.continuity === "unknown" ? " Messkontext unbekannt." : ""}`;
     return { label: `${title} · ${item.source}${measurement}`, legendLabel: title, source: item.source, unit, color,
       bars: metric === "sleep", average: true, averageInHeading: true, cadenceDays: recoveryHistoryPeriod === "twelveWeeks" ? 7 : 1, range, target,
       currentPoint: points.some(analysisValidPoint) ? null : item.history.findLast((point) => point.date <= today && analysisValidPoint(point)),

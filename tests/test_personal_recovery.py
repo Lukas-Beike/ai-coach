@@ -82,7 +82,7 @@ class PersonalRecoveryTests(unittest.TestCase):
             all(row["status"] == "insufficient_data" for row in stale["baselines"])
         )
 
-    def garmin_hrv(self, contexts, *, old=55, new=55):
+    def garmin_hrv(self, contexts, *, old=55, new=55, nights=31):
         """Return Garmin HRV over 30 earlier nights, re-measured from ``contexts``.
 
         ``contexts`` maps days before today to the context of that night and of
@@ -94,7 +94,7 @@ class PersonalRecoveryTests(unittest.TestCase):
                     "calendarDate": (self.today - timedelta(days=day)).isoformat(),
                     "lastNightAvg": old if day > min(contexts, default=-1) else new,
                 }
-                for day in range(31)
+                for day in range(nights)
             ]
         }
         inputs = mapped_recovery_inputs(garmin, [])
@@ -136,8 +136,7 @@ class PersonalRecoveryTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            "Messkontext am 2026-09-28 geändert; mindestens 14 passende Nächte "
-            "seitdem erforderlich.",
+            "Messkontext geändert; mindestens 14 passende Nächte seitdem erforderlich.",
             fresh["reason"],
         )
         self.assertEqual(
@@ -176,10 +175,20 @@ class PersonalRecoveryTests(unittest.TestCase):
         )
         intervals = mapped_personal_recovery(self.rows(30), {}, {}, self.today)
         for row in intervals["baselines"]:
-            self.assertEqual(
-                ("unknown", None, "ok"),
-                (row["continuity"], row["context_changed_on"], row["status"]),
-            )
+            self.assertEqual("ok", row["status"])
+            if row["metric"] == "sleep":
+                self.assertNotIn("continuity", row)
+            else:
+                self.assertEqual(
+                    ("unknown", None), (row["continuity"], row["context_changed_on"])
+                )
+
+    def test_a_change_before_the_window_is_not_reported(self):
+        device = MeasurementContext(device_model="Forerunner 965", window="overnight")
+        old = self.garmin_hrv({50: device}, nights=60)
+        self.assertEqual(
+            (None, 42, "ok"), (old["context_changed_on"], old["nights"], old["status"])
+        )
 
     def test_legacy_hrv_method_field_is_ignored(self):
         rows = self.rows(14)
