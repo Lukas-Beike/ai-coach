@@ -3,7 +3,7 @@
 - **Card:** M4
 - **Card version:** 1
 - **Method ID:** critical-power-speed-v1 (planned, #1431)
-- **Status:** not implemented; needs the local mean-maximal curve (#1430)
+- **Status:** not implemented; the local mean-maximal curve exists (#1430, `mean-max-curve` v1)
 - **Classification:** model estimate
 - **Literature checked:** 2026-10-24
 - **Review:** blocked
@@ -80,8 +80,8 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 ## Deviations from the studied procedure
 
 - Efforts from everyday files are not verified as maximal, unlike lab trials.
-- The current best-effort curve (`original-stream-integral-v1`) has no 180,
-  420 or 720 s windows; existing points are not CP test data (#1430).
+- The best-effort curve (`mean-max-curve` v1) has 180, 420 and 720 s windows,
+  but its points are best values from everyday files, not CP test data.
 - A freely chosen period such as "best of the last 90 days" is not one
   unchanged physiological state and is not used as a protocol.
 - No 3-min all-out test is offered as a substitute (R6).
@@ -94,7 +94,8 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
   parameters, incompatible conditions, estimated cycling power, running
   power or unvalidated elevation correction.
 - Downsampled streams are excluded or labelled; only full-resolution streams
-  feed the curve (#1430).
+  feed the curve (#1430). Overlapping bests of one session share an
+  `effort_group` and count as one effort.
 - Exact residual and plausibility limits are written on this card before any
   real-data evaluation; there is no universal "under 5 % error is valid" rule.
 
@@ -109,8 +110,8 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 | Duration difference between running trials | at least 7 min | source | R5: shorter differences between trial durations failed validity criteria. Not a recovery time. |
 | Recovery between running trials | not fixed | product assumption | R5 reports 30-60 min in included studies; taken from the selected original study before use. |
 | Primary fit | work or distance on time | product assumption | Chosen in advance per #1431; other fit shown as sensitivity. |
-| Existing cycling windows | 5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600 s | product assumption | `backend/performance/power_profile.py:10`; display windows, not a CP protocol. |
-| Existing running windows | 60, 300, 1200 s; 1,000 and 5,000 m | product assumption | `backend/performance/power_profile.py:12-13`. |
+| Curve cycling windows | 5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600 s | product assumption | `backend/performance/power_profile.py:POWER_DURATIONS`; 180/420/720 s follow R4, the rest are display windows. |
+| Curve running windows | 60, 180, 300, 420, 720, 1200 s; 1,000 and 5,000 m | product assumption | `backend/performance/power_profile.py:RUNNING_DURATIONS`, `RUNNING_DISTANCES`. |
 
 ## Allowed statements
 

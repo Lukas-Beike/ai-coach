@@ -52,16 +52,15 @@ from backend.db.activity_detail_store import (
 from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import CURRENT_DATABASE_SCHEMA
 from backend.errors import AppError
-from backend.performance.analysis_input import analysis_input
 from backend.performance.canonical_recovery import (
     RECOVERY_KINDS,
     read_recovery_inputs,
 )
+from backend.performance.mean_max_curve import SessionCurveReader
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.power_profile import power_profile
 from backend.performance.session_rpe_load import feedback_by_session, session_rpe_load
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
-from backend.providers.garmin_activity_mapping import map_garmin_activities
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 INTERVALS = ProviderId.INTERVALS.value
@@ -634,14 +633,6 @@ class M4BestEffortInputs(linking.LinkingCase):
             )
         )
 
-    def _profile(self, stored: StoredDetailSet) -> dict[str, Any]:
-        record = map_garmin_activities(
-            [linking.garmin_ride()], zone=linking.ZONE, retrieved_at=linking.FIRST
-        ).records[0]
-        candidate = DetailCandidate(stored=stored, started_at=None, device_type=None)
-        merged = merge_details([candidate])
-        return power_profile(analysis_input(record, merged.streams, None).activity)
-
     def test_complete(self) -> None:
         self._ingest_intervals([linking.intervals_ride()], linking.FIRST)
         stored, spans = self._full_intervals()
@@ -669,14 +660,13 @@ class M4BestEffortInputs(linking.LinkingCase):
                 },
             }
         )
-        durations = [point["duration_seconds"] for point in profile["duration_curve"]]
-        for duration in EFFORT_S:
-            self.assertNotIn(
-                duration,
-                durations,
-                msg="#1430: the best-effort curve has no 180/420/720 s windows; "
-                "expected them once the local mean-maximal curve exists",
-            )
+        best = {
+            point["duration_seconds"]: point["watts"]
+            for point in profile["duration_curve"]
+        }
+        self.assertEqual(
+            [best[duration] for duration in EFFORT_S], [350.0, 292.86, 275.0]
+        )
 
     def test_incomplete(self) -> None:
         self._ingest_garmin([linking.garmin_ride()], linking.FIRST)
@@ -684,38 +674,13 @@ class M4BestEffortInputs(linking.LinkingCase):
         assert isinstance(stored.detail, ActivityStreamSet)
         self.assertEqual(stored.detail.resolution, StreamResolution.DOWNSAMPLED)
 
-        profile = self._profile(stored)
-        window = next(
-            point
-            for point in profile["duration_curve"]
-            if point["duration_seconds"] == 1200
-        )
-        self.assertEqual(
-            (profile["status"], window["watts"]),
-            ("ok", 250.0),
-            msg="#1430: power_profile has no full-resolution filter and uses a "
-            "downsampled stream; expected exclusion or a downsampled label",
-        )
-        self.assertEqual(
-            set(profile),
-            {
-                "duration_curve",
-                "method",
-                "points",
-                "scope",
-                "source",
-                "status",
-            },
-            msg="#1430: power_profile carries no resolution or quality label; "
-            "expected one once downsampled input is labelled",
-        )
-        self.assertFalse(
-            any(
-                "resolution" in point or "quality" in point
-                for point in profile["duration_curve"]
-            ),
-            msg="#1430: best-effort points carry no resolution label",
-        )
+        session = self._sessions()[linking.GARMIN_ID]["activity_id"]
+        with self.manager.reader() as db:
+            curves = SessionCurveReader(
+                CanonicalTableReader().session_activities
+            ).curves(db, [session], {})
+        # A downsampled stream never enters the mean-maximal curve.
+        self.assertEqual(curves, {})
         empty = power_profile({"sport": "ride", "streams": {}})
         self.assertEqual(
             (empty["status"], empty["reason"], empty["duration_curve"]),

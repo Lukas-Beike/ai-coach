@@ -246,6 +246,91 @@ def detail_sets_for_session(db: Any, activity_id: str) -> list[StoredDetailSet]:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class FullStreamKey:
+    """Identity and version of one stored full-resolution stream set."""
+
+    provider: str
+    provider_activity_id: str
+    content_sha256: str
+    summary_sha256: str | None
+    # The merge breaks ties between equal sets by the newest fetch.
+    fetched_at: str
+
+
+def full_stream_keys(
+    db: Any, activity_ids: Iterable[str]
+) -> dict[str, tuple[FullStreamKey, ...]]:
+    """Return the keys of each session's full-resolution stream sets.
+
+    Like ``detail_sets_for_session``, records of sessions merged into a session
+    count as its own. Sessions without such a set are absent. No sensor data is
+    decoded, so a caller can tell whether a computed curve is still current.
+    """
+    ids = list(
+        dict.fromkeys(activity_id for activity_id in activity_ids if activity_id)
+    )
+    keys: dict[str, set[FullStreamKey]] = {}
+    for start in range(0, len(ids), 400):
+        chunk = ids[start : start + 400]
+        marks = ", ".join("?" * len(chunk))
+        rows = db.execute(
+            "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE s.activity_id END "
+            "AS owner, d.provider, d.provider_activity_id, d.content_sha256, "
+            "d.summary_sha256, d.fetched_at FROM activity_detail_sets AS d "
+            "JOIN activity_records AS r ON r.provider = d.provider "
+            "AND r.provider_activity_id = d.provider_activity_id "
+            "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+            "WHERE r.state = ? AND s.state <> ? AND d.detail_kind = ? "
+            f"AND d.resolution = ? AND (s.activity_id IN ({marks}) "
+            f"OR (s.state = ? AND s.merged_into IN ({marks})))",
+            (
+                ActivitySessionState.DUPLICATE.value,
+                ActivityRecordState.ACTIVE.value,
+                ActivitySessionState.DELETED.value,
+                ActivityDetailKind.STREAMS.value,
+                StreamResolution.FULL.value,
+                *chunk,
+                ActivitySessionState.DUPLICATE.value,
+                *chunk,
+            ),
+        ).fetchall()
+        for row in rows:
+            keys.setdefault(row["owner"], set()).add(
+                FullStreamKey(
+                    provider=row["provider"],
+                    provider_activity_id=row["provider_activity_id"],
+                    content_sha256=row["content_sha256"],
+                    summary_sha256=row["summary_sha256"],
+                    fetched_at=row["fetched_at"],
+                )
+            )
+    return {
+        owner: tuple(sorted(values, key=lambda key: key.content_sha256))
+        for owner, values in keys.items()
+    }
+
+
+def full_stream_sets_for_session(db: Any, activity_id: str) -> list[StoredDetailSet]:
+    """Return only the full-resolution stream sets of ``detail_sets_for_session``."""
+    return _read_sets(
+        db,
+        "d.detail_kind = ? AND d.resolution = ? "
+        "AND (s.activity_id = ? OR (s.state = ? AND s.merged_into = ?)) "
+        "AND NOT EXISTS (SELECT 1 FROM activity_sessions AS owner "
+        "WHERE owner.activity_id = ? AND owner.state = ?)",
+        (
+            ActivityDetailKind.STREAMS.value,
+            StreamResolution.FULL.value,
+            activity_id,
+            ActivitySessionState.DUPLICATE.value,
+            activity_id,
+            activity_id,
+            ActivitySessionState.DELETED.value,
+        ),
+    )
+
+
 def activity_detail_backfill_universe(
     db: Any, provider: str, *, since: datetime
 ) -> list[str]:

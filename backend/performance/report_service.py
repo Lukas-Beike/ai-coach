@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -26,6 +26,19 @@ from backend.performance.canonical_inputs import (
     activity_summaries_with_sync_time,
 )
 from backend.performance.comparisons import recurring_training_comparisons
+from backend.performance.mean_max_curve import (
+    SessionCurve,
+    SessionCurveReader,
+    input_fingerprint,
+)
+from backend.performance.power_profile import (
+    LEGACY_POWER_DURATIONS,
+    METHOD_ID,
+    METHOD_VERSION,
+    POWER_DURATIONS,
+    RUNNING_DISTANCES,
+    RUNNING_DURATIONS,
+)
 from backend.performance.season_inputs import (
     SeasonSource,
     read_activity_summaries,
@@ -34,6 +47,9 @@ from backend.performance.season_inputs import (
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import training_report
+
+# Analysis windows of the power and running profiles, shortest first.
+PROFILE_WINDOW_DAYS = (28, 90)
 
 
 def report_sport(value: Any) -> str | None:
@@ -97,28 +113,16 @@ class TrainingRecordsService:
                 stored["activity_id"]
             ):
                 continue
-            sport = summary.get("sport")
             records.append(
                 {
                     **stored,
-                    "date": summary_local_date(summary),
-                    "sport": sport,
-                    "activity_type": sport,
-                    "environment": "indoor"
-                    if summary_is_indoor(summary)
-                    else "outdoor",
+                    **summary_fields(summary),
                     # Stored analyses come from the Intervals.icu detail.
                     "source": "Intervals.icu"
                     if ProviderId.INTERVALS.value in (summary.get("record_ids") or {})
                     else summary.get("source") or "Intervals.icu",
-                    "name": summary.get("name"),
                     "average_temp": summary.get("avg_temp_c"),
                     "duration": summary_duration_s(summary),
-                    "device": str(
-                        summary.get("device_name")
-                        or summary.get("recorded_by")
-                        or "unknown"
-                    )[:200],
                 }
             )
         records.sort(key=lambda row: row["date"], reverse=True)
@@ -137,10 +141,60 @@ class TrainingRecordsService:
 
 
 class TrainingProfileSelectionService:
-    def __init__(self, today: Callable[[], date]) -> None:
+    def __init__(
+        self,
+        today: Callable[[], date],
+        *,
+        canonical: CanonicalPerformanceSource | None = None,
+        curves: SessionCurveReader | None = None,
+    ) -> None:
         self._today = today
+        self._canonical = canonical
+        self._curves = curves
 
-    def power_profiles(self, records: list[dict[str, Any]]) -> dict[str, Any]:
+    def curve_records(self) -> list[dict[str, Any]]:
+        """Ride and run sessions of the longest window with their session curves.
+
+        Sessions without full-resolution streams stay in the list with empty
+        profiles, so the coverage counts them as unknown.
+        """
+        if self._canonical is None or self._curves is None:
+            raise RuntimeError("power profiles need the canonical source and curves")
+        reader = self._canonical.activity_summary_reader()
+        if reader is None:
+            raise RuntimeError("power profiles need the canonical activity summaries")
+        today = self._today()
+        start = today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+        # One spare day on each side; the local date below decides membership.
+        first, last = start - timedelta(days=1), today + timedelta(days=1)
+        with self._canonical.database_manager().read_snapshot() as db:
+            sessions = [
+                summary
+                for summary in reader.activity_summaries(db, start=first, end=last)
+                if summary.get("sport") in ("ride", "run")
+                and start.isoformat()
+                <= summary_local_date(summary)
+                <= today.isoformat()
+            ]
+            fingerprints = {
+                str(row.get("id")): summary_fingerprint(row)
+                for row in reader.activity_rows(db, start=first, end=last)
+            }
+            curves = self._curves.curves(
+                db, [str(summary.get("id") or "") for summary in sessions], fingerprints
+            )
+        records = [
+            _curve_record(summary, curves.get(str(summary.get("id") or "")))
+            for summary in sessions
+        ]
+        records.sort(key=lambda row: row["date"], reverse=True)
+        return records
+
+    def power_profiles(
+        self, records: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        if records is None:
+            records = self.curve_records()
         today = self._today()
         eligible_records = [
             row for row in records if str(row.get("date") or "") <= today.isoformat()
@@ -158,7 +212,7 @@ class TrainingProfileSelectionService:
         # points. Candidates below still require a measured profile point.
         windows = {
             str(days): self._profile_window(eligible_records, today, days)
-            for days in (28, 90)
+            for days in PROFILE_WINDOW_DAYS
         }
         return {
             "status": "ok" if compatibility or valid else "insufficient_data",
@@ -170,8 +224,10 @@ class TrainingProfileSelectionService:
                 "type": "running",
                 "windows": {key: value["running"] for key, value in windows.items()},
             },
-            "method": "original-stream-integral-v1",
-            "scope": "Beobachtete Fenster aus lokal gespeicherten Aktivitäten. Fehlende oder ungültige Fenster bleiben unbekannt; keine FTP- oder Tempo-Schätzung.",
+            "method": METHOD_ID,
+            "method_version": METHOD_VERSION,
+            "input_fingerprint": _records_fingerprint(eligible_records),
+            "scope": "Beobachtete Bestwerte der letzten 90 Tage aus lokal gespeicherten Messreihen in voller Auflösung; heruntergerechnete Reihen zählen nicht. Fehlende oder ungültige Fenster bleiben unbekannt. Bestwerte mit gleicher effort_group stammen aus derselben Belastung und sind voneinander abhängig. Keine FTP-, CP- oder Tempo-Schätzung.",
         }
 
     @staticmethod
@@ -180,7 +236,7 @@ class TrainingProfileSelectionService:
     ) -> list[dict[str, Any]]:
         compatibility = []
         for environment in ("outdoor", "indoor"):
-            for duration in (5, 60, 300, 1200):
+            for duration in LEGACY_POWER_DURATIONS:
                 candidates = [
                     (p.get("watts"), row)
                     for row in eligible_records
@@ -218,7 +274,7 @@ class TrainingProfileSelectionService:
             for row in records
             if start.isoformat() <= str(row.get("date") or "") <= today.isoformat()
         ]
-        source = "Intervals.icu original streams via local activity detail cache"
+        source = "local full-resolution activity streams"
         usable = [
             row
             for row in eligible
@@ -236,11 +292,12 @@ class TrainingProfileSelectionService:
                 "unknown_records": len(eligible) - len(usable),
                 "eligible_activities": [row["activity_id"] for row in eligible],
             },
+            "input_fingerprint": _records_fingerprint(eligible),
             "power": [],
             "running": {"speed": [], "distance": []},
         }
         for environment in ("outdoor", "indoor"):
-            for duration in (5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600):
+            for duration in POWER_DURATIONS:
                 candidates = _power_candidates(eligible, environment, duration)
                 result["power"].append(
                     TrainingProfileSelectionService._winner(
@@ -252,8 +309,8 @@ class TrainingProfileSelectionService:
                     )
                 )
         for key, field, values in (
-            ("speed", "speed_mps", (60, 300, 1200)),
-            ("distance", "seconds", (1000, 5000)),
+            ("speed", "speed_mps", RUNNING_DURATIONS),
+            ("distance", "seconds", RUNNING_DISTANCES),
         ):
             for value in values:
                 candidates = _running_candidates(eligible, key, field, value)
@@ -267,6 +324,10 @@ class TrainingProfileSelectionService:
                         minimum=key == "distance",
                     )
                 )
+        _mark_effort_groups(result["power"])
+        _mark_effort_groups(
+            [*result["running"]["speed"], *result["running"]["distance"]]
+        )
         return result
 
     @staticmethod
@@ -305,6 +366,7 @@ class TrainingProfileSelectionService:
             "activity_id": row.get("activity_id"),
             "date": row.get("date"),
             "observed_at": row.get("observed_at"),
+            "start_seconds": point.get("start_seconds"),
             "status": "ok",
             "source": point.get("source")
             or row.get("source")
@@ -480,6 +542,95 @@ class TrainingReportServices:
     derived: TrainingDerivedReadService
     season: TrainingSeasonReadService
     timezone: Callable[[], str]
+
+
+def summary_fields(summary: Mapping[str, Any]) -> dict[str, Any]:
+    """Session fields every analysis row takes from its canonical summary."""
+    sport = summary.get("sport")
+    return {
+        "date": summary_local_date(summary),
+        "sport": sport,
+        "activity_type": sport,
+        "environment": "indoor" if summary_is_indoor(summary) else "outdoor",
+        "name": summary.get("name"),
+        "device": str(
+            summary.get("device_name") or summary.get("recorded_by") or "unknown"
+        )[:200],
+    }
+
+
+def _curve_record(
+    summary: Mapping[str, Any], curve: SessionCurve | None
+) -> dict[str, Any]:
+    fields = summary_fields(summary)
+    profile = None
+    if curve is not None:
+        profile = curve.power if fields["sport"] == "ride" else curve.running
+    return {
+        **fields,
+        "activity_id": stored_activity_key(summary),
+        "observed_at": summary.get("started_at"),
+        # Best values are credited to the providers of the streams they read.
+        "source": None if profile is None else profile.get("source"),
+        "power_profile": {} if curve is None else curve.power,
+        "running_profile": {} if curve is None else curve.running,
+        "fingerprint": None if curve is None else curve.fingerprint,
+    }
+
+
+def _records_fingerprint(records: list[dict[str, Any]]) -> str:
+    """Every input that decides a window: session identity, day, kind and curve."""
+    return input_fingerprint(
+        [
+            row.get("activity_id"),
+            row.get("date"),
+            row.get("sport"),
+            row.get("environment"),
+            row.get("fingerprint"),
+        ]
+        for row in records
+    )
+
+
+def _effort_span(point: dict[str, Any]) -> tuple[float, float] | None:
+    start = point.get("start_seconds")
+    length = point.get("duration_seconds")
+    if length is None:
+        length = point.get("seconds")
+    if point.get("status") != "ok" or start is None or length is None:
+        return None
+    return float(start), float(start) + float(length)
+
+
+def _mark_effort_groups(points: list[dict[str, Any]]) -> None:
+    """Give best values whose windows overlap in one session the same effort group.
+
+    Overlapping windows of one effort are not independent observations, so a
+    later model fit must not treat them as separate efforts.
+    """
+    marked = [
+        (point, span) for point in points if (span := _effort_span(point)) is not None
+    ]
+    parent = list(range(len(marked)))
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for left, (point, span) in enumerate(marked):
+        for right in range(left + 1, len(marked)):
+            other, other_span = marked[right]
+            if (
+                point.get("activity_id") == other.get("activity_id")
+                and span[0] < other_span[1]
+                and other_span[0] < span[1]
+            ):
+                parent[root(right)] = root(left)
+    groups: dict[int, int] = {}
+    for index, (point, _span) in enumerate(marked):
+        point["effort_group"] = groups.setdefault(root(index), len(groups) + 1)
 
 
 def _power_candidates(

@@ -66,6 +66,7 @@ from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.transcribe_post import TranscribePostRoutes
 from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
+from backend.performance.mean_max_curve import SessionCurveReader
 from backend.performance.report_service import (
     TrainingDerivedReadService,
     TrainingProfileSelectionService,
@@ -76,6 +77,7 @@ from backend.performance.report_service import (
 )
 from backend.planning.season_preparation import load_scenarios, season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
+from backend.sync.canonical_table_reader import CanonicalTableReader
 
 
 @dataclass(frozen=True)
@@ -468,6 +470,9 @@ class HttpApiAssembly:
             public_performance_state_service().performance_state()["performance"]
         )
 
+        # One reader keeps the session curves across requests.
+        power_curves = SessionCurveReader(CanonicalTableReader().session_activities)
+
         def training_report_services() -> TrainingReportServices:
             canonical = public.canonical_performance_source()
             report_synced_at = partial(_report_synced_at, canonical)
@@ -500,7 +505,9 @@ class HttpApiAssembly:
             )
             return TrainingReportServices(
                 records=records,
-                profiles=TrainingProfileSelectionService(local_today),
+                profiles=TrainingProfileSelectionService(
+                    local_today, canonical=canonical, curves=power_curves
+                ),
                 report=report_read,
                 derived=TrainingDerivedReadService(
                     read_checkins=report_checkins,
