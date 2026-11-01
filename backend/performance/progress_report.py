@@ -38,6 +38,8 @@ ZONE_MAPPING = (
 PROFILE_DURATIONS = (60, 300, 1200)
 # CTL and eFTP come from Intervals.icu wellness days and ride summaries.
 INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
+# Wellness-day eFTP, else the day's latest Intervals.icu ride summary.
+EFTP_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.CURRENT_METRIC)
 
 
 def _sport(summary: Mapping[str, Any]) -> str:
@@ -348,7 +350,7 @@ def weekly_progress(
         "ctl": {**ctl, "source": INTERVALS_SOURCE},
         "eftp": {
             "sport": "ride",
-            "source": INTERVALS_SOURCE,
+            "source": EFTP_SOURCE,
             **_first_last(eftp_values),
         },
         "mean_max_power": (
