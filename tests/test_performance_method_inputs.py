@@ -15,6 +15,7 @@ import json
 import math
 import unittest
 from datetime import UTC, date, datetime, timedelta
+from functools import partial
 from typing import Any, ClassVar
 
 import test_session_linking as linking
@@ -251,7 +252,10 @@ class M1SessionRpeInputs(linking.LinkingCase):
             )
         result = session_rpe_load(
             summaries,
-            feedback_by_session(summaries, self._feedback().for_activity_ids),
+            feedback_by_session(
+                summaries,
+                partial(self._feedback().for_activity_ids, sessions_only=True),
+            ),
             start=date(2026, 9, 10),
             end=date(2026, 9, 10),
             timezone="Europe/Berlin",

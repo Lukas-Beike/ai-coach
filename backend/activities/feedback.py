@@ -237,13 +237,14 @@ class ActivityFeedbackService:
         return views[:bounded_limit]
 
     def for_activity_ids(
-        self, activity_ids: builtins.list[str]
+        self, activity_ids: builtins.list[str], *, sessions_only: bool = False
     ) -> builtins.list[dict[str, Any]]:
         """The effective feedback of each id's session, keyed by the requested id.
 
         An id reaches a group through its own feedback row or through the session
         of its only activity record, so every provider copy of one session shows
-        the same feedback.
+        the same feedback. ``sessions_only`` leaves out feedback that stands
+        alone because its session is unknown or ambiguous.
         """
         requested = list(
             dict.fromkeys(
@@ -271,6 +272,8 @@ class ActivityFeedbackService:
             if key is None and activity_id in origins:
                 session = origins[activity_id]
                 key = ("session", effective.get(session, session))
+            if sessions_only and key is not None and key[0] != "session":
+                continue
             if key is not None and key in groups:
                 found.append(
                     {**_effective_view(groups[key]), "activity_id": activity_id}

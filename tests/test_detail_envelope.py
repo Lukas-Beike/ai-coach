@@ -32,7 +32,7 @@ class _Feedback:
     def __init__(self, rows):
         self.rows = rows
 
-    def for_activity_ids(self, activity_ids):
+    def for_activity_ids(self, activity_ids, **_options):
         return [
             row
             for key in activity_ids

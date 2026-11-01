@@ -158,7 +158,11 @@ def _days(start: date, end: date) -> Iterable[date]:
 def feedback_by_session(
     summaries: Sequence[Mapping[str, Any]], read: FeedbackLookup | None
 ) -> dict[str, dict[str, Any]]:
-    """The effective feedback of each summary's session, keyed by its stored key."""
+    """The effective feedback of each summary's session, keyed by its stored key.
+
+    ``read`` must return only feedback assigned to a session: a rating whose
+    session is ambiguous is excluded from the load.
+    """
     keys = [key for summary in summaries if (key := stored_activity_key(summary))]
     if read is None or not keys:
         return {}

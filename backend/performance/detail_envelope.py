@@ -44,14 +44,15 @@ class DetailEnvelopeReader:
         reference = str(self._references.resolve_reference(activity_id).activity_id)
         # The session's effective feedback, through the reference or, for
         # feedback saved before the merged record resolved, the requested id.
-        feedback = next(
-            iter(
-                self._feedback_service.for_activity_ids([reference, str(activity_id)])
-            ),
+        ids = [reference, str(activity_id)]
+        feedback = next(iter(self._feedback_service.for_activity_ids(ids)), None)
+        # A rating whose session is ambiguous stays shown but gives no load.
+        rated = next(
+            iter(self._feedback_service.for_activity_ids(ids, sessions_only=True)),
             None,
         )
         summary = self._summary()
-        load = None if summary is None else session_load(summary, feedback)[0]
+        load = None if summary is None else session_load(summary, rated)[0]
         if summary is None:
             validation = activity_performance_validation([], {}, {})
         else:

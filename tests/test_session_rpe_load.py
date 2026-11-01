@@ -13,13 +13,16 @@ import copy
 import threading
 import unittest
 from datetime import date
+from functools import partial
 from typing import Any
 
 from test_feedback_session_identity import (
     GARMIN_ID,
     INTERVALS_ID,
+    SYNCED,
     ZONE,
     FeedbackSessionFixture,
+    intervals_row,
 )
 
 from backend.activities.activity_summary import activity_summaries
@@ -35,6 +38,7 @@ from backend.performance.session_rpe_load import (
     session_rpe_load,
 )
 from backend.performance.training_report import training_report
+from backend.sync import canonical_ingest
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 DAY = "2026-10-21"
@@ -275,7 +279,9 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
             )
         return session_rpe_load(
             summaries,
-            feedback_by_session(summaries, self.service.for_activity_ids),
+            feedback_by_session(
+                summaries, partial(self.service.for_activity_ids, sessions_only=True)
+            ),
             start=date(2026, 9, 10),
             end=date(2026, 9, 10),
             timezone="Europe/Berlin",
@@ -308,6 +314,48 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
         self.undo(created["change"])
         (session,) = self.load()["sessions"]
         self.assertEqual((session["value"], session["rpe_source"]), (420.0, "provider"))
+
+    def test_a_rating_with_an_ambiguous_session_gives_no_load(self) -> None:
+        # A second Intervals.icu ride uses the Garmin copy's id, so feedback
+        # saved under that id cannot be assigned to one session.
+        with self.manager.unit_of_work() as db:
+            canonical_ingest.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": SYNCED,
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row(INTERVALS_ID, icu_rpe=7),
+                            intervals_row(
+                                GARMIN_ID, start_date_local="2026-09-12T07:00:00"
+                            ),
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+        self.service.save(GARMIN_ID, {"session_rpe": 10})
+        with self.manager.reader() as db:
+            summaries = activity_summaries(
+                CanonicalTableReader().activity_sessions(db), ZONE
+            )
+        feedback = feedback_by_session(
+            summaries,
+            lambda keys: self.service.for_activity_ids(keys, sessions_only=True),
+        )
+        result = session_rpe_load(
+            summaries,
+            feedback,
+            start=date(2026, 9, 10),
+            end=date(2026, 9, 12),
+            timezone="Europe/Berlin",
+        )
+        self.assertNotIn(GARMIN_ID, feedback)
+        self.assertNotIn(10, [item["rpe"] for item in result["sessions"]])
+        self.assertEqual(
+            [item["rpe_source"] for item in result["sessions"] if item["rpe"]],
+            ["provider"],
+        )
 
     def test_clearing_the_local_rating_falls_back_to_the_provider_rating(
         self,

@@ -91,7 +91,7 @@ class _Feedback:
         return self._rows
 
     def for_activity_ids(
-        self, activity_ids: builtins.list[str]
+        self, activity_ids: builtins.list[str], **_options: Any
     ) -> builtins.list[dict[str, Any]]:
         return [
             row

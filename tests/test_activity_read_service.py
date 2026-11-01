@@ -60,7 +60,7 @@ class _Feedback:
     def list(self, _limit=100):
         return self.rows
 
-    def for_activity_ids(self, activity_ids):
+    def for_activity_ids(self, activity_ids, **_options):
         return [
             row
             for key in activity_ids

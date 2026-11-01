@@ -604,6 +604,10 @@ The system SHALL compute the M1 session-RPE load (`session-rpe-load` v1) as elap
 - **WHEN** the session's provider records disagree on RPE without a local one, it has only a moving time, or its duration is not positive
 - **THEN** it gives no value with reason `conflicting_provider_ratings`, `no_elapsed_duration` or `invalid_duration` and stays an open session in the sums.
 
+#### Scenario: Ambiguous feedback assignment
+- **WHEN** a local rating is stored under an id that matches activities of several sessions, so it has no session
+- **THEN** it is not used as any session's rating; the session uses its provider fallback or stays open.
+
 #### Scenario: Duplicate imports and edits
 - **WHEN** one session is imported from two providers, or its RPE is edited, cleared or the edit undone
 - **THEN** it counts once, and the next read reflects the effective feedback or the provider fallback.

@@ -159,7 +159,7 @@ class ActivityReferenceResolverTests(_Fixture):
         garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
         self.merge(intervals, garmin)
         feedback = Mock()
-        feedback.for_activity_ids.side_effect = lambda ids: [
+        feedback.for_activity_ids.side_effect = lambda ids, **_options: [
             {"activity_id": key, "session_rpe": 6}
             for key in ids
             if key == "ride-merged"
