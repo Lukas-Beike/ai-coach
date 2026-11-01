@@ -43,7 +43,7 @@ except ImportError:
     cipher_backend = None
 
 FIXTURES = Path(__file__).with_name("fixtures")
-RELEASED_VERSIONS = (9, 10, 11, 12, 13)
+RELEASED_VERSIONS = (16, 17, 18)
 PASSWORD = "synthetic-retirement-upgrade-key"
 FULL = "9501"
 DOWNSAMPLED = "9502"
@@ -251,11 +251,7 @@ class RetirementUpgradeTestCase(unittest.TestCase):
         state = self.counters(manager)
         self.assertEqual("complete", state["status"])
         counters = {name: value for name, value in state["counters"].items() if value}
-        # Before v13 no lap set had a maximum speed; v13 lacks it only for one.
-        refilled = {9: 0, 13: 1}.get(version, len(RETIRED_IDS))
         expected = {"retired": 3, "unmapped_stream": 1, "no_record": 1}
-        if refilled:
-            expected["laps_refilled"] = refilled
         self.assertEqual(expected, counters)
         reader = CanonicalDetailReader(
             CanonicalTableReader().session_activities,

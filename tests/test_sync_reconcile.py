@@ -82,8 +82,8 @@ class SyncReconcileTests(unittest.TestCase):
             "name": "Run",
             "planned_duration_s": 300,
             "workout_doc": "old",
-            "icu_training_load": 1,
-            "icu_intensity": 2,
+            "planned_load": 1,
+            "planned_intensity": 2,
         }
         remote_event = {
             "id": 42,
@@ -123,8 +123,8 @@ class SyncReconcileTests(unittest.TestCase):
                 "external_id": "external-1",
                 "planned_duration_s": 600,
                 "workout_doc": "new workout",
-                "icu_training_load": 4,
-                "icu_intensity": 5,
+                "planned_load": 4,
+                "planned_intensity": 5,
             },
         )
         self.assertEqual(self.revisions.read(self.db), 8)
@@ -140,8 +140,8 @@ class SyncReconcileTests(unittest.TestCase):
             {
                 "planned_duration_s": 300,
                 "workout_doc": "old",
-                "icu_training_load": 1,
-                "icu_intensity": 2,
+                "planned_load": 1,
+                "planned_intensity": 2,
             },
         )
         remote_event = {"id": "remote-1", "external_id": " external-1 "}
@@ -153,8 +153,8 @@ class SyncReconcileTests(unittest.TestCase):
         payload = json.loads(self.unit("unit-1")["payload"])
         self.assertEqual(payload["planned_duration_s"], 300)
         self.assertNotIn("workout_doc", payload)
-        self.assertNotIn("icu_training_load", payload)
-        self.assertNotIn("icu_intensity", payload)
+        self.assertNotIn("planned_load", payload)
+        self.assertNotIn("planned_intensity", payload)
         self.assertEqual(payload["external_id"], " external-1 ")
         self.assertEqual(self.unit("unit-1")["external_id"], "external-1")
         self.assertEqual(self.revisions.read(self.db), 8)

@@ -16,6 +16,8 @@ from backend.athlete.zones import EDITABLE_SPORTS, public_configuration
 from backend.calendar import local as calendar_local
 from backend.canonical.activity_summary import ActivitySummary
 from backend.canonical.domain_records import ZoneConfiguration
+from backend.canonical.planning_fields import PLANNED_INTENSITY as INTENSITY
+from backend.canonical.planning_fields import PLANNED_LOAD as TRAINING_LOAD
 from backend.canonical.vocabulary import ProviderId, ZoneConfigurationMetric
 from backend.coach.context_selection import (
     CONTEXT_SECTIONS,
@@ -42,7 +44,6 @@ from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.library_service import WorkoutLibraryService
-from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 from backend.providers.source_labels import SourceView, provider_label
 
 # INTENSITY and TRAINING_LOAD name the stored keys of planned units and library

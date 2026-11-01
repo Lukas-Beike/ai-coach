@@ -593,7 +593,7 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         # Quirk: a planned load of 0 is not "unavailable" (that needs both planned
         # load and planned duration to be missing), and it is not a valid basis.
         result = workout_compliance(
-            _planned(icu_training_load=0, planned_duration_s=None),
+            _planned(planned_load=0, planned_duration_s=None),
             _activity(training_load=40),
             TODAY,
         )
@@ -605,7 +605,7 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
         self,
     ) -> None:
         result = workout_compliance(
-            _planned(icu_training_load=50, planned_duration_s=3_600),
+            _planned(planned_load=50, planned_duration_s=3_600),
             _activity(moving_duration_s=1_800),
             TODAY,
         )
@@ -650,12 +650,12 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
             _planned(
                 id="done",
                 starts_at_local="2026-04-27T09:00:00",
-                icu_training_load=50,
+                planned_load=50,
             ),
             _planned(
                 id="missed",
                 starts_at_local="2026-05-03T09:00:00",
-                icu_training_load=50,
+                planned_load=50,
             ),
         ]
         activities = [
@@ -689,7 +689,7 @@ class CompliancePlanningCharacterizationTests(unittest.TestCase):
                 id="with-load",
                 starts_at_local="2026-04-28T09:00:00",
                 planned_duration_s=3_600,
-                icu_training_load=50,
+                planned_load=50,
             ),
             _planned(
                 id="duration-only",

@@ -44,6 +44,7 @@ from backend.providers.intervals_activity_fields import (
     activity_detail_laps,
 )
 from backend.providers.intervals_activity_mapping import intervals_analysis_sport
+from backend.providers.intervals_performance_fields import CONFIGURED_FTP
 from backend.runtime.ports import ActivityRowAndSummaryReader
 from backend.sync.activity_detail_canonical import (
     CanonicalDetailWriter,
@@ -176,7 +177,11 @@ class ActivityDetailRefreshService:
         analysed = {**projected, **intervals_analysis_sport(projected)}
         observed_at = self._utc_now()
         targets = self._stored_targets(activity_id) or freeze_targets(
-            self._read_planned_units(), summaries, activity_id, projected, observed_at
+            self._read_planned_units(),
+            summaries,
+            activity_id,
+            {"ftp": projected.get(CONFIGURED_FTP)},
+            observed_at,
         )
         record = {
             "activity_id": activity_id,

@@ -117,7 +117,7 @@ class PlanningComplianceTests(unittest.TestCase):
                 "type": "Ride",
                 "starts_at_local": today.isoformat(),
                 "planned_duration_s": 3600,
-                "icu_training_load": 50,
+                "planned_load": 50,
             },
             {
                 "id": "missed",
@@ -125,7 +125,7 @@ class PlanningComplianceTests(unittest.TestCase):
                 "type": "Ride",
                 "starts_at_local": (today - timedelta(days=1)).isoformat(),
                 "planned_duration_s": 3600,
-                "icu_training_load": 50,
+                "planned_load": 50,
             },
         ]
         activities = [

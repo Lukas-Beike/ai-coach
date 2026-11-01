@@ -55,7 +55,7 @@ class SessionAnalysisTests(unittest.TestCase):
         activity["laps"] = [{"start_time": 0, "end_time": 120}]
         targets = {
             "steps": [{"kind": "power", "target": "100%", "duration": 120}] * 2,
-            "basis": {"icu_ftp": 200},
+            "basis": {"ftp": 200},
         }
         result = interval_quality(activity, targets)
         self.assertEqual("partial", result["status"])
@@ -108,7 +108,7 @@ class SessionAnalysisTests(unittest.TestCase):
             }
         ]
         frozen = freeze_targets(
-            local, rows, "activity-1", {"icu_ftp": 250}, "2026-10-02T10:00:00Z"
+            local, rows, "activity-1", {"ftp": 250}, "2026-10-02T10:00:00Z"
         )
         self.assertIsNotNone(frozen)
         self.assertEqual(120, frozen["steps"][0]["duration"])

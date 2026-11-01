@@ -8,10 +8,7 @@ from typing import Any
 
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 
-# Frozen target snapshots store their FTP basis under the Intervals.icu key.
-from backend.providers.intervals_performance_fields import (
-    CONFIGURED_FTP as TARGET_BASIS_FTP_KEY,
-)
+TARGET_BASIS_FTP_KEY = "ftp"
 
 METHOD = "time-weighted-session-analysis-v1"
 

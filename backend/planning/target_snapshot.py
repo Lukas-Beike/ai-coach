@@ -8,7 +8,6 @@ from backend.activities.identity import activity_kind
 from backend.activities.matching import match_planned_workouts, record_date
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.calendar.canonical import canonical_planned_workouts
-from backend.providers.intervals_performance_fields import CONFIGURED_FTP
 
 
 def freeze_targets(
@@ -43,7 +42,7 @@ def freeze_targets(
         return None
     return {
         "steps": steps,
-        "basis": {CONFIGURED_FTP: detail.get(CONFIGURED_FTP)},
+        "basis": {"ftp": detail.get("ftp")},
         "planned_unit_id": event.get("local_id"),
         "observed_at": observed_at,
         "matching": matching,

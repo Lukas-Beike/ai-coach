@@ -30,16 +30,16 @@ order and the package-cycle fixture is empty.
 ## Release and Database Compatibility
 
 Releases preserve the athlete's existing encrypted database. The oldest
-supported schema is version 9, written by release 1.13.x; startup and restore
+supported schema is version 16, written by release 1.13.32; startup and restore
 accept it in place, retaining existing records and SQLCipher encryption. Older,
 unknown or newer schemas are rejected without deleting or partially changing
-the data: upgrade an older database or backup with release 1.13.6 first. Keep
+the data: upgrade an older database or backup with release 1.13.32 first. Keep
 the existing `/data` bind mount and `APP_PASSWORD` when recreating the
 container, and do not replace or reset the data directory to resolve a
 rejected schema. A fresh database is only required when the athlete explicitly
 chooses to start over. Future schema changes add explicit, versioned and
-transactional migrations from version 9 with upgrade regression tests.
-The current schema is version 17. Version 10 adds canonical activity detail
+transactional migrations from version 16 with upgrade regression tests.
+The current schema is version 19. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
 `garmin_snapshot` value, version 13 adds the maximum speed of each lap, and
@@ -52,22 +52,19 @@ workout-library entries, competitions, staged Coach plans and adaptive previews)
 `starts_at_local` and `planned_duration_s` instead of the Intervals.icu fields
 `start_date_local` and `moving_time`, and version 17 stores the Intervals.icu
 cycling power curve (best power per duration with its day and activity, plus the
-status and window of the latest fetch) as canonical rows. A version 9 to 16 database or backup is
+status and window of the latest fetch) as canonical rows. A version 16 to 18 database or backup is
 upgraded to it in place within one transaction, and a failed upgrade leaves it
-unchanged. The version 12 step splits the stored
-Garmin value into rows, reads every element back to verify it, and keeps the
-original value unread as `garmin_snapshot_legacy`. The version 15 step links an
-existing activity note to its session only when the match is unambiguous
-and leaves every note's contents unchanged. Existing observations keep their
-keys and read with an unknown measurement context. The version 16 step renames
-only those two fields and keeps every value; the change history is not
-rewritten, so earlier changes stay undoable, and recorded Intervals.icu sync
+unchanged. The version 16 schema uses the neutral start and duration fields;
+the change history is not rewritten, so earlier changes stay undoable, and recorded Intervals.icu sync
 baselines still match. A sync confirmation that was prepared before the
 upgrade, or a confirmed sync job still queued during it, no longer matches the
 renamed records: it reports them as changed since the preview and writes
 nothing, so prepare and confirm that sync again. The version 17 step keeps the
 power curve of the newest stored snapshot as a raw record; the analysis power
 profile shows it again once the canonical backfill has projected it.
+Version 18 records the session-RPE rating time. Version 19 names local planned
+load and intensity `planned_load` and `planned_intensity` and the frozen target
+FTP basis `ftp`; the Intervals.icu adapter retains its provider wire names.
 
 Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types. Likewise only that adapter maps `starts_at_local` and `planned_duration_s` to the Intervals.icu event and workout fields, and Coach tools take `starts_at_local` and `planned_duration_s` as well.
 
@@ -616,7 +613,7 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`. The restore is refused with HTTP 507 when `/data` lacks the free space for this copy, and a partial copy is deleted.
-5. The replacement database must have the current schema (version 17) or a supported released schema from version 9 onward; a version 9 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must have the current schema (version 19) or a supported released schema from version 16 onward; a version 16 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Privacy Export & Data Purge
@@ -1404,7 +1401,7 @@ Treffer tragen für den Coach die Herkunft `data_origin` (`live`,
 „Datenbank“ die gespeicherten Einträge; „Lokal speichern“ übernimmt einen
 Eintrag nach Prüfung als eigenes Produkt, „Aus Datenbank entfernen“ löscht nur
 den Spiegeleintrag. Der Spiegel gehört zu Backup, Export und Datenlöschung. Das
-Upgrade von Schema v9 oder v10 legt die leere Tabelle an und erhält alle Daten.
+Bereits ab Schema v16 ist diese Tabelle vorhanden und bleibt beim Upgrade erhalten.
 
 #### Yazio-Produktsuche (optional)
 

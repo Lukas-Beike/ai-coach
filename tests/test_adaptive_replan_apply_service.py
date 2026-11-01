@@ -117,8 +117,8 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
             name="Tempo ride",
             description="- 30m 80%",
             workout_doc={"old": True},
-            icu_training_load=88,
-            icu_intensity=7,
+            planned_load=88,
+            planned_intensity=7,
         )
         self.add_workout(workout_id, original, sync_state="synced")
         with self.manager.unit_of_work() as db:
@@ -134,8 +134,8 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
             duration_minutes=25,
             description="- 25m 50% Easy",
             workout_doc={"new": True},
-            icu_training_load=20,
-            icu_intensity=2,
+            planned_load=20,
+            planned_intensity=2,
         )
         archived_id = str(uuid.uuid4())
         archived = self.workout(archived_id, "2026-09-22")
@@ -196,7 +196,7 @@ class AdaptiveReplanApplyServiceTests(unittest.TestCase):
         self.assertEqual(saved["description"], "- 25m 50% Easy")
         self.assertEqual(saved["duration_minutes"], 25)
         self.assertEqual(saved["planned_duration_s"], 1500)
-        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+        for key in ("workout_doc", "planned_load", "planned_intensity"):
             self.assertNotIn(key, saved)
         archived_saved = json.loads(
             self.row(

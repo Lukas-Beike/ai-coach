@@ -1,6 +1,6 @@
 """SQLCipher upgrade, rollback, restart and backup/restore from every released schema.
 
-Each released schema (v9 to v17) is populated in an encrypted temporary database
+Each supported released schema (v16 to v18) is populated in an encrypted temporary database
 with the rows of the native migration tests. The upgrade keeps every original
 value, the file stays encrypted, a failing upgrade leaves the database exactly as
 it was, a restart with the same build changes nothing, a wrong key reads nothing,
@@ -10,11 +10,13 @@ the container suite; SQLCipher has no Windows wheel.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import threading
 import unittest
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -22,7 +24,6 @@ from unittest import mock
 
 import test_db_feedback_rating_time_migration as rating_time
 import test_db_migrations as gate
-import test_db_planning_fields_migration as planning
 import test_db_power_curve_migration as power_curve
 
 from backend.backup.database import DatabaseBackupConfig, DatabaseBackupService
@@ -38,7 +39,7 @@ from backend.db.schema import (
     configure_cipher,
     database_schema_is_current,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V17
+from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V18
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -51,20 +52,36 @@ PLAINTEXT_HEADER = b"SQLite format 3\x00"
 
 def builders() -> dict[int, Callable[[Any], None]]:
     """The populated released databases of the native migration tests."""
-    released = gate.DatabaseSchemaGateTests(
-        "test_current_schema_is_accepted_repeatedly_without_changes"
-    )
-    return {
-        9: released.populated_v9_database,
-        10: released.populated_v10_database,
-        11: released.populated_v11_database,
-        12: released.populated_v12_database,
-        13: released.populated_v13_database,
-        14: lambda db: released.populated_v13_database(db, gate.V14_FIXTURE),
-        15: planning.populated_planning_database,
+    base = {
         16: power_curve.populated_power_curve_database,
         17: rating_time.populated_feedback_database,
+        18: lambda db: rating_time.populated_feedback_database(
+            db, gate.FIXTURES / "schema_v18.sql.txt"
+        ),
     }
+
+    def populated(db: Any, build: Callable[[Any], Any]) -> None:
+        build(db)
+        db.execute(
+            "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                "matrix-unit",
+                "matrix-unit",
+                json.dumps({"icu_training_load": 42, "icu_intensity": 0.8}),
+                "now",
+                "now",
+            ),
+        )
+        db.executemany(
+            "INSERT INTO workout_library(id, local_id, payload, updated_at) VALUES (?, ?, ?, 'now')",
+            [
+                (f"matrix-{i}", f"matrix-{i}", json.dumps({"icu_training_load": i}))
+                for i in range(130)
+            ],
+        )
+        db.commit()
+
+    return {version: partial(populated, build=build) for version, build in base.items()}
 
 
 def snapshot(db: Any) -> dict[str, Any]:
@@ -77,10 +94,10 @@ def snapshot(db: Any) -> dict[str, Any]:
 
 
 def fixed_clock() -> Any:
-    """Pin the time the v11 step stamps on the rows it writes."""
-    clock = mock.Mock()
-    clock.now.return_value.isoformat.return_value = gate.STAMP
-    return mock.patch("backend.db.garmin_items_migration.datetime", clock)
+    """No supported migration depends on the wall clock."""
+    from contextlib import nullcontext
+
+    return nullcontext()
 
 
 def plain_upgrade(version: int) -> dict[str, Any]:
@@ -143,6 +160,23 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                         migrate_schema(db)
                     db.commit()
                     self.assertEqual(snapshot(db), plain_upgrade(version))
+                    payload = json.loads(
+                        db.execute(
+                            "SELECT payload FROM planned_units WHERE id = 'matrix-unit'"
+                        ).fetchone()[0]
+                    )
+                    self.assertEqual(
+                        payload, {"planned_load": 42, "planned_intensity": 0.8}
+                    )
+                    migrated = db.execute(
+                        "SELECT id, payload FROM workout_library WHERE id LIKE 'matrix-%'"
+                    ).fetchall()
+                    self.assertEqual(len(migrated), 130)
+                    for unit_id, unit_payload in migrated:
+                        self.assertEqual(
+                            json.loads(unit_payload),
+                            {"planned_load": int(unit_id.removeprefix("matrix-"))},
+                        )
                     self.assertTrue(database_schema_is_current(db))
                     self.assertEqual(
                         db.execute("PRAGMA user_version").fetchone()[0],
@@ -160,7 +194,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
 
     def test_a_failing_upgrade_leaves_every_released_schema_unchanged(self) -> None:
         def failing_last_step(connection: Any) -> None:
-            migrations._upgrade_v17_to_v18(connection)
+            migrations._upgrade_v18_to_v19(connection)
             raise RuntimeError("injected migration failure")
 
         for version in builders():
@@ -171,7 +205,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                     with (
                         mock.patch.dict(
                             migrations.UPGRADE_STEPS,
-                            {SHAPE_SCHEMA_V17: (SHAPE_CURRENT, failing_last_step)},
+                            {SHAPE_SCHEMA_V18: (SHAPE_CURRENT, failing_last_step)},
                         ),
                         self.assertRaisesRegex(RuntimeError, "injected"),
                     ):

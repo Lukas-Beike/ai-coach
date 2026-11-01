@@ -411,10 +411,10 @@ class TrainingReportTests(unittest.TestCase):
                     {
                         "date": "2026-09-28",
                         "sport": "run",
-                        "icu_training_load": 20,
+                        "planned_load": 20,
                         "compliance": {"actual_activity": {"id": "r"}},
                     },
-                    {"date": "2026-09-28", "sport": "ride", "icu_training_load": 40},
+                    {"date": "2026-09-28", "sport": "ride", "planned_load": 40},
                 ]
             },
         )

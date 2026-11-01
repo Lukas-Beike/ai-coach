@@ -1849,7 +1849,7 @@ def _fixture_v6_units(today):
                 "sport": sport,
                 "duration_minutes": duration,
                 "description": description,
-                "icu_training_load": load,
+                "planned_load": load,
                 "target": "AUTO",
                 "rationale": FIXTURE_RATIONALE,
             },

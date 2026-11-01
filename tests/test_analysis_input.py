@@ -265,7 +265,7 @@ class GoldenParityTests(unittest.TestCase):
         )
         targets = {
             "steps": [{"kind": "power", "target": "100%", "duration": 600}] * 3,
-            "basis": {"icu_ftp": 200},
+            "basis": {"ftp": 200},
         }
         self.assertEqual("Intervals.icu", adapted.source_label)
         legacy_aerobic = aerobic_analysis(projected)

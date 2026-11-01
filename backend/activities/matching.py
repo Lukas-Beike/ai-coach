@@ -15,10 +15,8 @@ from backend.activities.identity import activity_sport as _activity_sport
 from backend.activities.identity import summary_sport as _summary_sport
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
+from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
 from backend.canonical.vocabulary import Sport
-from backend.providers.intervals_performance_fields import (
-    TRAINING_LOAD as PLANNED_LOAD_KEY,
-)
 
 # Units without a planned time are stored as a bare date or at local midnight.
 _DATE_ONLY_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]00:00(?::00(?:\.0+)?)?)?")

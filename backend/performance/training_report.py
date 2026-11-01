@@ -14,10 +14,8 @@ from backend.activities.activity_summary import (
 )
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
 from backend.performance.session_rpe_load import session_rpe_load
-from backend.providers.intervals_performance_fields import (
-    TRAINING_LOAD as PLANNED_LOAD_KEY,
-)
 
 METHOD = "local-training-report-v1"
 _SUMMARY_METRICS = ("moving_duration_s", "distance_m", "training_load")

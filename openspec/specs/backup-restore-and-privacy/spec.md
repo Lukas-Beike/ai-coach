@@ -12,7 +12,6 @@ Owns export/restore/erasure workflows, not a fresh-database upgrade policy. Prod
 
 The database backup service SHALL create a consistent snapshot containing committed WAL data, preserve configured encryption, stream without holding the application database lock for the download, and remove temporary snapshots afterward.
 
-
 #### Scenario: Committed WAL data
 - **WHEN** the athlete requests a database backup after a committed change remains in WAL
 - **THEN** the snapshot includes the committed change
@@ -30,7 +29,6 @@ Evidence: `backend/backup/database.py::DatabaseBackupService._create_snapshot`; 
 ### Requirement: Bounded export resource use
 
 Database and privacy-archive exports SHALL enforce their configured size, free-space and time bounds and SHALL reject missing database storage rather than create an empty successful backup.
-
 
 #### Scenario: Insufficient capacity
 - **WHEN** the configured export limit or required free-space reserve cannot be met
@@ -50,7 +48,6 @@ Evidence: `backend/backup/database.py::DatabaseBackupService._check_source_capac
 
 Authenticated privacy exports SHALL include durable athlete/planning/provider/history state through the JSON and bounded ZIP/JSONL projections while excluding sessions and server credential material from the privacy projection.
 
-
 #### Scenario: Privacy archive requested
 - **WHEN** the authenticated athlete requests the archive export
 - **THEN** the archive includes its complete declared manifest and streams the durable collections
@@ -68,7 +65,6 @@ Evidence: `backend/privacy.py::PrivacyDataExportService.export`; `backend/backup
 ### Requirement: Stage and validate restore before promotion
 
 Restore SHALL stage bounded input to a unique temporary file, migrate supported backup schemas, verify exact schema/integrity/foreign keys with the configured encryption, and leave the active database untouched on staging or validation failure.
-
 
 #### Scenario: Supported older encrypted backup
 - **WHEN** a staged backup has a supported released schema and decrypts under the configured key
@@ -88,7 +84,6 @@ Evidence: `backend/backup/restore_validation.py::DatabaseRestoreValidationServic
 
 The restore endpoint SHALL require authentication and CSRF, delete sessions from a validated staged backup, preserve a unique pre-restore recovery copy when an active file exists, swap under maintenance/drain, and clear the response cookies on success.
 
-
 #### Scenario: Successful restore
 - **WHEN** an authorized backup passes validation and promotion succeeds
 - **THEN** backup sessions are absent, the previous active file has a distinct recovery copy, and the athlete must authenticate again
@@ -107,7 +102,6 @@ Evidence: `backend/http_api/privacy_restore_post.py::PrivacyRestorePostRoutes.ha
 
 After replacing the database, restore SHALL refresh credential-derived configuration, resume interrupted sync and Coach jobs, restart canonical backfill and wake workers; resume failures SHALL be reported as restored_resume_failed rather than as an untouched invalid backup.
 
-
 #### Scenario: Recovered durable work
 - **WHEN** promotion completes and recovery dependencies succeed
 - **THEN** restored jobs resume against restored provider configuration and both workers are signaled
@@ -121,7 +115,6 @@ Evidence: `backend/backup/restore.py::DatabaseRestoreService._resume`; `backend/
 ### Requirement: Explicit scoped local erasure
 
 Local privacy deletion SHALL require the exact backend confirmation text before dependency access, expose a count preview covering durable deletion categories, and delete the declared local scope in one maintenance-gated transaction.
-
 
 #### Scenario: Wrong deletion confirmation
 - **WHEN** the request does not contain the exact required confirmation text
@@ -141,7 +134,6 @@ Evidence: `backend/privacy.py::PrivacyDeleteService.preview`; `backend/privacy.p
 
 Privacy deletion SHALL report local erasure separately from its best-effort OpenAI conversation deletion, preserve the declared untouched remote-provider scope, cancel pending Garmin login and mark legacy Garmin token state disconnected to prevent silent re-import.
 
-
 #### Scenario: Remote conversation deletion fails
 - **WHEN** an existing OpenAI conversation cannot be deleted remotely
 - **THEN** local erasure continues and the result reports the remote attempt and failure separately
@@ -155,3 +147,13 @@ Privacy deletion SHALL report local erasure separately from its best-effort Open
 - **THEN** pre-erasure capture caches cannot repopulate the deleted entries
 
 Evidence: `backend/privacy.py::PrivacyDeleteService.delete`; `backend/privacy.py::PRIVACY_REMOTE_SCOPE`; `backend/provider_credentials.py::GARMIN_TOKENSTORE_DISCONNECTED`. Tests: `tests/test_server_database.py::test_privacy_delete_reports_remote_attempt_and_failure`; `tests/test_privacy_delete_confirmation.py::test_deleted_diagnostic_entries_do_not_return_or_resurrect_after_delete`.
+
+### Requirement: Retired backup schema rejection
+
+Restore SHALL reject backups with schema versions older than v16 without changing the active database.
+
+#### Scenario: Older backup is selected
+- **WHEN** a backup with schema v15 or older is staged for restore
+- **THEN** validation fails and the active database remains unchanged.
+
+Evidence: `backend/backup/restore_validation.py`; `tests/test_database_restore_validation.py::test_validate_rejects_v9_backup_without_modifying_it` and `tests/test_database_restore_v13_upgrade.py`.
