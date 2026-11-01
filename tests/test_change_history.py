@@ -254,6 +254,10 @@ class ChangeHistoryTests(unittest.TestCase):
             "training_preferences_swimming": "",
             "training_preferences_strength": "",
             "training_preferences_mobility": "",
+            "training_model": "pyramidal",
+        }
+        before_training_model = {
+            key: item for key, item in value.items() if key != "training_model"
         }
         before_sport_preferences = {
             "name": "Ada",
@@ -264,6 +268,7 @@ class ChangeHistoryTests(unittest.TestCase):
             change_history.accepted_audit_hashes("profile", value),
             {
                 change_history.audit_hash(value),
+                change_history.audit_hash(before_training_model),
                 change_history.audit_hash(before_sport_preferences),
                 change_history.audit_hash({"name": "Ada"}),
             },

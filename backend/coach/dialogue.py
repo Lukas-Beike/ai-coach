@@ -228,7 +228,9 @@ when adding text. Daily walking habits belong in training_background or
 training_preferences. Sport-specific preferences belong in
 training_preferences_running, training_preferences_cycling,
 training_preferences_swimming, training_preferences_strength or
-training_preferences_mobility; general ones in training_preferences. Today's condition belongs in save_checkin, a week's
+training_preferences_mobility; general ones in training_preferences. training_model (pyramidal, polarized,
+threshold or sweet_spot) is the intensity model for plans; change it only on the
+athlete's explicit request. Today's condition belongs in save_checkin, a week's
 constraints in the plan. Never tell the athlete to enter supported profile changes manually.
 
 New schedules use apply_training_patch or replace_training_plan directly.
