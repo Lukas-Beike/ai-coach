@@ -1628,6 +1628,8 @@ def _fixture_wave2_summaries(today, snapshot):
             }[sport],
             "start_date_local": f"{day.isoformat()}T{('06:30:00' if sport == 'Run' else '18:00:00')}",
             "moving_time": (35 + offset % 5 * 10) * 60,
+            # Whole-session duration incl. pauses, the session-RPE load input.
+            "elapsed_time": (40 + offset % 5 * 10) * 60,
             "distance": (6000 + offset * 37)
             if sport == "Run"
             else (24000 + offset * 111),
@@ -2175,6 +2177,7 @@ class FixtureHandler(server.HTTP_API.request_handler_class()):
                 "type": "Ride",
                 "start_date_local": f"{today}T08:00:00",
                 "moving_time": 3600,
+                "elapsed_time": 3720,
                 "distance": 25000,
                 "icu_training_load": 50,
                 # Intervals.icu reports a fractional intensity and its own NP key.

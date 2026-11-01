@@ -1,7 +1,7 @@
 """Synthetic input sets for the method cards M1-M4: complete, incomplete, contradictory.
 
 Each set asserts a defined outcome: a value, no value with a status or reason, or an
-exclusion. M1 and M4 have no method yet, so they assert input-level facts. Gaps are
+exclusion. M4 has no method yet, so it asserts input-level facts. Gaps are
 pinned: the assertion states today's behaviour and names the owning issue, so closing
 the gap fails the test and forces an update. All data is synthetic, in temporary
 storage, with no provider call. Detailed behaviour lives in test_personal_recovery,
@@ -27,6 +27,7 @@ from canonical_recovery_support import (
 )
 
 from backend.activities.activity_reference import ActivityReferences
+from backend.activities.activity_summary import activity_summaries
 from backend.activities.detail_merge import DetailCandidate, merge_details
 from backend.activities.feedback import ActivityFeedbackService
 from backend.canonical.activity_detail import ActivityStreamSet
@@ -57,8 +58,10 @@ from backend.performance.canonical_recovery import (
 )
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.power_profile import power_profile
+from backend.performance.session_rpe_load import feedback_by_session, session_rpe_load
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.providers.garmin_activity_mapping import map_garmin_activities
+from backend.sync.canonical_table_reader import CanonicalTableReader
 
 INTERVALS = ProviderId.INTERVALS.value
 GARMIN = ProviderId.GARMIN.value
@@ -234,8 +237,30 @@ class M1SessionRpeInputs(linking.LinkingCase):
         self.assertEqual(
             [name for name in columns if "rpe" in name],
             [],
-            msg="#1423/#1406 D3: icu_rpe has no canonical field, only the raw payload; "
-            "expected a labelled fallback beside the local rating, never averaged",
+            msg="the provider RPE lives in the record details, not in a column",
+        )
+        intervals = self._record(INTERVALS, linking.INTERVALS_ID)
+        self.assertEqual(
+            json.loads(intervals["details"])["rpe"],
+            7,
+            msg="#1446: the canonical record keeps icu_rpe with its provenance",
+        )
+        with self.manager.reader() as db:
+            summaries = activity_summaries(
+                CanonicalTableReader().activity_sessions(db), linking.ZONE
+            )
+        result = session_rpe_load(
+            summaries,
+            feedback_by_session(summaries, self._feedback().for_activity_ids),
+            start=date(2026, 9, 10),
+            end=date(2026, 9, 10),
+            timezone="Europe/Berlin",
+        )
+        (session,) = result["sessions"]
+        self.assertEqual(
+            (session["value"], session["rpe"], session["rpe_source"]),
+            (300.0, 5, "athlete_feedback"),
+            msg="#1427/D3: the local rating wins over icu_rpe, never averaged",
         )
 
 

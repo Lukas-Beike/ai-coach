@@ -86,7 +86,13 @@ PLANNED_FIELDS = (
     "is_local",
     "is_remote",
 )
-FEEDBACK_FIELDS = ("activity_id", "activity_name", "activity_date", "notes")
+FEEDBACK_FIELDS = (
+    "activity_id",
+    "activity_name",
+    "activity_date",
+    "notes",
+    "session_rpe",
+)
 
 
 def local_calendar_library_entries(
@@ -195,7 +201,7 @@ def _project_activity_feedback_days(
         if not isinstance(feedback, dict):
             continue
         value = planning_date(feedback.get("activity_date"))
-        if value and feedback.get("notes"):
+        if value and (feedback.get("notes") or feedback.get("session_rpe") is not None):
             _day(days, value).setdefault("activity_feedback", []).append(
                 selected(feedback, FEEDBACK_FIELDS)
             )

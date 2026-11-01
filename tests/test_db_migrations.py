@@ -32,6 +32,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V14,
     SHAPE_SCHEMA_V15,
     SHAPE_SCHEMA_V16,
+    SHAPE_SCHEMA_V17,
     released_shape,
 )
 
@@ -51,6 +52,8 @@ V14_FIXTURE = FIXTURES / "schema_v14.sql.txt"
 V15_FIXTURE = FIXTURES / "schema_v15.sql.txt"
 # Release schema 16: planning field names; version 17 adds the power curve.
 V16_FIXTURE = FIXTURES / "schema_v16.sql.txt"
+# Release schema 17: power curve; version 18 adds the session RPE rating time.
+V17_FIXTURE = FIXTURES / "schema_v17.sql.txt"
 RELEASED_FIXTURES = (
     OLDEST_SUPPORTED_FIXTURE,
     V10_FIXTURE,
@@ -60,6 +63,7 @@ RELEASED_FIXTURES = (
     V14_FIXTURE,
     V15_FIXTURE,
     V16_FIXTURE,
+    V17_FIXTURE,
 )
 # Columns an upgrade renamed: (table, released name) -> current name. Rows read
 # with the columns of a released schema compare the same values afterwards.
@@ -771,6 +775,13 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                 "SELECT activity_id, provider, session_id FROM activity_feedback"
             )
         }
+
+    def test_frozen_v17_fixture_is_the_recorded_released_shape(self):
+        db = self.connect()
+        db.executescript(V17_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V17
+        )
 
     def test_frozen_v16_fixture_is_the_recorded_released_shape(self):
         db = self.connect()

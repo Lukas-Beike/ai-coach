@@ -219,3 +219,16 @@ Every completed-activity object that the HTTP API returns SHALL carry provider-n
 Detailed contract: the key map is listed in `openspec/changes/archive/2026-10-30-neutral-activity-http-shape/design.md` (D1). A neutral key that is already present wins. `weighted_average_watts` stays separate from `normalized_power`. The activity detail document (`/api/activities/{id}`) is already neutral and stays unchanged. The provider-coupling ratchet records every module outside the provider, sync and canonical packages that imports a provider field-name module, and that record may only shrink.
 
 Evidence: `backend/canonical/public_metrics.py:neutral_activity`, `backend/canonical/public_metrics.py:neutral_calendar_state`, `backend/http_api/bootstrap_calendar.py`, `backend/http_api/public_plan.py:PublicPlanStateService.read_public`, `backend/http_api/bootstrap_state.py`, `public/activity-analysis.js`, `public/plan-views.js`; `tests/test_canonical_public_metrics.py:NeutralPublicMetricsTests`, `tests/test_http_sync_get_routes.py:test_activity_page_uses_neutral_names_and_detail_is_passed_through`, `tests/test_public_plan.py:test_internal_read_keeps_stored_metrics_and_public_read_translates`, `tests/plan-views-week-distance.test.cjs`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_import_provider_field_name_modules`; `e2e/contracts.spec.js`, `e2e/activity-details.spec.js`.
+
+### Requirement: Session RPE rating time and session load in the detail
+The system SHALL store when the athlete last set a feedback row's session RPE, keep it while the RPE stays the same and clear it with the RPE; ratings stored before schema v18 SHALL keep an unknown rating time. The activity detail document SHALL carry the session's session-RPE load, and the PWA SHALL offer the RPE as a 0–10 half-point selection with the CR-10 anchors.
+
+#### Scenario: Rating time follows the RPE
+- **WHEN** the athlete saves a new RPE, then saves only notes, then clears the RPE
+- **THEN** the rating time is set, kept, then cleared; undo restores the recorded rating time with the row.
+
+#### Scenario: Detail shows the load
+- **WHEN** the activity detail of a session with local RPE 6.5 and 62 elapsed minutes is opened or its feedback is saved
+- **THEN** it shows `403 AU · RPE 6,5 (Athletenfeedback) × 62 min`; a session without a summary shows no load line.
+
+Evidence: `backend/db/repositories.py:ActivityFeedbackRepository.upsert`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `public/activity-details.js:rpeSelect`; `tests/test_db_feedback_rating_time_migration.py::test_upgraded_feedback_records_its_rating_time_only_on_an_rpe_change`, `tests/test_detail_envelope.py`, `e2e/activity-details.spec.js`.

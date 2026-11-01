@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.activities.activity_summary import (
@@ -31,6 +31,7 @@ from backend.performance.season_inputs import (
     read_activity_summaries,
     read_season_load_inputs,
 )
+from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import training_report
 
@@ -324,11 +325,15 @@ class TrainingReportReadService:
         load_scenarios: Callable[..., dict[str, Any]],
         season_source: SeasonSource,
         canonical: CanonicalPerformanceSource,
+        session_feedback: FeedbackLookup | None = None,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         self._read_synced_at = read_synced_at
         self._read_plan = read_plan
         self._read_checkins = read_checkins
         self._read_feedback = read_feedback
+        self._session_feedback = session_feedback
+        self._now = now
         self._today = today
         self._load_scenarios = load_scenarios
         self._season_source = season_source
@@ -373,6 +378,13 @@ class TrainingReportReadService:
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
         summaries, observed_at = activity_summaries_with_sync_time(self._canonical)
+        period = [
+            summary
+            for summary in summaries
+            if start.isoformat()
+            <= summary_local_date(summary, timezone)
+            <= (start + timedelta(days=days - 1)).isoformat()
+        ]
         return training_report(
             start=start,
             days=days,
@@ -384,6 +396,10 @@ class TrainingReportReadService:
             timezone=timezone,
             activity_summaries=summaries,
             observed_at=observed_at,
+            session_feedback=feedback_by_session(period, self._session_feedback),
+            computed_at=None
+            if self._now is None
+            else self._now().isoformat(timespec="seconds"),
         )
 
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.activities.activity_reference import ActivityReferenceResolver
 from backend.performance.activity_validation import activity_performance_validation
+from backend.performance.session_rpe_load import session_load
 
 
 class DetailEnvelopeReader:
@@ -15,7 +16,7 @@ class DetailEnvelopeReader:
     Feedback and equipment are keyed by the resolved session reference, the id
     that feedback writes and gear assignments use. Validation compares the
     session's activity summary with the performance context; a session without
-    one gets the validation's explicit no-data result.
+    one gets the validation's explicit no-data result and no session-RPE load.
     """
 
     def __init__(
@@ -51,6 +52,7 @@ class DetailEnvelopeReader:
             None,
         )
         summary = self._summary()
+        load = None if summary is None else session_load(summary, feedback)[0]
         if summary is None:
             validation = activity_performance_validation([], {}, {})
         else:
@@ -64,6 +66,7 @@ class DetailEnvelopeReader:
             "activity_feedback": feedback,
             "equipment": activity_equipment(self._read_equipment(reference), reference),
             "activity_validation": validation,
+            "session_rpe_load": load,
         }
 
 

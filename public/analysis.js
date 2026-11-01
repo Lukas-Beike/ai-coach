@@ -723,6 +723,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   } else {
     loadMissing.push("Trainingszeit");
   }
+  appendSessionRpeLoadChart(history.session_rpe_load, loadRoot, loadMissing, start, end);
   const loadMissingNote = analysisMissingDataNote(loadMissing);
   if (loadMissingNote) loadRoot.append(loadMissingNote);
   const performanceSeries = [
@@ -778,6 +779,24 @@ function renderAnalysisHistory(history) { // NOSONAR
   const otherMissingNote = analysisMissingDataNote(otherMissing);
   if (otherMissingNote) root.append(otherMissingNote);
   for (const target of [root, loadRoot, enduranceRoot]) target.querySelectorAll("details:not([data-analysis-section])").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
+}
+
+// Session-RPE load (AU) stays its own chart: it is never added to or compared with provider load.
+function appendSessionRpeLoadChart(report, loadRoot, loadMissing, start, end) {
+  const days = (report?.days || []).filter((day) => day.date >= start && day.date <= end);
+  const rated = days.reduce((sum, day) => sum + day.rated_sessions, 0);
+  if (!rated) { loadMissing.push("Session-RPE-Last"); return; }
+  const total = days.reduce((sum, day) => sum + day.total_sessions, 0);
+  const provider = days.reduce((sum, day) => sum + day.rpe_sources.provider, 0);
+  const weekly = analysisHistoryPeriod === "twelveWeeks";
+  const points = days.map((day) => ({ date: day.date, value: day.value }));
+  const series = [{ label: weekly ? "Session-RPE-Last pro Woche" : "Session-RPE-Last pro Tag", legendLabel: "Session-RPE-Last", source: "Athletenfeedback", unit: "AU", color: 2, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, points: weekly ? analysisWeeklySumPoints(points, start, end) : points }];
+  const sources = provider ? ` · ${analysisCountLabel(provider, "RPE", "RPE")} von Intervals.icu` : "";
+  const chart = collectAnalysisChart(loadMissing, `Session-RPE-Last · ${rated}/${total} Einheiten bewertet`, series, "AU", start, end, `Athletenfeedback: RPE × Gesamtdauer je Einheit in AU${sources}. Unbewertete Einheiten bleiben offen; nicht mit Intervals.icu- oder Garmin-Belastung vergleichbar.`, { calendarWeeks: weekly });
+  if (chart) {
+    chart.querySelector(".analysis-chart-legend")?.remove();
+    loadRoot.append(chart);
+  }
 }
 
 function providerMetricLabel(key) {

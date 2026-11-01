@@ -128,6 +128,26 @@ class ActivitySummaryTests(unittest.TestCase):
         self.assertEqual("Intervals.icu", summary["sources"]["training_load"])
         self.assertEqual(70.0, summary["intensity"])
 
+    def test_disagreeing_provider_ratings_mark_the_session(self) -> None:
+        agreeing = activity_summary(
+            "act_1",
+            [
+                record(ProviderId.INTERVALS, "i1", rpe=6.0),
+                record(ProviderId.INTERVALS, "i2", rpe=6.0),
+            ],
+            BERLIN,
+        )
+        self.assertNotIn("rpe_conflict", agreeing)
+        conflicting = activity_summary(
+            "act_1",
+            [
+                record(ProviderId.INTERVALS, "i1", rpe=6.0),
+                record(ProviderId.INTERVALS, "i2", rpe=8.0),
+            ],
+            BERLIN,
+        )
+        self.assertTrue(conflicting["rpe_conflict"])
+
     def test_garmin_only_load_is_not_a_tss_like_training_load(self) -> None:
         summary = activity_summary(
             "act_1",

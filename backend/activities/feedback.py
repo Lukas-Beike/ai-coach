@@ -39,6 +39,7 @@ _STORED_FIELDS: Final = (
     "updated_at",
     "provider",
     "session_id",
+    "session_rpe_rated_at",
 )
 FEEDBACK_CONTENT_FIELDS: Final = ("notes", "session_rpe", "deviation_reason")
 _PUBLIC_FIELDS: Final = (
@@ -50,6 +51,7 @@ _PUBLIC_FIELDS: Final = (
     "deviation_reason",
     "created_at",
     "updated_at",
+    "session_rpe_rated_at",
 )
 
 ACTIVITY_FEEDBACK_TEXT_LIMITS = {

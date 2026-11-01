@@ -56,7 +56,8 @@ TimeoutErrorFactory = Callable[[], Exception]
 # Coach plan artifacts, adaptive previews and planning.json (schema v16).
 # Version 9 adds power_curve_points and power_curve_fetches, including retired
 # rows (schema v17).
-PRIVACY_EXPORT_FORMAT_VERSION = 9
+# Version 10 adds activity_feedback.session_rpe_rated_at (schema v18).
+PRIVACY_EXPORT_FORMAT_VERSION = 10
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",

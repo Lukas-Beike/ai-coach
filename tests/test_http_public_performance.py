@@ -38,6 +38,15 @@ class PublicPerformanceStateTests(unittest.TestCase):
         ) as project_performance:
             result = service.performance_state()
 
+        load = result["performance"]["history"].pop("session_rpe_load")
+        self.assertEqual(
+            (load["metric_id"], load["status"], load["totals"]["total_sessions"]),
+            ("session_rpe_load", "insufficient_data", 0),
+        )
+        self.assertEqual(
+            (len(load["days"]), load["period"]["end"], load["sessions"]),
+            (84, today.isoformat(), []),
+        )
         self.assertEqual(
             result,
             {

@@ -196,6 +196,8 @@ class PublicStateAssembly:
             garmin.projection_service(),
             self._local_date,
             self.canonical_performance_source(),
+            session_feedback=athlete.activity_feedback().for_activity_ids,
+            now=self._local_now(),
         )
 
     def canonical_performance_source(self) -> CanonicalPerformanceSource | None:

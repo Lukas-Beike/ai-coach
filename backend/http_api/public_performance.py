@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId
@@ -20,6 +20,11 @@ from backend.performance.canonical_inputs import (
 )
 from backend.performance.chart_history import analysis_history
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
+from backend.performance.session_rpe_load import (
+    FeedbackLookup,
+    feedback_by_session,
+    session_rpe_load,
+)
 from backend.performance.training_focus import training_focus
 from backend.runtime.ports import ObservationReader
 
@@ -34,12 +39,17 @@ class PublicPerformanceStateService:
         garmin_projection_service: Any,
         today: Callable[[], date],
         canonical: CanonicalPerformanceSource | None = None,
+        *,
+        session_feedback: FeedbackLookup | None = None,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         self._garmin_payload_service = garmin_payload_service
         self._profile_service = profile_service
         self._garmin_projection_service = garmin_projection_service
         self._today = today
         self._canonical = canonical
+        self._session_feedback = session_feedback
+        self._now = now
 
     def performance_state(self) -> dict[str, Any]:
         source = self._canonical
@@ -104,7 +114,12 @@ class PublicPerformanceStateService:
         timezone = str(profile.get("timezone") or "UTC")
         performance = {
             **performance,
-            "history": analysis_history(garmin, today, canonical=inputs),
+            "history": {
+                **analysis_history(garmin, today, canonical=inputs),
+                "session_rpe_load": None
+                if inputs.pending
+                else self._session_rpe_load(inputs, today, timezone),
+            },
             # UI-only: the load tab's period selection picks the matching window.
             "training_focus_periods": {
                 period: training_focus(
@@ -127,6 +142,28 @@ class PublicPerformanceStateService:
                 )
             ),
         }
+
+    def _session_rpe_load(
+        self, inputs: CanonicalPerformanceInputs, today: date, timezone: str
+    ) -> dict[str, Any]:
+        """Daily and weekly session-RPE load of the load tab's 12-week window."""
+        start = today - timedelta(days=_SESSION_RPE_LOAD_DAYS - 1)
+        summaries = inputs.activities or ()
+        return session_rpe_load(
+            summaries,
+            feedback_by_session(summaries, self._session_feedback),
+            start=start,
+            end=today,
+            timezone=timezone,
+            computed_at=None
+            if self._now is None
+            else self._now().isoformat(timespec="seconds"),
+            session_limit=0,
+        )
+
+
+# The load tab's longest window: the current and the 11 previous ISO weeks.
+_SESSION_RPE_LOAD_DAYS = 84
 
 
 class PublicFeedbackStateService:

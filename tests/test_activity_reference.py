@@ -565,6 +565,7 @@ class ActivityFeedbackProviderColumnTests(_Fixture):
                 "deviation_reason",
                 "created_at",
                 "updated_at",
+                "session_rpe_rated_at",
             },
             set(saved["activity_feedback"]),
         )

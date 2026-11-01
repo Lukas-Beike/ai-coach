@@ -972,11 +972,14 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
         pending = public["performance"]
         self.assertEqual(
             pending["history"],
-            analysis_history(
-                GarminSyncStatus.from_state({}),
-                PARITY_TODAY,
-                canonical=EMPTY_PERFORMANCE_INPUTS,
-            ),
+            {
+                **analysis_history(
+                    GarminSyncStatus.from_state({}),
+                    PARITY_TODAY,
+                    canonical=EMPTY_PERFORMANCE_INPUTS,
+                ),
+                "session_rpe_load": None,
+            },
         )
         self.assertNotEqual(
             pending["history"],

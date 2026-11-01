@@ -458,6 +458,11 @@ class HttpApiAssembly:
         report_feedback = lambda: (
             athlete.activity_feedback().list(500) if athlete.activity_feedback else []
         )
+        report_session_feedback = lambda keys: (
+            athlete.activity_feedback().for_activity_ids(keys)
+            if athlete.activity_feedback
+            else []
+        )
         report_timezone = lambda: str(profile_service().get().get("timezone") or "UTC")
         report_recovery = lambda: (
             public_performance_state_service()
@@ -495,6 +500,8 @@ class HttpApiAssembly:
                 load_scenarios=load_scenarios,
                 season_source=public.season_source(),
                 canonical=canonical,
+                session_feedback=report_session_feedback,
+                now=athlete_clock.now,
             )
             return TrainingReportServices(
                 records=records,

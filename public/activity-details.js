@@ -78,28 +78,71 @@
     renderAerobic(payload, content);
     renderPower(payload, content);
     for (const item of payload.equipment || []) content.append(node("p", `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
-    renderFeedback(payload.activity_feedback, session, api, activityId, content);
+    renderFeedback(payload.activity_feedback, session, api, activityId, content, payload.session_rpe_load);
   }
 
-  function renderFeedback(feedback, session, api, activityId, content) {
+  // CR-10 anchors after Foster et al. 2001; the other steps have no verbal anchor.
+  const RPE_ANCHORS = { 0: "Ruhe", 1: "Sehr, sehr leicht", 2: "Leicht", 3: "Moderat", 4: "Etwas schwer", 5: "Schwer", 7: "Sehr schwer", 10: "Maximal" };
+
+  function rpeOption(value) {
+    const anchor = RPE_ANCHORS[value];
+    const number = value.toLocaleString("de-DE");
+    const option = node("option", anchor ? `${number} · ${anchor}` : number);
+    option.value = String(value);
+    return option;
+  }
+
+  function setRpe(select, value) {
+    const number = value == null || value === "" ? null : Number(value);
+    // A stored rating off the half-point grid keeps its own option instead of being rounded.
+    if (number != null && ![...select.options].some((option) => option.value === String(number))) select.append(rpeOption(number));
+    select.value = number == null ? "" : String(number);
+  }
+
+  function rpeSelect(value) {
+    const select = document.createElement("select"); select.name = "session_rpe";
+    const empty = node("option", "Keine Angabe"); empty.value = ""; select.append(empty);
+    for (let step = 0; step <= 20; step += 1) select.append(rpeOption(step / 2));
+    setRpe(select, value);
+    return select;
+  }
+
+  const SESSION_LOAD_REASONS = { no_rating: "kein RPE", conflicting_provider_ratings: "widersprüchliche Provider-RPE", no_elapsed_duration: "keine Gesamtdauer", invalid_duration: "ungültige Dauer" };
+
+  function sessionLoadText(load) {
+    if (!load) return "";
+    if (load.value == null) return `Session-RPE-Last: offen · ${SESSION_LOAD_REASONS[load.reason] || "unbekannt"}`;
+    const value = Number(load.value).toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    const rpe = Number(load.rpe).toLocaleString("de-DE");
+    const minutes = Number(load.duration_min).toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    return `Session-RPE-Last: ${value} AU · RPE ${rpe} (${load.rpe_source_label}) × ${minutes} min`;
+  }
+
+  function renderFeedback(feedback, session, api, activityId, content, sessionLoad) {
     const section = node("section", null, "activity-feedback"); section.append(node("h3", "Dein Feedback"));
     const form = document.createElement("form"); form.className = "activity-feedback-form";
-    const rpeLabel = node("label", "Session-RPE (0–10)"); const rpe = document.createElement("input"); rpe.name = "session_rpe"; rpe.type = "number"; rpe.min = "0"; rpe.max = "10"; rpe.step = "0.5"; rpe.inputMode = "decimal"; rpe.value = feedback?.session_rpe ?? ""; rpeLabel.append(rpe);
+    const rpeLabel = node("label", "Session-RPE (0–10)"); const rpe = rpeSelect(feedback?.session_rpe); rpeLabel.append(rpe);
     const reasonLabel = node("label", "Abweichungsgrund"); const reason = document.createElement("input"); reason.name = "deviation_reason"; reason.maxLength = 500; reason.value = feedback?.deviation_reason || ""; reasonLabel.append(reason);
     const notesLabel = node("label", "Notizen"); const notes = document.createElement("textarea"); notes.name = "notes"; notes.rows = 3; notes.maxLength = 4000; notes.value = feedback?.notes || ""; notesLabel.append(notes);
     const status = node("p", "", "muted"); status.setAttribute("role", "status"); const save = node("button", "Feedback speichern"); save.type = "submit";
-    form.append(rpeLabel, reasonLabel, notesLabel, save); section.append(form, status); content.append(section);
+    const load = node("p"); load.dataset.sessionRpeLoad = "";
+    const showLoad = (value) => { load.textContent = sessionLoadText(value); load.hidden = !load.textContent; };
+    showLoad(sessionLoad);
+    form.append(rpeLabel, reasonLabel, notesLabel, save); section.append(load, form, status); content.append(section);
     let shown = feedback;
-    const fill = (value) => { rpe.value = value?.session_rpe ?? ""; reason.value = value?.deviation_reason || ""; notes.value = value?.notes || ""; };
+    const fill = (value) => { setRpe(rpe, value?.session_rpe); reason.value = value?.deviation_reason || ""; notes.value = value?.notes || ""; };
+    // The served document recomputes the load from the saved feedback and its provider fallback.
+    const refreshLoad = async () => { try { showLoad((await api(`/api/activities/${encodeURIComponent(activityId)}`)).session_rpe_load); } catch { /* the saved feedback stays shown */ } };
     form.addEventListener("submit", async (event) => {
       event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
       try {
-        const raw = rpe.value.trim(); const value = { activity_name: session?.name || "", activity_date: session?.started_at_local || "", notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
+        const raw = rpe.value; const value = { activity_name: session?.name || "", activity_date: session?.started_at_local || "", notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
         if (raw !== "" && (!Number.isFinite(value.session_rpe) || value.session_rpe < 0 || value.session_rpe > 10)) throw new Error("RPE muss zwischen 0 und 10 liegen.");
         const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });
         const previous = shown; shown = result.activity_feedback;
         status.textContent = result.activity_feedback ? "Feedback gespeichert. " : "Feedback entfernt. ";
-        if (result.change?.id) status.append(feedbackUndoButton(api, result.change, status, () => { shown = previous; fill(previous); }));
+        if (result.change?.id) status.append(feedbackUndoButton(api, result.change, status, () => { shown = previous; fill(previous); refreshLoad(); }));
+        refreshLoad();
       } catch (error) { status.textContent = error.message; } finally { save.disabled = false; }
     });
   }

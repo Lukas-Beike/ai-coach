@@ -744,7 +744,7 @@ class ServerCoachTests(ServerTestCase):
         self.assertNotIn("function saveActivityFeedback", app)
         self.assertNotIn("Besonderheiten speichern", app)
         self.assertNotIn("activity-type-button", app)
-        self.assertIn('activity_feedback: ["feedback", "plan"]', app)
+        self.assertIn('activity_feedback: ["feedback", "plan", "performance"]', app)
         self.assertNotIn('"^/api/activities/([^/]+)/feedback$"', backend)
 
     def test_structured_context_keeps_garmin_value_in_performance_only(self):

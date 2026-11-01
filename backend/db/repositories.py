@@ -891,8 +891,8 @@ class ActivityFeedbackRepository:
         """Insert one recorded row exactly as it was, timestamps included."""
         db.execute(
             "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, "
-            "session_rpe, deviation_reason, created_at, updated_at, provider, session_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "session_rpe, deviation_reason, created_at, updated_at, provider, session_id, "
+            "session_rpe_rated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(row["activity_id"]),
                 str(row.get("activity_name") or ""),
@@ -904,6 +904,8 @@ class ActivityFeedbackRepository:
                 str(row["updated_at"]),
                 row.get("provider"),
                 row.get("session_id"),
+                # Recorded before schema version 18: the rating time is unknown.
+                row.get("session_rpe_rated_at"),
             ),
         )
 
@@ -913,8 +915,8 @@ class ActivityFeedbackRepository:
             dict(row)
             for row in db.execute(
                 "SELECT activity_id, activity_name, activity_date, notes, session_rpe, "
-                "deviation_reason, created_at, updated_at, provider, session_id "
-                "FROM activity_feedback"
+                "deviation_reason, created_at, updated_at, provider, session_id, "
+                "session_rpe_rated_at FROM activity_feedback"
             ).fetchall()
         ]
 
@@ -931,26 +933,34 @@ class ActivityFeedbackRepository:
         provider: str | None = None,
         session_id: str | None = None,
     ) -> None:
-        """Write feedback; a write without a resolved provider or session keeps the stored one."""
+        """Write feedback; a write without a resolved provider or session keeps the stored one.
+
+        The rating time is set when the session RPE changes, kept while it stays
+        the same and cleared with it.
+        """
         now = self._now()
+        rpe = feedback.get("session_rpe")
         db.execute(
-            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at, provider, session_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO activity_feedback(activity_id, activity_name, activity_date, notes, session_rpe, deviation_reason, created_at, updated_at, provider, session_id, session_rpe_rated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(activity_id) DO UPDATE SET activity_name=excluded.activity_name, "
             "activity_date=excluded.activity_date, notes=excluded.notes, session_rpe=excluded.session_rpe, deviation_reason=excluded.deviation_reason, updated_at=excluded.updated_at, "
             "provider=COALESCE(excluded.provider, activity_feedback.provider), "
-            "session_id=COALESCE(excluded.session_id, activity_feedback.session_id)",
+            "session_id=COALESCE(excluded.session_id, activity_feedback.session_id), "
+            "session_rpe_rated_at=CASE WHEN activity_feedback.session_rpe IS excluded.session_rpe "
+            "THEN activity_feedback.session_rpe_rated_at ELSE excluded.session_rpe_rated_at END",
             (
                 feedback["activity_id"],
                 feedback["activity_name"],
                 feedback["activity_date"],
                 feedback["notes"],
-                feedback.get("session_rpe"),
+                rpe,
                 feedback.get("deviation_reason", ""),
                 now,
                 now,
                 provider,
                 session_id,
+                None if rpe is None else now,
             ),
         )
 

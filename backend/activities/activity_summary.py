@@ -102,6 +102,8 @@ def activity_summary(
         ),
         None,
     )
+    if len({record.rpe for record in records if record.rpe is not None}) > 1:
+        summary["rpe_conflict"] = True
     if load is not None:
         summary["training_load"] = load.load
         summary["load_model"] = load.load_model.value
