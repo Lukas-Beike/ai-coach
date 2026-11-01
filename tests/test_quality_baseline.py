@@ -139,10 +139,12 @@ class QualityBaselineTests(unittest.TestCase):
             self.assertLess(len(subprocess.list2cmdline(command)), 32767)
             if "--version" in command:
                 return f"{command[0]} 2.4.0\n"
-            if command[:4] == [*quality_baseline.tool_command("ruff"), "check"]:
+            ruff = quality_baseline.tool_command("ruff")
+            if command[: len(ruff) + 1] == [*ruff, "check"]:
                 ruff_commands.append(command)
                 return "[]"
-            self.assertEqual(command[:3], quality_baseline.tool_command("mypy"))
+            mypy = quality_baseline.tool_command("mypy")
+            self.assertEqual(command[: len(mypy)], mypy)
             self.assertFalse(set(files) & set(command))
             [list_arg] = [arg for arg in command if arg.startswith("@")]
             mypy_files.extend(
