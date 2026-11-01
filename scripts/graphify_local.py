@@ -868,6 +868,31 @@ def _discard(path: Path) -> None:
     shutil.rmtree(doomed, ignore_errors=True)
 
 
+def setup_python() -> list[str]:
+    """Use the interpreter supported by the hash-locked tool dependencies."""
+    if sys.version_info[:2] == (3, 14):
+        return [sys.executable]
+    if os.name == "nt":
+        launcher = shutil.which("py")
+        if launcher:
+            command = [launcher, "-3.14"]
+            try:
+                subprocess.run(
+                    [*command, "--version"],
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+                return command
+            except OSError, subprocess.SubprocessError:
+                pass
+    else:
+        interpreter = shutil.which("python3.14")
+        if interpreter:
+            return [interpreter]
+    raise Unavailable("Graphify setup requires Python 3.14; install it and retry setup")
+
+
 def _setup(root: Path) -> int:
     identity = lock_identity()
     venv = shared_environment()
@@ -883,10 +908,11 @@ def _setup(root: Path) -> int:
             venv.exists() and venv.resolve().parent != shared_base().resolve()
         ):
             raise Unavailable("unsafe shared environment path")
+        interpreter = setup_python()
         if venv.exists():
             _discard(venv)
         subprocess.run(
-            [sys.executable, "-m", "venv", str(venv)],
+            [*interpreter, "-m", "venv", str(venv)],
             check=True,
             timeout=120,
             env=local_env(root),

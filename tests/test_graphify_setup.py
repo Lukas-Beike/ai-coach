@@ -36,6 +36,7 @@ class GraphifySetupTests(unittest.TestCase):
             ("LOCK_FILE", self.lock),
             ("VERSION", "0.9.93"),
             ("shared_base", lambda: self.root / "shared"),
+            ("setup_python", lambda: [sys.executable]),
         ):
             patcher = patch.object(graph, name, value)
             patcher.start()
@@ -400,6 +401,43 @@ class GraphifySnapshotTests(unittest.TestCase):
 
 
 class WorktreePreparationTests(unittest.TestCase):
+    def test_setup_uses_python_314_even_when_default_python_is_newer(self):
+        for platform, version, found, expected in (
+            ("nt", (3, 14), None, [sys.executable]),
+            ("nt", (3, 15), "py.exe", ["py.exe", "-3.14"]),
+            ("posix", (3, 15), "/usr/bin/python3.14", ["/usr/bin/python3.14"]),
+        ):
+            with (
+                self.subTest(platform=platform, version=version),
+                patch.object(graph.sys, "version_info", version),
+                patch.object(graph, "os", SimpleNamespace(name=platform)),
+                patch.object(graph.shutil, "which", return_value=found),
+                patch.object(graph.subprocess, "run"),
+            ):
+                self.assertEqual(graph.setup_python(), expected)
+
+    def test_missing_supported_python_reports_required_version(self):
+        with (
+            patch.object(graph.sys, "version_info", (3, 15)),
+            patch.object(graph.shutil, "which", return_value=None),
+            self.assertRaisesRegex(graph.Unavailable, "requires Python 3.14"),
+        ):
+            graph.setup_python()
+
+    def test_launcher_without_python_314_reports_required_version(self):
+        with (
+            patch.object(graph.sys, "version_info", (3, 15)),
+            patch.object(graph, "os", SimpleNamespace(name="nt")),
+            patch.object(graph.shutil, "which", return_value="py.exe"),
+            patch.object(
+                graph.subprocess,
+                "run",
+                side_effect=subprocess.CalledProcessError(1, []),
+            ),
+            self.assertRaisesRegex(graph.Unavailable, "requires Python 3.14"),
+        ):
+            graph.setup_python()
+
     def test_windows_shared_base_without_localappdata_is_unavailable(self):
         with (
             patch.object(graph, "os", SimpleNamespace(name="nt", environ={})),
