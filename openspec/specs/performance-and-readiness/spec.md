@@ -623,3 +623,28 @@ The system SHALL compute the M1 session-RPE load (`session-rpe-load` v1) as elap
 Detailed contract: each result names `metric_id`, `method_id`, `method_version`, unit, status (`descriptive` or `insufficient_data`), period with timezone, computation time, method note, limits and the evidence card `docs/performance-methods/m1-session-rpe-load.md`. Per session it lists RPE, source and label, duration in minutes and, for a local rating with a recorded rating time, `rated_minutes_after_end`. Values are rounded to one decimal only for output. The Coach training report carries it for the report period, the public performance history for the load tab's 84 days, where the PWA draws a separate AU chart with its coverage. The Coach SHALL name the inputs and source and SHALL NOT derive injury risk, readiness or ramp statements from AU.
 
 Evidence: `backend/performance/session_rpe_load.py`, `backend/performance/training_report.py:training_report`, `backend/performance/report_service.py:TrainingReportReadService`, `backend/http_api/public_performance.py:PublicPerformanceStateService`, `backend/coach/prompt.py`, `public/analysis.js:appendSessionRpeLoadChart`; `tests/test_session_rpe_load.py`, `e2e/activity-details.spec.js`.
+
+### Requirement: Released local methods are registered and shown the same in Coach and UI
+Each Epic S local method SHALL be listed in the register below with its method id and version, statuses, limits and card. The Coach SHALL receive the value, status, method and period the UI shows for the same inputs; it MAY omit display-only arrays such as per-day history or chart points, but SHALL NOT recompute, round differently or relabel a value.
+
+#### Scenario: Same inputs on both paths
+- **WHEN** one set of canonical sessions, feedback, recovery observations and sleep periods is read by the public performance state, the analysis route, the Coach context and `get_training_report`
+- **THEN** a full ISO week's session-RPE load, each recovery baseline, the sleep timing summary and the best-effort curve carry the same value, status, method and period on both paths.
+
+#### Scenario: Large sleep timing history
+- **WHEN** the sleep timing variability spans many nights
+- **THEN** `get_training_report` returns the same summary as the Coach context, without per-night points, and reports the section as complete.
+
+Detailed contract:
+
+| Metric | Method id, version | Statuses | Limits | Card, review |
+| --- | --- | --- | --- | --- |
+| Session-RPE load (AU) | `session-rpe-load` v1 | `descriptive`, `insufficient_data` | AU is not TSS, provider load or TRIMP; no injury, readiness or ramp statement | M1, released |
+| HRV, resting HR and sleep duration comparison | `personal-quartiles-v1` | `ok`, `provisional`, `insufficient_data` | own earlier values only, not a normal or clinical range | M2, M3, released |
+| Sleep goal shortfall (last 7 nights) | inside the `personal-quartiles-v1` result, no own id | `ok`, `partial`; none without a 4–12 h goal | no sleep debt | M3, released |
+| Sleep timing variability | `sleep-timing-variability-v2` | `ok`, `provisional`, `insufficient_data` | not the Sleep Regularity Index; no median or deviation below 14 earlier intervals | M3, released |
+| Power and running best-effort curve | `mean-max-curve` v1 | `ok`, `insufficient_data` | observed bests only, no FTP, CP or pace estimate | M4 card, fit blocked |
+
+CP/CS (#1431) stays without output until its card is released; M5 (#1432) is deferred. No observation phase has run.
+
+Evidence: `docs/performance-methods/README.md`, `backend/coach/context.py:coach_performance_projection`, `backend/coach/context.py:coach_sleep_timing_projection`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `tests/test_performance_coach_ui_parity.py`.

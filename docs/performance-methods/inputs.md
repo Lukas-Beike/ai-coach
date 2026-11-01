@@ -88,7 +88,9 @@ Consumer trace:
   `get_training_report(sections=["sleep_timing_variability"])`
   (`backend/coach/activity_read_tools.py:83`) via
   `TrainingDerivedReadService.sleep_timing_variability`
-  (`backend/performance/report_service.py:399`).
+  (`backend/performance/report_service.py:399`); the tool returns the Coach
+  context's per-series summary without per-night points
+  (`coach_sleep_timing_projection`, #1433).
 
 ## M4 — Critical Power and Critical Speed
 

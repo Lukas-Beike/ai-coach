@@ -454,25 +454,30 @@ def coach_performance_projection(performance: Any) -> Any:
         ]
     regularity = recovery.get("regularity")
     if isinstance(regularity, dict):
-        projected_regularity = {
-            key: value
-            for key, value in regularity.items()
-            if key not in {"sources", "points_14", "points_84"}
-        }
-        series = regularity.get("series")
-        if isinstance(series, list):
-            projected_regularity["series"] = [
-                {
-                    key: value
-                    for key, value in item.items()
-                    if key not in {"points", "points_14", "points_84"}
-                }
-                if isinstance(item, dict)
-                else item
-                for item in series
-            ]
-        projected_recovery["regularity"] = projected_regularity
+        projected_recovery["regularity"] = coach_sleep_timing_projection(regularity)
     return {**performance, "personal_recovery": projected_recovery}
+
+
+def coach_sleep_timing_projection(regularity: dict[str, Any]) -> dict[str, Any]:
+    """Keep each sleep timing series' summary without the per-night chart points."""
+    projected = {
+        key: value
+        for key, value in regularity.items()
+        if key not in {"sources", "points_14", "points_84"}
+    }
+    series = regularity.get("series")
+    if isinstance(series, list):
+        projected["series"] = [
+            {
+                key: value
+                for key, value in item.items()
+                if key not in {"points", "points_14", "points_84"}
+            }
+            if isinstance(item, dict)
+            else item
+            for item in series
+        ]
+    return projected
 
 
 class CoachPerformanceContextReader:
