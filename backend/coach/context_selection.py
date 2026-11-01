@@ -261,6 +261,32 @@ class CoachContextSelection:
         ]
 
 
+# Quick-action request kinds bring the sections their playbook needs, whatever the
+# message wording; nutrition products stay out. Selection never authorizes writes.
+_PLAN_SECTIONS = BASE_SECTIONS | {
+    "planning",
+    "training_plans",
+    "calendar",
+    "external_calendar",
+    "recovery",
+    "weather",
+}
+REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
+    "session_analysis": CoachContextSelection(
+        "activity_analysis", BASE_SECTIONS | {"recovery"}, 3, 5, False
+    ),
+    "progress_review": CoachContextSelection(
+        "progress_review",
+        BASE_SECTIONS | {"planning", "training_plans", "recovery"},
+        14,
+        5,
+        False,
+    ),
+    "plan_week": CoachContextSelection("plan_week", _PLAN_SECTIONS, 14, 5, True),
+    "plan_block": CoachContextSelection("plan_block", _PLAN_SECTIONS, 35, 5, True),
+}
+
+
 def is_bare_follow_up(message: str) -> bool:
     """Return whether the message only retries or continues, with no request of its own."""
     normalized = message.casefold()
@@ -285,7 +311,10 @@ def select_coach_context(
     *,
     attachments: bool = False,
     has_receipts: bool = False,
+    request_kind: str | None = None,
 ) -> CoachContextSelection:
+    if request_kind and request_kind in REQUEST_KIND_SELECTIONS:
+        return REQUEST_KIND_SELECTIONS[request_kind]
     normalized = message.casefold()
     continuation = bool(re.search(CONTINUATION_PATTERN, normalized))
     retry = bool(re.search(RETRY_PATTERN, normalized))

@@ -77,3 +77,34 @@ test("single-line draft shows no textarea scrollbar @responsive", async ({ page 
   expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight);
   await input.fill("");
 });
+
+test("analysis and plan menu sends the chosen period with its request kind @responsive", async ({ page }) => {
+  await openCoach(page);
+  await page.evaluate(() => {
+    state.quickTemplatesVisible = true;
+    renderQuickMessageTemplates();
+    window.__quickSubmit = null;
+    document.querySelector("#chatForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const input = document.querySelector("#messageInput");
+      window.__quickSubmit = { kind: input.dataset.requestKind, message: input.value };
+    }, { capture: true });
+  });
+  const trigger = page.getByRole("button", { name: "Analyse & Plan" });
+  await trigger.click();
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("menuitem", { name: "Einheit analysieren" })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "Fortschritt 2 Wochen" })).toBeFocused();
+  const target = await page.getByRole("menuitem", { name: "Plan 3 Wochen" }).boundingBox();
+  expect(target.width).toBeGreaterThanOrEqual(44);
+  expect(target.height).toBeGreaterThanOrEqual(44);
+  await page.keyboard.press("Escape");
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "Plan 3 Wochen" }).click();
+  const sent = await page.evaluate(() => window.__quickSubmit);
+  expect(sent.kind).toBe("plan_block");
+  expect(sent.message).toContain("3 Wochen");
+});
