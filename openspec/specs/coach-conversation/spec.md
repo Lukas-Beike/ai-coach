@@ -159,6 +159,23 @@ The system SHALL treat the morning quick action as a stored athlete-started turn
 
 Evidence: `backend/coach/morning.py:ManualMorningCheckinService.prepare`, `backend/coach/morning.py:MorningCheckinStateService.state`; `backend/coach/background_job.py:CoachBackgroundJobRunner._execute`; `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`; `tests/test_coach_manual_morning.py:test_fresh_sleep_syncs_then_refreshes_battery`, `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`, `tests/test_coach_manual_morning.py:test_unconfigured_garmin_returns_without_reading_or_refreshing`, `tests/test_coach_manual_morning.py:test_yesterday_ready_state_is_projected_as_waiting`; `tests/test_coach_dialogue.py:test_morning_quick_action_stays_pending_while_coach_awaits_clarification`.
 
+### Requirement: CC9a Analysis and planning quick actions
+The system SHALL accept only the quick-action kinds `morning_checkin`, `session_analysis`, `progress_review`, `plan_week` and `plan_block`, store the athlete's visible message with the chosen period, select the context sections the kind needs, and append the kind's playbook to the instructions of that turn only. A playbook never authorizes a write.
+
+#### Scenario: Playbook only on its own turn
+- **WHEN** a turn carries one of the four analysis or planning kinds
+- **THEN** its instructions end with that kind's playbook, while morning check-in and ordinary turns carry none.
+
+#### Scenario: Kind-specific context
+- **WHEN** a turn carries one of the four analysis or planning kinds
+- **THEN** its context sections come from the kind rather than the message wording, while dialogue and pending-request retention still follow the message as for an ordinary turn.
+
+#### Scenario: Unknown kind
+- **WHEN** a submission names another kind
+- **THEN** it is rejected as an unsupported quick action before any turn is stored.
+
+Evidence: `backend/coach/playbooks.py:playbook_for`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`; `backend/coach/context_selection.py:select_coach_context`; `backend/coach/request_payload.py:compose_model_instructions`; `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`, `tests/test_coach_playbooks.py:RequestKindSelectionTests.test_every_kind_has_a_selection_and_keeps_message_retention`.
+
 ### Requirement: CC10 Composer continuity and user-controlled input
 The system SHALL keep drafts editable while the Coach runs, serialize queued follow-ups, preserve rejected input on session expiry and require the athlete to send editable voice transcripts as chat messages.
 

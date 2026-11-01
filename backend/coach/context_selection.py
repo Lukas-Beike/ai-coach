@@ -230,6 +230,7 @@ class CoachContextSelection:
         if isinstance(performance, dict) and self.name not in {
             "activity_analysis",
             "attachment_analysis",
+            "progress_review",
         }:
             result["current_performance"] = {
                 key: value
@@ -261,6 +262,33 @@ class CoachContextSelection:
         ]
 
 
+# Quick-action request kinds bring the sections their playbook needs, whatever the
+# message wording; nutrition products stay out. Dialogue and pending-request
+# retention still follow the message, as the write gate and turn outcome decide
+# them from the message too. Selection never authorizes writes.
+_PLAN_SECTIONS = BASE_SECTIONS | {
+    "planning",
+    "training_plans",
+    "calendar",
+    "external_calendar",
+    "recovery",
+    "weather",
+}
+REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
+    # Plan versus actual and the next session need the full plan window.
+    "session_analysis": CoachContextSelection("activity_analysis"),
+    "progress_review": CoachContextSelection(
+        "progress_review",
+        BASE_SECTIONS | {"planning", "training_plans", "recovery"},
+        14,
+        5,
+        False,
+    ),
+    "plan_week": CoachContextSelection("plan_week", _PLAN_SECTIONS, 14, 5, True),
+    "plan_block": CoachContextSelection("plan_block", _PLAN_SECTIONS, 35, 5, True),
+}
+
+
 def is_bare_follow_up(message: str) -> bool:
     """Return whether the message only retries or continues, with no request of its own."""
     normalized = message.casefold()
@@ -285,6 +313,31 @@ def select_coach_context(
     *,
     attachments: bool = False,
     has_receipts: bool = False,
+    request_kind: str | None = None,
+) -> CoachContextSelection:
+    selection = _message_selection(
+        message, dialogue, attachments=attachments, has_receipts=has_receipts
+    )
+    fixed = REQUEST_KIND_SELECTIONS.get(request_kind or "")
+    if fixed is None:
+        return selection
+    return CoachContextSelection(
+        fixed.name,
+        fixed.sections,
+        fixed.horizon_days,
+        fixed.activity_limit,
+        fixed.include_library,
+        retain_dialogue=selection.retain_dialogue,
+        retain_pending_request=selection.retain_pending_request,
+    )
+
+
+def _message_selection(
+    message: str,
+    dialogue: dict[str, Any],
+    *,
+    attachments: bool,
+    has_receipts: bool,
 ) -> CoachContextSelection:
     normalized = message.casefold()
     continuation = bool(re.search(CONTINUATION_PATTERN, normalized))

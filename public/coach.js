@@ -607,6 +607,40 @@ async function cancelChat() {
   scheduleChatStatusPoll(0);
 }
 
+function quickMenuTarget(items, current, key) {
+  const last = items.length - 1;
+  if (key === "Home") return 0;
+  if (key === "End") return last;
+  const step = key === "ArrowDown" || key === "ArrowRight" ? 1 : -1;
+  return (current + step + items.length) % items.length;
+}
+
+function setupQuickActionMenu() {
+  const button = $("#quickAnalysisButton");
+  const menu = $("#quickAnalysisMenu");
+  if (!button || !menu) return;
+  const items = () => [...menu.querySelectorAll("[role=menuitem]")];
+  menu.addEventListener("toggle", (event) => {
+    const open = event.newState === "open";
+    button.setAttribute("aria-expanded", String(open));
+    if (!open) return;
+    const rect = button.getBoundingClientRect();
+    const { left, top } = analysisPopoverPosition(
+      { left: rect.left, top: rect.top, bottom: rect.bottom },
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: innerWidth, height: innerHeight });
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    items()[0]?.focus();
+  });
+  menu.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const list = items();
+    list[quickMenuTarget(list, list.indexOf(document.activeElement), event.key)].focus();
+  });
+}
+
 async function sendMessage(event) {
   event.preventDefault();
   const configured = state.data?.configured;
@@ -2377,6 +2411,8 @@ function setupCoachEvents() {
   $("#quickMessageTemplates").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-message]");
     if (!button || state.busy) return;
+    const menu = button.closest("#quickAnalysisMenu");
+    if (menu?.matches(":popover-open")) menu.hidePopover();
     const input = $("#messageInput");
     input.value = button.dataset.message || "";
     if (button.dataset.requestKind) input.dataset.requestKind = button.dataset.requestKind;
@@ -2384,6 +2420,7 @@ function setupCoachEvents() {
     input.dispatchEvent(new Event("input"));
     $("#chatForm").requestSubmit();
   });
+  setupQuickActionMenu();
   $("#voiceButton").addEventListener("click", toggleVoiceInput);
   $("#chatJumpToComposer").addEventListener("click", () => {
     jumpToLatestMessages();
@@ -2400,6 +2437,8 @@ function setupCoachEvents() {
   $("#messageInput").addEventListener("input", (event) => {
     // Capture the scroll position before the draft grows; only a reader already at the latest message follows the growth.
     const keepLatestVisible = $("#chatPanel")?.classList.contains("active") && chatIsNearBottom();
+    // A typed edit makes the draft the athlete's own request, not a quick action.
+    if (event.isTrusted) delete event.target.dataset.requestKind;
     state.chatDraftDirty = Boolean(event.target.value.trim());
     resizeChatInput(event.target);
     updateChatControls();

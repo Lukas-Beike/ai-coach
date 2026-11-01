@@ -83,7 +83,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Request-Specific Context Projection**: Compact daily, activity and dialogue windows for routine turns; detailed local context and additional tools are available on demand, with conservative fallback for continuations.
 - **Targeted Clarification Protocol**: Ambiguous coaching prompts generate a single, concrete clarification question stored locally across reloads and model switches until answered.
 - **Atomic Training Changesets**: Plan updates, session moves, and workout creations use transactional revision tracking and object hashes to prevent race conditions.
-- **Contextual Quick Actions**: Dynamic start cards presenting context-relevant prompts such as the Morning Check-in or recent workout analysis without permanent UI clutter.
+- **Contextual Quick Actions**: Start buttons for the Morning Check-in and an "Analyse & Plan" menu: analyse the latest session, review progress over 2/4/8/12 weeks, plan the next week, or plan a 2–4 week block. Each action carries its own request kind, so the server adds the matching context and a sourced training-science playbook (intensity distribution from the profile training model, hard/easy spacing, strength with endurance, taper) to that turn only. Plans may combine running, cycling and strength.
 - **Intelligent Duplicate Resolution**: Automated inspection of dual-recorded workouts (e.g., Wahoo and Garmin cycling files) that designates canonical recordings while protecting against accidental cloud deletions.
 - **Structured Error Recovery**: Robust recovery from provider rate limits and transient network errors with transparent diagnostic reporting and safe rollback of incomplete actions.
 
