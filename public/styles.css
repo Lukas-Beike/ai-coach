@@ -591,14 +591,6 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .quick-message-templates::-webkit-scrollbar { display: none; }
 .quick-message-templates[hidden] { display: none; }
 .chat-queue-status { display: none; }
-.quick-message-label {
-  flex: 0 0 auto;
-  color: var(--subtle);
-  font-size: .66rem;
-  font-weight: 750;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
 .composer .quick-message-templates button {
   flex: 0 0 auto;
   min-height: 44px;
@@ -1318,21 +1310,6 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
 @media (max-width: 559px) {
   .shell { padding-right: max(12px, env(safe-area-inset-right)); padding-left: max(12px, env(safe-area-inset-left)); }
   .composer { width: 100%; }
-  .quick-message-templates::after {
-    position: sticky;
-    right: 0;
-    display: grid;
-    flex: 0 0 24px;
-    height: 44px;
-    place-items: center;
-    margin-left: -24px;
-    color: var(--accent-bright);
-    background: linear-gradient(90deg, var(--transparent), var(--composer-bg) 45%);
-    content: "›";
-    font-size: 1.5rem;
-    font-weight: 700;
-    pointer-events: none;
-  }
   .coach-provider-status { grid-template-columns: 1fr; }
   h1 { font-size: 1.55rem; }
   h2 { font-size: 1.35rem; }
