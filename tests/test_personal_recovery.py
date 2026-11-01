@@ -1,10 +1,14 @@
 import unittest
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
-from canonical_recovery_support import mapped_personal_recovery
+from canonical_recovery_support import mapped_personal_recovery, mapped_recovery_inputs
 
 from backend.athlete.profile import normalize_profile
+from backend.canonical.records import UNKNOWN_CONTEXT, MeasurementContext
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.errors import AppError
+from backend.performance.personal_recovery import personal_recovery
 
 
 class PersonalRecoveryTests(unittest.TestCase):
@@ -76,6 +80,114 @@ class PersonalRecoveryTests(unittest.TestCase):
         stale = mapped_personal_recovery(self.rows(30)[3:], {}, {}, self.today)
         self.assertTrue(
             all(row["status"] == "insufficient_data" for row in stale["baselines"])
+        )
+
+    def garmin_hrv(self, contexts, *, old=55, new=55, nights=31):
+        """Return Garmin HRV over 30 earlier nights, re-measured from ``contexts``.
+
+        ``contexts`` maps days before today to the context of that night and of
+        every newer night; older nights keep the mapped overnight context.
+        """
+        garmin = {
+            "hrv": [
+                {
+                    "calendarDate": (self.today - timedelta(days=day)).isoformat(),
+                    "lastNightAvg": old if day > min(contexts, default=-1) else new,
+                }
+                for day in range(nights)
+            ]
+        }
+        inputs = mapped_recovery_inputs(garmin, [])
+        observations = []
+        for observation in inputs.of(MetricKind.HRV_RMSSD):
+            age = (self.today - observation.observed_on).days
+            starts = [day for day in contexts if age <= day]
+            if starts:
+                provenance = replace(
+                    observation.provenance, context=contexts[min(starts)]
+                )
+                observation = replace(observation, provenance=provenance)
+            observations.append(observation)
+        inputs = replace(
+            inputs,
+            observations={
+                **inputs.observations,
+                MetricKind.HRV_RMSSD: tuple(observations),
+            },
+        )
+        (baseline,) = [
+            row
+            for row in personal_recovery({}, self.today, canonical=inputs)["baselines"]
+            if row["source_provider"] == ProviderId.GARMIN.value
+            and row["metric"] == "hrv"
+        ]
+        return baseline
+
+    def test_device_change_restarts_the_comparison(self):
+        device = MeasurementContext(device_model="Forerunner 965", window="overnight")
+        fresh = self.garmin_hrv({4: device})
+        self.assertEqual(
+            ("insufficient_data", 4, "2026-09-28", "known"),
+            (
+                fresh["status"],
+                fresh["nights"],
+                fresh["context_changed_on"],
+                fresh["continuity"],
+            ),
+        )
+        self.assertEqual(
+            "Messkontext geändert; mindestens 14 passende Nächte seitdem erforderlich.",
+            fresh["reason"],
+        )
+        self.assertEqual(
+            {"device_model": "Forerunner 965", "window": "overnight"},
+            fresh["measurement_context"],
+        )
+        self.assertNotIn("position", fresh)
+        self.assertEqual(31, len(fresh["history"]))
+
+        settled = self.garmin_hrv({20: device}, old=90, new=40)
+        self.assertEqual(
+            ("provisional", 20, 40, "within"),
+            (
+                settled["status"],
+                settled["nights"],
+                settled["median"],
+                settled["position"],
+            ),
+        )
+
+    def test_unknown_metadata_is_its_own_context_with_unknown_continuity(self):
+        unchanged = self.garmin_hrv({})
+        self.assertEqual(
+            ("ok", None, "unknown", {"window": "overnight"}),
+            (
+                unchanged["status"],
+                unchanged["context_changed_on"],
+                unchanged["continuity"],
+                unchanged["measurement_context"],
+            ),
+        )
+        lost = self.garmin_hrv({2: UNKNOWN_CONTEXT})
+        self.assertEqual(
+            ("2026-09-30", 2, {}),
+            (lost["context_changed_on"], lost["nights"], lost["measurement_context"]),
+        )
+        intervals = mapped_personal_recovery(self.rows(30), {}, {}, self.today)
+        for row in intervals["baselines"]:
+            self.assertEqual("ok", row["status"])
+            if row["metric"] == "sleep":
+                self.assertNotIn("continuity", row)
+            else:
+                self.assertEqual(
+                    ("unknown", None), (row["continuity"], row["context_changed_on"])
+                )
+
+    def test_a_change_before_the_window_is_not_reported(self):
+        device = MeasurementContext(device_model="Forerunner 965", window="overnight")
+        old = self.garmin_hrv({50: device}, nights=60)
+        self.assertEqual(
+            (None, 42, "ok"), (old["context_changed_on"], old["nights"], old["status"])
         )
 
     def test_legacy_hrv_method_field_is_ignored(self):

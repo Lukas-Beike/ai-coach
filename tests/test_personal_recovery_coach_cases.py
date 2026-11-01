@@ -8,15 +8,22 @@ well a model answers (docs/coach-dialogue-evaluation.md).
 
 import json
 import unittest
+from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any
 from unittest.mock import Mock
 
-from canonical_recovery_support import mapped_personal_recovery, recovery_only_inputs
+from canonical_recovery_support import (
+    mapped_personal_recovery,
+    mapped_recovery_inputs,
+    recovery_only_inputs,
+)
 from performance_claim_support import claim_wording_violations
 from test_athlete_checkins import FakeManager
 
 from backend.athlete.checkins import CheckinService
+from backend.canonical.records import MeasurementContext
+from backend.canonical.vocabulary import MetricKind
 from backend.coach.context import (
     CoachPerformanceContextReader,
     CoachPlanningContextReader,
@@ -27,6 +34,7 @@ from backend.coach.context_selection import CoachContextSelection
 from backend.coach.prompt import COACH_PROMPT
 from backend.db.repositories import CheckinRepository
 from backend.performance.freshness import GarminSyncStatus
+from backend.performance.personal_recovery import personal_recovery
 
 TODAY = date(2026, 10, 2)
 NO_CLEARANCE = "Keine Diagnose, keine Trainingsfreigabe und keine Trainingsänderung"
@@ -132,6 +140,47 @@ class RecoveryCoachCases(unittest.TestCase):
             (series["garmin"]["status"], series["garmin"]["nights"]),
         )
         self.assertNotIn("position", series["garmin"])
+        self.assert_coach_text_is_clean(view)
+
+    def test_fresh_device_model_change_restarts_the_same_provider_series(self):
+        garmin = {
+            "hrv": [
+                {
+                    "calendarDate": (TODAY - timedelta(days=day)).isoformat(),
+                    "lastNightAvg": 55,
+                }
+                for day in range(31)
+            ]
+        }
+        inputs = mapped_recovery_inputs(garmin, [])
+        device = MeasurementContext(device_model="Forerunner 965", window="overnight")
+        hrv = tuple(
+            replace(item, provenance=replace(item.provenance, context=device))
+            if (TODAY - item.observed_on).days <= 2
+            else item
+            for item in inputs.of(MetricKind.HRV_RMSSD)
+        )
+        inputs = replace(
+            inputs, observations={**inputs.observations, MetricKind.HRV_RMSSD: hrv}
+        )
+        recovery = personal_recovery({}, TODAY, canonical=inputs)
+        view = coach_performance_projection({"personal_recovery": recovery})[
+            "personal_recovery"
+        ]
+        (item,) = _baselines(view, "hrv")
+        self.assertEqual(
+            ("insufficient_data", 2, "2026-09-30", "known"),
+            (
+                item["status"],
+                item["nights"],
+                item["context_changed_on"],
+                item["continuity"],
+            ),
+        )
+        self.assertIn("Messkontext geändert", item["reason"])
+        self.assertNotIn("measurement_context", item)
+        self.assertIn("Forerunner 965", json.dumps(recovery, ensure_ascii=False))
+        self.assertNotIn("position", item)
         self.assert_coach_text_is_clean(view)
 
     def test_stale_values_keep_the_old_value_without_a_position(self):

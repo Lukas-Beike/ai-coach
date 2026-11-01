@@ -150,9 +150,9 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
       { metric: "sleep", source: "Garmin Connect", measurement: "duration", observed_at: "2026-10-01", nights: 1,
         history: [{ date: "2026-09-30", value: 7 }, { date: "2026-10-01", value: 11 }] },
       { metric: "hrv", source: "Garmin Connect", measurement: "RMSSD", observed_at: "2026-10-01", nights: 28,
-        status: "ok", lower: 50, upper: 60, position: "within", history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
+        status: "ok", lower: 50, upper: 60, position: "within", continuity: "unknown", context_changed_on: null, history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
       { metric: "resting_hr", source: "Intervals.icu", measurement: "resting", observed_at: "2026-10-01", nights: 1,
-        status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", history: [{ date: "2026-10-01", value: 48 }] },
+        status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", continuity: "known", context_changed_on: "2026-09-30", history: [{ date: "2026-10-01", value: 48 }] },
     ],
   } }), "recovery");
   const root = page.locator("#personalRecovery");
@@ -169,6 +169,8 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(info).toContainText("Im Bereich deiner früheren Werte · 50 ms–60 ms");
   await expect(info).toContainText("Vergleich mit 28 früheren Nächten.");
   await expect(info).toContainText("Mindestens 14 frühere passende Nächte erforderlich.");
+  await expect(info).toContainText("Vergleich mit 28 früheren Nächten. Messkontext unbekannt.");
+  await expect(info).toContainText(/Messkontext geändert am 30\.09\.2026\./);
   await expect(info).toContainText("Durchschnitt der angezeigten Werte");
   await page.keyboard.press("Escape");
   const recoveryText = await root.evaluate((element) => element.textContent);

@@ -62,8 +62,9 @@ Consumer trace:
   the canonical sleep periods when the tables serve reads (#1419).
 - Method: `personal_recovery` (`backend/performance/personal_recovery.py`)
   builds one series per provider and measurement from the daily canonical
-  observations; raw rows and payloads feed sleep timing variability only before the
-  canonical tables serve reads.
+  observations and restarts the comparison at a change of method, aggregation
+  or measurement context (#1428); raw rows and payloads feed sleep timing
+  variability only before the canonical tables serve reads.
 - Report/context: `current_performance_context` (`backend/performance/context.py:167`).
 - HTTP: `GET /api/performance` (`backend/http_api/athlete_get.py:51`) and the
   report services (`backend/http_api/assembly.py:430`).

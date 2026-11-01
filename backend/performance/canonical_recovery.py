@@ -20,7 +20,7 @@ no data.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final
@@ -73,12 +73,24 @@ class CanonicalRecoveryInputs:
 
         ``bounded`` skips values outside the kind's current-rule bounds first.
         """
-        return first_per_day(
-            observation
-            for observation in self.of(kind)
-            if observation.provenance.provider is provider
-            and (not bounded or within_current_bounds(observation))
-        )
+        return {
+            day: float(observation.value.value)
+            for day, observation in self.daily_observations(
+                kind, provider, bounded=bounded
+            ).items()
+        }
+
+    def daily_observations(
+        self, kind: MetricKind, provider: ProviderId, *, bounded: bool = False
+    ) -> dict[date, Observation]:
+        """Return one observation per day of ``provider``; the first record wins."""
+        days: dict[date, Observation] = {}
+        for observation in self.of(kind):
+            if observation.provenance.provider is provider and (
+                not bounded or within_current_bounds(observation)
+            ):
+                days.setdefault(observation.observed_on, observation)
+        return days
 
 
 def read_recovery_inputs(
@@ -102,11 +114,3 @@ def read_recovery_inputs(
             else None
         ),
     )
-
-
-def first_per_day(observations: Iterable[Observation]) -> dict[date, float]:
-    """Return the value of the first observation of each day."""
-    values: dict[date, float] = {}
-    for observation in observations:
-        values.setdefault(observation.observed_on, float(observation.value.value))
-    return values
