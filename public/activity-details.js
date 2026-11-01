@@ -93,7 +93,7 @@
   }
 
   function setRpe(select, value) {
-    const number = value == null || value === "" ? NaN : Number(value);
+    const number = value == null || value === "" ? Number.NaN : Number(value);
     if (!Number.isFinite(number)) { select.value = ""; return; }
     // A stored rating off the half-point grid keeps its own option, in order, instead of being rounded.
     if (![...select.options].some((option) => option.value === String(number))) {
@@ -153,8 +153,8 @@
         const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });
         const previous = shown; shown = result.activity_feedback;
         status.textContent = result.activity_feedback ? "Feedback gespeichert. " : "Feedback entfernt. ";
-        if (result.change?.id) status.append(feedbackUndoButton(api, result.change, status, () => { shown = previous; fill(previous); refreshLoad(); }));
-        refreshLoad();
+        if (result.change?.id) status.append(feedbackUndoButton(api, result.change, status, () => { shown = previous; fill(previous); void refreshLoad(); }));
+        void refreshLoad();
       } catch (error) { status.textContent = error.message; } finally { save.disabled = false; }
     });
   }
