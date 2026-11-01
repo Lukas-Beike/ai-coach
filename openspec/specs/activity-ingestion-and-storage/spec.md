@@ -205,14 +205,20 @@ The canonical backfill runner SHALL run a retirement stage after the activity de
 - **THEN** the stage resumes from its stored cursor or reports completion, and repeating it changes no further rows.
 
 #### Scenario: Upgrade from supported released schemas
-- **WHEN** populated databases built from the frozen fixtures for schema v9 through v13 with seeded kv detail records are upgraded and the backfill and retirement stages run
+- **WHEN** populated databases built from the frozen fixtures for schema v16 through v18 with seeded kv detail records are upgraded and the backfill and retirement stages run
 - **THEN** every seeded detail remains readable as `activity_detail.v1`, verified kv records are retired, and unverifiable ones remain stored.
+
+#### Scenario: Legacy target basis
+- **WHEN** a preserved kv detail record uses the former FTP key in its frozen target basis
+- **THEN** canonical backfill stores the equivalent neutral basis, and retirement compares normalized values without discarding conflicting data.
 
 #### Scenario: Backup, restore and privacy export
 - **WHEN** a database is backed up, restored or privacy-exported after retirement
 - **THEN** the canonical detail sets, stream channels, laps, zone times and analysis payloads are present, and retired kv records are absent from the exported application state.
 
 Evidence: `backend/sync/activity_detail_retirement.py:ActivityDetailRetirement`, `backend/db/activity_detail_store.py:refill_lap_metrics`, `backend/sync/canonical_backfill_assembly.py`; `tests/test_activity_detail_retirement.py:test_proven_record_is_deleted_and_other_keys_are_kept`, `tests/test_activity_detail_retirement.py:test_missing_lap_speed_is_refilled_before_the_record_is_retired`, `tests/test_activity_detail_retirement.py:test_lap_metric_that_differs`, `tests/test_activity_detail_retirement.py:test_failed_batch_rolls_back_refills_and_deletions`, `tests/test_activity_detail_retirement.py:test_restart_resumes_from_the_cursor_and_repeats_nothing`, `tests/test_activity_detail_retirement_upgrade.py:test_released_schemas_upgrade_and_retire_proven_records` (the SQLCipher variant is skipped without SQLCipher), `tests/test_activity_detail_retirement_backup.py:test_restored_backup_serves_the_same_document`, `tests/test_activity_detail_retirement_backup.py:test_privacy_export_holds_the_retired_detail_in_the_canonical_files`. Related existing behavior: `backend/sync/activity_detail_backfill.py:ActivityDetailBackfill`, `backend/sync/canonical_backfill_worker.py`.
+
+Additional evidence: `tests/test_activity_detail_canonical.py::test_legacy_target_basis_is_normalized_without_changing_source`; `tests/test_activity_detail_retirement.py::test_legacy_target_basis_is_compared_after_normalization`; `tests/test_activity_detail_retirement.py::test_conflicting_legacy_target_basis_is_not_retired`.
 
 ### Requirement: Canonical duplicate pair detection
 The system SHALL detect and inspect the newest Wahoo/Garmin duplicate ride pair from canonical active Intervals.icu activity records, keeping the Wahoo-recorded activity and offering the Garmin-recorded copy for deletion, without reading the Intervals.icu snapshot. A pair SHALL contain the newest Intervals.icu activity.

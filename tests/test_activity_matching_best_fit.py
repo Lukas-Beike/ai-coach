@@ -16,7 +16,7 @@ def _unit(unit_id, sport, minutes, load=None):
         "planned_duration_s": minutes * 60,
     }
     if load is not None:
-        unit["icu_training_load"] = load
+        unit["planned_load"] = load
     return unit
 
 

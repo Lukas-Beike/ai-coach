@@ -17,6 +17,7 @@ from enum import StrEnum
 from typing import Any, Final
 
 from backend.canonical.activity_detail import ActivityDetailSet
+from backend.canonical.legacy_planning_fields import normalize_legacy_detail_targets
 from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
     ActivityRecordState,
@@ -128,7 +129,8 @@ class CanonicalDetailWriter:
         outcomes = _write_sets(
             db, result.records, _sha256_or_none(record.get("summary_sha256")), now
         )
-        analysis = _write_analysis(db, link, record, now)
+        normalized_record = normalize_legacy_detail_targets(record)
+        analysis = _write_analysis(db, link, normalized_record, now)
         if analysis is not None:
             outcomes.append(analysis)
         return _result(outcomes, len(result.issues))

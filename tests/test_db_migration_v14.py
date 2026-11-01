@@ -12,7 +12,11 @@ from backend.db.schema import (
     database_schema_is_current,
     database_schema_signature,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V13, released_shape
+from backend.db.schema_history import (
+    SHAPE_CURRENT,
+    SHAPE_SCHEMA_V16,
+    released_shape,
+)
 
 FIXTURES = Path(__file__).with_name("fixtures")
 STAMP = "2026-10-25T08:00:00+00:00"
@@ -48,11 +52,9 @@ class YazioSourceMigrationTests(unittest.TestCase):
     def rows(self, db, table):
         return [tuple(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY 1")]
 
-    def test_frozen_v13_fixture_is_the_recorded_released_shape(self):
+    def test_v13_fixture_is_not_a_supported_shape(self):
         db = self.connect(13)
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V13
-        )
+        self.assertIsNone(released_shape(database_schema_signature(db)))
 
     def test_v13_rejects_yazio_rows_before_the_upgrade(self):
         db = self.connect(13)
@@ -62,7 +64,7 @@ class YazioSourceMigrationTests(unittest.TestCase):
             db.execute(PRODUCT, ("p3", None, "Skyr", "yazio", STAMP, STAMP))
 
     def test_every_supported_schema_upgrades_keeping_rows_and_accepting_yazio(self):
-        for version in (9, 10, 11, 12, 13):
+        for version in (16, 17, 18):
             with self.subTest(version=version):
                 db = self.connect(version)
                 products = self.rows(db, "nutrition_products")
@@ -82,28 +84,28 @@ class YazioSourceMigrationTests(unittest.TestCase):
                 db.execute(PRODUCT, ("p3", None, "Skyr", "yazio", STAMP, STAMP))
                 db.commit()
 
-    def test_failed_upgrade_rolls_back_to_the_unchanged_v13_database(self):
-        db = self.connect(13)
+    def test_failed_upgrade_rolls_back_to_the_unchanged_v16_database(self):
+        db = self.connect(16)
         before = list(db.iterdump())
 
         def failing_step(connection):
-            migrations._upgrade_v13_to_v14(connection)
+            migrations._upgrade_v16_to_v17(connection)
             raise RuntimeError("injected migration failure")
 
         with (
             mock.patch.dict(
                 migrations.UPGRADE_STEPS,
-                {SHAPE_SCHEMA_V13: (SHAPE_CURRENT, failing_step)},
+                {SHAPE_SCHEMA_V16: (SHAPE_CURRENT, failing_step)},
             ),
             self.assertRaisesRegex(RuntimeError, "injected"),
         ):
             migrate_schema(db)
         db.rollback()
         self.assertEqual(list(db.iterdump()), before)
-        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 13)
+        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 16)
 
     def test_upgraded_database_restarts_with_the_same_build_unchanged(self):
-        db = self.connect(13)
+        db = self.connect(16)
         migrate_schema(db)
         db.commit()
         upgraded = list(db.iterdump())

@@ -17,7 +17,8 @@ from backend.backup.restore_validation import (
     DatabaseRestoreValidationService,
 )
 from backend.db.migrations import migrate_schema
-from backend.db.schema import CURRENT_SCHEMA_VERSION, database_schema_is_current
+from backend.db.schema import database_schema_is_current
+from backend.errors import AppError
 
 V13_FIXTURE = Path(__file__).with_name("fixtures") / "schema_v13.sql.txt"
 
@@ -39,7 +40,7 @@ def service(data_dir: Path) -> DatabaseRestoreValidationService:
 
 
 class ReleaseV13RestoreTests(unittest.TestCase):
-    def test_validate_upgrades_a_populated_release_v13_backup(self) -> None:
+    def test_validate_rejects_a_populated_release_v13_backup_unchanged(self) -> None:
         stamp = "2026-10-16T08:00:00+00:00"
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "backup.db"
@@ -57,20 +58,12 @@ class ReleaseV13RestoreTests(unittest.TestCase):
                     (stamp, stamp),
                 )
                 connection.commit()
-            service(Path(directory)).validate(path)
+                before = list(connection.iterdump())
+            with self.assertRaises(AppError):
+                service(Path(directory)).validate(path)
             with closing(sqlite3.connect(path)) as connection:
                 connection.row_factory = sqlite3.Row
-                self.assertEqual(
-                    connection.execute("PRAGMA user_version").fetchone()[0],
-                    CURRENT_SCHEMA_VERSION,
-                )
-                self.assertTrue(database_schema_is_current(connection))
-                rows = connection.execute(
-                    "SELECT activity_id, notes, session_id FROM activity_feedback"
-                ).fetchall()
-                self.assertEqual(
-                    [tuple(row) for row in rows], [("act_1", "Locker", "act_1")]
-                )
+                self.assertEqual(list(connection.iterdump()), before)
 
 
 if __name__ == "__main__":

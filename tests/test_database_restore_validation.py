@@ -133,11 +133,12 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0
                 )
 
-    def test_validate_upgrades_a_populated_release_v9_backup(self) -> None:
+    def test_validate_upgrades_a_populated_release_v16_backup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "backup.db"
             with closing(sqlite3.connect(path)) as connection:
-                connection.executescript(V9_FIXTURE.read_text(encoding="utf-8"))
+                fixture = V9_FIXTURE.with_name("schema_v16.sql.txt")
+                connection.executescript(fixture.read_text(encoding="utf-8"))
                 connection.execute(
                     "INSERT INTO messages(role, content, created_at) "
                     "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
@@ -160,6 +161,47 @@ class DatabaseRestoreValidationTests(unittest.TestCase):
                     connection.execute("SELECT content FROM messages").fetchone()[0],
                     "Hallo",
                 )
+
+    def test_validate_rejects_v9_backup_without_modifying_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.db"
+            with closing(sqlite3.connect(path)) as connection:
+                connection.executescript(V9_FIXTURE.read_text(encoding="utf-8"))
+                connection.execute(
+                    "INSERT INTO messages(role, content, created_at) VALUES ('user', 'Hallo', 'now')"
+                )
+                connection.commit()
+                before = list(connection.iterdump())
+            with self.assertRaises(AppError):
+                service(
+                    Path(directory),
+                    schema_is_current=database_schema_is_current,
+                    migrate_schema=migrate_schema,
+                ).validate(path)
+            with closing(sqlite3.connect(path)) as connection:
+                self.assertEqual(list(connection.iterdump()), before)
+
+    def test_validate_rejects_conflicting_planning_values_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.db"
+            with closing(sqlite3.connect(path)) as connection:
+                fixture = V9_FIXTURE.with_name("schema_v18.sql.txt")
+                connection.executescript(fixture.read_text(encoding="utf-8"))
+                connection.execute(
+                    "INSERT INTO workout_library(id, local_id, payload, updated_at) VALUES ('x', 'x', ?, 'now')",
+                    ('{"icu_training_load": 42, "planned_load": 99}',),
+                )
+                connection.commit()
+                before = list(connection.iterdump())
+            with self.assertRaises(AppError) as raised:
+                service(
+                    Path(directory),
+                    schema_is_current=database_schema_is_current,
+                    migrate_schema=migrate_schema,
+                ).validate(path)
+            self.assertEqual(raised.exception.status, 400)
+            with closing(sqlite3.connect(path)) as connection:
+                self.assertEqual(list(connection.iterdump()), before)
 
     def test_validate_rejects_unexpected_schema_without_scrubbing_backup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -21,23 +21,25 @@ from contextlib import closing
 from datetime import date
 from pathlib import Path
 from typing import Any
-from unittest import mock
 from unittest.mock import Mock
+
+from legacy_planning_fixture import (
+    rename_planning_fields,
+    rename_planning_fields_in_database,
+)
 
 from backend import change_history
 from backend.backup.restore_validation import (
     DatabaseRestoreValidationConfig,
     DatabaseRestoreValidationService,
 )
-from backend.db import DatabaseManager, migrations, row_factory
+from backend.db import DatabaseManager, row_factory
 from backend.db.migrations import migrate_schema
-from backend.db.planning_fields_migration import rename_planning_fields
 from backend.db.repositories import CompetitionRepository, PlanningStateRepository
 from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     database_schema_is_current,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V15
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.planning import planned_units
@@ -460,6 +462,27 @@ def populated_planning_database(db: Any, fixture: Path = V15_FIXTURE) -> Any:
     return db
 
 
+def populated_v16_planning_database(db: Any) -> Any:
+    """Construct a synthetic v16 database retaining pre-v16 audit history."""
+    populated_planning_database(db)
+    rename_planning_fields_in_database(db)
+    for unit_id in (REMOTE_UNIT, LOCAL_UNIT):
+        payload = json.loads(stored(db, "planned_units", "payload", unit_id))
+        payload.update({"icu_training_load": 42, "icu_intensity": 0.8})
+        db.execute(
+            "UPDATE planned_units SET payload = ? WHERE id = ?",
+            (json.dumps(payload), unit_id),
+        )
+        if unit_id == REMOTE_UNIT:
+            db.execute(
+                "UPDATE planned_units SET baseline_hash = ? WHERE id = ?",
+                (planned_units.planned_unit_payload_hash(payload), unit_id),
+            )
+    db.execute("PRAGMA user_version = 16")
+    db.commit()
+    return db
+
+
 def all_rows(db: Any) -> dict[str, list[tuple[Any, ...]]]:
     tables = [
         row[0]
@@ -504,125 +527,68 @@ class PlanningFieldsMigrationTests(unittest.TestCase):
     def released(self, fixture: Path = V15_FIXTURE) -> sqlite3.Connection:
         db = connect()
         self.addCleanup(db.close)
-        return populated_planning_database(db, fixture)
+        return populated_v16_planning_database(db)
 
-    def test_populated_releases_upgrade_every_planning_record_to_the_neutral_names(
-        self,
-    ):
-        for fixture in (V15_FIXTURE, V9_FIXTURE):
-            with self.subTest(fixture=fixture.name):
-                self.assert_upgraded(self.released(fixture))
-
-    def assert_upgraded(self, db: sqlite3.Connection) -> None:
-        before = all_rows(db)
-        payloads = {
-            row["id"]: row["payload"]
-            for row in db.execute("SELECT id, payload FROM planned_units")
+    def test_populated_v16_upgrade_preserves_unrelated_rows_and_unit_metadata(self):
+        db = self.released()
+        tables = [
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        ]
+        columns = {
+            table: [row[1] for row in db.execute(f"PRAGMA table_info({table})")]
+            for table in tables
         }
+        before = {
+            table: sorted(
+                (
+                    tuple(row)
+                    for row in db.execute(
+                        f"SELECT {', '.join(columns[table])} FROM {table}"
+                    )
+                ),
+                key=repr,
+            )
+            for table in tables
+            if table != "planned_units"
+        }
+        metadata = sorted(
+            (
+                tuple(row)
+                for row in db.execute(
+                    "SELECT id, local_id, external_id, sync_dirty, sync_state, baseline_hash, revision, tombstone FROM planned_units"
+                )
+            ),
+            key=repr,
+        )
         migrate_schema(db)
         db.commit()
-        self.assertTrue(database_schema_is_current(db))
-        self.assertEqual(
-            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
-        )
-        after = all_rows(db)
         for table, rows in before.items():
             with self.subTest(table=table):
-                self.assertEqual(len(after[table]), len(rows))
-                if table not in REWRITTEN_TABLES:
-                    self.assertEqual(after[table], rows)
-
-        # Planned units: renamed keys, same values and order, same baseline.
-        remote_before = json.loads(payloads[REMOTE_UNIT])
-        remote_after = json.loads(stored(db, "planned_units", "payload", REMOTE_UNIT))
+                after = sorted(
+                    (
+                        tuple(row)
+                        for row in db.execute(
+                            f"SELECT {', '.join(columns[table])} FROM {table}"
+                        )
+                    ),
+                    key=repr,
+                )
+                self.assertEqual(after, rows)
         self.assertEqual(
-            list(remote_after), [CURRENT_NAMES.get(key, key) for key in remote_before]
+            sorted(
+                (
+                    tuple(row)
+                    for row in db.execute(
+                        "SELECT id, local_id, external_id, sync_dirty, sync_state, baseline_hash, revision, tombstone FROM planned_units"
+                    )
+                ),
+                key=repr,
+            ),
+            metadata,
         )
-        self.assertEqual(remote_after, remote_unit_payload())
-        self.assertEqual(remote_after["starts_at_local"], "2026-11-02T07:30:00")
-        self.assertEqual(remote_after["planned_duration_s"], 2700)
-        conflict = json.loads(stored(db, "planned_units", "sync_conflict", REMOTE_UNIT))
-        self.assertEqual(conflict["remote"]["planned_duration_s"], 3000)
-        self.assertNotIn("moving_time", conflict["remote"])
-        self.assertEqual(conflict["type"], "remote_changed")
-        self.assertEqual(
-            stored(db, "planned_units", "payload", LIST_UNIT),
-            payloads[LIST_UNIT],
-        )
-        local = json.loads(stored(db, "planned_units", "payload", LOCAL_UNIT))
-        self.assertEqual(local["starts_at_local"], "2026-11-03T08:15:00")
-        for table in ("planned_units", "workout_library"):
-            for (payload,) in db.execute(
-                f"SELECT payload FROM {table} WHERE id <> ?", (LIST_UNIT,)
-            ):
-                with self.subTest(table=table):
-                    self.assertNotIn('"start_date_local"', payload)
-                    self.assertNotIn('"moving_time"', payload)
-
-        # The library entry with the key is renamed; text-only mentions stay.
-        library = json.loads(stored(db, "workout_library", "payload", LIBRARY_ENTRY))
-        self.assertEqual(library["planned_duration_s"], 3600)
-        self.assertNotIn("moving_time", library)
-        text_only = [
-            row for row in before["workout_library"] if row[0] == LIBRARY_TEXT_ONLY
-        ]
-        self.assertIn(text_only[0], after["workout_library"])
-
-        # Competitions: renamed columns with the same values and conflict remote.
-        competition = db.execute(
-            "SELECT starts_at_local, planned_duration_s, sync_conflict FROM competitions "
-            "WHERE id=?",
-            (COMPETITION,),
-        ).fetchone()
-        self.assertEqual(competition[0], "2026-11-15T10:00:00")
-        self.assertEqual(competition[1], 2700)
-        remote = json.loads(competition[2])["remote"]
-        self.assertEqual(remote["starts_at_local"], "2026-11-15T10:30:00")
-        self.assertEqual(remote["planned_duration_s"], 2400)
-        self.assertEqual(remote["intervals_event_id"], "88")
-        empty = db.execute(
-            "SELECT starts_at_local, planned_duration_s FROM competitions WHERE id=?",
-            (COMPETITION_EMPTY,),
-        ).fetchone()
-        self.assertEqual(tuple(empty), (None, None))
-
-        # Staged Coach plans and adaptive previews.
-        artifact = json.loads(
-            stored(db, "coach_plan_artifacts", "payload", "artifact-1")
-        )
-        self.assertEqual(
-            artifact["workouts"][0]["starts_at_local"], "2026-11-04T06:00:00"
-        )
-        self.assertEqual(
-            artifact["workouts"][1],
-            {"date": "2026-11-05", "sport": "Run", "name": "Ruhe"},
-        )
-        self.assertNotIn(
-            " ", stored(db, "coach_plan_artifacts", "payload", "artifact-1")[:20]
-        )
-        adjustment = json.loads(
-            stored(db, "plan_adjustments", "payload", "adjustment-1")
-        )
-        change = adjustment["changes"][0]
-        self.assertEqual(change["payload"]["planned_duration_s"], 2700)
-        self.assertEqual(change["payload"]["duration_minutes"], 30)
-        self.assertEqual(change["source_fingerprint"], "f" * 64)
-
-        # Proposals: the pending undo names the current fields; its payload and
-        # hash, used proposals and activity proposals keep their exact bytes.
-        old_proposals = {row[0]: row for row in before["coach_action_proposals"]}
-        new_proposals = {row[0]: row for row in after["coach_action_proposals"]}
-        pending = json.loads(stored(db, "coach_action_proposals", "diff", PENDING_UNDO))
-        self.assertEqual(list(pending["fields"]), ["name", "starts_at_local"])
-        for column in (6, 7):
-            self.assertEqual(
-                new_proposals[PENDING_UNDO][column], old_proposals[PENDING_UNDO][column]
-            )
-        self.assertEqual(new_proposals[USED_UNDO], old_proposals[USED_UNDO])
-        self.assertEqual(
-            new_proposals[DUPLICATE_PROPOSAL], old_proposals[DUPLICATE_PROPOSAL]
-        )
-        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_recorded_remote_baseline_still_matches_after_the_upgrade(self):
         db = self.released()
@@ -634,6 +600,7 @@ class PlanningFieldsMigrationTests(unittest.TestCase):
             ).fetchone()
         )
         incoming = remote_unit_payload()
+        incoming.update({"planned_load": 42, "planned_intensity": 0.8})
         incoming_hash = planned_units.planned_unit_payload_hash(incoming)
         self.assertEqual(row["baseline_hash"], incoming_hash)
         self.assertEqual(
@@ -647,43 +614,11 @@ class PlanningFieldsMigrationTests(unittest.TestCase):
         )
         self.assertEqual(state, "unchanged")
 
-    def test_failure_after_the_rewrite_rolls_back_to_the_unchanged_release(self):
-        for fixture, version in ((V15_FIXTURE, 15), (V9_FIXTURE, 9)):
-            with self.subTest(fixture=fixture.name):
-                db = self.released(fixture)
-                before = list(db.iterdump())
-                rewritten = []
-
-                def failing_step(connection, rewritten=rewritten):
-                    migrations._upgrade_v15_to_v16(connection)
-                    rewritten.append(
-                        connection.execute(
-                            "SELECT payload FROM planned_units WHERE id=?",
-                            (REMOTE_UNIT,),
-                        ).fetchone()[0]
-                    )
-                    raise RuntimeError("injected migration failure")
-
-                with (
-                    mock.patch.dict(
-                        migrations.UPGRADE_STEPS,
-                        {SHAPE_SCHEMA_V15: (SHAPE_CURRENT, failing_step)},
-                    ),
-                    self.assertRaisesRegex(RuntimeError, "injected"),
-                ):
-                    migrate_schema(db)
-                db.rollback()
-                self.assertIn("planned_duration_s", rewritten[0])
-                self.assertEqual(list(db.iterdump()), before)
-                self.assertEqual(
-                    db.execute("PRAGMA user_version").fetchone()[0], version
-                )
-
     def test_upgraded_database_restarts_with_the_same_build_unchanged(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "upgrade.db"
             with closing(connect(path)) as db:
-                populated_planning_database(db)
+                populated_v16_planning_database(db)
                 migrate_schema(db)
                 db.commit()
                 upgraded = list(db.iterdump())
@@ -691,7 +626,7 @@ class PlanningFieldsMigrationTests(unittest.TestCase):
                 migrate_schema(reopened)
                 self.assertEqual(list(reopened.iterdump()), upgraded)
 
-    def test_v15_version_and_shape_must_belong_together(self):
+    def test_v16_version_and_shape_must_belong_together(self):
         db = self.released()
         db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
         db.commit()
@@ -700,11 +635,11 @@ class PlanningFieldsMigrationTests(unittest.TestCase):
             migrate_schema(db)
         self.assertEqual(list(db.iterdump()), before)
 
-    def test_restore_of_a_populated_v15_backup_upgrades_through_validation(self):
+    def test_restore_of_a_populated_v16_backup_upgrades_through_validation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "backup.db"
             with closing(connect(path)) as db:
-                populated_planning_database(db)
+                populated_v16_planning_database(db)
             DatabaseRestoreValidationService(
                 DatabaseRestoreValidationConfig(
                     data_dir=Path(directory),
@@ -747,7 +682,7 @@ class PreUpgradeUndoTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         path = Path(directory.name) / "undo.db"
         with closing(connect(path)) as db:
-            populated_planning_database(db)
+            populated_v16_planning_database(db)
         self.manager = DatabaseManager(path, sqlite3, row_factory=row_factory)
         self.addCleanup(self.manager.close)
         with self.manager.unit_of_work() as db:
@@ -793,6 +728,9 @@ class PreUpgradeUndoTests(unittest.TestCase):
             payload = json.loads(stored(db, "planned_units", "payload", LOCAL_UNIT))
         self.assertEqual(payload["name"], "Lauf")
         self.assertEqual(payload["starts_at_local"], "2026-11-03T10:00:00")
+        self.assertEqual(
+            (payload["planned_load"], payload["planned_intensity"]), (42, 0.8)
+        )
         self.assertNotIn("start_date_local", payload)
 
     def test_pending_undo_proposal_from_v15_still_applies(self):

@@ -1,6 +1,5 @@
 """Schema gate: supported released schemas upgrade, anything else stays unchanged."""
 
-import json
 import sqlite3
 import tempfile
 import unittest
@@ -9,28 +8,18 @@ from typing import Any, ClassVar
 from unittest import mock
 
 from backend.canonical.vocabulary import ProviderId
-from backend.db import garmin_items_migration, garmin_store, migrations, row_factory
+from backend.db import migrations
 from backend.db.manager import DatabaseManager
 from backend.db.migrations import migrate_schema
 from backend.db.schema import (
-    ACTIVITY_DETAIL_DDL,
     CURRENT_SCHEMA_VERSION,
-    FOOD_DATABASE_DDL,
     configure_cipher,
     database_schema_is_current,
     database_schema_signature,
-    execute_ddl,
     initialize_schema,
 )
 from backend.db.schema_history import (
     SHAPE_CURRENT,
-    SHAPE_SCHEMA_V9,
-    SHAPE_SCHEMA_V10,
-    SHAPE_SCHEMA_V11,
-    SHAPE_SCHEMA_V12,
-    SHAPE_SCHEMA_V13,
-    SHAPE_SCHEMA_V14,
-    SHAPE_SCHEMA_V15,
     SHAPE_SCHEMA_V16,
     SHAPE_SCHEMA_V17,
     released_shape,
@@ -39,9 +28,9 @@ from backend.db.schema_history import (
 INTERVALS = ProviderId.INTERVALS.value
 GARMIN = ProviderId.GARMIN.value
 STAMP = "2026-10-16T08:00:00+00:00"
-OLDEST_SUPPORTED_VERSION = 9
+OLDEST_SUPPORTED_VERSION = 16
 FIXTURES = Path(__file__).with_name("fixtures")
-OLDEST_SUPPORTED_FIXTURE = FIXTURES / "schema_v9.sql.txt"
+V9_FIXTURE = FIXTURES / "schema_v9.sql.txt"
 V10_FIXTURE = FIXTURES / "schema_v10.sql.txt"
 V11_FIXTURE = FIXTURES / "schema_v11.sql.txt"
 V12_FIXTURE = FIXTURES / "schema_v12.sql.txt"
@@ -52,17 +41,13 @@ V14_FIXTURE = FIXTURES / "schema_v14.sql.txt"
 V15_FIXTURE = FIXTURES / "schema_v15.sql.txt"
 # Release schema 16: planning field names; version 17 adds the power curve.
 V16_FIXTURE = FIXTURES / "schema_v16.sql.txt"
+OLDEST_SUPPORTED_FIXTURE = V16_FIXTURE
 # Release schema 17: power curve; version 18 adds the session RPE rating time.
 V17_FIXTURE = FIXTURES / "schema_v17.sql.txt"
 RELEASED_FIXTURES = (
-    OLDEST_SUPPORTED_FIXTURE,
-    V10_FIXTURE,
-    V11_FIXTURE,
-    V12_FIXTURE,
-    V13_FIXTURE,
-    V14_FIXTURE,
-    V15_FIXTURE,
     V16_FIXTURE,
+    FIXTURES / "schema_v17.sql.txt",
+    FIXTURES / "schema_v18.sql.txt",
     V17_FIXTURE,
 )
 # Columns an upgrade renamed: (table, released name) -> current name. Rows read
@@ -131,8 +116,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         self.assertTrue(database_schema_is_current(db))
 
     def test_oldest_supported_release_schema_upgrades_to_current(self):
-        # Release 1.13.6 is the migration baseline. A schema change must keep
-        # this fixture and add a transactional upgrade step from version 9.
+        # Release 1.13.32 is the migration baseline.
         db = self.connect()
         db.executescript(OLDEST_SUPPORTED_FIXTURE.read_text(encoding="utf-8"))
         db.execute(
@@ -192,32 +176,6 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             db.execute(insert, ("competition", "5", INTERVALS, "9"))
 
-    def populated_v9_database(self, db):
-        db.executescript(OLDEST_SUPPORTED_FIXTURE.read_text(encoding="utf-8"))
-        db.execute(
-            "INSERT INTO messages(role, content, created_at) "
-            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
-        )
-        db.execute(
-            "INSERT INTO kv(key, value, updated_at) VALUES (?, ?, ?)",
-            ("activity_detail:synthetic", '{"streams": {"watts": [100, 110]}}', STAMP),
-        )
-        db.execute(
-            "INSERT INTO activity_sessions(activity_id, primary_provider, "
-            "primary_provider_activity_id, started_at, created_at, updated_at) "
-            "VALUES ('act_1', ?, 'i1', ?, ?, ?)",
-            (INTERVALS, STAMP, STAMP, STAMP),
-        )
-        db.execute(
-            "INSERT INTO activity_records(provider, provider_activity_id, activity_id, "
-            "mapper_version, source_kind, recorded_by, sport, environment, started_at, "
-            "load_model, avg_power, fetched_at, created_at, updated_at) "
-            "VALUES (?, 'i1', 'act_1', 1, 'provider_reported', 'garmin', 'ride', "
-            "'outdoor', ?, 'unknown', 210.5, ?, ?, ?)",
-            (INTERVALS, STAMP, STAMP, STAMP, STAMP),
-        )
-        db.commit()
-
     def table_columns(self, db, tables):
         return {
             table: [row[1] for row in db.execute(f"PRAGMA table_info({table})")]
@@ -252,115 +210,6 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             )
         )
 
-    def test_populated_v9_upgrade_keeps_every_row_and_adds_empty_detail_tables(self):
-        db = self.connect()
-        self.populated_v9_database(db)
-        v9_tables = self.user_tables(db)
-        columns = self.table_columns(db, v9_tables)
-        before = self.table_rows(db, v9_tables, columns)
-        migrate_schema(db)
-        db.commit()
-        self.assertEqual(self.table_rows(db, v9_tables, columns), before)
-        self.assertTrue(database_schema_is_current(db))
-        self.assertEqual(
-            [
-                tuple(row)
-                for row in db.execute(
-                    "SELECT merged_into_retained FROM activity_sessions"
-                )
-            ],
-            [(None,)],
-        )
-        for table in sorted(set(self.user_tables(db)) - set(v9_tables)):
-            with self.subTest(table=table):
-                self.assertIn(
-                    table,
-                    DETAIL_TABLES
-                    | MIRROR_TABLES
-                    | EXTENSION_TABLES
-                    | POWER_CURVE_TABLES,
-                )
-                self.assertEqual(
-                    db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
-                )
-        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
-
-    def populated_v10_database(self, db):
-        db.executescript(V10_FIXTURE.read_text(encoding="utf-8"))
-        db.execute(
-            "INSERT INTO messages(role, content, created_at) "
-            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
-        )
-        db.execute(
-            "INSERT INTO activity_sessions(activity_id, primary_provider, "
-            "primary_provider_activity_id, started_at, created_at, updated_at) "
-            "VALUES ('act_1', ?, 'i1', ?, ?, ?)",
-            (INTERVALS, STAMP, STAMP, STAMP),
-        )
-        db.execute(
-            "INSERT INTO nutrition_products(id, barcode, name, basis_amount, "
-            "basis_unit, kcal, source, created_at, updated_at) "
-            "VALUES ('p1', '4001', 'Skyr', 100, 'g', 63, 'manual', ?, ?)",
-            (STAMP, STAMP),
-        )
-        db.commit()
-        return db
-
-    def test_frozen_v10_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V10_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V10
-        )
-
-    def test_populated_v10_upgrade_keeps_every_row_and_adds_the_empty_mirror(self):
-        db = self.populated_v10_database(self.connect())
-        v10_tables = self.user_tables(db)
-        columns = self.table_columns(db, v10_tables)
-        before = self.table_rows(db, v10_tables, columns)
-        migrate_schema(db)
-        db.commit()
-        self.assertEqual(self.table_rows(db, v10_tables, columns), before)
-        self.assertTrue(database_schema_is_current(db))
-        self.assertEqual(
-            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
-        )
-        self.assertEqual(
-            set(self.user_tables(db)) - set(v10_tables),
-            MIRROR_TABLES | EXTENSION_TABLES | POWER_CURVE_TABLES,
-        )
-        self.assertEqual(
-            db.execute("SELECT COUNT(*) FROM food_database_entries").fetchone()[0], 0
-        )
-        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
-
-    def test_failed_v10_upgrade_rolls_back_to_the_unchanged_v10_database(self):
-        db = self.populated_v10_database(self.connect())
-        before = list(db.iterdump())
-
-        def failing_step(connection):
-            execute_ddl(connection, FOOD_DATABASE_DDL)
-            raise RuntimeError("injected migration failure")
-
-        with (
-            mock.patch.dict(
-                migrations.UPGRADE_STEPS,
-                {SHAPE_SCHEMA_V10: (SHAPE_CURRENT, failing_step)},
-            ),
-            self.assertRaisesRegex(RuntimeError, "injected"),
-        ):
-            migrate_schema(db)
-        db.rollback()
-        self.assertEqual(list(db.iterdump()), before)
-        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 10)
-
-    def test_upgraded_v10_database_restarts_with_the_same_build_unchanged(self):
-        db = self.populated_v10_database(self.connect())
-        migrate_schema(db)
-        db.commit()
-        upgraded = list(db.iterdump())
-        migrate_schema(db)
-        self.assertEqual(list(db.iterdump()), upgraded)
 
     GARMIN_BLOB: ClassVar[dict[str, Any]] = {
         "synced_at": "2026-10-20T06:00:00+00:00",
@@ -390,263 +239,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         "empty_section": [],
     }
 
-    def populated_v11_database(self, db, blob=None):
-        db.executescript(V11_FIXTURE.read_text(encoding="utf-8"))
-        db.execute(
-            "INSERT INTO messages(role, content, created_at) "
-            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
-        )
-        db.execute(
-            "INSERT INTO kv(key, value, updated_at) VALUES ('garmin_snapshot', ?, ?)",
-            (json.dumps(self.GARMIN_BLOB if blob is None else blob), STAMP),
-        )
-        db.execute(
-            "INSERT INTO provider_records(provider, record_kind, source_record_id, "
-            "payload, payload_hash, fetched_at, mapped_version, state, created_at, "
-            "updated_at) VALUES ('garmin', 'health', 'sleep', ?, ?, ?, 9, "
-            "'active', ?, ?)",
-            (
-                json.dumps({"sleep": self.GARMIN_BLOB["sleep"]}),
-                "0" * 64,
-                STAMP,
-                STAMP,
-                STAMP,
-            ),
-        )
-        db.commit()
-        return db
 
-    def garmin_rows(self, db, kind):
-        return {
-            row["source_record_id"]: row
-            for row in db.execute(
-                "SELECT * FROM provider_records WHERE provider = 'garmin' "
-                "AND record_kind = ?",
-                (kind,),
-            )
-        }
-
-    def test_frozen_v11_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V11_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V11
-        )
-
-    def test_populated_v11_upgrade_splits_the_garmin_snapshot_into_rows(self):
-        db = self.populated_v11_database(self.connect())
-        messages = self.table_rows(db, ["messages"])
-        migrate_schema(db)
-        db.commit()
-        self.assertTrue(database_schema_is_current(db))
-        self.assertEqual(self.table_rows(db, ["messages"]), messages)
-        health = self.garmin_rows(db, "health")
-        self.assertNotIn("sleep", health)
-        self.assertEqual(
-            {name.split("/")[0] for name in health},
-            {"sleep", "max_metrics", "performance_history"},
-        )
-        sleep = {n: r for n, r in health.items() if n.startswith("sleep/")}
-        self.assertEqual(len(sleep), 3)
-        self.assertEqual(sleep["sleep/2026-10-19"]["observed_on"], "2026-10-19")
-        self.assertEqual(sleep["sleep/2026-10-19"]["mapped_version"], 0)
-        self.assertEqual(sleep["sleep/2026-10-19"]["fetched_at"], STAMP)
-        self.assertEqual(health["max_metrics"]["observed_on"], None)
-        self.assertEqual(
-            garmin_store.read_sections(db, ["sleep", "max_metrics"]),
-            {
-                "sleep": [
-                    {"calendarDate": "2026-10-19", "sleepScore": 80},
-                    {"calendarDate": "2026-10-20", "sleepScore": 84},
-                    {"sleepScore": 70},
-                ],
-                "max_metrics": {"vo2MaxRunning": 52.0},
-            },
-        )
-        self.assertEqual(
-            garmin_store.read_sections(db, ["sleep"], start="2026-10-20"),
-            {
-                "sleep": [
-                    {"calendarDate": "2026-10-20", "sleepScore": 84},
-                    {"sleepScore": 70},
-                ]
-            },
-        )
-        state = garmin_store.read_state(db)
-        self.assertEqual(state["sport_max_hr"], {"run": 190})
-        self.assertEqual(state["synced_at"], self.GARMIN_BLOB["synced_at"])
-        self.assertNotIn("sleep", state)
-        self.assertNotIn("activities", state)
-        activities = self.garmin_rows(db, "activity")
-        self.assertEqual(set(activities), {"4001"})
-        self.assertEqual(activities["4001"]["observed_on"], "2026-10-20")
-        self.assertNotIn("authToken", activities["4001"]["payload"])
-        kv = {
-            row["key"]: row["value"]
-            for row in db.execute("SELECT key, value FROM kv WHERE key LIKE 'garmin%'")
-        }
-        self.assertNotIn("garmin_snapshot", kv)
-        self.assertEqual(json.loads(kv["garmin_snapshot_legacy"]), self.GARMIN_BLOB)
-        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
-
-    def test_v11_upgrade_without_a_garmin_snapshot_only_adds_the_day_column(self):
-        db = self.populated_v11_database(self.connect(), blob={})
-        db.execute("DELETE FROM kv WHERE key = 'garmin_snapshot'")
-        db.execute("DELETE FROM provider_records")
-        db.commit()
-        migrate_schema(db)
-        db.commit()
-        self.assertTrue(database_schema_is_current(db))
-        self.assertEqual(
-            db.execute("SELECT COUNT(*) FROM provider_records").fetchone()[0], 0
-        )
-
-    def test_failed_v11_upgrade_rolls_back_to_the_unchanged_v11_database(self):
-        db = self.populated_v11_database(self.connect())
-        before = list(db.iterdump())
-        with (
-            mock.patch.object(
-                migrations,
-                "split_garmin_snapshot",
-                side_effect=RuntimeError("injected"),
-            ),
-            self.assertRaisesRegex(RuntimeError, "injected"),
-        ):
-            migrate_schema(db)
-        db.rollback()
-        self.assertEqual(list(db.iterdump()), before)
-        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 11)
-
-    def test_v11_upgrade_that_cannot_read_every_element_back_is_rolled_back(self):
-        db = self.populated_v11_database(self.connect())
-        before = list(db.iterdump())
-        with (
-            mock.patch.object(
-                garmin_items_migration.garmin_store, "iter_items", return_value=iter(())
-            ),
-            self.assertRaises(RuntimeError),
-        ):
-            migrate_schema(db)
-        db.rollback()
-        self.assertEqual(list(db.iterdump()), before)
-
-    def test_upgraded_v11_database_restarts_with_the_same_build_unchanged(self):
-        db = self.populated_v11_database(self.connect())
-        migrate_schema(db)
-        db.commit()
-        upgraded = list(db.iterdump())
-        migrate_schema(db)
-        self.assertEqual(list(db.iterdump()), upgraded)
-
-    def populated_v12_database(self, db):
-        db.executescript(V12_FIXTURE.read_text(encoding="utf-8"))
-        db.execute(
-            "INSERT INTO messages(role, content, created_at) "
-            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
-        )
-        db.execute(
-            "INSERT INTO activity_sessions(activity_id, primary_provider, "
-            "primary_provider_activity_id, started_at, created_at, updated_at) "
-            "VALUES ('act_1', ?, 'i1', ?, ?, ?)",
-            (INTERVALS, STAMP, STAMP, STAMP),
-        )
-        db.execute(
-            "INSERT INTO activity_records(provider, provider_activity_id, "
-            "activity_id, mapper_version, source_kind, recorded_by, sport, "
-            "environment, started_at, load_model, fetched_at, created_at, "
-            "updated_at) VALUES (?, 'i1', 'act_1', 1, 'device_measured', "
-            "'intervals', 'ride', 'outdoor', ?, 'none', ?, ?, ?)",
-            (INTERVALS, STAMP, STAMP, STAMP, STAMP),
-        )
-        db.execute(
-            "INSERT INTO activity_detail_sets(provider, provider_activity_id, "
-            "detail_kind, mapper_version, origin, source_kind, recorded_by, "
-            "lap_source, content_sha256, fetched_at, created_at, updated_at) "
-            "VALUES (?, 'i1', 'laps', 1, 'fetch', 'device_measured', 'intervals', "
-            "'device_laps', ?, ?, ?, ?)",
-            (INTERVALS, "0" * 64, STAMP, STAMP, STAMP),
-        )
-        db.execute(
-            "INSERT INTO activity_laps(provider, provider_activity_id, lap_index, "
-            "kind, start_offset_s, end_offset_s, avg_speed_mps, intensity_pct) "
-            "VALUES (?, 'i1', 0, 'work', 0, 600, 8.5, 80)",
-            (INTERVALS,),
-        )
-        db.commit()
-        return db
-
-    def test_frozen_v12_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V12_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V12
-        )
-
-    def test_populated_v12_upgrade_keeps_every_row_and_adds_an_empty_lap_max_speed(
-        self,
-    ):
-        db = self.populated_v12_database(self.connect())
-        tables = self.user_tables(db)
-        columns = self.table_columns(db, tables)
-        before = self.table_rows(db, tables, columns)
-        migrate_schema(db)
-        db.commit()
-        self.assertEqual(self.table_rows(db, tables, columns), before)
-        lap = db.execute("SELECT * FROM activity_laps").fetchone()
-        self.assertIsNone(lap["max_speed_mps"])
-        self.assertEqual(lap["intensity_pct"], 80)
-        self.assertEqual(
-            set(self.user_tables(db)) - set(tables),
-            EXTENSION_TABLES | POWER_CURVE_TABLES,
-        )
-        self.assertTrue(database_schema_is_current(db))
-        self.assertEqual(
-            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
-        )
-        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
-
-    def test_v12_upgrade_works_with_the_application_row_factory(self):
-        # The application reads rows as plain mappings without positional access.
-        db = self.populated_v12_database(self.connect())
-        db.row_factory = row_factory
-        migrate_schema(db)
-        db.commit()
-        self.assertTrue(database_schema_is_current(db))
-        self.assertIsNone(
-            db.execute("SELECT max_speed_mps FROM activity_laps").fetchone()[
-                "max_speed_mps"
-            ]
-        )
-
-    def test_failed_v12_upgrade_rolls_back_to_the_unchanged_v12_database(self):
-        db = self.populated_v12_database(self.connect())
-        before = list(db.iterdump())
-
-        def failing_step(connection):
-            connection.execute(
-                "ALTER TABLE activity_laps ADD COLUMN max_speed_mps REAL"
-            )
-            raise RuntimeError("injected migration failure")
-
-        with (
-            mock.patch.dict(
-                migrations.UPGRADE_STEPS,
-                {SHAPE_SCHEMA_V12: (SHAPE_CURRENT, failing_step)},
-            ),
-            self.assertRaisesRegex(RuntimeError, "injected"),
-        ):
-            migrate_schema(db)
-        db.rollback()
-        self.assertEqual(list(db.iterdump()), before)
-        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 12)
-
-    def test_upgraded_v12_database_restarts_with_the_same_build_unchanged(self):
-        db = self.populated_v12_database(self.connect())
-        migrate_schema(db)
-        db.commit()
-        upgraded = list(db.iterdump())
-        migrate_schema(db)
-        self.assertEqual(list(db.iterdump()), upgraded)
 
     # (activity_id, primary provider, provider activity id, state, merged_into)
     V13_SESSIONS: ClassVar[tuple[tuple[str, str, str, str, str | None], ...]] = (
@@ -679,103 +272,6 @@ class DatabaseSchemaGateTests(unittest.TestCase):
     }
     LONG_NOTE: ClassVar[str] = ("Beine schwer, Puls ruhig. " * 160)[:4000]
 
-    def populated_v13_database(self, db, fixture=V13_FIXTURE):
-        """A populated v13 database; with ``V14_FIXTURE`` the same rows in v14."""
-        db.executescript(fixture.read_text(encoding="utf-8"))
-        db.execute(
-            "INSERT INTO messages(role, content, created_at) "
-            "VALUES ('user', 'Hallo', '2026-10-16T08:00:00Z')"
-        )
-        db.execute(
-            "INSERT INTO kv(key, value, updated_at) VALUES ('garmin_sync', '{}', ?)",
-            (STAMP,),
-        )
-        records = [(INTERVALS, "orphan", None, "active")]
-        for activity_id, provider, provider_id, state, merged in self.V13_SESSIONS:
-            db.execute(
-                "INSERT INTO activity_sessions(activity_id, primary_provider, "
-                "primary_provider_activity_id, state, merged_into, started_at, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    activity_id,
-                    provider,
-                    provider_id,
-                    state,
-                    merged,
-                    STAMP,
-                    STAMP,
-                    STAMP,
-                ),
-            )
-            record_state = "deleted" if state == "deleted" else "active"
-            records.append((provider, provider_id, activity_id, record_state))
-        for provider, provider_id, activity_id, state in records:
-            db.execute(
-                "INSERT INTO activity_records(provider, provider_activity_id, "
-                "activity_id, state, mapper_version, source_kind, recorded_by, sport, "
-                "environment, started_at, load_model, fetched_at, created_at, "
-                "updated_at) VALUES (?, ?, ?, ?, 1, 'device_measured', ?, 'run', "
-                "'outdoor', ?, 'none', ?, ?, ?)",
-                (provider, provider_id, activity_id, state, provider, STAMP, STAMP)
-                + (STAMP, STAMP),
-            )
-        for activity_id, provider in self.V13_FEEDBACK_SESSIONS:
-            db.execute(
-                "INSERT INTO activity_feedback(activity_id, activity_name, "
-                "activity_date, notes, session_rpe, deviation_reason, created_at, "
-                "updated_at, provider) VALUES (?, 'Lauf', '2026-10-16', ?, 6, "
-                "'krank', ?, '2026-10-17T08:00:00+00:00', ?)",
-                (activity_id, self.LONG_NOTE, STAMP, provider),
-            )
-        # A provider value and the FORM that this release derived from CTL and ATL.
-        for key, metric, value, source_kind in (
-            ("intervals|ctl|||2026-10-16", "ctl", 60.0, "provider_reported"),
-            ("intervals|form|||2026-10-16", "form", -5.0, "derived"),
-        ):
-            db.execute(
-                "INSERT INTO observations(natural_key, metric, value, unit, "
-                "source_kind, recorded_by, provider, source_record_id, observed_on, "
-                "mapper_version, created_at, updated_at) VALUES (?, ?, ?, 'load', ?, "
-                "'intervals', 'intervals', '2026-10-16', '2026-10-16', 6, ?, ?)",
-                (key, metric, value, source_kind, STAMP, STAMP),
-            )
-        db.execute(
-            "INSERT INTO provider_records(provider, record_kind, source_record_id, "
-            "payload, payload_hash, fetched_at, mapped_version, state, created_at, "
-            "updated_at, observed_on) VALUES ('garmin', 'health', 'sleep/2026-10-16', "
-            "'{\"sleepScore\": 80}', ?, ?, 1, 'active', ?, ?, '2026-10-16')",
-            ("0" * 64, STAMP, STAMP, STAMP),
-        )
-        db.execute(
-            "INSERT INTO activity_detail_sets(provider, provider_activity_id, "
-            "detail_kind, mapper_version, origin, source_kind, recorded_by, "
-            "lap_source, content_sha256, fetched_at, created_at, updated_at) "
-            "VALUES (?, 'i1', 'laps', 1, 'fetch', 'device_measured', 'intervals', "
-            "'device_laps', ?, ?, ?, ?)",
-            (INTERVALS, "0" * 64, STAMP, STAMP, STAMP),
-        )
-        db.execute(
-            "INSERT INTO activity_laps(provider, provider_activity_id, lap_index, "
-            "kind, start_offset_s, end_offset_s, avg_speed_mps, max_speed_mps, "
-            "intensity_pct) VALUES (?, 'i1', 0, 'work', 0, 600, 3.5, 4.2, 80)",
-            (INTERVALS,),
-        )
-        db.execute(
-            "INSERT INTO food_database_entries(food_id, barcode, name, payload, "
-            "fetched_at, updated_at) VALUES ('off:4001', '4001', 'Skyr', '{}', ?, ?)",
-            (STAMP, STAMP),
-        )
-        db.commit()
-        return db
-
-    def feedback_sessions(self, db):
-        return {
-            (row["activity_id"], row["provider"]): row["session_id"]
-            for row in db.execute(
-                "SELECT activity_id, provider, session_id FROM activity_feedback"
-            )
-        }
-
     def test_frozen_v17_fixture_is_the_recorded_released_shape(self):
         db = self.connect()
         db.executescript(V17_FIXTURE.read_text(encoding="utf-8"))
@@ -790,139 +286,8 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V16
         )
 
-    def test_frozen_v15_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V15_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V15
-        )
 
-    def test_frozen_v14_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V14_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V14
-        )
 
-    def test_frozen_v13_fixture_is_the_recorded_released_shape(self):
-        db = self.connect()
-        db.executescript(V13_FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(
-            released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V13
-        )
-
-    def test_populated_v13_upgrade_links_feedback_only_to_its_unique_session(self):
-        for fixture in (V13_FIXTURE, V14_FIXTURE):
-            with self.subTest(fixture=fixture.name):
-                self.assert_feedback_upgrade(
-                    self.populated_v13_database(self.connect(), fixture)
-                )
-
-    def assert_feedback_upgrade(self, db):
-        tables = self.user_tables(db)
-        columns = self.table_columns(db, tables)
-        before = self.table_rows(db, tables, columns)
-        migrate_schema(db)
-        db.commit()
-        self.assertEqual(self.table_rows(db, tables, columns), before)
-        self.assertEqual(self.feedback_sessions(db), self.V13_FEEDBACK_SESSIONS)
-        self.assertEqual(len(self.LONG_NOTE), 4000)
-        self.assertEqual(
-            {row[0] for row in db.execute("SELECT notes FROM activity_feedback")},
-            {self.LONG_NOTE},
-        )
-        self.assertEqual(
-            db.execute(
-                "SELECT COUNT(*) FROM activity_sessions "
-                "WHERE merged_into_retained IS NOT NULL"
-            ).fetchone()[0],
-            0,
-        )
-        self.assertEqual(
-            set(self.user_tables(db)) - set(tables),
-            EXTENSION_TABLES | POWER_CURVE_TABLES,
-        )
-        for table in sorted(EXTENSION_TABLES | POWER_CURVE_TABLES):
-            with self.subTest(table=table):
-                self.assertEqual(
-                    db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0
-                )
-        self.assertTrue(database_schema_is_current(db))
-        self.assertEqual(
-            db.execute("PRAGMA user_version").fetchone()[0], CURRENT_SCHEMA_VERSION
-        )
-        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
-
-    def test_failed_v13_upgrade_after_the_feedback_backfill_rolls_back(self):
-        for fixture, version in ((V13_FIXTURE, 13), (V14_FIXTURE, 14)):
-            with self.subTest(fixture=fixture.name):
-                self.assert_failed_feedback_upgrade(
-                    self.populated_v13_database(self.connect(), fixture), version
-                )
-
-    def assert_failed_feedback_upgrade(self, db, version):
-        before = list(db.iterdump())
-        linked = []
-
-        def failing_step(connection):
-            migrations._upgrade_v14_to_v15(connection)
-            linked.append(
-                connection.execute(
-                    "SELECT COUNT(*) FROM activity_feedback "
-                    "WHERE session_id IS NOT NULL"
-                ).fetchone()[0]
-            )
-            raise RuntimeError("injected migration failure")
-
-        with (
-            mock.patch.dict(
-                migrations.UPGRADE_STEPS,
-                {SHAPE_SCHEMA_V14: (SHAPE_CURRENT, failing_step)},
-            ),
-            self.assertRaisesRegex(RuntimeError, "injected"),
-        ):
-            migrate_schema(db)
-        db.rollback()
-        self.assertEqual(linked, [6])
-        self.assertEqual(list(db.iterdump()), before)
-        self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], version)
-
-    def test_upgraded_v13_database_restarts_with_the_same_build_unchanged(self):
-        with tempfile.TemporaryDirectory() as root:
-            path = Path(root) / "upgrade.db"
-            db = sqlite3.connect(path)
-            db.row_factory = sqlite3.Row
-            try:
-                self.populated_v13_database(db)
-                migrate_schema(db)
-                db.commit()
-                upgraded = list(db.iterdump())
-            finally:
-                db.close()
-            reopened = sqlite3.connect(path)
-            reopened.row_factory = sqlite3.Row
-            try:
-                migrate_schema(reopened)
-                self.assertEqual(list(reopened.iterdump()), upgraded)
-                self.assertEqual(
-                    self.feedback_sessions(reopened), self.V13_FEEDBACK_SESSIONS
-                )
-            finally:
-                reopened.close()
-
-    def test_v13_version_and_shape_must_belong_together(self):
-        released = self.populated_v13_database(self.connect())
-        released.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
-        released.commit()
-        self.assert_rejected_unchanged(released)
-        current = self.current_database()
-        current.execute("PRAGMA user_version = 13")
-        current.commit()
-        self.assert_rejected_unchanged(current)
-        older = self.populated_v12_database(self.connect())
-        older.execute("PRAGMA user_version = 13")
-        older.commit()
-        self.assert_rejected_unchanged(older)
 
     def test_every_released_schema_upgrades_to_the_frozen_current_signature(self):
         frozen = self.connect()
@@ -939,42 +304,21 @@ class DatabaseSchemaGateTests(unittest.TestCase):
                 db.commit()
                 self.assertEqual(database_schema_signature(db), expected)
 
-    def test_failed_upgrade_step_rolls_back_to_the_unchanged_v9_database(self):
-        db = self.connect()
-        self.populated_v9_database(db)
-        before = list(db.iterdump())
-
-        def failing_step(connection):
-            execute_ddl(connection, ACTIVITY_DETAIL_DDL)
-            raise RuntimeError("injected migration failure")
-
-        steps = {SHAPE_SCHEMA_V9: (SHAPE_CURRENT, failing_step)}
-        with (
-            mock.patch.dict(migrations.UPGRADE_STEPS, steps),
-            self.assertRaisesRegex(RuntimeError, "injected"),
-        ):
-            migrate_schema(db)
-        db.rollback()
-        self.assertEqual(list(db.iterdump()), before)
-        self.assertEqual(
-            db.execute("PRAGMA user_version").fetchone()[0], OLDEST_SUPPORTED_VERSION
-        )
-
     def test_lost_savepoint_does_not_mask_the_original_upgrade_error(self):
         # The step ends the transaction or drops the savepoint, as an engine
         # error can, before it fails; cleanup must keep the original error.
         for statement in ("ROLLBACK", "RELEASE schema_migration"):
             with self.subTest(statement=statement):
                 db = self.connect()
-                self.populated_v9_database(db)
+                db.executescript(V16_FIXTURE.read_text(encoding="utf-8"))
                 before = list(db.iterdump())
 
                 def failing_step(connection, statement=statement):
-                    execute_ddl(connection, ACTIVITY_DETAIL_DDL)
+                    connection.execute("CREATE TABLE migration_probe(value TEXT)")
                     connection.execute(statement)
                     raise RuntimeError("injected migration failure")
 
-                steps = {SHAPE_SCHEMA_V9: (SHAPE_CURRENT, failing_step)}
+                steps = {SHAPE_SCHEMA_V16: (SHAPE_CURRENT, failing_step)}
                 with (
                     mock.patch.dict(migrations.UPGRADE_STEPS, steps),
                     self.assertRaisesRegex(RuntimeError, "injected"),
@@ -989,7 +333,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             db = sqlite3.connect(path)
             db.row_factory = sqlite3.Row
             try:
-                self.populated_v9_database(db)
+                db.executescript(V16_FIXTURE.read_text(encoding="utf-8"))
                 migrate_schema(db)
                 db.commit()
                 upgraded = list(db.iterdump())
@@ -1013,7 +357,7 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         current.commit()
         self.assert_rejected_unchanged(current)
         released = self.connect()
-        self.populated_v9_database(released)
+        released.executescript(V16_FIXTURE.read_text(encoding="utf-8"))
         released.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
         released.commit()
         self.assert_rejected_unchanged(released)

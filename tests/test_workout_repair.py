@@ -538,7 +538,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         )
         edited = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(edited["planned_duration_s"], 4500)
-        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+        for key in ("workout_doc", "planned_load", "planned_intensity"):
             self.assertNotIn(key, edited)
 
         def upsert_with_intensity(payloads):
@@ -554,8 +554,8 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
             self.assertTrue(self.repair(local_id)["ok"])
         current = server.PLANNING_DATA.planned_unit().list()[0]
         self.assertEqual(current["planned_duration_s"], 4500)
-        self.assertEqual(current["icu_training_load"], 20)
-        self.assertEqual(current["icu_intensity"], 55)
+        self.assertEqual(current["planned_load"], 20)
+        self.assertEqual(current["planned_intensity"], 55)
         self.assertEqual(current["workout_doc"], self.remote["existing"]["workout_doc"])
 
     def test_adaptive_swim_uses_pace_and_clears_old_load_before_sync(self):
@@ -600,7 +600,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
         self.assertEqual(current["sport"], "swim")
         self.assertIn("- 30m Z1 Pace", current["description"])
         self.assertEqual(current["planned_duration_s"], 1800)
-        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+        for key in ("workout_doc", "planned_load", "planned_intensity"):
             self.assertNotIn(key, current)
         parsed = parsed_workout_fixture(
             1800, sport="Swim", kind="pace", units="pace_zone", value=1
@@ -618,7 +618,7 @@ class WorkoutRepairTests(DialogueHarness, unittest.TestCase):
                 )["ok"]
             )
         self.assertEqual(
-            server.PLANNING_DATA.planned_unit().list()[0]["icu_training_load"], 20
+            server.PLANNING_DATA.planned_unit().list()[0]["planned_load"], 20
         )
 
     def test_provider_io_allows_database_polling_and_excludes_same_unit_push(self):

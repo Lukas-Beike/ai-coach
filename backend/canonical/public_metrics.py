@@ -109,7 +109,10 @@ def neutral_calendar_entry(entry: Any) -> Any:
     if entry.get("is_completed_activity"):
         translated = neutral_activity(entry)
     else:
-        translated = neutral_activity_metrics(entry)
+        translated = _renamed(
+            neutral_activity_metrics(entry),
+            (("planned_load", "training_load"), ("planned_intensity", "intensity")),
+        )
     compliance = translated.get("compliance")
     if isinstance(compliance, Mapping) and isinstance(
         compliance.get("actual_activity"), Mapping

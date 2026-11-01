@@ -195,6 +195,12 @@ class SupervisorTests(unittest.TestCase):
             ".agents",
             ".codex/hooks.json",
             ".claude/settings.json",
+            ".claude/agents/explorer.md",
+            ".claude/agents/implementer.md",
+            ".claude/agents/reviewer.md",
+            ".claude/skills/ai-coach-release-unraid/SKILL.md",
+            ".claude/skills/deliver-issue/SKILL.md",
+            ".claude/skills/pr/SKILL.md",
         ):
             self.assertIn(relative, local.INPUTS)
         command = self.owner.container(

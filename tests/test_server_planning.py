@@ -661,7 +661,7 @@ class ServerPlanningTests(ServerTestCase):
                 "name": "Tempo",
                 "starts_at_local": f"{today.isoformat()}T00:00:00",
                 "planned_duration_s": 3600,
-                "icu_training_load": 50,
+                "planned_load": 50,
             },
             {
                 "id": "event-missed",
@@ -670,7 +670,7 @@ class ServerPlanningTests(ServerTestCase):
                 "name": "Grundlage",
                 "starts_at_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
                 "planned_duration_s": 3600,
-                "icu_training_load": 50,
+                "planned_load": 50,
             },
             {
                 "id": "race",
@@ -679,7 +679,7 @@ class ServerPlanningTests(ServerTestCase):
                 "name": "Wettkampf",
                 "starts_at_local": f"{(today - timedelta(days=1)).isoformat()}T00:00:00",
                 "planned_duration_s": 7200,
-                "icu_training_load": 100,
+                "planned_load": 100,
             },
         ]
         activities = [
