@@ -199,12 +199,12 @@ The system SHALL form personal recovery distributions separately by provider and
 - **WHEN** the sleep goal shortfall is reported or summarized
 - **THEN** it is worded as the sum of known shortfalls against the athlete's own sleep goal over known nights, with missing nights and unrecorded naps noted as limits, and no output uses the term sleep debt or states a needed number of hours of recovery sleep.
 
-Detailed contract: The quartile range (method `personal-quartiles-v1`) SHALL be described only as a comparison with the athlete's own earlier values and SHALL not be described as a normal, healthy, abnormal or clinical range, and a position below or above it SHALL not be described as an alarm or deficiency. The 14/28-night thresholds, the 42-day window and the status `ok` are product rules and SHALL not be presented as validity, confirmation or a health standard. The sleep goal shortfall SHALL require an explicit valid sleep target, sum only known-night shortfalls against that target, and never offset them with excess sleep on another night; it SHALL not be called sleep debt or presented as a recovery need.
+Detailed contract: The quartile range (method `personal-quartiles-v1`) SHALL be described only as a comparison with the athlete's own earlier values and SHALL not be described as a normal, healthy, abnormal or clinical range, and a position below or above it SHALL not be described as an alarm or deficiency. The 14/28-night thresholds, the 42-day window and the status `ok` are product rules and SHALL not be presented as validity, confirmation or a health standard. The sleep goal shortfall SHALL require an explicit valid sleep target, sum only known-night shortfalls against that target, and never offset them with excess sleep on another night; it SHALL not be called sleep debt or presented as a recovery need. Sleep duration SHALL be described as the provider's device estimate, not as measured sleep need.
 
-Evidence: `backend/performance/personal_recovery.py:personal_recovery`, `public/analysis.js:recoveryReferenceLabel`; `tests/test_personal_recovery.py:test_coverage_and_excluding_current_value_from_baseline`, `tests/test_personal_recovery.py:test_future_stale_and_separate_hrv_methods_are_not_classified`, `tests/test_personal_recovery.py:test_deficit_uses_known_nights_and_never_offsets_with_long_sleep`, `tests/test_personal_recovery.py:test_device_change_restarts_the_comparison`, `tests/test_personal_recovery.py:test_unknown_metadata_is_its_own_context_with_unknown_continuity`, `tests/test_personal_recovery.py:test_a_change_before_the_window_is_not_reported`; wording and Coach cases in `tests/test_performance_claim_wording.py` and `tests/test_personal_recovery_coach_cases.py`; `e2e/analysis-info.spec.js` recovery scenarios. Claim lists: `docs/performance-methods/m2-hrv-resting-hr.md`, `m3-sleep-duration-timing.md`.
+Evidence: `backend/performance/personal_recovery.py:personal_recovery`, `public/analysis.js:recoveryReferenceLabel`; `tests/test_personal_recovery.py:test_coverage_and_excluding_current_value_from_baseline`, `tests/test_personal_recovery.py:test_future_stale_and_separate_hrv_methods_are_not_classified`, `tests/test_personal_recovery.py:test_deficit_uses_known_nights_and_never_offsets_with_long_sleep`, `tests/test_personal_recovery.py:test_device_change_restarts_the_comparison`, `tests/test_personal_recovery.py:test_unknown_metadata_is_its_own_context_with_unknown_continuity`, `tests/test_personal_recovery.py:test_a_change_before_the_window_is_not_reported`; wording and Coach cases, including the M3 sleep cases `SleepCoachCases`, in `tests/test_performance_claim_wording.py` and `tests/test_personal_recovery_coach_cases.py`; `e2e/analysis-info.spec.js` recovery scenarios. Claim lists: `docs/performance-methods/m2-hrv-resting-hr.md`, `m3-sleep-duration-timing.md`.
 
 ### Requirement: Sleep timing and tagged-day associations
-The system SHALL derive sleep timing variability (method `sleep-timing-variability-v1`) from validated dated onset/wake intervals with timezone/DST-aware duration and separate source/method series, and SHALL keep insufficient coverage explicit. Tagged-day analysis SHALL use only explicit boolean answers paired with the following provider-dated night, require ten measured days per comparison group, and label results as observed associations rather than causal effects or inferred answers.
+The system SHALL derive sleep timing variability (method `sleep-timing-variability-v2`) from validated dated onset/wake intervals with timezone/DST-aware duration and separate source/method series, and SHALL keep insufficient coverage explicit. Tagged-day analysis SHALL use only explicit boolean answers paired with the following provider-dated night, require ten measured days per comparison group, and label results as observed associations rather than causal effects or inferred answers.
 
 #### Scenario: Sleep across midnight or DST
 - **WHEN** valid sleep intervals cross midnight or a clock change
@@ -214,17 +214,21 @@ The system SHALL derive sleep timing variability (method `sleep-timing-variabili
 - **WHEN** a day has no explicit tag answer or no measured following night
 - **THEN** it is excluded from both groups rather than treated as a negative answer; insufficient groups expose no confident association statistic.
 
+#### Scenario: Fewer than 14 earlier intervals
+- **WHEN** a timing series has fewer than 14 earlier intervals in the 42-day window
+- **THEN** its status is `insufficient_data` with the reason and count, and its onset/wake medians and every per-night deviation are null (#1429).
+
 #### Scenario: Source without canonical sleep periods
 - **WHEN** sleep timing variability is computed from a source that stores no canonical sleep periods
 - **THEN** the result is `insufficient_data`; the stored provider sleep and wellness records are not read (#1416).
 
 #### Scenario: Timing variability is not the Sleep Regularity Index
 - **WHEN** the timing variability result, its Coach report section or any description of it is produced
-- **THEN** the method id and section name are `sleep-timing-variability-v1` and `sleep_timing_variability`, the Sleep Regularity Index or SRI appears only in a sentence that denies the equivalence, and the unchanged fields `regularity` and `*_deviation_minutes` carry the same values as before the rename.
+- **THEN** the method id and section name are `sleep-timing-variability-v2` and `sleep_timing_variability`, and the Sleep Regularity Index or SRI appears only in a sentence that denies the equivalence.
 
 Detailed contract: Sleep timing variability compares each night's clock times circularly with the athlete's own earlier nights; it is not the Sleep Regularity Index and SHALL NOT be named, labelled or described as such, and no output SHALL share that name.
 
-Evidence: `backend/performance/personal_recovery.py:sleep_timing_variability`, `backend/performance/tag_impact.py:tag_impact`; `tests/test_personal_recovery.py:test_sleep_timing_variability_circular_midnight_median_and_sources`, `tests/test_personal_recovery.py:test_sleep_intervals_reject_future_missing_and_reversed_and_keep_dst_duration`, `tests/test_training_record_features.py:test_tag_impact_requires_ten_measured_days_in_each_explicit_group`, `tests/test_performance_claim_wording.py`.
+Evidence: `backend/performance/personal_recovery.py:sleep_timing_variability`, `backend/performance/tag_impact.py:tag_impact`; `tests/test_personal_recovery.py:test_sleep_timing_variability_circular_midnight_median_and_sources`, `tests/test_personal_recovery.py:test_sleep_intervals_reject_future_missing_and_reversed_and_keep_dst_duration`, `tests/test_performance_method_inputs.py:M3SleepInputs`, `tests/test_training_record_features.py:test_tag_impact_requires_ten_measured_days_in_each_explicit_group`, `tests/test_performance_claim_wording.py`.
 
 ### Requirement: Morning Body Battery sample recovery
 The system SHALL derive a morning reading from validated Garmin samples around actual sleep, retain date/attempt/status metadata, and use bounded retry/cache decisions. Automatic morning refresh SHALL start no earlier than 05:00 athlete-local time, use at most three attempts with fifteen-minute retry spacing, and stop repeating a ready reading.
@@ -362,11 +366,11 @@ The manual morning check-in SHALL decide whether today's Garmin sleep is availab
 Evidence: `backend/coach/morning.py:ManualMorningCheckinService`, `backend/performance/garmin_observations.py:garmin_sleep_ready_for_checkin`; `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`, `tests/test_garmin_observations.py:test_sleep_day_comes_from_the_observation_never_from_raw_sleep`.
 
 ### Requirement: Canonical sleep timing variability parity
-Sleep timing variability SHALL read canonical periods without traversing raw provider payloads. Equivalent synthetic periods SHALL preserve the existing sleep-timing-variability-v1 results, source separation and coverage before any intentional method change. Nightly bounds SHALL not be labelled as a complete sleep/wake series or the Sleep Regularity Index.
+Sleep timing variability SHALL read canonical periods without traversing raw provider payloads. Equivalent synthetic periods SHALL preserve the sleep-timing-variability-v1 results, source separation and coverage; v2 differs only by withholding medians and deviations below 14 earlier intervals. Nightly bounds SHALL not be labelled as a complete sleep/wake series or the Sleep Regularity Index.
 
 #### Scenario: Equivalent stored nights
 - **WHEN** equivalent synthetic nights are supplied through canonical periods rather than the previous provider aliases
-- **THEN** timing variability values, method identity and coverage match the existing method.
+- **THEN** timing variability values and coverage match the earlier provider-row method.
 
 #### Scenario: Sparse coverage
 - **WHEN** missing nights or overlapping provider periods exist
