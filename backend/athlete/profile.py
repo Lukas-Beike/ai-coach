@@ -11,6 +11,8 @@ from backend import change_history
 from backend.errors import AppError
 
 DEFAULT_TIMEZONE = "Europe/Berlin"
+# Intensity distribution the Coach plans with; pyramidal unless the athlete chooses.
+TRAINING_MODELS = ("pyramidal", "polarized", "threshold", "sweet_spot")
 
 DEFAULT_PROFILE = {
     "name": "",
@@ -27,6 +29,7 @@ DEFAULT_PROFILE = {
     "training_preferences_swimming": "",
     "training_preferences_strength": "",
     "training_preferences_mobility": "",
+    "training_model": TRAINING_MODELS[0],
     "performance_notes": "",
     "weight_kg": "",
     "body_fat_pct": "",
@@ -60,6 +63,13 @@ def normalize_profile(
         if key in value:
             result[key] = str(value[key]).strip()[:4000]
     result["timezone"] = timezone_name(result.get("timezone"), strict=validate_timezone)
+    if result["training_model"] not in TRAINING_MODELS:
+        if validate_timezone and result["training_model"]:
+            raise AppError(
+                400,
+                "Unbekanntes Trainingsmodell; erlaubt: " + ", ".join(TRAINING_MODELS),
+            )
+        result["training_model"] = TRAINING_MODELS[0]
     if result["sleep_target_hours"]:
         try:
             target = float(result["sleep_target_hours"])

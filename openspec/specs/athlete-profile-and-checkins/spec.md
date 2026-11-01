@@ -7,21 +7,21 @@ Describe durable athlete facts, local-day subjective feedback, completed-activit
 ## Requirements
 
 ### Requirement: AP1 Normalized durable profile and athlete-local dates
-The system SHALL persist the known profile fields with normalized bounded text, validate explicit timezone changes and sleep targets, and use the saved athlete timezone for local-day behavior.
+The system SHALL persist the known profile fields with normalized bounded text, validate explicit timezone changes, sleep targets and the training model, and use the saved athlete timezone for local-day behavior.
 
 #### Scenario: Valid profile facts
-- **WHEN** the athlete saves known facts, sport-specific preferences, constraints, measurements, coaching style or location
+- **WHEN** the athlete saves known facts, sport-specific preferences, the training model, constraints, measurements, coaching style or location
 - **THEN** known values are trimmed and bounded to 4000 characters per field, unknown fields are ignored, and the normalized local profile is returned.
 
 #### Scenario: Invalid timezone or sleep target
-- **WHEN** an explicit save supplies an invalid IANA timezone or a nonfinite/out-of-range sleep target outside 4 through 12 hours
+- **WHEN** an explicit save supplies an invalid IANA timezone, a nonfinite/out-of-range sleep target outside 4 through 12 hours, or a training model other than pyramidal, polarized, threshold or sweet_spot
 - **THEN** the save is rejected before replacing the stored profile.
 
 #### Scenario: Missing or malformed stored profile
 - **WHEN** no valid profile JSON is stored
-- **THEN** profile reads return the implemented defaults; a non-strict legacy invalid timezone falls back to Europe/Berlin rather than requiring an empty database.
+- **THEN** profile reads return the implemented defaults, including the pyramidal training model; a non-strict legacy invalid timezone falls back to Europe/Berlin rather than requiring an empty database.
 
-Evidence: `backend/athlete/profile.py:normalize_profile`, `backend/athlete/profile.py:timezone_name`, `backend/athlete/profile.py:ProfileService.get_from_db`; `backend/athlete/clock.py:AthleteLocalClock`; `tests/test_athlete_profile.py:test_known_values_are_stringified_trimmed_and_limited`, `tests/test_athlete_profile.py:test_unknown_fields_are_ignored`, `tests/test_athlete_profile.py:test_timezone_name_raises_exact_strict_error`; `tests/test_athlete_profile_service.py:test_get_returns_default_for_missing_or_malformed_payload`; `tests/test_characterization_recovery.py:test_sleep_target_bounds_and_falsy_zero_target`.
+Evidence: `backend/athlete/profile.py:normalize_profile`, `backend/athlete/profile.py:timezone_name`, `backend/athlete/profile.py:ProfileService.get_from_db`; `backend/athlete/clock.py:AthleteLocalClock`; `tests/test_athlete_profile.py:test_known_values_are_stringified_trimmed_and_limited`, `tests/test_athlete_profile.py:test_unknown_fields_are_ignored`, `tests/test_athlete_profile.py:test_timezone_name_raises_exact_strict_error`, `tests/test_athlete_profile.py:test_training_model_defaults_and_rejects_unknown_only_when_strict`; `tests/test_athlete_profile_service.py:test_get_returns_default_for_missing_or_malformed_payload`; `tests/test_characterization_recovery.py:test_sleep_target_bounds_and_falsy_zero_target`.
 
 ### Requirement: AP2 Partial profile edits and optimistic Coach conflicts
 The system SHALL preserve unsubmitted profile fields on the profile patch API and require exact expected field values for a Coach batch, with atomic rejection of stale or invalid batches.
