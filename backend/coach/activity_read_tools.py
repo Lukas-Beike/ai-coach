@@ -7,7 +7,11 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.profile import ProfileService
-from backend.coach.context import bounded_coach_context_value, coach_context_json_size
+from backend.coach.context import (
+    bounded_coach_context_value,
+    coach_context_json_size,
+    coach_sleep_timing_projection,
+)
 from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.garmin import GarminPayloadService
@@ -78,7 +82,11 @@ class CoachActivityReadToolService:
                 ),
                 "comparisons": self._report_services.records.comparisons,
                 "body_history": self._report_services.derived.body_history,
-                "sleep_timing_variability": self._report_services.derived.sleep_timing_variability,
+                # The Coach context's summary plus each series' last 14 nights.
+                "sleep_timing_variability": lambda: coach_sleep_timing_projection(
+                    self._report_services.derived.sleep_timing_variability(),
+                    recent_nights=True,
+                ),
             }
             payload = {
                 section: readers[section]() for section in dict.fromkeys(sections)

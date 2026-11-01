@@ -454,25 +454,41 @@ def coach_performance_projection(performance: Any) -> Any:
         ]
     regularity = recovery.get("regularity")
     if isinstance(regularity, dict):
-        projected_regularity = {
-            key: value
-            for key, value in regularity.items()
-            if key not in {"sources", "points_14", "points_84"}
-        }
-        series = regularity.get("series")
-        if isinstance(series, list):
-            projected_regularity["series"] = [
-                {
-                    key: value
-                    for key, value in item.items()
-                    if key not in {"points", "points_14", "points_84"}
-                }
-                if isinstance(item, dict)
-                else item
-                for item in series
-            ]
-        projected_recovery["regularity"] = projected_regularity
+        projected_recovery["regularity"] = coach_sleep_timing_projection(regularity)
     return {**performance, "personal_recovery": projected_recovery}
+
+
+def coach_sleep_timing_projection(
+    regularity: dict[str, Any], *, recent_nights: bool = False
+) -> dict[str, Any]:
+    """Keep each sleep timing series' summary without the per-night chart points.
+
+    ``recent_nights`` keeps each series' last 14 nights (``points_14``) for the
+    report tool's drill-down; the 84-night chart points stay UI-only.
+    """
+    dropped = (
+        {"points", "points_84"}
+        if recent_nights
+        else {
+            "points",
+            "points_14",
+            "points_84",
+        }
+    )
+    projected = {
+        key: value
+        for key, value in regularity.items()
+        if key not in {"sources", "points_14", "points_84"}
+    }
+    series = regularity.get("series")
+    if isinstance(series, list):
+        projected["series"] = [
+            {key: value for key, value in item.items() if key not in dropped}
+            if isinstance(item, dict)
+            else item
+            for item in series
+        ]
+    return projected
 
 
 class CoachPerformanceContextReader:

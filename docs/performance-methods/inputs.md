@@ -86,9 +86,12 @@ Consumer trace:
   on canonical sleep periods only (#1429).
 - Report/context, HTTP, UI and Coach as for M2; in addition the Coach tool
   `get_training_report(sections=["sleep_timing_variability"])`
-  (`backend/coach/activity_read_tools.py:83`) via
+  (`backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`) via
   `TrainingDerivedReadService.sleep_timing_variability`
-  (`backend/performance/report_service.py:399`).
+  (`backend/performance/report_service.py:TrainingDerivedReadService.sleep_timing_variability`);
+  the tool returns the Coach context's per-series summary plus each series'
+  last 14 nights, without the 84-night chart points
+  (`coach_sleep_timing_projection`, #1433).
 
 ## M4 — Critical Power and Critical Speed
 
