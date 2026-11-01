@@ -82,7 +82,7 @@ The system SHALL read local details without implicit provider refresh and compar
 - **WHEN** a failure note exists for the current summary fingerprint
 - **THEN** the Intervals.icu provider entry reports its message and time. A note keyed by another fingerprint is ignored, and a later successful detail write removes the note in the same transaction.
 
-Detailed contract: The current summary row of a session SHALL be found in the canonical activity rows only; the stored snapshot SHALL NOT be a lookup source. Session scalars SHALL come from the current summary row. Intervals.icu zone times SHALL come from the current summary row when present, outside the fingerprint. Analysis aggregation for reports and calendar profiles SHALL read only canonical analysis rows whose stored fingerprint matches current activity data; no kv detail fallback is read. Analyses retained only in unverifiable kv records are no longer displayed but remain stored. Old known activities are resolvable beyond the recent performance window. The analysis read service requires its canonical source at construction.
+Detailed contract: The current summary row of a session SHALL be found in the canonical activity rows only; the stored snapshot SHALL NOT be a lookup source. Session scalars SHALL come from the current summary row. Intervals.icu zone times SHALL come from the current summary row when present, outside the fingerprint. Analysis aggregation for reports and calendar profiles SHALL read only canonical analysis rows whose stored fingerprint matches current activity data, except the best-effort curve, which reads full-resolution canonical stream sets; no kv detail fallback is read. Analyses retained only in unverifiable kv records are no longer displayed but remain stored. Old known activities are resolvable beyond the recent performance window. The analysis read service requires its canonical source at construction.
 
 Evidence: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/report_service.py:TrainingRecordsService.observations`, `backend/performance/canonical_detail.py:CanonicalDetailReader.read`; `tests/test_activity_read_service.py:test_detail_reads_an_activity_older_than_the_performance_window`, `tests/test_activity_read_service.py:test_page_keeps_activities_with_failed_details_and_names_the_error`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`. `tests/test_canonical_detail_reader.py:test_live_zone_times_replace_stored_zones_without_marking_stale`, `tests/test_canonical_detail_reader.py:test_stale_provider_withholds_analysis_and_shows_current_scalars`, `tests/test_canonical_detail_reader.py:test_set_without_a_fingerprint_is_never_stale`, `tests/test_characterization_activity_reads.py:test_changed_provider_summary_marks_record_stale_and_hides_analysis`. Missing evidence (planned in this change): lookup with a snapshot that has no activity rows and construction without a canonical source.
 
@@ -124,6 +124,19 @@ The system SHALL compute observed power-duration and running speed/distance effo
 - **THEN** validation states the relevant no-data/unsupported scope and effort windows remain unknown.
 
 Evidence: `backend/performance/power_profile.py:power_profile`, `backend/performance/power_profile.py:running_profile`, `backend/performance/activity_validation.py:activity_performance_validation`; `tests/test_power_profile.py:test_sprint_is_not_lost_to_display_downsampling`, `tests/test_power_profile.py:test_missing_or_stopped_recording_never_yields_peak`, `tests/test_activity_performance_validation.py:test_unknown_sport_and_no_activity_are_explicit`.
+
+### Requirement: Canonical mean-maximal curve
+The analysis power and running best-effort curve (`mean-max-curve` version 1, windows including 180, 420 and 720 s) SHALL be computed at read time only from full-resolution canonical stream sets, count each canonical session once, give overlapping bests of one session the same effort group, and carry the method, version and an input fingerprint. The Intervals.icu power curve stays a separately labelled provider value.
+
+#### Scenario: Protocol windows
+- **WHEN** a full-resolution stream holds 3, 7 and 12 minute efforts between gaps and pauses
+- **THEN** the 180, 420 and 720 s windows reproduce their mean values and no window spans a gap or pause.
+
+#### Scenario: Downsampled, duplicate or changed streams
+- **WHEN** a session has only downsampled streams, a duplicate session is merged into another, or a session's stored streams change
+- **THEN** the downsampled session gives no best value and its activity detail profile is labelled `downsampled`, the merged pair counts once, and the changed session is recomputed under a new fingerprint without provider access.
+
+Evidence: `backend/performance/mean_max_curve.py:SessionCurveReader`, `backend/performance/report_service.py:TrainingProfileSelectionService`, `backend/performance/canonical_detail.py:stream_resolution`; `tests/test_power_profile.py:test_protocol_windows_reproduce_known_maxima_around_gaps_and_pauses`, `tests/test_mean_max_curve.py`, `tests/test_performance_method_inputs.py:M4BestEffortInputs`.
 
 ### Requirement: Durable athlete feedback separate from provider values
 The system SHALL normalize and persist local notes, session RPE from 0 through 10, and deviation reason against the resolved activity reference. Omitted fields SHALL preserve existing values; explicit clearing of all meaningful fields SHALL delete the local feedback. Coach saves SHALL require a currently known local activity and nonempty feedback.

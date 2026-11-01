@@ -38,7 +38,7 @@ class AnalysisRoutes:
         elif path.endswith("/season"):
             payload = reports.season.season(reports.timezone())
         elif path.endswith("/power-profiles"):
-            payload = reports.profiles.power_profiles(reports.records.observations())
+            payload = reports.profiles.power_profiles()
         else:
             payload = reports.records.endurance()
         handler.send_json(200, payload)

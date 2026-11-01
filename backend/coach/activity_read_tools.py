@@ -69,9 +69,7 @@ class CoachActivityReadToolService:
                     arguments, self._report_services.timezone()
                 ),
                 "endurance": self._report_services.records.endurance,
-                "power_profiles": lambda: self._report_services.profiles.power_profiles(
-                    self._report_services.records.observations()
-                ),
+                "power_profiles": self._report_services.profiles.power_profiles,
                 "tag_impact": lambda: self._report_services.derived.impact(
                     self._report_services.timezone()
                 ),

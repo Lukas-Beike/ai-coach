@@ -246,6 +246,47 @@ def detail_sets_for_session(db: Any, activity_id: str) -> list[StoredDetailSet]:
     )
 
 
+def full_stream_hashes(
+    db: Any, activity_ids: Iterable[str]
+) -> dict[str, tuple[str, ...]]:
+    """Return the content hashes of each session's full-resolution stream sets.
+
+    Like ``detail_sets_for_session``, records of sessions merged into a session
+    count as its own. Sessions without such a set are absent. No sensor data is
+    decoded, so a caller can tell whether a stored curve is still current.
+    """
+    ids = list(
+        dict.fromkeys(activity_id for activity_id in activity_ids if activity_id)
+    )
+    hashes: dict[str, set[str]] = {}
+    for start in range(0, len(ids), 400):
+        chunk = ids[start : start + 400]
+        marks = ", ".join("?" * len(chunk))
+        rows = db.execute(
+            "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE s.activity_id END "
+            "AS owner, d.content_sha256 FROM activity_detail_sets AS d "
+            "JOIN activity_records AS r ON r.provider = d.provider "
+            "AND r.provider_activity_id = d.provider_activity_id "
+            "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+            "WHERE r.state = ? AND s.state <> ? AND d.detail_kind = ? "
+            f"AND d.resolution = ? AND (s.activity_id IN ({marks}) "
+            f"OR (s.state = ? AND s.merged_into IN ({marks})))",
+            (
+                ActivitySessionState.DUPLICATE.value,
+                ActivityRecordState.ACTIVE.value,
+                ActivitySessionState.DELETED.value,
+                ActivityDetailKind.STREAMS.value,
+                StreamResolution.FULL.value,
+                *chunk,
+                ActivitySessionState.DUPLICATE.value,
+                *chunk,
+            ),
+        ).fetchall()
+        for row in rows:
+            hashes.setdefault(row["owner"], set()).add(row["content_sha256"])
+    return {owner: tuple(sorted(values)) for owner, values in hashes.items()}
+
+
 def activity_detail_backfill_universe(
     db: Any, provider: str, *, since: datetime
 ) -> list[str]:

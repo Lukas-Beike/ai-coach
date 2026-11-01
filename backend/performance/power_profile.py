@@ -1,23 +1,28 @@
 """Observed power and running best efforts from original activity streams."""
 
-from bisect import bisect_right
-from itertools import pairwise
-from typing import Any
+from bisect import bisect_left, bisect_right
+from itertools import accumulate, pairwise
+from typing import Any, Final
 
 from backend.performance.session_analysis import _number
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 
-POWER_DURATIONS = (5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600)
+# 180/420/720 s are the 3/7/12-min efforts of the CP/CS field protocols (M4).
+POWER_DURATIONS = (5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600)
 LEGACY_POWER_DURATIONS = (5, 60, 300, 1200)
-RUNNING_DURATIONS = (60, 300, 1200)
+RUNNING_DURATIONS = (60, 180, 300, 420, 720, 1200)
 RUNNING_DISTANCES = (1000, 5000)
+METHOD_ID: Final = "mean-max-curve"
+# Version 1: time-weighted windows that must be fully covered by valid samples.
+METHOD_VERSION: Final = 1
 
 
 def power_profile(
     activity: dict[str, Any], *, source_label: str = INTERVALS_LABEL
 ) -> dict[str, Any]:
     base = {
-        "method": "original-stream-integral-v1",
+        "method": METHOD_ID,
+        "method_version": METHOD_VERSION,
         "source": f"{source_label} original watts stream",
         "scope": "Beobachtete Bestwerte dieser Aufzeichnung; keine FTP-, CP- oder W'-Schätzung.",
     }
@@ -57,7 +62,8 @@ def running_profile(
     base = {
         "name": "running_best_efforts",
         "type": "running",
-        "method": "original-stream-running-v1",
+        "method": METHOD_ID,
+        "method_version": METHOD_VERSION,
         "source": f"{source_label} original speed/distance streams",
         "scope": "Beobachtete Laufbelastungen; Lücken und Pausen bleiben unbekannt.",
     }
@@ -102,8 +108,9 @@ def running_profile(
     speed_points = [
         _best_running_speed(times, rates, duration) for duration in RUNNING_DURATIONS
     ]
+    distances = [_number(value) for value in distance]
     distance_points = [
-        _best_running_distance(times, rates, distance, target)
+        _best_running_distance(times, rates, distances, target)
         for target in RUNNING_DISTANCES
     ]
     ok = any(point["speed_mps"] is not None for point in speed_points) or any(
@@ -136,9 +143,10 @@ def _power_integrals(
 def _best_power_point(
     times: list, energy: list, coverage: list, rates: list, duration: int
 ) -> dict[str, Any]:
-    def integral(at: float, values: list[float], channel: int) -> float:
-        index = min(max(bisect_right(times, at) - 1, 0), len(rates) - 1)
-        return values[index] + rates[index][channel] * (at - times[index])
+    last = len(rates) - 1
+
+    def index(at: float) -> int:
+        return min(max(bisect_right(times, at) - 1, 0), last)
 
     starts = sorted(
         {float(time) for time in times if time + duration <= times[-1]}
@@ -147,10 +155,17 @@ def _best_power_point(
     best, best_start = None, None
     for start in starts:
         end = start + duration
-        known = integral(end, coverage, 1) - integral(start, coverage, 1)
+        left, right = index(start), index(end)
+        left_offset, right_offset = start - times[left], end - times[right]
+        known = (coverage[right] + rates[right][1] * right_offset) - (
+            coverage[left] + rates[left][1] * left_offset
+        )
         if abs(known - duration) > 1e-6:
             continue
-        mean = (integral(end, energy, 0) - integral(start, energy, 0)) / duration
+        mean = (
+            (energy[right] + rates[right][0] * right_offset)
+            - (energy[left] + rates[left][0] * left_offset)
+        ) / duration
         if best is None or mean > best:
             best, best_start = mean, start
     return {
@@ -163,11 +178,16 @@ def _best_power_point(
 
 
 def _best_running_speed(times: list, rates: list, duration: int) -> dict[str, Any]:
+    elapsed = [0.0, *accumulate(delta for _, delta, _ in rates)]
+    covered = [0.0, *accumulate(rate * delta for rate, delta, _ in rates)]
+    run_end = _valid_run_ends([valid for _, _, valid in rates])
     best = None
-    for start_index, start in enumerate(times[:-1]):
-        candidate = _running_speed_candidate(rates[start_index:], duration)
+    for start, time in enumerate(times[:-1]):
+        candidate = _running_speed_candidate(
+            elapsed, covered, rates, start, run_end[start], duration
+        )
         if candidate is not None and (best is None or candidate > best[0]):
-            best = (candidate, start)
+            best = (candidate, time)
     return {
         "duration_seconds": duration,
         "speed_mps": round(best[0], 3) if best else None,
@@ -188,11 +208,19 @@ def _best_running_distance(
             "coverage": None,
             "status": "unknown",
         }
+    run_end = _valid_run_ends(
+        [
+            valid and distances[index + 1] is not None
+            for index, (_, _, valid) in enumerate(rates)
+        ]
+    )
     best = None
     for start in range(len(times) - 1):
-        if not rates[start][2] or _number(distances[start]) is None:
+        if not rates[start][2] or distances[start] is None:
             continue
-        elapsed = _running_distance_candidate(times, rates, distances, start, target)
+        elapsed = _running_distance_candidate(
+            times, distances, start, run_end[start], target
+        )
         if elapsed is not None and (best is None or elapsed < best[0]):
             best = (elapsed, times[start])
     return {
@@ -202,6 +230,14 @@ def _best_running_distance(
         "coverage": 1.0 if best else None,
         "status": "ok" if best else "unknown",
     }
+
+
+def _valid_run_ends(valid: list[bool]) -> list[int]:
+    """For each sample, the index after the last valid segment that follows it."""
+    ends = [len(valid)] * (len(valid) + 1)
+    for index in range(len(valid) - 1, -1, -1):
+        ends[index] = ends[index + 1] if valid[index] else index
+    return ends
 
 
 def _running_rates(
@@ -259,34 +295,49 @@ def _running_segment(
     return value, delta, valid
 
 
-def _running_speed_candidate(rates: list, duration: int) -> float | None:
-    elapsed = total = 0.0
-    for rate, delta, valid in rates:
-        if not valid:
-            break
-        take = min(delta, duration - elapsed)
-        total += rate * take
-        elapsed += take
-        if elapsed >= duration:
-            return total / duration
-    return None
+def _running_speed_candidate(
+    elapsed: list[float],
+    covered: list[float],
+    rates: list,
+    start: int,
+    end: int,
+    duration: int,
+) -> float | None:
+    """Mean speed over ``duration`` from ``start`` within one valid run."""
+    if end <= start:
+        return None
+    target = elapsed[start] + duration
+    stop = bisect_left(elapsed, target, start + 1, end + 1)
+    while stop <= end and elapsed[stop] - elapsed[start] < duration:
+        stop += 1
+    while stop - 1 > start and elapsed[stop - 1] - elapsed[start] >= duration:
+        stop -= 1
+    if stop > end:
+        return None
+    before = elapsed[stop - 1] - elapsed[start]
+    total = (
+        covered[stop - 1] - covered[start] + rates[stop - 1][0] * (duration - before)
+    )
+    return total / duration
 
 
 def _running_distance_candidate(
-    times: list, rates: list, distances: list, start: int, target: int
+    times: list, distances: list, start: int, end: int, target: int
 ) -> float | None:
-    base = float(distances[start])
-    for end in range(start + 1, len(times)):
-        if not rates[end - 1][2] or _number(distances[end]) is None:
-            break
-        delta = float(distances[end]) - base
-        if delta < target:
-            continue
-        segment = float(distances[end]) - float(distances[end - 1])
-        if segment <= 0:
-            break
-        fraction = (target - (delta - segment)) / segment
-        return (times[end - 1] - times[start]) + fraction * (
-            times[end] - times[end - 1]
-        )
-    return None
+    """Time to cover ``target`` metres from ``start`` within one valid run."""
+    if end <= start:
+        return None
+    base = distances[start]
+    stop = bisect_left(distances, base + target, start + 1, end + 1)
+    while stop <= end and distances[stop] - base < target:
+        stop += 1
+    while stop - 1 > start and distances[stop - 1] - base >= target:
+        stop -= 1
+    if stop > end:
+        return None
+    delta = distances[stop] - base
+    segment = distances[stop] - distances[stop - 1]
+    if segment <= 0:
+        return None
+    fraction = (target - (delta - segment)) / segment
+    return (times[stop - 1] - times[start]) + fraction * (times[stop] - times[stop - 1])

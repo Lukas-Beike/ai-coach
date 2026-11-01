@@ -44,7 +44,7 @@ class PowerProfileTests(unittest.TestCase):
             }
         )
         self.assertEqual(
-            [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600],
+            [5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600],
             [point["duration_seconds"] for point in result["duration_curve"]],
         )
         times = list(range(1201))
@@ -56,6 +56,67 @@ class PowerProfileTests(unittest.TestCase):
         streams["distance"][400] = None
         running = running_profile({"sport": "run", "streams": streams})
         self.assertEqual("unknown", running["distance"][1]["status"])
+
+    def test_protocol_windows_reproduce_known_maxima_around_gaps_and_pauses(self):
+        times = list(range(2401))
+        watts = [100.0] * len(times)
+        moving = [True] * len(times)
+        for start, end, value in (
+            (100, 280, 450),
+            (1000, 1420, 330),
+            (1600, 2320, 300),
+        ):
+            watts[start:end] = [value] * (end - start)
+        # A 900 W effort split by a gap and a pause never fills a 3-min window.
+        watts[500:850] = [900] * 350
+        watts[499] = watts[620] = watts[850] = None
+        moving[740] = False
+        result = power_profile(
+            {
+                "sport": "ride",
+                "streams": {"time": times, "watts": watts, "moving": moving},
+            }
+        )
+        best = {p["duration_seconds"]: p for p in result["duration_curve"]}
+        self.assertEqual(
+            {180: 450, 420: 330, 720: 300},
+            {duration: best[duration]["watts"] for duration in (180, 420, 720)},
+        )
+        self.assertEqual(
+            {180: 100, 420: 1000, 720: 1600},
+            {duration: best[duration]["start_seconds"] for duration in (180, 420, 720)},
+        )
+        self.assertEqual(
+            ("mean-max-curve", 1), (result["method"], result["method_version"])
+        )
+
+        speed = [3.0] * len(times)
+        for start, end, value in (
+            (100, 280, 5.0),
+            (1000, 1420, 4.5),
+            (1600, 2320, 4.2),
+        ):
+            speed[start:end] = [value] * (end - start)
+        distance = [0.0]
+        for value in speed[:-1]:
+            distance.append(distance[-1] + value)
+        running = running_profile(
+            {
+                "sport": "run",
+                "streams": {
+                    "time": times,
+                    "velocity_smooth": speed,
+                    "distance": distance,
+                },
+            }
+        )
+        fastest = {p["duration_seconds"]: p["speed_mps"] for p in running["speed"]}
+        self.assertEqual(
+            {180: 5.0, 420: 4.5, 720: 4.2}, {d: fastest[d] for d in (180, 420, 720)}
+        )
+        self.assertEqual(
+            ("mean-max-curve", 1), (running["method"], running["method_version"])
+        )
 
     def test_source_label_names_the_stream_provider(self):
         ride = {"sport": "ride", "streams": {"time": [0, 5], "watts": [200, 200]}}
