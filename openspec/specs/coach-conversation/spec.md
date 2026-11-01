@@ -166,11 +166,15 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 - **WHEN** a turn carries one of the four analysis or planning kinds
 - **THEN** its instructions end with that kind's playbook, while morning check-in and ordinary turns carry none.
 
+#### Scenario: Kind-specific context
+- **WHEN** a turn carries one of the four analysis or planning kinds
+- **THEN** its context sections come from the kind rather than the message wording, while dialogue and pending-request retention still follow the message as for an ordinary turn.
+
 #### Scenario: Unknown kind
 - **WHEN** a submission names another kind
 - **THEN** it is rejected as an unsupported quick action before any turn is stored.
 
-Evidence: `backend/coach/playbooks.py:playbook_for`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`; `backend/coach/context_selection.py:select_coach_context`; `backend/coach/request_payload.py:compose_model_instructions`; `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`.
+Evidence: `backend/coach/playbooks.py:playbook_for`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`; `backend/coach/context_selection.py:select_coach_context`; `backend/coach/request_payload.py:compose_model_instructions`; `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`, `tests/test_coach_playbooks.py:RequestKindSelectionTests.test_every_kind_has_a_selection_and_keeps_message_retention`.
 
 ### Requirement: CC10 Composer continuity and user-controlled input
 The system SHALL keep drafts editable while the Coach runs, serialize queued follow-ups, preserve rejected input on session expiry and require the athlete to send editable voice transcripts as chat messages.

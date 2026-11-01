@@ -19,10 +19,6 @@ References (only author and year appear in the model text):
 
 from __future__ import annotations
 
-REQUEST_KINDS = frozenset(
-    {"session_analysis", "progress_review", "plan_week", "plan_block"}
-)
-
 _COMMON = """\
 REQUEST PLAYBOOK (this turn only).
 - Separate measured facts from inference, name the data coverage, and label evidence strength as strong, moderate, limited or practice-based. Missing data is unknown, never zero or rest.
@@ -48,7 +44,7 @@ Task: analyze the last completed session.
 - End with the consequence for the next session.""",
     "progress_review": """\
 Task: review progress over the requested period.
-- Use get_training_report over the period. One call covers at most 28 days; for longer periods make consecutive calls with start dates.
+- Use get_training_report over the period. days is 7 or 28 per call; for longer periods make consecutive 28-day calls with start dates.
 - Report weekly volume and load per sport (run, ride, strength), the intensity distribution against training_model, consistency, and performance indicators with source labels.
 - State the data coverage per week; incomplete weeks are unknown.""",
     "plan_week": """\
@@ -58,6 +54,8 @@ Task: plan the requested next week.
 Task: plan the requested multi-week block.
 - Before the table give a short week-by-week rationale (focus, load trend, lighter week). This relaxes rule 5a for this turn only; the table format stays.""",
 }
+
+REQUEST_KINDS = frozenset(_TASKS)
 
 
 def playbook_for(request_kind: str | None) -> str:

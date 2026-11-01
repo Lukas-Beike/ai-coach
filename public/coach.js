@@ -625,11 +625,12 @@ function setupQuickActionMenu() {
     button.setAttribute("aria-expanded", String(open));
     if (!open) return;
     const rect = button.getBoundingClientRect();
-    const margin = 12;
-    const left = Math.max(margin, Math.min(rect.left, innerWidth - menu.offsetWidth - margin));
-    const above = rect.top - 8 - menu.offsetHeight;
+    const { left, top } = analysisPopoverPosition(
+      { left: rect.left, top: rect.top, bottom: rect.bottom },
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: innerWidth, height: innerHeight });
     menu.style.left = `${left}px`;
-    menu.style.top = `${Math.max(margin, above >= margin ? above : rect.bottom + 8)}px`;
+    menu.style.top = `${top}px`;
     items()[0]?.focus();
   });
   menu.addEventListener("keydown", (event) => {
@@ -2436,6 +2437,8 @@ function setupCoachEvents() {
   $("#messageInput").addEventListener("input", (event) => {
     // Capture the scroll position before the draft grows; only a reader already at the latest message follows the growth.
     const keepLatestVisible = $("#chatPanel")?.classList.contains("active") && chatIsNearBottom();
+    // A typed edit makes the draft the athlete's own request, not a quick action.
+    if (event.isTrusted) delete event.target.dataset.requestKind;
     state.chatDraftDirty = Boolean(event.target.value.trim());
     resizeChatInput(event.target);
     updateChatControls();

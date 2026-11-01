@@ -7,7 +7,10 @@ import unittest
 from typing import Any
 from unittest.mock import Mock
 
-from backend.coach.context_selection import compact_coach_dialogue, select_coach_context
+from backend.coach.context_selection import (
+    REQUEST_KIND_SELECTIONS,
+    select_coach_context,
+)
 from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.playbooks import REQUEST_KINDS, playbook_for
 from backend.coach.request_payload import (
@@ -138,18 +141,30 @@ class RequestKindSelectionTests(unittest.TestCase):
         self.assertEqual(analysis.name, "activity_analysis")
         self.assertIn("durable_profile", analysis.sections)
 
-    def test_quick_actions_drop_an_earlier_unanswered_request(self) -> None:
+    def test_every_kind_has_a_selection_and_keeps_message_retention(self) -> None:
+        self.assertEqual(set(REQUEST_KIND_SELECTIONS), set(REQUEST_KINDS))
         context = {
             "pending_request": {"status": "needs_clarification", "summary": "x"},
             "messages": [],
         }
         for kind in REQUEST_KINDS:
-            selection = select_coach_context("x", context, request_kind=kind)
-            with self.subTest(kind=kind):
-                self.assertFalse(selection.retain_pending_request)
-                self.assertIsNone(
-                    compact_coach_dialogue(context, selection)["pending_request"]
-                )
+            for message in ("Plane meine nächste Woche.", "Wie war mein Schlaf?"):
+                expected = select_coach_context(message, context)
+                selection = select_coach_context(message, context, request_kind=kind)
+                with self.subTest(kind=kind, message=message):
+                    self.assertEqual(
+                        selection.retain_pending_request,
+                        expected.retain_pending_request,
+                    )
+                    self.assertEqual(
+                        selection.retain_dialogue, expected.retain_dialogue
+                    )
+
+    def test_progress_review_keeps_performance_comparisons(self) -> None:
+        context = {"current_performance": {"comparisons": [1], "other": 2}}
+        selection = select_coach_context("x", {}, request_kind="progress_review")
+        projected = selection.project(context, "2026-11-01")
+        self.assertEqual(projected["current_performance"]["comparisons"], [1])
 
     def test_morning_checkin_and_unknown_kinds_use_message_selection(self) -> None:
         expected = select_coach_context("Wie geht es mir?", {}).name
