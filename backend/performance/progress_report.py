@@ -28,12 +28,15 @@ from backend.providers.source_labels import SourceView, provider_label
 
 METHOD = "weekly-progress-v1"
 SPORT_BUCKETS = ("run", "ride", "strength")
-# First zone number of the moderate and of the high band per sensor.
-ZONE_BANDS = {"power": (3, 5), "heart_rate": (3, 4)}
+# First zone number of the moderate and of the high band, by the number of zones
+# the provider recorded: 6 or more (Coggan power, Intervals.icu 7-zone heart rate)
+# or up to 5 (5-zone heart rate).
+ZONE_BANDS = {"many": (3, 5), "five": (3, 4)}
 ZONE_MAPPING = (
-    "Approximation of the 3-zone model from provider zone times: power Z1-Z2 "
-    "low, Z3-Z4 moderate, Z5+ high; heart rate Z1-Z2 low, Z3 moderate, Z4+ "
-    "high. Per session power zones, else heart-rate zones; pace zones unused."
+    "Approximation of the 3-zone model from provider zone times: with 6 or more "
+    "zones Z1-Z2 low, Z3-Z4 moderate, Z5+ high; with up to 5 zones Z1-Z2 low, Z3 "
+    "moderate, Z4+ high. Per session power zones, else heart-rate zones; pace "
+    "zones unused."
 )
 PROFILE_DURATIONS = (60, 300, 1200)
 # CTL and eFTP come from Intervals.icu wellness days and ride summaries.
@@ -46,12 +49,15 @@ def _sport(summary: Mapping[str, Any]) -> str:
     return str(summary.get("sport") or "other")
 
 
-def _band(sensor: str, zone_id: str) -> str | None:
+def _zone_number(zone_id: str) -> int | None:
     digits = zone_id[1:]
-    if not digits.isdigit():
+    return int(digits) if digits.isdigit() else None
+
+
+def _band(zone: int | None, zone_count: int) -> str | None:
+    if zone is None:
         return None
-    moderate, high = ZONE_BANDS[sensor]
-    zone = int(digits)
+    moderate, high = ZONE_BANDS["many" if zone_count >= 6 else "five"]
     return "low" if zone < moderate else "moderate" if zone < high else "high"
 
 
@@ -64,10 +70,15 @@ def _intensity(sessions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             ("power", "power_zone_times"),
             ("heart_rate", "heart_rate_zone_times"),
         ):
-            bands = [
-                (band, float(zone["secs"]))
+            zones = [
+                (_zone_number(str(zone["id"])), float(zone["secs"]))
                 for zone in valid_zones(row.get(key))
-                if (band := _band(sensor, str(zone["id"]))) is not None
+            ]
+            count = max((number or 0 for number, _ in zones), default=0)
+            bands = [
+                (band, secs)
+                for number, secs in zones
+                if (band := _band(number, count)) is not None
             ]
             if bands:
                 measured += 1
@@ -184,68 +195,111 @@ _CURVES = {
 def _mean_max_change(
     records: Sequence[Mapping[str, Any]], start: date, middle: date, end: date
 ) -> dict[str, Any]:
-    """Best ride power and run speed per duration: earlier versus later half."""
+    """Best ride power and run speed per duration and environment: earlier versus later half.
+
+    Indoor and outdoor sessions are compared separately, as in the power profile,
+    so a change of environment never reads as a change of fitness.
+    """
     halves = {"earlier": (start, middle - timedelta(days=1)), "later": (middle, end)}
     result: dict[str, Any] = {
-        "method": "Best full-resolution stream value per duration; later half minus earlier half.",
-        "periods": {},
+        "method": "Best full-resolution stream value per duration and environment; later half minus earlier half.",
     }
     for sport, (profile_key, curve_key, field, unit) in _CURVES.items():
-        best: dict[str, dict[int, float]] = {}
-        sources: set[str] = set()
-        periods = {}
-        for name, (first, last) in halves.items():
-            rows = [
-                row
-                for row in records
-                if row.get("sport") == sport
-                and first.isoformat() <= str(row.get("date") or "") <= last.isoformat()
-            ]
-            usable = [
-                row
-                for row in rows
-                if (row.get(profile_key) or {}).get("status") == "ok"
-            ]
-            periods[name] = {
-                "start": first.isoformat(),
-                "end": last.isoformat(),
-                "records": len(rows),
-                "usable_records": len(usable),
-            }
-            best[name] = {}
-            for row in usable:
-                profile = row[profile_key]
-                if profile.get("source"):
-                    sources.add(str(profile["source"]))
-                for point in profile.get(curve_key, []):
-                    value, seconds = (
-                        number(point.get(field)),
-                        point.get("duration_seconds"),
-                    )
-                    if (
-                        value is not None
-                        and seconds in PROFILE_DURATIONS
-                        and value > best[name].get(seconds, -1.0)
-                    ):
-                        best[name][seconds] = value
-        durations = []
-        for seconds in PROFILE_DURATIONS:
-            early, late = best["earlier"].get(seconds), best["later"].get(seconds)
-            durations.append(
-                {
-                    "duration_seconds": seconds,
-                    f"earlier_{unit}": early,
-                    f"later_{unit}": late,
-                    f"change_{unit}": None
-                    if early is None or late is None
-                    else round(late - early, 3),
-                }
-            )
         result[sport] = {
-            "unit": unit,
-            "source": ", ".join(sorted(sources)),
-            "periods": periods,
-            "durations": durations,
+            environment: _environment_change(
+                [
+                    row
+                    for row in records
+                    if row.get("sport") == sport
+                    and row.get("environment") == environment
+                ],
+                halves,
+                (profile_key, curve_key, field, unit),
+            )
+            for environment in ("outdoor", "indoor")
+        }
+    return result
+
+
+def _environment_change(
+    records: Sequence[Mapping[str, Any]],
+    halves: Mapping[str, tuple[date, date]],
+    curve: tuple[str, str, str, str],
+) -> dict[str, Any]:
+    profile_key, curve_key, field, unit = curve
+    best: dict[str, dict[int, float]] = {}
+    sources: set[str] = set()
+    periods = {}
+    for name, (first, last) in halves.items():
+        rows = [
+            row
+            for row in records
+            if first.isoformat() <= str(row.get("date") or "") <= last.isoformat()
+        ]
+        usable = [
+            row for row in rows if (row.get(profile_key) or {}).get("status") == "ok"
+        ]
+        periods[name] = {
+            "start": first.isoformat(),
+            "end": last.isoformat(),
+            "records": len(rows),
+            "usable_records": len(usable),
+        }
+        best[name] = {}
+        for row in usable:
+            profile = row[profile_key]
+            if profile.get("source"):
+                sources.add(str(profile["source"]))
+            for point in profile.get(curve_key, []):
+                value, seconds = (
+                    number(point.get(field)),
+                    point.get("duration_seconds"),
+                )
+                if (
+                    value is not None
+                    and seconds in PROFILE_DURATIONS
+                    and value > best[name].get(seconds, -1.0)
+                ):
+                    best[name][seconds] = value
+    durations = []
+    for seconds in PROFILE_DURATIONS:
+        early, late = best["earlier"].get(seconds), best["later"].get(seconds)
+        durations.append(
+            {
+                "duration_seconds": seconds,
+                f"earlier_{unit}": early,
+                f"later_{unit}": late,
+                f"change_{unit}": None
+                if early is None or late is None
+                else round(late - early, 3),
+            }
+        )
+    return {
+        "unit": unit,
+        "source": ", ".join(sorted(sources)),
+        "periods": periods,
+        "durations": durations,
+    }
+
+
+def _mean_max_window(
+    records: Sequence[Mapping[str, Any]] | None,
+    start: date,
+    middle: date,
+    end: date,
+    weeks: int,
+    sport: str,
+) -> dict[str, Any]:
+    if weeks < 2:
+        return {"status": "insufficient_data"}
+    if records is None:
+        return {"status": "outside_curve_window"}
+    result = _mean_max_change(records, start, middle, end)
+    if sport != "all":
+        result = {
+            key: value
+            for key, value in result.items()
+            if key not in _CURVES or key == sport
         }
     return result
 
@@ -262,7 +316,7 @@ def weekly_progress(
     plan: Mapping[str, Any] | None = None,
     ctl_by_day: Mapping[date, float] | None = None,
     eftp_by_day: Mapping[date, float] | None = None,
-    curve_records: Sequence[Mapping[str, Any]] = (),
+    curve_records: Sequence[Mapping[str, Any]] | None = (),
     observed_at: str | None = None,
 ) -> dict[str, Any]:
     """``start`` is a Monday; ``sport`` is ``"all"`` or a canonical sport."""
@@ -295,7 +349,9 @@ def weekly_progress(
             week_rows.append(
                 {
                     **week,
-                    "status": "no_records_unknown",
+                    "status": "incomplete_current_week_no_records"
+                    if last >= today
+                    else "no_records_unknown",
                     "plan": _plan(plan, first, min(last, today), sport),
                 }
             )
@@ -348,15 +404,25 @@ def weekly_progress(
         "zone_mapping": ZONE_MAPPING,
         "week_list": week_rows,
         "ctl": {**ctl, "source": INTERVALS_SOURCE},
-        "eftp": {
-            "sport": "ride",
-            "source": EFTP_SOURCE,
-            **_first_last(eftp_values),
-        },
-        "mean_max_power": (
-            _mean_max_change(curve_records, start, middle, effective_end)
-            if weeks >= 2
-            else {"status": "insufficient_data"}
+        **(
+            {
+                "eftp": {
+                    "sport": "ride",
+                    "source": EFTP_SOURCE,
+                    **_first_last(eftp_values),
+                }
+            }
+            if sport in {"all", "ride"}
+            else {}
+        ),
+        **(
+            {
+                "mean_max_power": _mean_max_window(
+                    curve_records, start, middle, effective_end, weeks, sport
+                )
+            }
+            if sport in {"all", "ride", "run"}
+            else {}
         ),
         "coverage_note": "Aggregation of known local records. A week without records is unknown, not rest; the running week is incomplete. Missing loads, RPE and zone times stay unknown; AU, TSS-like load and zone seconds are never combined. No training model is applied.",
     }

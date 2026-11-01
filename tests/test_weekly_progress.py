@@ -136,10 +136,11 @@ class WeeklyProgressTests(unittest.TestCase):
         )
 
     def test_mean_max_change_between_halves_for_ride_and_run(self):
-        def ride(day, watts):
+        def ride(day, watts, environment="outdoor"):
             return {
                 "date": day,
                 "sport": "ride",
+                "environment": environment,
                 "power_profile": {
                     "status": "ok",
                     "source": "Test provider streams",
@@ -151,6 +152,7 @@ class WeeklyProgressTests(unittest.TestCase):
             return {
                 "date": day,
                 "sport": "run",
+                "environment": "outdoor",
                 "running_profile": {
                     "status": "ok",
                     "source": "Test provider streams",
@@ -161,20 +163,70 @@ class WeeklyProgressTests(unittest.TestCase):
         records = [
             ride("2026-09-09", 250),
             ride("2026-09-30", 270),
+            ride("2026-09-08", 300, "indoor"),
             run("2026-09-10", 3.5),
             run("2026-09-29", 3.75),
         ]
         result = self._progress({"days": 28}, records=records)["mean_max_power"]
         five = {
             sport: next(
-                d for d in result[sport]["durations"] if d["duration_seconds"] == 300
+                d
+                for d in result[sport]["outdoor"]["durations"]
+                if d["duration_seconds"] == 300
             )
             for sport in ("ride", "run")
         }
+        # The indoor 300 W ride stays out of the outdoor comparison.
         self.assertEqual(20, five["ride"]["change_watts"])
         self.assertEqual(0.25, five["run"]["change_speed_mps"])
-        self.assertEqual("Test provider streams", result["ride"]["source"])
-        self.assertEqual(1, result["run"]["periods"]["later"]["usable_records"])
+        self.assertEqual("Test provider streams", result["ride"]["outdoor"]["source"])
+        self.assertEqual(
+            1, result["run"]["outdoor"]["periods"]["later"]["usable_records"]
+        )
+        indoor = result["ride"]["indoor"]["durations"]
+        self.assertIsNone(
+            next(d for d in indoor if d["duration_seconds"] == 300)["change_watts"]
+        )
+
+    def test_seven_zone_heart_rate_uses_the_seven_zone_bands(self):
+        rows = [
+            _summary(
+                "u",
+                "2026-09-29",
+                sport="run",
+                moving_duration_s=700,
+                heart_rate_zone_times=_zones(100, 100, 100, 100, 100, 100, 100),
+            )
+        ]
+        week = self._progress({"days": 7}, rows=rows)["week_list"][0]
+        self.assertEqual(
+            {"low": 200, "moderate": 200, "high": 300},
+            week["sports"]["run"]["intensity_3zone"]["seconds"],
+        )
+
+    def test_running_week_without_records_is_marked_running(self):
+        weeks = self._progress({"days": 7})["week_list"]
+        self.assertEqual("incomplete_current_week_no_records", weeks[0]["status"])
+
+    def test_sport_filter_limits_window_metrics(self):
+        run = self._progress({"days": 28, "sport": "run"})
+        self.assertNotIn("eftp", run)
+        self.assertEqual(["method", "run"], sorted(run["mean_max_power"]))
+        strength = self._progress({"days": 28, "sport": "strength"})
+        self.assertNotIn("eftp", strength)
+        self.assertNotIn("mean_max_power", strength)
+
+    def test_curves_are_read_only_inside_their_window(self):
+        reads = []
+        service = self._service()
+        service._curve_records = lambda: reads.append(1) or []
+        self.assertEqual(
+            {"status": "insufficient_data"},
+            service.progress({"days": 7}, "UTC")["mean_max_power"],
+        )
+        old = service.progress({"days": 28, "start": "2026-05-04"}, "UTC")
+        self.assertEqual({"status": "outside_curve_window"}, old["mean_max_power"])
+        self.assertEqual([], reads)
 
     def test_accepted_windows_and_rejected_values(self):
         for days in (7, 28, 42, 84):
@@ -204,6 +256,8 @@ class ProgressToolTests(unittest.TestCase):
         for arguments in (
             {"days": 42, "sections": ["report"]},
             {"days": 84, "sections": ["progress", "report"]},
+            {"days": 28, "sections": ["progress", "report"]},
+            {"days": [42], "sections": ["progress", "report"]},
         ):
             with self.subTest(arguments=arguments), self.assertRaises(AppError):
                 service.execute("get_training_report", arguments)

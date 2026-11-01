@@ -133,7 +133,7 @@ The system SHALL provide read-only tools for exact local records and determinist
 
 #### Scenario: Weekly progress over 6 or 12 weeks
 - **WHEN** `get_training_report` requests the `progress` section alone, for `days` 7, 28, 42 or 84
-- **THEN** it receives per-ISO-week run, ride and strength buckets (sessions, duration, load, session-RPE AU, 3-zone approximation, plan compliance) with CTL, eFTP and mean-max ride power and run speed change (canonical full-resolution curves); the running week and weeks without records are incomplete or unknown, never rest.
+- **THEN** it receives per-ISO-week run, ride and strength buckets (sessions, duration, load, session-RPE AU, 3-zone approximation, plan compliance) with CTL, eFTP and mean-max ride power and run speed change per environment (canonical full-resolution curves); the running week and weeks without records are incomplete or unknown, never rest, and window metrics follow the sport filter.
 
 #### Scenario: Invalid report or missing owner
 - **WHEN** unsupported sections (including the retired section name `sleep_regularity`), invalid list parameters or unavailable report services are requested

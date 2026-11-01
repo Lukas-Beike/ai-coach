@@ -468,7 +468,14 @@ class TrainingReportReadService:
             plan=self._read_plan(),
             ctl_by_day=wellness_days.series(history, MetricKind.CTL),
             eftp_by_day=None if inputs is None else inputs.eftp_by_day,
-            curve_records=[] if self._curve_records is None else self._curve_records(),
+            # Session curves cover the longest profile window only; read them
+            # only when the window needs the mean-max comparison.
+            curve_records=self._curve_records()
+            if self._curve_records is not None
+            and days >= 14
+            and sport in {"all", "ride", "run"}
+            and start >= today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+            else None,
             observed_at=observed_at,
         )
 

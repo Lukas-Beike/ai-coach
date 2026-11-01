@@ -48,7 +48,8 @@ class CoachActivityReadToolService:
         if name == "get_training_report":
             if self._report_services is None:
                 raise AppError(503, "Trainingsberichte sind nicht verfügbar.")
-            long_window = arguments.get("days") in {42, 84}
+            days = arguments.get("days")
+            long_window = isinstance(days, int) and days in {42, 84}
             sections = arguments.get(
                 "sections", ["progress"] if long_window else ["report"]
             )
@@ -72,8 +73,10 @@ class CoachActivityReadToolService:
                 )
             ):
                 raise AppError(400, "Unbekannter Analysebereich.")
-            if long_window and sections != ["progress"]:
-                raise AppError(400, "42 und 84 Tage gelten nur für progress.")
+            # progress uses whole ISO weeks, so it never shares a call with
+            # sections that read the requested window as given.
+            if (long_window or "progress" in sections) and sections != ["progress"]:
+                raise AppError(400, "progress und 42 oder 84 Tage nur allein abrufbar.")
             readers = {
                 "progress": lambda: self._report_services.report.progress(
                     arguments, self._report_services.timezone()
