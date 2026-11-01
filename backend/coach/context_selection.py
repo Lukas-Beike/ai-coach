@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
@@ -321,8 +321,12 @@ def select_coach_context(
     fixed = REQUEST_KIND_SELECTIONS.get(request_kind or "")
     if fixed is None:
         return selection
-    return replace(
-        fixed,
+    return CoachContextSelection(
+        fixed.name,
+        fixed.sections,
+        fixed.horizon_days,
+        fixed.activity_limit,
+        fixed.include_library,
         retain_dialogue=selection.retain_dialogue,
         retain_pending_request=selection.retain_pending_request,
     )

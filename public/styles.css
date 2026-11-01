@@ -608,8 +608,8 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .composer .quick-message-templates button:active { transform: scale(.97); }
 .quick-action-menu { position: fixed; inset: auto; margin: 0; width: min(300px, calc(100vw - 24px)); padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); box-shadow: 0 8px 24px var(--tooltip-shadow); }
 .quick-action-menu:popover-open { display: grid; gap: 4px; }
-.quick-action-menu [role=group] { display: flex; align-items: center; gap: 6px; }
-.quick-action-menu [role=group] > span { flex: 1 1 auto; padding-left: 4px; font-size: .72rem; font-weight: 650; }
+.quick-action-menu .quick-action-periods { display: flex; align-items: center; gap: 6px; }
+.quick-action-menu .quick-action-periods > span { flex: 1 1 auto; padding-left: 4px; font-size: .72rem; font-weight: 650; }
 .composer .quick-message-templates .quick-action-menu button { flex: 0 0 auto; min-width: 44px; justify-content: center; }
 .composer .quick-message-templates .quick-action-menu > button { width: 100%; justify-items: start; border-radius: var(--radius-md); text-align: left; }
 .composer textarea {
