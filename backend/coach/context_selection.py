@@ -262,7 +262,9 @@ class CoachContextSelection:
 
 
 # Quick-action request kinds bring the sections their playbook needs, whatever the
-# message wording; nutrition products stay out. Selection never authorizes writes.
+# message wording; nutrition products stay out. A quick action is a new request, so
+# an earlier failed or unanswered request does not ride along. Selection never
+# authorizes writes.
 _PLAN_SECTIONS = BASE_SECTIONS | {
     "planning",
     "training_plans",
@@ -273,7 +275,12 @@ _PLAN_SECTIONS = BASE_SECTIONS | {
 }
 REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
     "session_analysis": CoachContextSelection(
-        "activity_analysis", BASE_SECTIONS | {"recovery"}, 3, 5, False
+        "activity_analysis",
+        BASE_SECTIONS | {"recovery"},
+        3,
+        5,
+        False,
+        retain_pending_request=False,
     ),
     "progress_review": CoachContextSelection(
         "progress_review",
@@ -281,9 +288,14 @@ REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
         14,
         5,
         False,
+        retain_pending_request=False,
     ),
-    "plan_week": CoachContextSelection("plan_week", _PLAN_SECTIONS, 14, 5, True),
-    "plan_block": CoachContextSelection("plan_block", _PLAN_SECTIONS, 35, 5, True),
+    "plan_week": CoachContextSelection(
+        "plan_week", _PLAN_SECTIONS, 14, 5, True, retain_pending_request=False
+    ),
+    "plan_block": CoachContextSelection(
+        "plan_block", _PLAN_SECTIONS, 35, 5, True, retain_pending_request=False
+    ),
 }
 
 

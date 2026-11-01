@@ -7,7 +7,7 @@ import unittest
 from typing import Any
 from unittest.mock import Mock
 
-from backend.coach.context_selection import select_coach_context
+from backend.coach.context_selection import compact_coach_dialogue, select_coach_context
 from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.playbooks import REQUEST_KINDS, playbook_for
 from backend.coach.request_payload import (
@@ -137,6 +137,19 @@ class RequestKindSelectionTests(unittest.TestCase):
         analysis = select_coach_context("x", {}, request_kind="session_analysis")
         self.assertEqual(analysis.name, "activity_analysis")
         self.assertIn("durable_profile", analysis.sections)
+
+    def test_quick_actions_drop_an_earlier_unanswered_request(self) -> None:
+        context = {
+            "pending_request": {"status": "needs_clarification", "summary": "x"},
+            "messages": [],
+        }
+        for kind in REQUEST_KINDS:
+            selection = select_coach_context("x", context, request_kind=kind)
+            with self.subTest(kind=kind):
+                self.assertFalse(selection.retain_pending_request)
+                self.assertIsNone(
+                    compact_coach_dialogue(context, selection)["pending_request"]
+                )
 
     def test_morning_checkin_and_unknown_kinds_use_message_selection(self) -> None:
         expected = select_coach_context("Wie geht es mir?", {}).name
