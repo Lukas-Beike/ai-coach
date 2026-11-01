@@ -221,6 +221,9 @@ class _Feedback:
     def list(self, _limit: int = 100) -> list:
         return []
 
+    def for_activity_ids(self, _activity_ids: object, **_options: object) -> tuple[()]:
+        return ()
+
 
 class ActivityDetailRouteTests(unittest.TestCase):
     """Serve canonical detail documents through the production read assembly."""

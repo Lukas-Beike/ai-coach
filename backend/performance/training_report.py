@@ -14,6 +14,7 @@ from backend.activities.activity_summary import (
 )
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.performance.session_rpe_load import session_rpe_load
 from backend.providers.intervals_performance_fields import (
     TRAINING_LOAD as PLANNED_LOAD_KEY,
 )
@@ -133,11 +134,14 @@ def training_report(
     timezone: str = "UTC",
     activity_summaries: Sequence[ActivitySummary],
     observed_at: str | None = None,
+    session_feedback: Mapping[str, Mapping[str, Any]] | None = None,
+    computed_at: str | None = None,
 ) -> dict[str, Any]:
     """Build the report from the activity summaries, one per canonical session.
 
     ``sport`` is ``"all"`` or a canonical sport. ``observed_at`` is the sync time
-    of the summaries (canonical coverage).
+    of the summaries (canonical coverage). ``session_feedback`` maps a summary's
+    stored key to its session's effective feedback for the session-RPE load.
     """
     end = start + timedelta(days=days - 1)
     effective_end = min(today, end)
@@ -199,6 +203,14 @@ def training_report(
             for offset in range(days)
         ],
         "zones": zone_distribution(current),
+        "session_rpe_load": session_rpe_load(
+            current,
+            session_feedback or {},
+            start=start,
+            end=effective_end,
+            timezone=timezone,
+            computed_at=computed_at,
+        ),
         "key_sessions": _key_sessions(current, timezone),
         "planning": {
             "available": plan is not None,

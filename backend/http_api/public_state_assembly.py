@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from backend.canonical.records import Observation
@@ -196,6 +197,10 @@ class PublicStateAssembly:
             garmin.projection_service(),
             self._local_date,
             self.canonical_performance_source(),
+            session_feedback=partial(
+                athlete.activity_feedback().for_activity_ids, sessions_only=True
+            ),
+            now=self._local_now(),
         )
 
     def canonical_performance_source(self) -> CanonicalPerformanceSource | None:

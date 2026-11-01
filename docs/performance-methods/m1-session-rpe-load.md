@@ -2,8 +2,8 @@
 
 - **Card:** M1
 - **Card version:** 1
-- **Method ID:** session-rpe-load-v1 (planned, #1427)
-- **Status:** not implemented
+- **Method ID:** session-rpe-load-v1 (#1427)
+- **Status:** implemented (`backend/performance/session_rpe_load.py`)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-10-24
 - **Review:** released 2026-10-24 (athlete)
@@ -70,13 +70,20 @@ endurance athlete.
 
 ## Deviations from the studied procedure
 
-- The UI shows 0 to 10 in steps of 0.5 without the CR-10 verbal anchors.
-- Collection time relative to session end is not stored; historical ratings are
-  "timing unknown" and are not given protocol fidelity retroactively.
-- Duration comes from provider records, not a stopwatch of the rated session.
+- The UI offers 0 to 10 in steps of 0.5 and labels the anchor steps with the
+  R1 anchors as read from the OCR copy (German: 0 Ruhe, 1 Sehr, sehr leicht,
+  2 Leicht, 3 Moderat, 4 Etwas schwer, 5 Schwer, 7 Sehr schwer, 10 Maximal).
+- The rating time is stored since schema v18 whenever the athlete sets or
+  changes the RPE, and the result shows the minutes after the session end.
+  Earlier ratings and the Intervals.icu fallback stay "timing unknown" and are
+  not given protocol fidelity retroactively.
+- Duration comes from provider records, not a stopwatch of the rated session:
+  the canonical elapsed duration. A session with only a moving time gets no
+  value (`no_elapsed_duration`).
 - Intervals `icu_rpe` is a second rating source. Local `session_rpe` is the
   input (decision D3 on #1406); `icu_rpe` is used only as a labelled fallback
-  when no local rating exists, never averaged with it.
+  when no local rating exists, never averaged with it. Disagreeing provider
+  ratings of one session give no value unless a local rating exists.
 
 ## Minimum data and stop rules
 
@@ -122,12 +129,8 @@ endurance athlete.
 
 ## Open points
 
-- Verify the CR-10 anchors in R1 visually and decide whether the rating control
-  shows them (UI rule: no helper text; labelled steps instead).
-- Decide whether to store a collection timestamp relative to session end
-  (schema change needs migrations from v9).
-- Choose the canonical elapsed-duration field and its behaviour for Garmin
-  records that have only moving time (#1423, #1425).
+- Verify the CR-10 anchors in R1 visually; the rating control shows the OCR
+  reading as labelled steps (decided 2026-11-01).
 - R2 full text (participant count, duration definition, funding and declared
   interests) was not reachable; R1 has no funding or interest statement in
   the accessible copy.

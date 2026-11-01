@@ -200,6 +200,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "updated_at",
         "provider",
         "session_id",
+        "session_rpe_rated_at",
     },
     "plan_adjustments": {"id", "payload", "status", "created_at", "applied_at"},
     "coach_action_proposals": {
@@ -653,7 +654,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 17
+CURRENT_SCHEMA_VERSION = 18
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -1176,6 +1177,14 @@ POWER_CURVE_DDL = f"""
 """
 
 
+# Schema version 18: when the athlete last set the session RPE of a feedback row,
+# so the rating's time after the session end is known (session-RPE load, M1).
+# Rows written before keep NULL: their rating time stays unknown.
+FEEDBACK_RATING_TIME_DDL = """
+    ALTER TABLE activity_feedback ADD COLUMN session_rpe_rated_at TEXT
+"""
+
+
 def execute_ddl(db: Any, ddl: str) -> None:
     """Run DDL statement by statement inside the caller's transaction.
 
@@ -1515,6 +1524,7 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, FOOD_DATABASE_DDL)
     execute_ddl(db, CANONICAL_EXTENSIONS_DDL)
     execute_ddl(db, POWER_CURVE_DDL)
+    execute_ddl(db, FEEDBACK_RATING_TIME_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

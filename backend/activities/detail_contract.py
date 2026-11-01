@@ -39,7 +39,12 @@ from backend.providers.intervals_activity_detail_projection import (
 
 ACTIVITY_DETAIL_CONTRACT: Final = "activity_detail.v1"
 
-_ENVELOPE_KEYS: Final = ("activity_feedback", "equipment", "activity_validation")
+_ENVELOPE_KEYS: Final = (
+    "activity_feedback",
+    "equipment",
+    "activity_validation",
+    "session_rpe_load",
+)
 _PROVIDER_ORDER: Final[tuple[ProviderId, ...]] = (
     ProviderId.INTERVALS,
     ProviderId.GARMIN,
@@ -116,7 +121,8 @@ def activity_detail_contract(
     """Assemble the ``activity_detail.v1`` document of one canonical session.
 
     ``status`` adds stale, load error and coverage to each provider entry.
-    ``envelope`` adds the feedback, equipment and activity validation blocks.
+    ``envelope`` adds the feedback, equipment, activity validation and
+    session-RPE load blocks.
     ``summary_metrics`` fill metrics that no measured or derived value provides.
     ``zone`` is the athlete's zone for ``session.started_at_local``.
     """

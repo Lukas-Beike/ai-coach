@@ -60,6 +60,14 @@ class _Feedback:
     def list(self, _limit=100):
         return self.rows
 
+    def for_activity_ids(self, activity_ids, **_options):
+        return [
+            row
+            for key in activity_ids
+            for row in self.rows
+            if row["activity_id"] == key
+        ]
+
     def attach_to_activities(self, activities):
         by_id = {row["activity_id"]: row for row in self.rows}
         return [

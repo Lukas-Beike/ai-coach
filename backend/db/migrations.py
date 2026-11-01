@@ -20,6 +20,7 @@ from backend.db.schema import (
     ACTIVITY_DETAIL_DDL,
     CANONICAL_EXTENSIONS_DDL,
     CURRENT_SCHEMA_VERSION,
+    FEEDBACK_RATING_TIME_DDL,
     FOOD_DATABASE_DDL,
     NUTRITION_PRODUCTS_DDL,
     POWER_CURVE_DDL,
@@ -38,6 +39,7 @@ from backend.db.schema_history import (
     SHAPE_SCHEMA_V14,
     SHAPE_SCHEMA_V15,
     SHAPE_SCHEMA_V16,
+    SHAPE_SCHEMA_V17,
     released_shape,
 )
 
@@ -213,6 +215,12 @@ def _upgrade_v16_to_v17(db: Any) -> None:
     copy_power_curve_to_raw_record(db)
 
 
+def _upgrade_v17_to_v18(db: Any) -> None:
+    # Adds the rating time of the session RPE; existing feedback keeps NULL, so
+    # its rating time stays unknown. No row changes.
+    execute_ddl(db, FEEDBACK_RATING_TIME_DDL)
+
+
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V9: (SHAPE_SCHEMA_V10, _upgrade_v9_to_v10),
     SHAPE_SCHEMA_V10: (SHAPE_SCHEMA_V11, _upgrade_v10_to_v11),
@@ -221,5 +229,6 @@ UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V13: (SHAPE_SCHEMA_V14, _upgrade_v13_to_v14),
     SHAPE_SCHEMA_V14: (SHAPE_SCHEMA_V15, _upgrade_v14_to_v15),
     SHAPE_SCHEMA_V15: (SHAPE_SCHEMA_V16, _upgrade_v15_to_v16),
-    SHAPE_SCHEMA_V16: (SHAPE_CURRENT, _upgrade_v16_to_v17),
+    SHAPE_SCHEMA_V16: (SHAPE_SCHEMA_V17, _upgrade_v16_to_v17),
+    SHAPE_SCHEMA_V17: (SHAPE_CURRENT, _upgrade_v17_to_v18),
 }

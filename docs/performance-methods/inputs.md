@@ -24,23 +24,24 @@ Provenance has three separate parts. Fixtures check them separately:
 | Input | Canonical storage today | Evidence |
 | --- | --- | --- |
 | Elapsed duration | `elapsed_duration_s` in the record details JSON for every provider (Intervals elapsed time, Garmin `duration`, Wahoo `duration_total_accum`, since #1445); `duration_s` stays the provider summary duration and `moving_duration_s` separate. | `backend/providers/intervals_activity_mapping.py:427-446`, `backend/providers/garmin_activity_mapping.py:175-177`, `backend/providers/wahoo_activity_mapping.py:265-273`, `backend/db/canonical_store.py:34` |
-| Local session RPE | `activity_feedback.session_rpe` (0–10), keyed by the provider activity id plus `provider`; no link to `activity_sessions` | `backend/db/schema.py:662-673`, `backend/activities/feedback.py:43` |
-| Intervals `icu_rpe` | No canonical field. Kept in the stored provider activity row; the browser contract renames it to `rpe` | `backend/providers/intervals_activity_fields.py:47`, `backend/canonical/public_metrics.py:24` |
+| Local session RPE | `activity_feedback.session_rpe` (0–10) with `session_id` (#1423) and, since schema v18, `session_rpe_rated_at` | `backend/db/schema.py`, `backend/activities/feedback.py` |
+| Intervals `icu_rpe` | `ActivityRecord.rpe`, stored in the activity record details with provider provenance (#1510, closes #1446); the summary marks disagreeing records with `rpe_conflict` | `backend/providers/intervals_activity_mapping.py`, `backend/db/canonical_store.py`, `backend/activities/activity_summary.py` |
 | One session per ride | `bundle_sessions` groups records; `link_activity_sessions` marks the younger session `duplicate` with `merged_into` | `backend/activities/canonical_sessions.py:97`, `backend/activities/session_linking.py:47` |
 
-Consumer trace (no M1 method exists yet):
+Consumer trace (method `session-rpe-load-v1`, `backend/performance/session_rpe_load.py`, #1427):
 
-- Rating input: `public/activity-details.js:80` → `POST /api/activities/{id}/feedback`
+- Rating input: `public/activity-details.js` (CR-10 selection) → `POST /api/activities/{id}/feedback`
   (`backend/http_api/feedback_post.py:24`) → `ActivityFeedbackService`
   (`backend/activities/feedback.py`).
-- Report: `training_report` lists `activity_feedback` with `session_rpe`
-  (`backend/performance/training_report.py:284`); rows are deduplicated by
-  `deduplicated_rows` (`:35`), a second rule beside the session state.
-- Coach: feedback tools (`backend/coach/athlete_record_tools.py:102`,
-  `backend/coach/tool_schemas.py:651`). The planning context projects feedback
-  only with notes and without `session_rpe` (`FEEDBACK_FIELDS`,
-  `backend/planning/context.py:95`, `:388`); its `session_rpe` at `:26` is the
-  daily check-in value.
+- Report: `training_report` carries `session_rpe_load` per session, day, week
+  and sport from one summary per canonical session and the session's effective
+  feedback (`backend/performance/report_service.py`); the public performance
+  history carries the load tab's 84 days (`backend/http_api/public_performance.py`),
+  the activity detail the session value (`backend/performance/detail_envelope.py`).
+- Coach: feedback tools (`backend/coach/athlete_record_tools.py`,
+  `backend/coach/tool_schemas.py`); `session_rpe_load` in `get_training_report`
+  and `get_activity_details`. The planning context projects feedback with notes
+  or a session RPE (`FEEDBACK_FIELDS`, `backend/planning/context.py`).
 - `athlete_checkins.session_rpe` (`backend/db/schema.py:1037`) is a daily
   check-in value and is not an M1 input.
 
@@ -116,10 +117,10 @@ Consumer trace (no M4 method exists yet):
 
 | Gap | Method | Kind | Owner |
 | --- | --- | --- | --- |
-| Elapsed duration in three provider-specific places; Wahoo keeps none | M1 | mapping, maybe persistence | #1427; no #1408 sub-issue yet |
-| `icu_rpe` has no canonical field | M1 | mapping, maybe persistence | D3 on #1406; no #1408 sub-issue yet |
-| Two duplicate rules (session state and `deduplicated_rows`) | M1 | read path | #1427 |
-| Planning context omits feedback `session_rpe` | M1 | read path | #1427 |
+| Elapsed duration in three provider-specific places; Wahoo keeps none | M1 | mapping | resolved by #1445 |
+| `icu_rpe` has no canonical field | M1 | mapping | resolved by #1510 (#1446) |
+| Two duplicate rules (session state and `deduplicated_rows`) | M1 | read path | resolved: M1 reads one summary per canonical session (#1427) |
+| Planning context omits feedback `session_rpe` | M1 | read path | resolved by #1427 |
 | HRV and sleep duration read from raw rows | M2, M3 | read path | resolved by #1411 |
 | Canonical resting HR only replaces an equal legacy value | M2 | read path | resolved by #1411 |
 | Method, aggregation and window stored; only Garmin HRV populates them | M2, M3 | mapping | #1418 (#1408) |
@@ -131,8 +132,8 @@ Consumer trace (no M4 method exists yet):
 | No CP/CS fit | M4 | method | #1431 |
 | No RR/NN stream | M2 | out of scope | #1428 |
 
-One need has no #1408 sub-issue: a canonical home for `icu_rpe` (#1446). The
-provider-independent elapsed duration was delivered by #1445.
+The canonical home for `icu_rpe` (#1446) was delivered by #1510, the
+provider-independent elapsed duration by #1445.
 
 ## Fixture index
 
@@ -141,7 +142,7 @@ Classes in `tests/test_performance_method_inputs.py`; each has `test_complete`,
 
 | Method | Class | Extra tests | Pinned gaps |
 | --- | --- | --- | --- |
-| M1 | `M1SessionRpeInputs` | — | #1427, D3 on #1406 |
+| M1 | `M1SessionRpeInputs` | — | — |
 | M2 | `M2HrvRestingHrInputs` | `test_canonical_resting_hr_is_the_primary_input`, `test_canonical_hrv_is_read_per_provider` | — |
 | M3 | `M3SleepInputs` | `test_canonical_sleep_duration_is_read_but_timing_is_not` | #1429, #1419 |
 | M4 | `M4BestEffortInputs` | — | #1430 |

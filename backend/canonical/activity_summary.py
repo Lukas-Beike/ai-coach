@@ -26,7 +26,8 @@ class ActivitySummary(TypedDict, total=False):
     ``id`` is the local session id; ``record_ids`` maps each provider of the
     session to its provider activity id. ``started_at`` is the exact start and
     ``started_at_local`` the athlete's wall time. Zone times are lists of
-    ``{"id": "Z1", "secs": 600.0}`` items.
+    ``{"id": "Z1", "secs": 600.0}`` items. ``rpe_conflict`` is True when the
+    session's records report different provider RPE values.
     """
 
     id: str
@@ -53,6 +54,7 @@ class ActivitySummary(TypedDict, total=False):
     max_speed_mps: float
     avg_temp_c: float
     rpe: float
+    rpe_conflict: bool
     feel: float
     normalized_power: float
     weighted_avg_speed_mps: float

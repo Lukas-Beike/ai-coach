@@ -32,8 +32,13 @@ class _Feedback:
     def __init__(self, rows):
         self.rows = rows
 
-    def list(self, _limit=100):
-        return self.rows
+    def for_activity_ids(self, activity_ids, **_options):
+        return [
+            row
+            for key in activity_ids
+            for row in self.rows
+            if row["activity_id"] == key
+        ]
 
 
 class DetailEnvelopeTests(unittest.TestCase):
@@ -65,7 +70,7 @@ class DetailEnvelopeTests(unittest.TestCase):
         )
         self.equipment_reads = []
         self.configured = ["intervals", "garmin", "weather"]
-        feedback = _Feedback(
+        feedback = self.feedback = _Feedback(
             [
                 {"activity_id": reference, "notes": reference}
                 for reference in ("i1", "act_g", "act_w")
@@ -123,6 +128,19 @@ class DetailEnvelopeTests(unittest.TestCase):
                 self.assertEqual(
                     NO_DATA, self.detail(activity_id)["activity_validation"]
                 )
+
+    def test_session_rpe_load_comes_from_the_summary_and_its_feedback(self):
+        load = self.detail("i1")["session_rpe_load"]
+        self.assertEqual(
+            ("act_i1", None, "no_rating"),
+            (load["activity_id"], load["value"], load["reason"]),
+        )
+        self.feedback.rows[0]["session_rpe"] = 5
+        load = self.detail("i1")["session_rpe_load"]
+        self.assertEqual(("athlete_feedback", 5), (load["rpe_source"], load["rpe"]))
+        for activity_id in ("act_g", "act_w"):
+            with self.subTest(activity_id):
+                self.assertIsNone(self.detail(activity_id)["session_rpe_load"])
 
     def test_refresh_is_offered_for_configured_detail_providers_only(self):
         def refreshable(activity_id):

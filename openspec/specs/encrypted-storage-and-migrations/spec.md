@@ -28,17 +28,17 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from schema v9 through released v16 and the current schema v17, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from schema v9 through released v17 and the current schema v18, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Skipped-release upgrade
 - **WHEN** a populated released v9 database is opened by this build
 - **THEN** all intermediate migrations run to the exact current schema while preserving existing rows.
 
 #### Scenario: Later supported release
-- **WHEN** a populated v10, v11, v12, v13, v14, v15 or v16 database is opened
+- **WHEN** a populated v10, v11, v12, v13, v14, v15, v16 or v17 database is opened
 - **THEN** only remaining upgrade steps run and existing data remains intact.
 
-Evidence baseline: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py`. The outgoing v16 fixture is frozen (`tests/test_db_migrations.py::test_frozen_v16_fixture_is_the_recorded_released_shape`); freeze v17 before changing the live shape again.
+Evidence baseline: `backend/db/migrations.py`, `backend/db/schema_history.py`; `tests/test_db_migrations.py`. The outgoing v17 fixture is frozen (`tests/test_db_migrations.py::test_frozen_v17_fixture_is_the_recorded_released_shape`); freeze v18 before changing the live shape again.
 
 ### Requirement: Unknown schema preservation
 
@@ -197,3 +197,16 @@ The v16 to v17 upgrade SHALL add the canonical `power_curve_points` and `power_c
 - **THEN** the database returns to the unchanged v16 or v9 schema and rows.
 
 Evidence: `backend/db/power_curve_migration.py::copy_power_curve_to_raw_record`; `backend/db/migrations.py::_upgrade_v16_to_v17`. Tests: `tests/test_db_power_curve_migration.py::test_every_populated_release_keeps_its_rows_and_its_newest_curve`; `tests/test_db_power_curve_migration.py::test_a_release_without_a_stored_curve_only_adds_the_empty_table`; `tests/test_db_power_curve_migration.py::test_the_raw_record_takes_the_first_parseable_fetch_time`; `tests/test_db_power_curve_migration.py::test_failure_after_the_step_rolls_back_to_the_unchanged_release`; `tests/test_db_power_curve_migration.py::test_upgraded_database_restarts_with_the_same_build_unchanged`; `tests/test_db_power_curve_migration.py::test_restore_of_a_populated_v16_backup_upgrades_through_validation`; `tests/test_db_power_curve_migration.py::CompletedBackfillUpgradeTests`; `tests/test_db_encrypted_upgrade_matrix.py`.
+
+### Requirement: Session RPE rating time upgrade
+The v17 to v18 upgrade SHALL add the nullable `activity_feedback.session_rpe_rated_at` column in one migration transaction; every existing row SHALL keep its values with an unknown (NULL) rating time.
+
+#### Scenario: Populated upgrade
+- **WHEN** a populated v17 database with rated, unrated and session-linked feedback is opened
+- **THEN** every table keeps its exact rows and each feedback row gains a NULL rating time.
+
+#### Scenario: Upgrade fails partway
+- **WHEN** an injected failure follows the column addition
+- **THEN** the database returns to the unchanged v17 or v9 schema and rows.
+
+Evidence: `backend/db/migrations.py::_upgrade_v17_to_v18`; `tests/test_db_feedback_rating_time_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.

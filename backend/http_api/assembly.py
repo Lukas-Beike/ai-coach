@@ -495,6 +495,8 @@ class HttpApiAssembly:
                 load_scenarios=load_scenarios,
                 season_source=public.season_source(),
                 canonical=canonical,
+                session_feedback=_session_feedback_lookup(athlete),
+                now=athlete_clock.now,
             )
             return TrainingReportServices(
                 records=records,
@@ -769,3 +771,12 @@ class HttpApiAssembly:
                 static_asset_service=StaticAssetService(handler.public_dir),
             )
         )
+
+
+def _session_feedback_lookup(athlete: Any) -> Any:
+    """The session-aware feedback lookup of the session-RPE load, if feedback exists."""
+    if not athlete.activity_feedback:
+        return None
+    return lambda keys: athlete.activity_feedback().for_activity_ids(
+        keys, sessions_only=True
+    )
