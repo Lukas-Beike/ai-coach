@@ -59,12 +59,11 @@ Consumer trace:
 - Canonical read: `read_recovery_inputs` reads sleep duration and score, resting
   HR, RMSSD, SDNN, the Garmin weekly HRV average and readiness of all providers
   (`backend/performance/canonical_recovery.py`) since #1411, and for M3 timing
-  the canonical sleep periods when the tables serve reads (#1419).
+  the canonical sleep periods (#1419, #1429).
 - Method: `personal_recovery` (`backend/performance/personal_recovery.py`)
   builds one series per provider and measurement from the daily canonical
   observations and restarts the comparison at a change of method, aggregation
-  or measurement context (#1428); raw rows and payloads feed sleep timing
-  variability only before the canonical tables serve reads.
+  or measurement context (#1428); no raw provider row or payload is read.
 - Report/context: `current_performance_context` (`backend/performance/context.py:167`).
 - HTTP: `GET /api/performance` (`backend/http_api/athlete_get.py:51`) and the
   report services (`backend/http_api/assembly.py:430`).
@@ -82,9 +81,9 @@ Consumer trace:
 
 Consumer trace:
 
-- Method: `personal_recovery` → `_sleep_deficits` on raw rows, and
-  `sleep_timing_variability` on canonical sleep periods once the tables serve (raw
-  rows before that), with pinned parity.
+- Method: `personal_recovery` → `_sleep_deficits` on canonical sleep duration
+  observations, and `sleep_timing_variability` (`sleep-timing-variability-v2`)
+  on canonical sleep periods only (#1429).
 - Report/context, HTTP, UI and Coach as for M2; in addition the Coach tool
   `get_training_report(sections=["sleep_timing_variability"])`
   (`backend/coach/activity_read_tools.py:83`) via
@@ -126,7 +125,7 @@ Consumer trace (no M4 method exists yet):
 | Canonical resting HR only replaces an equal legacy value | M2 | read path | resolved by #1411 |
 | Method, aggregation and window stored; only Garmin HRV populates them | M2, M3 | mapping | #1418 (#1408) |
 | Device model and firmware unknown for Garmin HRV (no measurement-associated evidence) | M2, M3, M4 | mapping | #1420 (#1408) |
-| Timing deviations computed below 14 earlier intervals | M3 | method | #1429 |
+| Timing deviations computed below 14 earlier intervals | M3 | method | resolved by #1429 (`sleep-timing-variability-v2`) |
 | Labels "sleep deficit" and regularity | M3 | wording | resolved by #1426 |
 | No full-resolution filter and no 180/420/720 s windows | M4 | method | #1430 |
 | Reports read stored analyses with kv fallback | M4 | read path | #1410 |
@@ -145,5 +144,5 @@ Classes in `tests/test_performance_method_inputs.py`; each has `test_complete`,
 | --- | --- | --- | --- |
 | M1 | `M1SessionRpeInputs` | — | — |
 | M2 | `M2HrvRestingHrInputs` | `test_canonical_resting_hr_is_the_primary_input`, `test_canonical_hrv_is_read_per_provider` | — |
-| M3 | `M3SleepInputs` | `test_canonical_sleep_duration_is_read_but_timing_is_not` | #1429, #1419 |
+| M3 | `M3SleepInputs` | `test_sleep_duration_and_timing_are_canonical_inputs` | — |
 | M4 | `M4BestEffortInputs` | — | #1430 |

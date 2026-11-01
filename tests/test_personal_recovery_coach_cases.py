@@ -9,7 +9,7 @@ well a model answers (docs/coach-dialogue-evaluation.md).
 import json
 import unittest
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import Mock
 
@@ -218,6 +218,93 @@ class RecoveryCoachCases(unittest.TestCase):
         self.assert_coach_text_is_clean(recovery)
         self.assertIn("contradictory", COACH_PROMPT)
         self.assertIn("Never diagnose disease or injury.", COACH_PROMPT)
+
+
+def _sleep_view(hours: list[float | None], profile: dict[str, Any]) -> dict[str, Any]:
+    """Coach view of Intervals sleep: ``hours[0]`` is today, None a missing night."""
+    wellness = [
+        {"id": (TODAY - timedelta(days=index)).isoformat(), "sleepSecs": hour * 3600}
+        for index, hour in enumerate(hours)
+        if hour is not None
+    ]
+    recovery = mapped_personal_recovery(wellness, {}, profile, TODAY)
+    return coach_performance_projection({"personal_recovery": recovery})[
+        "personal_recovery"
+    ]
+
+
+def _garmin_nights(count: int) -> dict[str, Any]:
+    """Garmin sleep periods 22:00-06:00 UTC, waking on the last ``count`` days."""
+    nights = []
+    for offset in range(count):
+        end = datetime(TODAY.year, TODAY.month, TODAY.day, 6, tzinfo=UTC) - timedelta(
+            days=offset
+        )
+        nights.append(
+            {
+                "calendarDate": end.date().isoformat(),
+                "sleepStartTimestampGMT": int(
+                    (end - timedelta(hours=8)).timestamp() * 1000
+                ),
+                "sleepEndTimestampGMT": int(end.timestamp() * 1000),
+            }
+        )
+    return {"sleep": nights}
+
+
+class SleepCoachCases(unittest.TestCase):
+    """M3 (#1429): estimated duration, own goal, known shortfall, unknown coverage."""
+
+    def test_shortfall_counts_known_nights_against_the_own_goal(self):
+        view = _sleep_view(
+            [6.5, 7.0, None, 8.5, 6.0, 7.5, 7.0], {"sleep_target_hours": "8"}
+        )
+        (sleep,) = _baselines(view, "sleep")
+        self.assertEqual(("Intervals.icu", 6.5), (sleep["source"], sleep["value"]))
+        self.assertIn("Schätzung des jeweiligen Geräts", view["note"])
+        self.assertEqual(8.0, view["sleep_target_hours"])
+        (shortfall,) = view["sleep_deficits"]
+        self.assertEqual(
+            (6, "partial", 8.0, 6.0),
+            (
+                shortfall["known_nights"],
+                shortfall["status"],
+                shortfall["target_hours"],
+                shortfall["deficit_hours"],
+            ),
+        )
+        self.assertIn("fehlende Nächte", view["note"])
+        self.assertEqual(
+            [], claim_wording_violations(json.dumps(view, ensure_ascii=False))
+        )
+
+    def test_no_goal_gives_no_shortfall(self):
+        view = _sleep_view([6.0] * 7, {})
+        self.assertEqual(
+            ([], None), (view["sleep_deficits"], view["sleep_target_hours"])
+        )
+        (sleep,) = _baselines(view, "sleep")
+        self.assertEqual(6.0, sleep["value"])
+
+    def test_short_timing_history_gives_no_deviation(self):
+        recovery = mapped_personal_recovery(
+            [], _garmin_nights(10), {"timezone": "UTC"}, TODAY
+        )
+        view = coach_performance_projection({"personal_recovery": recovery})
+        (series,) = view["personal_recovery"]["regularity"]["series"]
+        self.assertEqual(
+            ("insufficient_data", 9),
+            (series["status"], series["coverage"]["baseline_nights"]),
+        )
+        self.assertEqual({None}, set(series["baseline"].values()))
+        self.assertNotIn("points", series)
+        self.assertEqual(
+            {None},
+            {
+                point["onset_deviation_minutes"]
+                for point in recovery["regularity"]["points_14"]
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -481,12 +481,13 @@ class M3SleepInputs(unittest.TestCase):
             series["reason"],
             "Mindestens 14 frühere datierte Schlafintervalle erforderlich.",
         )
+        # #1429 (v2): below 14 earlier intervals no median and no deviation.
         self.assertEqual(
-            series["points"][-1]["onset_deviation_minutes"],
-            75.0,
-            msg="#1429: sleep-timing-variability-v1 still computes deviations below 14 earlier "
-            "intervals; expected None until 14",
+            [None] * 14,
+            [point["onset_deviation_minutes"] for point in series["points"]],
         )
+        self.assertIsNone(series["baseline"]["onset_median_minutes_local"])
+        self.assertIsNone(series["baseline"]["wake_deviation_median_minutes"])
 
     def test_contradictory(self) -> None:
         wellness = [
@@ -515,7 +516,7 @@ class M3SleepInputs(unittest.TestCase):
         )
         self.assertEqual(regularity["regularity"]["series"], [])
 
-    def test_canonical_sleep_duration_is_read_but_timing_is_not(self) -> None:
+    def test_sleep_duration_and_timing_are_canonical_inputs(self) -> None:
         observation = recovery_observation(
             MetricKind.SLEEP_DURATION, 28_800.0, TODAY.isoformat(), ProviderId.GARMIN
         )
@@ -536,8 +537,7 @@ class M3SleepInputs(unittest.TestCase):
         self.assertEqual(
             timing,
             [],
-            msg="#1419: no canonical sleep start/end kind; sleep-timing-variability-v1 reads "
-            "raw provider fields",
+            msg="#1419: sleep start and end are canonical sleep periods, not metric kinds",
         )
         sleep_storage = [
             f"{table}.{column}"
@@ -549,7 +549,7 @@ class M3SleepInputs(unittest.TestCase):
             sleep_storage,
             ["sleep_periods.sleep_periods"],
             msg="#1419: canonical sleep periods are stored (schema v15); "
-            "sleep-timing-variability-v1 reads them when the tables serve",
+            "sleep-timing-variability-v2 reads them",
         )
         series = mapped_personal_recovery(
             [], {"sleep": [_night(0)]}, self.profile, TODAY

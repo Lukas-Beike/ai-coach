@@ -228,11 +228,12 @@ class PersonalRecoveryTests(unittest.TestCase):
             "Keine Diagnose, keine Trainingsfreigabe und keine Trainingsänderung",
             "summiert nur bekannte Nächte",
             "fehlende Nächte und nicht erfasste Nickerchen begrenzen diese Aussage",
+            "Schätzung des jeweiligen Geräts, kein gemessener Schlafbedarf",
             "kein Sleep Regularity Index",
         ):
             self.assertIn(sentence, note)
         self.assertEqual("personal-quartiles-v1", result["method"])
-        self.assertEqual("sleep-timing-variability-v1", result["regularity"]["method"])
+        self.assertEqual("sleep-timing-variability-v2", result["regularity"]["method"])
 
     def test_profile_target_requires_valid_explicit_value(self):
         self.assertEqual(
@@ -315,8 +316,9 @@ class PersonalRecoveryTests(unittest.TestCase):
                 self.assertTrue(item["method"].startswith("sleepStartTimestampGMT/"))
 
     def test_sleep_timing_variability_circular_midnight_median_and_sources(self):
+        # 15 rows; the moved second row shares a wake date, leaving 14 earlier.
         rows = self.sleep_rows(
-            14, start="2026-09-01T21:50:00Z", end="2026-09-02T05:50:00Z"
+            15, start="2026-09-01T21:50:00Z", end="2026-09-02T05:50:00Z"
         )
         rows[1]["sleepStartTimestampGMT"] = int(
             datetime(2026, 9, 1, 22, 10, tzinfo=UTC).timestamp() * 1000

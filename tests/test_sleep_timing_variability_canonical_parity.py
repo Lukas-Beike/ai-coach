@@ -1,4 +1,4 @@
-"""sleep-timing-variability-v1 reads the canonical sleep periods only.
+"""Sleep timing variability reads the canonical sleep periods only.
 
 Each case maps synthetic Garmin sleep and Intervals.icu wellness rows to canonical
 periods with the production mapper. The legacy walk over the raw rows is gone

@@ -60,8 +60,9 @@ _NOTE: Final = (
     "Werte; ein Wert außerhalb ist weder selten noch ein Warnsignal. Keine "
     "Diagnose, keine Trainingsfreigabe und keine Trainingsänderung allein aus "
     "einer Abweichung. Krankheit und Schmerzen separat berücksichtigen. Quellen "
-    "und Messfelder werden nicht gemischt. Der Fehlbetrag zum Schlafziel "
-    "summiert nur bekannte Nächte und wird nicht mit längeren Nächten "
+    "und Messfelder werden nicht gemischt. Die Schlafdauer ist eine Schätzung "
+    "des jeweiligen Geräts, kein gemessener Schlafbedarf. Der Fehlbetrag zum "
+    "Schlafziel summiert nur bekannte Nächte und wird nicht mit längeren Nächten "
     "verrechnet; fehlende Nächte und nicht erfasste Nickerchen begrenzen "
     "diese Aussage. Die Schlafzeit-Streuung ist kein Sleep Regularity Index."
 )
@@ -290,7 +291,8 @@ def sleep_timing_variability(
     """Summarize clock-time deviations of actual sleep intervals, without a score.
 
     Compares onset and wake with the athlete's own earlier nights; this is not the
-    Sleep Regularity Index.
+    Sleep Regularity Index. Version 2 (#1429) reports no median and no deviation
+    below 14 earlier intervals; otherwise it equals version 1.
 
     ``periods`` are the canonical sleep periods; None means the serving source
     stores none, and there is no data. Each provider and field pair is kept
@@ -310,7 +312,7 @@ def sleep_timing_variability(
     if not series:
         reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
         return {
-            "method": "sleep-timing-variability-v1",
+            "method": "sleep-timing-variability-v2",
             "timezone": timezone_name,
             "status": "insufficient_data",
             "reason": reason,
@@ -323,7 +325,7 @@ def sleep_timing_variability(
         }
     rank = {"insufficient_data": 0, "provisional": 1, "ok": 2}
     return {
-        "method": "sleep-timing-variability-v1",
+        "method": "sleep-timing-variability-v2",
         "timezone": timezone_name,
         "status": max(
             (item["status"] for item in series), key=lambda status: rank[status]
@@ -420,14 +422,16 @@ def _sleep_series(
         reason = "Mindestens 14 frühere datierte Schlafintervalle erforderlich."
     if not count:
         reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
+    # v2: below 14 earlier intervals there is no reference, so no deviation.
+    compared = status != "insufficient_data"
     onset = (
         _circular_median([item["onset_minutes_local"] for item in prior])
-        if prior
+        if compared
         else None
     )
     wake = (
         _circular_median([item["wake_minutes_local"] for item in prior])
-        if prior
+        if compared
         else None
     )
     points = [
@@ -496,8 +500,8 @@ def _sleep_series(
         "baseline": {
             "onset_median_minutes_local": onset,
             "wake_median_minutes_local": wake,
-            "onset_deviation_median_minutes": median(onset_dev) if prior else None,
-            "wake_deviation_median_minutes": median(wake_dev) if prior else None,
+            "onset_deviation_median_minutes": median(onset_dev) if compared else None,
+            "wake_deviation_median_minutes": median(wake_dev) if compared else None,
         },
         "points": points,
         "points_14": display(14),
