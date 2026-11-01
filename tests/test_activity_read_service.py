@@ -1,3 +1,4 @@
+import copy
 import json
 import tempfile
 import unittest
@@ -19,7 +20,6 @@ from backend.performance.activity_read_service import ActivityAnalysisReadServic
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.snapshot_reader import SnapshotRepositoryReader
 
 INTERVALS = ProviderId.INTERVALS
 LEGACY_KEYS = {
@@ -127,7 +127,6 @@ class ActivityReadServiceTests(unittest.TestCase):
         kwargs.setdefault("summary_rows", rows)
         return ActivityAnalysisReadService(
             self.manager,
-            _Snapshots(snapshot),
             CompactActivityRows(rows),
             _Feedback(),
             references=ActivityReferences(self.manager),
@@ -161,10 +160,11 @@ class ActivityReadServiceTests(unittest.TestCase):
                 ]
             },
         }
+        # The fixture snapshot the rows below are served from.
+        self.snapshot = snapshot
         rows = SnapshotActivityRows(_Snapshots(snapshot))
         return ActivityAnalysisReadService(
             _Manager(),
-            _Snapshots(snapshot),
             CompactActivityRows(rows),
             _Feedback(),
             detail_store,
@@ -189,13 +189,14 @@ class ActivityReadServiceTests(unittest.TestCase):
 
     def test_recent_filters_by_explicit_today_without_mutating_snapshot(self):
         service = self.service()
-        before = service._snapshot()
+        before = copy.deepcopy(self.snapshot)
         result = service.recent(days=1, today=date(2026, 9, 20))
         self.assertEqual(["new"], [item["id"] for item in result["activities"]])
-        self.assertEqual(before, service._snapshot())
+        self.assertEqual(before, self.snapshot)
 
     def test_detail_is_bounded_and_includes_feedback(self):
-        snapshot = self.service()._snapshot()
+        self.service()
+        snapshot = self.snapshot
         result = self.detail_service(snapshot).detail(
             "new",
             garmin_status=NO_GARMIN_SYNC_STATUS,
@@ -270,7 +271,8 @@ class ActivityReadServiceTests(unittest.TestCase):
         self.assertEqual(3, len(rows.starts))
 
     def test_detail_rejects_invalid_or_missing_activity(self):
-        service = self.detail_service(self.service()._snapshot())
+        self.service()
+        service = self.detail_service(self.snapshot)
         with self.assertRaises(AppError) as invalid:
             service.detail(
                 "",
@@ -293,22 +295,6 @@ class ActivityReadServiceTests(unittest.TestCase):
             self.assertEqual(
                 "Diese Aktivität ist lokal nicht vorhanden.", str(missing.exception)
             )
-
-    def test_snapshot_reader_preserves_provider_provenance(self):
-        snapshot = {
-            "synced_at": "2026-09-20T08:00:00+00:00",
-            "source_freshness": {"intervals": {"freshness": "current"}},
-            "provider_sync": {"source": "intervals", "cursor": "synthetic"},
-            "recent_activities": [],
-        }
-        service = ActivityAnalysisReadService(
-            _Manager(),
-            SnapshotRepositoryReader(_Snapshots(snapshot)),
-            CompactActivityRows(SnapshotActivityRows(_Snapshots(snapshot))),
-            _Feedback(),
-            canonical=canonical_source((), _Manager),
-        )
-        self.assertEqual(service._snapshot(), snapshot)
 
     def test_activity_sync_time_comes_from_canonical_coverage(self):
         # The snapshot carries other times; only the stored coverage is consulted.
@@ -357,7 +343,6 @@ class ActivityReadServiceTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             ActivityAnalysisReadService(  # type: ignore[call-arg]
                 _Manager(),
-                _Snapshots({}),
                 CompactActivityRows(SnapshotActivityRows(_Snapshots({}))),
                 _Feedback(),
             )

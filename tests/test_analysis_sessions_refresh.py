@@ -212,10 +212,8 @@ class AnalysisSessionsRefreshTests(unittest.TestCase):
             def attach_to_activities(self, rows):
                 return rows
 
-        saved_reader = Mock(latest_snapshot=Mock(return_value=saved))
         read_service = ActivityReadService(
             Database(),
-            saved_reader,
             CanonicalTableReader(),
             Feedback(),
             coverage=lambda: StoredCoverage(saved["activities_synced_at"]),

@@ -587,6 +587,81 @@ class OwnerReadGuardTests(unittest.TestCase):
             entries,
         )
 
+    def test_consumers_cannot_read_raw_provider_views(self) -> None:
+        entries = _owner_reads(
+            {
+                "backend/coach/consumer.py": (
+                    'rows = snapshot.get("recent_wellness")\n'
+                    'raw = snapshot["raw_provider_data"]\n'
+                    "view = self._garmin_payload.recent_view(7)\n"
+                    "inner = payload.recent_view_in(db, 7)\n"
+                    "from backend.db.garmin_store import read_view\n"
+                    'gear = read_view(db, ("gear",))\n'
+                    'KEY = f"activity_detail:{activity_id}"\n'
+                    "# recent_wellness in a comment is ignored\n"
+                ),
+                "backend/planning/consumer.py": (
+                    "sql = \"SELECT key FROM kv WHERE key LIKE 'activity_detail:%'\"\n"
+                ),
+            }
+        )
+        self.assertEqual(
+            [
+                ("legacy_read", "backend/coach/consumer.py", "activity_detail:", 1),
+                ("legacy_read", "backend/coach/consumer.py", "raw_provider_data", 1),
+                ("legacy_read", "backend/coach/consumer.py", "read_view", 2),
+                ("legacy_read", "backend/coach/consumer.py", "recent_view", 1),
+                ("legacy_read", "backend/coach/consumer.py", "recent_view_in", 1),
+                ("legacy_read", "backend/coach/consumer.py", "recent_wellness", 1),
+                ("legacy_read", "backend/planning/consumer.py", "activity_detail:", 1),
+            ],
+            entries,
+        )
+
+    def test_raw_view_docstrings_owners_and_lookalikes_are_not_flagged(self) -> None:
+        read = "view = garmin_store.read_view(db, None)\n"
+        entries = _owner_reads(
+            {
+                "backend/performance/consumer.py": (
+                    '"""Formerly read recent_wellness and raw_provider_data."""\n'
+                    "def f():\n"
+                    '    """Was recent_view; see activity_detail: records."""\n'
+                    'failure = "activity_detail_failure"\n'
+                    'unrelated = "recent_wellness_days"\n'
+                    "spread = reader.read_views(db)\n"
+                ),
+                # Ingestion and persistence owners are out of the rule's scope.
+                "backend/sync/garmin.py": read,
+                "backend/db/garmin_store.py": read,
+                "backend/backup/export.py": read,
+            }
+        )
+        self.assertEqual([], entries)
+
+    def test_allowlisted_raw_view_owner_passes_and_a_stale_entry_fails(self) -> None:
+        entries = _scan_files(
+            {
+                "backend/nutrition/status.py": "state = garmin_store.read_view(db, ())\n",
+                "backend/athlete/consumer.py": "rows = snapshot['recent_wellness']\n",
+            },
+            scan_owner_reads,
+        )
+        allowlist = {
+            ("legacy_read", "backend/nutrition/status.py"): "sync-status",
+            ("legacy_read", "backend/nutrition/gone.py"): "sync-status",
+        }
+        self.assertEqual(
+            [("legacy_read", "backend/athlete/consumer.py", "recent_wellness")],
+            [
+                (entry.rule, entry.path, entry.token)
+                for entry in unallowed_owner_reads(entries, allowlist)
+            ],
+        )
+        self.assertEqual(
+            [("legacy_read", "backend/nutrition/gone.py")],
+            stale_owner_allowlist(entries, allowlist),
+        )
+
     def test_athlete_views_are_in_the_source_label_scope(self) -> None:
         entries = _owner_reads(
             {"backend/athlete/consumer.py": 'item = {"source": "Garmin Connect"}\n'}

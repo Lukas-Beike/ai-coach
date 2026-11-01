@@ -15,11 +15,11 @@ from performance_day_support import latest_day, snapshot_metrics
 
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.canonical_current import CanonicalCurrentInputs
-from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
+from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 TODAY = date(2026, 5, 4)
 GARMIN = "Garmin Connect"

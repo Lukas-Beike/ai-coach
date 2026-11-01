@@ -21,7 +21,6 @@ from backend.errors import (
     INTERVALS_API_KEY_ERROR,
     AppError,
 )
-from backend.planning.context import compact_snapshot
 from backend.planning.library_service import WorkoutLibraryService
 from backend.providers.descriptors import INTERVALS_ID
 from backend.providers.intervals import IntervalsApiClient
@@ -34,6 +33,7 @@ from backend.sync.canonical_ingest import ingest_intervals_snapshot
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.freshness_sources import intervals_sync_running
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.intervals_compaction import compact_snapshot
 from backend.sync.library import WorkoutLibraryRefreshService
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.performance import PerformanceRefreshFollowupService

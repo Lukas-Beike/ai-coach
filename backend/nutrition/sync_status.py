@@ -17,13 +17,9 @@ from backend.nutrition.models import validate_iso_date
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import (
     daily_energy_expenditure,
-    read_daily_health_by_date,
+    read_daily_health_with_retrievals,
 )
-from backend.providers.garmin_fields import GARMIN_DATE_ALIASES
 from backend.runtime.ports import ObservationReader
-
-# The energy views need the daily stats of the shown days and the sync state.
-_ENERGY_SECTIONS = ("daily_stats",)
 
 
 class NutritionSyncStatusService:
@@ -54,14 +50,10 @@ class NutritionSyncStatusService:
         )
         with self._database_manager.read_snapshot() as db:
             summary = self._nutrition_repository.day_summary(db, validated_date)
-            # The snapshot carries only the daily-stats sync status.
-            garmin_snapshot = garmin_store.read_view(
-                db, _ENERGY_SECTIONS, start=snapshot_start, end=validated_date
-            )
-            measured = _filter_targeted_missing_energy(
-                self._measured_energy(db, snapshot_start, validated_date),
-                garmin_snapshot,
-                [validated_date],
+            # The Garmin state carries only the daily-stats sync status.
+            garmin_snapshot = garmin_store.read_state(db)
+            measured = self._filtered_energy(
+                db, snapshot_start, validated_date, garmin_snapshot, [validated_date]
             )
         add_intake_totals(summary)
         summary["energy_expenditure"] = daily_energy_expenditure(
@@ -73,16 +65,26 @@ class NutritionSyncStatusService:
         )
         return summary
 
-    def _measured_energy(
-        self, db: Any, start: str, end: str
+    def _filtered_energy(
+        self,
+        db: Any,
+        start: str,
+        end: str,
+        state: dict[str, Any],
+        dates: list[str],
     ) -> dict[str, dict[str, Any]]:
-        """Read the canonical daily energy of the inclusive ISO date range."""
-        return read_daily_health_by_date(
+        """Read the canonical daily energy of the inclusive ISO date range.
+
+        A day a current targeted refresh read without a Garmin daily total is
+        emptied (``_filter_targeted_missing_energy``).
+        """
+        measured, retrievals = read_daily_health_with_retrievals(
             resolve_reader(self._observation_reader(), db),
             db,
             start=date.fromisoformat(start),
             end=date.fromisoformat(end),
         )
+        return _filter_targeted_missing_energy(measured, state, dates, retrievals)
 
     def get_sync_snapshot(self, meal_date: str) -> dict[str, Any]:
         validated_date = validate_iso_date(meal_date)
@@ -102,12 +104,8 @@ class NutritionSyncStatusService:
             summaries = [
                 self._nutrition_repository.day_summary(db, day) for day in dates
             ]
-            snapshot = garmin_store.read_view(
-                db, _ENERGY_SECTIONS, start=dates[0], end=dates[-1]
-            )
-            measured = _filter_targeted_missing_energy(
-                self._measured_energy(db, dates[0], dates[-1]), snapshot, dates
-            )
+            snapshot = garmin_store.read_state(db)
+            measured = self._filtered_energy(db, dates[0], dates[-1], snapshot, dates)
         days = []
         for summary in summaries:
             add_intake_totals(summary)
@@ -224,9 +222,18 @@ def _week_day(summary: dict[str, Any], expenditure: dict[str, Any]) -> dict[str,
 
 
 def _filter_targeted_missing_energy(
-    measured: dict[str, dict[str, Any]], snapshot: dict[str, Any], dates: list[str]
+    measured: dict[str, dict[str, Any]],
+    snapshot: dict[str, Any],
+    dates: list[str],
+    retrievals: dict[str, datetime | None],
 ) -> dict[str, dict[str, Any]]:
-    """Do not reuse older canonical observations after a complete empty day read."""
+    """Do not reuse older canonical observations after a complete empty day read.
+
+    ``snapshot`` is the Garmin sync state. ``retrievals`` holds the latest fetch
+    time of each day's Garmin daily totals (``read_daily_health_with_retrievals``).
+    A day counts as read only with a total fetched at or after the refresh; a
+    refresh time that is not an ISO instant accepts any stored total of the day.
+    """
     nutrition_refresh = snapshot.get("nutrition_refresh")
     targeted = (
         nutrition_refresh.get("daily_stats", {})
@@ -235,25 +242,29 @@ def _filter_targeted_missing_energy(
     )
     if not isinstance(targeted, dict):
         return measured
-    records = snapshot.get("daily_stats")
-    observed_dates = (
-        {
-            str(record.get(key))[:10]
-            for record in records
-            if isinstance(record, dict)
-            for key in GARMIN_DATE_ALIASES
-            if record.get(key)
-        }
-        if isinstance(records, list)
-        else set()
-    )
     result = dict(measured)
     for day in dates:
         refresh = targeted.get(day)
         if (
             isinstance(refresh, dict)
             and refresh.get("freshness") == "current"
-            and day not in observed_dates
+            and not _read_by_refresh(retrievals, day, refresh.get("fetched_at"))
         ):
             result[day] = {}
     return result
+
+
+def _read_by_refresh(
+    retrievals: dict[str, datetime | None], day: str, fetched_at: Any
+) -> bool:
+    """Return whether the day has a Garmin daily total from this refresh or later."""
+    if day not in retrievals:
+        return False
+    try:
+        refreshed = datetime.fromisoformat(str(fetched_at))
+    except ValueError:
+        return True
+    retrieved = retrievals[day]
+    if refreshed.tzinfo is None or retrieved is None:
+        return True
+    return retrieved >= refreshed

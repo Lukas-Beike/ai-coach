@@ -11,6 +11,7 @@ from backend.athlete.checkins import CheckinService
 from backend.calendar.external import ExternalCalendarReader
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.public_metrics import neutral_calendar_state
+from backend.canonical.records import Observation
 from backend.planning import calendar_read_model
 from backend.planning.competition_service import CompetitionService
 from backend.planning.daily_context_service import DailyPlanningContextService
@@ -56,14 +57,18 @@ class PublicStateCalendarProjection:
 
     def read(
         self,
-        snapshot: dict[str, Any],
         canonical_planned: list[dict[str, Any]],
         local_planned: list[dict[str, Any]],
         activities: list[dict[str, Any]],
         weather: dict[str, Any],
         calendar_window: dict[str, Any],
+        sport_thresholds: Sequence[Observation] = (),
     ) -> PublicStateCalendarData:
-        """Read and project calendar data without opening a transaction."""
+        """Read and project calendar data without opening a transaction.
+
+        ``sport_thresholds`` are the plan-zone thresholds of the canonical current
+        inputs the caller already read.
+        """
         checkins = self._checkins.list(30)
         competitions = self._competitions.list()
         external_calendar = self._external_calendar.state(
@@ -92,7 +97,7 @@ class PublicStateCalendarProjection:
             today=self._today(),
             provider_window=calendar_window,
             default_name=self._default_workout_name,
-            sport_settings=calendar_read_model.snapshot_sport_settings(snapshot),
+            sport_thresholds=sport_thresholds,
             zone_configurations=self._zone_configurations(),
         )
         neutral_calendar_state(calendar_projection)

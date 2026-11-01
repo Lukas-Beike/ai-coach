@@ -1,6 +1,6 @@
 """Shared walk over Garmin weight payloads.
 
-The legacy reader in ``backend/performance/garmin_weight`` and the health mapper in
+The ingest weight parser in ``backend/sync/garmin_weight`` and the health mapper in
 ``backend/providers/garmin_health_mapping`` search the same nested weight payload
 with the same limits and skip rules. They differ only in how a record's day is typed
 and how its value is read, so the walk lives here and each caller supplies its own

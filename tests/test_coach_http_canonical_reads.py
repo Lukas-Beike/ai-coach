@@ -25,12 +25,12 @@ from backend.http_api.state_prelude import CalendarWindowRange, PublicStateLocal
 from backend.planning.compact_activities import (
     RECENT_ACTIVITY_LIMIT,
     ActivitySummarySource,
-    compact_activity_rows,
 )
 from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
     intervals_snapshot_coverage,
 )
+from backend.sync.intervals_compaction import compact_activity_rows
 
 TODAY = date(2026, 10, 13)
 CANONICAL_SECTIONS = ("recent_activities", "recent_wellness", "raw_provider_data")
@@ -295,7 +295,9 @@ class HttpStateReadTests(CanonicalContextReadCase):
         self, selector: Any, snapshot: dict[str, Any]
     ) -> list[dict[str, Any]]:
         state = Mock()
-        state.latest_snapshot.return_value = snapshot
+        state.sync_metadata.return_value = {
+            "provider_sync": snapshot.get("provider_sync", {})
+        }
         feedback = Mock()
         feedback.attach_to_activities.side_effect = lambda rows: rows
         planned = Mock()
@@ -333,7 +335,9 @@ class HttpStateReadTests(CanonicalContextReadCase):
         feedback = Mock()
         feedback.attach_to_activities.side_effect = lambda rows: rows
         sync_state = Mock()
-        sync_state.latest_snapshot.return_value = snapshot
+        sync_state.sync_metadata.return_value = {
+            "provider_sync": snapshot.get("provider_sync", {})
+        }
         planned = Mock()
         planned.list.return_value = []
         weather = Mock()

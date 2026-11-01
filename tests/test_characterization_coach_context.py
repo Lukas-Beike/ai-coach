@@ -42,12 +42,12 @@ from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     GarminCanonicalState,
 )
-from backend.planning.context import compact_snapshot
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
     GarminProjectionService,
 )
+from backend.sync.intervals_compaction import compact_snapshot
 
 TODAY = date(2026, 5, 4)
 GARMIN_SOURCE = "Garmin Connect"

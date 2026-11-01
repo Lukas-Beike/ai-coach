@@ -359,7 +359,6 @@ def _detail_tool(manager, activities: list[dict], garmin, profile):
     feedback.list.return_value = []
     activity_read = ActivityAnalysisReadService(
         manager,
-        snapshot_repository,
         CompactActivityRows(SnapshotActivityRows(snapshot_repository)),
         feedback,
         canonical=canonical_source(
@@ -392,7 +391,6 @@ def _canonical_activity_tool(case: unittest.TestCase, snapshot: dict):
     manager = MagicMock()
     activity_read = ActivityAnalysisReadService(
         sessions,
-        snapshot_reader,
         CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
         feedback,
         canonical=CanonicalPerformanceSource(

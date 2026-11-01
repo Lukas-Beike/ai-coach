@@ -11,13 +11,13 @@ from collections.abc import Iterable
 from datetime import date
 from typing import Any
 
-from backend.planning.context import ACTIVITY_FIELDS, selected
 from backend.runtime.ports import ActivityRowReader
+from backend.sync.intervals_compaction import compact_activity_row
 
 
 def compact_activity_rows(rows: Iterable[Any]) -> tuple[dict[str, Any], ...]:
     """Return the compact shape of raw activity rows, in the given order."""
-    return tuple(selected(row, ACTIVITY_FIELDS) for row in rows)
+    return tuple(compact_activity_row(row) for row in rows)
 
 
 class CompactActivityRows(ActivityRowReader):

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from backend.canonical.records import Observation
 from backend.http_api.bootstrap_calendar import PublicStateCalendarProjection
 from backend.http_api.bootstrap_state import (
     PublicBootstrapDependencies,
@@ -22,7 +23,11 @@ from backend.http_api.state_prelude import (
     PublicStateWeatherPrelude,
 )
 from backend.http_api.state_versions import StateVersionService
-from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.canonical_current import read_zone_thresholds
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceSource,
+    resolve_reader,
+)
 from backend.performance.season_inputs import SeasonSource
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.runtime.ports import (
@@ -204,6 +209,12 @@ class PublicStateAssembly:
             coverage=self._coverage,
         )
 
+    def _plan_zone_thresholds(self, db: Any) -> tuple[Observation, ...]:
+        """The plan-zone thresholds inside the plan's read; none without a reader."""
+        if self._observation_reader is None:
+            return ()
+        return read_zone_thresholds(resolve_reader(self._observation_reader(), db), db)
+
     def season_source(self) -> SeasonSource:
         if self._observation_reader is None or self._activity_summary_reader is None:
             raise RuntimeError(
@@ -353,6 +364,7 @@ class PublicStateAssembly:
                 activity_rows=self.activity_summary_source(),
                 activity_row_reader=self._activity_row_reader,
                 zone_configurations=athlete.zones().configurations,
+                sport_thresholds=self._plan_zone_thresholds,
             )
         )
 

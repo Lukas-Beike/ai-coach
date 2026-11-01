@@ -18,8 +18,6 @@ from backend.db.manager import DATABASE_MANAGER_CACHE
 from backend.http_api.auth import RATE_LIMITER
 from backend.http_api.rate_limit import RateLimiter
 from backend.performance import context as performance_context
-from backend.performance import garmin_metrics as performance_garmin_metrics
-from backend.performance import history as performance_history
 from backend.performance.freshness import GarminSyncStatus
 from backend.providers import garmin as garmin_provider
 from backend.providers.garmin import (
@@ -29,7 +27,8 @@ from backend.providers.garmin import (
 )
 from backend.runtime import maintenance as runtime_maintenance
 from backend.sync import garmin as garmin_sync
-from backend.sync import garmin_service
+from backend.sync import garmin_payload_metrics, garmin_service
+from backend.sync import garmin_performance_history as performance_history
 from backend.sync.intervals import IntervalsSnapshotReader
 from backend.sync.worker import SyncJobWorker
 
@@ -483,10 +482,9 @@ class ProviderReviewTests(unittest.TestCase):
                     ],
                     0,
                 )
-                self.assertEqual(
-                    read_garmin()["activity_matches"],
-                    [{"garmin_activity_id": 123, "intervals_activity_id": "canonical"}],
-                )
+                # Canonical reads (#1416): the sync stores no activity matches;
+                # equipment pairs canonical activity records at read time.
+                self.assertNotIn("activity_matches", read_garmin())
                 self.assertEqual(
                     server.SYNC_PERSISTENCE.state_repository().cursor("garmin", "data")[
                         "cursor"
@@ -591,7 +589,7 @@ class ProviderReviewTests(unittest.TestCase):
         performance_history.append_garmin_performance_history(
             payload, {}, server.ATHLETE_CLOCK.now().date()
         )
-        metric = performance_garmin_metrics.garmin_payload_performance_metrics(
+        metric = garmin_payload_metrics.garmin_payload_performance_metrics(
             payload, server.ATHLETE_CLOCK.now().date()
         )["cycling_ftp_watts"]
         self.assertEqual(metric["freshness"], "current")
@@ -629,7 +627,7 @@ class ProviderReviewTests(unittest.TestCase):
         }
         payloads.prepare_remote(second)
         save_garmin(second, replace=False)
-        metric = performance_garmin_metrics.garmin_payload_performance_metrics(
+        metric = garmin_payload_metrics.garmin_payload_performance_metrics(
             read_garmin(), server.ATHLETE_CLOCK.now().date()
         )["cycling_max_hr_bpm"]
         self.assertEqual(metric["value"], 180)

@@ -35,12 +35,12 @@ from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.load import activity_rollup
 from backend.performance.load_context import performance_load_context
 from backend.performance.recovery_context import performance_recovery_context
-from backend.planning.context import compact_snapshot
 from backend.providers.intervals_activity_mapping import map_intervals_activities
 from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
+from backend.sync.intervals_compaction import compact_snapshot
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "providers" / "intervals"
 BERLIN = ZoneInfo("Europe/Berlin")

@@ -130,7 +130,6 @@ def _detail_service(
     kwargs.setdefault("summary_rows", rows)
     return ActivityAnalysisReadService(
         database,
-        snapshots,
         CompactActivityRows(rows),
         _Feedback(),
         ActivityDetailStore(database),
@@ -188,7 +187,6 @@ class ActivityPageCharacterizationTests(_StorageCase):
         snapshots = _Snapshots(_snapshot(activities))
         service = ActivityReadService(
             self.database,
-            snapshots,
             CompactActivityRows(SnapshotActivityRows(snapshots)),
             _Feedback(),
         )
@@ -202,7 +200,6 @@ class ActivityPageCharacterizationTests(_StorageCase):
         store = ActivityDetailStore(self.database)
         service = ActivityReadService(
             self.database,
-            snapshots,
             CompactActivityRows(full_rows),
             _Feedback(),
             store,
@@ -385,7 +382,6 @@ class ActivityPageCharacterizationTests(_StorageCase):
         snapshots = _Snapshots(None)
         service = ActivityReadService(
             self.database,
-            snapshots,
             CompactActivityRows(SnapshotActivityRows(snapshots)),
             _Feedback(),
         )
@@ -405,7 +401,6 @@ class ActivityRecentCharacterizationTests(_StorageCase):
         snapshots = _Snapshots(_snapshot(activities))
         service = ActivityReadService(
             self.database,
-            snapshots,
             CompactActivityRows(SnapshotActivityRows(snapshots)),
             _Feedback(),
         )
@@ -842,7 +837,13 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
     ) -> PublicPlanStateService:
         return PublicPlanStateService(
             PublicPlanDependencies(
-                sync_state=Mock(latest_snapshot=Mock(return_value=snapshot)),
+                sync_state=Mock(
+                    sync_metadata=Mock(
+                        return_value={
+                            "provider_sync": snapshot.get("provider_sync", {})
+                        }
+                    )
+                ),
                 planned_units=Mock(list=Mock(return_value=[])),
                 activity_feedback=Mock(attach_to_activities=lambda rows: list(rows)),
                 weather=Mock(state=Mock(return_value={})),

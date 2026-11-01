@@ -2,7 +2,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -298,6 +298,59 @@ class NutritionGarminExpenditureTests(unittest.TestCase):
         self.assertEqual(week["balance_days"], 0)
         for metric in week["averages"].values():
             self.assertEqual(metric, {"value": None, "days": 0})
+
+    def refresh_daily_stats(self, records: list[dict[str, Any]], day: str) -> None:
+        """Run one complete targeted daily-stats read of ``day``, as the sync does."""
+        fetched_at = "2026-09-24T10:00:00+00:00"
+        writer = GarminSnapshotWriter(
+            KeyValueRepository(lambda: self.fixed_now), lambda: UTC
+        )
+        refreshed = date.fromisoformat(day)
+        with self.manager.unit_of_work() as db:
+            writer.write_refresh(
+                db,
+                fetched_at=fetched_at,
+                sections={"daily_stats": records},
+                view={
+                    "nutrition_refresh": {
+                        "daily_stats": {
+                            day: {"freshness": "current", "fetched_at": fetched_at}
+                        }
+                    }
+                },
+                windows={"daily_stats": (refreshed, refreshed)},
+                allowed=frozenset({"daily_stats"}),
+            )
+
+    def test_an_empty_targeted_read_drops_the_days_older_energy(self) -> None:
+        # Canonical reads (#1416): presence comes from the day's canonical Garmin
+        # totals fetched by the refresh, as the stored raw section's did before.
+        self.store_garmin(
+            {"daily_stats": [{"date": "2026-09-23", "totalKilocalories": 2000}]}
+        )
+        before = self.service.get_day_summary("2026-09-23")["energy_expenditure"]
+        self.assertEqual(before["total_kcal"], 2000)
+
+        self.refresh_daily_stats([], "2026-09-23")
+
+        after = self.service.get_day_summary("2026-09-23")["energy_expenditure"]
+        self.assertIsNone(after["total_kcal"])
+        self.assertEqual(after["status"], "unavailable")
+        week = self.service.get_week_summary(7)
+        (day,) = [item for item in week["days"] if item["date"] == "2026-09-23"]
+        self.assertIsNone(day["expenditure_kcal"])
+
+    def test_a_targeted_read_with_the_day_keeps_its_energy(self) -> None:
+        self.store_garmin(
+            {"daily_stats": [{"date": "2026-09-23", "totalKilocalories": 2000}]}
+        )
+        self.refresh_daily_stats(
+            [{"date": "2026-09-23", "totalKilocalories": 2200}], "2026-09-23"
+        )
+
+        after = self.service.get_day_summary("2026-09-23")["energy_expenditure"]
+        self.assertEqual(after["total_kcal"], 2200)
+        self.assertEqual(after["status"], "measured")
 
 
 if __name__ == "__main__":

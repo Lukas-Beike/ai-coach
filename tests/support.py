@@ -12,8 +12,8 @@ from unittest.mock import patch
 from backend.coach import streams as coach_streams
 from backend.config import Config
 from backend.db.manager import DATABASE_MANAGER_CACHE
-from backend.planning.context import compact_snapshot
 from backend.runtime import clock as runtime_clock
+from backend.sync.intervals_compaction import compact_snapshot
 
 PROVIDER_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "providers"
 PROVIDER_SYNCED_TEXT = "2026-10-10T06:00:00+00:00"

@@ -3,9 +3,10 @@
 Sleep, HRV, resting HR, readiness, CTL, ATL, form (TSB) and the daily totals come
 from the injected observation reader over a window that ends on the athlete's local
 date. Body battery is not mapped to observations and stays a read of the morning
-battery. The populated temporary database tests prove that the table-served view
-equals the stored-snapshot reference view and does not depend on the snapshot. All
-providers are mocked and all storage is temporary.
+battery. The populated temporary database tests pin the table-served view of the
+shared fixture, which matched the deleted stored-snapshot reader (#1416), and prove
+that it does not depend on the snapshot. All providers are mocked and all storage
+is temporary.
 """
 
 from __future__ import annotations
@@ -29,7 +30,6 @@ from backend.performance.planning_recovery import (
     GARMIN_SOURCE,
     INTERVALS_WELLNESS_SOURCE,
     canonical_planning_recovery,
-    planning_recovery_by_date,
     planning_recovery_view,
 )
 from backend.planning.daily_context_service import (
@@ -42,17 +42,61 @@ DAY = "2026-09-20"
 OTHER_DAY = "2026-09-21"
 TODAY = date(2026, 10, 10)
 WINDOW = (TODAY - timedelta(days=RECOVERY_WINDOW_DAYS), TODAY)
-# Fields the canonical view serves; the stored-snapshot reference serves the same.
-SERVED_FIELDS = (
-    "sleep_hours",
-    "sleep_score",
-    "hrv",
-    "readiness",
-    "resting_hr",
-    "ctl",
-    "atl",
-    "tsb",
-)
+
+
+def _day(values: dict[str, Any], garmin: tuple[str, ...] = ()) -> dict[str, Any]:
+    """One served day; ``garmin`` names the fields Garmin supplied."""
+    return {
+        **values,
+        "sources": {
+            field: GARMIN_SOURCE if field in garmin else INTERVALS_WELLNESS_SOURCE
+            for field in values
+        },
+    }
+
+
+# The populated fixture's window, as the deleted stored-snapshot reader also
+# served it before #1416 removed that reader.
+EXPECTED_WINDOW = {
+    "2026-10-08": _day(
+        {
+            "sleep_hours": 7.3,
+            "sleep_score": 82,
+            "hrv": 64.0,
+            "readiness": 74,
+            "resting_hr": 49,
+            "ctl": 52.1,
+            "atl": 60.4,
+            "tsb": -8.3,
+        }
+    ),
+    "2026-10-09": _day(
+        {
+            "sleep_hours": 7.0,
+            "sleep_score": 78,
+            "hrv": 62.0,
+            "readiness": 70,
+            "resting_hr": 50,
+            "ctl": 52.8,
+            "atl": 58.9,
+            "tsb": -6.1,
+        },
+        ("sleep_hours", "sleep_score"),
+    ),
+    "2026-10-10": _day(
+        {
+            "sleep_hours": 7.8,
+            "sleep_score": 86,
+            "hrv": 61,
+            "readiness": 79,
+            "resting_hr": 49,
+            "ctl": 53.4,
+            "atl": 57.0,
+            "tsb": -3.6,
+        },
+        ("sleep_hours", "sleep_score", "hrv", "resting_hr"),
+    ),
+}
 
 
 def _observation(
@@ -339,24 +383,7 @@ class DailyPlanningCanonicalWiringTests(unittest.TestCase):
 
 
 class CanonicalPlanningEndToEndTests(CanonicalReadFixture):
-    """Populated temporary database: the table-served view equals the reference."""
-
-    def _reference(self) -> dict[str, dict[str, Any]]:
-        legacy = planning_recovery_by_date(
-            self.intervals["recent_wellness"], self.garmin, {}, None
-        )
-        return {
-            day: {
-                **{field: values[field] for field in SERVED_FIELDS if field in values},
-                "sources": {
-                    field: values["sources"][field]
-                    for field in SERVED_FIELDS
-                    if field in values
-                },
-            }
-            for day, values in legacy.items()
-            if WINDOW[0].isoformat() <= day <= WINDOW[1].isoformat()
-        }
+    """Populated temporary database: the table-served view of the fixture."""
 
     def _served(self, selector: Any) -> dict[str, dict[str, Any]]:
         def view(db: Any) -> dict[str, dict[str, Any]]:
@@ -371,19 +398,16 @@ class CanonicalPlanningEndToEndTests(CanonicalReadFixture):
 
         return self.write(view)
 
-    def test_recovery_from_tables_equals_the_stored_snapshot_reference(self) -> None:
+    def test_recovery_from_tables_serves_the_fixture_window(self) -> None:
         populate(self)
         selector = make_selector(self)
         self.assertEqual(self.write(selector.summary)["serving"], "tables")
-        reference = self._reference()
-        self.assertTrue(reference)
-        self.assertEqual(self._served(selector), reference)
+        self.assertEqual(self._served(selector), EXPECTED_WINDOW)
 
     def test_recovery_before_the_first_backfill_is_empty(self) -> None:
         # The backfill has not run, so the selector serves nothing yet.
         selector = make_selector(self)
         self.assertFalse(self.write(selector.serves_tables))
-        self.assertTrue(self._reference())
         self.assertEqual(self._served(selector), {})
 
     def test_tables_serve_the_context_without_canonical_snapshot_sections(

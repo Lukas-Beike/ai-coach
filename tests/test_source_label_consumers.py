@@ -15,10 +15,10 @@ from backend.performance import (
     current_metrics,
     daily_health,
     garmin_metrics,
-    garmin_weight,
 )
 from backend.performance.season_inputs import SeasonLoadInputs
 from backend.planning import season_preparation
+from backend.sync import garmin_weight
 
 SEASON_VALUES = {"end": "2026-10-04", "load_scale": 0.8, "taper_days": 2}
 

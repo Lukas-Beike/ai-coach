@@ -681,7 +681,6 @@ ATHLETE_DATA = AthleteDataAssembly(
             checkin=CHECKIN_REPOSITORY,
             profile=PROFILE_REPOSITORY,
             key_values=KEY_VALUE_REPOSITORY,
-            snapshot_reader=SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
             activity_rows=lambda: CANONICAL_READ,
             table_serving=lambda: CANONICAL_READ,
             competition=COMPETITION_REPOSITORY,
@@ -706,7 +705,6 @@ CANONICAL_READ: CanonicalReadSelector
 ACTIVITY_READS = ActivityReadAssembly(
     database_manager,
     ActivityReadSources(
-        SnapshotRepositoryReader(SNAPSHOT_REPOSITORY),
         lambda: CANONICAL_READ,
         observation_reader=lambda: CANONICAL_READ,
         coverage=lambda: CANONICAL_READ,

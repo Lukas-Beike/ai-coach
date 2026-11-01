@@ -7,10 +7,10 @@ from performance_day_support import current_days
 from backend.canonical.vocabulary import MetricKind
 from backend.performance.wellness import (
     comparison_value,
-    readiness_score_value,
     wellness_average,
     wellness_form_average,
 )
+from backend.sync.garmin_performance_history import readiness_score_value
 
 
 class WellnessAverageTests(unittest.TestCase):

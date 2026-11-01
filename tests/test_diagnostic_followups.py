@@ -15,13 +15,13 @@ from garmin_support import read_garmin, save_garmin
 from support import store_canonical_snapshot
 
 from backend.activities.feedback import ActivityFeedbackService
-from backend.performance import garmin_metrics as performance_garmin_metrics
 from backend.performance import morning_battery as performance_morning_battery
 from backend.providers import garmin as garmin_provider
 from backend.providers import garmin_morning
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
 from backend.sync import garmin as garmin_sync
+from backend.sync import garmin_payload_metrics
 from backend.sync import observation as sync_observation
 from backend.sync.garmin_service import GarminSyncService
 
@@ -251,7 +251,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
         garmin_sync.merge_sources(snapshot, {}, frozenset())
         original = json.dumps(snapshot, sort_keys=True)
         save_garmin(snapshot)
-        metric = performance_garmin_metrics.garmin_payload_performance_metrics(
+        metric = garmin_payload_metrics.garmin_payload_performance_metrics(
             snapshot, server.ATHLETE_CLOCK.now().date()
         )["weight_kg"]
         self.assertEqual(metric["freshness"], "current")
@@ -352,7 +352,7 @@ class DiagnosticFollowupTests(unittest.TestCase):
                 if stored_maximum:
                     snapshot["sport_max_hr"] = {"cycling": stored_maximum}
                 original = json.dumps(snapshot, sort_keys=True)
-                metric = performance_garmin_metrics.garmin_payload_performance_metrics(
+                metric = garmin_payload_metrics.garmin_payload_performance_metrics(
                     snapshot, server.ATHLETE_CLOCK.now().date()
                 )["cycling_max_hr_bpm"]
                 self.assertEqual(metric["value"], stored_maximum or 190)

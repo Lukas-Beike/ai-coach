@@ -9,7 +9,6 @@ selector serves nothing. All storage is temporary.
 
 from __future__ import annotations
 
-import copy
 import logging
 import unittest
 from datetime import UTC, date, datetime
@@ -44,6 +43,7 @@ from backend.performance.garmin_canonical import (
     read_garmin_state,
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
+from backend.sync import garmin_payload_metrics
 from backend.sync.garmin import GarminPayloadService
 from backend.sync.garmin_projection_service import (
     GarminCanonicalSources,
@@ -114,14 +114,12 @@ class _Observations:
 class GarminReadFixture(CanonicalReadFixture):
     """Garmin services over the temporary database and the fixture selector."""
 
-    def _payload_service(self, *, canonical: bool) -> GarminPayloadService:
-        selector = make_selector(self)
+    def _payload_service(self) -> GarminPayloadService:
         return GarminPayloadService(
             self.manager,
             self.key_values,
             _LegacyActivities(self),  # type: ignore[arg-type]
             lambda: TODAY,
-            activity_rows=(lambda: selector) if canonical else None,
         )
 
     def _projection_service(self) -> GarminProjectionService:
@@ -138,7 +136,7 @@ class GarminReadFixture(CanonicalReadFixture):
         )
         return GarminProjectionService(
             config=config,
-            garmin_payload_service=self._payload_service(canonical=True),
+            garmin_payload_service=self._payload_service(),
             garmin_sync_service=_Flag(True),  # type: ignore[arg-type]
             garmin_sync_state_service=_CoreErrors(),  # type: ignore[arg-type]
             morning_body_battery_service=_Battery(),  # type: ignore[arg-type]
@@ -174,7 +172,9 @@ class GarminStateEqualityTests(GarminReadFixture):
     def test_table_observations_give_the_payload_state(self) -> None:
         populate(self)
         table = self.read(lambda db: read_garmin_state(self.table, db))
-        payload = garmin_metrics.garmin_payload_performance_metrics(self.garmin, TODAY)
+        payload = garmin_payload_metrics.garmin_payload_performance_metrics(
+            self.garmin, TODAY
+        )
 
         self.assertTrue(table.has_sleep)
         self.assertIsNotNone(table.metrics.weight_kg)
@@ -183,7 +183,9 @@ class GarminStateEqualityTests(GarminReadFixture):
     def test_state_has_the_flags_and_values_of_the_snapshot_sections(self) -> None:
         populate(self)
         state = self.read(lambda db: read_garmin_state(self.table, db))
-        legacy = garmin_metrics.garmin_payload_performance_metrics(self.garmin, TODAY)
+        legacy = garmin_payload_metrics.garmin_payload_performance_metrics(
+            self.garmin, TODAY
+        )
         overlay = garmin_metrics.garmin_performance_metrics(
             GarminSyncStatus.from_state(self.garmin), TODAY, state.metrics
         )
@@ -227,7 +229,7 @@ class GarminStateEqualityTests(GarminReadFixture):
 
         self.assertIsNotNone(table)
         self.assertEqual(
-            garmin_observations.garmin_source_observed_at(self.garmin["sleep"]),
+            garmin_payload_metrics.garmin_source_observed_at(self.garmin["sleep"]),
             None if table is None else table.isoformat(),
         )
 
@@ -342,27 +344,6 @@ class GarminServiceEqualityTests(GarminReadFixture):
 
         self.assertTrue(state["has_hrv"])
 
-    def test_activity_matches_are_equal_between_sources(self) -> None:
-        populate(self)
-        garmin_activities = copy.deepcopy(self.garmin["activities"])
-        legacy = self._payload_service(canonical=False)
-        migrated = self._payload_service(canonical=True)
-
-        stamp = {"synced_at": "2026-10-11T07:00:00Z"}
-        legacy_matches = legacy.prepare_fixture(
-            {"activities": garmin_activities, **stamp}
-        )["activity_matches"]
-        migrated_matches = migrated.prepare_fixture(
-            {"activities": copy.deepcopy(garmin_activities), **stamp}
-        )["activity_matches"]
-
-        self.assertEqual(migrated_matches, legacy_matches)
-        self.assertTrue(migrated_matches)
-        self.assertEqual(
-            {row["id"] for row in migrated.intervals_activities()},
-            {row["id"] for row in legacy.intervals_activities()},
-        )
-
 
 class GarminSleepReadinessTests(GarminReadFixture):
     def test_observed_day_decides_without_the_raw_sleep_section(self) -> None:
@@ -424,7 +405,7 @@ class GarminMorningCheckinTests(GarminReadFixture):
         battery = _MorningBattery()
         service = ManualMorningCheckinService(
             _MorningSync(),  # type: ignore[arg-type]
-            self._payload_service(canonical=False),
+            self._payload_service(),
             battery,  # type: ignore[arg-type]
             lambda: today,
             logging.getLogger("test-garmin-morning"),
@@ -604,7 +585,9 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
         metrics = garmin_metrics.garmin_performance_metrics(
             GarminSyncStatus.from_state(payload), TODAY, canonical
         )
-        legacy = garmin_metrics.garmin_payload_performance_metrics(payload, TODAY)
+        legacy = garmin_payload_metrics.garmin_payload_performance_metrics(
+            payload, TODAY
+        )
 
         self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 279)
         self.assertEqual(

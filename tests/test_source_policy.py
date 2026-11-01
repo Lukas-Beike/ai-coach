@@ -26,9 +26,7 @@ from backend.canonical.vocabulary import (
     SourceKind,
     Sport,
 )
-from backend.performance.garmin_metrics import garmin_payload_performance_metrics
 from backend.performance.load_context import performance_load_context
-from backend.performance.planning_recovery import planning_recovery_by_date
 from backend.performance.recovery_context import performance_recovery_context
 from backend.performance.source_policy import (
     CURRENT_RULES,
@@ -41,6 +39,7 @@ from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
     map_intervals_wellness,
 )
+from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 GARMIN = ProviderId.GARMIN
 
@@ -1084,34 +1083,13 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         self.assertEqual(recovery["readiness"], 71)
         self.assertEqual(self.pick(MetricKind.READINESS), recovery["readiness"])
 
-    def test_planning_view_matches_the_daily_policy(self) -> None:
-        planning = planning_recovery_by_date(WELLNESS_ROWS, GARMIN_SECTIONS, {}, None)
-
-        sleep = _day_values(select_daily(self.observations, MetricKind.SLEEP_DURATION))
-        self.assertEqual(
-            {day: round(seconds / 3600, 1) for day, seconds in sleep.items()},
-            {
-                date(2026, 5, 3): planning["2026-05-03"]["sleep_hours"],
-                date(2026, 5, 4): planning["2026-05-04"]["sleep_hours"],
-            },
-        )
+    def test_daily_policy_selects_each_days_hrv(self) -> None:
         self.assertEqual(
             _day_values(select_daily(self.observations, MetricKind.HRV_RMSSD)),
             {date(2026, 5, 3): 58, date(2026, 5, 4): 70},
         )
-        self.assertEqual(planning["2026-05-04"]["hrv"], 70)
-        self.assertEqual(planning["2026-05-03"]["hrv"], 58)
-        self.assertEqual(
-            _day_values(select_daily(self.observations, MetricKind.RESTING_HR))[TODAY],
-            planning["2026-05-04"]["resting_hr"],
-        )
-        readiness = _day_values(select_daily(self.observations, MetricKind.READINESS))
-        self.assertEqual(readiness[TODAY], planning["2026-05-04"]["readiness"])
-        self.assertEqual(
-            readiness[date(2026, 5, 3)], planning["2026-05-03"]["readiness"]
-        )
 
-    def test_planning_same_day_hrv_duplicates_keep_the_first_record(self) -> None:
+    def test_same_day_hrv_duplicates_keep_the_first_record(self) -> None:
         garmin = {
             "hrv": [
                 _garmin_record("2026-05-04", hrvLastNight=60),
@@ -1119,8 +1097,6 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
             ]
         }
 
-        planning = planning_recovery_by_date([], garmin, {}, None)
-        self.assertEqual(planning["2026-05-04"]["hrv"], 60)
         self.assertEqual(
             _day_values(select_daily(_mapped([], None, garmin), MetricKind.HRV_RMSSD)),
             {TODAY: 60},
@@ -1151,25 +1127,21 @@ class IntentionalDeviationTests(unittest.TestCase):
         )
 
     def test_planning_ignores_the_weekly_hrv_average(self) -> None:
-        # Deviation: the legacy planning view falls back to hrvWeeklyAvg. The
-        # Garmin mapper only uses the last-night average, because the weekly
-        # average covers a different window.
+        # Deviation: the deleted legacy planning view (#1416) fell back to
+        # hrvWeeklyAvg. The Garmin mapper only uses the last-night average,
+        # because the weekly average covers a different window.
         garmin = {"hrv": [_garmin_record("2026-05-04", hrvWeeklyAvg=65)]}
         observations = _mapped([], None, garmin)
 
-        legacy = planning_recovery_by_date([], garmin, {}, None)
-        self.assertEqual(legacy["2026-05-04"]["hrv"], 65)
         self.assertEqual(select_daily(observations, MetricKind.HRV_RMSSD), {})
 
-    def test_planning_keeps_garmin_values_that_the_mapper_rejects(self) -> None:
-        # Deviation: the legacy planning view overwrites without a plausibility
-        # check. The canonical mapper rejects a 15 bpm resting HR, so the
-        # Intervals value stays for that day.
+    def test_planning_drops_garmin_values_that_the_mapper_rejects(self) -> None:
+        # Deviation: the deleted legacy planning view (#1416) overwrote without a
+        # plausibility check. The canonical mapper rejects a 15 bpm resting HR,
+        # so the Intervals value stays for that day.
         garmin = {"resting_hr": [_garmin_record("2026-05-04", restingHeartRate=15)]}
         observations = _mapped(WELLNESS_ROWS, None, garmin)
 
-        legacy = planning_recovery_by_date(WELLNESS_ROWS, garmin, {}, None)
-        self.assertEqual(legacy["2026-05-04"]["resting_hr"], 15)
         self.assertEqual(
             _day_values(select_daily(observations, MetricKind.RESTING_HR))[TODAY],
             48.0,

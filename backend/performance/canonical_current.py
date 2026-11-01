@@ -67,6 +67,15 @@ _INSTANT_KINDS: Final = tuple(
     dict.fromkeys((*_SYNC_KINDS, MetricKind.EFTP, *_ATHLETE_RECORD_KINDS))
 )
 _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
+# Sport-scoped athlete settings that give the plan zones their thresholds.
+_ZONE_THRESHOLD_KINDS: Final = frozenset(
+    {
+        MetricKind.FTP,
+        MetricKind.INDOOR_FTP,
+        MetricKind.THRESHOLD_HR,
+        MetricKind.MAX_HR,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +103,9 @@ class CanonicalCurrentInputs:
     wellness_eftp: Observation | None = None
     athlete_record: tuple[Observation, ...] = ()
     synced_at: datetime | None = None
+    # This sync's sport-scoped FTP, indoor FTP, threshold and maximum heart rate:
+    # the thresholds of the plan zones only. Current metrics never read it.
+    zone_thresholds: tuple[Observation, ...] = ()
 
     def athlete_value(
         self, kind: MetricKind, sport: Sport | None = None
@@ -149,6 +161,7 @@ def read_current_inputs(
         wellness_eftp=_wellness_eftp(reader, db, latest_wellness_day),
         athlete_record=intervals.athlete_record,
         synced_at=intervals.synced_at,
+        zone_thresholds=intervals.zone_thresholds,
     )
 
 
@@ -165,6 +178,7 @@ class _SyncValues:
     athlete_eftp: Observation | None = None
     athlete_record: tuple[Observation, ...] = ()
     synced_at: datetime | None = None
+    zone_thresholds: tuple[Observation, ...] = ()
 
 
 _NO_SYNC: Final = _SyncValues()
@@ -200,6 +214,16 @@ def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None
         )
         if _is_athlete_record(observation)
     )
+    indoor_ftp = _sync_observations(
+        reader, db, MetricKind.INDOOR_FTP, synced, start=start, end=end
+    )
+    zone_thresholds = tuple(
+        observation
+        for observation in (*athlete_record, *thresholds, *indoor_ftp)
+        if observation.kind in _ZONE_THRESHOLD_KINDS
+        and observation.sport is not None
+        and _is_athlete_record(observation)
+    )
     return _SyncValues(
         bike_threshold_hr=_sport_candidates(thresholds, Sport.RIDE),
         run_threshold_hr=_sport_candidates(thresholds, Sport.RUN),
@@ -210,7 +234,16 @@ def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None
         athlete_eftp=_athlete_eftp(eftps),
         athlete_record=athlete_record,
         synced_at=synced,
+        zone_thresholds=zone_thresholds,
     )
+
+
+def read_zone_thresholds(reader: ObservationReader, db: Any) -> tuple[Observation, ...]:
+    """Return the latest sync's plan-zone thresholds (``zone_thresholds``).
+
+    A reader that already holds ``CanonicalCurrentInputs`` takes them from there.
+    """
+    return (_intervals_current(reader, db) or _NO_SYNC).zone_thresholds
 
 
 def _athlete_eftp(observations: tuple[Observation, ...]) -> Observation | None:

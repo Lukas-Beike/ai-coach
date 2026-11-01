@@ -77,8 +77,9 @@ _NO_RECOVERY = CanonicalRecoveryInputs(
 # load and load balance kinds and the four history-chart kinds), the daily totals
 # (with resting energy) and the recovery kinds not read before (the weekly HRV
 # average), the form and eFTP kinds (#1412), and the athlete-record kinds without
-# an earlier read (zone-2 pace, height and W′, #1415).
-_UNIT_READS = 51
+# an earlier read (zone-2 pace, height and W′, #1415), and the plan-zone indoor FTP
+# (#1416).
+_UNIT_READS = 52
 
 
 class StubObservationReader(ObservationReader):
@@ -662,11 +663,8 @@ class CanonicalWiringTests(unittest.TestCase):
         snapshot = _snapshot([{"id": PARITY_DAY, "ctl": 50, "atl": 60}])
         manager = RecordingManager()
         reader = StubObservationReader(_observations(snapshot))
-        snapshot_reader = Mock()
-        snapshot_reader.latest_snapshot.return_value = snapshot
         service = ActivityAnalysisReadService(
             manager,
-            snapshot_reader,
             Mock(),
             Mock(),
             canonical=CanonicalPerformanceSource(
@@ -701,7 +699,6 @@ class CanonicalWiringTests(unittest.TestCase):
         feedback.list.return_value = []
         service = ActivityAnalysisReadService(
             sessions,
-            snapshot_reader,
             Mock(),
             feedback,
             canonical=CanonicalPerformanceSource(
@@ -852,7 +849,9 @@ def _prelude(
     snapshot: dict[str, Any], manager: RecordingManager, inputs: Any
 ) -> PublicStateLocalPrelude:
     state = Mock()
-    state.latest_snapshot.return_value = snapshot
+    state.sync_metadata.return_value = {
+        "provider_sync": snapshot.get("provider_sync", {})
+    }
     feedback = Mock()
     feedback.attach_to_activities.return_value = []
     planned = Mock()
@@ -1024,10 +1023,8 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
 
     def test_activity_detail_inputs_carry_the_read_state(self) -> None:
         source = self._source()
-        snapshot_reader = Mock()
-        snapshot_reader.latest_snapshot.return_value = self.intervals
         service = ActivityAnalysisReadService(
-            self.manager, snapshot_reader, Mock(), Mock(), canonical=source
+            self.manager, Mock(), Mock(), canonical=source
         )
 
         pending, _rows = service._performance_inputs(PARITY_TODAY)

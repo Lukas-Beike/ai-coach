@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from zone_settings_reference import (
+    canonical_sport_inputs,
+    canonical_zone_settings,
+    legacy_sport_settings,
+)
+
 from backend import change_history
 from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.zones import ZoneConfigurationService, local_configuration
@@ -29,9 +35,9 @@ from backend.errors import AppError
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
 from backend.planning import calendar_read_model
-from backend.planning.context import compact_sport_settings
 from backend.providers.intervals_zone_mapping import map_intervals_zone_configurations
 from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.intervals_compaction import compact_sport_settings
 
 RETRIEVED_AT = datetime(2026, 10, 11, 6, tzinfo=UTC)
 NOW = "2026-10-11T06:00:00+00:00"
@@ -75,11 +81,18 @@ class EffectiveZoneTests(unittest.TestCase):
         for sport in (Sport.RIDE, Sport.RUN, Sport.SWIM):
             for environment in Environment:
                 with self.subTest(sport=sport, environment=environment):
+                    legacy = legacy_sport_settings(settings, sport, environment)
                     self.assertEqual(
                         ZoneSettings.from_configurations(
                             configurations, sport, environment
                         ),
-                        ZoneSettings.from_sport_settings(settings, sport, environment),
+                        legacy,
+                    )
+                    self.assertEqual(
+                        canonical_zone_settings(
+                            ATHLETE["sportSettings"], sport, environment
+                        ),
+                        legacy,
                     )
 
     def test_a_local_configuration_wins_on_its_valid_days(self) -> None:
@@ -140,8 +153,11 @@ class EffectiveZoneTests(unittest.TestCase):
         self.assertEqual(zone(provider_configurations()), 5)
         self.assertEqual(zone((*provider_configurations(), local)), 4)
 
-    def test_a_missing_power_list_keeps_the_sport_settings_ftp(self) -> None:
+    def test_a_missing_power_list_keeps_the_canonical_ride_ftp(self) -> None:
         heart_rate_only = {"types": ["Ride"], "lthr": 168, "hr_zones": RIDE["hr_zones"]}
+        _, thresholds = canonical_sport_inputs(
+            {"sportSettings": [{**RIDE, "types": ["Ride"]}]}
+        )
         planned = {
             "id": "p1",
             "date": "2026-10-12",
@@ -158,7 +174,7 @@ class EffectiveZoneTests(unittest.TestCase):
             today=date(2026, 10, 11),
             provider_window={},
             default_name="Workout",
-            sport_settings=[{**RIDE, "types": ["Ride"]}],
+            sport_thresholds=thresholds,
             zone_configurations=provider_configurations(
                 {"sportSettings": [heart_rate_only]}
             ),

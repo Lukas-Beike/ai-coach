@@ -18,7 +18,6 @@ from backend.activities.sync_time import activities_synced_at
 from backend.runtime.ports import (
     ActivityRowReader,
     ProviderCoverageReader,
-    ProviderSnapshotReader,
 )
 
 ALL_DAYS = -1
@@ -92,7 +91,6 @@ class ActivityReadService:
     def __init__(
         self,
         database_manager: Any,
-        snapshot_reader: ProviderSnapshotReader,
         row_reader: ActivityRowReader,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
@@ -103,7 +101,6 @@ class ActivityReadService:
         coverage: Callable[[], ProviderCoverageReader] | None = None,
     ):
         self._database_manager = database_manager
-        self._snapshot_reader = snapshot_reader
         self._row_reader = row_reader
         self._feedback_service = feedback_service
         self._detail_store = detail_store
@@ -113,11 +110,6 @@ class ActivityReadService:
         self._summary_rows = summary_rows
         # Where the activities' sync time comes from; without it the time is unknown.
         self._coverage = coverage
-
-    def _snapshot(self) -> dict[str, Any]:
-        with self._database_manager.reader() as db:
-            snapshot = self._snapshot_reader.latest_snapshot(db)
-        return snapshot if isinstance(snapshot, dict) else {}
 
     def _read(self) -> tuple[Any, list[dict[str, Any]]]:
         """Read the sync time and the activity rows in one read snapshot."""

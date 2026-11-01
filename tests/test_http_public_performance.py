@@ -72,7 +72,7 @@ class PublicPerformanceStateTests(unittest.TestCase):
             garmin, profile, today, canonical=EMPTY_PERFORMANCE_INPUTS
         )
         garmin_payload_service.sync_status.assert_called_once_with()
-        garmin_payload_service.recent_view.assert_not_called()
+        garmin_payload_service.view.assert_not_called()
         profile_service.get.assert_called_once_with()
         garmin_projection_service.public_state.assert_called_once_with(garmin)
 

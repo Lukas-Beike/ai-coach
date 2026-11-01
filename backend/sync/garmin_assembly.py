@@ -155,9 +155,6 @@ class GarminAssembly:
             self._key_values,
             self._sync_state_repository(),
             lambda: self._athlete_clock.now().date(),
-            activity_rows=(
-                None if self._canonical is None else self._canonical.activity_rows
-            ),
         )
 
     def sync_state_service(self) -> garmin.GarminSyncStateService:

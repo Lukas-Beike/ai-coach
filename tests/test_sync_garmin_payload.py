@@ -896,19 +896,8 @@ class GarminPayloadServiceTests(unittest.TestCase):
         self.assertEqual(
             payload["activities"][1]["garmin_specific"], {"sample": "preserved-b"}
         )
-        self.assertEqual(
-            payload["activity_matches"],
-            [
-                {
-                    "garmin_activity_id": 101,
-                    "intervals_activity_id": "intervals-canonical",
-                },
-                {
-                    "garmin_activity_id": 102,
-                    "intervals_activity_id": "intervals-canonical",
-                },
-            ],
-        )
+        # Canonical reads (#1416): equipment pairs canonical records at read time.
+        self.assertNotIn("activity_matches", payload)
         self.assertEqual(payload["sport_max_hr"], {"cycling": 205, "running": 196})
         self.assertNotIn("morning_body_battery", payload)
         self.assertEqual(
@@ -989,80 +978,11 @@ class GarminPayloadServiceTests(unittest.TestCase):
             payload["activities"],
             [first_activity, matching_activity, matching_without_id],
         )
-        self.assertEqual(
-            payload["activity_matches"],
-            [
-                {
-                    "garmin_activity_id": 203,
-                    "intervals_activity_id": "intervals-run",
-                },
-                {"garmin_activity_id": None, "intervals_activity_id": "intervals-run"},
-            ],
-        )
+        # Canonical reads (#1416): equipment pairs canonical records at read time.
+        self.assertNotIn("activity_matches", payload)
         self.assertEqual(payload["sport_max_hr"], {"cycling": 188, "running": 190})
         self.assertEqual(
             self.sync_state.latest_snapshot()["recent_activities"], [intervals]
-        )
-
-    def test_activity_matches_preserve_pairs_when_either_id_is_missing(self):
-        interval_activities = [
-            {
-                "start_date_local": "2026-09-17T08:00:00",
-                "type": "Run",
-                "moving_time": 1800,
-                "distance": 8000,
-            },
-            {
-                "id": "intervals-id",
-                "start_date_local": "2026-09-18T08:00:00",
-                "type": "Run",
-                "moving_time": 1800,
-                "distance": 8000,
-            },
-            {
-                "start_date_local": "2026-09-19T08:00:00",
-                "type": "Run",
-                "moving_time": 1800,
-                "distance": 8000,
-            },
-        ]
-        self.store_intervals_snapshot(interval_activities)
-        payload = {
-            "synced_at": "2026-09-20T10:00:00",
-            "errors": [],
-            "provider_sync": {"pagination": {"activities": {"complete": True}}},
-            "activities": [
-                {
-                    "startTimeLocal": "2026-09-17 08:00:00",
-                    "activityType": {"typeKey": "running"},
-                    "duration": 1800,
-                    "distance": 8000,
-                },
-                {
-                    "startTimeLocal": "2026-09-18 08:00:00",
-                    "activityType": {"typeKey": "running"},
-                    "duration": 1800,
-                    "distance": 8000,
-                },
-                {
-                    "activityId": 301,
-                    "startTimeLocal": "2026-09-19 08:00:00",
-                    "activityType": {"typeKey": "running"},
-                    "duration": 1800,
-                    "distance": 8000,
-                },
-            ],
-        }
-
-        self.service.prepare_remote(payload)
-
-        self.assertEqual(
-            payload["activity_matches"],
-            [
-                {"garmin_activity_id": None, "intervals_activity_id": None},
-                {"garmin_activity_id": None, "intervals_activity_id": "intervals-id"},
-                {"garmin_activity_id": 301, "intervals_activity_id": None},
-            ],
         )
 
 

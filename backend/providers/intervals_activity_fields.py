@@ -83,13 +83,6 @@ def activity_detail_laps(detail: dict[str, Any]) -> Any:
     return detail.get("icu_intervals", [])
 
 
-def selected(item: Any, fields: tuple[str, ...]) -> dict[str, Any]:
-    """Return the non-null ``fields`` of a mapping, or an empty dict for non-mappings."""
-    if not isinstance(item, dict):
-        return {}
-    return {key: item[key] for key in fields if key in item and item[key] is not None}
-
-
 # Wire fields that name the device or app which recorded an activity.
 _DEVICE_SOURCE_FIELDS = ("source", "device_name", "external_id")
 

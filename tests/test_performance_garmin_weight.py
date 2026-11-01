@@ -2,7 +2,7 @@ import copy
 import unittest
 from datetime import UTC, datetime
 
-from backend.performance.garmin_weight import (
+from backend.sync.garmin_weight import (
     garmin_weight_metric,
     garmin_weight_records,
 )

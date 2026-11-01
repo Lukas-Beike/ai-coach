@@ -12,7 +12,6 @@ from backend.activities.duplicates import deduplicate_api_records
 from backend.config import Config
 from backend.db import DatabaseManager
 from backend.errors import INTERVALS_API_KEY_ERROR, AppError
-from backend.planning.context import compact_snapshot
 from backend.providers.descriptors import INTERVALS_ID
 from backend.providers.intervals import IntervalsApiClient
 from backend.providers.snapshot_projection import intervals_row_local_date
@@ -22,6 +21,7 @@ from backend.sync.canonical_ingest import (
     intervals_deletion_window,
 )
 from backend.sync.gates import ProviderResyncGate
+from backend.sync.intervals_compaction import compact_snapshot
 from backend.sync.observation import SyncOperationObserver
 from backend.sync.snapshot_storage import SnapshotStorage
 

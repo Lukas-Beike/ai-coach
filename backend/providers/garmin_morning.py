@@ -8,6 +8,8 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.canonical.section_items import merge_records
+from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.garmin_fields import first_present as _first_present
 
 ExternalCall = Callable[[str, str, Callable[[], Any], dict[str, Any] | None], Any]
 
@@ -84,3 +86,39 @@ def morning_sleep_element(
 def merge_garmin_records(incoming: Any, previous: Any) -> list[Any]:
     """Merge bounded-window results without discarding older snapshot records."""
     return merge_records(incoming, previous)
+
+
+def latest_garmin_record(value: Any) -> dict[str, Any]:
+    """Return one dated Garmin record without exposing the complete range payload."""
+    if not isinstance(value, (dict, list)):
+        return {}
+    records: list[dict[str, Any]] = []
+    pending: list[Any] = [value]
+    visited = 0
+    while pending and visited < 2000:
+        current = pending.pop()
+        visited += 1
+        if isinstance(current, dict):
+            if _first_present(current, garmin_perf_fields.RECORD_IDENTITY_KEYS):
+                records.append(current)
+            pending.extend(
+                item for item in current.values() if isinstance(item, (dict, list))
+            )
+        elif isinstance(current, list):
+            pending.extend(
+                item for item in current[:500] if isinstance(item, (dict, list))
+            )
+    if records:
+        return max(
+            records,
+            key=lambda item: (
+                1
+                if _first_present(item, garmin_perf_fields.RECORD_TIMESTAMP_KEYS)
+                else 0,
+                str(
+                    _first_present(item, garmin_perf_fields.RECORD_IDENTITY_KEYS) or ""
+                ),
+            ),
+            default={},
+        )
+    return value if isinstance(value, dict) else {}

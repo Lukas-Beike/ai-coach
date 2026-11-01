@@ -146,6 +146,11 @@ class MetricKind(StrEnum):
     W_PRIME = "w_prime"
     HEIGHT = "height"
     ZONE2_PACE = "zone2_pace"
+    # The sport setting's indoor FTP (mapper version 10 of Intervals.icu). Only the
+    # plan zones of indoor and virtual workouts read this kind. FTP stays the
+    # setting's ``ftp``; a setting without ``ftp`` (absent or null) also stores its
+    # ``indoor_ftp`` as FTP, as the current metrics read it.
+    INDOOR_FTP = "indoor_ftp"
 
     @property
     def unit(self) -> str:
@@ -209,6 +214,7 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.W_PRIME: "J",
     MetricKind.HEIGHT: "cm",
     MetricKind.ZONE2_PACE: "m/s",
+    MetricKind.INDOOR_FTP: "W",
 }
 
 

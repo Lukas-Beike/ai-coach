@@ -132,6 +132,7 @@ class CanonicalVocabularyTests(unittest.TestCase):
                 "w_prime": "J",
                 "height": "cm",
                 "zone2_pace": "m/s",
+                "indoor_ftp": "W",
             },
             {kind.value: kind.unit for kind in MetricKind},
         )

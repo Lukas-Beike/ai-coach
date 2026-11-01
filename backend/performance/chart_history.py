@@ -8,11 +8,12 @@ from backend.activities.activity_summary import summary_duration_s
 from backend.athlete.local_date import LocalDate
 from backend.canonical.domain_records import PowerCurve
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance import activity_validation, body, eftp, garmin_metric_history
+from backend.performance import activity_validation, body, eftp
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.display_sources import preferred_providers
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
+from backend.providers.garmin_health_mapping import GARMIN_LABEL
 
 INTERVALS_SOURCE = "Intervals.icu"
 
@@ -293,7 +294,7 @@ def _canonical_metric(
         point: dict[str, Any] = {
             "date": day.isoformat(),
             "values": values,
-            "source": garmin_metric_history.GARMIN_SOURCE,
+            "source": GARMIN_LABEL,
         }
         if key in ("training_readiness_history", "weekly_training_status"):
             point["value"] = next(iter(values.values()))
@@ -301,7 +302,7 @@ def _canonical_metric(
     return {
         "status": "current" if points else "unavailable",
         "aggregation": aggregation,
-        "source": garmin_metric_history.GARMIN_SOURCE,
+        "source": GARMIN_LABEL,
         "unit": "unknown",
         "points": points,
         "observed_at": points[-1]["date"] if points else None,

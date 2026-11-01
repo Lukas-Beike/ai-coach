@@ -6,7 +6,7 @@ windows are sync status (``GarminSyncStatus``).
 """
 
 from collections.abc import Iterable, Mapping
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
@@ -59,12 +59,32 @@ def read_daily_health_by_date(
     to its value. Per day and kind the latest observation wins; ``source`` names
     the providers of the day's values.
     """
+    return read_daily_health_with_retrievals(reader, db, start=start, end=end)[0]
+
+
+def read_daily_health_with_retrievals(
+    reader: ObservationReader,
+    db: Any,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, datetime | None]]:
+    """Return ``read_daily_health_by_date`` and the Garmin fetch time of each day.
+
+    The second mapping holds, per ISO day with a stored Garmin daily total, the
+    latest fetch time among them (None when none carries one). Each kind is read
+    once for both.
+    """
     latest: dict[str, dict[str, Observation]] = {}
+    retrievals: dict[str, datetime | None] = {}
     for kind, name in DAILY_HEALTH_KINDS.items():
         for item in reader.observations(db, kind, start=start, end=end):
-            day = latest.setdefault(item.observed_on.isoformat(), {})
+            day_text = item.observed_on.isoformat()
+            day = latest.setdefault(day_text, {})
             if name not in day or _order(item) >= _order(day[name]):
                 day[name] = item
+            if item.provenance.provider is ProviderId.GARMIN:
+                _add_retrieval(retrievals, day_text, item.provenance.retrieved_at)
     health_by_date: dict[str, dict[str, Any]] = {}
     for record_date, values in sorted(latest.items()):
         health: dict[str, Any] = {
@@ -73,7 +93,17 @@ def read_daily_health_by_date(
         }
         health["source"] = _sources(values.values())
         health_by_date[record_date] = health
-    return health_by_date
+    return health_by_date, retrievals
+
+
+def _add_retrieval(
+    retrievals: dict[str, datetime | None], day: str, retrieved: datetime | None
+) -> None:
+    current = retrievals.get(day)
+    if day not in retrievals or (
+        retrieved is not None and (current is None or retrieved > current)
+    ):
+        retrievals[day] = retrieved
 
 
 def daily_energy_expenditure(

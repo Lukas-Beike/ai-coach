@@ -6,6 +6,8 @@ import copy
 import unittest
 from datetime import date, timedelta
 
+from zone_settings_reference import canonical_sport_inputs
+
 from backend.planning.calendar_read_model import (
     planned_unit_conflicts,
     project_planning_calendar,
@@ -418,6 +420,9 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
         run = _unit("Run", type="Run", description="- 10m 200w")
 
         def project(settings):
+            configurations, thresholds = canonical_sport_inputs(
+                {"sportSettings": list(settings)}
+            )
             result = project_planning_calendar(
                 [ride, run],
                 [],
@@ -427,7 +432,8 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
                 today=date(2026, 10, 10),
                 provider_window={},
                 default_name="Planned workout",
-                sport_settings=settings,
+                zone_configurations=configurations,
+                sport_thresholds=thresholds,
             )
             return {item["name"]: item for item in result["planned"]}
 
@@ -440,10 +446,20 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
         self.assertIsNone(project(())["Ride"]["workout_profile"]["segments"][0]["zone"])
 
     def test_planned_profiles_use_the_canonical_sport_and_environment(self):
+        # The indoor FTP is canonical as the threshold of the INDOOR power
+        # configuration, so the setting carries a (standard) power zone list.
         sport_settings = [
-            {"types": ["Ride", "VirtualRide"], "ftp": 250, "indoor_ftp": 200},
+            {
+                "types": ["Ride", "VirtualRide"],
+                "ftp": 250,
+                "indoor_ftp": 200,
+                "power_zones": [55, 75, 90, 105, 120, 150, 999],
+            },
             {"types": ["Run"], "lthr": 170},
         ]
+        configurations, thresholds = canonical_sport_inputs(
+            {"sportSettings": sport_settings}
+        )
         # "Strides" contains "ride" but is a run; the stored sport decides.
         strides = _unit("Strides", type="Run", description="- 10m 150bpm")
         indoor = _unit("Trainer", type="VirtualRide", description="- 10m 190w")
@@ -457,7 +473,8 @@ class PlannedUnitCalendarConflictTests(unittest.TestCase):
             today=date(2026, 10, 10),
             provider_window={},
             default_name="Planned workout",
-            sport_settings=sport_settings,
+            zone_configurations=configurations,
+            sport_thresholds=thresholds,
         )
         zones = {
             item["name"]: item["workout_profile"]["segments"][0]["zone"]

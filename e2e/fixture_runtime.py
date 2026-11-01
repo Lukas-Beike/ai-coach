@@ -1487,7 +1487,9 @@ def _fixture_seed_wave2(today, snapshot, garmin):
     garmin["morning_body_battery"] = morning_body_battery_record(
         today, sleep, garmin["body_battery"], attempted_at=attempted_at.isoformat()
     )
-    from backend.performance.history import append_garmin_performance_history
+    from backend.sync.garmin_performance_history import (
+        append_garmin_performance_history,
+    )
 
     append_garmin_performance_history(garmin, None, today)
     with server.database_manager().unit_of_work() as db:
