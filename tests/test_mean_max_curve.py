@@ -68,7 +68,9 @@ def add_record(db, provider, provider_activity_id, activity_id, sport="ride"):
     )
 
 
-def store_streams(db, provider, provider_activity_id, watts, resolution):
+def store_streams(
+    db, provider, provider_activity_id, watts, resolution, summary_sha256=None
+):
     detail = ActivityStreamSet(
         provider_activity_id=provider_activity_id,
         provenance=Provenance(
@@ -83,7 +85,9 @@ def store_streams(db, provider, provider_activity_id, watts, resolution):
         resolution=resolution,
         channels={StreamChannel.TIME_S: TIME, StreamChannel.POWER_W: watts},
     )
-    replace_detail_set(db, detail, mapper_version=1, summary_sha256=None, now=STAMP)
+    replace_detail_set(
+        db, detail, mapper_version=1, summary_sha256=summary_sha256, now=STAMP
+    )
 
 
 def watts_at(curve, duration):
@@ -118,7 +122,7 @@ class SessionCurveReaderTests(unittest.TestCase):
             self.db, GARMIN, "g-2", ride_power(999.0), StreamResolution.DOWNSAMPLED
         )
 
-        curves = self.reader.curves(self.db, ["act_1", "act_2"])
+        curves = self.reader.curves(self.db, ["act_1", "act_2"], {})
 
         self.assertEqual({"act_1"}, set(curves))
         self.assertEqual(350.0, watts_at(curves["act_1"], 180))
@@ -136,7 +140,7 @@ class SessionCurveReaderTests(unittest.TestCase):
         add_record(self.db, WAHOO, "w-1", "act_2")
         store_streams(self.db, WAHOO, "w-1", ride_power(350.0), StreamResolution.FULL)
 
-        curves = self.reader.curves(self.db, ["act_1", "act_2"])
+        curves = self.reader.curves(self.db, ["act_1", "act_2"], {})
 
         self.assertEqual({"act_1"}, set(curves))
         self.assertEqual(350.0, watts_at(curves["act_1"], 180))
@@ -151,17 +155,35 @@ class SessionCurveReaderTests(unittest.TestCase):
         with patch.object(
             mean_max_curve, "power_profile", wraps=mean_max_curve.power_profile
         ) as computed:
-            first = self.reader.curves(self.db, ["act_1"])["act_1"]
-            again = self.reader.curves(self.db, ["act_1"])["act_1"]
+            first = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+            again = self.reader.curves(self.db, ["act_1"], {})["act_1"]
             store_streams(
                 self.db, INTERVALS, "i-1", ride_power(380.0), StreamResolution.FULL
             )
-            changed = self.reader.curves(self.db, ["act_1"])["act_1"]
+            changed = self.reader.curves(self.db, ["act_1"], {})["act_1"]
 
         self.assertEqual(2, computed.call_count)
         self.assertIs(first, again)
         self.assertNotEqual(first.fingerprint, changed.fingerprint)
         self.assertEqual(380.0, watts_at(changed, 180))
+
+    def test_a_set_fetched_for_an_older_summary_is_left_out(self):
+        add_session(self.db, "act_1")
+        add_record(self.db, INTERVALS, "i-1", "act_1")
+        store_streams(
+            self.db,
+            INTERVALS,
+            "i-1",
+            ride_power(350.0),
+            StreamResolution.FULL,
+            summary_sha256="a" * 64,
+        )
+
+        current = self.reader.curves(self.db, ["act_1"], {"i-1": "a" * 64})
+        changed = self.reader.curves(self.db, ["act_1"], {"i-1": "b" * 64})
+
+        self.assertEqual(350.0, watts_at(current["act_1"], 180))
+        self.assertEqual({}, changed)
 
     def test_detail_view_labels_a_profile_from_downsampled_streams(self):
         add_session(self.db, "act_1")
@@ -203,7 +225,8 @@ class ProfileSelectionTests(unittest.TestCase):
 
         canonical = SimpleNamespace(
             activity_summary_reader=lambda: SimpleNamespace(
-                activity_summaries=lambda _db: summaries
+                activity_summaries=lambda _db, **_bounds: summaries,
+                activity_rows=lambda _db, **_bounds: (),
             ),
             database_manager=lambda: SimpleNamespace(read_snapshot=read_snapshot),
         )
@@ -253,6 +276,7 @@ class ProfileSelectionTests(unittest.TestCase):
             for point in window["power"]
             if point["duration_seconds"] == 180 and point["environment"] == "outdoor"
         )
+        self.assertEqual("Intervals.icu original watts stream", best["source"])
         self.assertEqual(
             (350.0, "i-act_1", 300.0),
             (best["watts"], best["activity_id"], best["start_seconds"]),

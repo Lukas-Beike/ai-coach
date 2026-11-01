@@ -133,8 +133,8 @@ The analysis power and running best-effort curve (`mean-max-curve` version 1, wi
 - **THEN** the 180, 420 and 720 s windows reproduce their mean values and no window spans a gap or pause.
 
 #### Scenario: Downsampled, duplicate or changed streams
-- **WHEN** a session has only downsampled streams, a duplicate session is merged into another, or a session's stored streams change
-- **THEN** the downsampled session gives no best value and its activity detail profile is labelled `downsampled`, the merged pair counts once, and the changed session is recomputed under a new fingerprint without provider access.
+- **WHEN** a session has only downsampled streams, a duplicate session is merged into another, a stream set was fetched for an older provider summary, or a session's stored streams change
+- **THEN** the downsampled session gives no best value and its activity detail profile is labelled `downsampled`, the merged pair counts once, the outdated set is left out, and the changed session is recomputed under a new fingerprint without provider access.
 
 Evidence: `backend/performance/mean_max_curve.py:SessionCurveReader`, `backend/performance/report_service.py:TrainingProfileSelectionService`, `backend/performance/canonical_detail.py:stream_resolution`; `tests/test_power_profile.py:test_protocol_windows_reproduce_known_maxima_around_gaps_and_pauses`, `tests/test_mean_max_curve.py`, `tests/test_performance_method_inputs.py:M4BestEffortInputs`.
 

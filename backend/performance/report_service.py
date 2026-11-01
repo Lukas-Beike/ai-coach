@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -32,6 +32,7 @@ from backend.performance.mean_max_curve import (
     input_fingerprint,
 )
 from backend.performance.power_profile import (
+    LEGACY_POWER_DURATIONS,
     METHOD_ID,
     METHOD_VERSION,
     POWER_DURATIONS,
@@ -112,28 +113,16 @@ class TrainingRecordsService:
                 stored["activity_id"]
             ):
                 continue
-            sport = summary.get("sport")
             records.append(
                 {
                     **stored,
-                    "date": summary_local_date(summary),
-                    "sport": sport,
-                    "activity_type": sport,
-                    "environment": "indoor"
-                    if summary_is_indoor(summary)
-                    else "outdoor",
+                    **summary_fields(summary),
                     # Stored analyses come from the Intervals.icu detail.
                     "source": "Intervals.icu"
                     if ProviderId.INTERVALS.value in (summary.get("record_ids") or {})
                     else summary.get("source") or "Intervals.icu",
-                    "name": summary.get("name"),
                     "average_temp": summary.get("avg_temp_c"),
                     "duration": summary_duration_s(summary),
-                    "device": str(
-                        summary.get("device_name")
-                        or summary.get("recorded_by")
-                        or "unknown"
-                    )[:200],
                 }
             )
         records.sort(key=lambda row: row["date"], reverse=True)
@@ -175,16 +164,24 @@ class TrainingProfileSelectionService:
         if reader is None:
             raise RuntimeError("power profiles need the canonical activity summaries")
         today = self._today()
-        start = (today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)).isoformat()
+        start = today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+        # One spare day on each side; the local date below decides membership.
+        first, last = start - timedelta(days=1), today + timedelta(days=1)
         with self._canonical.database_manager().read_snapshot() as db:
             sessions = [
                 summary
-                for summary in reader.activity_summaries(db)
+                for summary in reader.activity_summaries(db, start=first, end=last)
                 if summary.get("sport") in ("ride", "run")
-                and start <= summary_local_date(summary) <= today.isoformat()
+                and start.isoformat()
+                <= summary_local_date(summary)
+                <= today.isoformat()
             ]
+            fingerprints = {
+                str(row.get("id")): summary_fingerprint(row)
+                for row in reader.activity_rows(db, start=first, end=last)
+            }
             curves = self._curves.curves(
-                db, [str(summary.get("id") or "") for summary in sessions]
+                db, [str(summary.get("id") or "") for summary in sessions], fingerprints
             )
         records = [
             _curve_record(summary, curves.get(str(summary.get("id") or "")))
@@ -239,7 +236,7 @@ class TrainingProfileSelectionService:
     ) -> list[dict[str, Any]]:
         compatibility = []
         for environment in ("outdoor", "indoor"):
-            for duration in (5, 60, 300, 1200):
+            for duration in LEGACY_POWER_DURATIONS:
                 candidates = [
                     (p.get("watts"), row)
                     for row in eligible_records
@@ -547,20 +544,34 @@ class TrainingReportServices:
     timezone: Callable[[], str]
 
 
-def _curve_record(summary: Any, curve: SessionCurve | None) -> dict[str, Any]:
+def summary_fields(summary: Mapping[str, Any]) -> dict[str, Any]:
+    """Session fields every analysis row takes from its canonical summary."""
     sport = summary.get("sport")
     return {
-        "activity_id": stored_activity_key(summary),
         "date": summary_local_date(summary),
-        "observed_at": summary.get("started_at"),
         "sport": sport,
         "activity_type": sport,
         "environment": "indoor" if summary_is_indoor(summary) else "outdoor",
-        "source": summary.get("source"),
         "name": summary.get("name"),
         "device": str(
             summary.get("device_name") or summary.get("recorded_by") or "unknown"
         )[:200],
+    }
+
+
+def _curve_record(
+    summary: Mapping[str, Any], curve: SessionCurve | None
+) -> dict[str, Any]:
+    fields = summary_fields(summary)
+    profile = None
+    if curve is not None:
+        profile = curve.power if fields["sport"] == "ride" else curve.running
+    return {
+        **fields,
+        "activity_id": stored_activity_key(summary),
+        "observed_at": summary.get("started_at"),
+        # Best values are credited to the providers of the streams they read.
+        "source": None if profile is None else profile.get("source"),
         "power_profile": {} if curve is None else curve.power,
         "running_profile": {} if curve is None else curve.running,
         "fingerprint": None if curve is None else curve.fingerprint,
@@ -568,8 +579,16 @@ def _curve_record(summary: Any, curve: SessionCurve | None) -> dict[str, Any]:
 
 
 def _records_fingerprint(records: list[dict[str, Any]]) -> str:
+    """Every input that decides a window: session identity, day, kind and curve."""
     return input_fingerprint(
-        str(row["fingerprint"]) for row in records if row.get("fingerprint")
+        [
+            row.get("activity_id"),
+            row.get("date"),
+            row.get("sport"),
+            row.get("environment"),
+            row.get("fingerprint"),
+        ]
+        for row in records
     )
 
 

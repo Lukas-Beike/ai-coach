@@ -678,7 +678,7 @@ class M4BestEffortInputs(linking.LinkingCase):
         with self.manager.reader() as db:
             curves = SessionCurveReader(
                 CanonicalTableReader().session_activities
-            ).curves(db, [session])
+            ).curves(db, [session], {})
         # A downsampled stream never enters the mean-maximal curve.
         self.assertEqual(curves, {})
         empty = power_profile({"sport": "ride", "streams": {}})
