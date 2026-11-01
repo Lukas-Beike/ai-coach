@@ -79,6 +79,9 @@ class _Feedback:
     def list(self, _limit=100):
         return []
 
+    def for_activity_ids(self, _activity_ids):
+        return []
+
 
 def _garmin_collected(activity_id: str) -> dict:
     return {

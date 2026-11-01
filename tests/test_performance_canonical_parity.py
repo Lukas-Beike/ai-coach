@@ -697,6 +697,7 @@ class CanonicalWiringTests(unittest.TestCase):
         snapshot_reader.latest_snapshot.return_value = snapshot
         feedback = Mock()
         feedback.list.return_value = []
+        feedback.for_activity_ids.return_value = []
         service = ActivityAnalysisReadService(
             sessions,
             Mock(),

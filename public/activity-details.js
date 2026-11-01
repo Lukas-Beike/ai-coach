@@ -93,10 +93,14 @@
   }
 
   function setRpe(select, value) {
-    const number = value == null || value === "" ? null : Number(value);
-    // A stored rating off the half-point grid keeps its own option instead of being rounded.
-    if (number != null && ![...select.options].some((option) => option.value === String(number))) select.append(rpeOption(number));
-    select.value = number == null ? "" : String(number);
+    const number = value == null || value === "" ? NaN : Number(value);
+    if (!Number.isFinite(number)) { select.value = ""; return; }
+    // A stored rating off the half-point grid keeps its own option, in order, instead of being rounded.
+    if (![...select.options].some((option) => option.value === String(number))) {
+      const next = [...select.options].find((option) => option.value !== "" && Number(option.value) > number);
+      select.insertBefore(rpeOption(number), next || null);
+    }
+    select.value = String(number);
   }
 
   function rpeSelect(value) {
@@ -110,7 +114,7 @@
   const SESSION_LOAD_REASONS = { no_rating: "kein RPE", conflicting_provider_ratings: "widersprüchliche Provider-RPE", no_elapsed_duration: "keine Gesamtdauer", invalid_duration: "ungültige Dauer" };
 
   function sessionLoadText(load) {
-    if (!load) return "";
+    if (!load || load.reason === "no_rating") return "";
     if (load.value == null) return `Session-RPE-Last: offen · ${SESSION_LOAD_REASONS[load.reason] || "unbekannt"}`;
     const value = Number(load.value).toLocaleString("de-DE", { maximumFractionDigits: 1 });
     const rpe = Number(load.rpe).toLocaleString("de-DE");
@@ -132,7 +136,15 @@
     let shown = feedback;
     const fill = (value) => { setRpe(rpe, value?.session_rpe); reason.value = value?.deviation_reason || ""; notes.value = value?.notes || ""; };
     // The served document recomputes the load from the saved feedback and its provider fallback.
-    const refreshLoad = async () => { try { showLoad((await api(`/api/activities/${encodeURIComponent(activityId)}`)).session_rpe_load); } catch { /* the saved feedback stays shown */ } };
+    let loadGeneration = 0;
+    // Only the newest refresh may write, so a slow save response cannot overwrite a later undo.
+    const refreshLoad = async () => {
+      const current = ++loadGeneration;
+      try {
+        const payload = await api(`/api/activities/${encodeURIComponent(activityId)}`);
+        if (current === loadGeneration) showLoad(payload.session_rpe_load);
+      } catch { /* the saved feedback stays shown */ }
+    };
     form.addEventListener("submit", async (event) => {
       event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
       try {

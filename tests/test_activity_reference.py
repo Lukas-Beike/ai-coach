@@ -159,7 +159,11 @@ class ActivityReferenceResolverTests(_Fixture):
         garmin = self.seed("garmin-survivor", provider=ProviderId.GARMIN)
         self.merge(intervals, garmin)
         feedback = Mock()
-        feedback.list.return_value = [{"activity_id": "ride-merged", "session_rpe": 6}]
+        feedback.for_activity_ids.side_effect = lambda ids: [
+            {"activity_id": key, "session_rpe": 6}
+            for key in ids
+            if key == "ride-merged"
+        ]
         envelope = DetailEnvelopeReader(
             feedback_service=feedback,
             read_equipment=lambda reference: {},
@@ -327,6 +331,7 @@ class ActivityCallerResolutionTests(_Fixture):
             Mock(
                 attach_to_activities=Mock(side_effect=lambda rows: list(rows)),
                 list=Mock(return_value=[]),
+                for_activity_ids=Mock(return_value=[]),
             ),
             ActivityDetailStore(self.manager),
             references=ActivityReferences(self.manager),

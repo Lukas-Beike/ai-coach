@@ -42,13 +42,12 @@ class DetailEnvelopeReader:
         _raw_summary: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         reference = str(self._references.resolve_reference(activity_id).activity_id)
-        items = self._feedback_service.list(500)
-        # Feedback saved under the requested id before the merged record resolved.
+        # The session's effective feedback, through the reference or, for
+        # feedback saved before the merged record resolved, the requested id.
         feedback = next(
-            (item for item in items if item.get("activity_id") == reference),
-            None,
-        ) or next(
-            (item for item in items if item.get("activity_id") == str(activity_id)),
+            iter(
+                self._feedback_service.for_activity_ids([reference, str(activity_id)])
+            ),
             None,
         )
         summary = self._summary()

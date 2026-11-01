@@ -32,8 +32,13 @@ class _Feedback:
     def __init__(self, rows):
         self.rows = rows
 
-    def list(self, _limit=100):
-        return self.rows
+    def for_activity_ids(self, activity_ids):
+        return [
+            row
+            for key in activity_ids
+            for row in self.rows
+            if row["activity_id"] == key
+        ]
 
 
 class DetailEnvelopeTests(unittest.TestCase):

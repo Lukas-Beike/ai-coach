@@ -383,7 +383,7 @@ class TrainingReportReadService:
             for summary in summaries
             if start.isoformat()
             <= summary_local_date(summary, timezone)
-            <= (start + timedelta(days=days - 1)).isoformat()
+            <= min(today, start + timedelta(days=days - 1)).isoformat()
         ]
         return training_report(
             start=start,

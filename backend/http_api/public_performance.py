@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import context as performance_context
 from backend.performance.canonical_inputs import (
@@ -148,7 +149,11 @@ class PublicPerformanceStateService:
     ) -> dict[str, Any]:
         """Daily and weekly session-RPE load of the load tab's 12-week window."""
         start = today - timedelta(days=_SESSION_RPE_LOAD_DAYS - 1)
-        summaries = inputs.activities or ()
+        summaries = [
+            summary
+            for summary in inputs.activities or ()
+            if start.isoformat() <= summary_local_date(summary, timezone)
+        ]
         return session_rpe_load(
             summaries,
             feedback_by_session(summaries, self._session_feedback),

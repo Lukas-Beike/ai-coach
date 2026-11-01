@@ -131,9 +131,16 @@ def _audit_value(group: builtins.list[dict[str, Any]] | None) -> dict[str, Any] 
     if not group:
         return None
     rows = sorted(group, key=lambda row: str(row["activity_id"]))
-    return {
-        "rows": [{field: row.get(field) for field in _STORED_FIELDS} for row in rows]
-    }
+    return {"rows": [_audit_row(row) for row in rows]}
+
+
+def _audit_row(row: dict[str, Any]) -> dict[str, Any]:
+    """One stored row; an unknown rating time is left out, as rows recorded
+    before schema version 18 have no such field and keep their audit hash."""
+    recorded = {field: row.get(field) for field in _STORED_FIELDS}
+    if recorded["session_rpe_rated_at"] is None:
+        del recorded["session_rpe_rated_at"]
+    return recorded
 
 
 def _ordered(group: Iterable[dict[str, Any]]) -> builtins.list[dict[str, Any]]:

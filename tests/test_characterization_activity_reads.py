@@ -90,6 +90,16 @@ class _Feedback:
     def list(self, _limit: int = 100) -> builtins.list[dict[str, Any]]:
         return self._rows
 
+    def for_activity_ids(
+        self, activity_ids: builtins.list[str]
+    ) -> builtins.list[dict[str, Any]]:
+        return [
+            row
+            for key in activity_ids
+            for row in self._rows
+            if str(row["activity_id"]) == key
+        ]
+
     def attach_to_activities(
         self, activities: builtins.list[Any]
     ) -> builtins.list[dict[str, Any]]:

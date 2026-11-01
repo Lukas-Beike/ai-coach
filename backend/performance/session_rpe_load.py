@@ -62,16 +62,16 @@ def _finite(value: Any) -> float | None:
 
 def _rating(
     summary: Mapping[str, Any], feedback: Mapping[str, Any] | None
-) -> tuple[float | None, str | None, str | None]:
-    """The session's RPE, its source and label, or no RPE and the reason."""
+) -> tuple[float, str, str] | str:
+    """The session's RPE with its source and label, or the reason it has none."""
     local = _finite((feedback or {}).get("session_rpe"))
     if local is not None:
         return local, SOURCE_ATHLETE, ATHLETE_LABEL
     if summary.get("rpe_conflict"):
-        return None, None, REASON_CONFLICTING_PROVIDER_RATINGS
+        return REASON_CONFLICTING_PROVIDER_RATINGS
     provider = _finite(summary.get("rpe"))
     if provider is None:
-        return None, None, REASON_NO_RATING
+        return REASON_NO_RATING
     label = str((summary.get("sources") or {}).get("rpe") or "Provider")
     return provider, SOURCE_PROVIDER, label
 
@@ -100,18 +100,25 @@ def session_load(
     timezone: str | None = None,
 ) -> tuple[dict[str, Any], float | None]:
     """One session's output entry and its unrounded AU, or ``None`` with a reason."""
-    rpe, source, label_or_reason = _rating(summary, feedback)
-    elapsed = _finite(summary.get("elapsed_duration_s"))
+    rating = _rating(summary, feedback)
+    rpe, source, label = (None, None, None) if isinstance(rating, str) else rating
+    raw_elapsed = _finite(summary.get("elapsed_duration_s"))
+    elapsed = raw_elapsed if raw_elapsed is not None and raw_elapsed > 0 else None
+    value: float | None = None
     reason: str | None = None
-    if rpe is None:
-        reason = label_or_reason
-    elif elapsed is None:
+    if isinstance(rating, str):
+        reason = rating
+    elif raw_elapsed is None:
         reason = REASON_NO_ELAPSED_DURATION
-    elif elapsed <= 0:
+    elif elapsed is None:
         reason = REASON_INVALID_DURATION
-    value = None
-    if reason is None and rpe is not None and elapsed is not None:
+    elif rpe is not None:
         value = elapsed / 60 * rpe
+    rated_after_end = None
+    if source == SOURCE_ATHLETE and elapsed is not None:
+        rated_after_end = _minutes_after_end(
+            summary, elapsed, (feedback or {}).get("session_rpe_rated_at")
+        )
     entry: dict[str, Any] = {
         "activity_id": summary.get("id"),
         "date": summary_local_date(summary, timezone),
@@ -120,15 +127,9 @@ def session_load(
         "value": None if value is None else round(value, 1),
         "rpe": rpe,
         "rpe_source": source,
-        "rpe_source_label": label_or_reason if source else None,
-        "duration_min": None
-        if elapsed is None or elapsed <= 0
-        else round(elapsed / 60, 1),
-        "rated_minutes_after_end": _minutes_after_end(
-            summary, elapsed, (feedback or {}).get("session_rpe_rated_at")
-        )
-        if source == SOURCE_ATHLETE and elapsed is not None and elapsed > 0
-        else None,
+        "rpe_source_label": label,
+        "duration_min": None if elapsed is None else round(elapsed / 60, 1),
+        "rated_minutes_after_end": rated_after_end,
         "status": "descriptive" if value is not None else "insufficient_data",
         "reason": reason,
     }
