@@ -171,6 +171,27 @@ def _segment_start(
     return None
 
 
+def _window_change(
+    records: dict[str, float],
+    observations: dict[str, Observation],
+    observed: str,
+    cutoff: str,
+) -> str | None:
+    """Return the segment start when it lies inside the comparison window."""
+    changed_on = _segment_start(records, observations, observed)
+    return changed_on if changed_on is not None and changed_on > cutoff else None
+
+
+def _reason(*, current: bool, changed: bool) -> str:
+    if not current:
+        return "Messung veraltet."
+    if changed:
+        return (
+            "Messkontext geändert; mindestens 14 passende Nächte seitdem erforderlich."
+        )
+    return "Mindestens 14 frühere passende Nächte erforderlich."
+
+
 def _baseline(
     key: tuple[ProviderId, str, str],
     records: dict[str, float],
@@ -180,9 +201,7 @@ def _baseline(
 ) -> dict[str, Any]:
     provider, metric, field = key
     observed = max(records)
-    changed_on = _segment_start(records, observations, observed)
-    if changed_on is not None and changed_on <= cutoff:
-        changed_on = None  # The change lies before the window and has no effect.
+    changed_on = _window_change(records, observations, observed, cutoff)
     # Today's value never influences its own comparison distribution, and a
     # measurement change restarts it.
     first = changed_on or cutoff
@@ -221,14 +240,7 @@ def _baseline(
             position="below" if latest < lower else _upper_position(latest, upper),
         )
     else:
-        baseline["reason"] = "Mindestens 14 frühere passende Nächte erforderlich."
-        if changed_on:
-            baseline["reason"] = (
-                "Messkontext geändert; mindestens 14 passende Nächte seitdem "
-                "erforderlich."
-            )
-        if not current:
-            baseline["reason"] = "Messung veraltet."
+        baseline["reason"] = _reason(current=current, changed=changed_on is not None)
 
     return baseline
 

@@ -112,10 +112,10 @@ and no competing interests.
 | --- | --- | --- | --- |
 | Comparison window | 42 days | product assumption | Existing rule, `personal_recovery.py:83`; R9 names no single window, R7 used a 4-week reference. |
 | History loaded | 83 days | product assumption | Existing rule, `personal_recovery.py:84`; covers the 42-day window plus display history. |
-| Minimum earlier values for a position | 14 | product assumption | Existing rule, `personal_recovery.py:214`; no source fixes a minimum. |
-| Values for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:217`. |
-| Quartile method | inclusive, n = 4 | product assumption | Existing rule, `personal_recovery.py:215`; the middle quartiles hold about half of the values by definition, so "outside" is not rare. |
-| Current value counts as fresh | observed today or yesterday | product assumption | Existing rule, `personal_recovery.py:191`. |
+| Minimum earlier values for a position | 14 | product assumption | Existing rule, `personal_recovery.py:233`; no source fixes a minimum. |
+| Values for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:236`. |
+| Quartile method | inclusive, n = 4 | product assumption | Existing rule, `personal_recovery.py:234`; the middle quartiles hold about half of the values by definition, so "outside" is not rare. |
+| Current value counts as fresh | observed today or yesterday | product assumption | Existing rule, `personal_recovery.py:210`. |
 | Resting HR plausibility | 20 to 230 bpm | product assumption | Existing filter, `personal_recovery.py:144`; data-entry guard, not a physiological range. |
 | HRV plausibility | greater than 0 ms | product assumption | Existing filter, `personal_recovery.py:137`. |
 | RMSSD and SDNN kept separate | yes | source | Different metrics; R8 pools them separately, R10 and R11 report RMSSD. |
