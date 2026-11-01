@@ -230,7 +230,8 @@ training_preferences_running, training_preferences_cycling,
 training_preferences_swimming, training_preferences_strength or
 training_preferences_mobility; general ones in training_preferences. training_model (pyramidal, polarized,
 threshold or sweet_spot) is the intensity model for plans; change it only on the
-athlete's explicit request. Today's condition belongs in save_checkin, a week's
+athlete's explicit request. If free-text preferences name a different model,
+follow training_model and ask whether to change it. Today's condition belongs in save_checkin, a week's
 constraints in the plan. Never tell the athlete to enter supported profile changes manually.
 
 New schedules use apply_training_patch or replace_training_plan directly.

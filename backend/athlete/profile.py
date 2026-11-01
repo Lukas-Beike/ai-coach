@@ -65,7 +65,10 @@ def normalize_profile(
     result["timezone"] = timezone_name(result.get("timezone"), strict=validate_timezone)
     if result["training_model"] not in TRAINING_MODELS:
         if validate_timezone and result["training_model"]:
-            raise AppError(400, "Unbekanntes Trainingsmodell.")
+            raise AppError(
+                400,
+                "Unbekanntes Trainingsmodell; erlaubt: " + ", ".join(TRAINING_MODELS),
+            )
         result["training_model"] = TRAINING_MODELS[0]
     if result["sleep_target_hours"]:
         try:
