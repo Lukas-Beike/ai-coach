@@ -18,8 +18,9 @@ environment per version and lock hash. The base is `%LOCALAPPDATA%/ai-coach/grap
 on Windows and `$XDG_DATA_HOME/ai-coach/graphify` (default
 `~/.local/share/ai-coach/graphify`) on POSIX. Graph state and isolated home stay
 under each worktree's `.graphify-local/`; app dependencies are separate.
-Setup requires Python 3.14; it selects `py -3.14` on Windows or `python3.14`
-on POSIX if the calling interpreter is a different version.
+Run the tooling scripts with Python 3.14 or newer. Setup requires Python 3.14
+for its environment; it selects `py -3.14` on Windows or `python3.14` on POSIX
+when called with a newer interpreter.
 Preparation uses `update --preparation` with a 600-second budget; hooks and
 plain `update` retain 180 seconds. Graphify does not require Sonar or scan
 prompts/source for secrets. Source allowlists,
