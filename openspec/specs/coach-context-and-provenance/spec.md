@@ -129,7 +129,7 @@ The system SHALL provide read-only tools for exact local records and determinist
 
 #### Scenario: Sleep timing section is the context summary
 - **WHEN** `get_training_report` selects `sleep_timing_variability`
-- **THEN** it returns the same per-series summary as the Coach context, without the UI's per-night chart points.
+- **THEN** it returns the Coach context's per-series summary plus each series' last 14 nights, without the UI's 84-night chart points.
 
 #### Scenario: Invalid report or missing owner
 - **WHEN** unsupported sections (including the retired section name `sleep_regularity`), invalid list parameters or unavailable report services are requested

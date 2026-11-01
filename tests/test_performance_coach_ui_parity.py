@@ -24,6 +24,7 @@ from backend.http_api.public_performance import PublicPerformanceStateService
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.report_service import (
     TrainingDerivedReadService,
+    TrainingProfileSelectionService,
     TrainingReportReadService,
     TrainingReportServices,
 )
@@ -34,6 +35,8 @@ PROFILE = {"timezone": "UTC", "sleep_target_hours": 8}
 # Display-only keys the Coach projection drops (`coach_performance_projection`).
 UI_ONLY_BASELINE_KEYS = {"history", "measurement_context"}
 UI_ONLY_TIMING_KEYS = {"sources", "points", "points_14", "points_84"}
+# The report tool keeps each series' last 14 nights for a per-night drill-down.
+REPORT_ONLY_TIMING_KEYS = {"points_14"}
 
 
 def _wellness() -> list[dict[str, Any]]:
@@ -87,6 +90,30 @@ def _feedback(keys: list[str]) -> list[dict[str, Any]]:
     ]
 
 
+def _curve_records() -> list[dict[str, Any]]:
+    def ride(activity_id: str, curve: list[tuple[int, float, float]]) -> dict:
+        return {
+            "activity_id": activity_id,
+            "date": (MONDAY + timedelta(days=1)).isoformat(),
+            "sport": "ride",
+            "environment": "outdoor",
+            "fingerprint": activity_id,
+            "power_profile": {
+                "status": "ok",
+                "points": [],
+                "duration_curve": [
+                    {"duration_seconds": d, "watts": w, "start_seconds": s}
+                    for d, w, s in curve
+                ],
+            },
+        }
+
+    return [
+        ride("a", [(180, 400.0, 100.0), (420, 330.0, 0.0), (720, 250.0, 1000.0)]),
+        ride("b", [(180, 300.0, 0.0), (420, 300.0, 0.0), (720, 300.0, 0.0)]),
+    ]
+
+
 def _without(row: dict[str, Any], keys: set[str]) -> dict[str, Any]:
     return {key: value for key, value in row.items() if key not in keys}
 
@@ -118,14 +145,10 @@ class CoachUiParityTests(unittest.TestCase):
         self.coach_context = CoachPerformanceContextReader(
             profile, garmin_payload, Mock(), lambda: TODAY
         ).current_performance(self.inputs)
-        self.curves = {
-            "method": "mean-max-curve",
-            "method_version": 1,
-            "status": "ok",
-            "cycling": [{"duration_s": 180, "watts": 310, "effort_group": "a"}],
-        }
-        profiles = Mock()
-        profiles.power_profiles.return_value = self.curves
+        # The real curve owner over synthetic session curves; only the stream
+        # read is replaced (`tests/test_mean_max_curve.py` covers it).
+        profiles = TrainingProfileSelectionService(lambda: TODAY)
+        profiles.curve_records = _curve_records  # type: ignore[method-assign]
         # Wired as `backend/http_api/assembly.py` does: the Coach report sections
         # read the services the analysis routes and the public state use.
         self.reports = TrainingReportServices(
@@ -208,13 +231,13 @@ class CoachUiParityTests(unittest.TestCase):
             [_without(row, UI_ONLY_BASELINE_KEYS) for row in ui["baselines"]],
             coach["baselines"],
         )
-        statuses = {
-            (row["metric"], row["source_provider"]): row["status"]
+        statuses = sorted(
+            (row["source_provider"], row["measurement"], row["status"])
             for row in coach["baselines"]
             if row["metric"] == "hrv"
-        }
+        )
         self.assertEqual(
-            {("hrv", "intervals"): "ok", ("hrv", "garmin"): "insufficient_data"},
+            [("garmin", "RMSSD", "insufficient_data"), ("intervals", "RMSSD", "ok")],
             statuses,
         )
         for key in ("method", "as_of", "note", "sleep_deficits", "sleep_target_hours"):
@@ -227,7 +250,21 @@ class CoachUiParityTests(unittest.TestCase):
         section = self.coach_report("sleep_timing_variability")[
             "sleep_timing_variability"
         ]
-        self.assertEqual(coach, section)
+        self.assertEqual(
+            coach,
+            {
+                **section,
+                "series": [
+                    _without(item, REPORT_ONLY_TIMING_KEYS)
+                    for item in section["series"]
+                ],
+            },
+        )
+        self.assertEqual(
+            [item["points_14"] for item in ui["series"]],
+            [item["points_14"] for item in section["series"]],
+        )
+        self.assertTrue(all(len(item["points_14"]) == 14 for item in ui["series"]))
         self.assertEqual(
             _without(ui, UI_ONLY_TIMING_KEYS | {"series"}),
             _without(coach, {"series"}),
@@ -241,9 +278,14 @@ class CoachUiParityTests(unittest.TestCase):
         handler = _Handler()
         auth = Mock()
         AnalysisRoutes(lambda: auth, lambda: self.reports).handle(handler, handler.path)
-        self.assertEqual((200, self.curves), handler.sent)
+        status, ui = handler.sent
+        self.assertEqual(200, status)
+        self.assertEqual(
+            ("mean-max-curve", 1, "ok"),
+            (ui["method"], ui["method_version"], ui["status"]),
+        )
         coach = self.coach_report("power_profiles")["power_profiles"]
-        self.assertEqual(handler.sent[1], coach)
+        self.assertEqual(ui, coach)
 
 
 if __name__ == "__main__":

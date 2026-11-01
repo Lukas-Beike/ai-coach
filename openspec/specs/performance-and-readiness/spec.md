@@ -633,7 +633,7 @@ Each Epic S local method SHALL be listed in the register below with its method i
 
 #### Scenario: Large sleep timing history
 - **WHEN** the sleep timing variability spans many nights
-- **THEN** `get_training_report` returns the same summary as the Coach context, without per-night points, and reports the section as complete.
+- **THEN** `get_training_report` returns the Coach context's summary plus each series' last 14 nights as the UI shows them, without the 84-night chart points, and reports the section as complete.
 
 Detailed contract:
 
@@ -643,7 +643,7 @@ Detailed contract:
 | HRV, resting HR and sleep duration comparison | `personal-quartiles-v1` | `ok`, `provisional`, `insufficient_data` | own earlier values only, not a normal or clinical range | M2, M3, released |
 | Sleep goal shortfall (last 7 nights) | inside the `personal-quartiles-v1` result, no own id | `ok`, `partial`; none without a 4–12 h goal | no sleep debt | M3, released |
 | Sleep timing variability | `sleep-timing-variability-v2` | `ok`, `provisional`, `insufficient_data` | not the Sleep Regularity Index; no median or deviation below 14 earlier intervals | M3, released |
-| Power and running best-effort curve | `mean-max-curve` v1 | `ok`, `insufficient_data` | observed bests only, no FTP, CP or pace estimate | M4 card, fit blocked |
+| Power and running best-effort curve | `mean-max-curve` v1 | `ok`, `insufficient_data`; per running point also `unknown` | observed bests only, no FTP, CP or pace estimate | M4 card, fit blocked |
 
 CP/CS (#1431) stays without output until its card is released; M5 (#1432) is deferred. No observation phase has run.
 

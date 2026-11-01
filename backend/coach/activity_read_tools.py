@@ -82,9 +82,10 @@ class CoachActivityReadToolService:
                 ),
                 "comparisons": self._report_services.records.comparisons,
                 "body_history": self._report_services.derived.body_history,
-                # The Coach context's summary, not the UI's per-night points.
+                # The Coach context's summary plus each series' last 14 nights.
                 "sleep_timing_variability": lambda: coach_sleep_timing_projection(
-                    self._report_services.derived.sleep_timing_variability()
+                    self._report_services.derived.sleep_timing_variability(),
+                    recent_nights=True,
                 ),
             }
             payload = {

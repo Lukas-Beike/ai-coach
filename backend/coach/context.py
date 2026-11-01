@@ -458,8 +458,23 @@ def coach_performance_projection(performance: Any) -> Any:
     return {**performance, "personal_recovery": projected_recovery}
 
 
-def coach_sleep_timing_projection(regularity: dict[str, Any]) -> dict[str, Any]:
-    """Keep each sleep timing series' summary without the per-night chart points."""
+def coach_sleep_timing_projection(
+    regularity: dict[str, Any], *, recent_nights: bool = False
+) -> dict[str, Any]:
+    """Keep each sleep timing series' summary without the per-night chart points.
+
+    ``recent_nights`` keeps each series' last 14 nights (``points_14``) for the
+    report tool's drill-down; the 84-night chart points stay UI-only.
+    """
+    dropped = (
+        {"points", "points_84"}
+        if recent_nights
+        else {
+            "points",
+            "points_14",
+            "points_84",
+        }
+    )
     projected = {
         key: value
         for key, value in regularity.items()
@@ -468,11 +483,7 @@ def coach_sleep_timing_projection(regularity: dict[str, Any]) -> dict[str, Any]:
     series = regularity.get("series")
     if isinstance(series, list):
         projected["series"] = [
-            {
-                key: value
-                for key, value in item.items()
-                if key not in {"points", "points_14", "points_84"}
-            }
+            {key: value for key, value in item.items() if key not in dropped}
             if isinstance(item, dict)
             else item
             for item in series
