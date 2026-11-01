@@ -9,7 +9,7 @@ cover the year before ``as_of``, extended to the current window's first day.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Any, Final, cast
 
@@ -176,8 +176,7 @@ def _changed(
     base: CanonicalPerformanceInputs, **changes: Any
 ) -> CanonicalPerformanceInputs:
     """Return a copy of ``base`` with ``changes`` applied."""
-    values = {field.name: getattr(base, field.name) for field in fields(base)}
-    return CanonicalPerformanceInputs(**{**values, **changes})
+    return cast(CanonicalPerformanceInputs, replace(base, **changes))
 
 
 def _read_state(
