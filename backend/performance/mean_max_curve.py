@@ -170,7 +170,7 @@ def _fingerprint(
                 )
                 for record in records
             ),
-            sorted(key.content_sha256 for key in keys),
+            sorted([key.content_sha256, key.fetched_at] for key in keys),
         ]
     )
 

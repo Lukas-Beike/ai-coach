@@ -254,6 +254,8 @@ class FullStreamKey:
     provider_activity_id: str
     content_sha256: str
     summary_sha256: str | None
+    # The merge breaks ties between equal sets by the newest fetch.
+    fetched_at: str
 
 
 def full_stream_keys(
@@ -275,7 +277,7 @@ def full_stream_keys(
         rows = db.execute(
             "SELECT CASE WHEN s.state = ? THEN s.merged_into ELSE s.activity_id END "
             "AS owner, d.provider, d.provider_activity_id, d.content_sha256, "
-            "d.summary_sha256 FROM activity_detail_sets AS d "
+            "d.summary_sha256, d.fetched_at FROM activity_detail_sets AS d "
             "JOIN activity_records AS r ON r.provider = d.provider "
             "AND r.provider_activity_id = d.provider_activity_id "
             "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
@@ -300,6 +302,7 @@ def full_stream_keys(
                     provider_activity_id=row["provider_activity_id"],
                     content_sha256=row["content_sha256"],
                     summary_sha256=row["summary_sha256"],
+                    fetched_at=row["fetched_at"],
                 )
             )
     return {

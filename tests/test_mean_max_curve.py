@@ -69,7 +69,13 @@ def add_record(db, provider, provider_activity_id, activity_id, sport="ride"):
 
 
 def store_streams(
-    db, provider, provider_activity_id, watts, resolution, summary_sha256=None
+    db,
+    provider,
+    provider_activity_id,
+    watts,
+    resolution,
+    summary_sha256=None,
+    retrieved_at=RETRIEVED,
 ):
     detail = ActivityStreamSet(
         provider_activity_id=provider_activity_id,
@@ -78,7 +84,7 @@ def store_streams(
             source_kind=SourceKind.PROVIDER_REPORTED,
             source_record_id=None,
             recorded_by=RecordingOrigin.GARMIN,
-            retrieved_at=RETRIEVED,
+            retrieved_at=retrieved_at,
             label=provider.value.title(),
         ),
         origin=ActivityDetailOrigin.FETCH,
@@ -166,6 +172,35 @@ class SessionCurveReaderTests(unittest.TestCase):
         self.assertIs(first, again)
         self.assertNotEqual(first.fingerprint, changed.fingerprint)
         self.assertEqual(380.0, watts_at(changed, 180))
+
+    def test_a_refetch_that_changes_the_chosen_set_recomputes_the_curve(self):
+        add_session(self.db, "act_1")
+        add_record(self.db, WAHOO, "w-1", "act_1")
+        store_streams(self.db, WAHOO, "w-1", ride_power(350.0), StreamResolution.FULL)
+        add_session(self.db, "act_2", "duplicate", merged_into="act_1")
+        add_record(self.db, WAHOO, "w-2", "act_2")
+        store_streams(self.db, WAHOO, "w-2", ride_power(450.0), StreamResolution.FULL)
+        before = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+
+        # Same content fetched later: the merge now prefers this set.
+        later = datetime(2026, 10, 19, 8, 0, tzinfo=UTC)
+        for provider_activity_id, peak in (("w-1", 350.0), ("w-2", 450.0)):
+            if watts_at(before, 180) != peak:
+                store_streams(
+                    self.db,
+                    WAHOO,
+                    provider_activity_id,
+                    ride_power(peak),
+                    StreamResolution.FULL,
+                    retrieved_at=later,
+                )
+        cached = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+        fresh = SessionCurveReader(CanonicalTableReader().session_activities).curves(
+            self.db, ["act_1"], {}
+        )["act_1"]
+
+        self.assertNotEqual(watts_at(before, 180), watts_at(fresh, 180))
+        self.assertEqual(watts_at(fresh, 180), watts_at(cached, 180))
 
     def test_a_set_fetched_for_an_older_summary_is_left_out(self):
         add_session(self.db, "act_1")
