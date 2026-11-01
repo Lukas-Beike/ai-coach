@@ -272,7 +272,14 @@ class ActivityFeedbackService:
             if key is None and activity_id in origins:
                 session = origins[activity_id]
                 key = ("session", effective.get(session, session))
-            if sessions_only and key is not None and key[0] != "session":
+            # A row without a stored session still counts when its id now
+            # resolves to exactly one session.
+            if (
+                sessions_only
+                and key is not None
+                and key[0] != "session"
+                and activity_id not in origins
+            ):
                 continue
             if key is not None and key in groups:
                 found.append(

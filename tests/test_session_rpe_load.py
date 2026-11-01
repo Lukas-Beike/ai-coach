@@ -357,6 +357,19 @@ class SessionRpeLoadIntegrationTests(FeedbackSessionFixture):
             ["provider"],
         )
 
+    def test_a_rating_without_a_stored_session_counts_once_its_id_is_unique(
+        self,
+    ) -> None:
+        # Written before its record was linked: session_id stays NULL, but the
+        # Intervals.icu id now resolves to exactly one session.
+        self.service.save(INTERVALS_ID, {"session_rpe": 5})
+        with self.manager.unit_of_work() as db:
+            db.execute("UPDATE activity_feedback SET session_id = NULL")
+        (session,) = self.load()["sessions"]
+        self.assertEqual(
+            (session["value"], session["rpe_source"]), (300.0, "athlete_feedback")
+        )
+
     def test_clearing_the_local_rating_falls_back_to_the_provider_rating(
         self,
     ) -> None:
