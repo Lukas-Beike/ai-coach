@@ -6,7 +6,7 @@
 - **Status:** implemented on canonical sleep observations and periods (#1429)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-10-24
-- **Review:** version 2 released 2026-10-26 (athlete); version 3 implements its stop rule without a new claim
+- **Review:** released 2026-11-01 (athlete)
 
 ## Target construct
 
@@ -19,7 +19,7 @@ debt, sleep quality or a sleep diagnosis.
 
 - Duration: the provider's device-estimated sleep duration in hours, per
   provider and field, from canonical sleep duration observations.
-- Goal shortfall (`backend/performance/personal_recovery.py:170-199`): with a
+- Goal shortfall (`backend/performance/personal_recovery.py:_sleep_deficits`): with a
   goal of 4 to 12 h, `sum(max(0, goal_h − duration_h))` over known nights from
   today − 6 to today, in hours, rounded to 0.01 h after summing.
 - Timing (`sleep-timing-variability-v2`, `personal_recovery.py:sleep_timing_variability`):
@@ -98,8 +98,9 @@ declares lighting-industry funding.
   is a valid state.
 - Shortfall status `ok` only with 7 known nights, otherwise `partial` with the
   known count.
-- Timing: fewer than 14 earlier intervals gives status `insufficient_data`
-  with no median and no deviation; 14 to 27 is `provisional`; 28 or more is
+- Timing, per provider and field series: fewer than 14 earlier intervals
+  before the latest night gives status `insufficient_data` with no median and
+  no deviation for any night of the series; 14 to 27 is `provisional`; 28 or more is
   `ok`.
 - Durations above 24 h and non-positive values are excluded.
 - SRI enters scope only with a sufficiently complete sleep/wake series
@@ -109,16 +110,16 @@ declares lighting-industry funding.
 
 | Rule | Value | Tag | Rationale |
 | --- | --- | --- | --- |
-| Valid sleep goal | 4 to 12 h | product assumption | Existing rule, `personal_recovery.py:177`; input guard, not a recommended range. |
-| Shortfall window | 7 days | product assumption | Existing rule, `personal_recovery.py:184`; one week of bookkeeping. |
-| Shortfall status ok | 7 known nights | product assumption | Existing rule, `personal_recovery.py:195`. |
-| Maximum sleep interval | 24 h | product assumption | Existing filters, `personal_recovery.py:97` and `:324`; data guard. |
-| Timing comparison window | 42 days | product assumption | Existing rule, `personal_recovery.py:373`; same window as M2. |
-| Timing history loaded | 83 days | product assumption | Existing rule, `personal_recovery.py:327`. |
-| Minimum earlier intervals | 14 | product assumption | Existing rule, `personal_recovery.py:377`; no source fixes a minimum. |
-| Intervals for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:379`. |
-| Shortfall rounding | 0.01 h after summing | product assumption | Existing rule, `personal_recovery.py:192-193`; display precision only. |
-| Deviation rounding | 0.1 min | product assumption | Existing rule, `personal_recovery.py:361`; display precision only. |
+| Valid sleep goal | 4 to 12 h | product assumption | Existing rule, `personal_recovery.py:_sleep_deficits`; input guard, not a recommended range. |
+| Shortfall window | 7 days | product assumption | Existing rule, `personal_recovery.py:_sleep_deficits`; one week of bookkeeping. |
+| Shortfall status ok | 7 known nights | product assumption | Existing rule, `personal_recovery.py:_sleep_deficits`. |
+| Maximum sleep interval | 24 h | product assumption | Existing filters, `personal_recovery.py:_add_record` and `sleep_bounds.py:MAX_SLEEP_INTERVAL`; data guard. |
+| Timing comparison window | 42 days | product assumption | Existing rule, `personal_recovery.py:_sleep_series`; same window as M2. |
+| Timing history loaded | 83 days | product assumption | Existing rule, `personal_recovery.py:_interval_item`. |
+| Minimum earlier intervals | 14 | product assumption | Existing rule, `personal_recovery.py:_sleep_series`; also gates medians and deviations (v2); no source fixes a minimum. |
+| Intervals for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:_sleep_series`. |
+| Shortfall rounding | 0.01 h after summing | product assumption | Existing rule, `personal_recovery.py:_sleep_deficits`; display precision only. |
+| Deviation rounding | 0.1 min | product assumption | Existing rule, `personal_recovery.py:_circular_deviation`; display precision only. |
 | Circular day length | 1,440 min | source | Clock time wraps at midnight; R13 also uses 24-h comparison. |
 | No blanket sleep target | individual goal only | source | R12 recommends individual sleep needs over 7-9 h for everyone. |
 

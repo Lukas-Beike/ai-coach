@@ -471,10 +471,10 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
     personal_recovery: {
       as_of: "2026-10-01", sleep_target_hours: null, baselines: [], sleep_deficits: [],
       regularity: {
-        method: "sleep-timing-variability-v2", timezone: "Europe/Berlin", status: "insufficient_data", series: [{
-          source: "Garmin Connect", method: "sleepStartTimestampGMT/sleepEndTimestampGMT", status: "insufficient_data",
-          coverage: { baseline_nights: 3, required_nights: 14 },
-          points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5, onset_deviation_minutes: null, wake_deviation_minutes: null }, { date: "2026-09-30" }],
+        method: "sleep-timing-variability-v2", timezone: "Europe/Berlin", status: "provisional", series: [{
+          source: "Garmin Connect", method: "sleepStartTimestampGMT/sleepEndTimestampGMT", status: "provisional",
+          coverage: { baseline_nights: 14, required_nights: 14 },
+          points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5, onset_deviation_minutes: 15, wake_deviation_minutes: 10 }, { date: "2026-09-30" }],
           points_84: [],
         }],
       },

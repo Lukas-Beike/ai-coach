@@ -423,7 +423,7 @@ def _sleep_series(
     if not count:
         reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
     # v2: below 14 earlier intervals there is no reference, so no deviation.
-    compared = count >= 14
+    compared = status != "insufficient_data"
     onset = (
         _circular_median([item["onset_minutes_local"] for item in prior])
         if compared
