@@ -6,7 +6,7 @@
 - **Status:** implemented on canonical inputs with the segment rule (#1428)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-10-24
-- **Review:** released 2026-10-26 (athlete); segment rule chosen 2026-11-01 (athlete)
+- **Review:** released 2026-11-01 (athlete)
 
 ## Target construct
 
