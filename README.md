@@ -777,6 +777,8 @@ specs, and the `pr` workflow blocks a push while a touched change is still activ
 Worktree preparation uses `python scripts/prepare_worktree.py` to install Node
 development dependencies, set up Graphify and generate the first graph.
 Graphify's version comes from the hash-locked `requirements-graphify.txt`.
+Setup requires Python 3.14 and selects it explicitly (`py -3.14` on Windows,
+`python3.14` on POSIX) when the calling interpreter is a different version.
 One shared virtual environment per version and lock hash lives under
 `%LOCALAPPDATA%/ai-coach/graphify` on Windows, or
 `$XDG_DATA_HOME/ai-coach/graphify` (default `~/.local/share/ai-coach/graphify`)
