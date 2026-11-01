@@ -17,13 +17,15 @@ from backend.activities.activity_summary import (
 from backend.activities.detail_analysis_reads import analysis_summaries
 from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.stored_sports import resolve_workout_sport
-from backend.canonical.vocabulary import ProviderId
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.errors import AppError
+from backend.performance import wellness_days
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
     activity_summaries_and_rows,
     activity_summaries_for,
     activity_summaries_with_sync_time,
+    inputs_for_snapshot,
 )
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.mean_max_curve import (
@@ -39,6 +41,7 @@ from backend.performance.power_profile import (
     RUNNING_DISTANCES,
     RUNNING_DURATIONS,
 )
+from backend.performance.progress_report import weekly_progress
 from backend.performance.season_inputs import (
     SeasonSource,
     read_activity_summaries,
@@ -50,6 +53,7 @@ from backend.performance.training_report import training_report
 
 # Analysis windows of the power and running profiles, shortest first.
 PROFILE_WINDOW_DAYS = (28, 90)
+PROGRESS_DAYS = frozenset({7, 28, 42, 84})
 
 
 def report_sport(value: Any) -> str | None:
@@ -389,7 +393,9 @@ class TrainingReportReadService:
         canonical: CanonicalPerformanceSource,
         session_feedback: FeedbackLookup | None = None,
         now: Callable[[], datetime] | None = None,
+        curve_records: Callable[[], list[dict[str, Any]]] | None = None,
     ) -> None:
+        self._curve_records = curve_records
         self._read_synced_at = read_synced_at
         self._read_plan = read_plan
         self._read_checkins = read_checkins
@@ -418,6 +424,52 @@ class TrainingReportReadService:
             today,
             values,
             inputs=inputs,
+        )
+
+    def progress(self, values: dict[str, Any], timezone: str = "UTC") -> dict[str, Any]:
+        """Weekly per-sport progress over whole ISO weeks (7, 28, 42 or 84 days)."""
+        today = self._today()
+        try:
+            days = int(values.get("days", 42))
+            first = (
+                date.fromisoformat(str(values["start"]))
+                if values.get("start")
+                else today - timedelta(weeks=max(days // 7 - 1, 0))
+            )
+        except (TypeError, ValueError) as exc:
+            raise AppError(400, "Ungültiger Berichtszeitraum.") from exc
+        sport = report_sport(values.get("sport"))
+        start = first - timedelta(days=first.weekday())
+        if (
+            days not in PROGRESS_DAYS
+            or not date(2010, 1, 1) <= start <= today
+            or sport is None
+        ):
+            raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
+        summaries, observed_at = activity_summaries_with_sync_time(self._canonical)
+        period = [
+            row
+            for row in summaries
+            if start.isoformat()
+            <= summary_local_date(row, timezone)
+            <= today.isoformat()
+        ]
+        with self._canonical.database_manager().read_snapshot() as db:
+            inputs = inputs_for_snapshot(self._canonical, db, as_of=today)
+        history = () if inputs is None else inputs.history_wellness_days or ()
+        return weekly_progress(
+            start=start,
+            weeks=days // 7,
+            today=today,
+            sport=sport,
+            timezone=timezone,
+            activity_summaries=summaries,
+            session_feedback=feedback_by_session(period, self._session_feedback),
+            plan=self._read_plan(),
+            ctl_by_day=wellness_days.series(history, MetricKind.CTL),
+            eftp_by_day=None if inputs is None else inputs.eftp_by_day,
+            curve_records=[] if self._curve_records is None else self._curve_records(),
+            observed_at=observed_at,
         )
 
     def read(self, values: dict[str, Any], timezone: str = "UTC") -> dict[str, Any]:

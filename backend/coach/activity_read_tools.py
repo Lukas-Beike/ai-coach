@@ -48,8 +48,12 @@ class CoachActivityReadToolService:
         if name == "get_training_report":
             if self._report_services is None:
                 raise AppError(503, "Trainingsberichte sind nicht verfügbar.")
-            sections = arguments.get("sections", ["report"])
+            long_window = arguments.get("days") in {42, 84}
+            sections = arguments.get(
+                "sections", ["progress"] if long_window else ["report"]
+            )
             allowed = {
+                "progress",
                 "report",
                 "endurance",
                 "power_profiles",
@@ -61,14 +65,19 @@ class CoachActivityReadToolService:
             }
             if (
                 not isinstance(sections, list)
-                or not 1 <= len(sections) <= 8
+                or not 1 <= len(sections) <= 9
                 or any(
                     not isinstance(section, str) or section not in allowed
                     for section in sections
                 )
             ):
                 raise AppError(400, "Unbekannter Analysebereich.")
+            if long_window and sections != ["progress"]:
+                raise AppError(400, "42 und 84 Tage gelten nur für progress.")
             readers = {
+                "progress": lambda: self._report_services.report.progress(
+                    arguments, self._report_services.timezone()
+                ),
                 "report": lambda: self._report_services.report.read(
                     arguments, self._report_services.timezone()
                 ),
