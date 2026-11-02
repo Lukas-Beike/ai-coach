@@ -491,6 +491,9 @@ class HttpApiAssembly:
                 ),
                 canonical=canonical,
             )
+            profiles = TrainingProfileSelectionService(
+                local_today, canonical=canonical, curves=power_curves
+            )
             report_read = TrainingReportReadService(
                 read_synced_at=report_synced_at,
                 read_plan=report_plan,
@@ -502,12 +505,11 @@ class HttpApiAssembly:
                 canonical=canonical,
                 session_feedback=_session_feedback_lookup(athlete),
                 now=athlete_clock.now,
+                curve_records=profiles.curve_records,
             )
             return TrainingReportServices(
                 records=records,
-                profiles=TrainingProfileSelectionService(
-                    local_today, canonical=canonical, curves=power_curves
-                ),
+                profiles=profiles,
                 report=report_read,
                 derived=TrainingDerivedReadService(
                     read_checkins=report_checkins,

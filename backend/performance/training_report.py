@@ -25,7 +25,7 @@ def _planned_day(row: Mapping[str, Any]) -> str:
     return iso_date_prefix(str(row.get("starts_at_local") or row.get("date") or ""))
 
 
-def _metric(rows: Sequence[Mapping[str, Any]], key: str) -> dict[str, Any]:
+def metric_sum(rows: Sequence[Mapping[str, Any]], key: str) -> dict[str, Any]:
     measured = [value for row in rows if (value := number(row.get(key))) is not None]
     return {
         "value": round(sum(measured), 2) if measured else None,
@@ -37,7 +37,7 @@ def _metric(rows: Sequence[Mapping[str, Any]], key: str) -> dict[str, Any]:
 def _totals(summaries: Sequence[ActivitySummary]) -> dict[str, Any]:
     result: dict[str, Any] = {"sessions": len(summaries)}
     for key in _SUMMARY_METRICS:
-        result[key] = _metric(summaries, key)
+        result[key] = metric_sum(summaries, key)
     return result
 
 
@@ -99,7 +99,7 @@ def zone_distribution(summaries: Sequence[Mapping[str, Any]]) -> list[dict[str, 
                 {
                     str(label)
                     for row in sport_rows
-                    if _valid_zones(row.get(key))
+                    if valid_zones(row.get(key))
                     and (label := (row.get("sources") or {}).get(key))
                 }
             )
@@ -220,7 +220,7 @@ def training_report(
             "missed": sum(
                 row.get("compliance", {}).get("status") == "missed" for row in planned
             ),
-            "load": _metric(planned, PLANNED_LOAD_KEY),
+            "load": metric_sum(planned, PLANNED_LOAD_KEY),
         },
         "checkins": [
             {
@@ -252,7 +252,7 @@ def _sport(summary: Mapping[str, Any]) -> str:
     return str(summary.get("sport") or "other")
 
 
-def _valid_zones(values: Any) -> list[dict]:
+def valid_zones(values: Any) -> list[dict]:
     if not isinstance(values, list):
         return []
     return [
@@ -271,7 +271,7 @@ def _sensor_zones(
     zones: dict[str, float] = defaultdict(float)
     measured_sessions = 0
     for row in sport_rows:
-        valid = _valid_zones(row.get(key))
+        valid = valid_zones(row.get(key))
         if valid:
             measured_sessions += 1
             for value in valid:
