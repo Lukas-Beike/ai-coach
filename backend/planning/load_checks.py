@@ -238,41 +238,46 @@ def session_spikes(
     """Planned load against the highest-load session of the sport in 30 days."""
     best: dict[Sport, SessionLoad] = {}
     for sport, day, load in _completed_loads(completed, thresholds):
-        if (
-            load
-            and _in_window(day, today)
-            and load.load > (best[sport].load if sport in best else 0.0)
-        ):
+        if load and _in_window(day, today) and load.load > _load_of(best.get(sport)):
             best[sport] = load
     drafts: list[Draft] = []
     for session in sessions:
-        reference = best.get(session.sport)
-        planned = session.estimate.load
-        if planned is None or reference is None:
-            continue
-        severity = _grade(planned, reference.load)
-        if severity is None:
-            continue
-        drafts.append(
-            (
-                "load_spike",
-                [session.unit],
-                f"Planned {session.sport.value} load is "
-                + ("more than 30 % above" if severity == "warning" else "10-30 % above")
-                + " the highest-load session of the last 30 days.",
-                {
-                    "severity": severity,
-                    "sport": session.sport.value,
-                    "planned_load": round(planned),
-                    "highest_load_30d": round(reference.load),
-                    "increase_percent": round((planned / reference.load - 1) * 100),
-                    "planned_basis": session.estimate.load_basis,
-                    "reference_basis": reference.basis,
-                    "precision": "precise" if reference.precise else "less_precise",
-                },
-            )
-        )
+        draft = _spike_draft(session, best.get(session.sport))
+        if draft is not None:
+            drafts.append(draft)
     return drafts
+
+
+def _load_of(session: SessionLoad | None) -> float:
+    return 0.0 if session is None else session.load
+
+
+def _spike_draft(
+    session: PlannedSession, reference: SessionLoad | None
+) -> Draft | None:
+    planned = session.estimate.load
+    if planned is None or reference is None:
+        return None
+    severity = _grade(planned, reference.load)
+    if severity is None:
+        return None
+    return (
+        "load_spike",
+        [session.unit],
+        f"Planned {session.sport.value} load is "
+        + ("more than 30 % above" if severity == "warning" else "10-30 % above")
+        + " the highest-load session of the last 30 days.",
+        {
+            "severity": severity,
+            "sport": session.sport.value,
+            "planned_load": round(planned),
+            "highest_load_30d": round(reference.load),
+            "increase_percent": round((planned / reference.load - 1) * 100),
+            "planned_basis": session.estimate.load_basis,
+            "reference_basis": reference.basis,
+            "precision": "precise" if reference.precise else "less_precise",
+        },
+    )
 
 
 def _monday(day: str) -> str:
@@ -287,18 +292,21 @@ def _weekly_totals(
 ) -> tuple[dict[tuple[Sport, str], float], set[tuple[Sport, str]]]:
     """Load per sport and ISO week, and the weeks missing a session's load.
 
-    Completed sessions count before today, planned ones from today.
+    Completed sessions count up to today, planned ones from today. For a sport
+    already done today, today's planned units are the same work and are left out.
     """
     totals: dict[tuple[Sport, str], float] = defaultdict(float)
     partial: set[tuple[Sport, str]] = set()
+    now = today.isoformat()
+    done_today = {sport for sport, day, _load in completed if day == now}
     entries = [
         (sport, day, None if load is None else load.load)
         for sport, day, load in completed
-        if day < today.isoformat()
+        if day <= now
     ] + [
         (item.sport, item.day, item.estimate.load)
         for item in sessions
-        if item.day >= today.isoformat()
+        if item.day > now or (item.day == now and item.sport not in done_today)
     ]
     for sport, day, load in entries:
         key = (sport, _monday(day))

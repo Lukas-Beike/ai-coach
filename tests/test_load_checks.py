@@ -266,6 +266,20 @@ class WeeklyRiseTests(unittest.TestCase):
         ]
         self.assertEqual([], only(check(self.plan, history), "weekly_load_rise"))
 
+    def test_activity_done_today_counts_and_replaces_todays_plan(self) -> None:
+        done = [*self.history, ride_done("2026-11-02", normalized_power=250)]
+        later = [planned("a", "2026-11-04", "ride", "- 60m 80%")]
+        found = only(check(later, done), "weekly_load_rise")
+        self.assertEqual(1, len(found))
+        self.assertEqual("2026-11-02", found[0]["evidence"]["week_start"])
+        both = [planned("t", "2026-11-02", "ride", "- 60m 100%"), *later]
+        self.assertEqual(
+            found[0]["evidence"]["planned_week_load"],
+            only(check(both, done), "weekly_load_rise")[0]["evidence"][
+                "planned_week_load"
+            ],
+        )
+
     def test_week_with_unknown_load_is_skipped(self) -> None:
         plan = [*self.plan, planned("x", "2026-11-11", "ride", "Easy Z2")]
         self.assertEqual([], only(check(plan, self.history), "weekly_load_rise"))
