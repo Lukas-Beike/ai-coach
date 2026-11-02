@@ -97,8 +97,23 @@ class RunTests(unittest.TestCase):
         self.assertAlmostEqual(0.8 * 190 / 170, exact.intensity)
 
     def test_ramp_uses_the_mean_of_both_ends(self):
-        step = estimate_workout("- 10m ramp 60-80%\n", Sport.RUN, NONE).steps[0]
+        step = estimate_workout("- 10m ramp 60-80%\n", Sport.RIDE, NONE).steps[0]
         self.assertAlmostEqual(0.7, step.intensity)
+        pace = estimate_workout("- 10m ramp 60-80% Pace\n", Sport.RUN, NONE).steps[0]
+        self.assertAlmostEqual(0.7, pace.intensity)
+
+    def test_bare_run_target_is_ambiguous_but_watts_are_not(self):
+        for text in ("- 40m Z2\n", "- 10m 75%\n"):
+            result = estimate_workout(text, Sport.RUN, FULL)
+            self.assertEqual(("ambiguous_run_target",), result.unknown)
+            self.assertIsNone(result.load)
+        watts = estimate_workout("- 10m 200w\n", Sport.RUN, FULL)
+        self.assertEqual((), watts.unknown)
+
+    def test_zones_beyond_the_limits_are_unknown(self):
+        for text in ("- 20m Z10\n", "- 20m Z1-Z10\n"):
+            result = estimate_workout(text, Sport.RIDE, FULL)
+            self.assertEqual(("zone_out_of_range",), result.unknown)
 
     def test_mixed_steps_use_quadratic_mean(self):
         result = estimate_workout("- 30m Z2 Pace\n- 30m 80% LTHR\n", Sport.RUN, FULL)

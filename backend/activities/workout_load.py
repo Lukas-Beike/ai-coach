@@ -42,7 +42,7 @@ BANDS = ("low", "moderate", "high")
 _MANY_ZONES = 6
 _MILE_M = 1609.344
 _NUMBER = r"\d+(?:\.\d+)?"
-_ZONE = re.compile(r"Z(\d)(?:-Z(\d))?")
+_ZONE = re.compile(r"Z(\d+)(?:-Z(\d+))?")
 _PERCENT = re.compile(rf"({_NUMBER})%?(?:-({_NUMBER})%?)?")
 _ABSOLUTE = re.compile(rf"({_NUMBER})(?:-({_NUMBER}))?(W|BPM)")
 _PACE = re.compile(r"(\d+):([0-5]\d)")
@@ -209,9 +209,22 @@ def _pace_target(text: str, thresholds: AthleteThresholds) -> _Target:
     )
 
 
-def _resolve_target(step: Mapping[str, Any], thresholds: AthleteThresholds) -> _Target:
+def _bare_run_target(text: str, kind: str, sport: Sport) -> bool:
+    """Unsuffixed run targets parse as power but Intervals.icu may read pace."""
+    return (
+        sport is Sport.RUN
+        and kind == "power"
+        and not re.search(r"W$|FTP", text.split()[0])
+    )
+
+
+def _resolve_target(
+    step: Mapping[str, Any], thresholds: AthleteThresholds, sport: Sport
+) -> _Target:
     text, kind = str(step["target"]), str(step["kind"])
-    zone = _ZONE.match(text)
+    if _bare_run_target(text, kind, sport):
+        return _unknown("ambiguous_run_target")
+    zone = _ZONE.fullmatch(text.split()[0])
     if zone:
         return _zone_target(zone, kind, thresholds.zones)
     if ":" in text:
@@ -234,9 +247,9 @@ def _pace_speed(
 
 
 def _estimate_step(
-    step: Mapping[str, Any], thresholds: AthleteThresholds
+    step: Mapping[str, Any], thresholds: AthleteThresholds, sport: Sport
 ) -> StepEstimate:
-    target = _resolve_target(step, thresholds)
+    target = _resolve_target(step, thresholds, sport)
     speed = _pace_speed(step, target, thresholds)
     duration = step.get("duration")
     distance = step.get("distance")
@@ -345,7 +358,7 @@ def estimate_workout(
         parsed = structured_steps(description)
     except WorkoutTextError as error:
         return _empty(sport.value, error.reason, fallback_duration_s)
-    steps = tuple(_estimate_step(step, thresholds) for step in parsed)
+    steps = tuple(_estimate_step(step, thresholds, sport) for step in parsed)
     load = factor = basis = None
     if _all_known(steps, "duration_s", "intensity"):
         factor, hours, basis = _unit_intensity(steps)
