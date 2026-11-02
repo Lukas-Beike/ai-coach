@@ -537,18 +537,29 @@ def _classified(
     return state.verdict
 
 
-def _verdict_for(
-    state: TurnGateState,
-    classifier: ImpactClassifier | None,
-    authority: TurnAuthority,
-    current_text: str,
-    previous_assistant_text: str,
-) -> ImpactVerdict:
-    if classifier is None:
-        return NO_IMPACT
-    return _classified(
-        state, classifier, authority, current_text, previous_assistant_text
+def _classifier_denial(
+    tool_name: str,
+    domain: str,
+    impact: frozenset[str],
+    arguments: Mapping[str, Any] | None,
+    classified: tuple[TurnGateState, ImpactClassifier | None, TurnAuthority, str, str],
+) -> str | None:
+    """Return the denial reason when a classifier-confirmed call is unconfirmed."""
+    approval = tool_name in _APPROVAL_TOOLS
+    illness = _accepts_illness(arguments)
+    if not (impact or approval or illness):
+        return None
+    state, classifier, authority, current_text, previous_text = classified
+    verdict = (
+        NO_IMPACT
+        if classifier is None
+        else _classified(state, classifier, authority, current_text, previous_text)
     )
+    if (impact or approval) and not verdict.confirms(domain, impact, approval=approval):
+        return "approval_not_confirmed" if approval else "impact_not_confirmed"
+    if illness and not verdict.illness_override:
+        return "illness_not_confirmed"
+    return None
 
 
 def check_write(
@@ -590,22 +601,15 @@ def check_write(
         if domain == REMOTE_INTERVALS
         else call_impact(tool_name, arguments, state.records_count)
     )
-    approval = tool_name in _APPROVAL_TOOLS
-    needs = (
-        bool(impact or approval),
-        _accepts_illness(arguments),
+    denied = _classifier_denial(
+        tool_name,
+        domain,
+        impact,
+        arguments,
+        (state, classifier, authority, current_text, previous_assistant_text),
     )
-    if any(needs):
-        verdict = _verdict_for(
-            state, classifier, authority, current_text, previous_assistant_text
-        )
-        if needs[0] and not verdict.confirms(domain, impact, approval=approval):
-            reason = "approval_not_confirmed" if approval else "impact_not_confirmed"
-            return GateDecision(False, domain, reason, state.classifier_used)
-        if needs[1] and not verdict.illness_override:
-            return GateDecision(
-                False, domain, "illness_not_confirmed", state.classifier_used
-            )
+    if denied:
+        return GateDecision(False, domain, denied, state.classifier_used)
     state.writes_count += 1
     state.records_count += records
     return GateDecision(True, domain, "ok", state.classifier_used)
