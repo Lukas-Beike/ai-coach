@@ -47,7 +47,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
-from backend.planning import calendar_load, leg_strength, load_checks
+from backend.planning import calendar_load, leg_strength, load_checks, weekly_plan_checks
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
@@ -64,6 +64,7 @@ FINDING_CODES = (
     leg_strength.BEFORE_KEY,
     leg_strength.FREQUENCY,
     "calendar_load",
+    *weekly_plan_checks.CODES,
 )
 # Only the health rule blocks a write. The load rules are notes the Coach must
 # name: their evidence is observational or practice-based, or (taper) the
@@ -82,6 +83,7 @@ EVIDENCE = {
     leg_strength.BEFORE_KEY: "limited, residual fatigue after lower-body resistance training (Doma et al.)",
     leg_strength.FREQUENCY: "Ronnestad & Mujika 2014, Blagrove 2018 (2x/week build, 1x/week maintenance); thresholds practice-based",
     "calendar_load": "calendar overlap and locally chosen eight-hour busy-day threshold",
+    **dict.fromkeys(weekly_plan_checks.CODES, "athlete's own weekly plan"),
 }
 _RULE_TEXT = {
     "run_spike": "planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
@@ -96,6 +98,10 @@ _RULE_TEXT = {
     leg_strength.BEFORE_KEY: "moderate or heavy leg strength less than about 24 h before a hard run or ride or the week's long one.",
     leg_strength.FREQUENCY: "more than 3 leg strength sessions or more than 2 heavy ones in a week, or none in a plan of 2+ weeks when strength is expected.",
     "calendar_load": "long or hard unit overlaps a calendar event or falls on a day with at least eight hours of events.",
+    weekly_plan_checks.FIXED_MISSING: "a fixed session of the profile weekly plan is not planned on its day.",
+    weekly_plan_checks.REST_DAY: "a unit on a rest day of the weekly plan.",
+    weekly_plan_checks.OUTSIDE_WINDOWS: "a unit outside the time windows set by the athlete (built-in fallback windows never trigger it).",
+    weekly_plan_checks.OVER_MAX: "planned minutes of a day above the weekly plan's maximum.",
 }
 RULE_SUMMARY = {
     code: f"{'Blocks' if code in BLOCKING_CODES else 'Note'}: {text}"
@@ -191,7 +197,9 @@ def _finding(
         "evidence_strength": EVIDENCE[code],
         "dates": sorted({_day(unit) for unit in units}),
         "local_ids": sorted(
-            str(unit.get("local_id") or unit.get("id")) for unit in units
+            str(unit.get("local_id") or unit.get("id"))
+            for unit in units
+            if unit.get("local_id") or unit.get("id")
         ),
         "message": message,
         "evidence": dict(evidence),
@@ -423,6 +431,7 @@ def check_plan(
     thresholds: load_checks.LoadThresholds | None = None,
     expects_strength: bool = False,
     calendar_events: Sequence[Mapping[str, Any]] = (),
+    weekly_plan: str = "",
 ) -> list[dict[str, Any]]:
     """Return all findings for the resulting future planned units.
 
@@ -461,6 +470,7 @@ def check_plan(
         *_drafted(leg_strength.frequency(units, today, expects_strength)),
         *_missing_taper(units, completed, competitions, today),
         *_illness_hard(units, illness, today),
+        *_drafted(weekly_plan_checks.check(weekly_plan, units, today)),
     ]
 
 

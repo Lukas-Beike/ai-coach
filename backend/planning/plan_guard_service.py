@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete import weekly_plan
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
@@ -181,6 +182,7 @@ def build_planning_brief(
     planned_sessions: Sequence[Mapping[str, Any]] = (),
     planned_strength: Sequence[Mapping[str, Any]] = (),
     calendar_busy: Mapping[str, int] | None = None,
+    weekly_plan_text: str = "",
 ) -> dict[str, Any]:
     """Compact deterministic brief for plan_week, plan_block and adjust_week turns."""
     weeks = [
@@ -194,6 +196,7 @@ def build_planning_brief(
     return {
         "source": BRIEF_SOURCE,
         "training_model": training_model,
+        "weekly_plan": weekly_plan.brief(weekly_plan_text),
         "weeks": [_brief_week(week, completed) for week in weeks],
         "weeks_note": "Weeks without records are unknown, not rest; the running week is incomplete.",
         "longest_run_30d_minutes": None if longest is None else round(longest / 60),
@@ -234,7 +237,9 @@ class PlanGuardService:
         thresholds: Callable[[], LoadThresholds | None] = lambda: None,
         expects_strength: Callable[[], bool] = lambda: False,
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
+        weekly_plan_text: Callable[[], str] = lambda: "",
     ) -> None:
+        self._weekly_plan = weekly_plan_text
         self._planned_units = planned_units
         self._completed = completed_activities
         self._competitions = competitions
@@ -275,6 +280,7 @@ class PlanGuardService:
                 thresholds=self._load_thresholds(),
                 expects_strength=self._expects_strength(),
                 calendar_events=self._events(),
+                weekly_plan=self._weekly_plan(),
             ),
             *intensity_distribution.distribution_findings(
                 self._training_model(), self._planned_weeks(units, today)
@@ -338,4 +344,5 @@ class PlanGuardService:
             planned_sessions=planned_focus(units, self._estimate_unit, today),
             planned_strength=leg_strength.planned_weeks(units, today),
             calendar_busy=calendar_load.busy_minutes(self._events(), today, 35),
+            weekly_plan_text=self._weekly_plan(),
         )

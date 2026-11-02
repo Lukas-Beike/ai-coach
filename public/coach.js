@@ -1834,6 +1834,10 @@ function appendPlanNotes(node, planNotes) {
     illness_hard: ["Belastung bei Krankheit", "Medizinische Vorsicht"],
     intensity_distribution: ["Intensitätsverteilung der Woche", "Praxisbasierte Referenzbereiche"],
     leg_strength_before_key_session: ["Beinkraft vor Schlüsseleinheit", "Begrenzte Evidenz"],
+    fixed_session_missing: ["Feste Einheit fehlt oder liegt an einem anderen Tag", "Eigener Wochenplan"],
+    rest_day_session: ["Einheit an einem Ruhetag", "Eigener Wochenplan"],
+    outside_windows: ["Einheit außerhalb der Zeitfenster", "Eigener Wochenplan"],
+    over_max_minutes: ["Über der maximalen Tagesdauer", "Eigener Wochenplan"],
     leg_strength_frequency: ["Beinkraft pro Woche", "Rønnestad & Mujika 2014, Blagrove 2018; Schwellen praxisbasiert"],
     calendar_load: ["Kalender und Einheit", "Terminüberschneidung oder stark belegter Tag"],
   };
