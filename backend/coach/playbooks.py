@@ -34,7 +34,8 @@ Planning science:
 - Taper about 2 weeks before a competition: cut volume by 40-60 %, keep intensity and frequency (Bosquet 2007).
 - When HRV or readiness data exist, adjust load to it (Kiviniemi 2007; Javaloyes 2019; moderate).
 - Respect availability (rule 8b), illness (rule 2a), calendar events and competitions.
-- Running, cycling and strength can share one plan. Create local planned units only; no Intervals.icu write."""
+- Running, cycling and strength can share one plan. Create local planned units only; no Intervals.icu write.
+- planning_brief in the context summarizes the last weeks per sport. The server checks every plan before saving; on findings nothing is saved, so correct the plan and call the tool again. Use accept_plan_findings only when the athlete explicitly wants that deviation, and name it in the answer."""
 
 _TASKS = {
     "session_analysis": """\
