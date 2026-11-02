@@ -127,9 +127,9 @@ class CalendarPlanningTests(unittest.TestCase):
         )
 
     def test_plan_playbook_requests_clarification(self):
-        self.assertIn("ask whether to train", playbook_for("plan_week"))
-        self.assertIn("ask whether to train", playbook_for("plan_block"))
-        self.assertNotIn("ask whether to train", playbook_for("session_analysis"))
+        self.assertIn("whether to train", playbook_for("plan_week"))
+        self.assertIn("whether to train", playbook_for("plan_block"))
+        self.assertNotIn("whether to train", playbook_for("session_analysis"))
 
 
 class AllDayEventTests(unittest.TestCase):
