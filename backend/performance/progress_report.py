@@ -394,7 +394,10 @@ def weekly_progress(
         <= summary_local_date(row, timezone)
         <= effective_end.isoformat()
     ]
-    middle = start + timedelta(weeks=weeks // 2)
+    # Split on the weeks that have started, so a window reaching past today keeps
+    # a non-empty later half.
+    started_weeks = min(weeks, (effective_end - start).days // 7 + 1)
+    middle = start + timedelta(weeks=started_weeks // 2)
     ctl = _first_last(
         {
             day: value
@@ -429,7 +432,7 @@ def weekly_progress(
         **(
             {
                 "mean_max_power": _mean_max_window(
-                    curve_records, start, middle, effective_end, weeks, sport
+                    curve_records, start, middle, effective_end, started_weeks, sport
                 )
             }
             if sport in {"all", "ride", "run"}

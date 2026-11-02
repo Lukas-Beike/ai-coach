@@ -234,6 +234,27 @@ class WeeklyProgressTests(unittest.TestCase):
         self.assertNotIn("eftp", strength)
         self.assertNotIn("mean_max_power", strength)
 
+    def test_mean_max_halves_split_on_started_weeks(self):
+        records = [
+            {
+                "date": day,
+                "sport": "ride",
+                "environment": "outdoor",
+                "power_profile": {
+                    "status": "ok",
+                    "duration_curve": [{"duration_seconds": 300, "watts": watts}],
+                },
+            }
+            for day, watts in (("2026-09-08", 250), ("2026-09-29", 265))
+        ]
+        # 84 days from 2026-09-07 reach far past today (2026-10-02): 4 weeks started.
+        result = self._progress({"days": 84, "start": "2026-09-07"}, records=records)[
+            "mean_max_power"
+        ]["ride"]["outdoor"]
+        self.assertEqual("2026-09-21", result["periods"]["later"]["start"])
+        five = next(d for d in result["durations"] if d["duration_seconds"] == 300)
+        self.assertEqual(15, five["change_watts"])
+
     def test_curves_are_read_only_inside_their_window(self):
         reads = []
         service = self._service()
