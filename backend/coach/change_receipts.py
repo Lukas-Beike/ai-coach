@@ -7,7 +7,7 @@ from typing import Any
 
 from backend.coach.outcomes import coach_effect_label
 from backend.coach.write_gate import TOOL_DOMAIN
-from backend.planning.plan_checks import FINDING_CODES
+from backend.planning.plan_checks import BLOCKING_CODES, FINDING_CODES
 
 # Write tools whose success leaves athlete records unchanged: previews and
 # drafts take effect only through a later, separately approved step.
@@ -36,6 +36,36 @@ def _is_change(tool: Any, result: Any) -> bool:
     return result.get("ok") is True and result.get("status") not in _WAITING_STATUSES
 
 
+def _note_dates(value: Any) -> list[str]:
+    dates = []
+    for day in value if isinstance(value, list) else []:
+        try:
+            dates.append(date.fromisoformat(day).isoformat())
+        except TypeError, ValueError:
+            continue
+    return dates
+
+
+def _plan_notes(result: dict[str, Any]) -> list[dict[str, Any]]:
+    notes: list[dict[str, Any]] = []
+    raw_notes = result.get("plan_check_notes")
+    for note in raw_notes if isinstance(raw_notes, list) else []:
+        if not isinstance(note, dict) or note.get("code") not in FINDING_CODES:
+            continue
+        evidence = note.get("evidence")
+        warning = note["code"] in BLOCKING_CODES or (
+            isinstance(evidence, dict) and evidence.get("severity") == "warning"
+        )
+        safe = {
+            "code": note["code"],
+            "dates": _note_dates(note.get("dates")),
+            "severity": "warning" if warning else "notice",
+        }
+        if safe not in notes:
+            notes.append(safe)
+    return notes
+
+
 def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Summarize a turn's applied writes for the chat, or ``None`` without any.
 
@@ -55,27 +85,9 @@ def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | N
         label = coach_effect_label(entry)
         if label not in labels:
             labels.append(label)
-        raw_notes = entry["result"].get("plan_check_notes")
-        for note in raw_notes if isinstance(raw_notes, list) else []:
-            if not isinstance(note, dict) or note.get("code") not in FINDING_CODES:
-                continue
-            dates = []
-            raw_dates = note.get("dates")
-            for day in raw_dates if isinstance(raw_dates, list) else []:
-                try:
-                    dates.append(date.fromisoformat(day).isoformat())
-                except TypeError, ValueError:
-                    continue
-            evidence = note.get("evidence")
-            safe = {
-                "code": note["code"],
-                "dates": dates,
-                "severity": "warning"
-                if isinstance(evidence, dict) and evidence.get("severity") == "warning"
-                else "notice",
-            }
-            if safe not in notes:
-                notes.append(safe)
+        for note in _plan_notes(entry["result"]):
+            if note not in notes:
+                notes.append(note)
     if not labels:
         return None
     summary = {"labels": labels, "undoable": undoable, "undone_at": None}

@@ -30,6 +30,27 @@ def _step(tool, result=None, changes=None):
 
 
 class ChangeSummaryTests(unittest.TestCase):
+    def test_accepted_blocking_finding_is_a_warning(self) -> None:
+        summary = change_summary(
+            [
+                _step(
+                    "apply_training_patch",
+                    {
+                        "ok": True,
+                        "plan_check_notes": [
+                            {
+                                "code": "illness_hard",
+                                "dates": ["2026-11-02"],
+                                "evidence": {},
+                            }
+                        ],
+                    },
+                )
+            ]
+        )
+        assert summary is not None
+        self.assertEqual(summary["plan_check_notes"][0]["severity"], "warning")
+
     def test_plan_notes_are_safe_and_only_attached_to_successful_writes(self) -> None:
         note = {
             "code": "run_spike",
