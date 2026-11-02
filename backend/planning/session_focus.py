@@ -145,8 +145,8 @@ _STRENGTH_PATTERNS: Final = (
 )
 _ENDURANCE_PATTERNS: Final = (
     ("recovery", r"regeneration|recovery|\bregen\b"),
-    ("threshold", r"schwelle|threshold|\bftp\b"),
-    ("vo2max", r"vo2|intervalle|intervals?\b"),
+    ("threshold", r"schwelle|threshold"),
+    ("vo2max", r"vo2|intervalle|\bintervals\b(?!\.icu)"),
     ("tempo", r"\btempo"),
     ("long", r"\blang(?:e[rnsm]?)?\b|\blong"),
     ("endurance", r"grundlage|endurance|\bbase\b"),
@@ -212,3 +212,16 @@ def session_focus(
     if derived is None or derived not in allowed:
         return SessionFocus(strength_intensity=intensity)
     return SessionFocus(derived, intensity, "derived")
+
+
+def carry_focus(target: dict[str, Any], source: Mapping[str, Any]) -> None:
+    """Keep the local focus on a remote payload when it fits the payload's sport."""
+    candidate = {
+        **target,
+        **{key: source[key] for key in FOCUS_KEYS if source.get(key) is not None},
+    }
+    try:
+        normalize_session_focus(candidate)
+    except AppError:
+        return
+    target.update({key: candidate[key] for key in FOCUS_KEYS if key in candidate})

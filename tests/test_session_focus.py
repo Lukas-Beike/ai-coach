@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import unittest
 from datetime import date
+from pathlib import Path
 
 from backend import change_history
 from backend.activities.workout_load import StepEstimate, WorkoutEstimate
@@ -19,14 +21,17 @@ from backend.planning.planned_units import (
     planned_workout_update_candidate,
 )
 from backend.planning.session_focus import (
+    ALL_FOCI,
     SessionFocus,
     allowed_foci,
+    carry_focus,
     session_focus,
 )
 from backend.planning.workout_export import build_planned_workout_export
 from backend.planning.workouts import normalize_workout
 from backend.providers.intervals_workouts import intervals_event_payload
 
+ROOT = Path(__file__).resolve().parents[1]
 TODAY = date(2026, 11, 2)
 LOCAL_ID = "12345678-1234-5678-1234-567812345678"
 
@@ -91,6 +96,10 @@ class NormalizationTests(unittest.TestCase):
             current, "update", {"session_focus": None}
         )
         self.assertNotIn("session_focus", normalize_planned_unit(cleared))
+        resent = planned_workout_update_candidate(
+            current, "update", {"sport": "Run", "description": "- 20m Z2"}
+        )
+        self.assertEqual(resent["session_focus"], "tempo")
         moved = planned_workout_update_candidate(
             current, "update", {"sport": "WeightTraining"}
         )
@@ -121,6 +130,20 @@ class FallbackTests(unittest.TestCase):
             with self.subTest(text=text):
                 found = session_focus(unit(sport, name=text, description=""))
                 self.assertEqual((found.value, found.origin), (expected, "derived"))
+
+    def test_generic_words_do_not_derive_a_hard_focus(self):
+        for text in ("Z2 bei 60% FTP", "Sync mit Intervals.icu", "easy Z2"):
+            with self.subTest(text=text):
+                found = session_focus(unit("Ride", name="Ausfahrt", description=text))
+                self.assertNotIn(found.value, ("threshold", "vo2max"))
+
+    def test_remote_payload_keeps_only_a_fitting_focus(self):
+        remote = planned("Run")
+        carry_focus(remote, {"session_focus": "long"})
+        self.assertEqual(remote["session_focus"], "long")
+        strength = planned("WeightTraining")
+        carry_focus(strength, {"session_focus": "long"})
+        self.assertNotIn("session_focus", strength)
 
     def test_unknown_stays_unknown(self):
         self.assertEqual(
@@ -159,6 +182,13 @@ class FallbackTests(unittest.TestCase):
         self.assertTrue(SessionFocus("legs", "heavy", "set").is_leg_strength)
         self.assertTrue(SessionFocus("plyometrics", None, "set").is_leg_strength)
         self.assertFalse(SessionFocus("upper", None, "set").is_leg_strength)
+
+
+class FrontendParityTests(unittest.TestCase):
+    def test_labels_cover_every_focus(self):
+        source = (ROOT / "public" / "plan-views.js").read_text(encoding="utf-8")
+        labels = source.split("const FOCUS_LABELS = {", 1)[1].split("};", 1)[0]
+        self.assertEqual(set(re.findall(r"(\w+):", labels)), set(ALL_FOCI))
 
 
 class CheckTests(unittest.TestCase):

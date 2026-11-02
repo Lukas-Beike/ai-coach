@@ -12,7 +12,6 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.config import Config
 from backend.db import DatabaseManager
@@ -29,6 +28,7 @@ from backend.observability import Redactor
 from backend.planning import library as planning_library
 from backend.planning import workouts as planning_workouts
 from backend.planning.library_service import WorkoutLibraryService
+from backend.planning.session_focus import carry_focus
 from backend.providers.http import ProviderHTTPError
 from backend.runtime.events import StateEventBuffer
 from backend.runtime.maintenance import maintenance_operation
@@ -46,7 +46,6 @@ _REMOTE_LIBRARY_METADATA_FIELDS = (
     "plan_name",
     "source",
     "private_calendar_adjustment",
-    *FOCUS_KEYS,
     "archived",
     "local_marked",
     "local_deleted",
@@ -147,6 +146,7 @@ class WorkoutLibraryRemoteReconciler:
         for metadata_key in _REMOTE_LIBRARY_METADATA_FIELDS:
             if existing_payload.get(metadata_key) is not None:
                 entry[metadata_key] = existing_payload[metadata_key]
+        carry_focus(entry, existing_payload)
 
     @classmethod
     def _persist_remote_library_workout_entry(

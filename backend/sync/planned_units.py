@@ -9,13 +9,13 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import RemoteEntityKind
 from backend.db import DatabaseManager
 from backend.db.remote_links import RemoteLinkRepository
 from backend.planning import planned_units
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
+from backend.planning.session_focus import carry_focus
 from backend.providers.intervals_workouts import planning_fields_from_intervals
 
 _REMOTE_LINKS = RemoteLinkRepository()
@@ -206,10 +206,10 @@ class RemotePlannedUnitReconciler:
             "rationale",
             "archived",
             "private_calendar_adjustment",
-            *FOCUS_KEYS,
         ):
             if current.get(key) is not None:
                 incoming[key] = current[key]
+        carry_focus(incoming, current)
         updated = _update_if_unchanged(
             db,
             current_row,

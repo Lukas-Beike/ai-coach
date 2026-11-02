@@ -724,13 +724,18 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const status = document.createElement("span");
     status.className = "planned-focus-status";
     status.setAttribute("role", "status");
+    const previous = parts.map((part) => part.select.value);
     const save = async () => {
       status.textContent = "";
       try {
         const body = { session_focus: focus.select.value || null, strength_intensity: parts[1]?.select.value || null };
         await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/focus`, { method: "POST", body: JSON.stringify(body) });
+        previous.splice(0, previous.length, ...parts.map((part) => part.select.value));
         status.textContent = "Gespeichert";
-      } catch (error) { status.textContent = error.message; }
+      } catch (error) {
+        parts.forEach((part, index) => { part.select.value = previous[index]; });
+        status.textContent = error.message;
+      }
     };
     for (const part of parts) part.select.addEventListener("change", save);
     form.append(...parts.map((part) => part.field), status);

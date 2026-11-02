@@ -26,6 +26,7 @@ test("@responsive session focus chip and select on a planned unit", async ({ pag
   const saved = page.waitForResponse((response) => response.url().includes("/focus") && response.request().method() === "POST");
   await select.selectOption("threshold");
   expect((await saved).ok()).toBeTruthy();
+  await expect(entry.locator("[data-focus-chip='set'] .planned-badge")).toHaveText("Schwelle");
   await page.reload();
   await page.waitForFunction(() => state.initialStateLoaded);
   entry = await openEntry(page, name);

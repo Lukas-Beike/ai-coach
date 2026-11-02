@@ -12,6 +12,7 @@ from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.local_date import iso_date_prefix
 from backend.calendar import canonical, local
 from backend.canonical.domain_records import ZoneConfiguration
+from backend.canonical.planning_fields import SESSION_FOCUS
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import Sport
 from backend.planning import calendar as planning_calendar
@@ -122,7 +123,11 @@ def _with_session_focus(
 ) -> dict[str, Any]:
     """Row with its effective focus; ``focus_origin`` tells set from derived."""
     estimate = None
-    if planned_sport_environment(row)[0] in {Sport.RUN, Sport.RIDE}:
+    # A set focus needs no estimate; only derived ones read the steps.
+    if not row.get(SESSION_FOCUS) and planned_sport_environment(row)[0] in {
+        Sport.RUN,
+        Sport.RIDE,
+    }:
         estimate = estimate_planned_unit(
             row, unit_thresholds(row, sport_thresholds, zone_configurations)
         )

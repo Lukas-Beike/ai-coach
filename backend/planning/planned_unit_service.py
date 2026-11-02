@@ -18,12 +18,23 @@ from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
 from backend.planning.conflicts import calendar_item_window
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
+from backend.planning.session_focus import carry_focus
 
 _REMOTE_LINKS = RemoteLinkRepository()
 UPDATE_SQL = (
     "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', "
     "sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?"
 )
+
+
+# A focus-only edit changes nothing the provider holds, so sync state stays.
+FOCUS_UPDATE_SQL = "UPDATE planned_units SET payload=?, updated_at=? WHERE local_id=?"
+
+
+def _is_focus_only(values: dict[str, Any]) -> bool:
+    return set(values) - {"action"} <= set(FOCUS_KEYS) and bool(
+        set(values) & set(FOCUS_KEYS)
+    )
 
 
 def _start_time_suffix(start: str) -> str | None:
@@ -408,10 +419,10 @@ class PlannedUnitService:
             "rationale",
             "archived",
             "private_calendar_adjustment",
-            *FOCUS_KEYS,
         ):
             if local.get(key) is not None:
                 incoming[key] = local[key]
+        carry_focus(incoming, local)
         incoming.update(id=local_id, sync_status="synced")
         db.execute(
             "UPDATE planned_units SET external_id=?, payload=?, sync_dirty=0, "
@@ -459,9 +470,12 @@ class PlannedUnitService:
         before: dict[str, Any],
         *,
         bump_planning_revision: bool,
+        focus_only: bool = False,
     ) -> None:
+        if focus_only:
+            normalized["sync_status"] = before.get("sync_status")
         db.execute(
-            UPDATE_SQL,
+            FOCUS_UPDATE_SQL if focus_only else UPDATE_SQL,
             (json.dumps(normalized, ensure_ascii=False), self._now(), normalized_id),
         )
         _REMOTE_LINKS.refresh_from_slots(
@@ -473,7 +487,9 @@ class PlannedUnitService:
             normalized_id,
             "update",
             before,
-            {**normalized, "sync_status": "local"},
+            {**normalized, "sync_status": "local"}
+            if not focus_only
+            else dict(normalized),
         )
         if bump_planning_revision:
             self._planning_revision_service.bump(db)
@@ -553,6 +569,7 @@ class PlannedUnitService:
             updated,
             before,
             bump_planning_revision=bump_planning_revision,
+            focus_only=action == "update" and _is_focus_only(values),
         )
         return {
             "status": "local",
