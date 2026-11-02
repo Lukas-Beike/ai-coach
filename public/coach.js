@@ -1819,6 +1819,22 @@ function appendMessageChanges(node, message) {
     line.append(undo);
   }
   node.append(line);
+  const planNoteLabels = {
+    run_spike: ["Laufsprung", "Beobachtungsstudie, mittlere Evidenz"],
+    back_to_back_hard: ["Harte Tage in Folge", "Praxisbasiert"],
+    strength_hard_same_day: ["Kraft und harte Einheit", "Begrenzte Evidenz"],
+    missing_taper: ["Wettkampf-Taper", "Starke Evidenz; Schwelle lokal gewählt"],
+    illness_hard: ["Belastung bei Krankheit", "Medizinische Vorsicht"],
+  };
+  for (const note of Array.isArray(changes.plan_check_notes) ? changes.plan_check_notes : []) {
+    const label = planNoteLabels[note?.code];
+    if (!label) continue;
+    const detail = document.createElement("div");
+    detail.className = `message-plan-note${note.severity === "warning" ? " is-warning" : ""}`;
+    const dates = Array.isArray(note.dates) ? note.dates.map((day) => AppFormat.date(day)).filter(Boolean).join(", ") : "";
+    detail.textContent = `${note.severity === "warning" ? "Warnung" : "Hinweis"}: ${label[0]}${dates ? ` · ${dates}` : ""} · ${label[1]}`;
+    node.append(detail);
+  }
 }
 
 async function undoCoachTurn(clientTurnId, button) {

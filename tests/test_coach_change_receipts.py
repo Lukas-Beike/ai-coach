@@ -30,6 +30,31 @@ def _step(tool, result=None, changes=None):
 
 
 class ChangeSummaryTests(unittest.TestCase):
+    def test_plan_notes_are_safe_and_only_attached_to_successful_writes(self) -> None:
+        note = {
+            "code": "run_spike",
+            "dates": ["2026-11-02", "unsafe"],
+            "evidence": {"severity": "warning", "provider_text": "private"},
+            "message": "private",
+        }
+        summary = change_summary(
+            [
+                _step(
+                    "apply_training_patch",
+                    {"ok": True, "plan_check_notes": [note, note]},
+                ),
+                _step(
+                    "apply_training_patch", {"ok": False, "plan_check_notes": [note]}
+                ),
+            ]
+        )
+        assert summary is not None
+        self.assertEqual(
+            summary["plan_check_notes"],
+            [{"code": "run_spike", "dates": ["2026-11-02"], "severity": "warning"}],
+        )
+        self.assertNotIn("private", str(summary))
+
     def test_applied_tracked_writes_are_listed_once_and_undoable(self) -> None:
         summary = change_summary(
             [

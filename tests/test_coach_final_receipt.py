@@ -203,6 +203,51 @@ class CoachFinalReceiptTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(update.args[1][0])["change_summary"], summary)
 
+    def test_plan_notes_persist_on_the_message_and_command_receipt(self) -> None:
+        self.db.execute.side_effect = lambda sql, _values: Mock(
+            fetchone=lambda: {"status": "running"}
+        )
+        steps = [
+            {
+                "tool": "apply_training_patch",
+                "result": {
+                    "ok": True,
+                    "plan_check_notes": [
+                        {
+                            "code": "run_spike",
+                            "dates": ["2026-11-02"],
+                            "evidence": {"severity": "warning"},
+                        }
+                    ],
+                },
+            }
+        ]
+        final = self.service.build(
+            {"text": "Fertig"},
+            status="completed",
+            response={},
+            client_turn_id="turn-1",
+            command_receipts=steps,
+            sync_job_ids=[],
+            intent={},
+            rounds=1,
+            failures=[],
+            awaiting_clarification=False,
+        )
+        result = self.service.persist(
+            final, client_turn_id="turn-1", command_receipts=steps
+        )
+        notes = [{"code": "run_spike", "dates": ["2026-11-02"], "severity": "warning"}]
+        self.assertEqual(result["message"]["coach_changes"]["plan_check_notes"], notes)
+        update = next(
+            call
+            for call in self.db.execute.call_args_list
+            if call.args[0].startswith("UPDATE coach_commands")
+        )
+        self.assertEqual(
+            json.loads(update.args[1][0])["change_summary"]["plan_check_notes"], notes
+        )
+
     def test_a_turn_without_changes_adds_no_summary_to_the_answer(self) -> None:
         self.db.execute.side_effect = lambda sql, _values: Mock(
             fetchone=lambda: {"status": "running"}

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from backend.coach.outcomes import coach_effect_label
 from backend.coach.write_gate import TOOL_DOMAIN
+from backend.planning.plan_checks import FINDING_CODES
 
 # Write tools whose success leaves athlete records unchanged: previews and
 # drafts take effect only through a later, separately approved step.
@@ -41,6 +43,7 @@ def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | N
     change history; otherwise undo would silently keep part of the turn.
     """
     labels: list[str] = []
+    notes: list[dict[str, Any]] = []
     undoable = True
     for entry in command_receipts:
         tool = entry.get("tool")
@@ -52,9 +55,33 @@ def change_summary(command_receipts: list[dict[str, Any]]) -> dict[str, Any] | N
         label = coach_effect_label(entry)
         if label not in labels:
             labels.append(label)
+        raw_notes = entry["result"].get("plan_check_notes")
+        for note in raw_notes if isinstance(raw_notes, list) else []:
+            if not isinstance(note, dict) or note.get("code") not in FINDING_CODES:
+                continue
+            dates = []
+            raw_dates = note.get("dates")
+            for day in raw_dates if isinstance(raw_dates, list) else []:
+                try:
+                    dates.append(date.fromisoformat(day).isoformat())
+                except TypeError, ValueError:
+                    continue
+            evidence = note.get("evidence")
+            safe = {
+                "code": note["code"],
+                "dates": dates,
+                "severity": "warning"
+                if isinstance(evidence, dict) and evidence.get("severity") == "warning"
+                else "notice",
+            }
+            if safe not in notes:
+                notes.append(safe)
     if not labels:
         return None
-    return {"labels": labels, "undoable": undoable, "undone_at": None}
+    summary = {"labels": labels, "undoable": undoable, "undone_at": None}
+    if notes:
+        summary["plan_check_notes"] = notes
+    return summary
 
 
 def turn_changes(command_receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:

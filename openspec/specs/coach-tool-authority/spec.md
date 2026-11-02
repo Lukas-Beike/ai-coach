@@ -201,6 +201,10 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 
 #### Scenario: Acknowledged deviation
 - **WHEN** the model resubmits with `accept_plan_findings` listing illness_hard
-- **THEN** the write is saved and the result carries the finding in `plan_check_notes` as text only; nothing new is persisted.
+- **THEN** the write is saved and the result carries the finding in `plan_check_notes`; the receipt persists only its safe structured summary.
 
-Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/tool_failures.py:CoachStructuredToolFailureService.project`; `tests/test_plan_checks.py`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`, `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_acknowledgement_writes_and_reports_text_only`, `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_load_findings_save_with_notes`.
+#### Scenario: Visible plan notes
+- **WHEN** a successful Coach plan write produces notes
+- **THEN** its change receipt shows their dates, severity and evidence strength without provider text, and the Coach is instructed to justify rather than repeat or contradict them.
+
+Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`.
