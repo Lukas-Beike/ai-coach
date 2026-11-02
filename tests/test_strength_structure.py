@@ -14,6 +14,7 @@ from backend.planning.library import (
 )
 from backend.planning.planned_units import (
     normalize_planned_unit,
+    normalized_planned_workout_update,
     planned_unit_payload_hash,
     planned_workout_update_candidate,
 )
@@ -196,6 +197,17 @@ class EditTests(unittest.TestCase):
         carry_focus(edited, local)
         self.assertNotIn("strength_structure", edited)
         self.assertEqual(edited["description"], "remote geändert")
+
+    def test_structure_edit_drops_stale_derived_keys(self):
+        current = {**planned([SQUAT]), "planned_load": 80, "workout_doc": {"x": 1}}
+        values = {"strength_structure": [ROW]}
+        candidate = planned_workout_update_candidate(current, "update", values)
+        stored = normalized_planned_workout_update(
+            candidate, current, {}, LOCAL_ID, "update", values
+        )
+        self.assertNotIn("planned_load", stored)
+        self.assertNotIn("workout_doc", stored)
+        self.assertEqual(stored["description"], "Rudern: 3x8 @ 3 RIR")
 
     def test_structure_does_not_change_the_sync_hash(self):
         local = planned([SQUAT])

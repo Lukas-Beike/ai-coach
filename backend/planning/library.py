@@ -442,7 +442,14 @@ def _reconcile_updated_library_workout_content(
         )
     if any(
         key in values
-        for key in ("description", "strength_structure", "duration_minutes", "target", "type", "sport")
+        for key in (
+            "description",
+            "strength_structure",
+            "duration_minutes",
+            "target",
+            "type",
+            "sport",
+        )
     ):
         for key in DERIVED_WORKOUT_KEYS:
             normalized.pop(key, None)
