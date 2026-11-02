@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Mapping
 from datetime import date
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from backend.activities.workout_load import AthleteThresholds
+from backend.activities.workout_load import AthleteThresholds, WorkoutEstimate
 from backend.activities.zone_settings import ZoneSettings
 from backend.planning import intensity_distribution as dist
 from backend.planning import plan_checks
@@ -21,7 +22,7 @@ THRESHOLDS = AthleteThresholds(ZoneSettings(ftp=250, lthr=170, max_hr=190))
 TODAY = date(2026, 11, 2)
 
 
-def estimate(unit: dict[str, Any]) -> Any:
+def estimate(unit: Mapping[str, Any]) -> WorkoutEstimate:
     return estimate_planned_unit(unit, THRESHOLDS)
 
 
@@ -135,7 +136,8 @@ class EstimatorTests(unittest.TestCase):
             ) as read,
             patch("backend.planning.planned_unit_load.resolve_reader"),
         ):
-            self.assertEqual(1800, estimator(ride).band_seconds["low"])
+            bands = estimator(ride).band_seconds
+            self.assertEqual(1800, (bands or {}).get("low"))
             estimator(ride)
         read.assert_called_once()
         configurations.assert_called_once()
