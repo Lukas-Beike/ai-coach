@@ -200,11 +200,15 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 - **THEN** the write is saved and the result carries them as `plan_check_notes` with evidence strength; a run_spike is a notice up to 30 % and a warning beyond.
 
 #### Scenario: Acknowledged deviation
-- **WHEN** the model resubmits with `accept_plan_findings` listing illness_hard
+- **WHEN** the model resubmits with `accept_plan_findings` listing illness_hard and the write gate's classifier confirms that the athlete's current message, or a short confirmation of the Coach's question about exactly this, explicitly asks to train despite the illness
 - **THEN** the write is saved and the result carries the finding in `plan_check_notes`; the receipt persists only its safe structured summary.
+
+#### Scenario: Unconfirmed deviation
+- **WHEN** the model lists illness_hard in `accept_plan_findings` but the classifier does not confirm an explicit athlete request, or fails or is unavailable
+- **THEN** nothing is saved, the tool result is `not_performed` with gate reason `illness_not_confirmed`, and the Coach asks one clarification question.
 
 #### Scenario: Visible plan notes
 - **WHEN** a successful Coach plan write produces notes
 - **THEN** its change receipt shows their dates, severity and evidence strength without provider text, and the Coach is instructed to justify rather than repeat or contradict them.
 
-Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`.
+Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`; `backend/coach/write_gate.py:check_write`; `tests/test_coach_write_gate.py:IllnessOverrideTests`.
