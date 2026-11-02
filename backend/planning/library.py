@@ -15,6 +15,7 @@ from backend.canonical.planning_fields import (
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.stored_sports import workout_sport_from_record
 from backend.errors import AppError
+from backend.planning import strength_structure
 from backend.planning import workouts as planning_workouts
 from backend.planning.session_focus import normalize_session_focus
 from backend.planning.sport import apply_sport_update
@@ -414,6 +415,7 @@ def workout_library_update_candidate(
     for key in ("name", "description", "duration_minutes", "target", *FOCUS_KEYS):
         if key in values:
             candidate[key] = values.get(key)
+    strength_structure.drop_stale(candidate, values)
     if {"type", "sport", "environment"} & values.keys():
         apply_sport_update(candidate, values)
     return candidate
@@ -440,7 +442,14 @@ def _reconcile_updated_library_workout_content(
         )
     if any(
         key in values
-        for key in ("description", "duration_minutes", "target", "type", "sport")
+        for key in (
+            "description",
+            "strength_structure",
+            "duration_minutes",
+            "target",
+            "type",
+            "sport",
+        )
     ):
         for key in DERIVED_WORKOUT_KEYS:
             normalized.pop(key, None)

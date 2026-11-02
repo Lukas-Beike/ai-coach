@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from backend.canonical.planning_fields import SESSION_FOCUS_KEYS
+from backend.canonical.planning_fields import FOCUS_ONLY_KEYS
 from backend.errors import AppError
 
 _FOCUS_PATH = re.compile(r"/api/planned-units/([^/]+)/focus")
@@ -26,7 +26,7 @@ class PlannedUnitFocusPostRoutes:
         payload = handler.read_json()
         if not isinstance(payload, dict):
             raise AppError(400, "Die Anfrage muss ein Objekt sein.")
-        values = {key: payload.get(key) for key in SESSION_FOCUS_KEYS}
+        values = {key: payload.get(key) for key in FOCUS_ONLY_KEYS}
         with self._database_lock:
             result = self._planned_unit_service().update(match.group(1), values)
         handler.send_json(200, result)

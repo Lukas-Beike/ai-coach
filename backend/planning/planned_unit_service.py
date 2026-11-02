@@ -10,6 +10,7 @@ from typing import Any
 from backend import change_history
 from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
+from backend.canonical.planning_fields import FOCUS_ONLY_KEYS
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.db.remote_links import RemoteLinkRepository
@@ -32,8 +33,8 @@ FOCUS_UPDATE_SQL = "UPDATE planned_units SET payload=?, updated_at=? WHERE local
 
 
 def _is_focus_only(values: dict[str, Any]) -> bool:
-    return set(values) - {"action"} <= set(FOCUS_KEYS) and bool(
-        set(values) & set(FOCUS_KEYS)
+    return set(values) - {"action"} <= set(FOCUS_ONLY_KEYS) and bool(
+        set(values) & set(FOCUS_ONLY_KEYS)
     )
 
 

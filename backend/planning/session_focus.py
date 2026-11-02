@@ -18,9 +18,11 @@ from backend.canonical.planning_fields import (
     SESSION_FOCUS,
     SESSION_FOCUS_KEYS,
     STRENGTH_INTENSITY,
+    STRENGTH_STRUCTURE,
 )
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
+from backend.planning import strength_structure
 from backend.planning.sport import planned_sport_environment
 
 FOCUS_KEY: Final = SESSION_FOCUS
@@ -70,6 +72,7 @@ class SessionFocus:
     value: str | None = None
     strength_intensity: str | None = None
     origin: Origin | None = None
+    intensity_origin: Origin | None = None
 
     @property
     def is_hard(self) -> bool | None:
@@ -86,6 +89,7 @@ class SessionFocus:
             "session_focus": self.value,
             "strength_intensity": self.strength_intensity,
             "focus_origin": self.origin,
+            "intensity_origin": self.intensity_origin,
         }
 
 
@@ -107,15 +111,27 @@ def _text_value(record: Mapping[str, Any], key: str) -> str | None:
     return text or None
 
 
+def _set_structure(record: dict[str, Any], sport: Sport, value: Any) -> None:
+    exercises = strength_structure.normalize_structure(value)
+    if exercises is None:
+        return
+    if sport is not Sport.STRENGTH:
+        raise _invalid("Die Kraftstruktur gibt es nur für Krafteinheiten.")
+    record[STRENGTH_STRUCTURE] = exercises
+    record["description"] = strength_structure.render(exercises)
+
+
 def normalize_session_focus(record: dict[str, Any]) -> None:
     """Validate the focus fields of a unit in place; empty values are removed.
 
-    The focus must exist for the unit's sport; strength intensity only on
-    strength.
+    The focus must exist for the unit's sport; strength intensity and the
+    strength structure only on strength. A structure replaces the description
+    with the text generated from it.
     """
     sport = planned_sport_environment(record)[0]
     focus = _text_value(record, FOCUS_KEY)
     intensity = _text_value(record, INTENSITY_KEY)
+    structure = record.get(STRENGTH_STRUCTURE)
     for key in FOCUS_KEYS:
         record.pop(key, None)
     if focus is not None:
@@ -126,6 +142,7 @@ def normalize_session_focus(record: dict[str, Any]) -> None:
         if sport is not Sport.STRENGTH or intensity not in STRENGTH_INTENSITIES:
             raise _invalid("Ungültige Krafteinheit-Intensität.")
         record[INTENSITY_KEY] = intensity
+    _set_structure(record, sport, structure)
 
 
 # Strength keywords; the first matching group wins, legs plus upper is full body.
@@ -161,6 +178,14 @@ _COMPILED = {
 }
 
 
+def _structure(unit: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The stored exercises of a unit; an invalid stored value counts as none."""
+    value = unit.get(STRENGTH_STRUCTURE)
+    return (
+        [i for i in value if isinstance(i, Mapping)] if isinstance(value, list) else []
+    )
+
+
 def _keyword_focus(unit: Mapping[str, Any], sport: Sport) -> str | None:
     text = f"{unit.get('name') or ''} {unit.get('description') or ''}"
     if sport is Sport.STRENGTH:
@@ -192,34 +217,63 @@ def _step_focus(estimate: WorkoutEstimate | None) -> str | None:
     return "easy" if estimate.intensity_factor < _EASY_INTENSITY else None
 
 
+def _intensity(
+    unit: Mapping[str, Any], sport: Sport
+) -> tuple[str | None, Origin | None]:
+    """Set strength intensity, else the one derived from the structure."""
+    if sport is not Sport.STRENGTH:
+        return None, None
+    intensity = _text_value(unit, INTENSITY_KEY)
+    if intensity in STRENGTH_INTENSITIES:
+        return intensity, "set"
+    derived = strength_structure.derived_intensity(_structure(unit))
+    return derived, None if derived is None else "derived"
+
+
 def session_focus(
     unit: Mapping[str, Any], estimate: WorkoutEstimate | None = None
 ) -> SessionFocus:
-    """Set focus first, then the step-derived, then the keyword-derived focus."""
+    """Set focus first, then the step-derived, then the keyword-derived focus.
+
+    The strength intensity is the set one, else derived from the structure.
+    """
     sport = planned_sport_environment(unit)[0]
     allowed = allowed_foci(sport)
     value = _text_value(unit, FOCUS_KEY)
-    intensity = _text_value(unit, INTENSITY_KEY)
-    if intensity not in STRENGTH_INTENSITIES or sport is not Sport.STRENGTH:
-        intensity = None
+    intensity, intensity_origin = _intensity(unit, sport)
     if value in allowed:
-        return SessionFocus(value, intensity, "set")
+        return SessionFocus(value, intensity, "set", intensity_origin)
     if not allowed:
         return SessionFocus()
     derived = (
         None if sport is Sport.STRENGTH else _step_focus(estimate)
     ) or _keyword_focus(unit, sport)
     if derived is None or derived not in allowed:
-        return SessionFocus(strength_intensity=intensity)
-    return SessionFocus(derived, intensity, "derived")
+        return SessionFocus(
+            strength_intensity=intensity, intensity_origin=intensity_origin
+        )
+    return SessionFocus(derived, intensity, "derived", intensity_origin)
+
+
+def _matches_description(target: Mapping[str, Any], carried: Mapping[str, Any]) -> bool:
+    try:
+        exercises = strength_structure.normalize_structure(carried[STRENGTH_STRUCTURE])
+    except AppError:
+        return False
+    text = strength_structure.render(exercises or [])
+    return text.split() == str(target.get("description") or "").split()
 
 
 def carry_focus(target: dict[str, Any], source: Mapping[str, Any]) -> None:
-    """Keep the local focus on a remote payload when it fits the payload's sport."""
-    candidate = {
-        **target,
-        **{key: source[key] for key in FOCUS_KEYS if source.get(key) is not None},
-    }
+    """Keep the local focus on a remote payload when it fits the payload's sport.
+
+    The structure stays only while the remote description still equals its text;
+    a description edited remotely wins as free text.
+    """
+    carried = {key: source[key] for key in FOCUS_KEYS if source.get(key) is not None}
+    if STRENGTH_STRUCTURE in carried and not _matches_description(target, carried):
+        del carried[STRENGTH_STRUCTURE]
+    candidate = {**target, **carried}
     try:
         normalize_session_focus(candidate)
     except AppError:

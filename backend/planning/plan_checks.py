@@ -21,7 +21,7 @@ Rules (references are observational or practice-based, not individual advice):
   ``load_checks.computed_hard``), else a planned intensity key of at least 0.85 (percent values above 1.5 are
   divided by 100) or workout text with a Z4-Z7 / zone 4-7 target, else a keyword-derived hard focus. Unknown is not
   hard.
-- strength_hard_same_day: heavy strength (set strength_intensity, else planned intensity >= 0.85 or text
+- strength_hard_same_day: heavy strength (set or structure-derived strength_intensity, else planned intensity >= 0.85 or text
   naming heavy, schwer, maximal or a 1-6 RM) and a hard run/ride on one date
   with less than 6 h between start times, or an unknown start time
   (Robineau et al. 2016).
