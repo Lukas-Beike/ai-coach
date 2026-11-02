@@ -138,6 +138,19 @@ The analysis power and running best-effort curve (`mean-max-curve` version 1, wi
 
 Evidence: `backend/performance/mean_max_curve.py:SessionCurveReader`, `backend/performance/report_service.py:TrainingProfileSelectionService`, `backend/performance/canonical_detail.py:stream_resolution`; `tests/test_power_profile.py:test_protocol_windows_reproduce_known_maxima_around_gaps_and_pauses`, `tests/test_mean_max_curve.py`, `tests/test_performance_method_inputs.py:M4BestEffortInputs`.
 
+### Requirement: Critical Power and Critical Speed model estimate
+The power profile SHALL carry `critical-power-speed` version 1 (card M4) as an experimental model estimate: least squares of work or distance on time over the best 180, 420 and 720 s efforts of the last 28 days, cycling outdoor and indoor separately and outdoor running only, each effort from another session or at least 30 minutes apart in one session. It SHALL apply the card's stop rules and never set FTP, thresholds or zones.
+
+#### Scenario: Reference efforts
+- **WHEN** three separate efforts follow CP 250 W and W′ 18,000 J, or CS 4 m/s and D′ 200 m
+- **THEN** the fit returns exactly these parameters with the 1/t and leave-one-out fits as sensitivity, and Analysis and Coach show the same values.
+
+#### Scenario: Dependent or unsuitable efforts
+- **WHEN** the bests overlap in one session, fewer than three efforts remain, a parameter or leave-one-out fit is not positive, a residual exceeds 3 %, or values fall outside CP 50–600 W, W′ 1–50 kJ, CS 1.5–7 m/s or D′ 10–500 m
+- **THEN** the fit reports `insufficient_data` or `withheld` with its reason and no parameter.
+
+Evidence: `backend/performance/critical_power.py:critical_power_speed`; `tests/test_critical_power.py`, `tests/test_performance_coach_ui_parity.py:test_mean_max_curve_is_the_analysis_route_payload`, `e2e/performance-values.spec.js`.
+
 ### Requirement: Durable athlete feedback separate from provider values
 The system SHALL normalize and persist local notes, session RPE from 0 through 10, and deviation reason against the resolved activity reference. Omitted fields SHALL preserve existing values; explicit clearing of all meaningful fields SHALL delete the local feedback. Coach saves SHALL require a currently known local activity and nonempty feedback.
 

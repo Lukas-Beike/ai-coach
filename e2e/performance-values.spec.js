@@ -5,7 +5,11 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
   await page.route("**/api/analysis/power-profiles", (route) => route.fulfill({ json: { windows: { "90": { power: [
     { sport: "Ride", duration_seconds: 5, watts: 650, status: "ok", date: "2026-10-01" },
     { sport: "VirtualRide", duration_seconds: 5, watts: 700, status: "ok", date: "2026-10-02" },
-  ] } } } }));
+  ] } }, critical_power: { window_days: 28, scope: "Experimentelle Modellschätzung", fits: [
+    { sport: "ride", environment: "outdoor", status: "ok", cp_watts: 250, w_prime_joules: 18000 },
+    { sport: "ride", environment: "indoor", status: "insufficient_data" },
+    { sport: "run", environment: "outdoor", status: "ok", cs_mps: 4.12, d_prime_meters: 200 },
+  ] } } }));
   await page.goto("/#analysis/performance");
   await expect(page.locator("#currentPerformance")).toBeVisible();
   await page.waitForFunction(() => !!state.data?.performance?.history?.body);
@@ -45,5 +49,6 @@ test("@responsive performance keeps Garmin measurements and one cycling best per
   await expect(page.locator('#cyclingPowerProfile [data-power-duration="5"]')).toContainText("700 W");
   await expect(page.locator('#cyclingPowerProfile [data-power-duration="60"]')).toContainText("420 W");
   await expect(page.locator("#cyclingPowerProfile thead th")).toHaveText(["Dauer", "Leistung"]);
+  await expect(page.locator("#cyclingPowerProfile [data-critical-power]")).toHaveText("Experimentelle CP/CS-Schätzung (3/7/12 min, 28 Tage): Rad outdoor CP 250 W · W′ 18 kJ · Rad indoor — · Lauf CS 4,12 m/s · D′ 200 m");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
 });

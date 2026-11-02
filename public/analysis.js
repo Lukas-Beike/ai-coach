@@ -626,6 +626,23 @@ function cyclingPowerProfileTable(result) {
   return scroll;
 }
 
+function criticalPowerLine(result) {
+  const estimate = result?.critical_power;
+  if (!estimate?.fits) return null;
+  const labels = { "ride:outdoor": "Rad outdoor", "ride:indoor": "Rad indoor", "run:outdoor": "Lauf" };
+  const parts = estimate.fits.map((fit) => {
+    const label = labels[`${fit.sport}:${fit.environment}`] || fit.sport;
+    if (fit.status !== "ok") return `${label} —`;
+    return fit.sport === "run"
+      ? `${label} CS ${AppFormat.number(fit.cs_mps, { digits: 2 })} m/s · D′ ${analysisValue(fit.d_prime_meters, "m")}`
+      : `${label} CP ${analysisValue(fit.cp_watts, "W")} · W′ ${analysisValue(fit.w_prime_joules / 1000, "kJ")}`;
+  });
+  const line = reportNode("p", `Experimentelle CP/CS-Schätzung (3/7/12 min, ${estimate.window_days} Tage): ${parts.join(" · ")}`, "analysis-reference-note");
+  line.dataset.criticalPower = "true";
+  line.title = estimate.scope || "";
+  return line;
+}
+
 async function renderCyclingPowerProfile() {
   if (state.route !== "analysis/performance" || !state.data?.performance) return;
   const root = document.getElementById("cyclingPowerProfile");
@@ -638,6 +655,8 @@ async function renderCyclingPowerProfile() {
     root.replaceChildren(reportNode("h4", "Leistungsprofil"));
     root.append(reportNode("p", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · Rad und Indoor zusammen", "analysis-reference-note"));
     root.append(cyclingPowerProfileTable(result));
+    const criticalPower = criticalPowerLine(result);
+    if (criticalPower) root.append(criticalPower);
     if (state.data?.performance?.history?.cycling_power_profile?.status === "failed") {
       root.append(reportNode("p", "Leistungskurven konnten zuletzt nicht synchronisiert werden. Angezeigt werden vorhandene Messungen.", "analysis-reference-note"));
     }

@@ -101,7 +101,7 @@ Consumer trace:
 | Resolution | Intervals fetch `full`, legacy cache `full` only when marked, Garmin `downsampled`, FIT (Wahoo) `full` | `backend/providers/intervals_activity_detail_mapping.py:195,227-230`, `backend/providers/garmin_activity_detail_mapping.py:207`, `backend/providers/fit_activity_detail_mapping.py:257` |
 | Effort windows | 5–3600 s for cycling including 180, 420 and 720 s; running 60–1200 s including 180, 420 and 720 s | `backend/performance/power_profile.py:POWER_DURATIONS`, `RUNNING_DURATIONS` |
 
-Consumer trace (method `mean-max-curve` version 1; no M4 fit exists yet):
+Consumer trace (method `mean-max-curve` version 1, fit `critical-power-speed` version 1):
 
 - Per activity: `CanonicalDetailReader.read`
   (`backend/performance/canonical_detail.py:113`) follows a merged session
@@ -118,6 +118,10 @@ Consumer trace (method `mean-max-curve` version 1; no M4 fit exists yet):
   `get_training_report(sections=["power_profiles"])`
   (`backend/coach/activity_read_tools.py`). Overlapping bests of one session share
   an `effort_group`.
+- Fit: `critical_power_speed` (`backend/performance/critical_power.py`) reads
+  the 28-day session curves inside `power_profiles` and returns
+  `critical_power` in the same payload, so the Analysis card line and the
+  Coach tool show the same values.
 
 ## Data gaps and persistence needs
 
@@ -135,7 +139,7 @@ Consumer trace (method `mean-max-curve` version 1; no M4 fit exists yet):
 | Labels "sleep deficit" and regularity | M3 | wording | resolved by #1426 |
 | No full-resolution filter and no 180/420/720 s windows | M4 | method | resolved by #1430 (`mean-max-curve` v1) |
 | Reports read stored analyses with kv fallback | M4 | read path | resolved by #1410 and #1430 |
-| No CP/CS fit | M4 | method | #1431 |
+| No CP/CS fit | M4 | method | resolved by #1431 (`critical-power-speed` v1, experimental) |
 | No RR/NN stream | M2 | out of scope | #1428 |
 
 The canonical home for `icu_rpe` (#1446) was delivered by #1510, the
