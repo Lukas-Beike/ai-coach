@@ -201,6 +201,8 @@ class CoachContextSelection:
     retain_dialogue: bool = False
     retain_pending_request: bool = True
     past_days: int = 2
+    # Earlier planned units of this many days are read; 0 keeps today onward.
+    past_planned_days: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -304,7 +306,7 @@ REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
     "plan_block": CoachContextSelection("plan_block", _PLAN_SECTIONS, 35, 5, True),
     # The current week reaches back to Monday; the next days serve hard/easy spacing.
     "adjust_week": CoachContextSelection(
-        "adjust_week", _PLAN_SECTIONS, 8, 5, True, past_days=6
+        "adjust_week", _PLAN_SECTIONS, 8, 5, True, past_days=6, past_planned_days=6
     ),
 }
 
@@ -369,6 +371,7 @@ def select_coach_context(
         retain_dialogue=selection.retain_dialogue,
         retain_pending_request=selection.retain_pending_request,
         past_days=fixed.past_days,
+        past_planned_days=fixed.past_planned_days,
     )
 
 

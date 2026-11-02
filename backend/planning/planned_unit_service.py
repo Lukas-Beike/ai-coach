@@ -334,6 +334,7 @@ class PlannedUnitService:
         include_archived: bool = False,
         *,
         future_only: bool = False,
+        since: date | None = None,
     ) -> list[dict[str, Any]]:
         with self._database_manager.reader() as db:
             rows = planned_unit_rows(
@@ -342,6 +343,7 @@ class PlannedUnitService:
                 include_archived,
                 future_only,
                 today=self._today(),
+                since=since,
             )
         return [
             payload

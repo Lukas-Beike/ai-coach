@@ -172,7 +172,7 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 
 #### Scenario: Adjust the current week
 - **WHEN** a turn carries `adjust_week`
-- **THEN** its playbook compares plan and actual for the current week, changes only today and later days, moves a missed key session by `session_focus` without back-to-back hard days or leg strength less than 24 h before it, keeps run, ride and strength combinable, leaves adaptive replans to the preview and approval rule, and writes nothing to Intervals.icu without a named sync, while its context holds the plan sections, planning brief, calendars, weather and recovery for the current week and the days after it.
+- **THEN** its playbook compares plan and actual for the current week, changes only today and later days, moves a missed key session by `session_focus` without back-to-back hard days or leg strength less than 24 h before it, keeps run, ride and strength combinable, leaves adaptive replans to the preview and approval rule, and writes nothing to Intervals.icu without a named sync, while its context holds the plan sections, planning brief, calendars, weather and recovery for the current week, including planned units from earlier days of that week, and the days after it.
 
 #### Scenario: Session analysis context
 - **WHEN** a turn carries `session_analysis`

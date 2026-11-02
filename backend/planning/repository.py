@@ -16,6 +16,7 @@ def planned_unit_rows(
     future_only: bool,
     *,
     today: date,
+    since: date | None = None,
 ) -> list[Any]:
     clauses: list[str] = []
     if not include_archived:
@@ -34,10 +35,13 @@ def planned_unit_rows(
     )
     bounded_limit = max(1, min(int(limit) * (2 if include_archived else 1), 1000))
 
+    # ``since`` only widens a future-only read back to that date.
+    lower = (since if future_only and since else today).isoformat()
+
     def select(extra: str, order: str, count: int) -> list[Any]:
         where = " AND ".join([*clauses, extra])
         sql = f"SELECT {columns} FROM planned_units WHERE {where} ORDER BY {order} LIMIT ?"
-        return db.execute(sql, (today.isoformat(), count)).fetchall()
+        return db.execute(sql, (lower, count)).fetchall()
 
     upcoming_filter = f"{day} >= ?"
     if future_only:

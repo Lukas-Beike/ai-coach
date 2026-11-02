@@ -361,8 +361,11 @@ class CoachPlanningContextReader:
         self._adaptive_replan_preview_service = adaptive_replan_preview_service
         self._today = today
 
-    def planned(self) -> list[dict[str, Any]]:
-        return self._planned_unit_service.list(250, future_only=True)
+    def planned(self, past_days: int = 0) -> list[dict[str, Any]]:
+        if past_days <= 0:
+            return self._planned_unit_service.list(250, future_only=True)
+        since = self._today() - timedelta(days=past_days)
+        return self._planned_unit_service.list(250, future_only=True, since=since)
 
     def daily(self, planned: Any, weather: Any, checkins: Any) -> Any:
         return self._daily_planning_context_service.build(
@@ -698,7 +701,9 @@ class CoachStructuredContextService:
             else {}
         )
         local_planned_workouts = (
-            self._planning_reader.planned()
+            self._planning_reader.planned(
+                selection.past_planned_days if selection else 0
+            )
             if included
             & {
                 "local_planned_workouts",

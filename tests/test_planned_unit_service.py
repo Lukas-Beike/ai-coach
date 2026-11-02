@@ -283,6 +283,26 @@ class PlannedUnitServiceTests(unittest.TestCase):
 
         self.assertEqual(self.state(), ([], [], 0))
 
+    def test_future_only_since_reads_earlier_units_of_the_week(self):
+        for index, (day, name) in enumerate(
+            (
+                ("2026-09-13", "Last week"),
+                ("2026-09-15", "Missed Tuesday"),
+                ("2026-09-20", "Today"),
+            )
+        ):
+            self.id = uuid.UUID(f"{index + 1}2345678-1234-5678-1234-567812345678")
+            self.service.create(self.workout(date=day, name=name))
+
+        since = date(2026, 9, 14)
+        widened = self.service.list(future_only=True, since=since)
+        default = self.service.list(future_only=True)
+        past_ignored = self.service.list(since=since)
+
+        self.assertEqual(["Missed Tuesday", "Today"], [i["name"] for i in widened])
+        self.assertEqual(["Today"], [i["name"] for i in default])
+        self.assertEqual(3, len(past_ignored))
+
     def test_list_preserves_archive_future_and_limit_filters(self):
         self.service.create(self.workout(date="2026-09-19", name="Past"))
         self.id = uuid.UUID("22345678-1234-5678-1234-567812345678")
