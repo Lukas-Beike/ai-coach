@@ -44,7 +44,6 @@ _CANONICAL_SQL: Final = """
         AND r.provider = ? AND r.state = ?
 """
 
-
 def _wrap(inner: str) -> str:
     return (
         f"SELECT *, julianday(observed_at) AS instant FROM ({inner}) "

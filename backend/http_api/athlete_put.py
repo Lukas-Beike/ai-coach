@@ -40,10 +40,7 @@ class AthletePutRoutes:
     def _handle_athlete_context(self, handler: Any) -> bool:
         payload = handler.read_json()
         context = self._athlete_context_service()
-        with (
-            context.profile_service.mutation_coordinator,
-            self._database_lock or nullcontext(),
-        ):
+        with context.profile_service.mutation_coordinator, self._database_lock or nullcontext():
             result = context.save(payload.get("profile"), payload.get("competitions"))
         handler.send_json(200, result)
         return True
@@ -52,9 +49,7 @@ class AthletePutRoutes:
         deadline = monotonic() + 10.0
         payload = handler.read_json()
         profile = self._profile_service()
-        opted_in = (
-            isinstance(payload, dict) and payload.get("sync_body_to_garmin") is True
-        )
+        opted_in = isinstance(payload, dict) and payload.get("sync_body_to_garmin") is True
         retry_export = opted_in and payload.get("retry_body_to_garmin") is True
         changes = (
             {
@@ -70,9 +65,7 @@ class AthletePutRoutes:
             result = profile.patch(changes)
             revision = profile.revision() if before is not None else None
 
-        result = self._export_body_if_needed(
-            result, before, retry_export, revision, deadline
-        )
+        result = self._export_body_if_needed(result, before, retry_export, revision, deadline)
         handler.send_json(200, result)
         return True
 

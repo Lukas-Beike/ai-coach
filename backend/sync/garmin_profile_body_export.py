@@ -73,9 +73,7 @@ class GarminProfileBodyExport:
         with ExitStack() as locks:
             if not self._acquire_locks(locks, deadline):
                 return "unavailable"
-            current = (
-                self._profile.get()
-            )  # reader closes before authentication or upload
+            current = self._profile.get()  # reader closes before authentication or upload
             if self._profile.revision() != revision or any(
                 current.get(k) != saved.get(k) for k in ("weight_kg", "body_fat_pct")
             ):
@@ -97,7 +95,7 @@ def _parse_body_measurements(current: dict[str, Any]) -> tuple[float, float] | N
     try:
         weight = float(current["weight_kg"])
         fat = float(current["body_fat_pct"])
-    except KeyError, TypeError, ValueError:
+    except (KeyError, TypeError, ValueError):
         return None
     if not (
         math.isfinite(weight)
