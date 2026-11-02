@@ -327,23 +327,25 @@ class CoachStructuredToolRoundService:
         return result
 
     def _refreshed_instructions(self, state: StructuredCoachRoundState) -> str:
+        selection = select_coach_context(
+            state.message,
+            state.context,
+            attachments=bool(
+                state.attachments or state.request_payload.get("conversation")
+            ),
+            has_receipts=True,
+            request_kind=state.request_kind,
+        )
         return compose_model_instructions(
             self._training_context.build(
-                selection=select_coach_context(
-                    state.message,
-                    state.context,
-                    attachments=bool(
-                        state.attachments or state.request_payload.get("conversation")
-                    ),
-                    has_receipts=True,
-                    request_kind=state.request_kind,
-                ),
+                selection=selection,
                 local_date=state.context.get("local_date", ""),
             ),
             allow_mutations=state.allow_mutations,
             attachment_summary=LOCAL_ATTACHMENT_SUMMARY_NOTICE
             in state.model_instructions,
             request_kind=state.request_kind,
+            nutrition="nutrition_products" in selection.sections,
         )
 
     def _update_plan_scope(

@@ -170,11 +170,19 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 - **WHEN** a turn carries one of the four analysis or planning kinds
 - **THEN** its context sections come from the kind rather than the message wording, while dialogue and pending-request retention still follow the message as for an ordinary turn.
 
+#### Scenario: Session analysis context
+- **WHEN** a turn carries `session_analysis`
+- **THEN** its context holds profile, competitions, feedback, planned units around the session and the next one, activities, recovery and current performance with activity validation, while weather, calendars and plan sections stay requestable through `read_coach_context`.
+
+#### Scenario: Nutrition rules only on nutrition turns
+- **WHEN** the selected context includes `nutrition_products`
+- **THEN** the instructions append the nutrition playbook (reusable meals, food matching), which the base prompt only references; plan and analysis turns carry neither the playbook nor its rules.
+
 #### Scenario: Unknown kind
 - **WHEN** a submission names another kind
 - **THEN** it is rejected as an unsupported quick action before any turn is stored.
 
-Evidence: `backend/coach/playbooks.py:playbook_for`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`; `backend/coach/context_selection.py:select_coach_context`; `backend/coach/request_payload.py:compose_model_instructions`; `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`, `tests/test_coach_playbooks.py:RequestKindSelectionTests.test_every_kind_has_a_selection_and_keeps_message_retention`; plan_week and plan_block also load the deterministic `planning_brief` section (`backend/planning/plan_guard_service.py:build_planning_brief`; `tests/test_plan_guard_service.py:PlanBriefTests.test_brief_section_only_for_plan_kinds`).
+Evidence: `backend/coach/playbooks.py:playbook_for`, `backend/coach/playbooks.py:nutrition_playbook`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`; `backend/coach/context_selection.py:select_coach_context`; `backend/coach/request_payload.py:compose_model_instructions`; `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_nutrition_rules_only_on_nutrition_turns`, `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`, `tests/test_coach_playbooks.py:RequestKindSelectionTests.test_every_kind_has_a_selection_and_keeps_message_retention`; plan_week and plan_block also load the deterministic `planning_brief` section (`backend/planning/plan_guard_service.py:build_planning_brief`; `tests/test_plan_guard_service.py:PlanBriefTests.test_brief_section_only_for_plan_kinds`).
 
 ### Requirement: CC10 Composer continuity and user-controlled input
 The system SHALL keep drafts editable while the Coach runs, serialize queued follow-ups, preserve rejected input on session expiry and require the athlete to send editable voice transcripts as chat messages.

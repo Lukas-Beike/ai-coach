@@ -281,8 +281,12 @@ _PLAN_SECTIONS = BASE_SECTIONS | {
     "weather",
 }
 REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
-    # Plan versus actual and the next session need the full plan window.
-    "session_analysis": CoachContextSelection("activity_analysis"),
+    # The session detail comes from get_activity_details. Plan versus actual and the
+    # next session need the plan window; weather, calendars and the plan sections
+    # stay requestable through read_coach_context.
+    "session_analysis": CoachContextSelection(
+        "activity_analysis", BASE_SECTIONS | {"recovery"}, 14, 5, False
+    ),
     "progress_review": CoachContextSelection(
         "progress_review",
         BASE_SECTIONS | {"planning", "training_plans", "recovery"},
