@@ -44,7 +44,7 @@ Task: analyze the last completed session.
 - End with the consequence for the next session.""",
     "progress_review": """\
 Task: review progress over the requested period.
-- Use get_training_report over the period. days is 7 or 28 per call; for longer periods make consecutive 28-day calls with start dates.
+- Call get_training_report with sections [progress] alone and the smallest days value that covers the period: 28 for 2 or 4 weeks, 84 for 8 or 12 weeks. It returns whole weeks per sport with intensity, plan compliance, CTL, eFTP and mean-max changes per environment.
 - Report weekly volume and load per sport (run, ride, strength), the intensity distribution against training_model, consistency, and performance indicators with source labels.
 - State the data coverage per week; incomplete weeks are unknown.""",
     "plan_week": """\
