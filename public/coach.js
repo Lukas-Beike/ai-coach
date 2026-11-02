@@ -1833,6 +1833,8 @@ function appendPlanNotes(node, planNotes) {
     missing_taper: ["Wettkampf-Taper", "Starke Evidenz; Schwelle lokal gewählt"],
     illness_hard: ["Belastung bei Krankheit", "Medizinische Vorsicht"],
     intensity_distribution: ["Intensitätsverteilung der Woche", "Praxisbasierte Referenzbereiche"],
+    leg_strength_before_key_session: ["Beinkraft vor Schlüsseleinheit", "Begrenzte Evidenz"],
+    leg_strength_frequency: ["Beinkraft pro Woche", "Rønnestad & Mujika 2014, Blagrove 2018; Schwellen praxisbasiert"],
   };
   for (const note of Array.isArray(planNotes) ? planNotes : []) {
     const label = planNoteLabels[note?.code];

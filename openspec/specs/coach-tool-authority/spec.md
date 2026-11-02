@@ -189,14 +189,14 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 
 #### Scenario: Checked tools and rules
 - **WHEN** `apply_training_patch`, `apply_training_changes`, `replace_training_plan`, `apply_workout_library_plan` or `commit_training_plan` writes planned units
-- **THEN** the resulting plan is checked for run_spike (planned distance against the longest run of 30 days), load_spike and weekly_load_rise (load = duration x intensity^2 per sport, run and ride), load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, illness_hard and intensity_distribution.
+- **THEN** the resulting plan is checked for run_spike (planned distance against the longest run of 30 days), load_spike and weekly_load_rise (load = duration x intensity^2 per sport, run and ride), load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, illness_hard, intensity_distribution, leg_strength_before_key_session and leg_strength_frequency.
 
 #### Scenario: Blocking violation
 - **WHEN** a Coach plan write would add an illness_hard finding
 - **THEN** the transaction is rolled back, the tool result is a failure with the findings, and the model may correct the plan and call again in the same turn.
 
 #### Scenario: Notes
-- **WHEN** a Coach plan write adds only run_spike, load_spike, weekly_load_rise, load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper or intensity_distribution findings
+- **WHEN** a Coach plan write adds only run_spike, load_spike, weekly_load_rise, load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, intensity_distribution, leg_strength_before_key_session or leg_strength_frequency findings
 - **THEN** the write is saved and the result carries them as `plan_check_notes` with evidence strength; a run_spike or load_spike is a notice up to 30 % and a warning beyond.
 
 #### Scenario: Load notes
@@ -206,6 +206,10 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 #### Scenario: Intensity distribution
 - **WHEN** the planned run and ride time of a week (low/moderate/high from the workout steps, strength excluded, unknown time reported as uncovered, never as low) lies more than 5 percentage points outside the reference range of the profile's `training_model`
 - **THEN** a non-blocking `intensity_distribution` note with the shares, ranges and evidence is returned; weeks with less than 2 h or 60 % covered time are not judged, and the `planning_brief` carries the planned distribution.
+
+#### Scenario: Leg strength notes
+- **WHEN** a planned strength unit has a leg session focus (`legs`, `full_body`, `plyometrics`, set or keyword-derived), graded by strength intensity, else planned intensity (heavy from 0.85, moderate from 0.70), else RPE (8, 6), else text, else unknown
+- **THEN** only the number and intensity of leg sessions count (no tonnage, no strength load; strength stays out of the endurance distribution), and non-blocking notes cover moderate or heavy leg strength less than about 24 h before a hard or long run/ride (heavy within 6 h of a hard session stays `strength_hard_same_day`), more than 3 leg or more than 2 heavy leg sessions in a week, and no leg session in 2+ full planned weeks when the profile or season phase expects strength; the `planning_brief` carries `strength` (sessions, leg sessions, leg sessions by intensity) per planned week and the same counts in completed strength weeks.
 
 #### Scenario: Acknowledged deviation
 - **WHEN** the model resubmits with `accept_plan_findings` listing illness_hard and the write gate's classifier confirms that the athlete's current message, or a short confirmation of the Coach's question about exactly this, explicitly asks to train despite the illness
@@ -219,7 +223,7 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 - **WHEN** a successful Coach plan write produces notes
 - **THEN** its change receipt shows their dates, severity and evidence strength without provider text, and the Coach is instructed to justify rather than repeat or contradict them.
 
-Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/load_checks.py:session_spikes`; `backend/planning/load_checks.py:weekly_rises`; `backend/planning/load_checks.py:unknown_load`; `tests/test_load_checks.py`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/planning/intensity_distribution.py:distribution_findings`; `tests/test_intensity_distribution.py`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`; `backend/coach/write_gate.py:check_write`; `tests/test_coach_write_gate.py:IllnessOverrideTests`.
+Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/load_checks.py:session_spikes`; `backend/planning/load_checks.py:weekly_rises`; `backend/planning/load_checks.py:unknown_load`; `tests/test_load_checks.py`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/planning/intensity_distribution.py:distribution_findings`; `tests/test_intensity_distribution.py`; `backend/planning/leg_strength.py`; `tests/test_leg_strength.py`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`; `backend/coach/write_gate.py:check_write`; `tests/test_coach_write_gate.py:IllnessOverrideTests`.
 
 ### Requirement: Coach sets the session focus
 The Coach plan and template tools SHALL accept `session_focus` and `strength_intensity`, require them in strict plan payloads, validate them per sport on the server and list upcoming units' focus with its origin in `planning_brief.planned_sessions`.

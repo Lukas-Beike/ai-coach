@@ -256,6 +256,7 @@ from backend.planning.assembly import (
     PlanningRuntime as PlanningDataRuntime,
 )
 from backend.planning.compact_activities import ActivitySummarySource
+from backend.planning.leg_strength import strength_expected
 from backend.planning.plan_guard_service import (
     PlanGuardService,
     read_completed,
@@ -1722,6 +1723,13 @@ def _plan_guard_service() -> PlanGuardService:
         today=lambda: ATHLETE_CLOCK.now().date(),
         thresholds=lambda: read_load_thresholds(
             database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
+        ),
+        expects_strength=lambda: strength_expected(
+            str(
+                ATHLETE_DATA.profile().get().get("training_preferences_strength") or ""
+            ),
+            PLANNING_DATA.competition().list(),
+            ATHLETE_CLOCK.now().date(),
         ),
     )
 
