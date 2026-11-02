@@ -13,6 +13,7 @@ from backend.coach.context_selection import (
 )
 from backend.coach.job_submission import CoachJobSubmissionService
 from backend.coach.playbooks import REQUEST_KINDS, playbook_for
+from backend.coach.prompt import COACH_PROMPT
 from backend.coach.request_payload import (
     CoachRequestPayloadService,
     compose_model_instructions,
@@ -69,6 +70,25 @@ class PlaybookInjectionTests(unittest.TestCase):
             self.assertIn("Planning science", playbook_for(kind))
         self.assertIn("week-by-week rationale", playbook_for("plan_block"))
         self.assertNotIn("week-by-week rationale", playbook_for("plan_week"))
+
+    def test_nutrition_rules_only_on_nutrition_turns(self) -> None:
+        marker = (
+            "first match every ingredient against the athlete's saved local products"
+        )
+        plain = compose_model_instructions("ctx", allow_mutations=True)
+        food = compose_model_instructions("ctx", allow_mutations=True, nutrition=True)
+        self.assertNotIn(marker, plain)
+        self.assertNotIn(marker, COACH_PROMPT)
+        self.assertIn(marker, food)
+        self.assertIn("save_nutrition_template", food)
+        self.assertNotIn("save_nutrition_template", plain)
+        for kind in ("plan_week", "session_analysis"):
+            self.assertNotIn(
+                marker,
+                compose_model_instructions(
+                    "ctx", allow_mutations=True, request_kind=kind
+                ),
+            )
 
     def test_other_turns_carry_no_playbook(self) -> None:
         for kind in (None, "morning_checkin", "unknown"):
@@ -140,6 +160,66 @@ class RequestKindSelectionTests(unittest.TestCase):
         analysis = select_coach_context("x", {}, request_kind="session_analysis")
         self.assertEqual(analysis.name, "activity_analysis")
         self.assertIn("durable_profile", analysis.sections)
+        self.assertLessEqual(
+            {"local_planned_workouts", "activities", "recovery", "current_performance"},
+            analysis.sections,
+        )
+        for heavy in ("weather", "calendar", "external_calendar", "training_plans"):
+            self.assertNotIn(heavy, analysis.sections)
+        self.assertEqual(analysis.horizon_days, 14)
+
+    def test_confirmation_after_food_exchange_keeps_products(self) -> None:
+        history = {
+            "messages": [
+                {"id": 1, "role": "user", "content": "Speichere Mahlzeit Porridge"},
+                {"id": 2, "role": "assistant", "content": "Soll ich speichern?"},
+            ]
+        }
+        self.assertIn(
+            "nutrition_products", select_coach_context("ja", history).sections
+        )
+        self.assertNotIn(
+            "nutrition_products",
+            select_coach_context("ja", {"messages": []}).sections,
+        )
+
+    def test_message_food_survives_a_fixed_kind(self) -> None:
+        sections = select_coach_context(
+            "80g Haferflocken gegessen", {}, request_kind="plan_week"
+        ).sections
+        self.assertIn("nutrition_products", sections)
+
+    def test_upload_alone_adds_no_products_to_a_fixed_kind(self) -> None:
+        for kind in ("session_analysis", "plan_week"):
+            sections = select_coach_context(
+                "Analysiere meine letzte Einheit.",
+                {},
+                attachments=True,
+                request_kind=kind,
+            ).sections
+            with self.subTest(kind=kind):
+                self.assertNotIn("nutrition_products", sections)
+
+    def test_nutrition_topics_without_intake_wording_select_products(self) -> None:
+        for message in (
+            "Welche meiner gespeicherten Produkte passen dazu?",
+            "Ändere die Vorlage auf zwei Portionen.",
+            "Whey-Shake nach dem Training",
+        ):
+            with self.subTest(message=message):
+                self.assertIn(
+                    "nutrition_products", select_coach_context(message, {}).sections
+                )
+
+    def test_base_prompt_keeps_core_nutrition_write_rules(self) -> None:
+        for marker in (
+            "log a consumed meal once with save_nutrition_entry",
+            "matching saved local products by exact product_id first",
+            "log_nutrition_template by exact ID",
+            "never save hypothetical or negated consumption",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, COACH_PROMPT)
 
     def test_every_kind_has_a_selection_and_keeps_message_retention(self) -> None:
         self.assertEqual(set(REQUEST_KIND_SELECTIONS), set(REQUEST_KINDS))
