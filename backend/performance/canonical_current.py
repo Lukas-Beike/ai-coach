@@ -105,7 +105,8 @@ class CanonicalCurrentInputs:
     athlete_record: tuple[Observation, ...] = ()
     synced_at: datetime | None = None
     # This sync's sport-scoped FTP, indoor FTP, threshold and maximum heart rate:
-    # the thresholds of the plan zones only. Current metrics never read it.
+    # the thresholds of the plan zones and of planned-unit load (threshold pace).
+    # Current metrics never read it.
     zone_thresholds: tuple[Observation, ...] = ()
 
     def athlete_value(

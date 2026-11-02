@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from typing import Any
 
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.planning.planned_unit_load import (
@@ -12,10 +13,10 @@ from backend.planning.planned_unit_load import (
     unit_thresholds,
 )
 
-PACE = SimpleNamespace(
+PACE: Any = SimpleNamespace(
     kind=MetricKind.THRESHOLD_PACE, sport=Sport.RUN, value=SimpleNamespace(value=4.0)
 )
-RIDE_PACE = SimpleNamespace(
+RIDE_PACE: Any = SimpleNamespace(
     kind=MetricKind.THRESHOLD_PACE, sport=Sport.RIDE, value=SimpleNamespace(value=9.0)
 )
 RUN = {
