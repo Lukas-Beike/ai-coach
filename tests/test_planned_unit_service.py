@@ -460,6 +460,73 @@ class PlannedUnitServiceTests(unittest.TestCase):
         payload = json.loads(planned[0]["payload"])
         self.assertEqual(payload["environment"], "indoor")
 
+    def test_focus_update_is_persisted_recorded_and_clearable(self):
+        self.service.create(self.workout())
+
+        self.service.update(str(self.id), {"session_focus": "tempo"})
+        planned, _history, _revision = self.state()
+        self.assertEqual(json.loads(planned[0]["payload"])["session_focus"], "tempo")
+        with self.manager.reader() as db:
+            row = db.execute(
+                "SELECT diff FROM change_history WHERE action='update'"
+            ).fetchone()
+        diff = json.loads(row["diff"])["fields"]
+        self.assertEqual(diff["session_focus"]["after"], "tempo")
+
+        self.service.update(str(self.id), {"session_focus": None})
+        planned, _history, _revision = self.state()
+        self.assertNotIn("session_focus", json.loads(planned[0]["payload"]))
+
+        with self.assertRaises(AppError):
+            self.service.update(str(self.id), {"session_focus": "legs"})
+
+    def test_focus_only_update_keeps_the_sync_state(self):
+        self.service.create(self.workout())
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET sync_state='synced', sync_dirty=0 "
+                "WHERE local_id=?",
+                (str(self.id),),
+            )
+
+        self.service.update(str(self.id), {"session_focus": "easy"})
+
+        planned, _history, _revision = self.state()
+        self.assertEqual(
+            (planned[0]["sync_state"], planned[0]["sync_dirty"]), ("synced", 0)
+        )
+        self.assertEqual(json.loads(planned[0]["payload"])["session_focus"], "easy")
+
+        self.service.update(str(self.id), {"name": "Anders"})
+        planned, _history, _revision = self.state()
+        self.assertEqual(planned[0]["sync_state"], "local")
+
+    def test_undoing_a_focus_edit_keeps_the_sync_state(self):
+        self.service.create(self.workout())
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET sync_state='synced', sync_dirty=0 "
+                "WHERE local_id=?",
+                (str(self.id),),
+            )
+        self.service.update(str(self.id), {"session_focus": "easy"})
+        with self.manager.reader() as db:
+            current = db.execute(
+                "SELECT * FROM planned_units WHERE local_id=?", (str(self.id),)
+            ).fetchone()
+        target = {**json.loads(current["payload"])}
+        target.pop("session_focus")
+        with self.manager.unit_of_work() as db:
+            self.service.restore_in_transaction(
+                db, str(self.id), dict(current), target, "undo"
+            )
+
+        planned, _history, _revision = self.state()
+        self.assertEqual(
+            (planned[0]["sync_state"], planned[0]["sync_dirty"]), ("synced", 0)
+        )
+        self.assertNotIn("session_focus", json.loads(planned[0]["payload"]))
+
     def test_archive_and_restore_are_dirty_local_updates(self):
         self.service.create(self.workout())
 

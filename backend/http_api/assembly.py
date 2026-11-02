@@ -40,6 +40,7 @@ from backend.http_api.nutrition import (
     NutritionPostRoutes,
     NutritionPutRoutes,
 )
+from backend.http_api.planned_unit_focus_post import PlannedUnitFocusPostRoutes
 from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.post_dispatch import (
@@ -271,6 +272,7 @@ class HttpReadRouteServices:
     history: HttpHistoryServices
     diagnostics: HttpDiagnosticsServices
     workout_library: Callable[[], Any]
+    planned_unit: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -333,6 +335,7 @@ class HttpApiAssembly:
         history = dependencies.reads.history
         diagnostics = dependencies.reads.diagnostics
         workout_library = dependencies.reads.workout_library
+        planned_unit_service = dependencies.reads.planned_unit
         privacy = dependencies.domains.privacy
         sync = dependencies.domains.sync
         nutrition = dependencies.domains.nutrition
@@ -702,6 +705,7 @@ class HttpApiAssembly:
             self.metric_export_post_routes,
             self.garmin_post_routes,
             self.provider_connection_post_routes,
+            PlannedUnitFocusPostRoutes(planned_unit_service, database_lock()),
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

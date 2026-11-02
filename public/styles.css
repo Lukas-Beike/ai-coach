@@ -967,6 +967,11 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .planned-actual-facts strong { color: var(--subtle); font-size: inherit; font-weight: 500; }
 .planned-comparison { display: grid; gap: 4px; padding: 10px; border-radius: 10px; color: var(--muted); background: var(--translucent-surface); font-size: .75rem; line-height: 1.5; }
 .planned-comparison p { margin: 0; }
+.planned-badge.is-focus-derived { border-style: dashed; color: var(--muted); }
+.planned-focus-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.planned-focus-field { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; }
+.planned-focus-field select { min-height: 36px; padding: 4px 8px; }
+.planned-focus-status { color: var(--muted); font-size: .72rem; }
 .planned-description { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
 .planned-week-totals { margin: 0; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--subtle); font-size: .7rem; line-height: 1.5; }
 @media (max-width: 480px) {

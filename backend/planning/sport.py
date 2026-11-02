@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS
 from backend.canonical.stored_sports import StoredSport, workout_sport_from_record
 from backend.canonical.vocabulary import Environment, Sport
 from backend.providers.intervals_workouts import intervals_record_type
@@ -37,12 +38,18 @@ def apply_sport_update(candidate: dict[str, Any], values: Mapping[str, Any]) -> 
         if values.get("environment"):
             candidate["environment"] = values["environment"]
         return
+    previous = planned_sport_environment(candidate)[0]
     for key in ("type", "environment", "sport_detail"):
         candidate.pop(key, None)
     candidate["sport"] = values.get("sport") or values.get("type")
     for key in ("environment", "sport_detail"):
         if values.get(key):
             candidate[key] = values[key]
+    # The focus belongs to the previous sport unless the request sets its own.
+    if planned_sport_environment(candidate)[0] is not previous:
+        for key in SESSION_FOCUS_KEYS:
+            if key not in values:
+                candidate.pop(key, None)
 
 
 def planned_activity_type(record: Mapping[str, Any]) -> str:

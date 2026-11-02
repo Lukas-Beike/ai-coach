@@ -79,6 +79,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("backend.http_api.transcribe_post", ("TranscribePostRoutes",)),
     ("backend.http_api.planning_commands_post", ("PlanningCommandsPostRoutes",)),
     ("backend.http_api.feedback_post", ("FeedbackPostRoutes",)),
+    ("backend.http_api.planned_unit_focus_post", ("PlannedUnitFocusPostRoutes",)),
     ("backend.http_api.chat_cancel_post", ("ChatCancelPostRoutes",)),
     ("backend.http_api.privacy_restore_post", ("PrivacyRestorePostRoutes",)),
     ("backend.http_api.auth_post", ("AuthPostRoutes",)),

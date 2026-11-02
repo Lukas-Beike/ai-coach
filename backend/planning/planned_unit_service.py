@@ -10,6 +10,7 @@ from typing import Any
 from backend import change_history
 from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_PLANNING_ERROR, AppError
@@ -17,12 +18,48 @@ from backend.planning import calendar as planning_calendar
 from backend.planning import planned_units, workouts
 from backend.planning.conflicts import calendar_item_window
 from backend.planning.repository import planned_unit_payload, planned_unit_rows
+from backend.planning.session_focus import carry_focus
 
 _REMOTE_LINKS = RemoteLinkRepository()
 UPDATE_SQL = (
     "UPDATE planned_units SET payload=?, sync_dirty=1, sync_state='local', "
     "sync_error=NULL, sync_conflict='', updated_at=? WHERE local_id=?"
 )
+
+
+# A focus-only edit changes nothing the provider holds, so sync state stays.
+FOCUS_UPDATE_SQL = "UPDATE planned_units SET payload=?, updated_at=? WHERE local_id=?"
+
+
+def _is_focus_only(values: dict[str, Any]) -> bool:
+    return set(values) - {"action"} <= set(FOCUS_KEYS) and bool(
+        set(values) & set(FOCUS_KEYS)
+    )
+
+
+def _without_unset_focus(
+    current: dict[str, Any], target: dict[str, Any]
+) -> dict[str, Any]:
+    """Current payload minus focus keys the audited target does not name."""
+    return {
+        key: value
+        for key, value in current.items()
+        if key not in FOCUS_KEYS or key in target
+    }
+
+
+def _differs_only_in_focus(restored: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether an undo changes nothing but the local focus (sync state stays)."""
+    ignored = {*FOCUS_KEYS, "sync_status"}
+
+    def comparable(payload: dict[str, Any]) -> dict[str, Any]:
+        result = {key: value for key, value in payload.items() if key not in ignored}
+        # An unset start reads as local midnight of the date.
+        if result.get("starts_at_local") in (None, f"{result.get('date')}T00:00:00"):
+            result.pop("starts_at_local", None)
+        return result
+
+    return comparable(restored) == comparable(current)
 
 
 def _start_time_suffix(start: str) -> str | None:
@@ -159,9 +196,10 @@ class PlannedUnitService:
             self._reject_restore_conflict(
                 entity_id, {**current_payload, **restored_target}
             )
+        kept = _without_unset_focus(current_payload, target)
         restored = planned_units.normalize_planned_unit(
             {
-                **current_payload,
+                **kept,
                 **restored_target,
                 "archived": archived,
                 "local_deleted": local_deleted,
@@ -173,8 +211,11 @@ class PlannedUnitService:
             or None,
             sync_status="local",
         )
+        focus_only = _differs_only_in_focus(restored, current_payload)
+        if focus_only:
+            restored["sync_status"] = current_payload.get("sync_status")
         db.execute(
-            UPDATE_SQL,
+            FOCUS_UPDATE_SQL if focus_only else UPDATE_SQL,
             (json.dumps(restored, ensure_ascii=False), self._now(), entity_id),
         )
         _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.PLANNED_UNIT, entity_id)
@@ -410,6 +451,7 @@ class PlannedUnitService:
         ):
             if local.get(key) is not None:
                 incoming[key] = local[key]
+        carry_focus(incoming, local)
         incoming.update(id=local_id, sync_status="synced")
         db.execute(
             "UPDATE planned_units SET external_id=?, payload=?, sync_dirty=0, "
@@ -457,9 +499,12 @@ class PlannedUnitService:
         before: dict[str, Any],
         *,
         bump_planning_revision: bool,
+        focus_only: bool = False,
     ) -> None:
+        if focus_only:
+            normalized["sync_status"] = before.get("sync_status")
         db.execute(
-            UPDATE_SQL,
+            FOCUS_UPDATE_SQL if focus_only else UPDATE_SQL,
             (json.dumps(normalized, ensure_ascii=False), self._now(), normalized_id),
         )
         _REMOTE_LINKS.refresh_from_slots(
@@ -471,7 +516,9 @@ class PlannedUnitService:
             normalized_id,
             "update",
             before,
-            {**normalized, "sync_status": "local"},
+            {**normalized, "sync_status": "local"}
+            if not focus_only
+            else dict(normalized),
         )
         if bump_planning_revision:
             self._planning_revision_service.bump(db)
@@ -551,6 +598,7 @@ class PlannedUnitService:
             updated,
             before,
             bump_planning_revision=bump_planning_revision,
+            focus_only=action == "update" and _is_focus_only(values),
         )
         return {
             "status": "local",

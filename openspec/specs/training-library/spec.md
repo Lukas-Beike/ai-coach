@@ -343,3 +343,24 @@ Local planning records SHALL use provider-neutral names for planned load, intens
 - **THEN** the stored FTP basis uses a provider-neutral name and retains its value.
 
 Evidence: `backend/planning/library.py`, `backend/planning/target_snapshot.py`, `backend/providers/intervals_workouts.py`; `tests/test_workout_export_intervals.py`, `tests/test_target_snapshot_summaries.py`, `tests/test_db_planning_metrics_migration.py`.
+
+### Requirement: Session focus of planned units and templates
+Planned units and library templates SHALL carry an optional local session focus, validated per sport, that no provider export writes.
+
+#### Scenario: Valid focus
+- **WHEN** a unit or template sets a focus allowed for its sport (run and ride: recovery, easy, endurance, long, tempo, threshold, vo2max, anaerobic, race, test; ride also sweet_spot; strength: legs, upper, full_body, core, plyometrics, mobility with an optional light, moderate or heavy strength intensity)
+- **THEN** it is stored in the unit payload, shown as a chip, editable per unit and recorded in change history and backups.
+
+#### Scenario: Invalid focus
+- **WHEN** a focus or strength intensity does not exist for the unit's sport
+- **THEN** the write fails with `invalid_session_focus`; changing a unit's sport drops its previous focus unless the request sets one.
+
+#### Scenario: Unit without focus
+- **WHEN** a unit carries no focus
+- **THEN** a derived focus is taken from parsed steps and computed intensity, then from keywords, otherwise it is unknown; a derived focus is labelled `derived` and is never shown as set.
+
+#### Scenario: Export
+- **WHEN** a unit with a focus is exported to Intervals.icu
+- **THEN** the event payload is unchanged and a remote refresh keeps the local focus.
+
+Evidence: `backend/planning/session_focus.py`; `tests/test_session_focus.py`, `e2e/session-focus.spec.js`.

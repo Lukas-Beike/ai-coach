@@ -201,7 +201,7 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 
 #### Scenario: Load notes
 - **WHEN** a planned run or ride has a computed load (workout steps against the latest Intervals.icu thresholds, at most 30 days old)
-- **THEN** it is compared with the highest-load session of its sport in 30 days (ride Normalized Power over FTP, run grade-adjusted pace over threshold pace, heart-rate fallback marked less precise), and the planned weekly load per sport with the mean of the previous 3-4 weeks (notice above 20 %); "hard" uses the computed intensity before text; missing or stale thresholds or unparsed steps give a load_unknown note, never a number; all are non-blocking and labelled as extrapolated from distance/volume studies, not directly validated.
+- **THEN** it is compared with the highest-load session of its sport in 30 days (ride Normalized Power over FTP, run grade-adjusted pace over threshold pace, heart-rate fallback marked less precise), and the planned weekly load per sport with the mean of the previous 3-4 weeks (notice above 20 %); "hard" uses a set session focus, then the computed intensity, then text and keyword-derived focus; heavy strength uses a set strength intensity first; missing or stale thresholds or unparsed steps give a load_unknown note, never a number; all are non-blocking and labelled as extrapolated from distance/volume studies, not directly validated.
 
 #### Scenario: Intensity distribution
 - **WHEN** the planned run and ride time of a week (low/moderate/high from the workout steps, strength excluded, unknown time reported as uncovered, never as low) lies more than 5 percentage points outside the reference range of the profile's `training_model`
@@ -220,3 +220,12 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 - **THEN** its change receipt shows their dates, severity and evidence strength without provider text, and the Coach is instructed to justify rather than repeat or contradict them.
 
 Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/load_checks.py:session_spikes`; `backend/planning/load_checks.py:weekly_rises`; `backend/planning/load_checks.py:unknown_load`; `tests/test_load_checks.py`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/planning/intensity_distribution.py:distribution_findings`; `tests/test_intensity_distribution.py`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`; `backend/coach/write_gate.py:check_write`; `tests/test_coach_write_gate.py:IllnessOverrideTests`.
+
+### Requirement: Coach sets the session focus
+The Coach plan and template tools SHALL accept `session_focus` and `strength_intensity`, require them in strict plan payloads, validate them per sport on the server and list upcoming units' focus with its origin in `planning_brief.planned_sessions`.
+
+#### Scenario: Plan write with focus
+- **WHEN** the Coach stages, replaces or changes units with a focus valid for their sport
+- **THEN** the focus is stored and an invalid one rejects the write.
+
+Evidence: `backend/coach/tool_schemas.py`, `backend/planning/plan_guard_service.py`; `tests/test_coach_tool_schemas.py`, `tests/test_session_focus.py`.
