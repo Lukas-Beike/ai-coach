@@ -24,7 +24,7 @@ function weeklyWindows(rows) {
   for (const text of rows.map(weeklyWindowText).filter(Boolean).sort()) {
     const [start, end] = text.split("-");
     const last = merged.at(-1);
-    if (last && start <= last[1]) last[1] = end > last[1] ? end : last[1];
+    if (last && start <= last[1]) last[1] = [last[1], end].sort().at(-1);
     else merged.push([start, end]);
   }
   return merged.slice(0, WEEKLY_MAX_ROWS).map((item) => item.join("-"));
@@ -204,7 +204,11 @@ function weeklyDayEditor(day, form, rerender) {
   const box = document.createElement("input");
   box.type = "checkbox";
   box.checked = item.rest;
-  box.addEventListener("change", () => { item.rest = box.checked; if (item.rest) item.fixed = []; changed(true); });
+  box.addEventListener("change", () => {
+    item.rest = box.checked;
+    if (item.rest) item.fixed = [];
+    changed(true);
+  });
   rest.append(box, " Ruhetag");
   const body = weeklyElement("div", "weekly-body");
   body.append(rest);
