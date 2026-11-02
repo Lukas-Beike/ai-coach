@@ -197,6 +197,8 @@ def _pace_target(text: str, thresholds: AthleteThresholds) -> _Target:
     if unit is None or not times:
         return _unknown("pace_unit_unknown")
     metres = 1000.0 if unit[1] == "KM" else _MILE_M
+    if not sum(times):
+        return _unknown("invalid_pace")
     speed = metres / (sum(times) / len(times))
     reference = thresholds.threshold_speed_mps
     if not reference:
@@ -214,7 +216,8 @@ def _bare_run_target(text: str, kind: str, sport: Sport) -> bool:
     return (
         sport is Sport.RUN
         and kind == "power"
-        and not re.search(r"W$|FTP", text.split()[0])
+        and not text.split()[0].endswith("W")
+        and "FTP" not in text.split()[1:]
     )
 
 

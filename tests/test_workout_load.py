@@ -109,6 +109,13 @@ class RunTests(unittest.TestCase):
             self.assertIsNone(result.load)
         watts = estimate_workout("- 10m 200w\n", Sport.RUN, FULL)
         self.assertEqual((), watts.unknown)
+        ftp = estimate_workout("- 20m 85-95% FTP\n", Sport.RUN, FULL)
+        self.assertEqual((), ftp.unknown)
+        self.assertAlmostEqual(0.9, ftp.steps[0].intensity)
+
+    def test_zero_pace_is_unknown(self):
+        result = estimate_workout("- 10m 0:00/km Pace\n", Sport.RUN, FULL)
+        self.assertEqual(("invalid_pace",), result.unknown)
 
     def test_zones_beyond_the_limits_are_unknown(self):
         for text in ("- 20m Z10\n", "- 20m Z1-Z10\n"):
