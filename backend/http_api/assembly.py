@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -10,6 +11,7 @@ from typing import Any
 from backend.activities.sync_time import intervals_synced_at
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.diagnostics.readiness_probe import ReadinessProbeService
+from backend.errors import AppError
 from backend.http_api.analysis import AnalysisRoutes
 from backend.http_api.athlete_get import AthleteGetRoutes
 from backend.http_api.athlete_put import AthletePutRoutes
@@ -67,6 +69,7 @@ from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.transcribe_post import TranscribePostRoutes
 from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
+from backend.performance.current_metrics import as_number
 from backend.performance.mean_max_curve import SessionCurveReader
 from backend.performance.report_service import (
     TrainingDerivedReadService,
@@ -618,11 +621,41 @@ class HttpApiAssembly:
             max_backup_bytes,
         )
         self.auth_post_routes = AuthPostRoutes(session_auth_service, maintenance_gate)
+
+        def nutrition_macro_context() -> tuple[Any, Any]:
+            try:
+                performance = public_performance_state_service().performance_state()[
+                    "performance"
+                ]
+                weight = (
+                    performance.get("metrics", {}).get("weight_kg", {}).get("value")
+                )
+            except AppError, OSError, RuntimeError, ValueError:
+                logging.getLogger(__name__).warning(
+                    "Nutrition performance data unavailable"
+                )
+                weight = None
+            if weight is None:
+                weight = as_number(profile_service().get().get("weight_kg"))
+            try:
+                calendar = (
+                    public_plan_state_service()
+                    .read_public(local_only=True)
+                    .get("training_calendar")
+                )
+            except AppError, OSError, RuntimeError, ValueError:
+                logging.getLogger(__name__).warning(
+                    "Nutrition training data unavailable"
+                )
+                calendar = None
+            return weight, calendar
+
         self.nutrition_get_routes = NutritionGetRoutes(
             session_auth_service,
             diary_service,
             meal_library_service,
             athlete_clock.now,
+            nutrition_macro_context,
         )
         self.nutrition_post_routes = NutritionPostRoutes(
             diary_service,

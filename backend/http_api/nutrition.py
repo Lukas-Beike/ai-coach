@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -11,6 +12,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.http_api.auth import SessionAuthService
 from backend.nutrition.diary import NutritionDiaryService
+from backend.nutrition.macro_ranges import macro_ranges
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.models import validate_iso_date
 from backend.nutrition.photo import PHOTO_REQUEST_MAX_BYTES
@@ -29,11 +31,13 @@ class NutritionGetRoutes:
         diary_service: Callable[[], NutritionDiaryService],
         meal_library_service: Callable[[], NutritionMealLibraryService],
         local_now: Callable[[], datetime],
+        macro_context: Callable[[], tuple[Any, Any]] | None = None,
     ) -> None:
         self._session_auth_service = session_auth_service
         self._diary_service = diary_service
         self._meal_library_service = meal_library_service
         self._local_now = local_now
+        self._macro_context = macro_context
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {
@@ -93,6 +97,17 @@ class NutritionGetRoutes:
                 query.get("date", [None])[0] or self._local_now().date().isoformat()
             )
             summary = diary.get_day_summary(date_param)
+            if self._macro_context is not None:
+                try:
+                    weight, calendar = self._macro_context()
+                except AppError, OSError, RuntimeError, ValueError:
+                    logging.getLogger(__name__).warning(
+                        "Nutrition reference data unavailable"
+                    )
+                    weight, calendar = None, None
+                summary["macro_ranges"] = macro_ranges(
+                    weight, calendar, date_param, summary.get("total_kcal")
+                )
             handler.send_json(200, {"ok": True, **summary})
             return True
 

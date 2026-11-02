@@ -115,6 +115,48 @@ class NutritionHttpApiTests(unittest.TestCase):
             {"ok": True, "date": "2026-09-24", "total_kcal": 2000, "entry_count": 3},
         )
 
+    def test_day_reference_uses_weight_and_logged_energy(self) -> None:
+        self.handler.path = "/api/nutrition/day?date=2026-09-24"
+        self.diary_service.get_day_summary.return_value = {
+            "date": "2026-09-24",
+            "total_kcal": 2700,
+        }
+        routes = NutritionGetRoutes(
+            lambda: self.auth,
+            lambda: self.diary_service,
+            lambda: self.meal_library_service,
+            self.local_now,
+            lambda: (90, None),
+        )
+        routes.handle(self.handler, "/api/nutrition/day")
+        payload = self.handler.send_json.call_args.args[1]
+        self.assertEqual(payload["macro_ranges"]["carbs_g"], (270, 450))
+        self.assertEqual(payload["macro_ranges"]["protein_g"], (153, 207))
+        self.assertEqual(payload["macro_ranges"]["fat_g"], (60, 90))
+
+    def test_day_reference_failure_preserves_diary(self) -> None:
+        self.handler.path = "/api/nutrition/day?date=2026-09-24"
+        self.diary_service.get_day_summary.return_value = {
+            "date": "2026-09-24",
+            "total_kcal": 2700,
+        }
+
+        def unavailable():
+            raise RuntimeError("unavailable")
+
+        routes = NutritionGetRoutes(
+            lambda: self.auth,
+            lambda: self.diary_service,
+            lambda: self.meal_library_service,
+            self.local_now,
+            unavailable,
+        )
+        with self.assertLogs("backend.http_api.nutrition", level="WARNING"):
+            routes.handle(self.handler, "/api/nutrition/day")
+        payload = self.handler.send_json.call_args.args[1]
+        self.assertEqual(payload["macro_ranges"], {"fat_g": (60, 90)})
+        self.assertEqual(payload["date"], "2026-09-24")
+
     def test_week_route_requires_authentication(self) -> None:
         self.handler.path = "/api/nutrition/week"
         self.diary_service.get_week_summary.return_value = {"balance_days": 7}

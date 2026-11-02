@@ -183,3 +183,32 @@ The client SHALL expose body history under nutrition with selectable 14-day and 
 - **THEN** the latest-values table shows missing values and empty metric charts are omitted rather than silently substituting another source or profile value.
 
 Evidence: `backend/performance/body.py::body_history`, `public/analysis.js::renderBodyAnalysis`, `public/analysis.js::bodyWeeklyPoints`, `public/navigation.js::NAV_ROUTES`; `e2e/body-analysis.spec.js::@responsive Body keeps old measurements dated and long gaps empty`, `e2e/body-analysis.spec.js::@responsive Body plots measurements and W/kg appears only in the cycling table`, `tests/test_nutrition_garmin_refresh.py::GarminNutritionRefreshTests.test_remote_body_refresh_keeps_body_fat_only_measurements_and_normalizes_date`. Exact body-chart runtime conformance remains unexecuted in this worker; detailed body-series calculation belongs to the performance domain specification.
+
+### Requirement: Daily macro comparison
+The diary SHALL subtly color complete macro totals outside athlete-specific daily reference ranges using the latest available weight and training data.
+
+#### Scenario: Protein target
+- **WHEN** a current body weight is available
+- **THEN** the protein reference is 2 g/kg with a 15 percent tolerance in either direction.
+
+#### Scenario: Training-adjusted carbohydrate range
+- **WHEN** the day's training is known
+- **THEN** the base range is 3–5 g/kg below 90 minutes, 5–7 g/kg from 90 minutes, and 6–10 g/kg from 120 minutes; at least ten minutes in zone 4 or above raises it one range, capped at 6–10 g/kg.
+
+#### Scenario: Planned and completed sessions
+- **WHEN** a completed activity is matched to a planned session
+- **THEN** its actual duration replaces the planned duration in the daily total without double counting.
+
+#### Scenario: Fat reference
+- **WHEN** complete fat and positive calorie totals are available
+- **THEN** the reference is 20–30 percent of recorded energy as fat energy.
+
+#### Scenario: Missing input
+- **WHEN** intensity or training information is unavailable but current weight is known
+- **THEN** carbohydrate comparison uses the 3–5 g/kg light-activity reference without claiming the training intensity is known.
+
+#### Scenario: Missing weight or intake
+- **WHEN** a required weight, calorie value or macro total is unknown
+- **THEN** the affected comparison is not colored and no missing value is assumed.
+
+Evidence: `backend/nutrition/macro_ranges.py`, `backend/http_api/nutrition.py`, `public/nutrition.js`; `tests/test_nutrition_macro_ranges.py`, `tests/test_nutrition_api_and_sync.py`, `tests/nutrition-macro-ranges.test.cjs`, `e2e/nutrition-macro-ranges.spec.js`.
