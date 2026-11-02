@@ -138,7 +138,7 @@ def build_planning_brief(
             for row in upcoming
         ],
         "planned_distribution": intensity_distribution.brief_distribution(
-            training_model, planned_weeks
+            training_model, planned_weeks, BRIEF_WEEKS
         ),
         "plan_checks": plan_checks.RULE_SUMMARY,
     }
@@ -157,7 +157,7 @@ class PlanGuardService:
         progress: Callable[[], Mapping[str, Any]],
         training_model: Callable[[], str],
         today: Callable[[], date],
-        estimate_unit: intensity_distribution.Estimator | None = None,
+        estimate_unit: intensity_distribution.Estimator,
     ) -> None:
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -168,10 +168,10 @@ class PlanGuardService:
         self._today = today
         self._estimate_unit = estimate_unit
 
-    def _planned_weeks(self, units: Sequence[Mapping[str, Any]]) -> list[dict]:
-        if self._estimate_unit is None:
-            return []
-        return intensity_distribution.planned_weeks(units, self._estimate_unit)
+    def _planned_weeks(
+        self, units: Sequence[Mapping[str, Any]], today: date
+    ) -> list[dict]:
+        return intensity_distribution.planned_weeks(units, self._estimate_unit, today)
 
     def _recent(self, today: date) -> list[Mapping[str, Any]]:
         first = (today - timedelta(days=HISTORY_DAYS)).isoformat()
@@ -193,7 +193,7 @@ class PlanGuardService:
                 illness=self._illness(),
             ),
             *intensity_distribution.distribution_findings(
-                self._training_model(), self._planned_weeks(units)
+                self._training_model(), self._planned_weeks(units, today)
             ),
         ]
 
@@ -237,5 +237,5 @@ class PlanGuardService:
             competitions=self._competitions(),
             training_model=self._training_model(),
             today=today,
-            planned_weeks=self._planned_weeks(self._planned_units()),
+            planned_weeks=self._planned_weeks(self._planned_units(), today),
         )

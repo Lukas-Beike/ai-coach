@@ -44,8 +44,8 @@ def week(low: int, moderate: int, high: int) -> list[dict]:
 
 
 class DistributionTests(unittest.TestCase):
-    def weeks(self, units: list[dict]) -> list[dict]:
-        return dist.planned_weeks(units, estimate)
+    def weeks(self, units: list[dict], today: date = TODAY) -> list[dict]:
+        return dist.planned_weeks(units, estimate, today)
 
     def test_pyramidal_in_range_and_out_of_range(self) -> None:
         inside = self.weeks(week(300, 60, 20))[0]
@@ -68,7 +68,7 @@ class DistributionTests(unittest.TestCase):
         self.assertIn("Z1-Z2 low", findings[0]["evidence"]["zone_mapping"])
 
     def test_threshold_and_sweet_spot_ranges(self) -> None:
-        easy = self.weeks(week(360, 30, 0))[0]
+        easy = self.weeks(week(300, 60, 20))[0]
         for model in ("threshold", "sweet_spot"):
             self.assertIn("low", dist.deviations(model, easy), model)
         middle = self.weeks(week(180, 150, 20))[0]
@@ -96,6 +96,20 @@ class DistributionTests(unittest.TestCase):
         self.assertNotIn("s", result["local_ids"])
         self.assertEqual(0, result["uncovered_s"])
         self.assertEqual(22800, sum(result["seconds"].values()))
+
+    def test_easy_and_partial_weeks_are_not_judged(self) -> None:
+        easy = self.weeks([unit("a", "2026-11-03", "Ride", "- 240m Z2\n")])[0]
+        self.assertEqual({}, dist.deviations("polarized", easy))
+        partial = self.weeks(week(240, 120, 20), date(2026, 11, 4))[0]
+        self.assertTrue(partial["partial"])
+        self.assertEqual({}, dist.deviations("polarized", partial))
+
+    def test_finding_identity_is_the_week(self) -> None:
+        guard = GuardIntegrationTests().guard
+        before = guard("polarized", week(240, 120, 20)).findings()
+        more = [*week(240, 120, 20), unit("d", "2026-11-08", "Ride", "- 20m Z2\n")]
+        after = guard("polarized", more).findings()
+        self.assertEqual([], plan_checks.new_findings(before, after))
 
     def test_weeks_are_separate_and_unknown_model_is_silent(self) -> None:
         units = [*week(240, 120, 20), unit("n", "2026-11-10", "Run", "- 60m Z2\n")]

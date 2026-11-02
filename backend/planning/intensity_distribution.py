@@ -60,7 +60,7 @@ MODEL_RANGES: dict[str, dict[str, tuple[float, float]]] = {
 TOLERANCE = 0.05
 MIN_KNOWN_S = 7200
 MIN_COVERAGE = 0.6
-BRIEF_WEEKS = 6
+EASY_WEEK_SHARE = 0.10
 NOTE = (
     "Planned endurance time (run, ride) by 3-zone band; strength excluded. "
     "Reference range of the training model, not a target."
@@ -89,9 +89,13 @@ def _unit_seconds(unit: Mapping[str, Any], estimate: WorkoutEstimate) -> float:
 
 
 def planned_weeks(
-    units: Sequence[Mapping[str, Any]], estimate: Estimator
+    units: Sequence[Mapping[str, Any]], estimate: Estimator, today: date
 ) -> list[dict[str, Any]]:
-    """Planned band seconds per ISO week of the run and ride units, oldest first."""
+    """Planned band seconds per ISO week of the run and ride units, oldest first.
+
+    A week that began before ``today`` is partial: its elapsed days are not in
+    the planned units, so it is shown but never judged.
+    """
     weeks: dict[date, dict[str, Any]] = {}
     for unit in units:
         start = _monday(unit)
@@ -120,10 +124,10 @@ def planned_weeks(
         week["dates"].append(
             iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
         )
-    return [_summary(weeks[start]) for start in sorted(weeks)]
+    return [_summary(weeks[start], start < today) for start in sorted(weeks)]
 
 
-def _summary(week: dict[str, Any]) -> dict[str, Any]:
+def _summary(week: dict[str, Any], partial: bool) -> dict[str, Any]:
     known = sum(week["seconds"].values())
     total = known + week["uncovered_s"]
     shares = (
@@ -133,6 +137,7 @@ def _summary(week: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "week_start": week["week_start"],
+        "partial": partial,
         "seconds": {band: round(seconds) for band, seconds in week["seconds"].items()},
         "shares": shares,
         "uncovered_s": round(week["uncovered_s"]),
@@ -149,8 +154,14 @@ def _outside(share: float, bounds: tuple[float, float]) -> float:
 
 def _judged(week: Mapping[str, Any]) -> bool:
     known = sum(week["seconds"].values())
+    # An easy week (recovery, taper, base) is not a model deviation.
+    easy = week["shares"] is not None and (
+        week["shares"]["moderate"] + week["shares"]["high"] < EASY_WEEK_SHARE
+    )
     return (
         week["shares"] is not None
+        and not week["partial"]
+        and not easy
         and known >= MIN_KNOWN_S
         and (week["coverage"] or 0) >= MIN_COVERAGE
     )
@@ -205,7 +216,7 @@ def distribution_findings(
 
 
 def brief_distribution(
-    model: str, weeks: Sequence[Mapping[str, Any]]
+    model: str, weeks: Sequence[Mapping[str, Any]], limit: int
 ) -> dict[str, Any] | None:
     """Planned distribution of the next planned weeks for the planning brief."""
     if not weeks:
@@ -221,12 +232,13 @@ def brief_distribution(
                 key: week[key]
                 for key in (
                     "week_start",
+                    "partial",
                     "seconds",
                     "shares",
                     "uncovered_s",
                     "coverage",
                 )
             }
-            for week in weeks[:BRIEF_WEEKS]
+            for week in weeks[:limit]
         ],
     }

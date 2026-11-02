@@ -75,6 +75,7 @@ class PlanGuardWriteTests(unittest.TestCase):
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
+            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
         )
         self.dispatch = Mock()
         self.dispatch.execute.side_effect = self.write

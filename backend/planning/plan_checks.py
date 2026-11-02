@@ -388,6 +388,8 @@ def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
     """Identity of a finding across a write; a taper is one per competition."""
     if finding["code"] == "missing_taper":
         return (finding["code"], finding["evidence"]["competition_date"])
+    if finding["code"] == "intensity_distribution":
+        return (finding["code"], finding["evidence"]["week_start"])
     return (finding["code"], tuple(finding["dates"]), tuple(finding["local_ids"]))
 
 
@@ -398,6 +400,8 @@ def _risk(finding: Mapping[str, Any]) -> tuple[Any, ...]:
         return (evidence.get("severity") == "warning",)
     if finding["code"] == "illness_hard":
         return (bool(evidence.get("hard")), evidence.get("planned_minutes") or 0)
+    if finding["code"] == "intensity_distribution":
+        return (max(evidence["deviating_bands"].values()),)
     return ()
 
 
