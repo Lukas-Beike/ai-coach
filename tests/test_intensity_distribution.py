@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 from datetime import date
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 from backend.activities.workout_load import AthleteThresholds
 from backend.activities.zone_settings import ZoneSettings
@@ -120,18 +121,24 @@ class DistributionTests(unittest.TestCase):
 
 
 class EstimatorTests(unittest.TestCase):
-    def test_reads_inputs_once_and_uses_sport_thresholds(self) -> None:
-        reads: list[str] = []
-
-        def thresholds() -> tuple:
-            reads.append("thresholds")
-            return ()
-
-        estimator = PlannedUnitEstimator(thresholds, tuple)
+    def test_reads_inputs_once(self) -> None:
+        manager = MagicMock()
+        configurations = MagicMock(return_value=())
+        estimator = PlannedUnitEstimator(
+            lambda: manager, lambda: "reader", configurations
+        )
         ride = unit("a", "2026-11-03", "Ride", "- 30m Z2\n")
-        self.assertEqual(1800, estimator(ride).band_seconds["low"])
-        estimator(ride)
-        self.assertEqual(["thresholds"], reads)
+        with (
+            patch(
+                "backend.planning.planned_unit_load.read_zone_thresholds",
+                return_value=(),
+            ) as read,
+            patch("backend.planning.planned_unit_load.resolve_reader"),
+        ):
+            self.assertEqual(1800, estimator(ride).band_seconds["low"])
+            estimator(ride)
+        read.assert_called_once()
+        configurations.assert_called_once()
 
 
 class GuardIntegrationTests(unittest.TestCase):

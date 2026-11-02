@@ -14,6 +14,8 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation
+from backend.performance.canonical_current import read_zone_thresholds
+from backend.performance.canonical_inputs import resolve_reader
 from backend.planning.sport import planned_sport_environment
 
 
@@ -69,16 +71,27 @@ class PlannedUnitEstimator:
 
     def __init__(
         self,
-        sport_thresholds: Callable[[], Sequence[Observation]],
+        database_manager: Callable[[], Any],
+        observation_reader: Callable[[], Any],
         zone_configurations: Callable[[], Sequence[ZoneConfiguration]],
     ) -> None:
-        self._read_thresholds = sport_thresholds
+        self._database_manager = database_manager
+        self._observation_reader = observation_reader
         self._read_configurations = zone_configurations
         self._inputs: (
             tuple[Sequence[Observation], Sequence[ZoneConfiguration]] | None
         ) = None
 
+    def _read_inputs(
+        self,
+    ) -> tuple[Sequence[Observation], Sequence[ZoneConfiguration]]:
+        with self._database_manager().reader() as db:
+            thresholds = read_zone_thresholds(
+                resolve_reader(self._observation_reader(), db), db
+            )
+        return thresholds, self._read_configurations()
+
     def __call__(self, unit: Mapping[str, Any]) -> WorkoutEstimate:
         if self._inputs is None:
-            self._inputs = (self._read_thresholds(), self._read_configurations())
+            self._inputs = self._read_inputs()
         return estimate_planned_unit(unit, unit_thresholds(unit, *self._inputs))
