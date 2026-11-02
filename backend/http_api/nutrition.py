@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -11,6 +12,7 @@ from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 from backend.http_api.auth import SessionAuthService
 from backend.nutrition.diary import NutritionDiaryService
+from backend.nutrition.macro_ranges import macro_ranges
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.nutrition.models import validate_iso_date
 from backend.nutrition.photo import PHOTO_REQUEST_MAX_BYTES
@@ -29,11 +31,37 @@ class NutritionGetRoutes:
         diary_service: Callable[[], NutritionDiaryService],
         meal_library_service: Callable[[], NutritionMealLibraryService],
         local_now: Callable[[], datetime],
+        macro_context: Callable[[], tuple[Any, Any]] | None = None,
     ) -> None:
         self._session_auth_service = session_auth_service
         self._diary_service = diary_service
         self._meal_library_service = meal_library_service
         self._local_now = local_now
+        self._macro_context = macro_context
+
+    def _day_summary(self, date_param: str) -> dict[str, Any]:
+        summary = self._diary_service().get_day_summary(date_param)
+        if self._macro_context is None:
+            return summary
+        try:
+            weight, calendar = self._macro_context()
+        except AppError, OSError, RuntimeError, ValueError:
+            logging.getLogger(__name__).warning("Nutrition reference data unavailable")
+            weight, calendar = None, None
+        summary["macro_ranges"] = macro_ranges(
+            weight, calendar, date_param, summary.get("total_kcal")
+        )
+        return summary
+
+    def _products(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        meal_library = self._meal_library_service()
+        barcode = query.get("barcode", [None])[0]
+        term = query.get("q", [None])[0]
+        if query.get("source", [None])[0] == "database":
+            return {"ok": True, "foods": meal_library.list_database_foods(term)}
+        if barcode:
+            return meal_library.lookup_product({"barcode": barcode})
+        return {"ok": True, "products": meal_library.list_products(query=term)}
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {
@@ -64,21 +92,7 @@ class NutritionGetRoutes:
             )
             return True
         if path == NUTRITION_PRODUCTS_PATH:
-            meal_library = self._meal_library_service()
-            barcode = query.get("barcode", [None])[0]
-            term = query.get("q", [None])[0]
-            if query.get("source", [None])[0] == "database":
-                handler.send_json(
-                    200,
-                    {"ok": True, "foods": meal_library.list_database_foods(term)},
-                )
-            elif barcode:
-                handler.send_json(
-                    200, meal_library.lookup_product({"barcode": barcode})
-                )
-            else:
-                products = meal_library.list_products(query=term)
-                handler.send_json(200, {"ok": True, "products": products})
+            handler.send_json(200, self._products(query))
             return True
         if path == "/api/nutrition/templates":
             meal_library = self._meal_library_service()
@@ -88,12 +102,10 @@ class NutritionGetRoutes:
             return True
 
         if path == "/api/nutrition/day":
-            diary = self._diary_service()
             date_param = (
                 query.get("date", [None])[0] or self._local_now().date().isoformat()
             )
-            summary = diary.get_day_summary(date_param)
-            handler.send_json(200, {"ok": True, **summary})
+            handler.send_json(200, {"ok": True, **self._day_summary(date_param)})
             return True
 
         if path == "/api/nutrition/range":

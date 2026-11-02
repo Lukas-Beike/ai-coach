@@ -67,6 +67,7 @@ from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.transcribe_post import TranscribePostRoutes
 from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
+from backend.nutrition.macro_context import macro_context
 from backend.performance.mean_max_curve import SessionCurveReader
 from backend.performance.report_service import (
     TrainingDerivedReadService,
@@ -618,11 +619,18 @@ class HttpApiAssembly:
             max_backup_bytes,
         )
         self.auth_post_routes = AuthPostRoutes(session_auth_service, maintenance_gate)
+
         self.nutrition_get_routes = NutritionGetRoutes(
             session_auth_service,
             diary_service,
             meal_library_service,
             athlete_clock.now,
+            partial(
+                macro_context,
+                public_performance_state_service,
+                public_plan_state_service,
+                profile_service,
+            ),
         )
         self.nutrition_post_routes = NutritionPostRoutes(
             diary_service,

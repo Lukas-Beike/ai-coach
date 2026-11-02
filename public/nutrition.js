@@ -290,6 +290,11 @@ function nutritionTotalTile(label, key, unit, day, hasEntries) {
   tile.className = "nutrition-total";
   const value = document.createElement("strong");
   const complete = hasEntries ? day[`total_${key}`] : null;
+  const range = day.macro_ranges?.[key];
+  if (complete != null && Array.isArray(range) && range.length === 2) {
+    if (complete < range[0] && day.date < todayIso()) tile.classList.add("nutrition-below-range");
+    else if (complete > range[1]) tile.classList.add("nutrition-above-range");
+  }
   // A partial sum of known values is shown only with an explicit incompleteness label.
   const total = hasEntries ? (complete ?? day.known_macro_totals?.[key] ?? day.known_intake_totals?.[key]) : null;
   const totalText = total != null ? nutritionNumber(total) : "–";
