@@ -10,6 +10,7 @@ from typing import Any
 from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate, iso_date_prefix
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
+from backend.canonical.planning_fields import STRENGTH_STRUCTURE
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
@@ -191,6 +192,8 @@ def _apply_planned_workout_update(
     ):
         if key in values:
             candidate[key] = values.get(key)
+    if "description" in values and STRENGTH_STRUCTURE not in values:
+        candidate.pop(STRENGTH_STRUCTURE, None)
     if "starts_at_local" in values:
         candidate["starts_at_local"] = planning_workouts.validate_workout_start_date(
             values["starts_at_local"], str(candidate.get("date") or "")

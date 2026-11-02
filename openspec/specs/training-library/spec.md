@@ -364,3 +364,16 @@ Planned units and library templates SHALL carry an optional local session focus,
 - **THEN** the event payload is unchanged and a remote refresh keeps the local focus.
 
 Evidence: `backend/planning/session_focus.py`; `tests/test_session_focus.py`, `e2e/session-focus.spec.js`.
+
+### Requirement: Structured strength units
+Strength units and templates SHALL carry an optional local `strength_structure` (at most 12 exercises with name, sets, reps, optional kg, %1RM, RPE or RIR (one relative load) and rest) in the payload, validated server-side with `invalid_strength_structure`; free text stays the fallback.
+
+#### Scenario: Structure given
+- **WHEN** a strength unit or template is written with a structure
+- **THEN** its description is generated from it, a free-text description edit without a structure drops it, and `strength_intensity` and leg involvement are derived and labelled `derived` (heavy from 80 % 1RM, RPE 8 or 2 RIR) unless a focus or intensity is set.
+
+#### Scenario: Export and refresh
+- **WHEN** a structured unit is exported to Intervals.icu on an explicit sync
+- **THEN** only the readable description is sent, nothing implicit is written, and a remote refresh keeps the structure only while the remote description is unchanged.
+
+Evidence: `backend/planning/strength_structure.py`, `backend/planning/session_focus.py`; `tests/test_strength_structure.py`.

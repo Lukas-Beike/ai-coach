@@ -56,6 +56,27 @@ SESSION_FOCUS_SCHEMA: dict[str, Any] = {
     "enum": [*ALL_FOCI, None],
     "description": _FOCUS_DESCRIPTION,
 }
+_EXERCISE_PROPERTIES: dict[str, Any] = {
+    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+    "sets": {"type": "integer", "minimum": 1, "maximum": 10},
+    "reps": {"type": "integer", "minimum": 1, "maximum": 100},
+    "kg": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+    "pct_1rm": {"type": ["number", "null"], "minimum": 1, "maximum": 150},
+    "rpe": {"type": ["number", "null"], "minimum": 1, "maximum": 10},
+    "rir": {"type": ["integer", "null"], "minimum": 0, "maximum": 10},
+    "rest_s": {"type": ["integer", "null"], "minimum": 0, "maximum": 600},
+}
+STRENGTH_STRUCTURE_SCHEMA: dict[str, Any] = {
+    "type": ["array", "null"],
+    "maxItems": 12,
+    "description": "Strength only: exercises with sets, reps, optional load and rest. At most one of pct_1rm, rpe or rir per exercise. The server generates the description from it and derives strength_intensity (heavy from 80 % 1RM, RPE 8 or 2 RIR) when not set. Null for free text.",
+    "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(_EXERCISE_PROPERTIES),
+        "properties": _EXERCISE_PROPERTIES,
+    },
+}
 STRENGTH_INTENSITY_SCHEMA: dict[str, Any] = {
     "type": ["string", "null"],
     "enum": [*STRENGTH_INTENSITIES, None],
@@ -393,6 +414,7 @@ def build_structured_tool_schemas(
                                     "starts_at_local",
                                     "session_focus",
                                     "strength_intensity",
+                                    "strength_structure",
                                 ],
                                 "properties": {
                                     "date": {
@@ -425,6 +447,7 @@ def build_structured_tool_schemas(
                                     "rationale": {"type": "string", "minLength": 1},
                                     "session_focus": SESSION_FOCUS_SCHEMA,
                                     "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
+                                    "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                                 },
                             },
                         },
@@ -471,6 +494,7 @@ def build_structured_tool_schemas(
                                     "starts_at_local",
                                     "session_focus",
                                     "strength_intensity",
+                                    "strength_structure",
                                 ],
                                 "properties": {
                                     "date": {
@@ -496,6 +520,7 @@ def build_structured_tool_schemas(
                                     "rationale": {"type": "string", "minLength": 1},
                                     "session_focus": SESSION_FOCUS_SCHEMA,
                                     "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
+                                    "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                                 },
                             },
                         },
@@ -540,6 +565,7 @@ def build_structured_tool_schemas(
                             "sport_detail": {"type": "string"},
                             "session_focus": SESSION_FOCUS_SCHEMA,
                             "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
+                            "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                         },
                         "additionalProperties": False,
                     },
@@ -607,6 +633,7 @@ def build_structured_tool_schemas(
                             },
                             "session_focus": SESSION_FOCUS_SCHEMA,
                             "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
+                            "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                         },
                     },
                 }

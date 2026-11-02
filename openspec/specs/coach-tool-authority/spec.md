@@ -242,3 +242,12 @@ Coach plan writes SHALL report a non-blocking note for a long or hard unit on a 
 - **THEN** the receipt includes a non-blocking note with safe evidence.
 
 Evidence: `backend/planning/plan_checks.py:check_plan`, `backend/coach/change_receipts.py:change_summary`, `public/coach.js:appendPlanNotes`; `tests/test_plan_guard_service.py:test_calendar_conflict_is_saved_as_note`, `tests/coach-turn-undo.test.cjs`, `e2e/coach-plan-notes.spec.js`.
+
+### Requirement: Coach structures strength sessions
+The Coach plan and template tools SHALL accept `strength_structure` (strict plan payloads require it, null for free text), validate it on the server, and the plan playbook SHALL give progression rules: heavy strength 2 times per week in base and build, 1 in the competition phase, load or reps rising across weeks, a deload in the lighter week. Heavy and leg checks read the structure-derived intensity before words; only count and intensity of leg sessions are checked, never tonnage.
+
+#### Scenario: Structured strength block
+- **WHEN** the Coach plans weekly strength units with rising %1RM
+- **THEN** each week's `strength_intensity` is derived from its structure and the plan checks use it.
+
+Evidence: `backend/coach/tool_schemas.py`, `backend/coach/playbooks.py`; `tests/test_strength_structure.py`, `tests/test_coach_playbooks.py`.
