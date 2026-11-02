@@ -82,7 +82,7 @@ def normalize_structure(value: Any) -> list[dict[str, Any]] | None:
     return [_exercise(item) for item in value]
 
 
-def _plain(value: float | int) -> str:
+def _plain(value: float) -> str:
     return str(int(value)) if float(value) == int(value) else f"{value:g}"
 
 

@@ -11,9 +11,9 @@ from backend.athlete.local_date import LocalDate
 from backend.canonical.planning_fields import (
     PLANNED_INTENSITY,
     PLANNED_LOAD,
+    STRENGTH_STRUCTURE,
 )
 from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
-from backend.canonical.planning_fields import STRENGTH_STRUCTURE
 from backend.canonical.stored_sports import workout_sport_from_record
 from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
