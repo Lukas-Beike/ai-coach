@@ -24,8 +24,8 @@ function weeklyWindows(rows) {
   for (const text of rows.map(weeklyWindowText).filter(Boolean).sort()) {
     const [start, end] = text.split("-");
     const last = merged.at(-1);
-    if (last && start <= last[1]) last[1] = [last[1], end].sort().at(-1);
-    else merged.push([start, end]);
+    if (!last || start > last[1]) merged.push([start, end]);
+    else if (end > last[1]) last[1] = end;
   }
   return merged.slice(0, WEEKLY_MAX_ROWS).map((item) => item.join("-"));
 }
