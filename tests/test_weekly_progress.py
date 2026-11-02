@@ -36,7 +36,7 @@ def _zones(*seconds):
 class WeeklyProgressTests(unittest.TestCase):
     TODAY = date(2026, 10, 2)  # Friday; the week of 2026-09-28 is running
 
-    def _service(self, rows=(), plan=None, records=()):
+    def _service(self, rows=(), plan=None, records=(), feedback=None):
         return TrainingReportReadService(
             read_synced_at=lambda _db: None,
             read_plan=lambda: plan,
@@ -51,6 +51,11 @@ class WeeklyProgressTests(unittest.TestCase):
                 activity_summaries=lambda: _Rows(rows),
             ),
             curve_records=lambda: list(records),
+            session_feedback=lambda keys: [
+                {"activity_id": key, **values}
+                for key, values in (feedback or {}).items()
+                if key in keys
+            ],
         )
 
     def _progress(self, values=None, **options):
@@ -187,6 +192,19 @@ class WeeklyProgressTests(unittest.TestCase):
         self.assertIsNone(
             next(d for d in indoor if d["duration_seconds"] == 300)["change_watts"]
         )
+
+    def test_session_rpe_keeps_athlete_and_provider_counts(self):
+        rows = [
+            _summary("a", "2026-09-29", sport="run", elapsed_duration_s=1800, rpe=5),
+            _summary("b", "2026-09-30", sport="run", elapsed_duration_s=1800),
+        ]
+        week = self._progress(
+            {"days": 7}, rows=rows, feedback={"b": {"session_rpe": 4}}
+        )["week_list"][0]
+        load = week["sports"]["run"]["session_rpe_load"]
+        self.assertEqual(270.0, load["value"])
+        self.assertEqual({"athlete_feedback": 1, "provider": 1}, load["rpe_sources"])
+        self.assertEqual("AU", load["unit"])
 
     def test_seven_zone_heart_rate_uses_the_seven_zone_bands(self):
         rows = [

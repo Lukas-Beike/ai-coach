@@ -48,35 +48,7 @@ class CoachActivityReadToolService:
         if name == "get_training_report":
             if self._report_services is None:
                 raise AppError(503, "Trainingsberichte sind nicht verfügbar.")
-            days = arguments.get("days")
-            long_window = isinstance(days, int) and days in {42, 84}
-            sections = arguments.get(
-                "sections", ["progress"] if long_window else ["report"]
-            )
-            allowed = {
-                "progress",
-                "report",
-                "endurance",
-                "power_profiles",
-                "tag_impact",
-                "season",
-                "comparisons",
-                "body_history",
-                "sleep_timing_variability",
-            }
-            if (
-                not isinstance(sections, list)
-                or not 1 <= len(sections) <= 9
-                or any(
-                    not isinstance(section, str) or section not in allowed
-                    for section in sections
-                )
-            ):
-                raise AppError(400, "Unbekannter Analysebereich.")
-            # progress uses whole ISO weeks, so it never shares a call with
-            # sections that read the requested window as given.
-            if (long_window or "progress" in sections) and sections != ["progress"]:
-                raise AppError(400, "progress und 42 oder 84 Tage nur allein abrufbar.")
+            sections = _report_sections(arguments)
             readers = {
                 "progress": lambda: self._report_services.report.progress(
                     arguments, self._report_services.timezone()
@@ -147,3 +119,35 @@ class CoachActivityReadToolService:
             return max(1, min(int(arguments.get(key, default)), maximum))
         except (TypeError, ValueError) as exc:
             raise AppError(400, error, reason="invalid_list_request") from exc
+
+
+def _report_sections(arguments: dict[str, Any]) -> list[str]:
+    """Validated report sections; progress and its long windows stand alone."""
+    days = arguments.get("days")
+    long_window = isinstance(days, int) and days in {42, 84}
+    sections = arguments.get("sections", ["progress"] if long_window else ["report"])
+    allowed = {
+        "progress",
+        "report",
+        "endurance",
+        "power_profiles",
+        "tag_impact",
+        "season",
+        "comparisons",
+        "body_history",
+        "sleep_timing_variability",
+    }
+    if (
+        not isinstance(sections, list)
+        or not 1 <= len(sections) <= 9
+        or any(
+            not isinstance(section, str) or section not in allowed
+            for section in sections
+        )
+    ):
+        raise AppError(400, "Unbekannter Analysebereich.")
+    # progress uses whole ISO weeks, so it never shares a call with
+    # sections that read the requested window as given.
+    if (long_window or "progress" in sections) and sections != ["progress"]:
+        raise AppError(400, "progress und 42 oder 84 Tage nur allein abrufbar.")
+    return sections

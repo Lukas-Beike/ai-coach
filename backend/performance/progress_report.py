@@ -22,7 +22,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import eftp
-from backend.performance.session_rpe_load import session_load
+from backend.performance.session_rpe_load import period_load, session_load
 from backend.performance.training_report import metric_sum, valid_zones
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -58,7 +58,9 @@ def _band(zone: int | None, zone_count: int) -> str | None:
     if zone is None:
         return None
     moderate, high = ZONE_BANDS["many" if zone_count >= 6 else "five"]
-    return "low" if zone < moderate else "moderate" if zone < high else "high"
+    if zone < moderate:
+        return "low"
+    return "moderate" if zone < high else "high"
 
 
 def _intensity(sessions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -114,17 +116,12 @@ def _rpe(
     feedback: Mapping[str, Mapping[str, Any]],
     timezone: str,
 ) -> dict[str, Any]:
-    values = [
-        session_load(row, feedback.get(stored_activity_key(row)), timezone)[1]
+    # The session-RPE report's own aggregation keeps the athlete/provider counts.
+    loads = [
+        session_load(row, feedback.get(stored_activity_key(row)), timezone)
         for row in sessions
     ]
-    known = [value for value in values if value is not None]
-    return {
-        "value": round(sum(known), 1) if known else None,
-        "unit": "AU",
-        "rated_sessions": len(known),
-        "total_sessions": len(values),
-    }
+    return {**period_load(loads), "unit": "AU"}
 
 
 def _plan(
@@ -221,12 +218,35 @@ def _mean_max_change(
     return result
 
 
+def _best_values(
+    rows: Sequence[Mapping[str, Any]],
+    curve: tuple[str, str, str, str],
+    sources: set[str],
+) -> dict[int, float]:
+    """Best value per profile duration over ``rows``; collects their stream sources."""
+    profile_key, curve_key, field, _unit = curve
+    best: dict[int, float] = {}
+    for row in rows:
+        profile = row[profile_key]
+        if profile.get("source"):
+            sources.add(str(profile["source"]))
+        for point in profile.get(curve_key, []):
+            value, seconds = number(point.get(field)), point.get("duration_seconds")
+            if (
+                value is not None
+                and seconds in PROFILE_DURATIONS
+                and value > best.get(seconds, -1.0)
+            ):
+                best[seconds] = value
+    return best
+
+
 def _environment_change(
     records: Sequence[Mapping[str, Any]],
     halves: Mapping[str, tuple[date, date]],
     curve: tuple[str, str, str, str],
 ) -> dict[str, Any]:
-    profile_key, curve_key, field, unit = curve
+    profile_key, _curve_key, _field, unit = curve
     best: dict[str, dict[int, float]] = {}
     sources: set[str] = set()
     periods = {}
@@ -245,22 +265,7 @@ def _environment_change(
             "records": len(rows),
             "usable_records": len(usable),
         }
-        best[name] = {}
-        for row in usable:
-            profile = row[profile_key]
-            if profile.get("source"):
-                sources.add(str(profile["source"]))
-            for point in profile.get(curve_key, []):
-                value, seconds = (
-                    number(point.get(field)),
-                    point.get("duration_seconds"),
-                )
-                if (
-                    value is not None
-                    and seconds in PROFILE_DURATIONS
-                    and value > best[name].get(seconds, -1.0)
-                ):
-                    best[name][seconds] = value
+        best[name] = _best_values(usable, curve, sources)
     durations = []
     for seconds in PROFILE_DURATIONS:
         early, late = best["earlier"].get(seconds), best["later"].get(seconds)
@@ -304,6 +309,51 @@ def _mean_max_window(
     return result
 
 
+def _week_row(
+    first: date,
+    today: date,
+    sport: str,
+    timezone: str,
+    eligible: Sequence[ActivitySummary],
+    feedback: Mapping[str, Mapping[str, Any]],
+    plan: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    last = first + timedelta(days=6)
+    week: dict[str, Any] = {
+        "week_start": first.isoformat(),
+        "week_end": last.isoformat(),
+    }
+    if first > today:
+        return {**week, "status": "future"}
+    span = (first, min(last, today))
+    running = last >= today
+    sessions = [
+        row
+        for row in eligible
+        if first.isoformat() <= summary_local_date(row, timezone) <= span[1].isoformat()
+    ]
+    if not sessions:
+        status = (
+            "incomplete_current_week_no_records" if running else "no_records_unknown"
+        )
+        return {**week, "status": status, "plan": _plan(plan, first, span[1], sport)}
+    if sport != "all":
+        groups = {sport: sessions}
+    else:
+        groups = {"all": sessions} | {
+            name: [row for row in sessions if _sport(row) == name]
+            for name in SPORT_BUCKETS
+        }
+    return {
+        **week,
+        "status": "incomplete_current_week" if running else "recorded",
+        "sports": {
+            name: _bucket(rows, feedback, plan, span, name, timezone)
+            for name, rows in groups.items()
+        },
+    }
+
+
 def weekly_progress(
     *,
     start: date,
@@ -325,57 +375,18 @@ def weekly_progress(
     eligible = [
         row for row in activity_summaries if sport == "all" or _sport(row) == sport
     ]
-    names = ("all", *SPORT_BUCKETS) if sport == "all" else (sport,)
-    feedback = session_feedback or {}
-    week_rows = []
-    for index in range(weeks):
-        first = start + timedelta(weeks=index)
-        last = first + timedelta(days=6)
-        week: dict[str, Any] = {
-            "week_start": first.isoformat(),
-            "week_end": last.isoformat(),
-        }
-        if first > today:
-            week_rows.append({**week, "status": "future"})
-            continue
-        sessions = [
-            row
-            for row in eligible
-            if first.isoformat()
-            <= summary_local_date(row, timezone)
-            <= min(last, today).isoformat()
-        ]
-        if not sessions:
-            week_rows.append(
-                {
-                    **week,
-                    "status": "incomplete_current_week_no_records"
-                    if last >= today
-                    else "no_records_unknown",
-                    "plan": _plan(plan, first, min(last, today), sport),
-                }
-            )
-            continue
-        span = (first, min(last, today))
-        week_rows.append(
-            {
-                **week,
-                "status": "incomplete_current_week" if last >= today else "recorded",
-                "sports": {
-                    name: _bucket(
-                        sessions
-                        if name == "all" or sport != "all"
-                        else [row for row in sessions if _sport(row) == name],
-                        feedback,
-                        plan,
-                        span,
-                        sport if sport != "all" else name,
-                        timezone,
-                    )
-                    for name in names
-                },
-            }
+    week_rows = [
+        _week_row(
+            start + timedelta(weeks=index),
+            today,
+            sport,
+            timezone,
+            eligible,
+            session_feedback or {},
+            plan,
         )
+        for index in range(weeks)
+    ]
     in_window = [
         row
         for row in activity_summaries
