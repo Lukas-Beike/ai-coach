@@ -92,9 +92,18 @@ def _fail(message: str) -> AppError:
     return AppError(400, _INVALID + message)
 
 
+def _items(value: Any, *, strict: bool) -> list[Any]:
+    """A list value; anything else is empty, or an error when strict."""
+    if isinstance(value, list):
+        return value
+    if strict and value not in (None, ""):
+        raise _fail("Listen erwartet.")
+    return []
+
+
 def _windows(value: Any, *, strict: bool) -> list[str]:
     """Valid windows sorted by start, overlapping or touching ones merged."""
-    items = value if isinstance(value, list) else []
+    items = _items(value, strict=strict)
     parsed = [parse_window(item) for item in items]
     if strict and (None in parsed or len(items) > MAX_WINDOWS):
         raise _fail("Zeitfenster als HH:MM-HH:MM, höchstens vier pro Tag.")
@@ -143,7 +152,7 @@ def _fixed_session(value: Any, *, strict: bool) -> dict[str, Any] | None:
 
 
 def _fixed_sessions(value: Any, *, strict: bool) -> list[dict[str, Any]]:
-    items = value if isinstance(value, list) else []
+    items = _items(value, strict=strict)
     if strict and len(items) > MAX_FIXED:
         raise _fail("Höchstens vier feste Einheiten pro Tag.")
     sessions = (_fixed_session(item, strict=strict) for item in items[:MAX_FIXED])
@@ -182,8 +191,12 @@ def _load_payload(value: Any, *, strict: bool) -> Mapping[str, Any]:
     return {}
 
 
-def _mapping(value: Any) -> Mapping[str, Any]:
-    return value if isinstance(value, Mapping) else {}
+def _mapping(value: Any, *, strict: bool = False) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    if strict and value is not None:
+        raise _fail("Objekt erwartet.")
+    return {}
 
 
 def normalize(value: Any, *, strict: bool = False) -> str:
@@ -192,8 +205,8 @@ def normalize(value: Any, *, strict: bool = False) -> str:
     ``strict`` rejects invalid input; otherwise invalid parts are dropped.
     """
     payload = _load_payload(value, strict=strict)
-    given_days = _mapping(payload.get("days"))
-    given_default = _mapping(payload.get("default"))
+    given_days = _mapping(payload.get("days"), strict=strict)
+    given_default = _mapping(payload.get("default"), strict=strict)
     days = {}
     default = {}
     for name in DAYS:

@@ -87,6 +87,17 @@ class NormalizationTests(unittest.TestCase):
             weekly_plan.normalize(plan(mon={"max_minutes": 5}), strict=True)
         self.assertEqual(weekly_plan.normalize(plan(mon={"max_minutes": 5})), "")
 
+    def test_malformed_containers_are_rejected_strictly(self) -> None:
+        for bad in (
+            '{"days":{"mon":{"windows":"06:00-07:00"}}}',
+            '{"days":{"mon":{"fixed":"run"}}}',
+            '{"days":[]}',
+            '{"default":{"mon":"06:00-07:00"}}',
+        ):
+            with self.subTest(bad=bad), self.assertRaises(AppError):
+                weekly_plan.normalize(bad, strict=True)
+            self.assertEqual(weekly_plan.normalize(bad), "")
+
     def test_non_finite_numbers_are_a_validation_error(self) -> None:
         text = '{"days":{"mon":{"max_minutes":1e999}}}'
         with self.assertRaises(AppError):
