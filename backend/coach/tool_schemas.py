@@ -10,7 +10,7 @@ ACCEPT_PLAN_FINDINGS: dict[str, Any] = {
     "type": "array",
     "maxItems": len(BLOCKING_CODES),
     "items": {"type": "string", "enum": list(BLOCKING_CODES)},
-    "description": "The server checks the resulting plan. A blocking finding (illness_hard) saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. Other findings save the plan and come back as plan_check_notes. Otherwise send an empty list.",
+    "description": "The server checks the resulting plan. A blocking finding (illness_hard) saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. Other findings save the plan and come back as plan_check_notes, which are shown in the change receipt. Justify them without repeating or contradicting the receipt. Otherwise send an empty list.",
 }
 
 

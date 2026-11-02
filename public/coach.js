@@ -1819,6 +1819,27 @@ function appendMessageChanges(node, message) {
     line.append(undo);
   }
   node.append(line);
+  appendPlanNotes(node, changes.plan_check_notes);
+}
+
+function appendPlanNotes(node, planNotes) {
+  const planNoteLabels = {
+    run_spike: ["Laufsprung", "Beobachtungsstudie, mittlere Evidenz"],
+    back_to_back_hard: ["Harte Tage in Folge", "Praxisbasiert"],
+    strength_hard_same_day: ["Kraft und harte Einheit", "Begrenzte Evidenz"],
+    missing_taper: ["Wettkampf-Taper", "Starke Evidenz; Schwelle lokal gewählt"],
+    illness_hard: ["Belastung bei Krankheit", "Medizinische Vorsicht"],
+  };
+  for (const note of Array.isArray(planNotes) ? planNotes : []) {
+    const label = planNoteLabels[note?.code];
+    if (!label) continue;
+    const detail = document.createElement("div");
+    detail.className = `message-plan-note${note.severity === "warning" ? " is-warning" : ""}`;
+    const dates = Array.isArray(note.dates) ? note.dates.map((day) => AppFormat.date(day)).filter(Boolean).join(", ") : "";
+    const dateLabel = dates ? " · " + dates : "";
+    detail.textContent = `${note.severity === "warning" ? "Warnung" : "Hinweis"}: ${label[0]}${dateLabel} · ${label[1]}`;
+    node.append(detail);
+  }
 }
 
 async function undoCoachTurn(clientTurnId, button) {

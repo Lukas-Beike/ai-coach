@@ -119,6 +119,10 @@ The system SHALL summarize applied Coach record changes on receipts/answers and 
 - **WHEN** any applied write lacks history or also changes untracked state such as plan constraints, sync flags or other records
 - **THEN** its changes can be listed but whole-turn undo is false, preventing a misleading partial rollback.
 
+#### Scenario: Plan-check notes
+- **WHEN** an applied Coach plan write has plan-check notes
+- **THEN** its receipt includes safe structured notes, and the answer shows their labels, dates, evidence strength and severity alongside the change summary.
+
 #### Scenario: Read, failed or pending action
 - **WHEN** a turn only reads, fails before applying, stages/previews or waits for approval
 - **THEN** those steps do not appear as applied record changes, and model input does not receive private undo references.

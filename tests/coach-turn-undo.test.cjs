@@ -27,6 +27,7 @@ function harness({ confirmed = true, apiResult, apiError } = {}) {
   const state = { data: { messages: [] } };
   const context = vm.createContext({
     state,
+    AppFormat: require("../public/format.js"),
     document: { createElement: (tag) => new FakeElement(tag) },
     async requestConfirmation(message, options) {
       calls.confirm.push({ message, options });
@@ -63,6 +64,18 @@ test("an undoable turn lists its changes with one undo button", () => {
   assert.equal(line.children[1].className, "message-undo");
   assert.equal(line.children[1].type, "button");
   assert.equal(line.children[1].textContent, "Rückgängig");
+});
+
+test("plan notes render safe labels, dates, evidence and warning emphasis", () => {
+  const { context } = harness();
+  const node = new FakeElement("div");
+  context.appendMessageChanges(node, { role: "assistant", coach_changes: changes({
+    plan_check_notes: [{ code: "run_spike", dates: ["2026-11-02"], severity: "warning" },
+      { code: "back_to_back_hard", dates: [], severity: "notice" }],
+  }) });
+  assert.equal(node.children[1].className, "message-plan-note is-warning");
+  assert.match(node.children[1].textContent, /Warnung: Laufsprung · 02\.11\.2026 · Beobachtungsstudie/);
+  assert.match(node.children[2].textContent, /Hinweis: Harte Tage in Folge · Praxisbasiert/);
 });
 
 test("undone, untracked and turn-less changes show no undo button", () => {
