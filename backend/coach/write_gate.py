@@ -537,6 +537,20 @@ def _classified(
     return state.verdict
 
 
+def _verdict_for(
+    state: TurnGateState,
+    classifier: ImpactClassifier | None,
+    authority: TurnAuthority,
+    current_text: str,
+    previous_assistant_text: str,
+) -> ImpactVerdict:
+    if classifier is None:
+        return NO_IMPACT
+    return _classified(
+        state, classifier, authority, current_text, previous_assistant_text
+    )
+
+
 def check_write(
     tool_name: str,
     authority: TurnAuthority,
@@ -577,23 +591,21 @@ def check_write(
         else call_impact(tool_name, arguments, state.records_count)
     )
     approval = tool_name in _APPROVAL_TOOLS
-    if (impact or approval) and (
-        classifier is None
-        or not _classified(
+    needs = (
+        bool(impact or approval),
+        _accepts_illness(arguments),
+    )
+    if any(needs):
+        verdict = _verdict_for(
             state, classifier, authority, current_text, previous_assistant_text
-        ).confirms(domain, impact, approval=approval)
-    ):
-        reason = "approval_not_confirmed" if approval else "impact_not_confirmed"
-        return GateDecision(False, domain, reason, state.classifier_used)
-    if _accepts_illness(arguments) and (
-        classifier is None
-        or not _classified(
-            state, classifier, authority, current_text, previous_assistant_text
-        ).illness_override
-    ):
-        return GateDecision(
-            False, domain, "illness_not_confirmed", state.classifier_used
         )
+        if needs[0] and not verdict.confirms(domain, impact, approval=approval):
+            reason = "approval_not_confirmed" if approval else "impact_not_confirmed"
+            return GateDecision(False, domain, reason, state.classifier_used)
+        if needs[1] and not verdict.illness_override:
+            return GateDecision(
+                False, domain, "illness_not_confirmed", state.classifier_used
+            )
     state.writes_count += 1
     state.records_count += records
     return GateDecision(True, domain, "ok", state.classifier_used)
