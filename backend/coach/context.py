@@ -720,9 +720,7 @@ class CoachStructuredContextService:
             "training_plans": self._planning_reader.training_plans()
             if "training_plans" in included
             else None,
-            "planning_brief": self._planning_brief()
-            if "planning_brief" in included and self._planning_brief
-            else None,
+            "planning_brief": self._brief(included),
             "local_feedback": checkins,
             "activity_feedback": self._activity_feedback_service.context()
             if "activity_feedback" in included
@@ -777,6 +775,11 @@ class CoachStructuredContextService:
                 "scope": "Canonical activity and provider data are unavailable; local plans remain available.",
             }
         return selected
+
+    def _brief(self, included: frozenset[str]) -> Any:
+        if "planning_brief" not in included or self._planning_brief is None:
+            return None
+        return self._planning_brief()
 
     def _compact_nutrition_products(self) -> dict[str, Any]:
         if self._nutrition_meal_library is None:
