@@ -70,7 +70,7 @@ class CoachStructuredToolExecutionService:
         self._tool_dispatch = tool_dispatch
 
     def execute(self, metadata: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        """Run one tool; plan writes are checked and rolled back on findings."""
+        """Run one tool; plan writes are checked, blocked on illness, else noted."""
         if metadata["name"] not in PLAN_CHECKED_TOOLS or self._plan_guard is None:
             return self._execute_tool(metadata, **kwargs)
         guard = self._plan_guard()

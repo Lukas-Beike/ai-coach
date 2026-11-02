@@ -192,14 +192,24 @@ class PlanGuardService:
             if plan_checks.finding_key(item) not in known
         ]
         blocking = [
-            item for item in new if item["blocking"] and item["code"] not in accepted
+            item
+            for item in new
+            if item["code"] in plan_checks.BLOCKING_CODES
+            and item["code"] not in accepted
         ]
         if blocking:
             raise PlanCheckError(blocking)
         return [
             {
                 key: item[key]
-                for key in ("code", "dates", "message", "evidence_strength", "evidence")
+                for key in (
+                    "code",
+                    "blocking",
+                    "dates",
+                    "message",
+                    "evidence_strength",
+                    "evidence",
+                )
             }
             for item in new
         ]

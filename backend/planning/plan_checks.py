@@ -1,7 +1,8 @@
 """Pure checks of a proposed future plan against five training-science rules.
 
-The Coach tool write runs these on the resulting plan; findings stop the write
-until the model corrects the plan or names the accepted deviation. No I/O.
+The Coach tool write runs these on the resulting plan. Only illness_hard stops
+the write until the model corrects the plan or names the accepted deviation;
+the other findings are saved and returned as notes. No I/O.
 
 Rules (references are observational or practice-based, not individual advice):
 - run_spike: a planned run is more than 10 % longer than the longest completed
@@ -41,8 +42,9 @@ FINDING_CODES = (
     "missing_taper",
     "illness_hard",
 )
-# Only a health rule blocks a write. The load rules rest on observational or
-# practice-based evidence, so they come back as notes the Coach must name.
+# Only the health rule blocks a write. The load rules are notes the Coach must
+# name: their evidence is observational or practice-based, or (taper) the
+# evidence is strong but the 20 % floor is a local choice, not a proven limit.
 BLOCKING_CODES = ("illness_hard",)
 EVIDENCE = {
     "run_spike": "observational, moderate (Frandsen 2025)",
@@ -51,12 +53,16 @@ EVIDENCE = {
     "missing_taper": "meta-analysis, strong (Bosquet 2007); 20 % floor is a local choice",
     "illness_hard": "medical caution",
 }
+_RULE_TEXT = {
+    "run_spike": "planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
+    "back_to_back_hard": "hard run or ride on consecutive days.",
+    "strength_hard_same_day": "heavy strength and a hard run or ride less than 6 h apart.",
+    "missing_taper": "final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
+    "illness_hard": "hard or 90+ minute session within 3 days of a reported illness.",
+}
 RULE_SUMMARY = {
-    "run_spike": "Note: planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
-    "back_to_back_hard": "Note: hard run or ride on consecutive days.",
-    "strength_hard_same_day": "Note: heavy strength and a hard run or ride less than 6 h apart.",
-    "missing_taper": "Note: final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
-    "illness_hard": "Blocks: no hard or 90+ minute session within 3 days of a reported illness.",
+    code: f"{'Blocks' if code in BLOCKING_CODES else 'Note'}: {text}"
+    for code, text in _RULE_TEXT.items()
 }
 SPIKE_FACTOR = 1.10
 SPIKE_WARNING_FACTOR = 1.30
@@ -336,21 +342,22 @@ def _illness_hard(
     if illness.strip().casefold() in _NO_ILLNESS:
         return []
     last = (today + timedelta(days=ILLNESS_DAYS)).isoformat()
-    risky = [
-        unit
-        for unit in units
-        if today.isoformat() <= _day(unit) <= last
-        and (is_hard(unit) or _duration_s(unit) >= LONG_SESSION_S)
-    ]
-    if not risky:
-        return []
+    # One finding per session, so making a flagged session harder or longer
+    # is a new finding and blocks again.
     return [
         _finding(
             "illness_hard",
-            risky,
+            [unit],
             "Illness is reported; no hard or long session in the next 3 days.",
-            {"through": last},
+            {
+                "through": last,
+                "planned_minutes": round(_duration_s(unit) / 60),
+                "hard": is_hard(unit),
+            },
         )
+        for unit in units
+        if today.isoformat() <= _day(unit) <= last
+        and (is_hard(unit) or _duration_s(unit) >= LONG_SESSION_S)
     ]
 
 
@@ -373,7 +380,16 @@ def check_plan(
 
 
 def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
-    """Identity of a finding across a write; a taper is one finding per competition."""
-    if finding["code"] == "missing_taper":
-        return (finding["code"], finding["evidence"]["competition_date"])
-    return (finding["code"], tuple(finding["dates"]), tuple(finding["local_ids"]))
+    """Identity of a finding across a write.
+
+    A taper is one finding per competition. A run spike that grows into a
+    warning and an illness-time session that gets harder or longer are new.
+    """
+    code, evidence = finding["code"], finding["evidence"]
+    if code == "missing_taper":
+        return (code, evidence["competition_date"])
+    state = {
+        "run_spike": (evidence.get("severity"),),
+        "illness_hard": (evidence.get("planned_minutes"), evidence.get("hard")),
+    }.get(code, ())
+    return (code, tuple(finding["dates"]), tuple(finding["local_ids"]), *state)

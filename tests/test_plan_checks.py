@@ -127,7 +127,8 @@ class PlanCheckRuleTests(unittest.TestCase):
         long = unit("b", "2026-11-03", "ride", 120)
         easy = unit("c", "2026-11-04", "ride", 45)
         self.assertEqual(
-            ["illness_hard"], codes(check([hard, long, easy], illness="Fieber"))
+            ["illness_hard", "illness_hard"],
+            codes(check([hard, long, easy], illness="Fieber")),
         )
         self.assertNotIn("illness_hard", codes(check([hard, long])))
         self.assertEqual([], check([easy], illness="Fieber"))
