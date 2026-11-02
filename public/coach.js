@@ -1835,6 +1835,7 @@ function appendPlanNotes(node, planNotes) {
     intensity_distribution: ["Intensitätsverteilung der Woche", "Praxisbasierte Referenzbereiche"],
     leg_strength_before_key_session: ["Beinkraft vor Schlüsseleinheit", "Begrenzte Evidenz"],
     leg_strength_frequency: ["Beinkraft pro Woche", "Rønnestad & Mujika 2014, Blagrove 2018; Schwellen praxisbasiert"],
+    calendar_load: ["Kalender und Einheit", "Terminüberschneidung oder stark belegter Tag"],
   };
   for (const note of Array.isArray(planNotes) ? planNotes : []) {
     const label = planNoteLabels[note?.code];

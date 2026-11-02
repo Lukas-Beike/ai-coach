@@ -12,6 +12,7 @@ from backend.coach.context import (
     CoachPlanningContextReader,
     CoachStructuredContextService,
 )
+from backend.coach.context_selection import select_coach_context
 from backend.performance.freshness import GarminSyncStatus
 from backend.planning.compact_activities import ActivitySummarySource
 
@@ -185,6 +186,24 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         )
         self.assertFalse(result["recovery"].get("performance"))
         self.assertFalse(result["current_performance"]["available"])
+
+    def test_plan_kinds_use_full_calendar_horizons(self) -> None:
+        self.external_calendar_reader.list_events_in_window.return_value = [
+            {
+                "name": "Appointment",
+                "start_local": "2026-09-24T09:00:00",
+                "end_local": "2026-09-24T10:00:00",
+                "description": "private",
+            }
+        ]
+        for kind, days in (("plan_week", 14), ("plan_block", 35)):
+            selection = select_coach_context("Plan", {}, request_kind=kind)
+            result = self.service.build(selection=selection)
+            self.assertEqual(
+                result["external_calendar"]["events"][0]["name"], "Appointment"
+            )
+            self.assertNotIn("description", result["external_calendar"]["events"][0])
+            self.external_calendar_reader.list_events_in_window.assert_called_with(days)
 
     def test_preserves_intended_repeated_reads_and_source_labels(self) -> None:
         self.service.build()

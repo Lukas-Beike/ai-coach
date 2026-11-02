@@ -204,3 +204,12 @@ The system SHALL keep drafts editable while the Coach runs, serialize queued fol
 - **THEN** recording is bounded to sixty seconds, recording resources are stopped after capture, and a successful transcript is appended to the editable draft rather than sent automatically; denied/unsupported recording or empty transcription produces an explicit error.
 
 Evidence: `public/coach.js:queueChatMessage`, `public/coach.js:editQueuedChatMessage`, `public/coach.js:chatEnterAction`, `public/coach.js:rejectChatStreamResponse`, `public/coach.js:toggleVoiceInput`, `public/coach.js:transcribeVoice`; `backend/providers/audio.py:AudioTranscriptionClient.transcribe`; `tests/coach-enter.test.cjs:desktop Enter sends the draft`, `tests/coach-enter.test.cjs:IME composition never triggers an action`; `tests/coach-queue-edit.test.cjs:editing a queued message is refused and leaves the queue untouched when the combined count exceeds the limit`; `tests/coach-session-expiry.test.cjs:a chat 401 keeps newer typed text and parks the rejected message once when the input was edited`; `tests/test_provider_audio.py:test_validation_precedes_provider_io_and_keeps_order`, `tests/test_provider_audio.py:test_empty_or_invalid_provider_responses_are_rejected`. Microphone permissions/recording cleanup are source-inspected; no browser/microphone runtime was exercised.
+
+### Requirement: Clarify uncertain calendar impact
+The planning playbook SHALL direct the Coach to ask whether to train and whether to reduce intensity when an event creates material uncertainty, and to use the athlete's answer. An ordinary event alone SHALL not imply a cancellation or reduction.
+
+#### Scenario: Uncertain busy day
+- **WHEN** a calendar event leaves a material training decision unclear
+- **THEN** the Coach asks before making that decision and groups questions where practical.
+
+Evidence: `backend/coach/playbooks.py:playbook_for`; `tests/test_calendar_planning.py:test_plan_playbook_requests_clarification`; `tests/test_coach_dialogue.py:test_calendar_clarification_then_easy_workout`. The scripted dialogue proves mechanics, not natural-language model reliability.

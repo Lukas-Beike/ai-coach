@@ -47,7 +47,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
-from backend.planning import leg_strength, load_checks
+from backend.planning import calendar_load, leg_strength, load_checks
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
@@ -63,6 +63,7 @@ FINDING_CODES = (
     "intensity_distribution",
     leg_strength.BEFORE_KEY,
     leg_strength.FREQUENCY,
+    "calendar_load",
 )
 # Only the health rule blocks a write. The load rules are notes the Coach must
 # name: their evidence is observational or practice-based, or (taper) the
@@ -80,6 +81,7 @@ EVIDENCE = {
     "intensity_distribution": "practice-based reference ranges; pyramidal/polarized after Seiler 2010, Stoeggl & Sperlich 2014",
     leg_strength.BEFORE_KEY: "limited, residual fatigue after lower-body resistance training (Doma et al.)",
     leg_strength.FREQUENCY: "Ronnestad & Mujika 2014, Blagrove 2018 (2x/week build, 1x/week maintenance); thresholds practice-based",
+    "calendar_load": "calendar overlap and locally chosen eight-hour busy-day threshold",
 }
 _RULE_TEXT = {
     "run_spike": "planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
@@ -93,6 +95,7 @@ _RULE_TEXT = {
     "intensity_distribution": "planned low/moderate/high time of a week clearly outside the training model's reference range (unknown time is uncovered, strength excluded).",
     leg_strength.BEFORE_KEY: "moderate or heavy leg strength less than about 24 h before a hard run or ride or the week's long one.",
     leg_strength.FREQUENCY: "more than 3 leg strength sessions or more than 2 heavy ones in a week, or none in a plan of 2+ weeks when strength is expected.",
+    "calendar_load": "long or hard unit overlaps a calendar event or falls on a day with at least eight hours of events.",
 }
 RULE_SUMMARY = {
     code: f"{'Blocks' if code in BLOCKING_CODES else 'Note'}: {text}"
@@ -419,6 +422,7 @@ def check_plan(
     illness: str = "",
     thresholds: load_checks.LoadThresholds | None = None,
     expects_strength: bool = False,
+    calendar_events: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """Return all findings for the resulting future planned units.
 
@@ -428,7 +432,23 @@ def check_plan(
         units, thresholds or load_checks.LoadThresholds()
     )
     units = _with_computed_hard(units, sessions)
+    occupied = calendar_load.busy_minutes(calendar_events, today, 56)
+    calendar_notes = []
+    for unit in units:
+        if not (is_hard(unit) or _duration_s(unit) >= LONG_SESSION_S):
+            continue
+        overlap, minutes = calendar_load.calendar_risk(unit, calendar_events, occupied)
+        if overlap or minutes >= calendar_load.HEAVY_DAY_MINUTES:
+            calendar_notes.append(
+                _finding(
+                    "calendar_load",
+                    [unit],
+                    "Calendar event overlaps or day is heavily booked",
+                    {"overlap": overlap, "busy_minutes": minutes},
+                )
+            )
     return [
+        *calendar_notes,
         *_drafted(load_checks.run_distance_spikes(sessions, completed, today)),
         *(
             _load_findings(sessions, completed, thresholds, today)
@@ -483,6 +503,8 @@ def _risk(finding: Mapping[str, Any]) -> tuple[Any, ...]:
         )
     if finding["code"] == "intensity_distribution":
         return (max(evidence["deviating_bands"].values()),)
+    if finding["code"] == "calendar_load":
+        return (bool(evidence.get("overlap")), evidence.get("busy_minutes") or 0)
     return ()
 
 

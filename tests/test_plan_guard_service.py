@@ -173,6 +173,37 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.assertEqual("back_to_back_hard", note["code"])
         self.assertIn("practice-based", note["evidence_strength"])
 
+    def test_calendar_conflict_is_saved_as_note(self) -> None:
+        self.illness = ""
+        self.guard = PlanGuardService(
+            planned_units=lambda: list(self.units),
+            completed_activities=list,
+            competitions=list,
+            illness=lambda: "",
+            progress=lambda: {"week_list": []},
+            training_model=lambda: "pyramidal",
+            today=lambda: TODAY,
+            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            calendar_events=lambda: [
+                {
+                    "start_local": "2026-11-04T09:00:00",
+                    "end_local": "2026-11-04T10:00:00",
+                }
+            ],
+        )
+        self.write_units = [
+            {**hard_pair()[0], "starts_at_local": "2026-11-04T09:30:00"}
+        ]
+        result = self.run_tool("replace_training_plan", workouts=[{}])
+        note = next(
+            item
+            for item in result["plan_check_notes"]
+            if item["code"] == "calendar_load"
+        )
+        self.assertFalse(note["blocking"])
+        self.assertTrue(note["evidence"]["overlap"])
+        self.assertEqual(self.stored(), 1)
+
     def test_failure_projection_carries_findings(self) -> None:
         service = CoachStructuredToolFailureService(
             Path(self.temporary.name), Mock(), frozenset({"replace_training_plan"})

@@ -321,6 +321,47 @@ class CoachDialogueTests(DialogueHarness, unittest.TestCase):
         self.assertTrue(result["command_receipts"][0]["result"]["ok"])
         self.assertEqual(result.get("sync_job_ids", []), [])
 
+    def test_calendar_clarification_then_easy_workout(self):
+        def clarification(_payload):
+            return self.call(
+                "clarify_coach_request",
+                {
+                    "source_message_ids": [
+                        server.COACH_CONVERSATION.message_service().list()[-1]["id"]
+                    ],
+                    "summary": "Plan the week around the Saturday appointment locally",
+                    "question": "Soll am Samstag eine Einheit stattfinden und locker sein?",
+                },
+            )
+
+        before = self.state()
+        result, _ = self.turn(
+            "Plane die Woche lokal", [clarification, {"output_text": "Frage"}]
+        )
+        self.assertTrue(result["awaiting_clarification"])
+        self.assertEqual(self.state(), before)
+
+        def continuation(payload):
+            pending = json.loads(payload["input"])["dialogue"]["pending_request"]
+            self.assertIn("Saturday appointment", pending["summary"])
+            return self.call(
+                "apply_training_patch",
+                {
+                    "workouts": [self.workout("2026-09-12", "Locker")],
+                    "changes": [],
+                    "expected_revision": before["planning_revision"],
+                },
+                ["local_plan"],
+                {"start": "2026-09-12", "end": "2026-09-12"},
+            )
+
+        result, _ = self.turn(
+            "Ja, bitte locker", [continuation, {"output_text": "Lokal gespeichert."}]
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(self.state()["planned_units"][0]["name"], "Locker")
+        self.assertEqual(result.get("sync_job_ids", []), [])
+
     def test_clarification_service_persists_valid_user_provenance_and_limits(self):
         messages = [{"id": item, "role": "user"} for item in range(1, 25)]
         context = {"messages": messages, "current_user_message_id": 24}
