@@ -730,6 +730,13 @@ class CoachStructuredContextService:
             selection=selection,
         )
 
+    def _external_calendar(
+        self, selection: CoachContextSelection | None
+    ) -> dict[str, Any]:
+        if selection and selection.name in {"plan_week", "plan_block"}:
+            return self._planning_reader.external_calendar(selection.horizon_days)
+        return self._planning_reader.external_calendar()
+
     def _current_performance(
         self, performance_inputs: CanonicalPerformanceInputs | None
     ) -> Any:
@@ -775,11 +782,7 @@ class CoachStructuredContextService:
             "calendar": self._planning_reader.calendar(local_planned_workouts)
             if "calendar" in included
             else None,
-            "external_calendar": (
-                self._planning_reader.external_calendar(selection.horizon_days)
-                if selection and selection.name in {"plan_week", "plan_block"}
-                else self._planning_reader.external_calendar()
-            )
+            "external_calendar": self._external_calendar(selection)
             if "external_calendar" in included
             else None,
             "activities": self._performance_reader.activities(
@@ -1075,6 +1078,27 @@ def coach_context_projection_meta(
 _TOTAL_BUDGET_NOTE_MARGIN = 128
 
 
+def _has_omitted(calendar: Any) -> bool:
+    return isinstance(calendar, dict) and "omitted_count" in calendar
+
+
+def _reconcile_calendar_clip(original: Any, clipped: Any) -> None:
+    """Count events lost to clipping as omitted instead of silently dropping."""
+    if not (_has_omitted(original) and isinstance(clipped, dict)):
+        return
+    original_events = original.get("events", [])
+    kept = clipped.get("events", [])
+    kept = [
+        item
+        for item, source in zip(kept if isinstance(kept, list) else [], original_events)
+        if item == source
+    ]
+    clipped["events"] = kept
+    clipped["omitted_count"] = (
+        original["omitted_count"] + len(original_events) - len(kept)
+    )
+
+
 def coach_context_total_budget_note(
     omitted_sections: list[str], truncated_sections: list[str]
 ) -> dict[str, Any]:
@@ -1225,26 +1249,7 @@ class CoachTrainingContextService:
                 clipped_context = {}
             original_calendar = prompt_context.get("external_calendar")
             clipped_calendar = clipped_context.get("external_calendar")
-            if (
-                isinstance(original_calendar, dict)
-                and "omitted_count" in original_calendar
-            ):
-                original_events = original_calendar.get("events", [])
-                if isinstance(clipped_calendar, dict):
-                    retained = clipped_calendar.get("events", [])
-                    if not isinstance(retained, list):
-                        retained = []
-                    retained = [
-                        item
-                        for item, original in zip(retained, original_events)
-                        if item == original
-                    ]
-                    clipped_calendar["events"] = retained
-                    clipped_calendar["omitted_count"] = (
-                        original_calendar["omitted_count"]
-                        + len(original_events)
-                        - len(retained)
-                    )
+            _reconcile_calendar_clip(original_calendar, clipped_calendar)
             omitted_sections = sorted(
                 key for key in prompt_context if key not in clipped_context
             )
@@ -1264,10 +1269,8 @@ class CoachTrainingContextService:
                 if isinstance(clipped_projection, dict)
                 else budget_note
             )
-            if (
-                isinstance(original_calendar, dict)
-                and "omitted_count" in original_calendar
-                and not isinstance(clipped_calendar, dict)
+            if not isinstance(clipped_calendar, dict) and _has_omitted(
+                original_calendar
             ):
                 projection["external_calendar_omitted_count"] = original_calendar[
                     "omitted_count"
