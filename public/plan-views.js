@@ -414,6 +414,15 @@ function focusChipSpec(entry) {
   return { kind: derived ? "focus-derived" : "focus", text: [derived ? "≈" : null, label, intensity].filter(Boolean).join(" "), derived };
 }
 
+function appendFocusChip(root, entry) {
+  const chip = focusChipSpec(entry);
+  if (!chip) return;
+  const row = calendarBadgeRow([chip]);
+  row.dataset.focusChip = chip.derived ? "derived" : "set";
+  if (chip.derived) row.firstElementChild.setAttribute("aria-label", `${chip.text} (abgeleitet)`);
+  root.append(row);
+}
+
 function focusSelect(label, name, options, selected) {
   const field = document.createElement("label");
   field.className = "planned-focus-field";
@@ -769,13 +778,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
     if (profile) cardSummary.append(profile);
     cardSummary.append(cardTitle);
-    const chip = focusChipSpec(entry);
-    if (chip) {
-      const chipRow = calendarBadgeRow([chip]);
-      chipRow.dataset.focusChip = chip.derived ? "derived" : "set";
-      if (chip.derived) chipRow.firstElementChild.setAttribute("aria-label", `${chip.text} (abgeleitet)`);
-      cardSummary.append(chipRow);
-    }
+    appendFocusChip(cardSummary, entry);
     const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
     if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);

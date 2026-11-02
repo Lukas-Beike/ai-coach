@@ -37,6 +37,20 @@ def _is_focus_only(values: dict[str, Any]) -> bool:
     )
 
 
+def _differs_only_in_focus(restored: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether an undo changes nothing but the local focus (sync state stays)."""
+    ignored = {*FOCUS_KEYS, "sync_status"}
+
+    def comparable(payload: dict[str, Any]) -> dict[str, Any]:
+        result = {key: value for key, value in payload.items() if key not in ignored}
+        # An unset start reads as local midnight of the date.
+        if result.get("starts_at_local") in (None, f"{result.get('date')}T00:00:00"):
+            result.pop("starts_at_local", None)
+        return result
+
+    return comparable(restored) == comparable(current)
+
+
 def _start_time_suffix(start: str) -> str | None:
     """Return the time part of a local start such as 2026-09-21T07:15:00."""
     return start[10:] if len(start) > 10 and start[10] == "T" else None
@@ -171,9 +185,15 @@ class PlannedUnitService:
             self._reject_restore_conflict(
                 entity_id, {**current_payload, **restored_target}
             )
+        # The audited state names the focus only when it was set.
+        kept = {
+            key: value
+            for key, value in current_payload.items()
+            if key not in FOCUS_KEYS or key in target
+        }
         restored = planned_units.normalize_planned_unit(
             {
-                **current_payload,
+                **kept,
                 **restored_target,
                 "archived": archived,
                 "local_deleted": local_deleted,
@@ -185,8 +205,11 @@ class PlannedUnitService:
             or None,
             sync_status="local",
         )
+        focus_only = _differs_only_in_focus(restored, current_payload)
+        if focus_only:
+            restored["sync_status"] = current_payload.get("sync_status")
         db.execute(
-            UPDATE_SQL,
+            FOCUS_UPDATE_SQL if focus_only else UPDATE_SQL,
             (json.dumps(restored, ensure_ascii=False), self._now(), entity_id),
         )
         _REMOTE_LINKS.refresh_from_slots(db, RemoteEntityKind.PLANNED_UNIT, entity_id)
