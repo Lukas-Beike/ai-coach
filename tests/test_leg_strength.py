@@ -268,6 +268,18 @@ class NoteTests(unittest.TestCase):
         unknown = unit("k", "2026-11-12", "strength", name="Kraft", description="")
         self.assertEqual([], check([*block, unknown], True))
 
+    def test_sparse_weeks_are_not_a_plan_of_two_weeks(self) -> None:
+        sparse = [unit("a", "2026-11-03", "run"), unit("b", "2026-12-14", "run")]
+        self.assertEqual([], check(sparse, True))
+
+    def test_more_leg_sessions_in_a_flagged_week_is_a_new_note(self) -> None:
+        four = [legs(f"l{n}", f"2026-11-0{n + 2}") for n in range(4)]
+        five = [*four, legs("l5", "2026-11-07")]
+        self.assertEqual(
+            [leg_strength.FREQUENCY],
+            codes(plan_checks.new_findings(check(four), check(five))),
+        )
+
     def test_finding_identity_is_stable(self) -> None:
         block = [unit("a", "2026-11-03", "run"), unit("b", "2026-11-10", "run")]
         before = check(block, True)
@@ -279,6 +291,7 @@ class NoteTests(unittest.TestCase):
         expected = leg_strength.strength_expected
         self.assertTrue(expected("Zweimal pro Woche", [], TODAY))
         self.assertFalse(expected("keine Kraft", [], TODAY))
+        self.assertFalse(expected("-", [], TODAY))
         self.assertFalse(expected("", [], TODAY))
         self.assertTrue(expected("", race, TODAY))
         peak = [{"event_date": "2026-11-20", "priority": "A", "name": "R"}]

@@ -456,6 +456,9 @@ def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
         return (finding["code"], finding["evidence"]["week_start"])
     if finding["code"] == leg_strength.FREQUENCY:
         evidence = finding["evidence"]
+        if evidence["reason"] == "no_leg_session":
+            # One note for the plan: unrelated edits must not repeat it.
+            return (finding["code"], evidence["reason"])
         return (finding["code"], evidence["reason"], evidence["week_start"])
     if finding["code"] == "weekly_load_rise":
         evidence = finding["evidence"]
@@ -473,6 +476,11 @@ def _risk(finding: Mapping[str, Any]) -> tuple[Any, ...]:
         return (evidence.get("severity") == "warning",)
     if finding["code"] == "illness_hard":
         return (bool(evidence.get("hard")), evidence.get("planned_minutes") or 0)
+    if finding["code"] == leg_strength.FREQUENCY:
+        return (
+            evidence.get("leg_sessions") or 0,
+            evidence.get("heavy_leg_sessions") or 0,
+        )
     if finding["code"] == "intensity_distribution":
         return (max(evidence["deviating_bands"].values()),)
     return ()

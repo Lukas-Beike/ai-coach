@@ -53,7 +53,9 @@ _HEAVY = re.compile(r"\b(?:heavy|schwer|[1-6]\s*rm)\b", re.IGNORECASE)
 _MODERATE = re.compile(r"\b(?:moderate|moderat|mittel(?:schwer)?)\b", re.IGNORECASE)
 _LIGHT = re.compile(r"\b(?:light|leicht)\b", re.IGNORECASE)
 # A profile answer that says no strength is wanted.
-_NO_STRENGTH = re.compile(r"^\s*(?:-|kein\w*|nein|no|none|ohne)\b", re.IGNORECASE)
+_NO_STRENGTH = re.compile(
+    r"^\s*(?:-+\s*$|(?:kein\w*|nein|no|none|ohne|nicht)\b)", re.IGNORECASE
+)
 _EXPECTING_PHASES = frozenset({"base", "build"})
 
 
@@ -321,6 +323,7 @@ def before_key_session(
                     },
                 )
             )
+            break
     return drafts
 
 
@@ -344,11 +347,21 @@ def _too_many(monday: date, group: Sequence[Mapping[str, Any]]) -> Draft | None:
     )
 
 
+def _consecutive(mondays: Sequence[date]) -> list[date]:
+    """The run of adjacent weeks that starts at the first Monday."""
+    run = list(mondays[:1])
+    for monday in mondays[1:]:
+        if monday - run[-1] != timedelta(weeks=1):
+            break
+        run.append(monday)
+    return run
+
+
 def _no_legs(
     weeks: Mapping[date, Sequence[Mapping[str, Any]]], today: date
 ) -> Draft | None:
     """Two or more full planned weeks without any leg strength session."""
-    full = sorted(monday for monday in weeks if monday >= today)
+    full = _consecutive(sorted(monday for monday in weeks if monday >= today))
     if len(full) < MIN_PLAN_WEEKS:
         return None
     counts = [week_counts(weeks[monday]) for monday in full]
