@@ -436,8 +436,18 @@ class TrainingReportReadService:
             inputs=inputs,
         )
 
-    def progress(self, values: dict[str, Any], timezone: str = "UTC") -> dict[str, Any]:
-        """Weekly per-sport progress over whole ISO weeks (7, 28, 42 or 84 days)."""
+    def progress(
+        self,
+        values: dict[str, Any],
+        timezone: str = "UTC",
+        *,
+        with_curves: bool = True,
+    ) -> dict[str, Any]:
+        """Weekly per-sport progress over whole ISO weeks (7, 28, 42 or 84 days).
+
+        ``with_curves=False`` skips the mean-max curve read for callers that
+        never use it.
+        """
         today = self._today()
         try:
             days = int(values.get("days", 42))
@@ -481,7 +491,8 @@ class TrainingReportReadService:
             # Session curves cover the longest profile window only; read them
             # only when the window needs the mean-max comparison.
             curve_records=self._curve_records()
-            if self._curve_records is not None
+            if with_curves
+            and self._curve_records is not None
             and days >= 14
             and sport in {"all", "ride", "run"}
             and start >= today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
