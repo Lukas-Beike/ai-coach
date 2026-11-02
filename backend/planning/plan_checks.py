@@ -408,6 +408,7 @@ def new_findings(
     result = []
     for item in after:
         known = previous.get(finding_key(item))
-        if known is None or _risk(item) > known:
+        # Riskier in any dimension (harder, or longer) is new, not lexicographic.
+        if known is None or any(now > then for now, then in zip(_risk(item), known)):
             result.append(item)
     return result

@@ -187,6 +187,16 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.run_tool("replace_training_plan")
         self.assertEqual(1, self.stored())
 
+    def test_easier_but_much_longer_illness_session_blocks(self) -> None:
+        self.units = hard_pair()
+        easier = hard_pair()
+        easier[0].pop("planned_intensity")
+        easier[0]["planned_duration_s"] = 12000
+        self.write_units = easier
+        with self.assertRaises(PlanCheckError):
+            self.run_tool("replace_training_plan")
+        self.assertEqual(0, self.stored())
+
     def test_spike_growing_into_a_warning_is_a_new_note(self) -> None:
         self.illness = ""
         self.completed = [
