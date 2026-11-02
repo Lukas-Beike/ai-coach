@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.activities.workout_text import canonical_workout_zones
 from backend.athlete.local_date import LocalDate, iso_date_prefix
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import (
     CORRUPT_PLANNING_ERROR,
@@ -61,7 +62,15 @@ def planned_unit_payload_hash(payload: Any) -> str:
     comparable = {
         key: value
         for key, value in payload.items()
-        if key not in {"id", "sync_status", "sync_conflict", "origin", "local_marked"}
+        if key
+        not in {
+            "id",
+            "sync_status",
+            "sync_conflict",
+            "origin",
+            "local_marked",
+            *FOCUS_KEYS,
+        }
     }
     if "sport" in comparable or "type" in comparable:
         # The hash is representation-invariant: a payload stored with the
@@ -178,6 +187,7 @@ def _apply_planned_workout_update(
         "description",
         "duration_minutes",
         "target",
+        *FOCUS_KEYS,
     ):
         if key in values:
             candidate[key] = values.get(key)

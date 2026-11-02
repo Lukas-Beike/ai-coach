@@ -10,6 +10,7 @@ from typing import Any
 from backend import change_history
 from backend.athlete.local_date import LocalDate
 from backend.calendar.canonical import canonical_planned_workouts
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.vocabulary import ProviderId, RemoteEntityKind
 from backend.db.remote_links import RemoteLinkRepository
 from backend.errors import CORRUPT_PLANNING_ERROR, AppError
@@ -407,6 +408,7 @@ class PlannedUnitService:
             "rationale",
             "archived",
             "private_calendar_adjustment",
+            *FOCUS_KEYS,
         ):
             if local.get(key) is not None:
                 incoming[key] = local[key]

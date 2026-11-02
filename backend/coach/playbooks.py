@@ -29,13 +29,14 @@ _PLAN_RULES = """\
 Planning science:
 - Use a periodized structure with progressive overload and a lighter week every 3rd to 4th week (practice-based). No single periodization model is clearly superior (Kiely 2012).
 - Alternate hard and easy days; no back-to-back hard days. Distribute intensity according to training_model.
-- Do not plan a single run much longer than the longest run of the last 30 days (Frandsen 2025; observational, moderate).
+- Do not plan a single run much longer than the longest run of the last 30 days (Frandsen 2025).
 - Heavy strength 2 times per week improves running economy and cycling performance (Ronnestad & Mujika 2014; Blagrove 2018); 1 time per week maintains it in the competition phase. Separate it from hard endurance by at least 6 h (Robineau 2016), or place it on hard days after endurance or on easy days.
 - Taper about 2 weeks before a competition: cut volume by 40-60 %, keep intensity and frequency (Bosquet 2007).
 - When HRV or readiness data exist, adjust load to it (Kiviniemi 2007; Javaloyes 2019; moderate).
 - Respect availability (rule 8b), illness (rule 2a), calendar events and competitions.
+- Set session_focus on every new unit (strength also strength_intensity) and name it in the Typ column.
 - Running, cycling and strength can share one plan. Create local planned units only; no Intervals.icu write.
-- planning_brief in the context summarizes the last weeks per sport. The server checks every plan. Only illness_hard blocks the save: then correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Findings in plan_check_notes appear in the change receipt. Do not repeat or contradict the receipt; justify the finding or adjust the plan. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means the load could not be computed, so say that instead of estimating it. planning_brief.planned_distribution holds the planned low/moderate/high time per week and the reference ranges of training_model; an intensity_distribution note means a week clearly leaves that range, so justify it or adjust the plan."""
+- planning_brief summarizes the last weeks per sport. The server checks every plan. Only illness_hard blocks the save: then correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Findings in plan_check_notes appear in the change receipt. Do not repeat or contradict the receipt; justify the finding or adjust the plan. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means the load could not be computed, so say that instead of estimating it. planning_brief.planned_distribution holds the planned low/moderate/high time per week and the reference ranges of training_model; an intensity_distribution note means a week clearly leaves that range, so justify it or adjust the plan."""
 
 _TASKS = {
     "session_analysis": """\

@@ -39,6 +39,10 @@ def apply_sport_update(candidate: dict[str, Any], values: Mapping[str, Any]) -> 
         return
     for key in ("type", "environment", "sport_detail"):
         candidate.pop(key, None)
+    # The focus belongs to the previous sport unless the request sets its own.
+    for key in ("session_focus", "strength_intensity"):
+        if key not in values:
+            candidate.pop(key, None)
     candidate["sport"] = values.get("sport") or values.get("type")
     for key in ("environment", "sport_detail"):
         if values.get(key):

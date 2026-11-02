@@ -2198,6 +2198,7 @@ HTTP_API = HttpApiAssembly(
                 undo=HISTORY.undo_service,
             ),
             workout_library=PLANNING_DATA.workout_library,
+            planned_unit=PLANNING_DATA.planned_unit,
         ),
         domains=HttpDomainRouteServices(
             privacy=HttpPrivacyServices(

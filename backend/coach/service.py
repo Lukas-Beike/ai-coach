@@ -6,6 +6,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS
 from backend.coach.proposal_models import coach_action_hash
 
 
@@ -89,6 +90,7 @@ def dialogue_plan_effect_key(name: str, arguments: dict[str, Any]) -> str | None
                     "duration_minutes",
                     "target",
                     "rationale",
+                    *SESSION_FOCUS_KEYS,
                 )
             }
         )

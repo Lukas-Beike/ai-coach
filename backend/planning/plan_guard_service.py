@@ -7,15 +7,20 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.performance.canonical_current import read_current_inputs
 from backend.performance.canonical_inputs import resolve_reader
 from backend.planning import intensity_distribution, plan_checks
 from backend.planning.load_checks import LoadThresholds, load_thresholds
+from backend.planning.session_focus import session_focus
+from backend.planning.sport import planned_sport_environment
 
 BRIEF_WEEKS = 6
 BRIEF_SPORTS = ("run", "ride", "strength")
 BRIEF_COMPETITIONS = 3
+BRIEF_FOCUS_DAYS = 14
+BRIEF_FOCUS_UNITS = 40
 HISTORY_DAYS = 60
 BRIEF_SOURCE = (
     "Local activity records (weekly-progress-v1), local planning and "
@@ -116,6 +121,43 @@ def _competition_day(row: Mapping[str, Any]) -> str:
     return "" if day is None else day.isoformat()
 
 
+def planned_focus(
+    units: Sequence[Mapping[str, Any]],
+    estimate: intensity_distribution.Estimator,
+    today: date,
+) -> list[dict[str, Any]]:
+    """Session focus of the next planned units; ``derived`` marks a guess."""
+    last = (today + timedelta(days=BRIEF_FOCUS_DAYS)).isoformat()
+    rows = []
+    for unit in sorted(units, key=_unit_day):
+        day = _unit_day(unit)
+        if not today.isoformat() <= day <= last:
+            continue
+        focus = session_focus(unit, _focus_estimate(unit, estimate))
+        rows.append(
+            {
+                "local_id": unit.get("local_id") or unit.get("id"),
+                "date": day,
+                "sport": planned_sport_environment(unit)[0].value,
+                **focus.as_dict(),
+            }
+        )
+    return rows[:BRIEF_FOCUS_UNITS]
+
+
+def _unit_day(unit: Mapping[str, Any]) -> str:
+    return iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
+
+
+def _focus_estimate(
+    unit: Mapping[str, Any], estimate: intensity_distribution.Estimator
+) -> Any:
+    """Workout estimate for the focus fallback; run and ride units only."""
+    if planned_sport_environment(unit)[0] not in {Sport.RUN, Sport.RIDE}:
+        return None
+    return estimate(unit)
+
+
 def build_planning_brief(
     *,
     progress: Mapping[str, Any],
@@ -124,6 +166,7 @@ def build_planning_brief(
     training_model: str,
     today: date,
     planned_weeks: Sequence[Mapping[str, Any]] = (),
+    planned_sessions: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Compact deterministic brief for plan_week and plan_block turns."""
     weeks = [
@@ -152,6 +195,7 @@ def build_planning_brief(
         "planned_distribution": intensity_distribution.brief_distribution(
             training_model, planned_weeks, BRIEF_WEEKS
         ),
+        "planned_sessions": list(planned_sessions),
         "plan_checks": plan_checks.RULE_SUMMARY,
     }
 
@@ -253,11 +297,13 @@ class PlanGuardService:
 
     def brief(self) -> dict[str, Any]:
         today = self._today()
+        units = self._planned_units()
         return build_planning_brief(
             progress=self._progress(),
             completed=self._recent(today),
             competitions=self._competitions(),
             training_model=self._training_model(),
             today=today,
-            planned_weeks=self._planned_weeks(self._planned_units(), today),
+            planned_weeks=self._planned_weeks(units, today),
+            planned_sessions=planned_focus(units, self._estimate_unit, today),
         )

@@ -16,11 +16,12 @@ Rules (references are observational or practice-based, not individual advice):
   computed (missing or stale thresholds, unparsed steps) is named, not guessed.
   Only with thresholds passed to ``check_plan``.
 - back_to_back_hard: hard run/ride sessions on consecutive days. Hard means a
+  set session focus (threshold, sweet_spot, vo2max, anaerobic, race, test), else a
   computed workout zone (at least five minutes in zone 4+ steps,
   ``load_checks.computed_hard``), else a planned intensity key of at least 0.85 (percent values above 1.5 are
-  divided by 100) or workout text with a Z4-Z7 / zone 4-7 target. Unknown is not
+  divided by 100) or workout text with a Z4-Z7 / zone 4-7 target, else a keyword-derived hard focus. Unknown is not
   hard.
-- strength_hard_same_day: heavy strength (planned intensity >= 0.85 or text
+- strength_hard_same_day: heavy strength (set strength_intensity, else planned intensity >= 0.85 or text
   naming heavy, schwer, maximal or a 1-6 RM) and a hard run/ride on one date
   with less than 6 h between start times, or an unknown start time
   (Robineau et al. 2016).
@@ -45,6 +46,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
 from backend.planning import load_checks
+from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
 FINDING_CODES = (
@@ -143,18 +145,26 @@ def is_hard(unit: Mapping[str, Any]) -> bool:
     """Whether a planned run or ride is hard: computed intensity, else key or text."""
     if _sport(unit) not in _ENDURANCE:
         return False
+    focus = session_focus(unit)
+    if focus.origin == "set":
+        return bool(focus.is_hard)
     computed = unit.get(COMPUTED_HARD)
     if isinstance(computed, bool):
         return computed
     factor = intensity_factor(unit)
-    return (factor is not None and factor >= HARD_INTENSITY) or bool(
-        _HARD_ZONE.search(_text(unit))
+    return (
+        (factor is not None and factor >= HARD_INTENSITY)
+        or bool(_HARD_ZONE.search(_text(unit)))
+        or bool(focus.is_hard)
     )
 
 
 def is_heavy_strength(unit: Mapping[str, Any]) -> bool:
     if _sport(unit) is not Sport.STRENGTH:
         return False
+    focus = session_focus(unit)
+    if focus.strength_intensity is not None:
+        return focus.strength_intensity == "heavy"
     factor = intensity_factor(unit)
     return (factor is not None and factor >= HARD_INTENSITY) or bool(
         _HEAVY.search(_text(unit))

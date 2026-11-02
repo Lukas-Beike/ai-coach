@@ -5,6 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from backend.planning.plan_checks import BLOCKING_CODES
+from backend.planning.session_focus import (
+    ALL_FOCI,
+    ENDURANCE_FOCI,
+    RIDE_FOCI,
+    STRENGTH_FOCI,
+    STRENGTH_INTENSITIES,
+)
 
 ACCEPT_PLAN_FINDINGS: dict[str, Any] = {
     "type": "array",
@@ -33,6 +40,27 @@ def _canonical_coach_tool(
             "additionalProperties": False,
         },
     }
+
+
+_FOCUS_DESCRIPTION = (
+    "Art der Einheit, set for every new unit. Run: "
+    + ", ".join(ENDURANCE_FOCI)
+    + ". Ride: "
+    + ", ".join(RIDE_FOCI)
+    + ". Strength: "
+    + ", ".join(STRENGTH_FOCI)
+    + ". Null only for sports without focus."
+)
+SESSION_FOCUS_SCHEMA: dict[str, Any] = {
+    "type": ["string", "null"],
+    "enum": [*ALL_FOCI, None],
+    "description": _FOCUS_DESCRIPTION,
+}
+STRENGTH_INTENSITY_SCHEMA: dict[str, Any] = {
+    "type": ["string", "null"],
+    "enum": [*STRENGTH_INTENSITIES, None],
+    "description": "Strength only: load level; null otherwise.",
+}
 
 
 def build_structured_tool_schemas(
@@ -363,6 +391,8 @@ def build_structured_tool_schemas(
                                     "target",
                                     "rationale",
                                     "starts_at_local",
+                                    "session_focus",
+                                    "strength_intensity",
                                 ],
                                 "properties": {
                                     "date": {
@@ -393,6 +423,8 @@ def build_structured_tool_schemas(
                                         "enum": ["AUTO", "POWER", "HR", "PACE"],
                                     },
                                     "rationale": {"type": "string", "minLength": 1},
+                                    "session_focus": SESSION_FOCUS_SCHEMA,
+                                    "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                                 },
                             },
                         },
@@ -437,6 +469,8 @@ def build_structured_tool_schemas(
                                     "target",
                                     "rationale",
                                     "starts_at_local",
+                                    "session_focus",
+                                    "strength_intensity",
                                 ],
                                 "properties": {
                                     "date": {
@@ -460,6 +494,8 @@ def build_structured_tool_schemas(
                                         "enum": ["AUTO", "POWER", "HR", "PACE"],
                                     },
                                     "rationale": {"type": "string", "minLength": 1},
+                                    "session_focus": SESSION_FOCUS_SCHEMA,
+                                    "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                                 },
                             },
                         },
@@ -502,6 +538,8 @@ def build_structured_tool_schemas(
                             "rationale": {"type": "string"},
                             "environment": {"type": "string"},
                             "sport_detail": {"type": "string"},
+                            "session_focus": SESSION_FOCUS_SCHEMA,
+                            "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                         },
                         "additionalProperties": False,
                     },
@@ -567,6 +605,8 @@ def build_structured_tool_schemas(
                                 "type": "string",
                                 "enum": ["AUTO", "POWER", "HR", "PACE"],
                             },
+                            "session_focus": SESSION_FOCUS_SCHEMA,
+                            "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
                         },
                     },
                 }
