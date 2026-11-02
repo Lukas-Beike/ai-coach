@@ -87,6 +87,12 @@ class NormalizationTests(unittest.TestCase):
             weekly_plan.normalize(plan(mon={"max_minutes": 5}), strict=True)
         self.assertEqual(weekly_plan.normalize(plan(mon={"max_minutes": 5})), "")
 
+    def test_non_finite_numbers_are_a_validation_error(self) -> None:
+        text = '{"days":{"mon":{"max_minutes":1e999}}}'
+        with self.assertRaises(AppError):
+            weekly_plan.normalize(text, strict=True)
+        self.assertEqual(weekly_plan.normalize(text), "")
+
     def test_normalization_is_idempotent_and_profile_integrated(self) -> None:
         once = weekly_plan.normalize(plan(sun={"max_minutes": 240}), strict=True)
         self.assertEqual(weekly_plan.normalize(once, strict=True), once)
@@ -228,6 +234,47 @@ class PlanCheckTests(unittest.TestCase):
     def test_unknown_start_time_is_not_checked(self) -> None:
         text = plan(mon={"windows": ["06:00-08:00"]})
         self.assertEqual(codes(text, [unit("2026-11-02", "run")]), {})
+
+    def test_first_unit_late_in_the_week_still_checks_earlier_fixed_days(self) -> None:
+        text = plan(mon={"fixed": [{"sport": "run"}]})
+        found = codes(text, [unit("2026-11-04", "ride")])
+        self.assertEqual(found["fixed_session_missing"][0]["dates"], ["2026-11-02"])
+
+    def test_fixed_session_window_is_enforced(self) -> None:
+        text = plan(
+            tue={"fixed": [{"sport": "run", "window": "06:00-07:00"}]},
+            wed={"fixed": [{"sport": "run"}]},
+        )
+        late = codes(text, [unit("2026-11-03", "run", time="18:00")])
+        self.assertEqual(
+            late["outside_windows"][0]["evidence"]["windows"], ["06:00-07:00"]
+        )
+        on_time = codes(text, [unit("2026-11-03", "run", time="06:00", minutes=45)])
+        self.assertNotIn("outside_windows", on_time)
+        free = codes(text, [unit("2026-11-04", "run", time="18:00")])
+        self.assertNotIn("outside_windows", free)
+
+    def test_longer_overrun_is_a_new_note(self) -> None:
+        text = plan(mon={"max_minutes": 60})
+        before = plan_checks.check_plan(
+            today=MONDAY,
+            units=[unit("2026-11-02", "run", minutes=90)],
+            completed=[],
+            competitions=[],
+            weekly_plan=text,
+        )
+        after = plan_checks.check_plan(
+            today=MONDAY,
+            units=[unit("2026-11-02", "run", minutes=150)],
+            completed=[],
+            competitions=[],
+            weekly_plan=text,
+        )
+        self.assertEqual(plan_checks.new_findings(before, before), [])
+        self.assertEqual(
+            [item["code"] for item in plan_checks.new_findings(before, after)],
+            ["over_max_minutes"],
+        )
 
     def test_only_illness_blocks(self) -> None:
         self.assertEqual(plan_checks.BLOCKING_CODES, ("illness_hard",))

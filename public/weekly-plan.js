@@ -204,7 +204,7 @@ function weeklyDayEditor(day, form, rerender) {
   const box = document.createElement("input");
   box.type = "checkbox";
   box.checked = item.rest;
-  box.addEventListener("change", () => { item.rest = box.checked; changed(true); });
+  box.addEventListener("change", () => { item.rest = box.checked; if (item.rest) item.fixed = []; changed(true); });
   rest.append(box, " Ruhetag");
   const body = weeklyElement("div", "weekly-body");
   body.append(rest);
@@ -213,7 +213,7 @@ function weeklyDayEditor(day, form, rerender) {
     Object.assign(max, { min: 15, max: 600, step: 5, placeholder: "Max. min" });
     body.append(weeklyWindowEditor(item.windows, "Zeitfenster", changed), max);
   }
-  body.append(weeklyFixedEditor(item, changed));
+  if (!item.rest) body.append(weeklyFixedEditor(item, changed));
   details.append(summary, body);
   return details;
 }

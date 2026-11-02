@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal
 
 from backend.activities.workout_load import WorkoutEstimate
+from backend.canonical import planning_fields
 from backend.canonical.planning_fields import (
     SESSION_FOCUS,
     SESSION_FOCUS_KEYS,
@@ -29,27 +30,9 @@ FOCUS_KEY: Final = SESSION_FOCUS
 INTENSITY_KEY: Final = STRENGTH_INTENSITY
 FOCUS_KEYS: Final = SESSION_FOCUS_KEYS
 
-ENDURANCE_FOCI: Final = (
-    "recovery",
-    "easy",
-    "endurance",
-    "long",
-    "tempo",
-    "threshold",
-    "vo2max",
-    "anaerobic",
-    "race",
-    "test",
-)
-RIDE_FOCI: Final = (*ENDURANCE_FOCI[:6], "sweet_spot", *ENDURANCE_FOCI[6:])
-STRENGTH_FOCI: Final = (
-    "legs",
-    "upper",
-    "full_body",
-    "core",
-    "plyometrics",
-    "mobility",
-)
+ENDURANCE_FOCI: Final = planning_fields.ENDURANCE_FOCI
+RIDE_FOCI: Final = planning_fields.RIDE_FOCI
+STRENGTH_FOCI: Final = planning_fields.STRENGTH_FOCI
 STRENGTH_INTENSITIES: Final = ("light", "moderate", "heavy")
 ALL_FOCI: Final = (*RIDE_FOCI, *STRENGTH_FOCI)
 # Hard endurance sessions; a set focus decides hardness before any text rule.

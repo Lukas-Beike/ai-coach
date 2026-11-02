@@ -69,14 +69,15 @@ def _matches(fixed: Mapping[str, Any], unit: Mapping[str, Any]) -> bool:
 
 
 def _span(units: Sequence[Mapping[str, Any]], today: date) -> list[date]:
-    """Days from the first planned day (not before today) to the end of its last week."""
+    """Days of the weeks the plan touches, from its first week's start (not before today)."""
     days = sorted(day for day in (_date(_day(unit)) for unit in units) if day)
     days = [day for day in days if day >= today]
     if not days:
         return []
+    first = max(_week_start(days[0]), today)
     last = days[-1] + timedelta(days=6 - days[-1].weekday())
-    count = min((last - days[0]).days + 1, MAX_SPAN_DAYS)
-    return [days[0] + timedelta(days=offset) for offset in range(count)]
+    count = min((last - first).days + 1, MAX_SPAN_DAYS)
+    return [first + timedelta(days=offset) for offset in range(count)]
 
 
 def _week_start(day: date) -> date:
@@ -87,12 +88,12 @@ def _missing_fixed(
     week: Sequence[weekly_plan.EffectiveDay],
     units: Sequence[Mapping[str, Any]],
     today: date,
-) -> tuple[list[Draft], set[int]]:
+) -> tuple[list[Draft], dict[int, Mapping[str, Any]]]:
     """Notes for fixed sessions without a unit; also the ids of matched units."""
     by_day: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for unit in units:
         by_day[_day(unit)].append(unit)
-    matched: set[int] = set()
+    matched: dict[int, Mapping[str, Any]] = {}
     drafts: list[Draft] = []
     for day in _span(units, today):
         missing = _unmatched(week, day, by_day[day.isoformat()], matched)
@@ -105,7 +106,7 @@ def _unmatched(
     week: Sequence[weekly_plan.EffectiveDay],
     day: date,
     day_units: Sequence[Mapping[str, Any]],
-    matched: set[int],
+    matched: dict[int, Mapping[str, Any]],
 ) -> list[Mapping[str, Any]]:
     missing: list[Mapping[str, Any]] = []
     for fixed in week[day.weekday()].fixed_sessions:
@@ -120,7 +121,7 @@ def _unmatched(
         if unit is None:
             missing.append(fixed)
         else:
-            matched.add(id(unit))
+            matched[id(unit)] = fixed
     return missing
 
 
@@ -167,11 +168,26 @@ def _window_note(unit: Mapping[str, Any], windows: Sequence[str]) -> Draft | Non
     )
 
 
+def _unit_windows(
+    unit: Mapping[str, Any],
+    effective: weekly_plan.EffectiveDay,
+    matched: Mapping[int, Mapping[str, Any]],
+) -> Sequence[str]:
+    """Windows a unit must lie in: a fixed session's own window, else the day's.
+
+    A fixed session without a window and the built-in fallback have none.
+    """
+    fixed = matched.get(id(unit))
+    if fixed is not None:
+        return [fixed["window"]] if fixed.get("window") else []
+    return [] if effective.source == "fallback" else effective.windows
+
+
 def _day_notes(
     week: Sequence[weekly_plan.EffectiveDay],
     day: date,
     day_units: Sequence[Mapping[str, Any]],
-    matched: set[int],
+    matched: dict[int, Mapping[str, Any]],
 ) -> list[Draft]:
     effective = week[day.weekday()]
     if effective.rest_day:
@@ -183,14 +199,11 @@ def _day_notes(
                 {"day": effective.day},
             )
         ]
-    drafts: list[Draft] = []
-    if effective.source != "fallback":
-        drafts += [
-            note
-            for unit in day_units
-            if id(unit) not in matched
-            and (note := _window_note(unit, effective.windows))
-        ]
+    drafts: list[Draft] = [
+        note
+        for unit in day_units
+        if (note := _window_note(unit, _unit_windows(unit, effective, matched)))
+    ]
     total = round(sum(_minutes(unit) for unit in day_units))
     if effective.max_minutes is not None and total > effective.max_minutes:
         drafts.append(
@@ -206,7 +219,7 @@ def _day_notes(
 
 def check(plan: Any, units: Sequence[Mapping[str, Any]], today: date) -> list[Draft]:
     """Drafts for the future units; none when the weekly plan is empty."""
-    if not weekly_plan.normalize(plan):
+    if not str(plan or "").strip():
         return []
     week = weekly_plan.effective_week(plan)
     drafts, matched = _missing_fixed(week, units, today)

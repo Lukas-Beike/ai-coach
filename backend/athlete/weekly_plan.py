@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final
 
+from backend.canonical.planning_fields import ENDURANCE_FOCI, RIDE_FOCI, STRENGTH_FOCI
 from backend.errors import AppError
-from backend.planning.session_focus import ENDURANCE_FOCI, RIDE_FOCI, STRENGTH_FOCI
 
 DAYS: Final = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SPORTS: Final = ("run", "ride", "strength")
@@ -112,7 +112,7 @@ def _bounded(value: Any, limits: tuple[int, int], *, strict: bool) -> int | None
         return None
     try:
         number = int(value)
-    except TypeError, ValueError:
+    except TypeError, ValueError, OverflowError:
         number = limits[0] - 1
     if limits[0] <= number <= limits[1] and not isinstance(value, bool):
         return number

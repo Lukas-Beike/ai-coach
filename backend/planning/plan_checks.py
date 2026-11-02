@@ -515,6 +515,8 @@ def _risk(finding: Mapping[str, Any]) -> tuple[Any, ...]:
         return (max(evidence["deviating_bands"].values()),)
     if finding["code"] == "calendar_load":
         return (bool(evidence.get("overlap")), evidence.get("busy_minutes") or 0)
+    if finding["code"] == weekly_plan_checks.OVER_MAX:
+        return (evidence["planned_minutes"],)
     return ()
 
 
