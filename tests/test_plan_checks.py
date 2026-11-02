@@ -52,6 +52,12 @@ class PlanCheckRuleTests(unittest.TestCase):
         )
         self.assertEqual([], check([unit("a", "2026-11-05", "run", 66)], done))
 
+    def test_run_spike_counts_a_run_completed_today(self) -> None:
+        today = [run_done("2026-11-02", 60)]
+        self.assertEqual(
+            ["run_spike"], codes(check([unit("a", "2026-11-03", "run", 120)], today))
+        )
+
     def test_run_spike_needs_a_run_in_30_days(self) -> None:
         self.assertEqual([], check([unit("a", "2026-11-05", "run", 200)]))
         old = [run_done("2026-09-01", 60)]

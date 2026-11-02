@@ -143,7 +143,8 @@ def longest_completed_run_s(
         number(row.get("moving_duration_s")) or 0.0
         for row in completed
         if row.get("sport") == Sport.RUN.value
-        and first <= iso_date_prefix(row.get("started_at_local")) < today.isoformat()
+        # A run completed earlier today already counts.
+        and first <= iso_date_prefix(row.get("started_at_local")) <= today.isoformat()
     ]
     longest = max(durations, default=0.0)
     return longest or None
