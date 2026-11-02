@@ -9,11 +9,15 @@ The diary SHALL subtly color complete macro totals outside athlete-specific dail
 
 #### Scenario: Training-adjusted carbohydrate range
 - **WHEN** the day's training is known
-- **THEN** the base range is 3–5 g/kg below 90 minutes, 5–7 g/kg from 90 minutes, and 6–10 g/kg from 120 minutes; at least ten minutes in zone 4 or above raises it one range, capped at 6–10 g/kg.
+- **THEN** the base range is 3–5 g/kg below 90 minutes, 5–7 g/kg from 90 minutes, and 6–10 g/kg from 120 minutes; at least ten minutes in zone 4 or above within one session raises it one range, capped at 6–10 g/kg.
 
 #### Scenario: Planned and completed sessions
 - **WHEN** a completed activity is matched to a planned session
-- **THEN** its actual duration replaces the planned duration in the daily total without double counting.
+- **THEN** its actual duration replaces the planned duration on the activity's actual date without double counting.
+
+#### Scenario: Missed session
+- **WHEN** a planned session is marked missed
+- **THEN** it does not contribute training to the day's carbohydrate range.
 
 #### Scenario: Fat reference
 - **WHEN** complete fat and positive calorie totals are available
