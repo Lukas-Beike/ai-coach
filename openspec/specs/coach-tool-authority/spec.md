@@ -189,15 +189,19 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 
 #### Scenario: Checked tools and rules
 - **WHEN** `apply_training_patch`, `apply_training_changes`, `replace_training_plan`, `apply_workout_library_plan` or `commit_training_plan` writes planned units
-- **THEN** the resulting plan is checked for run_spike, back_to_back_hard, strength_hard_same_day, missing_taper and illness_hard.
+- **THEN** the resulting plan is checked for run_spike, back_to_back_hard, strength_hard_same_day, missing_taper, illness_hard and intensity_distribution.
 
 #### Scenario: Blocking violation
 - **WHEN** a Coach plan write would add an illness_hard finding
 - **THEN** the transaction is rolled back, the tool result is a failure with the findings, and the model may correct the plan and call again in the same turn.
 
 #### Scenario: Notes
-- **WHEN** a Coach plan write adds only run_spike, back_to_back_hard, strength_hard_same_day or missing_taper findings
+- **WHEN** a Coach plan write adds only run_spike, back_to_back_hard, strength_hard_same_day, missing_taper or intensity_distribution findings
 - **THEN** the write is saved and the result carries them as `plan_check_notes` with evidence strength; a run_spike is a notice up to 30 % and a warning beyond.
+
+#### Scenario: Intensity distribution
+- **WHEN** the planned run and ride time of a week (low/moderate/high from the workout steps, strength excluded, unknown time reported as uncovered, never as low) lies more than 5 percentage points outside the reference range of the profile's `training_model`
+- **THEN** a non-blocking `intensity_distribution` note with the shares, ranges and evidence is returned; weeks with less than 2 h or 60 % covered time are not judged, and the `planning_brief` carries the planned distribution.
 
 #### Scenario: Acknowledged deviation
 - **WHEN** the model resubmits with `accept_plan_findings` listing illness_hard and the write gate's classifier confirms that the athlete's current message, or a short confirmation of the Coach's question about exactly this, explicitly asks to train despite the illness
@@ -211,4 +215,4 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 - **WHEN** a successful Coach plan write produces notes
 - **THEN** its change receipt shows their dates, severity and evidence strength without provider text, and the Coach is instructed to justify rather than repeat or contradict them.
 
-Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`; `backend/coach/write_gate.py:check_write`; `tests/test_coach_write_gate.py:IllnessOverrideTests`.
+Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/planning/intensity_distribution.py:distribution_findings`; `tests/test_intensity_distribution.py`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`; `backend/coach/write_gate.py:check_write`; `tests/test_coach_write_gate.py:IllnessOverrideTests`.

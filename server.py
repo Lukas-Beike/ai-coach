@@ -262,6 +262,7 @@ from backend.planning.plan_guard_service import (
     read_progress,
     recent_illness,
 )
+from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -1700,6 +1701,11 @@ CHAT_PAGE_MAX = 100
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
     return PlanGuardService(
+        estimate_unit=PlannedUnitEstimator(
+            database_manager=database_manager,
+            observation_reader=lambda: CANONICAL_READ,
+            zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+        ),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
         completed_activities=lambda: read_completed(
             database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()

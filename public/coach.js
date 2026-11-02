@@ -1829,6 +1829,7 @@ function appendPlanNotes(node, planNotes) {
     strength_hard_same_day: ["Kraft und harte Einheit", "Begrenzte Evidenz"],
     missing_taper: ["Wettkampf-Taper", "Starke Evidenz; Schwelle lokal gewählt"],
     illness_hard: ["Belastung bei Krankheit", "Medizinische Vorsicht"],
+    intensity_distribution: ["Intensitätsverteilung der Woche", "Praxisbasierte Referenzbereiche"],
   };
   for (const note of Array.isArray(planNotes) ? planNotes : []) {
     const label = planNoteLabels[note?.code];

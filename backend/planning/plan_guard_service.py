@@ -8,7 +8,7 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
-from backend.planning import plan_checks
+from backend.planning import intensity_distribution, plan_checks
 
 BRIEF_WEEKS = 6
 BRIEF_SPORTS = ("run", "ride", "strength")
@@ -111,6 +111,7 @@ def build_planning_brief(
     competitions: Sequence[Mapping[str, Any]],
     training_model: str,
     today: date,
+    planned_weeks: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Compact deterministic brief for plan_week and plan_block turns."""
     weeks = [
@@ -136,6 +137,9 @@ def build_planning_brief(
             }
             for row in upcoming
         ],
+        "planned_distribution": intensity_distribution.brief_distribution(
+            training_model, planned_weeks, BRIEF_WEEKS
+        ),
         "plan_checks": plan_checks.RULE_SUMMARY,
     }
 
@@ -153,6 +157,7 @@ class PlanGuardService:
         progress: Callable[[], Mapping[str, Any]],
         training_model: Callable[[], str],
         today: Callable[[], date],
+        estimate_unit: intensity_distribution.Estimator,
     ) -> None:
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -161,6 +166,12 @@ class PlanGuardService:
         self._progress = progress
         self._training_model = training_model
         self._today = today
+        self._estimate_unit = estimate_unit
+
+    def _planned_weeks(
+        self, units: Sequence[Mapping[str, Any]], today: date
+    ) -> list[dict]:
+        return intensity_distribution.planned_weeks(units, self._estimate_unit, today)
 
     def _recent(self, today: date) -> list[Mapping[str, Any]]:
         first = (today - timedelta(days=HISTORY_DAYS)).isoformat()
@@ -172,13 +183,19 @@ class PlanGuardService:
 
     def findings(self) -> list[dict[str, Any]]:
         today = self._today()
-        return plan_checks.check_plan(
-            today=today,
-            units=self._planned_units(),
-            completed=self._recent(today),
-            competitions=self._competitions(),
-            illness=self._illness(),
-        )
+        units = self._planned_units()
+        return [
+            *plan_checks.check_plan(
+                today=today,
+                units=units,
+                completed=self._recent(today),
+                competitions=self._competitions(),
+                illness=self._illness(),
+            ),
+            *intensity_distribution.distribution_findings(
+                self._training_model(), self._planned_weeks(units, today)
+            ),
+        ]
 
     def verify(
         self, before: Sequence[Mapping[str, Any]], accepted: Sequence[str]
@@ -220,4 +237,5 @@ class PlanGuardService:
             competitions=self._competitions(),
             training_model=self._training_model(),
             today=today,
+            planned_weeks=self._planned_weeks(self._planned_units(), today),
         )
