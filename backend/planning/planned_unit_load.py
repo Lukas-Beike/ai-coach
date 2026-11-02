@@ -1,6 +1,7 @@
 """Intensity, 3-zone time and load of a planned unit, derived at read time."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
+from datetime import date
 from typing import Any
 
 from backend.activities.workout_load import (
@@ -8,7 +9,11 @@ from backend.activities.workout_load import (
     WorkoutEstimate,
     estimate_workout,
 )
+from backend.activities.zone_settings import ZoneSettings
+from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.canonical.domain_records import ZoneConfiguration
+from backend.canonical.records import Observation
 from backend.planning.sport import planned_sport_environment
 
 
@@ -29,3 +34,51 @@ def estimate_planned_unit(
         thresholds,
         fallback_duration_s=seconds,
     )
+
+
+def unit_thresholds(
+    unit: Mapping[str, Any],
+    sport_thresholds: Sequence[Observation],
+    zone_configurations: Sequence[ZoneConfiguration],
+) -> AthleteThresholds:
+    """Current thresholds and zone limits of a unit's sport, as the plan profiles use.
+
+    The threshold running speed is not read here, so absolute pace targets stay
+    unknown.
+    """
+    sport, environment = planned_sport_environment(unit)
+    try:
+        day = date.fromisoformat(
+            iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
+        )
+    except ValueError:
+        day = None
+    return AthleteThresholds(
+        zones=ZoneSettings.from_configurations(
+            zone_configurations,
+            sport,
+            environment,
+            day,
+            fallback=ZoneSettings.from_thresholds(sport_thresholds, sport, environment),
+        )
+    )
+
+
+class PlannedUnitEstimator:
+    """Estimate planned units with thresholds read once, on first use."""
+
+    def __init__(
+        self,
+        sport_thresholds: Callable[[], Sequence[Observation]],
+        zone_configurations: Callable[[], Sequence[ZoneConfiguration]],
+    ) -> None:
+        self._read_thresholds = sport_thresholds
+        self._read_configurations = zone_configurations
+        self._inputs: (
+            tuple[Sequence[Observation], Sequence[ZoneConfiguration]] | None
+        ) = None
+
+    def __call__(self, unit: Mapping[str, Any]) -> WorkoutEstimate:
+        if self._inputs is None:
+            self._inputs = (self._read_thresholds(), self._read_configurations())
+        return estimate_planned_unit(unit, unit_thresholds(unit, *self._inputs))

@@ -19,6 +19,8 @@ Rules (references are observational or practice-based, not individual advice):
   than 20 % less duration than the 14 days before them (completed activities
   before today, planned units from today). Only judged when the plan reaches
   into the final 14 days (Bosquet et al. 2007: cut volume 40-60 %).
+- intensity_distribution: computed in ``intensity_distribution`` and added by
+  the plan guard, not by ``check_plan``; see that module.
 - illness_hard: the latest check-in reports illness and a hard session or a
   session of 90 minutes or more is planned within the next 3 days.
 """
@@ -41,6 +43,7 @@ FINDING_CODES = (
     "strength_hard_same_day",
     "missing_taper",
     "illness_hard",
+    "intensity_distribution",
 )
 # Only the health rule blocks a write. The load rules are notes the Coach must
 # name: their evidence is observational or practice-based, or (taper) the
@@ -52,6 +55,7 @@ EVIDENCE = {
     "strength_hard_same_day": "limited, performance studies (Robineau 2016)",
     "missing_taper": "meta-analysis, strong (Bosquet 2007); 20 % floor is a local choice",
     "illness_hard": "medical caution",
+    "intensity_distribution": "practice-based reference ranges; pyramidal/polarized after Seiler 2010, Stoeggl & Sperlich 2014",
 }
 _RULE_TEXT = {
     "run_spike": "planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
@@ -59,6 +63,7 @@ _RULE_TEXT = {
     "strength_hard_same_day": "heavy strength and a hard run or ride less than 6 h apart.",
     "missing_taper": "final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
     "illness_hard": "hard or 90+ minute session within 3 days of a reported illness.",
+    "intensity_distribution": "planned low/moderate/high time of a week clearly outside the training model's reference range (unknown time is uncovered, strength excluded).",
 }
 RULE_SUMMARY = {
     code: f"{'Blocks' if code in BLOCKING_CODES else 'Note'}: {text}"

@@ -38,6 +38,7 @@ from backend.backup.assembly import (
 )
 from backend.backup.staging_sweep import remove_orphaned_staging_files
 from backend.calendar import local as calendar_local
+from backend.canonical.records import Observation
 from backend.coach import attachments as coach_attachments
 from backend.coach import context as coach_context_module
 from backend.coach import limits as coach_limits
@@ -229,7 +230,11 @@ from backend.nutrition.assembly import (
     NutritionRuntime,
 )
 from backend.nutrition.photo import NutritionPhotoExtractionService
-from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.canonical_current import read_zone_thresholds
+from backend.performance.canonical_inputs import (
+    CanonicalPerformanceSource,
+    resolve_reader,
+)
 from backend.performance.morning_battery_service import (
     MORNING_BODY_BATTERY_SERVICE_CACHE,
     MorningBatteryClock,
@@ -262,6 +267,7 @@ from backend.planning.plan_guard_service import (
     read_progress,
     recent_illness,
 )
+from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -1697,9 +1703,18 @@ CHAT_PAGE_MAX = 100
 )
 
 
+def _plan_zone_thresholds() -> tuple[Observation, ...]:
+    with database_manager().reader() as db:
+        return read_zone_thresholds(resolve_reader(CANONICAL_READ, db), db)
+
+
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
     return PlanGuardService(
+        estimate_unit=PlannedUnitEstimator(
+            sport_thresholds=_plan_zone_thresholds,
+            zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+        ),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
         completed_activities=lambda: read_completed(
             database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()

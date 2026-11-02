@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from backend.activities.workout_load import AthleteThresholds
 from backend.coach.context_selection import select_coach_context
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_failures import CoachStructuredToolFailureService
@@ -25,6 +26,7 @@ from backend.planning.plan_guard_service import (
     read_progress,
     recent_illness,
 )
+from backend.planning.planned_unit_load import estimate_planned_unit
 
 TODAY = date(2026, 11, 2)
 
@@ -131,6 +133,33 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.illness = ""
         self.run_tool("replace_training_plan", workouts=[{}])
         self.assertEqual(["replace_training_plan"], self.published)
+
+    def test_distribution_note_in_write_result(self) -> None:
+        self.illness = ""
+        self.guard = PlanGuardService(
+            planned_units=lambda: list(self.units),
+            completed_activities=list,
+            competitions=list,
+            illness=lambda: "",
+            progress=lambda: {"week_list": []},
+            training_model=lambda: "polarized",
+            today=lambda: TODAY,
+            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+        )
+        self.write_units = [
+            {
+                "local_id": "r",
+                "date": "2026-11-04",
+                "sport": "Ride",
+                "description": "- 240m Z2\n- 120m Z3\n- 20m Z6\n",
+            }
+        ]
+        result = self.run_tool("replace_training_plan", workouts=[{}])
+        self.assertEqual(
+            ["intensity_distribution"],
+            [note["code"] for note in result["plan_check_notes"]],
+        )
+        self.assertFalse(result["plan_check_notes"][0]["blocking"])
 
     def test_load_findings_save_with_notes(self) -> None:
         self.illness = ""
