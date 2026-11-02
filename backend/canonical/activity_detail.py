@@ -141,7 +141,9 @@ class ActivityStreamSet:
         if time is None:
             raise ValueError("channels must include time_s")
         if not 1 <= len(time) <= MAX_STREAM_POINTS:
-            raise ValueError(f"time_s must have between 1 and {MAX_STREAM_POINTS} points")
+            raise ValueError(
+                f"time_s must have between 1 and {MAX_STREAM_POINTS} points"
+            )
         if any(point is None for point in time):
             raise ValueError("time_s must not contain gaps")
         axis = [point for point in time if point is not None]
@@ -153,7 +155,9 @@ class ActivityStreamSet:
             if len(values) != len(time):
                 raise ValueError(f"{channel.value} must have as many points as time_s")
         if len(frozen) < 2:
-            raise ValueError("channels must include at least one channel besides time_s")
+            raise ValueError(
+                "channels must include at least one channel besides time_s"
+            )
         object.__setattr__(self, "channels", MappingProxyType(frozen))
 
 

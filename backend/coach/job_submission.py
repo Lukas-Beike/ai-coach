@@ -15,6 +15,7 @@ from backend.coach.attachments import (
 )
 from backend.coach.authorization import coach_execution_scope, coach_session_key
 from backend.coach.constants import AI_PROVIDER
+from backend.coach.playbooks import REQUEST_KINDS
 from backend.coach.service import command_receipt
 from backend.coach.streams import ChatStreamRegistry
 from backend.db.manager import DatabaseManager
@@ -189,7 +190,7 @@ class CoachJobSubmissionService:
         message = str(message or "").strip()
         client_turn_id = str(client_turn_id or "").strip()
         request_kind = str(request_kind or "").strip() or None
-        if request_kind not in {None, "morning_checkin"}:
+        if request_kind not in {None, "morning_checkin", *REQUEST_KINDS}:
             raise AppError(
                 400, "Unbekannte Coach-Schnellaktion.", reason="invalid_request_kind"
             )

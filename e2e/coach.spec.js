@@ -287,13 +287,11 @@ test.describe("critical browser states", { tag: "@responsive" }, () => {
         const chips = document.querySelector("#quickMessageTemplates");
         return {
           composerAboveNavigation: composer.bottom <= navigation.top - 8,
-          chipsOverflow: chips.scrollWidth > chips.clientWidth,
-          overflowCue: getComputedStyle(chips, "::after").content,
+          chipsFit: chips.scrollWidth <= chips.clientWidth,
         };
       });
       expect(mobileDock.composerAboveNavigation, "composer stays above fixed navigation").toBe(true);
-      expect(mobileDock.chipsOverflow, "quick-start chips are horizontally scrollable").toBe(true);
-      expect(mobileDock.overflowCue).toBe('"›"');
+      expect(mobileDock.chipsFit, "quick-start buttons fit without horizontal scrolling").toBe(true);
       // Add the class and measure in one task: a pending viewport-layout frame
       // would otherwise remove it again, since the input is not focused.
       const keyboardDock = await page.evaluate(() => {

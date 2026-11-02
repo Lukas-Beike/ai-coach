@@ -36,7 +36,7 @@ from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V17
 
 FIXTURES = Path(__file__).with_name("fixtures")
 RELEASED = {
-    version: FIXTURES / f"schema_v{version}.sql.txt" for version in range(9, 18)
+    version: FIXTURES / f"schema_v{version}.sql.txt" for version in range(16, 18)
 }
 V17_FIXTURE = RELEASED[17]
 SESSION = "act_feedback"
@@ -121,14 +121,14 @@ class FeedbackRatingTimeMigrationTests(unittest.TestCase):
                 self.assertEqual(columns[-2:], ["session_id", "session_rpe_rated_at"])
 
     def test_failure_after_the_step_rolls_back_to_the_unchanged_release(self):
-        for version in (17, 9):
+        for version in (17, 16):
             with self.subTest(version=version):
                 db = connect()
                 self.addCleanup(db.close)
                 if version == 17:
                     populated_feedback_database(db)
                 else:
-                    populated_power_curve_database(db, RELEASED[9])
+                    populated_power_curve_database(db, RELEASED[16])
                 before = list(db.iterdump())
 
                 def failing_step(connection):

@@ -7,7 +7,11 @@ from datetime import date
 from typing import Any
 
 from backend.athlete.profile import ProfileService
-from backend.coach.context import bounded_coach_context_value, coach_context_json_size
+from backend.coach.context import (
+    bounded_coach_context_value,
+    coach_context_json_size,
+    coach_sleep_timing_projection,
+)
 from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.sync.garmin import GarminPayloadService
@@ -44,34 +48,16 @@ class CoachActivityReadToolService:
         if name == "get_training_report":
             if self._report_services is None:
                 raise AppError(503, "Trainingsberichte sind nicht verfügbar.")
-            sections = arguments.get("sections", ["report"])
-            allowed = {
-                "report",
-                "endurance",
-                "power_profiles",
-                "tag_impact",
-                "season",
-                "comparisons",
-                "body_history",
-                "sleep_timing_variability",
-            }
-            if (
-                not isinstance(sections, list)
-                or not 1 <= len(sections) <= 8
-                or any(
-                    not isinstance(section, str) or section not in allowed
-                    for section in sections
-                )
-            ):
-                raise AppError(400, "Unbekannter Analysebereich.")
+            sections = _report_sections(arguments)
             readers = {
+                "progress": lambda: self._report_services.report.progress(
+                    arguments, self._report_services.timezone()
+                ),
                 "report": lambda: self._report_services.report.read(
                     arguments, self._report_services.timezone()
                 ),
                 "endurance": self._report_services.records.endurance,
-                "power_profiles": lambda: self._report_services.profiles.power_profiles(
-                    self._report_services.records.observations()
-                ),
+                "power_profiles": self._report_services.profiles.power_profiles,
                 "tag_impact": lambda: self._report_services.derived.impact(
                     self._report_services.timezone()
                 ),
@@ -80,7 +66,11 @@ class CoachActivityReadToolService:
                 ),
                 "comparisons": self._report_services.records.comparisons,
                 "body_history": self._report_services.derived.body_history,
-                "sleep_timing_variability": self._report_services.derived.sleep_timing_variability,
+                # The Coach context's summary plus each series' last 14 nights.
+                "sleep_timing_variability": lambda: coach_sleep_timing_projection(
+                    self._report_services.derived.sleep_timing_variability(),
+                    recent_nights=True,
+                ),
             }
             payload = {
                 section: readers[section]() for section in dict.fromkeys(sections)
@@ -129,3 +119,35 @@ class CoachActivityReadToolService:
             return max(1, min(int(arguments.get(key, default)), maximum))
         except (TypeError, ValueError) as exc:
             raise AppError(400, error, reason="invalid_list_request") from exc
+
+
+def _report_sections(arguments: dict[str, Any]) -> list[str]:
+    """Validated report sections; progress and its long windows stand alone."""
+    days = arguments.get("days")
+    long_window = isinstance(days, int) and days in {42, 84}
+    sections = arguments.get("sections", ["progress"] if long_window else ["report"])
+    allowed = {
+        "progress",
+        "report",
+        "endurance",
+        "power_profiles",
+        "tag_impact",
+        "season",
+        "comparisons",
+        "body_history",
+        "sleep_timing_variability",
+    }
+    if (
+        not isinstance(sections, list)
+        or not 1 <= len(sections) <= 9
+        or any(
+            not isinstance(section, str) or section not in allowed
+            for section in sections
+        )
+    ):
+        raise AppError(400, "Unbekannter Analysebereich.")
+    # progress uses whole ISO weeks, so it never shares a call with
+    # sections that read the requested window as given.
+    if (long_window or "progress" in sections) and sections != ["progress"]:
+        raise AppError(400, "progress und 42 oder 84 Tage nur allein abrufbar.")
+    return sections

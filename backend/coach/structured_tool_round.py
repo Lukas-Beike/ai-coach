@@ -83,6 +83,7 @@ class StructuredCoachRoundState:
     write_gate: CoachTurnWriteGate | None = None
     # Turn's initial request profile (as coach_request_sizes); reload telemetry only.
     context_profile: str = ""
+    request_kind: str | None = None
     # Set when the model still requested tools after the last allowed round.
     budget_exhausted: bool = False
 
@@ -335,12 +336,14 @@ class CoachStructuredToolRoundService:
                         state.attachments or state.request_payload.get("conversation")
                     ),
                     has_receipts=True,
+                    request_kind=state.request_kind,
                 ),
                 local_date=state.context.get("local_date", ""),
             ),
             allow_mutations=state.allow_mutations,
             attachment_summary=LOCAL_ATTACHMENT_SUMMARY_NOTICE
             in state.model_instructions,
+            request_kind=state.request_kind,
         )
 
     def _update_plan_scope(

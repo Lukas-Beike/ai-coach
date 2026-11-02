@@ -38,6 +38,11 @@ NON_SOURCE_DIRECTORIES = {
 COMMAND_LINE_PATH_BUDGET = 30000
 
 
+def tool_command(tool: str) -> list[str]:
+    """Run the tool from this interpreter, where worktree preparation installs it."""
+    return [sys.executable, "-m", tool]
+
+
 def path_batches(files: list[str]) -> list[list[str]]:
     batches: list[list[str]] = [[]]
     size = 0
@@ -69,6 +74,10 @@ def source_files(root: Path) -> list[str]:
     return sorted(files)
 
 
+def tool_name(command: list[str]) -> str:
+    return command[2] if command[1:2] == ["-m"] else command[0]
+
+
 def run(command: list[str], root: Path, allowed: tuple[int, ...] = (0, 1)) -> str:
     result = subprocess.run(
         command, cwd=root, text=True, capture_output=True, check=False
@@ -76,9 +85,11 @@ def run(command: list[str], root: Path, allowed: tuple[int, ...] = (0, 1)) -> st
     if result.returncode not in allowed:
         detail = (result.stderr or result.stdout).strip().splitlines()
         suffix = f": {detail[-1]}" if detail else ""
-        raise RuntimeError(f"{command[0]} failed with exit {result.returncode}{suffix}")
+        raise RuntimeError(
+            f"{tool_name(command)} failed with exit {result.returncode}{suffix}"
+        )
     if result.returncode == 1 and not result.stdout.strip():
-        raise RuntimeError(f"{command[0]} failed without diagnostic output")
+        raise RuntimeError(f"{tool_name(command)} failed without diagnostic output")
     return result.stdout
 
 
@@ -103,7 +114,7 @@ def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
         raise RuntimeError("No Python source files discovered")
     versions = {}
     for tool in TOOLS:
-        output = run([tool, "--version"], root, (0,))
+        output = run([*tool_command(tool), "--version"], root, (0,))
         match = re.search(r"\b\d+\.\d+\.\d+\b", output)
         if not match:
             raise RuntimeError(f"Cannot identify {tool} version")
@@ -113,7 +124,7 @@ def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
     for batch in path_batches(files):
         ruff_output = run(
             [
-                "ruff",
+                *tool_command("ruff"),
                 "check",
                 "--no-cache",
                 "--config",
@@ -131,7 +142,7 @@ def collect(root: Path) -> tuple[dict[str, str], list[dict]]:
         file_list.write_text("\n".join(files) + "\n", encoding="utf-8")
         mypy_output = run(
             [
-                "mypy",
+                *tool_command("mypy"),
                 "--config-file",
                 "pyproject.toml",
                 "--no-incremental",

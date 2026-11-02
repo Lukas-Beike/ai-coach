@@ -421,7 +421,7 @@ class ServerFrontendTests(ServerTestCase):
             coach,
         )
         self.assertNotIn("chat-composer-hidden", app + styles)
-        self.assertIn(".quick-message-templates::after", styles)
+        self.assertNotIn(".quick-message-templates::after", styles)
 
     def test_message_actions_are_compact_icon_buttons_with_accessible_names(self):
         root = Path(__file__).resolve().parents[1]

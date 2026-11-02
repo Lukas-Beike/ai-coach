@@ -208,44 +208,11 @@ _SUMMARY_FINGERPRINT = (
     "mapping: summary_fingerprint hashes the stored provider activity summary, "
     "excluding the later-added zone-time keys, to detect stale details"
 )
-_PLANNING_RECORDS = (
-    "planning-records: local planned units, library entries and frozen target "
-    "snapshots still store the provider training-load, intensity and FTP keys "
-    "(start and duration moved in #1507)"
-)
 # repository-relative path -> (reason, field-name modules it may still import).
 # A new module in an allowlisted file fails the guard as well.
 _FIELD_MODULE_OWNERS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "backend/activities/detail_store.py": (
         _SUMMARY_FINGERPRINT,
-        ("intervals_performance_fields",),
-    ),
-    "backend/activities/matching.py": (
-        _PLANNING_RECORDS,
-        ("intervals_performance_fields",),
-    ),
-    "backend/coach/context.py": (
-        _PLANNING_RECORDS,
-        ("intervals_performance_fields",),
-    ),
-    "backend/performance/training_report.py": (
-        _PLANNING_RECORDS,
-        ("intervals_performance_fields",),
-    ),
-    "backend/performance/session_analysis.py": (
-        _PLANNING_RECORDS,
-        ("intervals_performance_fields",),
-    ),
-    "backend/planning/library.py": (
-        _PLANNING_RECORDS,
-        ("intervals_performance_fields",),
-    ),
-    "backend/planning/season_preparation.py": (
-        _PLANNING_RECORDS,
-        ("intervals_performance_fields",),
-    ),
-    "backend/planning/target_snapshot.py": (
-        _PLANNING_RECORDS,
         ("intervals_performance_fields",),
     ),
 }

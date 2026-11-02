@@ -28,7 +28,7 @@ SUMMARY: dict[str, Any] = {
     "environment": "outdoor",
     "moving_duration_s": 3500.0,
 }
-DETAIL = {"icu_ftp": 250}
+DETAIL = {"ftp": 250}
 
 
 class FreezeTargetsTests(unittest.TestCase):

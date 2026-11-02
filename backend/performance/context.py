@@ -114,14 +114,18 @@ def _refresh_status(canonical: CanonicalPerformanceInputs) -> dict[str, str]:
     return {"status": REFRESH_STATUS} if canonical.activities_need_refresh else {}
 
 
-def _pending_context(profile: dict[str, Any], today: date) -> dict[str, Any]:
+def _pending_context(
+    profile: dict[str, Any], today: date, *, failed: bool = False
+) -> dict[str, Any]:
     """The context while the canonical source serves nothing yet: no values at all."""
     return {
         **_unavailable_context(
             NO_GARMIN_SYNC_STATUS, profile, today, EMPTY_PERFORMANCE_INPUTS
         ),
         "reason": REASON_CANONICAL_PENDING,
-        "status": PENDING_STATUS,
+        "status": "Datenvorbereitung fehlgeschlagen; erneuter Versuch folgt"
+        if failed
+        else PENDING_STATUS,
     }
 
 
@@ -175,7 +179,7 @@ def current_performance_context(
     source serves nothing yet.
     """
     if canonical.pending:
-        return _pending_context(profile, today)
+        return _pending_context(profile, today, failed=canonical.backfill_failed)
     if canonical is EMPTY_PERFORMANCE_INPUTS or not _has_provider_values(canonical):
         return _unavailable_context(garmin, profile, today, canonical)
 

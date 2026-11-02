@@ -41,7 +41,7 @@ INTERVALS = ProviderId.INTERVALS
 GARMIN = ProviderId.GARMIN
 TARGETS = {
     "steps": [{"kind": "power", "target": "100%", "duration": 600}] * 3,
-    "basis": {"icu_ftp": 200},
+    "basis": {"ftp": 200},
 }
 WORK_LAPS = tuple(
     ActivityLap(index=index, kind=LapKind.WORK, start_offset_s=start, end_offset_s=end)

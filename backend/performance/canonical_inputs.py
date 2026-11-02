@@ -106,6 +106,7 @@ class CanonicalPerformanceInputs:
     body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
     power_curve: PowerCurve = EMPTY_POWER_CURVE
     pending: bool = False
+    backfill_failed: bool = False
     activities_need_refresh: bool = False
     intervals_synced_at: str | None = None
 
@@ -188,6 +189,8 @@ def _read_state(
         return inputs
     status = source.serving()
     if not status.serves_tables(db):
+        if status.backfill_failed(db):
+            return _changed(PENDING_PERFORMANCE_INPUTS, backfill_failed=True)
         return PENDING_PERFORMANCE_INPUTS
     if status.activities_need_refresh(db):
         return _changed(

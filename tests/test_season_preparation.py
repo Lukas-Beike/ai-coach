@@ -141,7 +141,7 @@ class SeasonPreparationTests(unittest.TestCase):
                 {
                     "id": "local",
                     "starts_at_local": "2026-10-03",
-                    "icu_training_load": 100,
+                    "planned_load": 100,
                 }
             ]
         }
@@ -216,7 +216,7 @@ class SeasonPreparationTests(unittest.TestCase):
             "training_calendar": [
                 {
                     "date": "2026-10-02",
-                    "icu_training_load": 50,
+                    "planned_load": 50,
                     "compliance": {"actual_activity": activity},
                 }
             ]
@@ -417,7 +417,7 @@ class SeasonPreparationTests(unittest.TestCase):
                     "name": "Tempo",
                     "starts_at_local": "2026-10-03T08:00:00",
                     "planned_duration_s": 3600,
-                    "icu_intensity": 0.85,
+                    "planned_intensity": 0.85,
                 }
             ]
         }
@@ -443,7 +443,7 @@ class SeasonPreparationTests(unittest.TestCase):
                 {
                     "starts_at_local": "2026-10-03T08:00:00",
                     "planned_duration_s": 3600,
-                    "icu_intensity": 85,
+                    "planned_intensity": 85,
                 }
             ]
         }
@@ -456,8 +456,8 @@ class SeasonPreparationTests(unittest.TestCase):
                 {
                     "starts_at_local": "2026-10-03T08:00:00",
                     "planned_duration_s": 3600,
-                    "icu_intensity": 0.85,
-                    "icu_training_load": 50,
+                    "planned_intensity": 0.85,
+                    "planned_load": 50,
                 }
             ]
         }
@@ -474,13 +474,13 @@ class SeasonPreparationTests(unittest.TestCase):
                     "date": "2026-10-04",
                     "name": "Bad intensity",
                     "planned_duration_s": 3600,
-                    "icu_intensity": 250,
+                    "planned_intensity": 250,
                 },
                 {
                     "date": "2026-10-04",
                     "name": "Estimable",
                     "planned_duration_s": 1800,
-                    "icu_intensity": 0.7,
+                    "planned_intensity": 0.7,
                 },
             ]
         }
@@ -503,7 +503,7 @@ class SeasonPreparationTests(unittest.TestCase):
                 {
                     "id": "local",
                     "starts_at_local": "2026-10-03",
-                    "icu_training_load": 100,
+                    "planned_load": 100,
                 }
             ]
         }

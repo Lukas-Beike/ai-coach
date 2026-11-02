@@ -113,8 +113,8 @@ class NeutralPublicMetricsTests(unittest.TestCase):
         entries = [
             {
                 "name": "Plan",
-                "icu_training_load": 25,
-                "icu_intensity": 0.7,
+                "planned_load": 25,
+                "planned_intensity": 0.7,
                 "compliance": {
                     "status": "completed",
                     "actual_activity": {"icu_training_load": 34, "icu_rpe": 5},

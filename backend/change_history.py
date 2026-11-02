@@ -63,6 +63,7 @@ PROFILE_FIELDS = {
     "training_preferences_swimming",
     "training_preferences_strength",
     "training_preferences_mobility",
+    "training_model",
     "coaching_style",
     "timezone",
     "weather_location",
@@ -240,6 +241,7 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
             "training_preferences_strength",
             "training_preferences_mobility",
         ),
+        ("training_model",),
     ),
     "planned_unit": (("starts_at_local",),),
 }

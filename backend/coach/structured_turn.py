@@ -127,12 +127,14 @@ class CoachStructuredTurnService:
                 if tool["name"] in self._deps.read_only_tools
             ]
         )
+        request_kind = receipt.get("request_kind")
         context_profile = request_context_selection(
             message,
             context,
             command_receipts=command_receipts,
             attachments=attachments,
             has_prior_openai_attachments=has_prior_openai_attachments,
+            request_kind=request_kind,
         ).name
         model_instructions, request_payload = self._deps.payload.build(
             message=message,
@@ -146,6 +148,7 @@ class CoachStructuredTurnService:
             attachments=attachments,
             retain_openai_attachment_context=retain_openai_attachment_context,
             has_prior_openai_attachments=has_prior_openai_attachments,
+            request_kind=request_kind,
         )
         recovery_state = {"conversation_recovered": False}
         resume_id = self._resume_id(
@@ -181,6 +184,7 @@ class CoachStructuredTurnService:
             "background_owned": background_owned,
             "response": response,
             "context_profile": context_profile,
+            "request_kind": request_kind,
             "conversation_id": conversation_id,
         }
 
@@ -233,6 +237,7 @@ class CoachStructuredTurnService:
             on_text_delta=on_text_delta,
             recovery_state=state["recovery_state"],
             context_profile=state["context_profile"],
+            request_kind=state["request_kind"],
         )
         response, rounds, question, cancelled, _ = self._deps.rounds.run(
             state["response"],

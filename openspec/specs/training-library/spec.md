@@ -192,7 +192,6 @@ The system SHALL bind explicit plan pushes to concrete local IDs/current hashes,
 
 Evidence: `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._prepare_plan_sync`; `backend/coach/proposal_creation.py:_approved_plan_sync_arguments`; `backend/sync/plan_selection.py:StructuredPlanSyncService`; `backend/sync/plan_repair.py:PlanRepairManifestService`; `backend/sync/plan_commands.py:PlanPushCommandService.enqueue`; `backend/coach/sync_tools.py:CoachSyncToolService._resolve_conflict`; `tests/test_coach_tool_preparation.py:test_created_plan_sync_projects_exact_ids_and_scopes`, `tests/test_coach_tool_preparation.py:test_all_pending_captures_a_concrete_manifest_for_approval`, `tests/test_coach_tool_preparation.py:test_selected_sync_requires_entries_unless_repairing`; `tests/test_coach_sync_tools.py:test_plan_repair_checks_object_scopes_before_mutation`, `tests/test_coach_sync_tools.py:test_retry_requires_matching_provider_and_remote_write_intent`; `tests/test_coach_tool_coverage.py:test_all_pending_approval_does_not_expand_to_units_added_after_preview`. Intervals planned-calendar execution and recovery are specified in TL11-TL15; no real remote sync was exercised here. The local-choice tool's catalog/write-gate mismatch is recorded separately rather than promised as universally available through chat.
 
-
 ### Requirement: TL11 Planned-calendar upsert identity and in-flight local changes
 The system SHALL use stable Intervals planned-event identity for explicit dated-unit pushes, validate the returned event before marking the unchanged local unit synced, and preserve newer local content and recoverable remote identity when the upload races with local changes or result validation fails.
 
@@ -326,3 +325,21 @@ Local planning records (planned units, workout-library entries, competitions, st
 - **THEN** the competition is stored with those values.
 
 Evidence: `backend/providers/intervals_workouts.py::planning_fields_from_intervals`, `backend/providers/intervals_workouts.py::intervals_fields_from_planning`, `backend/providers/intervals_workouts.py::intervals_event_payload`; `backend/sync/intervals_workout_export.py::IntervalsWorkoutExport`; `backend/sync/competitions.py::CompetitionSyncService.sync`; `backend/sync/planned_units.py`; `backend/sync/reconcile.py`. Tests: `tests/test_workout_export_parity.py::test_export_port_payload_matches_golden_for_every_payload_case`; `tests/test_workout_export_intervals.py::test_library_workouts_cross_the_adapter_with_planning_field_names`; `tests/test_workout_export_intervals.py::test_library_readback_checks_the_remote_duration_under_its_wire_name`; `tests/test_planning_competitions.py::test_event_payload_fallbacks_limits_and_input_immutability`; `tests/test_sync_adaptive.py::test_sync_sends_the_illness_start_under_the_intervals_wire_name`; `tests/test_server_coach.py`.
+
+### Requirement: Provider-neutral planning metrics
+
+Local planning records SHALL use provider-neutral names for planned load, intensity and frozen target FTP. The Intervals.icu adapter SHALL translate its wire fields at the provider boundary.
+
+#### Scenario: Provider workout is imported
+- **WHEN** a provider workout has planned load or intensity
+- **THEN** its local record retains those values under provider-neutral names.
+
+#### Scenario: Workout is exported
+- **WHEN** a local workout is explicitly synchronized to Intervals.icu
+- **THEN** the adapter emits the corresponding provider fields with unchanged values.
+
+#### Scenario: Frozen target basis
+- **WHEN** an activity detail freezes a local workout target
+- **THEN** the stored FTP basis uses a provider-neutral name and retains its value.
+
+Evidence: `backend/planning/library.py`, `backend/planning/target_snapshot.py`, `backend/providers/intervals_workouts.py`; `tests/test_workout_export_intervals.py`, `tests/test_target_snapshot_summaries.py`, `tests/test_db_planning_metrics_migration.py`.

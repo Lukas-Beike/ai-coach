@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.planning.plan_checks import BLOCKING_CODES
+
+ACCEPT_PLAN_FINDINGS: dict[str, Any] = {
+    "type": "array",
+    "maxItems": len(BLOCKING_CODES),
+    "uniqueItems": True,
+    "items": {"type": "string", "enum": list(BLOCKING_CODES)},
+    "description": "The server checks the resulting plan. A blocking finding (illness_hard) saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. Other findings save the plan and come back as plan_check_notes. Otherwise send an empty list.",
+}
+
 
 def _canonical_coach_tool(
     name: str,
@@ -203,6 +213,7 @@ def build_structured_tool_schemas(
                             "weather",
                             "daily_planning_context",
                             "nutrition_products",
+                            "planning_brief",
                             "source_policy",
                         ],
                     },
@@ -273,10 +284,10 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "get_training_report",
-            "Read selected deterministic local analyses shown in the Analysis UI. Default section report includes coverage, previous period, recorded sensor zones, local plan execution and the session-RPE load (AU) per session, day, week and sport with its rated-session coverage and RPE sources. Select endurance, power_profiles, tag_impact, season, comparisons, body_history (weight, body fat, W/kg history) or sleep_timing_variability only when relevant. sleep_timing_variability reports sleep onset and wake clock-time deviations from the athlete's own earlier nights; it is not the Sleep Regularity Index. Describe observed values; make no diagnosis and derive no training clearance or change from an isolated deviation. Does not refresh providers, archive reports or change planning. Treat incomplete periods and missing loads as unknown; do not infer rest from absent records.",
+            "Read selected deterministic local analyses shown in the Analysis UI. Default section report includes coverage, previous period, recorded sensor zones, local plan execution and the session-RPE load (AU) per session, day, week and sport with its rated-session coverage and RPE sources. Select progress alone for per-ISO-week trends of run, ride and strength (sessions, duration, training load, session-RPE AU, 3-zone low/moderate/high time approximated from recorded power or HR zones, local plan compliance, coverage) plus CTL, ride eFTP and ride power and run speed mean-max change over the window; it uses whole Monday-based weeks, days 7, 28, 42 or 84 (default 42); 42 and 84 are only valid for progress. Select endurance, power_profiles, tag_impact, season, comparisons, body_history (weight, body fat, W/kg history) or sleep_timing_variability only when relevant. sleep_timing_variability reports per source the median sleep onset and wake clock-time deviations from the athlete's own earlier nights and each of the last 14 nights (points_14); it is not the Sleep Regularity Index. power_profiles includes critical_power, an experimental Critical Power/Speed model estimate with its efforts and sensitivity; never present CP or CS as FTP, threshold or zone boundary, nor W′ or D′ as measured capacity. Describe observed values; make no diagnosis and derive no training clearance or change from an isolated deviation. Does not refresh providers, archive reports or change planning. Treat incomplete periods and missing loads as unknown; do not infer rest from absent records.",
             {
                 "start": {"type": "string", "format": "date"},
-                "days": {"type": "integer", "enum": [7, 28]},
+                "days": {"type": "integer", "enum": [7, 28, 42, 84]},
                 "sport": {
                     "type": "string",
                     "maxLength": 40,
@@ -285,12 +296,13 @@ def build_structured_tool_schemas(
                 "sections": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 8,
+                    "maxItems": 9,
                     "uniqueItems": True,
                     "items": {
                         "type": "string",
                         "enum": [
                             "report",
+                            "progress",
                             "endurance",
                             "power_profiles",
                             "tag_impact",
@@ -393,7 +405,10 @@ def build_structured_tool_schemas(
         _canonical_coach_tool(
             "commit_training_plan",
             "Commit a referenced local training-plan artifact atomically.",
-            {"artifact_id": {"type": "string"}},
+            {
+                "artifact_id": {"type": "string"},
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
+            },
         ),
         _canonical_coach_tool(
             "replace_training_plan",
@@ -452,6 +467,7 @@ def build_structured_tool_schemas(
                     },
                 },
                 "expected_revision": {"type": "integer"},
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
             },
             strict=True,
         ),
@@ -459,6 +475,7 @@ def build_structured_tool_schemas(
             "apply_training_changes",
             "Apply an explicitly authorized set of local training changes atomically. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every change.",
             {
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
                 "changes": {
                     "type": "array",
                     "minItems": 1,
@@ -573,7 +590,8 @@ def build_structured_tool_schemas(
                             "date": {"type": "string", "format": "date"},
                         },
                     },
-                }
+                },
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
             },
         ),
         _canonical_coach_tool(

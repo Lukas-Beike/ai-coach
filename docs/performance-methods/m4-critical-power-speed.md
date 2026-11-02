@@ -1,12 +1,12 @@
 # M4 — Critical Power and Critical Speed
 
 - **Card:** M4
-- **Card version:** 1
-- **Method ID:** critical-power-speed-v1 (planned, #1431)
-- **Status:** not implemented; needs the local mean-maximal curve (#1430)
+- **Card version:** 2
+- **Method ID:** critical-power-speed v1 (`backend/performance/critical_power.py`)
+- **Status:** implemented as an experimental model estimate (#1431) on the local mean-maximal curve (#1430, `mean-max-curve` v1)
 - **Classification:** model estimate
 - **Literature checked:** 2026-10-24
-- **Review:** blocked
+- **Review:** released 2026-11-02 (athlete)
 
 ## Target construct
 
@@ -53,11 +53,21 @@ recreational marathon runners, no lab reference.
   does not ask the athlete to do maximal tests.
 - Running: a running-specific protocol from R5, with fixed durations or
   distances of 3 to 12 min whose durations differ by at least 7 min, trials
-  longest to shortest or randomised. Recovery comes from the selected original
-  running study, not from R5. CP protocols are not transferred to running.
+  longest to shortest or randomised. Within 3 to 12 min the 7-min rule can
+  only apply to the shortest and longest trial; 3/7/12 min spans 9 min.
+  Recovery is the 30-min product assumption in the numeric rules, released by
+  the athlete; R5's included studies report 30-60 min. CP protocols are not
+  transferred to running.
 - Inputs need real power for cycling and reliable time and distance for
   running. Record test intent, date, recovery, sensor, indoor/outdoor and
   conditions, or mark them unknown.
+- Implemented selection (v1): the best 180, 420 and 720 s of the last 28 days
+  from the mean-maximal curve, the training-file protocol of R4. Cycling is
+  fitted separately for outdoor and indoor sessions; running uses outdoor runs
+  only. Longest duration first, each pick is the best candidate from another
+  session or at least 30 min after the end of every earlier pick of the same
+  session. Test intent, sensor and calibration are reported as unknown; nothing
+  is persisted and there is no schema change.
 
 ## Measurement error and uncertainty
 
@@ -80,8 +90,8 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 ## Deviations from the studied procedure
 
 - Efforts from everyday files are not verified as maximal, unlike lab trials.
-- The current best-effort curve (`original-stream-integral-v1`) has no 180,
-  420 or 720 s windows; existing points are not CP test data (#1430).
+- The best-effort curve (`mean-max-curve` v1) has 180, 420 and 720 s windows,
+  but its points are best values from everyday files, not CP test data.
 - A freely chosen period such as "best of the last 90 days" is not one
   unchanged physiological state and is not used as a protocol.
 - No 3-min all-out test is offered as a substitute (R6).
@@ -94,9 +104,11 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
   parameters, incompatible conditions, estimated cycling power, running
   power or unvalidated elevation correction.
 - Downsampled streams are excluded or labelled; only full-resolution streams
-  feed the curve (#1430).
-- Exact residual and plausibility limits are written on this card before any
-  real-data evaluation; there is no universal "under 5 % error is valid" rule.
+  feed the curve (#1430). Overlapping bests of one session share an
+  `effort_group` and count as one effort.
+- Residual, leave-one-out and plausibility limits are in the numeric rules,
+  fixed on 2026-11-02 before any real-data evaluation; there is no universal
+  "under 5 % error is valid" rule.
 
 ## Numeric rules
 
@@ -107,10 +119,16 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 | Recovery between cycling efforts in one session | 30 min | source | R4 single-session protocol. |
 | Running trial durations | 3 to 12 min | source | R5 recommendation. |
 | Duration difference between running trials | at least 7 min | source | R5: shorter differences between trial durations failed validity criteria. Not a recovery time. |
-| Recovery between running trials | not fixed | product assumption | R5 reports 30-60 min in included studies; taken from the selected original study before use. |
+| Recovery between running trials | 30 min | product assumption | Lower end of the 30-60 min R5 reports in included studies; same rule as cycling. |
+| Effort window | 28 days | product assumption | Shorter analysis window of the curve, closer to one physiological state than 90 days. |
+| Running sessions | outdoor only | product assumption | Treadmill speed and distance are not reliable without calibration. |
+| Maximum relative residual | 3 % of the observed work or distance per effort | product assumption | Fixed before real data; a larger misfit suggests a non-maximal or incompatible effort. |
+| Leave-one-out fits | every two-effort fit positive | product assumption | A non-positive parameter without one effort shows the estimate hinges on it. |
+| Plausible cycling range | CP 50-600 W, W′ 1-50 kJ | product assumption | Outside these ranges a fit is treated as a data or effort error. |
+| Plausible running range | CS 1.5-7 m/s, D′ 10-500 m | product assumption | Outside these ranges a fit is treated as a data or effort error. |
 | Primary fit | work or distance on time | product assumption | Chosen in advance per #1431; other fit shown as sensitivity. |
-| Existing cycling windows | 5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600 s | product assumption | `backend/performance/power_profile.py:10`; display windows, not a CP protocol. |
-| Existing running windows | 60, 300, 1200 s; 1,000 and 5,000 m | product assumption | `backend/performance/power_profile.py:12-13`. |
+| Curve cycling windows | 5, 15, 30, 60, 120, 180, 300, 420, 600, 720, 1200, 1800, 3600 s | product assumption | `backend/performance/power_profile.py:POWER_DURATIONS`; 180/420/720 s follow R4, the rest are display windows. |
+| Curve running windows | 60, 180, 300, 420, 720, 1200 s; 1,000 and 5,000 m | product assumption | `backend/performance/power_profile.py:RUNNING_DURATIONS`, `RUNNING_DISTANCES`. |
 
 ## Allowed statements
 
@@ -132,10 +150,10 @@ precise than CS (R16). No study validates this athlete's power meter or GPS.
 
 ## Open points
 
-- Fix residual, plausibility and sensitivity limits before real data.
-- Decide the running protocol and its recovery from R5's included studies
-  (full texts).
-- Persistence of test protocols may need a schema migration from v9.
+- No comparison with published reference or controlled validation data yet;
+  the estimate stays experimental (gate G4) and never feeds FTP or zones.
+- Athlete-marked protocol tests with recorded intent, sensor and calibration
+  are not stored; adding them needs a schema migration from v16.
 - R4 participant count and recovery for its repeated-effort protocol were not
   reachable.
 - Passive CS from everyday runs (R16) stays deferred to M5.

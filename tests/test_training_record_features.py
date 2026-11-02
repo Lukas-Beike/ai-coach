@@ -368,7 +368,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             "device": "Wahoo",
             "target_snapshot": {
                 "steps": [{"duration": 300, "target": "90%"}],
-                "basis": {"icu_ftp": 250},
+                "basis": {"ftp": 250},
             },
             "interval_quality": {"status": "ok"},
             "date": "2026-08-01",
@@ -381,7 +381,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
                 **base,
                 "target_snapshot": {
                     **base["target_snapshot"],
-                    "basis": {"icu_ftp": 280},
+                    "basis": {"ftp": 280},
                 },
             },
             {**base, "interval_quality": {"status": "partial"}},

@@ -2106,6 +2106,79 @@ class WorkerTests(BackfillFixture):
 
         self.assertEqual(backfill.run_batch.call_count, 2)
 
+    def test_failed_batch_is_retried_without_restart(self) -> None:
+        backfill = Mock()
+        backfill.run_batch.side_effect = [
+            RuntimeError("synthetic failure"),
+            BatchReport(items=0, done=True),
+        ]
+        worker = self.make_worker(backfill)
+        worker._retry_seconds = 0
+        with self.assertLogs("backend.sync.canonical_backfill_worker", level="ERROR"):
+            worker.run_loop()
+        self.assertEqual(backfill.run_batch.call_count, 2)
+        backfill.mark_failed.assert_called_once()
+
+    def test_stop_interrupts_retry_delay(self) -> None:
+        failed = threading.Event()
+        backfill = Mock()
+        backfill.run_batch.side_effect = RuntimeError("synthetic failure")
+        backfill.mark_failed.side_effect = lambda db: failed.set()
+        worker = self.make_worker(backfill)
+        with self.assertLogs("backend.sync.canonical_backfill_worker", level="ERROR"):
+            worker.start()
+            self.assertTrue(failed.wait(5))
+            worker.stop()
+            worker.join(5)
+        assert worker._thread is not None
+        self.assertFalse(worker._thread.is_alive())
+
+    def test_retry_preserves_committed_cursor_and_finishes(self) -> None:
+        self.insert_snapshot(
+            self.manager, intervals_snapshot([intervals_activity("1")])
+        )
+        assembly = build_canonical_backfill(
+            database=lambda: self.manager,
+            key_values=self.key_values,
+            zone_provider=lambda: ZONE,
+            maintenance_gate=MaintenanceGate(),
+            clock=lambda: NOW,
+            batch_size=100,
+        )
+        stage = assembly.worker._backfill
+        original = stage.run_batch
+        calls = 0
+        cursors = []
+
+        def saved_state(db: Any) -> dict[str, Any]:
+            raw = self.key_values.get(db, STATE_KEY)
+            assert raw is not None
+            return json.loads(raw)
+
+        def fail_once(db: Any) -> BatchReport:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                cursors.append(saved_state(db))
+                raise RuntimeError("synthetic failure")
+            if calls == 3:
+                cursors.append(saved_state(db))
+            return original(db)
+
+        with patch.object(stage, "run_batch", side_effect=fail_once):
+            assembly.worker._retry_seconds = 0
+            with self.assertLogs(
+                "backend.sync.canonical_backfill_worker", level="ERROR"
+            ):
+                assembly.worker.run_loop()
+        self.assertEqual(cursors[1]["status"], "failed")
+        self.assertEqual(
+            {k: v for k, v in cursors[0].items() if k != "status"},
+            {k: v for k, v in cursors[1].items() if k != "status"},
+        )
+        self.assertEqual(self.summary(assembly.status_reader)["status"], "complete")
+        self.assertEqual(self.count("activity_records"), 1)
+
     def test_maintenance_refusal_waits_and_retries(self) -> None:
         backfill = Mock()
         backfill.run_batch.side_effect = [
@@ -2137,7 +2210,7 @@ class WorkerTests(BackfillFixture):
         with self.assertLogs(
             "backend.sync.canonical_backfill_worker", level="ERROR"
         ) as logs:
-            worker.run_loop()
+            worker._run_stage(backfill, "canonical")
 
         self.assertEqual(backfill.run_batch.call_count, 1)
         backfill.mark_failed.assert_called_once()
@@ -2151,7 +2224,7 @@ class WorkerTests(BackfillFixture):
         with self.assertLogs(
             "backend.sync.canonical_backfill_worker", level="ERROR"
         ) as logs:
-            worker.run_loop()
+            worker._run_stage(backfill, "canonical")
 
         self.assertEqual(backfill.run_batch.call_count, 1)
         backfill.mark_failed.assert_called_once()
@@ -2169,7 +2242,7 @@ class WorkerTests(BackfillFixture):
         with self.assertLogs(
             "backend.sync.canonical_backfill_worker", level="ERROR"
         ) as logs:
-            worker.run_loop()
+            worker._run_stage(backfill, "canonical")
 
         self.assertEqual(
             [log_extra(record, "event") for record in logs.records],
@@ -2355,7 +2428,12 @@ class FollowupStageTests(unittest.TestCase):
         log = []
         canonical = self.Stage("canonical", log, fail=True)
         followup = self.Stage("followup", log)
-        self.run_worker(canonical, [followup])
+        worker = self.make_worker(canonical, [followup])
+        canonical.mark_failed = lambda db: (
+            setattr(canonical, "failed", True),
+            worker.stop(),
+        )
+        worker.run_loop()
         self.assertTrue(canonical.failed)
         self.assertEqual(["canonical"], log)
         self.assertFalse(followup.failed)

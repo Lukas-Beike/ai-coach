@@ -34,6 +34,7 @@ class AthleteProfileTests(unittest.TestCase):
                         "mobility",
                     )
                 },
+                "training_model": "pyramidal",
                 "performance_notes": "",
                 "weight_kg": "",
                 "body_fat_pct": "",
@@ -80,6 +81,25 @@ class AthleteProfileTests(unittest.TestCase):
         self.assertEqual(normalize_profile(invalid)["timezone"], DEFAULT_TIMEZONE)
         with self.assertRaises(AppError):
             normalize_profile(invalid, validate_timezone=True)
+
+    def test_training_model_defaults_and_rejects_unknown_only_when_strict(self):
+        self.assertEqual(normalize_profile({})["training_model"], "pyramidal")
+        self.assertEqual(
+            normalize_profile({"training_model": " polarized "})["training_model"],
+            "polarized",
+        )
+        self.assertEqual(
+            normalize_profile({"training_model": "hiit"})["training_model"],
+            "pyramidal",
+        )
+        self.assertEqual(
+            normalize_profile({"training_model": ""}, validate_timezone=True)[
+                "training_model"
+            ],
+            "pyramidal",
+        )
+        with self.assertRaises(AppError):
+            normalize_profile({"training_model": "hiit"}, validate_timezone=True)
 
     def test_normalize_profile_does_not_mutate_input(self):
         value = {"name": "  Ada  ", "timezone": "UTC", "unknown": ["keep"]}

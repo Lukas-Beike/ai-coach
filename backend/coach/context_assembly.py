@@ -49,6 +49,7 @@ class CoachContextPlanningSources:
     adaptive_preview_service: Callable[[], Any]
     workout_library_service: Callable[[], Any]
     nutrition_meal_library: Callable[[], Any] | None = None
+    planning_brief: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,7 @@ class CoachContextAssembly:
         self._adaptive_preview_service = planning.adaptive_preview_service
         self._workout_library_service = planning.workout_library_service
         self._nutrition_meal_library = planning.nutrition_meal_library
+        self._planning_brief = planning.planning_brief
         self._profile_service = dialogue.profile_service
         self._message_service = dialogue.message_service
         self._settings = dialogue.settings
@@ -122,6 +124,7 @@ class CoachContextAssembly:
             ),
             nutrition_meal_library=self._nutrition_meal_library,
             zone_configurations=self._zone_configurations,
+            planning_brief=self._planning_brief,
             today=self._local_date,
         )
 

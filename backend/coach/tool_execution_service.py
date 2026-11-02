@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any
 
@@ -13,8 +14,23 @@ from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
+from backend.planning.plan_guard_service import PlanGuardService
 
 PROFILE_MUTATING_COACH_TOOLS = frozenset({"update_profile", "undo_training_change"})
+
+# Coach tools that create or move future planned units; the server checks the
+# resulting plan, rolls the write back on a blocking finding and returns the
+# other findings as notes.
+PLAN_CHECKED_TOOLS = frozenset(
+    {
+        "apply_training_patch",
+        "apply_training_changes",
+        "replace_training_plan",
+        "apply_workout_library_plan",
+        "commit_training_plan",
+    }
+)
+PLAN_FINDINGS_ARGUMENT = "accept_plan_findings"
 
 COACH_EXTERNAL_FOOD_LOOKUP_TOOLS = frozenset(
     {
@@ -40,7 +56,9 @@ class CoachStructuredToolExecutionService:
         proposal_creation: CoachProposalCreationService,
         tool_dispatch: CoachToolDispatchService,
         profile_mutation_coordinator: Any,
+        plan_guard: Callable[[], PlanGuardService] | None = None,
     ) -> None:
+        self._plan_guard = plan_guard
         self._profile_mutation_coordinator = profile_mutation_coordinator
         self._database_manager = database_manager
         self._database_lock = database_lock
@@ -51,7 +69,21 @@ class CoachStructuredToolExecutionService:
         self._proposal_creation = proposal_creation
         self._tool_dispatch = tool_dispatch
 
-    def execute(
+    def execute(self, metadata: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        """Run one tool; plan writes are checked, blocked on illness, else noted."""
+        if metadata["name"] not in PLAN_CHECKED_TOOLS or self._plan_guard is None:
+            return self._execute_tool(metadata, **kwargs)
+        guard = self._plan_guard()
+        arguments = dict(metadata["arguments"])
+        accepted = arguments.pop(PLAN_FINDINGS_ARGUMENT, None)
+        accepted = accepted if isinstance(accepted, list) else []
+        with self._database_lock, self._database_manager.unit_of_work():
+            before = guard.findings()
+            result = self._execute_tool({**metadata, "arguments": arguments}, **kwargs)
+            notes = guard.verify(before, accepted)
+        return {**result, "plan_check_notes": notes} if notes else result
+
+    def _execute_tool(
         self,
         metadata: dict[str, Any],
         *,

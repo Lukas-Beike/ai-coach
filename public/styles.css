@@ -591,14 +591,6 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .quick-message-templates::-webkit-scrollbar { display: none; }
 .quick-message-templates[hidden] { display: none; }
 .chat-queue-status { display: none; }
-.quick-message-label {
-  flex: 0 0 auto;
-  color: var(--subtle);
-  font-size: .66rem;
-  font-weight: 750;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
 .composer .quick-message-templates button {
   flex: 0 0 auto;
   min-height: 44px;
@@ -614,6 +606,12 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 }
 .composer .quick-message-templates button:hover { border-color: var(--focus-accent-border); background: var(--accent-soft); }
 .composer .quick-message-templates button:active { transform: scale(.97); }
+.quick-action-menu { position: fixed; inset: auto; margin: 0; width: min(300px, calc(100vw - 24px)); padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); box-shadow: 0 8px 24px var(--tooltip-shadow); }
+.quick-action-menu:popover-open { display: grid; gap: 4px; }
+.quick-action-menu .quick-action-periods { display: flex; align-items: center; gap: 6px; }
+.quick-action-menu .quick-action-periods > span { flex: 1 1 auto; padding-left: 4px; font-size: .72rem; font-weight: 650; }
+.composer .quick-message-templates .quick-action-menu button { flex: 0 0 auto; min-width: 44px; justify-content: center; }
+.composer .quick-message-templates .quick-action-menu > button { width: 100%; justify-items: start; border-radius: var(--radius-md); text-align: left; }
 .composer textarea {
   width: 100%;
   min-width: 0;
@@ -1312,21 +1310,6 @@ body:has(#chatPanel.active) .toast { bottom: calc(var(--composer-height, 0px) + 
 @media (max-width: 559px) {
   .shell { padding-right: max(12px, env(safe-area-inset-right)); padding-left: max(12px, env(safe-area-inset-left)); }
   .composer { width: 100%; }
-  .quick-message-templates::after {
-    position: sticky;
-    right: 0;
-    display: grid;
-    flex: 0 0 24px;
-    height: 44px;
-    place-items: center;
-    margin-left: -24px;
-    color: var(--accent-bright);
-    background: linear-gradient(90deg, var(--transparent), var(--composer-bg) 45%);
-    content: "›";
-    font-size: 1.5rem;
-    font-weight: 700;
-    pointer-events: none;
-  }
   .coach-provider-status { grid-template-columns: 1fr; }
   h1 { font-size: 1.55rem; }
   h2 { font-size: 1.35rem; }

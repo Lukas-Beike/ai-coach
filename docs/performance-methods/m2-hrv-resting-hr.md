@@ -1,12 +1,12 @@
 # M2 — Personal HRV and resting HR description
 
 - **Card:** M2
-- **Card version:** 2
+- **Card version:** 3
 - **Method ID:** personal-quartiles-v1
-- **Status:** implemented for provider rows; canonical inputs planned (#1428)
+- **Status:** implemented on canonical inputs with the segment rule (#1428)
 - **Classification:** descriptive statistic
 - **Literature checked:** 2026-10-24
-- **Review:** released 2026-10-26 (athlete)
+- **Review:** released 2026-11-01 (athlete)
 
 ## Target construct
 
@@ -22,7 +22,8 @@ readiness or health state.
 - Series are kept per provider and field: RMSSD (`hrv`, ms), SDNN (`hrvSDNN`,
   ms) and resting HR (bpm) are never merged.
 - Comparison set: values on days from today − 42 to the day before the latest
-  observation. The latest value is excluded from its own baseline.
+  observation, and not before the latest measurement change (segment rule
+  below). The latest value is excluded from its own baseline.
 - Lower and upper quartile: `quantiles(prior, n=4, method="inclusive")`;
   median shown alongside.
 - Position: `below` the lower quartile, `above` the upper quartile, otherwise
@@ -78,8 +79,10 @@ and no competing interests.
   unknown window, position and artefact handling.
 - Quartile position is not the R7 rule (7-day rolling mean vs mean ± 0.5 SD)
   and is not used to prescribe training.
-- Series are separated by provider and field only; device model, measurement
-  window and firmware changes are not yet available (#1418, #1420).
+- Series are separated by provider and field; within a series, the method,
+  aggregation and measurement context (#1418, #1420) mark segments. Providers
+  rarely report them: Garmin HRV carries only the `overnight` window, Intervals
+  values carry nothing.
 - HRV and resting HR come from canonical observations per provider and
   measurement (#1411); Garmin's weekly HRV average is not a baseline series.
 
@@ -90,22 +93,33 @@ and no competing interests.
 - 14 to 27 values: position `provisional`; 28 or more: `ok`.
 - Latest value older than yesterday: stale, no current position.
 - HRV must be positive; resting HR outside 20 to 230 bpm is excluded.
-- A device, method or window change starts a new segment once the change
-  marker exists (#1420); until then unknown continuity is shown.
+- Segment rule (restart): a change of method, aggregation or measurement
+  context (device model, firmware, algorithm, sensor, window, protocol) within a
+  provider series restarts the comparison. Only values since the latest change
+  count; older values stay in the history and the change day is reported
+  (`context_changed_on`) while it lies inside the 42-day window. Below 14 values
+  since the change: no position, reason "Messkontext geändert; mindestens 14
+  passende Nächte seitdem erforderlich." The rule covers HRV and resting HR, not
+  sleep duration (M3).
+- A switch between unknown and known metadata is a change. Without a reported
+  device model a device change cannot be seen: `continuity` is `unknown` and
+  shown as "Messkontext unbekannt"; the comparison is still made. The Coach
+  receives continuity and the change day, not the provider's device text.
 
 ## Numeric rules
 
 | Rule | Value | Tag | Rationale |
 | --- | --- | --- | --- |
-| Comparison window | 42 days | product assumption | Existing rule, `personal_recovery.py:40`; R9 names no single window, R7 used a 4-week reference. |
-| History loaded | 83 days | product assumption | Existing rule, `personal_recovery.py:41`; covers the 42-day window plus display history. |
-| Minimum earlier values for a position | 14 | product assumption | Existing rule, `personal_recovery.py:147`; no source fixes a minimum. |
-| Values for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:150`. |
-| Quartile method | inclusive, n = 4 | product assumption | Existing rule, `personal_recovery.py:148`; the middle quartiles hold about half of the values by definition, so "outside" is not rare. |
-| Current value counts as fresh | observed today or yesterday | product assumption | Existing rule, `personal_recovery.py:131`. |
-| Resting HR plausibility | 20 to 230 bpm | product assumption | Existing filter, `personal_recovery.py:99`; data-entry guard, not a physiological range. |
-| HRV plausibility | greater than 0 ms | product assumption | Existing filter, `personal_recovery.py:92`. |
+| Comparison window | 42 days | product assumption | Existing rule, `personal_recovery.py:83`; R9 names no single window, R7 used a 4-week reference. |
+| History loaded | 83 days | product assumption | Existing rule, `personal_recovery.py:84`; covers the 42-day window plus display history. |
+| Minimum earlier values for a position | 14 | product assumption | Existing rule, `personal_recovery.py:233`; no source fixes a minimum. |
+| Values for status ok | 28 | product assumption | Existing rule, `personal_recovery.py:236`. |
+| Quartile method | inclusive, n = 4 | product assumption | Existing rule, `personal_recovery.py:234`; the middle quartiles hold about half of the values by definition, so "outside" is not rare. |
+| Current value counts as fresh | observed today or yesterday | product assumption | Existing rule, `personal_recovery.py:210`. |
+| Resting HR plausibility | 20 to 230 bpm | product assumption | Existing filter, `personal_recovery.py:144`; data-entry guard, not a physiological range. |
+| HRV plausibility | greater than 0 ms | product assumption | Existing filter, `personal_recovery.py:137`. |
 | RMSSD and SDNN kept separate | yes | source | Different metrics; R8 pools them separately, R10 and R11 report RMSSD. |
+| Measurement change | restart, 14 values since the change | product assumption | `_segment_start`, `personal_recovery.py:161`; R10 validates specific models and firmware; values across a device or window change are not assumed comparable. Chosen by the athlete 2026-11-01. |
 
 ## Allowed statements
 
@@ -114,6 +128,7 @@ and no competing interests.
 - "HRV (RMSSD, Garmin) is within the range of your earlier values (42 days)."
 - "Not enough earlier values for a comparison: 9 of 14."
 - "The latest HRV value is from three days ago."
+- "The measurement context changed on 28 September; 4 of 14 values since then."
 
 ## Forbidden statements
 
@@ -127,8 +142,7 @@ and no competing interests.
 
 ## Open points
 
-- Segment rule for device, firmware and window changes (needs #1420).
 - Whether to add `ln(RMSSD)` and a 7-day rolling mean as the R7/R9 protocol
   family, with its own minimum coverage.
-- Method/aggregation fields on observations (#1418).
+- Providers that report a device model; until then continuity stays unknown.
 - Garmin resting HR has no validation data in R10.

@@ -907,12 +907,12 @@ class StandardFixtureSeedLifecycleTests(StandardFixtureTestCase):
         self.assertEqual(len(scenarios["swim_unit"]), 1)
         self.assertEqual(scenarios["swim_unit"][0]["sport"], "swim")
         self.assertEqual(scenarios["swim_unit"][0]["date"], scenarios["swim_day"])
-        self.assertEqual(scenarios["swim_unit"][0]["icu_training_load"], 40)
+        self.assertEqual(scenarios["swim_unit"][0]["planned_load"], 40)
         self.assertEqual(len(scenarios["camp_units"]), 1)
-        self.assertEqual(scenarios["camp_units"][0]["icu_training_load"], 75)
+        self.assertEqual(scenarios["camp_units"][0]["planned_load"], 75)
         self.assertEqual(len(scenarios["short_units"]), 1)
         self.assertEqual(scenarios["short_units"][0]["duration_minutes"], 90)
-        self.assertEqual(scenarios["short_units"][0]["icu_training_load"], 85)
+        self.assertEqual(scenarios["short_units"][0]["planned_load"], 85)
         self.assertEqual(
             scenarios["unit_name_counts"],
             {name: 1 for name in V6_UNIT_NAMES},

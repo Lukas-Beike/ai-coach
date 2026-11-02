@@ -150,9 +150,9 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
       { metric: "sleep", source: "Garmin Connect", measurement: "duration", observed_at: "2026-10-01", nights: 1,
         history: [{ date: "2026-09-30", value: 7 }, { date: "2026-10-01", value: 11 }] },
       { metric: "hrv", source: "Garmin Connect", measurement: "RMSSD", observed_at: "2026-10-01", nights: 28,
-        status: "ok", lower: 50, upper: 60, position: "within", history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
+        status: "ok", lower: 50, upper: 60, position: "within", continuity: "unknown", context_changed_on: null, history: [{ date: "2026-09-30", value: 52 }, { date: "2026-10-01", value: 58 }] },
       { metric: "resting_hr", source: "Intervals.icu", measurement: "resting", observed_at: "2026-10-01", nights: 1,
-        status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", history: [{ date: "2026-10-01", value: 48 }] },
+        status: "insufficient_data", reason: "Mindestens 14 frühere passende Nächte erforderlich.", continuity: "known", context_changed_on: "2026-09-30", history: [{ date: "2026-10-01", value: 48 }] },
     ],
   } }), "recovery");
   const root = page.locator("#personalRecovery");
@@ -169,6 +169,8 @@ test("@responsive recovery uses independent scales, honest coverage over exactly
   await expect(info).toContainText("Im Bereich deiner früheren Werte · 50 ms–60 ms");
   await expect(info).toContainText("Vergleich mit 28 früheren Nächten.");
   await expect(info).toContainText("Mindestens 14 frühere passende Nächte erforderlich.");
+  await expect(info).toContainText("Vergleich mit 28 früheren Nächten. Messkontext unbekannt.");
+  await expect(info).toContainText(/Messkontext geändert am 30\.09\.2026\./);
   await expect(info).toContainText("Durchschnitt der angezeigten Werte");
   await page.keyboard.press("Escape");
   const recoveryText = await root.evaluate((element) => element.textContent);
@@ -469,10 +471,10 @@ test("@responsive provider metrics render as charts without raw text", async ({ 
     personal_recovery: {
       as_of: "2026-10-01", sleep_target_hours: null, baselines: [], sleep_deficits: [],
       regularity: {
-        method: "sleep-timing-variability-v1", timezone: "Europe/Berlin", status: "provisional", series: [{
+        method: "sleep-timing-variability-v2", timezone: "Europe/Berlin", status: "provisional", series: [{
           source: "Garmin Connect", method: "sleepStartTimestampGMT/sleepEndTimestampGMT", status: "provisional",
-          coverage: { baseline_nights: 3, required_nights: 14 },
-          points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5, onset_deviation_minutes: 15, wake_deviation_minutes: -10 }, { date: "2026-09-30" }],
+          coverage: { baseline_nights: 14, required_nights: 14 },
+          points_14: [{ date: "2026-10-01", onset_at: "2026-09-30T22:15:00+02:00", wake_at: "2026-10-01T06:45:00+02:00", duration_hours: 8.5, onset_deviation_minutes: 15, wake_deviation_minutes: 10 }, { date: "2026-09-30" }],
           points_84: [],
         }],
       },

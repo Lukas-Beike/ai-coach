@@ -24,13 +24,19 @@ from backend.activities.detail_contract import (
 from backend.activities.detail_merge import (
     DetailCandidate,
     MergedDetail,
+    MergedStreams,
     merge_details,
 )
 from backend.activities.detail_store import summary_fingerprint
 from backend.activities.detail_summary_metrics import intervals_summary_metrics
-from backend.canonical.activity_detail import ZoneDistribution
+from backend.canonical.activity_detail import ActivityStreamSet, ZoneDistribution
 from backend.canonical.records import ActivityRecord
-from backend.canonical.vocabulary import ActivitySessionState, ProviderId
+from backend.canonical.vocabulary import (
+    ActivitySessionState,
+    ProviderId,
+    StreamChannel,
+    StreamResolution,
+)
 from backend.db import activity_detail_store, canonical_store
 from backend.db.activity_detail_store import StoredDetailSet
 from backend.performance.analysis_input import analysis_input
@@ -138,26 +144,9 @@ class CanonicalDetailReader:
         if not records:
             return None
         stored = activity_detail_store.detail_sets_for_session(db, activity_id)
-        by_key = {
-            (_provider_text(record), record.activity_id): record for record in records
-        }
-        candidates = []
-        for item in stored:
-            record = by_key.get((item.provider, item.provider_activity_id))
-            if record is not None:
-                candidates.append(
-                    DetailCandidate(
-                        stored=_labelled(item, record),
-                        started_at=record.started_at,
-                        device_type=record.device_type,
-                    )
-                )
+        candidates = detail_candidates(records, stored)
         sets = [candidate.stored for candidate in candidates]
-        ordered = measured_order(records)
-        analysis_record = next(
-            (r for r in ordered if r.provenance.provider is ProviderId.INTERVALS),
-            ordered[0],
-        )
+        analysis_record = primary_analysis_record(records)
         intervals_id = (
             analysis_record.activity_id
             if analysis_record.provenance.provider is ProviderId.INTERVALS
@@ -231,13 +220,28 @@ class CanonicalDetailReader:
                     "watts", "heartrate", "velocity_smooth", "moving"
                 ),
             ),
-            "power_profile": power_profile(
-                adapted.activity, source_label=adapted.label_for("watts", "moving")
-            ),
-            "running_profile": running_profile(
-                adapted.activity,
-                source_label=adapted.label_for("velocity_smooth", "distance", "moving"),
-            ),
+            "power_profile": {
+                **power_profile(
+                    adapted.activity, source_label=adapted.label_for("watts", "moving")
+                ),
+                "stream_resolution": stream_resolution(
+                    merged.streams, StreamChannel.POWER_W, StreamChannel.MOVING
+                ),
+            },
+            "running_profile": {
+                **running_profile(
+                    adapted.activity,
+                    source_label=adapted.label_for(
+                        "velocity_smooth", "distance", "moving"
+                    ),
+                ),
+                "stream_resolution": stream_resolution(
+                    merged.streams,
+                    StreamChannel.SPEED_MPS,
+                    StreamChannel.DISTANCE_M,
+                    StreamChannel.MOVING,
+                ),
+            },
         }
 
     def _status(
@@ -282,6 +286,57 @@ class CanonicalDetailReader:
         if not note or note.get("summary_sha256") != fingerprint:
             return None
         return {"message": note.get("message"), "observed_at": note.get("observed_at")}
+
+
+def stream_resolution(
+    streams: MergedStreams | None, *channels: StreamChannel
+) -> str | None:
+    """Return the resolution: downsampled when the time axis or a read channel is."""
+    if streams is None:
+        return None
+    sources = [streams.primary] + [
+        streams.channels[channel].source
+        for channel in channels
+        if channel in streams.channels
+    ]
+    downsampled = any(
+        isinstance(source.stored.detail, ActivityStreamSet)
+        and source.stored.detail.resolution is StreamResolution.DOWNSAMPLED
+        for source in sources
+    )
+    return (
+        StreamResolution.DOWNSAMPLED if downsampled else StreamResolution.FULL
+    ).value
+
+
+def detail_candidates(
+    records: Sequence[ActivityRecord], stored: Iterable[StoredDetailSet]
+) -> list[DetailCandidate]:
+    """Pair each stored set with its session record; sets without one are dropped."""
+    by_key = {
+        (_provider_text(record), record.activity_id): record for record in records
+    }
+    candidates = []
+    for item in stored:
+        record = by_key.get((item.provider, item.provider_activity_id))
+        if record is not None:
+            candidates.append(
+                DetailCandidate(
+                    stored=_labelled(item, record),
+                    started_at=record.started_at,
+                    device_type=record.device_type,
+                )
+            )
+    return candidates
+
+
+def primary_analysis_record(records: Sequence[ActivityRecord]) -> ActivityRecord:
+    """The record whose sport and environment the session analysis uses."""
+    ordered = measured_order(records)
+    return next(
+        (r for r in ordered if r.provenance.provider is ProviderId.INTERVALS),
+        ordered[0],
+    )
 
 
 def _provider_text(record: ActivityRecord) -> str | None:

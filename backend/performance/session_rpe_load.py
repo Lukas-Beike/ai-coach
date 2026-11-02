@@ -136,7 +136,7 @@ def session_load(
     return entry, value
 
 
-def _period(loads: Sequence[tuple[dict[str, Any], float | None]]) -> dict[str, Any]:
+def period_load(loads: Sequence[tuple[dict[str, Any], float | None]]) -> dict[str, Any]:
     known = [value for _entry, value in loads if value is not None]
     sources = {SOURCE_ATHLETE: 0, SOURCE_PROVIDER: 0}
     for entry, value in loads:
@@ -210,7 +210,7 @@ def session_rpe_load(
                 "start": monday.isoformat(),
                 "end": sunday.isoformat(),
                 "partial_period": monday < start or sunday > end,
-                **_period(
+                **period_load(
                     [
                         item
                         for item in loads
@@ -220,7 +220,7 @@ def session_rpe_load(
             }
         )
         monday += timedelta(days=7)
-    totals = _period(loads)
+    totals = period_load(loads)
     return {
         "metric_id": METRIC_ID,
         "method_id": METHOD_ID,
@@ -238,10 +238,12 @@ def session_rpe_load(
         "evidence_card": EVIDENCE_CARD,
         "totals": totals,
         "days": [
-            {"date": day.isoformat(), **_period(by_day.get(day.isoformat(), []))}
+            {"date": day.isoformat(), **period_load(by_day.get(day.isoformat(), []))}
             for day in _days(start, end)
         ],
         "weeks": weeks,
-        "sports": {sport: _period(items) for sport, items in sorted(by_sport.items())},
+        "sports": {
+            sport: period_load(items) for sport, items in sorted(by_sport.items())
+        },
         "sessions": [entry for entry, _value in loads[:session_limit]],
     }

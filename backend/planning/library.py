@@ -8,11 +8,11 @@ import uuid
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
+from backend.canonical.planning_fields import PLANNED_INTENSITY, PLANNED_LOAD
 from backend.canonical.stored_sports import workout_sport_from_record
 from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 from backend.planning.sport import apply_sport_update
-from backend.providers.intervals_performance_fields import INTENSITY, TRAINING_LOAD
 from backend.providers.intervals_workouts import (
     DERIVED_WORKOUT_KEYS,
     intervals_record_type,
@@ -33,8 +33,8 @@ LIBRARY_WORKOUT_FIELDS = {
     "distance",
     "target",
     "workout_doc",
-    TRAINING_LOAD,
-    INTENSITY,
+    PLANNED_LOAD,
+    PLANNED_INTENSITY,
     "indoor",
     "tags",
     "folder_id",

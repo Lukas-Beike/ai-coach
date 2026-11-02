@@ -8,6 +8,7 @@ from typing import Any
 from backend.coach.capabilities import build_capability_catalog
 from backend.coach.outcomes import COACH_OPERATION_LABELS
 from backend.coach.tool_schemas import (
+    ACCEPT_PLAN_FINDINGS,
     _canonical_coach_tool,
     build_structured_tool_schemas,
 )
@@ -70,6 +71,7 @@ def build_tool_contracts(
             if tool["name"] == "stage_training_plan"
         )["parameters"]["properties"]["payload"]["properties"]["workouts"],
         "expected_revision": {"type": "integer"},
+        "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
         "plan_name": {"type": "string"},
         "goal": {"type": "string"},
     }

@@ -81,8 +81,8 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
             "plan_name": "Basis",
             "private_calendar_adjustment": {"reason": "fixture"},
             "workout_doc": {"derived": True},
-            "icu_training_load": 42,
-            "icu_intensity": 0.8,
+            "planned_load": 42,
+            "planned_intensity": 0.8,
         }
         row = {"external_id": "remote-7"}
         values = {
@@ -110,7 +110,7 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
         self.assertEqual(updated["plan_id"], "plan-1")
         self.assertEqual(updated["plan_name"], "Basis")
         self.assertEqual(updated["private_calendar_adjustment"], {"reason": "fixture"})
-        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+        for key in ("workout_doc", "planned_load", "planned_intensity"):
             self.assertNotIn(key, updated)
         self.assertEqual((current, row, values), original)
 
@@ -121,8 +121,8 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
             "description": "- 20m Z2 Easy",
             "duration_minutes": 20,
             "workout_doc": {"derived": True},
-            "icu_training_load": 12,
-            "icu_intensity": 0.7,
+            "planned_load": 12,
+            "planned_intensity": 0.7,
         }
 
         updated = library.updated_workout_library_entry(
@@ -130,8 +130,8 @@ class WorkoutLibraryMutationTests(unittest.TestCase):
         )
 
         self.assertEqual(updated["workout_doc"], {"derived": True})
-        self.assertEqual(updated["icu_training_load"], 12)
-        self.assertEqual(updated["icu_intensity"], 0.7)
+        self.assertEqual(updated["planned_load"], 12)
+        self.assertEqual(updated["planned_intensity"], 0.7)
 
     def test_moving_time_uses_validated_description_seconds_or_minutes(self):
         seconds_from_description = library.updated_workout_library_entry(

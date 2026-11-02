@@ -64,6 +64,23 @@ def _mapped_performance_context(snapshot):
 
 
 class ServerPerformanceTests(ServerTestCase):
+    def test_performance_assembly_returns_session_rpe_history(self):
+        today = server.ATHLETE_CLOCK.now().date()
+        seed_intervals_activity(
+            server.database_manager(),
+            "assembly-test",
+            start_date_local=f"{today.isoformat()}T07:00:00",
+            elapsed_time=3600,
+            icu_rpe=5,
+        )
+        mark_tables_serving(server)
+
+        result = server.PUBLIC_STATE.performance_state_service().performance_state()
+
+        load = result["performance"]["history"]["session_rpe_load"]
+        self.assertEqual(load["totals"]["value"], 300.0)
+        self.assertIsNotNone(load["computed_at"])
+
     def test_performance_refresh_jobs_are_deduplicated_atomically(self):
         config = replace(server.CONFIG, intervals_api_key="test-key")
         with patch.object(server, "CONFIG", config):

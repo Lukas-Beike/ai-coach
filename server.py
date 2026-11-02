@@ -256,6 +256,12 @@ from backend.planning.assembly import (
     PlanningRuntime as PlanningDataRuntime,
 )
 from backend.planning.compact_activities import ActivitySummarySource
+from backend.planning.plan_guard_service import (
+    PlanGuardService,
+    read_completed,
+    read_progress,
+    recent_illness,
+)
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -466,7 +472,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.33"
+APP_VERSION = "1.13.34"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -1457,6 +1463,7 @@ COACH_CONTEXT = CoachContextAssembly(
             ),
             workout_library_service=PLANNING_DATA.workout_library,
             nutrition_meal_library=NUTRITION_ASSEMBLY.meal_library_service,
+            planning_brief=lambda: _plan_guard_service().brief(),
         ),
         dialogue=CoachContextDialogueSources(
             profile_service=ATHLETE_DATA.profile,
@@ -1690,6 +1697,25 @@ CHAT_PAGE_MAX = 100
 )
 
 
+def _plan_guard_service() -> PlanGuardService:
+    """Plan checks and planning brief over the current local state."""
+    return PlanGuardService(
+        planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
+        completed_activities=lambda: read_completed(
+            database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
+        ),
+        competitions=lambda: PLANNING_DATA.competition().list(),
+        illness=lambda: recent_illness(
+            ATHLETE_DATA.checkin().list(3), ATHLETE_CLOCK.now().date()
+        ),
+        progress=lambda: read_progress(HTTP_API.training_reports()),
+        training_model=lambda: str(
+            ATHLETE_DATA.profile().get().get("training_model") or ""
+        ),
+        today=lambda: ATHLETE_CLOCK.now().date(),
+    )
+
+
 COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
     dependencies=CoachPlanningToolsAssembly.Inputs(
         database_manager=database_manager,
@@ -1810,6 +1836,7 @@ COACH_TOOL_ROUNDS = CoachStructuredToolRoundAssembly(
             tool_dispatch_service=lambda: COACH_TOOL_DISPATCH.service(),
             dialogue_action_service=COACH_LOCAL.dialogue_action_service,
             planning_authority_service=SYNC_COMMANDS.authority,
+            plan_guard_service=_plan_guard_service,
         ),
         state=StructuredToolRoundState(
             duplicate_inspector=ATHLETE_DATA.duplicate_inspector,

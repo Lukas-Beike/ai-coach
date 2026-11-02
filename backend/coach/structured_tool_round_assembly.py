@@ -44,6 +44,7 @@ class StructuredToolRoundServices:
     tool_dispatch_service: Callable[[], Any]
     dialogue_action_service: Callable[[], Any]
     planning_authority_service: Callable[[], Any]
+    plan_guard_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ class CoachStructuredToolRoundAssembly:
         self._tool_dispatch_service = services.tool_dispatch_service
         self._dialogue_action_service = services.dialogue_action_service
         self._planning_authority_service = services.planning_authority_service
+        self._plan_guard_service = services.plan_guard_service
         self._duplicate_inspector = state.duplicate_inspector
         self._job_store = state.job_store
         self._training_context_service = conversation.training_context_service
@@ -110,6 +112,7 @@ class CoachStructuredToolRoundAssembly:
             self._proposal_creation_service(),
             self._tool_dispatch_service(),
             self._profile_mutation_coordinator,
+            self._plan_guard_service,
         )
 
     def failure_service(self) -> CoachStructuredToolFailureService:

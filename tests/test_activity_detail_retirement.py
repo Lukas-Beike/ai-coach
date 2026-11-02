@@ -205,7 +205,11 @@ class RetiredRecordTests(RetirementTestCase):
         self.store.save_failure("9299", "0" * 64, "Synthetic note", NOW)
         self.store.save_prefetch_floor("2026-10-01T00:00:00", NOW)
         canonical = canonical_snapshot(self.manager)
-        kept = [row for row in kv_rows(self.manager) if not row[0].startswith("activity_detail:")]
+        kept = [
+            row
+            for row in kv_rows(self.manager)
+            if not row[0].startswith("activity_detail:")
+        ]
         calls = self.api.get.call_count
         self.assertTrue(record["activity"]["laps"])
         counters = self.run_to_completion()
@@ -225,6 +229,17 @@ class RetiredRecordTests(RetirementTestCase):
         )
         self.assertEqual(1, self.run_to_completion()["retired"])
 
+    def test_legacy_target_basis_is_compared_after_normalization(self):
+        record = self.load("9207")
+        record["target_snapshot"] = {"basis": {"icu_ftp": 250}}
+        self.save_raw_record(record)
+        self.execute(
+            "UPDATE activity_detail_analysis SET payload = json_set(payload, '$.target_snapshot', json(?))",
+            (json.dumps({"basis": {"ftp": 250}}),),
+        )
+        self.assertEqual(1, self.run_to_completion()["retired"])
+        self.assertIsNone(self.kv_record("9207"))
+
     def test_downsampled_record_of_full_canonical_streams_is_retired(self):
         record = self.load("9203", points=POINTS)
         streams = record["activity"]["streams"]
@@ -235,7 +250,9 @@ class RetiredRecordTests(RetirementTestCase):
         record["full_resolution"] = False
         # The analysis values were computed from the full streams.
         self.save_raw_record(record)
-        self.assertLess(len(self.kv_record("9203")["activity"]["streams"]["watts"]), POINTS)
+        self.assertLess(
+            len(self.kv_record("9203")["activity"]["streams"]["watts"]), POINTS
+        )
         self.assertEqual(1, self.run_to_completion()["retired"])
         self.assertIsNone(self.kv_record("9203"))
 
@@ -261,7 +278,9 @@ class RetiredRecordTests(RetirementTestCase):
         self.assertIsNotNone(self.kv_record("9206"))
         with self.manager.unit_of_work() as db:
             self.assertTrue(self.make().run_batch(db).done)
-        self.assertEqual(record["summary_sha256"], self.kv_record("9206")["summary_sha256"])
+        self.assertEqual(
+            record["summary_sha256"], self.kv_record("9206")["summary_sha256"]
+        )
 
 
 class KeptRecordTests(RetirementTestCase):
@@ -270,9 +289,7 @@ class KeptRecordTests(RetirementTestCase):
     def assert_kept(self, reason, activity_id):
         before_kv = kv_rows(self.manager)
         before = canonical_snapshot(self.manager)
-        self.assertIn(
-            legacy_detail_kv.key(activity_id), [key for key, _ in before_kv]
-        )
+        self.assertIn(legacy_detail_kv.key(activity_id), [key for key, _ in before_kv])
         counters = self.run_to_completion()
         self.assertEqual(0, counters["retired"])
         self.assertEqual(1, counters[reason])
@@ -287,6 +304,15 @@ class KeptRecordTests(RetirementTestCase):
         record = self.load(activity_id)
         change(record)
         self.save_record(record)
+
+    def test_conflicting_legacy_target_basis_is_not_retired(self):
+        self.changed(
+            "9299",
+            lambda record: record.update(
+                target_snapshot={"basis": {"icu_ftp": 250, "ftp": 280}}
+            ),
+        )
+        self.assert_kept("analysis_mismatch", "9299")
 
     def test_value_that_is_not_a_record(self):
         self.execute(
@@ -338,7 +364,9 @@ class KeptRecordTests(RetirementTestCase):
 
     def test_stream_channel_missing_from_the_canonical_set(self):
         self.load("9307")
-        self.execute("DELETE FROM activity_stream_channels WHERE channel = 'heart_rate_bpm'")
+        self.execute(
+            "DELETE FROM activity_stream_channels WHERE channel = 'heart_rate_bpm'"
+        )
         self.assert_kept("streams_unproven", "9307")
 
     def test_lap_bounds_that_differ(self):
@@ -468,7 +496,9 @@ class RetirementWorkerTests(RetirementTestCase):
         self.assertEqual(records, kv_rows(self.manager))
         self.assertEqual(canonical, canonical_snapshot(self.manager))
         state = self.state()
-        self.assertEqual(("failed", "", 0), (state["status"], state["cursor"], state["batches"]))
+        self.assertEqual(
+            ("failed", "", 0), (state["status"], state["cursor"], state["batches"])
+        )
         counters = self.run_to_completion()
         self.assertEqual((2, 2), (counters["retired"], counters["laps_refilled"]))
 

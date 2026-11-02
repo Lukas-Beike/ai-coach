@@ -1,7 +1,7 @@
 """Sleep start and end instants in stored provider rows.
 
 One definition for the canonical sleep-period mappers and the sleep timing
-variability method (``sleep-timing-variability-v1``), so both read the same intervals: the same field
+variability methods (``sleep-timing-variability-v1`` and ``-v2``), so both read the same intervals: the same field
 aliases in the same precedence, the same timestamp parsing and the same walk over
 nested objects and lists.
 """
@@ -93,7 +93,7 @@ def sleep_intervals(payload: Any) -> Iterator[SleepInterval]:
 
     Every object with a start and an end field yields one interval when the end
     is after the start and at most 24 hours later. The walk visits at most 2000
-    nodes and the first 500 items of each list, as sleep-timing-variability-v1 does.
+    nodes and the first 500 items of each list, as sleep-timing-variability-v1 did.
     """
     pending: list[tuple[Any, int]] = [(payload, 0)]
     visited = 0

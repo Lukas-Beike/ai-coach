@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from backend.canonical.planned_workout import PlannedWorkoutExport
+from backend.canonical.planning_fields import PLANNED_INTENSITY, PLANNED_LOAD
 from backend.canonical.stored_sports import (
     DEFAULT_WORKOUT_SPORT_TOKEN,
     LEGACY_COMPETITION_TOKENS,
@@ -33,7 +34,7 @@ INTERVALS_EVENT_CATEGORY = "WORKOUT"
 # Workout payload field holding structured interval text.
 WORKOUT_INTERVALS_FIELD = "intervals"
 # Remote-derived fields that stop being valid once a local workout is edited.
-DERIVED_WORKOUT_KEYS = ("workout_doc", TRAINING_LOAD, INTENSITY)
+DERIVED_WORKOUT_KEYS = ("workout_doc", PLANNED_LOAD, PLANNED_INTENSITY)
 INTERVALS_DEFAULT_WORKOUT_TYPE = DEFAULT_WORKOUT_SPORT_TOKEN
 INTERVALS_TEMPLATE_WORKOUT_TYPES = frozenset(
     {"Ride", "VirtualRide", "Run", "Swim", "WeightTraining"}
@@ -48,6 +49,8 @@ PLANNING_DURATION_FIELD = "planned_duration_s"
 _PLANNING_WIRE_FIELDS = (
     ("start_date_local", PLANNING_START_FIELD),
     ("moving_time", PLANNING_DURATION_FIELD),
+    (TRAINING_LOAD, PLANNED_LOAD),
+    (INTENSITY, PLANNED_INTENSITY),
 )
 _PLANNING_FIELD_BY_WIRE = dict(_PLANNING_WIRE_FIELDS)
 # Planned-unit metrics a synced remote event carries back, by planning name.

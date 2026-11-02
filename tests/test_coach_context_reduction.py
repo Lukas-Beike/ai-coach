@@ -13,6 +13,7 @@ from backend.coach.context_selection import CoachContextSelection, select_coach_
 from backend.coach.read_tools import CoachReadToolService
 from backend.errors import AppError
 from backend.observability import JsonLogFormatter, Redactor
+from backend.performance.canonical_inputs import PENDING_PERFORMANCE_INPUTS
 from tests import test_coach_request_payload as payload_tests
 from tests import test_coach_structured_context as context_tests
 from tests import test_coach_structured_tool_round as round_tests
@@ -20,6 +21,20 @@ from tests import test_observability as observability_tests
 
 
 class CoachContextReductionTests(unittest.TestCase):
+    def test_pending_data_marker_survives_scoped_planning_projection(self):
+        fixture = context_tests.CoachStructuredContextServiceTests()
+        fixture.setUp()
+        fixture.service._performance_reader.read_sources = Mock(
+            return_value=(PENDING_PERFORMANCE_INPUTS, None)
+        )
+        selection = CoachContextSelection("planning", frozenset({"planning"}))
+        result = fixture.service.build(selection=selection)
+        self.assertEqual(result["canonical_data_status"]["status"], "pending")
+        self.assertIn(
+            "local plans remain available", result["canonical_data_status"]["scope"]
+        )
+        self.assertIn("canonical_data_status", selection.project(result))
+
     def test_oversized_single_section_retains_useful_prefix(self):
         result = bounded_coach_context_value(
             {"recovery": {"history": "synthetic " * 5000}}, 40_000

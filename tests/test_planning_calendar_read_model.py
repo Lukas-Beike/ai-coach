@@ -71,7 +71,7 @@ class PlanningCalendarReadModelTests(unittest.TestCase):
                 "name": "First ride",
                 "type": "Ride",
                 "planned_duration_s": 3600,
-                "icu_training_load": 100,
+                "planned_load": 100,
             },
             {
                 "id": "ride-b",

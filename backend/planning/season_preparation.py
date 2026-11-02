@@ -15,19 +15,13 @@ from backend.activities.activity_summary import (
 )
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.canonical.planning_fields import PLANNED_INTENSITY as PLANNED_INTENSITY_KEY
+from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
 from backend.canonical.stored_sports import resolve_competition_sport
 from backend.canonical.vocabulary import Environment, ProviderId
 from backend.errors import AppError
 from backend.performance.season_inputs import SeasonLoadInputs
 from backend.planning.season import season_plan_summary
-
-# Local planned units keep their stored planning keys.
-from backend.providers.intervals_performance_fields import (
-    INTENSITY as PLANNED_INTENSITY_KEY,
-)
-from backend.providers.intervals_performance_fields import (
-    TRAINING_LOAD as PLANNED_LOAD_KEY,
-)
 from backend.providers.source_labels import SourceView, provider_label
 
 ActivitySummariesBetween = Callable[[date, date], Sequence[ActivitySummary]]

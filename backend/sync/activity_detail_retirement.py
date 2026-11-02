@@ -27,6 +27,7 @@ from backend.canonical.activity_detail import (
     ActivityStreamSet,
     ZoneDistribution,
 )
+from backend.canonical.legacy_planning_fields import normalize_legacy_detail_targets
 from backend.canonical.vocabulary import (
     ActivityRecordState,
     LapKind,
@@ -387,6 +388,10 @@ def _analysis_proven(
     if not isinstance(payload, dict):
         return False
     if payload.get("summary_sha256") != record.get("summary_sha256"):
+        return False
+    try:
+        record = normalize_legacy_detail_targets(record)
+    except RuntimeError:
         return False
     return all(
         canonical_json({key: payload.get(key)})

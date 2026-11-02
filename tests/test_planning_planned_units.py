@@ -229,8 +229,8 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
             "remote_event_external_id": "ext-1",
             "private_calendar_adjustment": {"adjusted_duration_minutes": 40},
             "workout_doc": {"old": True},
-            "icu_training_load": 9,
-            "icu_intensity": 1.2,
+            "planned_load": 9,
+            "planned_intensity": 1.2,
         }
         values = {
             "action": "update",
@@ -263,7 +263,7 @@ class PlannedWorkoutUpdateTests(unittest.TestCase):
             "private_calendar_adjustment",
         ):
             self.assertEqual(updated[key], current[key])
-        for key in ("workout_doc", "icu_training_load", "icu_intensity"):
+        for key in ("workout_doc", "planned_load", "planned_intensity"):
             self.assertNotIn(key, updated)
 
     def test_normalized_update_validates_endurance_content_and_handles_non_endurance_duration(

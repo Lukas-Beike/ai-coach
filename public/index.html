@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=345">
+  <link rel="stylesheet" href="/styles.css?v=348">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -74,9 +74,14 @@
         <p id="voiceStatus" class="voice-status" aria-live="polite" hidden></p>
         <form id="chatForm" class="composer">
           <div id="quickMessageTemplates" class="quick-message-templates" hidden aria-label="Schnelle Nachrichten">
-            <span class="quick-message-label">Schnellstart</span>
             <button id="quickMorningCheckinButton" type="button" data-request-kind="morning_checkin" data-message="Gib mir den heutigen Morgen-Check-in. Lade dafür die aktuellen Garmin-/Intervals.icu-Daten, bewerte Erholung, Trainingsbelastung und die geplante Einheit und sag mir, was heute sinnvoll ist.">Morgen-Check-in</button>
-            <button type="button" data-message="Aktualisiere zuerst meine Intervals.icu-Daten. Analysiere danach meine letzte absolvierte Einheit: Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit? Nutze bei einer nahezu gleichen Wahoo- und Garmin-Radaufzeichnung immer Wahoo.">Letzte Einheit analysieren</button>
+            <button id="quickAnalysisButton" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="quickAnalysisMenu" popovertarget="quickAnalysisMenu">Analyse &amp; Plan</button>
+            <div id="quickAnalysisMenu" class="quick-action-menu" popover="auto" role="menu" aria-label="Analyse und Plan">
+              <button type="button" role="menuitem" data-request-kind="session_analysis" data-message="Aktualisiere zuerst meine Intervals.icu-Daten. Analysiere danach meine letzte absolvierte Einheit: Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit? Nutze bei einer nahezu gleichen Wahoo- und Garmin-Radaufzeichnung immer Wahoo.">Einheit analysieren</button>
+              <div class="quick-action-periods"><span aria-hidden="true">Fortschritt</span><button type="button" role="menuitem" aria-label="Fortschritt 2 Wochen" data-request-kind="progress_review" data-message="Zeige mir meinen Fortschritt der letzten 2 Wochen: Volumen und Belastung je Sportart, Intensitätsverteilung, Konstanz und Leistungsindikatoren.">2</button><button type="button" role="menuitem" aria-label="Fortschritt 4 Wochen" data-request-kind="progress_review" data-message="Zeige mir meinen Fortschritt der letzten 4 Wochen: Volumen und Belastung je Sportart, Intensitätsverteilung, Konstanz und Leistungsindikatoren.">4</button><button type="button" role="menuitem" aria-label="Fortschritt 8 Wochen" data-request-kind="progress_review" data-message="Zeige mir meinen Fortschritt der letzten 8 Wochen: Volumen und Belastung je Sportart, Intensitätsverteilung, Konstanz und Leistungsindikatoren.">8</button><button type="button" role="menuitem" aria-label="Fortschritt 12 Wochen" data-request-kind="progress_review" data-message="Zeige mir meinen Fortschritt der letzten 12 Wochen: Volumen und Belastung je Sportart, Intensitätsverteilung, Konstanz und Leistungsindikatoren.">12</button></div>
+              <button type="button" role="menuitem" data-request-kind="plan_week" data-message="Plane meine nächste Woche.">Plan nächste Woche</button>
+              <div class="quick-action-periods"><span aria-hidden="true">Plan 2–4 Wochen</span><button type="button" role="menuitem" aria-label="Plan 2 Wochen" data-request-kind="plan_block" data-message="Plane meine nächsten 2 Wochen als Trainingsblock.">2</button><button type="button" role="menuitem" aria-label="Plan 3 Wochen" data-request-kind="plan_block" data-message="Plane meine nächsten 3 Wochen als Trainingsblock.">3</button><button type="button" role="menuitem" aria-label="Plan 4 Wochen" data-request-kind="plan_block" data-message="Plane meine nächsten 4 Wochen als Trainingsblock.">4</button></div>
+            </div>
           </div>
           <div id="chatQueueStatus" class="chat-queue-status" hidden aria-live="polite"></div>
           <div id="chatAttachments" class="chat-attachments" hidden aria-live="polite"></div>
@@ -238,6 +243,7 @@
               <label>Schwimmen<textarea name="training_preferences_swimming" rows="2" placeholder="Becken oder Freiwasser, Technik, Hilfsmittel…"></textarea></label>
               <label>Krafttraining<textarea name="training_preferences_strength" rows="2" placeholder="Gym oder zu Hause, Geräte, Übungen, Häufigkeit…"></textarea></label>
               <label>Mobility<textarea name="training_preferences_mobility" rows="2" placeholder="Yoga, Dehnen, Faszienrolle, Dauer, Tageszeit…"></textarea></label>
+              <label>Trainingsmodell<select name="training_model"><option value="pyramidal">Pyramidal</option><option value="polarized">Polarisiert</option><option value="threshold">Schwellenbetont</option><option value="sweet_spot">Sweet Spot</option></select></label>
             </fieldset>
             <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
             <label>Persönliches Schlafziel (Stunden)<input name="sleep_target_hours" type="number" min="4" max="12" step="0.25" placeholder="Optional, zum Beispiel 8"></label>
@@ -591,14 +597,14 @@
   <script src="/plan-views.js?v=21" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=38" defer></script>
+  <script src="/coach.js?v=40" defer></script>
   <script src="/shared.js?v=20" defer></script>
   <script src="/auth.js?v=13" defer></script>
   <script src="/sync-status.js?v=14" defer></script>
   <script src="/view-refresh.js?v=3" defer></script>
   <script src="/notifications.js?v=5" defer></script>
   <script src="/nutrition.js?v=46" defer></script>
-  <script src="/analysis.js?v=141" defer></script>
+  <script src="/analysis.js?v=143" defer></script>
   <script src="/activity-details.js?v=21" defer></script>
   <script src="/activity-analysis.js?v=6" defer></script>
   <script src="/performance-view.js?v=29" defer></script>

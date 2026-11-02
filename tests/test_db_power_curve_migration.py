@@ -50,7 +50,7 @@ from backend.sync.canonical_table_reader import CanonicalTableReader
 
 FIXTURES = Path(__file__).with_name("fixtures")
 RELEASED = {
-    version: FIXTURES / f"schema_v{version}.sql.txt" for version in range(9, 17)
+    version: FIXTURES / f"schema_v{version}.sql.txt" for version in range(16, 17)
 }
 V16_FIXTURE = RELEASED[16]
 ZONE = ZoneInfo("Europe/Berlin")
@@ -204,7 +204,7 @@ class PowerCurveMigrationTests(unittest.TestCase):
         self.assertEqual(raw["fetched_at"], ENVELOPE["synced_at"])
 
     def test_failure_after_the_step_rolls_back_to_the_unchanged_release(self):
-        for version in (16, 9):
+        for version in (16,):
             with self.subTest(version=version):
                 db = self.released(RELEASED[version])
                 before = list(db.iterdump())

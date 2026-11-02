@@ -14,6 +14,7 @@ from backend.coach.context_selection import (
     compact_coach_dialogue,
     select_coach_context,
 )
+from backend.coach.playbooks import playbook_for
 from backend.settings import SettingsService
 
 
@@ -45,7 +46,11 @@ _ADVISORY_RUN_NOTICE = (
 
 
 def compose_model_instructions(
-    training_context: str, *, allow_mutations: bool, attachment_summary: bool = False
+    training_context: str,
+    *,
+    allow_mutations: bool,
+    attachment_summary: bool = False,
+    request_kind: str | None = None,
 ) -> str:
     """Order instructions for provider prompt caching.
 
@@ -56,6 +61,7 @@ def compose_model_instructions(
     instructions = (
         dialogue.INSTRUCTIONS + _ATTACHMENT_POLICY + "\n\n" + training_context
     )
+    instructions += playbook_for(request_kind)
     if attachment_summary:
         instructions += LOCAL_ATTACHMENT_SUMMARY_NOTICE
     if not allow_mutations:
@@ -70,6 +76,7 @@ def request_context_selection(
     command_receipts: list[dict[str, Any]],
     attachments: list[dict[str, Any]],
     has_prior_openai_attachments: bool,
+    request_kind: str | None = None,
 ) -> CoachContextSelection:
     """Select the initial request context for the turn and its payload."""
     return select_coach_context(
@@ -77,6 +84,7 @@ def request_context_selection(
         context,
         attachments=bool(attachments or has_prior_openai_attachments),
         has_receipts=bool(command_receipts),
+        request_kind=request_kind,
     )
 
 
@@ -107,6 +115,7 @@ class CoachRequestPayloadService:
         attachments: list[dict[str, Any]],
         retain_openai_attachment_context: bool,
         has_prior_openai_attachments: bool,
+        request_kind: str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         selection = request_context_selection(
             message,
@@ -114,6 +123,7 @@ class CoachRequestPayloadService:
             command_receipts=command_receipts,
             attachments=attachments,
             has_prior_openai_attachments=has_prior_openai_attachments,
+            request_kind=request_kind,
         )
         training_context = self._training_context.build(
             selection=selection, local_date=context.get("local_date", "")
@@ -121,6 +131,7 @@ class CoachRequestPayloadService:
         model_instructions = compose_model_instructions(
             training_context,
             allow_mutations=allow_mutations,
+            request_kind=request_kind,
             # Earlier pixels are gone once the conversation rotates or leaves the
             # window, so the summary notice applies to every turn after an upload.
             attachment_summary=has_prior_openai_attachments

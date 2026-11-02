@@ -13,10 +13,10 @@ Use [README.md](README.md) for setup and operational commands.
   sessions, settings, conversations, usage, and sync state, not just chat history.
 - Schema changes require versioned, transactional SQLCipher migrations from
   supported released schemas, including documented skipped-release upgrades.
-  Release 1.13.6 (schema v9) is the oldest supported schema: no upgrade paths
+  Release 1.13.32 (schema v16) is the oldest supported schema: no upgrade paths
   from older releases are kept, but every later schema change must upgrade from
-  v9 and each newer released schema. Preserve frozen released-schema fixtures
-  from v9 onward; verify populated upgrades, rollback
+  v16 and each newer released schema. Preserve frozen released-schema fixtures
+  from v16 onward; verify populated upgrades, rollback
   on failure, and same-build restarts. A schema PR is not release-ready without
   this evidence.
 - Fresh databases require an explicit user request; tests use temporary storage.

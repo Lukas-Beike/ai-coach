@@ -157,7 +157,7 @@ class PublicPlanStateServiceTests(unittest.TestCase):
         services["external"].list_events.return_value = []
         entry = {
             "id": "planned-1",
-            "icu_training_load": 30,
+            "planned_load": 30,
             "planned_duration_s": 3600,
             "compliance": {
                 "actual_activity": {"icu_training_load": 28, "moving_time": 3500}
@@ -176,8 +176,8 @@ class PublicPlanStateServiceTests(unittest.TestCase):
             public = service.read_public(local_only=True)
 
         # The training report and season scenarios read the stored keys.
-        self.assertEqual(30, internal["planned"][0]["icu_training_load"])
-        self.assertEqual(30, internal["training_calendar"][0]["icu_training_load"])
+        self.assertEqual(30, internal["planned"][0]["planned_load"])
+        self.assertEqual(30, internal["training_calendar"][0]["planned_load"])
         expected = {
             "id": "planned-1",
             "training_load": 30,

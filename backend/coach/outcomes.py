@@ -201,7 +201,8 @@ def _alternative_planning_steps_repaired(
     effect_key = previous.get("plan_effect_key")
     return bool(
         alternatives
-        and before.get("reason") in ("request_invalid", "tool_arguments_invalid")
+        and before.get("reason")
+        in ("request_invalid", "tool_arguments_invalid", "plan_check_failed")
         and request_key
         and request_key == current.get("request_binding_key")
         and effect_key
@@ -238,6 +239,7 @@ def _matching_coach_steps_repaired(
         return _result(previous).get("reason") in (
             "request_invalid",
             "tool_arguments_invalid",
+            "plan_check_failed",
         )
     if before.get("target") != after.get("target"):
         return False

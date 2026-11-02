@@ -52,16 +52,15 @@ from backend.db.activity_detail_store import (
 from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import CURRENT_DATABASE_SCHEMA
 from backend.errors import AppError
-from backend.performance.analysis_input import analysis_input
 from backend.performance.canonical_recovery import (
     RECOVERY_KINDS,
     read_recovery_inputs,
 )
+from backend.performance.mean_max_curve import SessionCurveReader
 from backend.performance.personal_recovery import personal_recovery
 from backend.performance.power_profile import power_profile
 from backend.performance.session_rpe_load import feedback_by_session, session_rpe_load
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
-from backend.providers.garmin_activity_mapping import map_garmin_activities
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
 INTERVALS = ProviderId.INTERVALS.value
@@ -481,12 +480,13 @@ class M3SleepInputs(unittest.TestCase):
             series["reason"],
             "Mindestens 14 frühere datierte Schlafintervalle erforderlich.",
         )
+        # #1429 (v2): below 14 earlier intervals no median and no deviation.
         self.assertEqual(
-            series["points"][-1]["onset_deviation_minutes"],
-            75.0,
-            msg="#1429: sleep-timing-variability-v1 still computes deviations below 14 earlier "
-            "intervals; expected None until 14",
+            [None] * 14,
+            [point["onset_deviation_minutes"] for point in series["points"]],
         )
+        self.assertIsNone(series["baseline"]["onset_median_minutes_local"])
+        self.assertIsNone(series["baseline"]["wake_deviation_median_minutes"])
 
     def test_contradictory(self) -> None:
         wellness = [
@@ -515,7 +515,7 @@ class M3SleepInputs(unittest.TestCase):
         )
         self.assertEqual(regularity["regularity"]["series"], [])
 
-    def test_canonical_sleep_duration_is_read_but_timing_is_not(self) -> None:
+    def test_sleep_duration_and_timing_are_canonical_inputs(self) -> None:
         observation = recovery_observation(
             MetricKind.SLEEP_DURATION, 28_800.0, TODAY.isoformat(), ProviderId.GARMIN
         )
@@ -536,8 +536,7 @@ class M3SleepInputs(unittest.TestCase):
         self.assertEqual(
             timing,
             [],
-            msg="#1419: no canonical sleep start/end kind; sleep-timing-variability-v1 reads "
-            "raw provider fields",
+            msg="#1419: sleep start and end are canonical sleep periods, not metric kinds",
         )
         sleep_storage = [
             f"{table}.{column}"
@@ -549,7 +548,7 @@ class M3SleepInputs(unittest.TestCase):
             sleep_storage,
             ["sleep_periods.sleep_periods"],
             msg="#1419: canonical sleep periods are stored (schema v15); "
-            "sleep-timing-variability-v1 reads them when the tables serve",
+            "sleep-timing-variability-v2 reads them",
         )
         series = mapped_personal_recovery(
             [], {"sleep": [_night(0)]}, self.profile, TODAY
@@ -634,14 +633,6 @@ class M4BestEffortInputs(linking.LinkingCase):
             )
         )
 
-    def _profile(self, stored: StoredDetailSet) -> dict[str, Any]:
-        record = map_garmin_activities(
-            [linking.garmin_ride()], zone=linking.ZONE, retrieved_at=linking.FIRST
-        ).records[0]
-        candidate = DetailCandidate(stored=stored, started_at=None, device_type=None)
-        merged = merge_details([candidate])
-        return power_profile(analysis_input(record, merged.streams, None).activity)
-
     def test_complete(self) -> None:
         self._ingest_intervals([linking.intervals_ride()], linking.FIRST)
         stored, spans = self._full_intervals()
@@ -669,14 +660,13 @@ class M4BestEffortInputs(linking.LinkingCase):
                 },
             }
         )
-        durations = [point["duration_seconds"] for point in profile["duration_curve"]]
-        for duration in EFFORT_S:
-            self.assertNotIn(
-                duration,
-                durations,
-                msg="#1430: the best-effort curve has no 180/420/720 s windows; "
-                "expected them once the local mean-maximal curve exists",
-            )
+        best = {
+            point["duration_seconds"]: point["watts"]
+            for point in profile["duration_curve"]
+        }
+        self.assertEqual(
+            [best[duration] for duration in EFFORT_S], [350.0, 292.86, 275.0]
+        )
 
     def test_incomplete(self) -> None:
         self._ingest_garmin([linking.garmin_ride()], linking.FIRST)
@@ -684,38 +674,13 @@ class M4BestEffortInputs(linking.LinkingCase):
         assert isinstance(stored.detail, ActivityStreamSet)
         self.assertEqual(stored.detail.resolution, StreamResolution.DOWNSAMPLED)
 
-        profile = self._profile(stored)
-        window = next(
-            point
-            for point in profile["duration_curve"]
-            if point["duration_seconds"] == 1200
-        )
-        self.assertEqual(
-            (profile["status"], window["watts"]),
-            ("ok", 250.0),
-            msg="#1430: power_profile has no full-resolution filter and uses a "
-            "downsampled stream; expected exclusion or a downsampled label",
-        )
-        self.assertEqual(
-            set(profile),
-            {
-                "duration_curve",
-                "method",
-                "points",
-                "scope",
-                "source",
-                "status",
-            },
-            msg="#1430: power_profile carries no resolution or quality label; "
-            "expected one once downsampled input is labelled",
-        )
-        self.assertFalse(
-            any(
-                "resolution" in point or "quality" in point
-                for point in profile["duration_curve"]
-            ),
-            msg="#1430: best-effort points carry no resolution label",
-        )
+        session = self._sessions()[linking.GARMIN_ID]["activity_id"]
+        with self.manager.reader() as db:
+            curves = SessionCurveReader(
+                CanonicalTableReader().session_activities
+            ).curves(db, [session], {})
+        # A downsampled stream never enters the mean-maximal curve.
+        self.assertEqual(curves, {})
         empty = power_profile({"sport": "ride", "streams": {}})
         self.assertEqual(
             (empty["status"], empty["reason"], empty["duration_curve"]),

@@ -14,6 +14,10 @@ from backend.errors import AppError
 from backend.planning import workouts as planning_workouts
 from backend.planning.workout_export import build_planned_workout_export
 from backend.providers.intervals_client import IntervalsClient
+from backend.providers.intervals_workouts import (
+    intervals_fields_from_planning,
+    planning_fields_from_intervals,
+)
 from backend.sync.intervals_workout_export import IntervalsWorkoutExport
 from backend.sync.workout_export import (
     WorkoutExportCapabilities,
@@ -50,6 +54,23 @@ class IntervalsWorkoutExportTests(unittest.TestCase):
         self.request = Mock(return_value=None)
         self.client = IntervalsClient(config_stub(), request=self.request)
         self.export = IntervalsWorkoutExport(lambda: self.client)
+
+    def test_planning_metrics_round_trip_through_provider_boundary(self):
+        remote = {"icu_training_load": 42, "icu_intensity": 0.75, "name": "Tempo"}
+        local = planning_fields_from_intervals(remote)
+        self.assertEqual(
+            local, {"planned_load": 42, "planned_intensity": 0.75, "name": "Tempo"}
+        )
+        self.assertEqual(intervals_fields_from_planning(local), remote)
+
+    def test_planning_metrics_preserve_zero_null_and_missing(self):
+        remote = {"icu_training_load": 0, "icu_intensity": None}
+        local = planning_fields_from_intervals(remote)
+        self.assertEqual(local, {"planned_load": 0, "planned_intensity": None})
+        self.assertEqual(intervals_fields_from_planning(local), remote)
+        self.assertEqual(
+            planning_fields_from_intervals({"name": "Rest"}), {"name": "Rest"}
+        )
 
     def test_declares_planned_events_and_library_capabilities_only(self):
         self.assertIsInstance(self.export, WorkoutExportPort)

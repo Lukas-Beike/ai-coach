@@ -3,6 +3,13 @@
 The comparisons and sleep goal shortfalls read the daily canonical observations of
 each provider. Sleep timing variability reads the canonical sleep periods only
 (#1419, #1416); without them it has no data.
+
+Segment rule (M2, #1428): within one HRV or resting HR series, a change of the
+observation's method, aggregation or measurement context (device model,
+firmware, algorithm, sensor, window, protocol) restarts the comparison; only
+values since the latest change count. A switch between unknown and known
+metadata is a change. Without a reported device model a device change cannot be
+seen, so the continuity is unknown.
 """
 
 import math
@@ -14,6 +21,7 @@ from typing import Any, Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.canonical.domain_records import SleepPeriod
+from backend.canonical.records import Observation
 from backend.canonical.sleep_bounds import bounds_fields
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.canonical_recovery import CanonicalRecoveryInputs
@@ -52,8 +60,9 @@ _NOTE: Final = (
     "Werte; ein Wert außerhalb ist weder selten noch ein Warnsignal. Keine "
     "Diagnose, keine Trainingsfreigabe und keine Trainingsänderung allein aus "
     "einer Abweichung. Krankheit und Schmerzen separat berücksichtigen. Quellen "
-    "und Messfelder werden nicht gemischt. Der Fehlbetrag zum Schlafziel "
-    "summiert nur bekannte Nächte und wird nicht mit längeren Nächten "
+    "und Messfelder werden nicht gemischt. Die Schlafdauer ist eine Schätzung "
+    "des jeweiligen Geräts, kein gemessener Schlafbedarf. Der Fehlbetrag zum "
+    "Schlafziel summiert nur bekannte Nächte und wird nicht mit längeren Nächten "
     "verrechnet; fehlende Nächte und nicht erfasste Nickerchen begrenzen "
     "diese Aussage. Die Schlafzeit-Streuung ist kein Sleep Regularity Index."
 )
@@ -76,15 +85,22 @@ def personal_recovery(
     history_start = (today - timedelta(days=83)).isoformat()
     current_day = today.isoformat()
     groups: dict[tuple[ProviderId, str, str], dict[str, float]] = {}
+    contexts: dict[tuple[ProviderId, str, str], dict[str, Observation]] = {}
 
     add = partial(_add_record, groups, (history_start, current_day))
 
     if canonical is not None:
         for (provider, kind), (metric, field, scale) in _SERIES.items():
-            for day, value in sorted(canonical.daily(kind, provider).items()):
-                add((provider, metric, field), day.isoformat(), value, scale)
+            key = (provider, metric, field)
+            daily = canonical.daily_observations(kind, provider)
+            for day, observation in sorted(daily.items()):
+                add(key, day.isoformat(), observation.value.value, scale)
+            if metric != "sleep":
+                contexts[key] = {
+                    day.isoformat(): observation for day, observation in daily.items()
+                }
     baselines = [
-        _baseline(key, records, cutoff, today)
+        _baseline(key, records, cutoff, today, contexts.get(key, {}))
         for key, records in sorted(groups.items())
     ]
     try:
@@ -132,16 +148,65 @@ def _add_record(
     groups.setdefault(key, {})[day] = number
 
 
+def _comparability(observation: Observation | None) -> tuple[Any, ...]:
+    """Return what must stay equal for two values to share a comparison."""
+    if observation is None:
+        return ()
+    return (
+        observation.method,
+        observation.aggregation,
+        observation.provenance.context,
+    )
+
+
+def _segment_start(
+    records: dict[str, float], observations: dict[str, Observation], observed: str
+) -> str | None:
+    """Return the first day of the latest value's segment, or None without a change."""
+    latest = _comparability(observations.get(observed))
+    start = None
+    for day in sorted(records, reverse=True):
+        if _comparability(observations.get(day)) != latest:
+            return start
+        start = day
+    return None
+
+
+def _window_change(
+    records: dict[str, float],
+    observations: dict[str, Observation],
+    observed: str,
+    cutoff: str,
+) -> str | None:
+    """Return the segment start when it lies inside the comparison window."""
+    changed_on = _segment_start(records, observations, observed)
+    return changed_on if changed_on is not None and changed_on > cutoff else None
+
+
+def _reason(*, current: bool, changed: bool) -> str:
+    if not current:
+        return "Messung veraltet."
+    if changed:
+        return (
+            "Messkontext geändert; mindestens 14 passende Nächte seitdem erforderlich."
+        )
+    return "Mindestens 14 frühere passende Nächte erforderlich."
+
+
 def _baseline(
     key: tuple[ProviderId, str, str],
     records: dict[str, float],
     cutoff: str,
     today: date,
+    observations: dict[str, Observation],
 ) -> dict[str, Any]:
     provider, metric, field = key
     observed = max(records)
-    # Today's value never influences its own comparison distribution.
-    prior = [value for day, value in records.items() if cutoff <= day < observed]
+    changed_on = _window_change(records, observations, observed, cutoff)
+    # Today's value never influences its own comparison distribution, and a
+    # measurement change restarts it.
+    first = changed_on or cutoff
+    prior = [value for day, value in records.items() if first <= day < observed]
     latest = records[observed]
     current = observed >= (today - timedelta(days=1)).isoformat()
     baseline: dict[str, Any] = {
@@ -159,6 +224,13 @@ def _baseline(
             {"date": day, "value": value} for day, value in sorted(records.items())
         ],
     }
+    if observed in observations:
+        context = observations[observed].provenance.context.as_details()
+        baseline.update(
+            measurement_context=context,
+            continuity="known" if "device_model" in context else "unknown",
+            context_changed_on=changed_on,
+        )
     if len(prior) >= 14 and current:
         lower, _, upper = quantiles(prior, n=4, method="inclusive")
         baseline.update(
@@ -169,11 +241,7 @@ def _baseline(
             position="below" if latest < lower else _upper_position(latest, upper),
         )
     else:
-        baseline["reason"] = (
-            "Messung veraltet."
-            if not current
-            else "Mindestens 14 frühere passende Nächte erforderlich."
-        )
+        baseline["reason"] = _reason(current=current, changed=changed_on is not None)
 
     return baseline
 
@@ -223,7 +291,8 @@ def sleep_timing_variability(
     """Summarize clock-time deviations of actual sleep intervals, without a score.
 
     Compares onset and wake with the athlete's own earlier nights; this is not the
-    Sleep Regularity Index.
+    Sleep Regularity Index. Version 2 (#1429) reports no median and no deviation
+    below 14 earlier intervals; otherwise it equals version 1.
 
     ``periods`` are the canonical sleep periods; None means the serving source
     stores none, and there is no data. Each provider and field pair is kept
@@ -243,7 +312,7 @@ def sleep_timing_variability(
     if not series:
         reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
         return {
-            "method": "sleep-timing-variability-v1",
+            "method": "sleep-timing-variability-v2",
             "timezone": timezone_name,
             "status": "insufficient_data",
             "reason": reason,
@@ -256,7 +325,7 @@ def sleep_timing_variability(
         }
     rank = {"insufficient_data": 0, "provisional": 1, "ok": 2}
     return {
-        "method": "sleep-timing-variability-v1",
+        "method": "sleep-timing-variability-v2",
         "timezone": timezone_name,
         "status": max(
             (item["status"] for item in series), key=lambda status: rank[status]
@@ -353,14 +422,16 @@ def _sleep_series(
         reason = "Mindestens 14 frühere datierte Schlafintervalle erforderlich."
     if not count:
         reason = "Keine geprüften datierten Schlafbeginn- und Endzeiten verfügbar."
+    # v2: below 14 earlier intervals there is no reference, so no deviation.
+    compared = status != "insufficient_data"
     onset = (
         _circular_median([item["onset_minutes_local"] for item in prior])
-        if prior
+        if compared
         else None
     )
     wake = (
         _circular_median([item["wake_minutes_local"] for item in prior])
-        if prior
+        if compared
         else None
     )
     points = [
@@ -429,8 +500,8 @@ def _sleep_series(
         "baseline": {
             "onset_median_minutes_local": onset,
             "wake_median_minutes_local": wake,
-            "onset_deviation_median_minutes": median(onset_dev) if prior else None,
-            "wake_deviation_median_minutes": median(wake_dev) if prior else None,
+            "onset_deviation_median_minutes": median(onset_dev) if compared else None,
+            "wake_deviation_median_minutes": median(wake_dev) if compared else None,
         },
         "points": points,
         "points_14": display(14),

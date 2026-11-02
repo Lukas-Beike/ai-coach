@@ -16,6 +16,12 @@ M5 (own smoothed load curves, passive CP/CS, HRV-based recommendations, #1432)
 is deferred and has no card. It needs its own card and G0 review before work
 starts.
 
+Method ids, versions, statuses and limits of the offered methods are
+registered in `openspec/specs/performance-and-readiness/spec.md`;
+`tests/test_performance_coach_ui_parity.py` checks that Coach and UI show the
+same value, status and scope (gate G5, #1433). No observation phase has run;
+one needs the athlete's consent with scope and duration fixed in advance.
+
 [Method inputs](inputs.md) records where each card's inputs are stored, how
 they reach API, UI and Coach, and which data gaps remain (gate G1, #1425).
 

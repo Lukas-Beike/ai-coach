@@ -59,11 +59,11 @@ Consumer trace:
 - Canonical read: `read_recovery_inputs` reads sleep duration and score, resting
   HR, RMSSD, SDNN, the Garmin weekly HRV average and readiness of all providers
   (`backend/performance/canonical_recovery.py`) since #1411, and for M3 timing
-  the canonical sleep periods when the tables serve reads (#1419).
+  the canonical sleep periods (#1419, #1429).
 - Method: `personal_recovery` (`backend/performance/personal_recovery.py`)
   builds one series per provider and measurement from the daily canonical
-  observations; raw rows and payloads feed sleep timing variability only before the
-  canonical tables serve reads.
+  observations and restarts the comparison at a change of method, aggregation
+  or measurement context (#1428); no raw provider row or payload is read.
 - Report/context: `current_performance_context` (`backend/performance/context.py:167`).
 - HTTP: `GET /api/performance` (`backend/http_api/athlete_get.py:51`) and the
   report services (`backend/http_api/assembly.py:430`).
@@ -81,14 +81,17 @@ Consumer trace:
 
 Consumer trace:
 
-- Method: `personal_recovery` → `_sleep_deficits` on raw rows, and
-  `sleep_timing_variability` on canonical sleep periods once the tables serve (raw
-  rows before that), with pinned parity.
+- Method: `personal_recovery` → `_sleep_deficits` on canonical sleep duration
+  observations, and `sleep_timing_variability` (`sleep-timing-variability-v2`)
+  on canonical sleep periods only (#1429).
 - Report/context, HTTP, UI and Coach as for M2; in addition the Coach tool
   `get_training_report(sections=["sleep_timing_variability"])`
-  (`backend/coach/activity_read_tools.py:83`) via
+  (`backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`) via
   `TrainingDerivedReadService.sleep_timing_variability`
-  (`backend/performance/report_service.py:399`).
+  (`backend/performance/report_service.py:TrainingDerivedReadService.sleep_timing_variability`);
+  the tool returns the Coach context's per-series summary plus each series'
+  last 14 nights, without the 84-night chart points
+  (`coach_sleep_timing_projection`, #1433).
 
 ## M4 — Critical Power and Critical Speed
 
@@ -96,22 +99,29 @@ Consumer trace:
 | --- | --- | --- |
 | Power, speed, distance, time streams | `activity_detail_sets` (with `resolution`) and `activity_stream_channels` | `backend/db/activity_detail_store.py` |
 | Resolution | Intervals fetch `full`, legacy cache `full` only when marked, Garmin `downsampled`, FIT (Wahoo) `full` | `backend/providers/intervals_activity_detail_mapping.py:195,227-230`, `backend/providers/garmin_activity_detail_mapping.py:207`, `backend/providers/fit_activity_detail_mapping.py:257` |
-| Effort windows | 5–3600 s for cycling; no 180, 420 or 720 s window | `backend/performance/power_profile.py:10-13` |
+| Effort windows | 5–3600 s for cycling including 180, 420 and 720 s; running 60–1200 s including 180, 420 and 720 s | `backend/performance/power_profile.py:POWER_DURATIONS`, `RUNNING_DURATIONS` |
 
-Consumer trace (no M4 method exists yet):
+Consumer trace (method `mean-max-curve` version 1, fit `critical-power-speed` version 1):
 
 - Per activity: `CanonicalDetailReader.read`
   (`backend/performance/canonical_detail.py:113`) follows a merged session
   (`:68`), `merge_details` (`backend/activities/detail_merge.py:126`) prefers a
-  full-resolution stream set, then `power_profile` runs on the result.
-- Reports: stored analyses (`backend/db/activity_analysis_reads.py:78`, kv
-  fallback `:92`) → `power_profiles`
-  (`backend/performance/report_service.py:123`) → `GET /api/analysis/power-profiles`
-  (`backend/http_api/analysis.py:40`) → `public/analysis.js`; Coach tool
+  full-resolution stream set, then `power_profile` runs on the result and is
+  labelled `stream_resolution` `full` or `downsampled`.
+- Reports: `SessionCurveReader.curves`
+  (`backend/performance/mean_max_curve.py`) reads only full-resolution stream
+  sets of each canonical session (merged duplicates count once), keyed in memory
+  by method, sport and stream content hashes → `power_profiles`
+  (`backend/performance/report_service.py:TrainingProfileSelectionService`) →
+  `GET /api/analysis/power-profiles` (`backend/http_api/analysis.py`) →
+  `public/analysis.js`; Coach tool
   `get_training_report(sections=["power_profiles"])`
-  (`backend/coach/activity_read_tools.py:72`).
-- `power_profile` does not check resolution; a downsampled stream still gives
-  best efforts.
+  (`backend/coach/activity_read_tools.py`). Overlapping bests of one session share
+  an `effort_group`.
+- Fit: `critical_power_speed` (`backend/performance/critical_power.py`) reads
+  the 28-day session curves inside `power_profiles` and returns
+  `critical_power` in the same payload, so the Analysis card line and the
+  Coach tool show the same values.
 
 ## Data gaps and persistence needs
 
@@ -125,11 +135,11 @@ Consumer trace (no M4 method exists yet):
 | Canonical resting HR only replaces an equal legacy value | M2 | read path | resolved by #1411 |
 | Method, aggregation and window stored; only Garmin HRV populates them | M2, M3 | mapping | #1418 (#1408) |
 | Device model and firmware unknown for Garmin HRV (no measurement-associated evidence) | M2, M3, M4 | mapping | #1420 (#1408) |
-| Timing deviations computed below 14 earlier intervals | M3 | method | #1429 |
+| Timing deviations computed below 14 earlier intervals | M3 | method | resolved by #1429 (`sleep-timing-variability-v2`) |
 | Labels "sleep deficit" and regularity | M3 | wording | resolved by #1426 |
-| No full-resolution filter and no 180/420/720 s windows | M4 | method | #1430 |
-| Reports read stored analyses with kv fallback | M4 | read path | #1410 |
-| No CP/CS fit | M4 | method | #1431 |
+| No full-resolution filter and no 180/420/720 s windows | M4 | method | resolved by #1430 (`mean-max-curve` v1) |
+| Reports read stored analyses with kv fallback | M4 | read path | resolved by #1410 and #1430 |
+| No CP/CS fit | M4 | method | resolved by #1431 (`critical-power-speed` v1, experimental) |
 | No RR/NN stream | M2 | out of scope | #1428 |
 
 The canonical home for `icu_rpe` (#1446) was delivered by #1510, the
@@ -144,5 +154,5 @@ Classes in `tests/test_performance_method_inputs.py`; each has `test_complete`,
 | --- | --- | --- | --- |
 | M1 | `M1SessionRpeInputs` | — | — |
 | M2 | `M2HrvRestingHrInputs` | `test_canonical_resting_hr_is_the_primary_input`, `test_canonical_hrv_is_read_per_provider` | — |
-| M3 | `M3SleepInputs` | `test_canonical_sleep_duration_is_read_but_timing_is_not` | #1429, #1419 |
-| M4 | `M4BestEffortInputs` | — | #1430 |
+| M3 | `M3SleepInputs` | `test_sleep_duration_and_timing_are_canonical_inputs` | — |
+| M4 | `M4BestEffortInputs` | — | — |

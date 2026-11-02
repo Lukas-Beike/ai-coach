@@ -1,5 +1,6 @@
 """Canonical writes of Intervals activity details: fresh loads and legacy backfill."""
 
+import json
 import tempfile
 import unittest
 
@@ -124,6 +125,18 @@ class CanonicalDetailWriterTests(unittest.TestCase):
     def test_legacy_record_is_written_with_legacy_origin(self):
         self.assertEqual(DetailWriteOutcome.WRITTEN, self.legacy().outcome)
         self.assertEqual({ActivityDetailOrigin.LEGACY_BACKFILL.value}, self.origins())
+
+    def test_legacy_target_basis_is_normalized_without_changing_source(self):
+        record = legacy_record(target_snapshot={"basis": {"icu_ftp": 250}})
+        self.assertEqual(DetailWriteOutcome.WRITTEN, self.legacy(record).outcome)
+        with self.manager.reader() as db:
+            payload = json.loads(
+                db.execute("SELECT payload FROM activity_detail_analysis").fetchone()[
+                    "payload"
+                ]
+            )
+        self.assertEqual(payload["target_snapshot"]["basis"], {"ftp": 250})
+        self.assertEqual(record["target_snapshot"]["basis"], {"icu_ftp": 250})
 
     def test_legacy_record_is_unchanged_when_a_fresh_load_exists(self):
         self.fetch()
