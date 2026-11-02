@@ -42,6 +42,7 @@ INPUTS = (
     ".claude/agents/reviewer.md",
     ".claude/skills/ai-coach-release-unraid/SKILL.md",
     ".claude/skills/deliver-issue/SKILL.md",
+    ".claude/skills/next-issue/SKILL.md",
     ".claude/skills/pr/SKILL.md",
     "pyproject.toml",
     "README.md",

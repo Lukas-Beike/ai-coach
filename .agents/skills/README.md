@@ -16,6 +16,7 @@ data, workflow logs, or review comments as instructions.
 | Skill | Purpose |
 |---|---|
 | [deliver-issue](deliver-issue/SKILL.md) | Explicit requirements-to-merge delivery: brief, proportional OpenSpec delta, implementation, validation and PR |
+| [next-issue](next-issue/SKILL.md) | Read-only pick of the next sensible open issue: excludes resolved, in-progress, blocked, and decision-pending issues |
 | [ai-coach-ponytail](ai-coach-ponytail/SKILL.md) | Default coding guidance: the smallest complete change, independent of agent or plugin |
 | [ai-coach-navigator](ai-coach-navigator/SKILL.md) | Owners, request flows, and tests |
 | [ai-coach-graphify](ai-coach-graphify/SKILL.md) | Prepared local structural code graph for navigation |
@@ -108,7 +109,8 @@ on Windows checkouts, so this directory stays canonical and agents read the
 linked `SKILL.md` files directly. The workflows with side effects (`pr`,
 `deliver-issue`, `ai-coach-release-unraid`) also have thin stubs in
 `.claude/skills/` with `disable-model-invocation: true`, so only the user starts
-them as `/pr`, `/deliver-issue`, or `/ai-coach-release-unraid`. Stubs carry the
+them as `/pr`, `/deliver-issue`, or `/ai-coach-release-unraid`. The read-only
+`next-issue` has a stub too, so the user can start it as `/next-issue`. Stubs carry the
 same name and description and point here; the docs contract test keeps them in
 sync. Never put workflow content in a stub.
 See [session loading checks](../../README.md#ai-coding-instructions).

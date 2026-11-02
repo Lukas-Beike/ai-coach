@@ -30,6 +30,10 @@ class _DatabaseManager:
         self.db = db
         self.trace = trace
         self.calls = 0
+        self._callbacks: list[Any] = []
+
+    def after_commit(self, callback: Any) -> None:
+        self._callbacks.append(callback)
 
     @contextmanager
     def unit_of_work(self):
@@ -40,9 +44,13 @@ class _DatabaseManager:
             self.db.commit()
             self.trace.append("commit")
         except Exception:
+            self._callbacks.clear()
             self.db.rollback()
             self.trace.append("rollback")
             raise
+        callbacks, self._callbacks = self._callbacks, []
+        for callback in callbacks:
+            callback()
 
 
 class _CalendarConflictService:

@@ -267,6 +267,16 @@ class WeeklyProgressTests(unittest.TestCase):
         self.assertEqual({"status": "outside_curve_window"}, old["mean_max_power"])
         self.assertEqual([], reads)
 
+    def test_curves_can_be_skipped_inside_their_window(self):
+        reads = []
+        service = self._service()
+        service._curve_records = lambda: reads.append(1) or []
+        values = {"days": 42, "start": "2026-09-07"}
+        service.progress(values, "UTC", with_curves=False)
+        self.assertEqual([], reads)
+        service.progress(values, "UTC")
+        self.assertEqual([1], reads)
+
     def test_accepted_windows_and_rejected_values(self):
         for days in (7, 28, 42, 84):
             self.assertEqual(days // 7, self._progress({"days": days})["weeks"])

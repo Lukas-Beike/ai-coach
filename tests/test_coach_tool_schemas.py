@@ -46,6 +46,13 @@ def _nested_objects(node, path=""):
 
 
 class CoachToolSchemaTests(unittest.TestCase):
+    def test_strict_replace_plan_findings_use_supported_array_schema(self):
+        tool = _tools()["replace_training_plan"]
+        findings = tool["parameters"]["properties"]["accept_plan_findings"]
+        self.assertTrue(tool["strict"])
+        self.assertEqual(findings["maxItems"], 1)
+        self.assertNotIn("uniqueItems", findings)
+
     def test_activity_detail_description_is_not_limited_to_one_provider(self):
         description = _tools()["get_activity_details"]["description"]
         self.assertNotIn("Intervals.icu", description)

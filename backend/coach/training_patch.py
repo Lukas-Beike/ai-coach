@@ -136,7 +136,8 @@ class CoachTrainingPatchService:
                 created, ids, action["request"]["constraints"], authorized_plan_id, db
             )
             revision = db.execute(SELECT_PLANNING_REVISION_SQL).fetchone()["revision"]
-        self._events.publish("planning", {"status": "changed"})
+            # Deferred to the outermost commit: a plan-guard rollback publishes nothing.
+            self._database_manager.after_commit(self._publish_changed)
         return {
             "ok": True,
             "status": "applied",
@@ -144,6 +145,9 @@ class CoachTrainingPatchService:
             "changes": changed["changes"],
             "library_entry_ids": [item["id"] for item in created],
         }
+
+    def _publish_changed(self) -> None:
+        self._events.publish("planning", {"status": "changed"})
 
     def _validate_schedule(
         self,

@@ -684,7 +684,7 @@ class StructuredTrainingChangeService:
                 require_revision=require_revision,
                 authorized_plan_id=authorized_plan_id,
             )
-        self._publish_change()
+            self._database_manager.after_commit(self._publish_change)
         return result
 
     def apply_in_db(

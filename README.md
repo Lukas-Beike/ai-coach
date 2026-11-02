@@ -663,7 +663,7 @@ subagents.
 
 Sessions default to `medium` effort (`effortLevel` in `.claude/settings.json`);
 raise it with `/effort high` for tricky work. Agents may not go above `high`
-without your approval. `/pr`, `/deliver-issue`, and `/ai-coach-release-unraid`
+without your approval. `/pr`, `/deliver-issue`, `/next-issue`, and `/ai-coach-release-unraid`
 are user-only Claude Code commands (`disable-model-invocation: true`) that load
 the canonical workflows in `.agents/skills/`.
 

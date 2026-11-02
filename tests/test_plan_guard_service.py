@@ -22,6 +22,7 @@ from backend.planning.plan_guard_service import (
     PlanCheckError,
     PlanGuardService,
     build_planning_brief,
+    read_progress,
     recent_illness,
 )
 
@@ -60,6 +61,7 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.addCleanup(self.manager.close)
         self.units: list[dict[str, Any]] = []
         self.completed: list[dict[str, Any]] = []
+        self.published: list[str] = []
         self.write_units: list[dict[str, Any]] | None = None
         # A reported illness makes the hard pair a blocking finding.
         self.illness = "Fieber"
@@ -90,6 +92,7 @@ class PlanGuardWriteTests(unittest.TestCase):
     def write(self, name: str, arguments: dict[str, Any], **_: Any) -> dict[str, Any]:
         with self.manager.unit_of_work() as db:
             db.execute("INSERT INTO synthetic_writes VALUES (?)", (name,))
+        self.manager.after_commit(lambda: self.published.append(name))
         self.units = self.write_units if self.write_units is not None else hard_pair()
         self.seen_arguments = arguments
         return {"ok": True, "status": "applied"}
@@ -120,6 +123,14 @@ class PlanGuardWriteTests(unittest.TestCase):
             [f["code"] for f in raised.exception.findings],
         )
         self.assertEqual(0, self.stored())
+
+    def test_rolled_back_write_publishes_nothing_and_committed_write_does(self) -> None:
+        with self.assertRaises(PlanCheckError):
+            self.run_tool("replace_training_plan", workouts=[{}])
+        self.assertEqual([], self.published)
+        self.illness = ""
+        self.run_tool("replace_training_plan", workouts=[{}])
+        self.assertEqual(["replace_training_plan"], self.published)
 
     def test_load_findings_save_with_notes(self) -> None:
         self.illness = ""
@@ -232,6 +243,14 @@ class PlanGuardWriteTests(unittest.TestCase):
 
 
 class PlanBriefTests(unittest.TestCase):
+    def test_brief_progress_read_skips_mean_max_curves(self) -> None:
+        reports = Mock()
+        reports.timezone.return_value = "UTC"
+        read_progress(reports)
+        reports.report.progress.assert_called_once_with(
+            {"days": 42}, "UTC", with_curves=False
+        )
+
     def test_brief_is_bounded_and_labelled(self) -> None:
         weeks = [
             {
