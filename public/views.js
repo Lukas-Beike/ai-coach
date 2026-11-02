@@ -379,6 +379,7 @@ function renderProfile(profile) {
   for (const [key, value] of Object.entries(profile)) populateProfileField(form, key, value);
   if (form.elements.coaching_style?.value === "Supportive, direct, and evidence-aware") form.elements.coaching_style.value = "Unterstützend, direkt und evidenzbasiert";
   state.profileBaseline = profileFormValues(form);
+  renderWeeklyPlan(form);
   renderProfileSummary(profile);
 }
 

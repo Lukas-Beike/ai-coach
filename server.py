@@ -1720,6 +1720,9 @@ def _plan_guard_service() -> PlanGuardService:
         training_model=lambda: str(
             ATHLETE_DATA.profile().get().get("training_model") or ""
         ),
+        weekly_plan_text=lambda: str(
+            ATHLETE_DATA.profile().get().get("weekly_plan") or ""
+        ),
         today=lambda: ATHLETE_CLOCK.now().date(),
         thresholds=lambda: read_load_thresholds(
             database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()

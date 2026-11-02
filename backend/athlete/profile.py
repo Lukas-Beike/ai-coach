@@ -8,6 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend import change_history
+from backend.athlete import weekly_plan
 from backend.errors import AppError
 
 DEFAULT_TIMEZONE = "Europe/Berlin"
@@ -30,6 +31,7 @@ DEFAULT_PROFILE = {
     "training_preferences_strength": "",
     "training_preferences_mobility": "",
     "training_model": TRAINING_MODELS[0],
+    "weekly_plan": "",
     "performance_notes": "",
     "weight_kg": "",
     "body_fat_pct": "",
@@ -60,8 +62,11 @@ def normalize_profile(
     """Copy and normalize known profile fields without mutating the input."""
     result = dict(DEFAULT_PROFILE)
     for key in result:
-        if key in value:
+        if key in value and key != "weekly_plan":
             result[key] = str(value[key]).strip()[:4000]
+    result["weekly_plan"] = weekly_plan.normalize(
+        value.get("weekly_plan", ""), strict=validate_timezone
+    )
     result["timezone"] = timezone_name(result.get("timezone"), strict=validate_timezone)
     if result["training_model"] not in TRAINING_MODELS:
         if validate_timezone and result["training_model"]:

@@ -1017,6 +1017,20 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .form-grid { display: grid; gap: 12px; }
 .form-grid > label { min-width: 0; }
 .profile-subsection { display: grid; gap: 12px; min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.weekly-plan { display: grid; gap: 6px; min-width: 0; }
+.weekly-day { border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.weekly-summary { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; min-height: 44px; box-sizing: border-box; cursor: pointer; }
+.weekly-summary strong { flex: 0 0 2.2em; }
+.weekly-summary-text { min-width: 0; overflow-wrap: anywhere; }
+.weekly-summary-text[data-source="default"], .weekly-summary-text[data-source="fallback"] { color: var(--muted); font-style: italic; }
+.weekly-body { display: grid; gap: 8px; padding: 0 10px 10px; min-width: 0; }
+.weekly-line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.weekly-line input, .weekly-line select, .weekly-body > input { min-height: 36px; width: auto; max-width: 100%; }
+.weekly-line input[type="number"], .weekly-body > input[type="number"] { width: 6.5em; }
+.weekly-check { display: flex; gap: 8px; align-items: center; min-height: 36px; }
+.weekly-check input { width: auto; }
+.weekly-remove { min-width: 36px; min-height: 36px; padding: 0 8px; }
+.weekly-default-day { display: grid; grid-template-columns: 2.2em minmax(0, 1fr); gap: 8px; align-items: start; }
 .profile-subsection legend { padding: 0 6px; color: var(--ink); font-size: .85rem; font-weight: 700; }
 .competition-list { display: grid; gap: 12px; }
 .competition-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: var(--card-hover-surface); }

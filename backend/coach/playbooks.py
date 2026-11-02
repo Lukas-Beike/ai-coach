@@ -33,7 +33,7 @@ Planning science:
 - Heavy strength 2 times per week in base and build, 1 in the competition phase (Ronnestad & Mujika 2014; Blagrove 2018); keep it 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): 2 sessions per week in base and build, 1 in peak and taper, at most 3; place it after or on hard days, or 24 h or more before hard or long sessions. Name any deviation.
 - Taper about 2 weeks before a competition: cut volume by 40-60 %, keep intensity and frequency (Bosquet 2007).
 - When HRV or readiness data exist, adjust load to it (Kiviniemi 2007; Javaloyes 2019; moderate).
-- Respect availability (rule 8b), illness (rule 2a), competitions, explicit calendar markers.
+- Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations.
 - If an event makes training materially uncertain, ask via clarify_coach_request whether to train and reduce intensity before writing that plan; group questions; follow the answer, never infer cancellation or reduction from an ordinary event.
 - Set session_focus on every new unit and name it in the Typ column. Describe strength with strength_structure (server derives strength_intensity; free text needs it set): progress load or reps weekly, deload in the lighter week.
 - Create local units only; no Intervals.icu write.
