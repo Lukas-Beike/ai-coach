@@ -9,7 +9,6 @@ from backend.planning.plan_checks import BLOCKING_CODES
 ACCEPT_PLAN_FINDINGS: dict[str, Any] = {
     "type": "array",
     "maxItems": len(BLOCKING_CODES),
-    "uniqueItems": True,
     "items": {"type": "string", "enum": list(BLOCKING_CODES)},
     "description": "The server checks the resulting plan. A blocking finding (illness_hard) saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. Other findings save the plan and come back as plan_check_notes. Otherwise send an empty list.",
 }
