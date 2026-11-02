@@ -55,7 +55,11 @@ The system SHALL bound per-section and total Coach context, retain valid structu
 - **WHEN** the app supplies default full training context
 - **THEN** recent activities, planned events, local planned units and library templates are bounded and the projection exposes the applicable limits.
 
-Evidence: `backend/coach/context.py:bounded_coach_context_sections`, `backend/coach/context.py:coach_context_projection_meta`, `backend/coach/context.py:CoachTrainingContextService.build`; `tests/test_coach_training_context.py:test_section_and_total_truncation_keep_valid_bounded_context`; `tests/test_coach_context_reduction.py:test_oversized_single_section_retains_useful_prefix`; `tests/test_coach_context_selection.py:test_date_window_and_activity_limits_preserve_provenance`.
+#### Scenario: Canonical data is not yet available
+- **WHEN** the first canonical backfill is pending or failed and a scoped Coach context is built
+- **THEN** the context marks the unavailable canonical activity and provider data, preserves that marker through selection, and identifies local plans as still available.
+
+Evidence: `backend/coach/context.py:bounded_coach_context_sections`, `backend/coach/context.py:coach_context_projection_meta`, `backend/coach/context.py:CoachTrainingContextService.build`; `tests/test_coach_training_context.py:test_section_and_total_truncation_keep_valid_bounded_context`; `tests/test_coach_context_reduction.py:test_oversized_single_section_retains_useful_prefix`, `tests/test_coach_context_reduction.py:test_pending_data_marker_survives_scoped_planning_projection`; `tests/test_coach_context_selection.py:test_date_window_and_activity_limits_preserve_provenance`.
 
 ### Requirement: CP4 On-demand omitted context
 The system SHALL support read-only loading of named local Coach context sections, report whether the bounded result is complete, and reject invalid section requests.

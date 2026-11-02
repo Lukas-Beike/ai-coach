@@ -26,6 +26,7 @@ from canonical_read_support import (
     CanonicalReadFixture,
     intervals_snapshot,
     make_selector,
+    new_backfill,
     populate,
     store_garmin,
 )
@@ -945,6 +946,22 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
             canonical=source,
         )
         return reader.current_performance(reader.read_inputs())
+
+    def test_failed_first_backfill_is_visible_but_completed_data_stays_available(
+        self,
+    ) -> None:
+        backfill = new_backfill(self)
+        self.write(backfill.mark_failed)
+        source = self._source()
+        for result in (
+            _service(source, self.garmin).performance_state()["performance"],
+            self._coach_performance(source),
+        ):
+            self.assertEqual(result["reason"], "canonical_pending")
+            self.assertIn("fehlgeschlagen", result["status"])
+        completed = populate(self)
+        self.write(completed.mark_failed)
+        self.assertTrue(self._coach_performance(source)["available"])
 
     def test_before_the_first_backfill_performance_and_coach_are_pending(
         self,

@@ -60,7 +60,12 @@ from backend.runtime.ports import (
     ProviderCoverageReader,
     SessionRecords,
 )
-from backend.sync.canonical_backfill import ReadState, read_state
+from backend.sync.canonical_backfill import (
+    BackfillStatus,
+    ReadState,
+    read_state,
+    read_status,
+)
 from backend.sync.canonical_coverage_store import (
     CANONICAL_COVERAGE_PROVIDERS,
     LIVE_COVERAGE_PROVIDERS,
@@ -266,6 +271,10 @@ class CanonicalReadSelector(
     def serves_tables(self, db: Any) -> bool:
         """Return True while observation and activity reads come from the tables."""
         return self._read_state(db) is not ReadState.PENDING
+
+    def backfill_failed(self, db: Any) -> bool:
+        """Return whether the backfill most recently failed."""
+        return read_status(self._key_values, db) == BackfillStatus.FAILED
 
     def summary(self, db: Any) -> dict[str, Any]:
         """Return the content-free switch state for diagnostics.
