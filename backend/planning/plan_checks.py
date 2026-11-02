@@ -47,7 +47,12 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
-from backend.planning import calendar_load, leg_strength, load_checks, weekly_plan_checks
+from backend.planning import (
+    calendar_load,
+    leg_strength,
+    load_checks,
+    weekly_plan_checks,
+)
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
