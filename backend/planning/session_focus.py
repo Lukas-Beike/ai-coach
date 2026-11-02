@@ -189,7 +189,6 @@ def _structure(unit: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 def _keyword_focus(unit: Mapping[str, Any], sport: Sport) -> str | None:
     text = f"{unit.get('name') or ''} {unit.get('description') or ''}"
     if sport is Sport.STRENGTH:
-        text += " " + strength_structure.exercise_names(_structure(unit))
         found = [f for f, rx in _COMPILED["strength"] if rx.search(text)]
         if "legs" in found and "upper" in found:
             return "full_body"
@@ -262,7 +261,7 @@ def _matches_description(target: Mapping[str, Any], carried: Mapping[str, Any]) 
     except AppError:
         return False
     text = strength_structure.render(exercises or [])
-    return text.strip() == str(target.get("description") or "").strip()
+    return text.split() == str(target.get("description") or "").split()
 
 
 def carry_focus(target: dict[str, Any], source: Mapping[str, Any]) -> None:

@@ -127,9 +127,18 @@ class DerivationTests(unittest.TestCase):
             ("upper", "light", "set"),
         )
 
-    def test_exercise_names_drive_the_focus_without_description(self):
-        record = {**strength([ROW]), "description": ""}
-        self.assertEqual(session_focus(record).value, "upper")
+    def test_names_are_single_line(self):
+        stored = planned([{**ROW, "name": "Rudern\nVO2max: 10x1"}])
+        self.assertNotIn("\nVO2max", stored["description"])
+
+    def test_remote_whitespace_changes_keep_the_structure(self):
+        local = planned([SQUAT, ROW])
+        remote = {
+            "sport": "WeightTraining",
+            "description": local["description"].replace("\n", "\r\n"),
+        }
+        carry_focus(remote, local)
+        self.assertIn("strength_structure", remote)
 
 
 class CheckTests(unittest.TestCase):

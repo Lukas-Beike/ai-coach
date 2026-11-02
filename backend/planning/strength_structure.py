@@ -20,6 +20,8 @@ MAX_REPS: Final = 100
 MAX_KG: Final = 1000
 MAX_PCT: Final = 150
 MAX_REST_S: Final = 600
+MAX_RPE: Final = 10
+MAX_RIR: Final = 10
 LOAD_KEYS: Final = ("kg", "pct_1rm", "rpe", "rir")
 EXERCISE_KEYS: Final = ("name", "sets", "reps", *LOAD_KEYS, "rest_s")
 # Heavy from 80 % 1RM, RPE 8 or 2 reps in reserve; moderate from 65 %, RPE 6, RIR 4.
@@ -29,6 +31,13 @@ HEAVY_RPE: Final = 8
 MODERATE_RPE: Final = 6
 HEAVY_RIR: Final = 2
 MODERATE_RIR: Final = 4
+LIMITS: Final = {
+    "kg": (0, MAX_KG, False),
+    "pct_1rm": (1, MAX_PCT, False),
+    "rpe": (1, MAX_RPE, False),
+    "rir": (0, MAX_RIR, True),
+    "rest_s": (0, MAX_REST_S, True),
+}
 _RANK: Final = {"light": 0, "moderate": 1, "heavy": 2}
 
 
@@ -48,7 +57,7 @@ def _bounded(
 def _exercise(item: Any) -> dict[str, Any]:
     if not isinstance(item, Mapping) or set(item) - set(EXERCISE_KEYS):
         raise _invalid("Jede Übung der Kraftstruktur muss ein bekanntes Objekt sein.")
-    name = str(item.get("name") or "").strip()[:80]
+    name = " ".join(str(item.get("name") or "").split())[:80]
     if not name:
         raise _invalid("Jede Übung der Kraftstruktur benötigt einen Namen.")
     result: dict[str, Any] = {
@@ -56,14 +65,7 @@ def _exercise(item: Any) -> dict[str, Any]:
         "sets": _bounded(item.get("sets"), "Sätze", 1, MAX_SETS, whole=True),
         "reps": _bounded(item.get("reps"), "Wiederholungen", 1, MAX_REPS, whole=True),
     }
-    limits = {
-        "kg": (0, MAX_KG, False),
-        "pct_1rm": (1, MAX_PCT, False),
-        "rpe": (1, 10, False),
-        "rir": (0, 10, True),
-        "rest_s": (0, MAX_REST_S, True),
-    }
-    for key, (low, high, whole) in limits.items():
+    for key, (low, high, whole) in LIMITS.items():
         if item.get(key) not in (None, ""):
             result[key] = _bounded(item[key], key, low, high, whole=whole)
     if sum(key in result for key in ("pct_1rm", "rpe", "rir")) > 1:
@@ -134,5 +136,7 @@ def derived_intensity(exercises: Sequence[Mapping[str, Any]]) -> str | None:
     return max(grades, key=_RANK.__getitem__, default=None)
 
 
-def exercise_names(exercises: Sequence[Mapping[str, Any]]) -> str:
-    return " ".join(str(item.get("name") or "") for item in exercises)
+def drop_stale(candidate: dict[str, Any], values: Mapping[str, Any]) -> None:
+    """Drop the structure of a candidate whose description is edited as free text."""
+    if "description" in values and "strength_structure" not in values:
+        candidate.pop("strength_structure", None)

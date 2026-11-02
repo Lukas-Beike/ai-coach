@@ -29,15 +29,15 @@ _PLAN_RULES = """\
 Planning science:
 - Periodize with progressive overload and a lighter week every 3rd to 4th week (practice-based; no model clearly superior, Kiely 2012).
 - Alternate hard and easy days; no back-to-back hard days. Distribute intensity according to training_model.
-- Do not plan a single run much longer than the longest run of the last 30 days (Frandsen 2025).
+- Plan no single run much longer than the longest of the last 30 days (Frandsen 2025).
 - Heavy strength 2 times per week in base and build, 1 in the competition phase (Ronnestad & Mujika 2014; Blagrove 2018); keep it 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): 2 sessions per week in base and build, 1 in peak and taper, at most 3; place it after or on hard days, or 24 h or more before hard or long sessions. Name any deviation.
 - Taper about 2 weeks before a competition: cut volume by 40-60 %, keep intensity and frequency (Bosquet 2007).
 - When HRV or readiness data exist, adjust load to it (Kiviniemi 2007; Javaloyes 2019; moderate).
-- Respect availability (rule 8b), illness (rule 2a), competitions and explicit calendar markers.
+- Respect availability (rule 8b), illness (rule 2a), competitions, explicit calendar markers.
 - If an event makes training materially uncertain, ask via clarify_coach_request whether to train and reduce intensity before writing that plan; group questions; follow the answer, never infer cancellation or reduction from an ordinary event.
-- Set session_focus on every new unit and name it in the Typ column. Describe strength with strength_structure: progress load or reps week to week, deload in the lighter week. The server derives strength_intensity from it; free text needs it set.
-- Create local planned units only; no Intervals.icu write.
-- planning_brief covers recent weeks per sport; planned_distribution (time against training_model) and strength (sessions, leg sessions by intensity) cover planned weeks. The server checks every plan. Only illness_hard blocks the save: then correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding (shown in the receipt, not repeated) or adjust the plan. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means the load could not be computed, so say so."""
+- Set session_focus on every new unit and name it in the Typ column. Describe strength with strength_structure (server derives strength_intensity; free text needs it set): progress load or reps weekly, deload in the lighter week.
+- Create local units only; no Intervals.icu write.
+- planning_brief covers recent weeks per sport; planned_distribution (time against training_model) and strength (sessions, leg sessions by intensity) cover planned weeks. The server checks every plan. Only illness_hard blocks the save: then correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding or adjust the plan. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means the load could not be computed, so say so."""
 
 _TASKS = {
     "session_analysis": """\

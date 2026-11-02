@@ -409,7 +409,8 @@ function focusSport(entry) {
 function focusChipSpec(entry) {
   const label = FOCUS_LABELS[entry?.session_focus];
   if (!label) return null;
-  const intensity = STRENGTH_INTENSITY_LABELS[entry.strength_intensity];
+  const intensityLabel = STRENGTH_INTENSITY_LABELS[entry.strength_intensity];
+  const intensity = intensityLabel && entry.intensity_origin === "derived" ? `≈${intensityLabel}` : intensityLabel;
   const derived = entry.focus_origin === "derived";
   return { kind: derived ? "focus-derived" : "focus", text: [derived ? "≈" : null, label, intensity].filter(Boolean).join(" "), derived };
 }
@@ -729,7 +730,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     form.className = "planned-focus-form";
     const focus = focusSelect("Art der Einheit", "session_focus", FOCUS_OPTIONS[sport].map((value) => [value, FOCUS_LABELS[value]]), isSet ? entry.session_focus : "");
     const parts = [focus];
-    if (sport === "strength") parts.push(focusSelect("Intensität", "strength_intensity", Object.entries(STRENGTH_INTENSITY_LABELS), entry.strength_intensity));
+    if (sport === "strength") parts.push(focusSelect("Intensität", "strength_intensity", Object.entries(STRENGTH_INTENSITY_LABELS), entry.intensity_origin === "set" ? entry.strength_intensity : ""));
     const status = document.createElement("span");
     status.className = "planned-focus-status";
     status.setAttribute("role", "status");
