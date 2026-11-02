@@ -21,7 +21,7 @@ BRIEF_SOURCE = (
 
 
 class PlanCheckError(AppError):
-    """A proposed plan breaks checks; carries the findings for the model."""
+    """A proposed plan breaks a blocking check; carries the findings for the model."""
 
     def __init__(self, findings: list[dict[str, Any]]) -> None:
         codes = ", ".join(sorted({item["code"] for item in findings}))
@@ -180,18 +180,32 @@ class PlanGuardService:
     def verify(
         self, before: Sequence[Mapping[str, Any]], accepted: Sequence[str]
     ) -> list[dict[str, Any]]:
-        """Raise on new findings that are not accepted; return the accepted ones."""
-        known = {plan_checks.finding_key(item) for item in before}
-        new = [
+        """Raise on new blocking findings that are not accepted; return the notes.
+
+        Notes are the new non-blocking findings plus accepted blocking ones; the
+        Coach names and justifies them in its answer.
+        """
+        new = plan_checks.new_findings(before, self.findings())
+        blocking = [
             item
-            for item in self.findings()
-            if plan_checks.finding_key(item) not in known
+            for item in new
+            if item["code"] in plan_checks.BLOCKING_CODES
+            and item["code"] not in accepted
         ]
-        blocking = [item for item in new if item["code"] not in accepted]
         if blocking:
             raise PlanCheckError(blocking)
         return [
-            {"code": item["code"], "dates": item["dates"], "message": item["message"]}
+            {
+                key: item[key]
+                for key in (
+                    "code",
+                    "blocking",
+                    "dates",
+                    "message",
+                    "evidence_strength",
+                    "evidence",
+                )
+            }
             for item in new
         ]
 

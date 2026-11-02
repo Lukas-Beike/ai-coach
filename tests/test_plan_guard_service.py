@@ -59,11 +59,15 @@ class PlanGuardWriteTests(unittest.TestCase):
         )
         self.addCleanup(self.manager.close)
         self.units: list[dict[str, Any]] = []
+        self.completed: list[dict[str, Any]] = []
+        self.write_units: list[dict[str, Any]] | None = None
+        # A reported illness makes the hard pair a blocking finding.
+        self.illness = "Fieber"
         self.guard = PlanGuardService(
             planned_units=lambda: list(self.units),
-            completed_activities=list,
+            completed_activities=lambda: list(self.completed),
             competitions=list,
-            illness=lambda: "",
+            illness=lambda: self.illness,
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
@@ -86,7 +90,7 @@ class PlanGuardWriteTests(unittest.TestCase):
     def write(self, name: str, arguments: dict[str, Any], **_: Any) -> dict[str, Any]:
         with self.manager.unit_of_work() as db:
             db.execute("INSERT INTO synthetic_writes VALUES (?)", (name,))
-        self.units = hard_pair()
+        self.units = self.write_units if self.write_units is not None else hard_pair()
         self.seen_arguments = arguments
         return {"ok": True, "status": "applied"}
 
@@ -112,9 +116,18 @@ class PlanGuardWriteTests(unittest.TestCase):
         with self.assertRaises(PlanCheckError) as raised:
             self.run_tool("replace_training_plan", workouts=[{}])
         self.assertEqual(
-            ["back_to_back_hard"], [f["code"] for f in raised.exception.findings]
+            ["illness_hard", "illness_hard"],
+            [f["code"] for f in raised.exception.findings],
         )
         self.assertEqual(0, self.stored())
+
+    def test_load_findings_save_with_notes(self) -> None:
+        self.illness = ""
+        result = self.run_tool("replace_training_plan", workouts=[{}])
+        self.assertEqual(1, self.stored())
+        note = result["plan_check_notes"][0]
+        self.assertEqual("back_to_back_hard", note["code"])
+        self.assertIn("practice-based", note["evidence_strength"])
 
     def test_failure_projection_carries_findings(self) -> None:
         service = CoachStructuredToolFailureService(
@@ -137,25 +150,74 @@ class PlanGuardWriteTests(unittest.TestCase):
         )
         self.assertFalse(result["ok"])
         self.assertEqual("plan_check_failed", result["reason"])
-        self.assertEqual("back_to_back_hard", result["findings"][0]["code"])
+        self.assertEqual("illness_hard", result["findings"][0]["code"])
 
     def test_acknowledgement_writes_and_reports_text_only(self) -> None:
         result = self.run_tool(
             "replace_training_plan",
             workouts=[{}],
-            accept_plan_findings=["back_to_back_hard"],
+            accept_plan_findings=["illness_hard"],
         )
         self.assertEqual(1, self.stored())
         self.assertNotIn("accept_plan_findings", self.seen_arguments)
         self.assertEqual(
-            ["back_to_back_hard"],
-            [f["code"] for f in result["plan_check_acknowledged"]],
+            ["back_to_back_hard", "illness_hard", "illness_hard"],
+            sorted(f["code"] for f in result["plan_check_notes"]),
         )
 
     def test_other_code_does_not_cover_the_finding(self) -> None:
         with self.assertRaises(PlanCheckError):
-            self.run_tool("replace_training_plan", accept_plan_findings=["run_spike"])
+            self.run_tool("replace_training_plan", accept_plan_findings=[])
         self.assertEqual(0, self.stored())
+
+    def test_harder_session_during_illness_blocks_again(self) -> None:
+        self.units = hard_pair()
+        harder = hard_pair()
+        harder[0]["planned_duration_s"] = 9000
+        self.write_units = harder
+        with self.assertRaises(PlanCheckError):
+            self.run_tool("replace_training_plan")
+        self.assertEqual(0, self.stored())
+
+    def test_shortening_an_illness_time_session_is_saved(self) -> None:
+        longer = hard_pair()
+        longer[0]["planned_duration_s"] = 9000
+        self.units = longer
+        self.write_units = hard_pair()
+        self.run_tool("replace_training_plan")
+        self.assertEqual(1, self.stored())
+
+    def test_easier_but_much_longer_illness_session_blocks(self) -> None:
+        self.units = hard_pair()
+        easier = hard_pair()
+        easier[0].pop("planned_intensity")
+        easier[0]["planned_duration_s"] = 12000
+        self.write_units = easier
+        with self.assertRaises(PlanCheckError):
+            self.run_tool("replace_training_plan")
+        self.assertEqual(0, self.stored())
+
+    def test_spike_growing_into_a_warning_is_a_new_note(self) -> None:
+        self.illness = ""
+        self.completed = [
+            {
+                "sport": "run",
+                "started_at_local": "2026-10-30T08:00:00",
+                "moving_duration_s": 3600,
+            }
+        ]
+        run = {
+            "local_id": "r",
+            "date": "2026-11-06",
+            "sport": "run",
+            "planned_duration_s": 4200,
+        }
+        self.units = [run]
+        self.write_units = [{**run, "planned_duration_s": 7200}]
+        result = self.run_tool("replace_training_plan")
+        note = result["plan_check_notes"][0]
+        self.assertEqual("warning", note["evidence"]["severity"])
+        self.assertFalse(note["blocking"])
 
     def test_existing_findings_do_not_block_unrelated_writes(self) -> None:
         self.units = hard_pair()
@@ -228,7 +290,7 @@ class PlanBriefTests(unittest.TestCase):
 
     def test_schema_enum_matches_rule_codes(self) -> None:
         self.assertEqual(
-            list(plan_checks.FINDING_CODES), ACCEPT_PLAN_FINDINGS["items"]["enum"]
+            list(plan_checks.BLOCKING_CODES), ACCEPT_PLAN_FINDINGS["items"]["enum"]
         )
 
 

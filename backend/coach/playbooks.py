@@ -35,7 +35,7 @@ Planning science:
 - When HRV or readiness data exist, adjust load to it (Kiviniemi 2007; Javaloyes 2019; moderate).
 - Respect availability (rule 8b), illness (rule 2a), calendar events and competitions.
 - Running, cycling and strength can share one plan. Create local planned units only; no Intervals.icu write.
-- planning_brief in the context summarizes the last weeks per sport. The server checks every plan before saving; on findings nothing is saved, so correct the plan and call the tool again. Use accept_plan_findings only when the athlete explicitly wants that deviation, and name it in the answer."""
+- planning_brief in the context summarizes the last weeks per sport. The server checks every plan. Only illness_hard blocks the save: then correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Other findings come back as plan_check_notes with their evidence strength: name each in the answer and justify it or adjust the plan; a run_spike warning (over 30 %) needs a concrete reason."""
 
 _TASKS = {
     "session_analysis": """\
