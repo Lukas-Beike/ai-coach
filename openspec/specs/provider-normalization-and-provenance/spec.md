@@ -117,7 +117,7 @@ The system SHALL preserve provider raw-record identity and mapper version, inges
 
 #### Scenario: First backfill has not completed
 - **WHEN** initial backfill is pending, running, or failed
-- **THEN** activities, activity rows and summaries, observations, metric windows and the chosen reader return nothing, coverage reports only current persisted summaries, and performance and Coach contexts report that data is being prepared instead of partial values.
+- **THEN** activities, activity rows and summaries, observations, metric windows and the chosen reader return nothing, coverage reports only current persisted summaries, and performance and Coach contexts mark the unavailable canonical data instead of presenting partial values. A failure is reported as such and the worker retries after a delay from the last committed cursor without requiring a restart.
 
 #### Scenario: Compact-only Intervals.icu snapshot
 - **WHEN** the stored Intervals.icu snapshot lists activities only in compact form (from a release before raw provider data) and the backfill has completed

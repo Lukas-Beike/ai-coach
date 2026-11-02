@@ -538,7 +538,7 @@ The system SHALL read every daily wellness value of the performance projection f
 
 #### Scenario: Canonical data is still being prepared
 - **WHEN** the first canonical backfill has not completed
-- **THEN** the context is unavailable with reason `canonical_pending` and the status "Daten werden vorbereitet", shows no values, and the Coach context carries the same reason and status.
+- **THEN** the context is unavailable with reason `canonical_pending`, shows no values and reports "Daten werden vorbereitet" while pending or running; after a failed batch it reports the failure and upcoming retry. The Coach context also marks canonical data unavailable, including when only activity or planning sections are selected.
 
 #### Scenario: Sport-scoped and athlete-record observations
 - **WHEN** athlete-record observations (thresholds, athlete weight) or sport-scoped wellness observations exist

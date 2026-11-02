@@ -255,5 +255,7 @@ class CanonicalReadStatus(CanonicalTableServing, Protocol):
 
     def activities_need_refresh(self, db: Any) -> bool: ...
 
+    def backfill_failed(self, db: Any) -> bool: ...
+
 
 ProviderOperation = Callable[[], AbstractContextManager[None]]

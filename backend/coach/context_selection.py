@@ -203,7 +203,11 @@ class CoachContextSelection:
         )
 
     def project(self, context: dict[str, Any], local_date: str = "") -> dict[str, Any]:
-        result = {key: value for key, value in context.items() if key in self.sections}
+        result = {
+            key: value
+            for key, value in context.items()
+            if key in self.sections or key == "canonical_data_status"
+        }
         if self.horizon_days is None:
             return result
         try:

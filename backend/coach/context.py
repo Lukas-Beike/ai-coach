@@ -764,7 +764,13 @@ class CoachStructuredContextService:
                 "conversation": "Nur Dialogkontinuität; keine autoritative Quelle für dauerhafte Athletenfakten",
             },
         }
-        return {key: value for key, value in context.items() if key in included}
+        selected = {key: value for key, value in context.items() if key in included}
+        if performance_inputs and performance_inputs.pending:
+            selected["canonical_data_status"] = {
+                "status": "failed" if performance_inputs.backfill_failed else "pending",
+                "scope": "Canonical activity and provider data are unavailable; local plans remain available.",
+            }
+        return selected
 
     def _compact_nutrition_products(self) -> dict[str, Any]:
         if self._nutrition_meal_library is None:
@@ -1088,6 +1094,10 @@ class CoachTrainingContextService:
             local_planned_limit=self._local_planned_limit,
             truncations=truncations,
         )
+        if "canonical_data_status" in prompt_context:
+            prompt_context["projection"]["canonical_data_status"] = prompt_context[
+                "canonical_data_status"
+            ]
         prompt_context = {
             "projection": prompt_context.pop("projection"),
             **prompt_context,

@@ -3,7 +3,7 @@
 Every batch runs inside the maintenance gate, outermost, and then the writer unit of
 work, so a restore never overlaps a batch. The stop event is checked between
 batches. A failed batch rolls back, and the failure is recorded as ``failed`` in its
-own transaction; the next startup resumes from the last committed cursor.
+own transaction; a delayed retry resumes from the last committed cursor.
 Batches run as background writers, so a waiting foreground request (a login,
 for example) is served between two batches instead of queuing behind the loop.
 
@@ -29,6 +29,7 @@ from backend.sync.canonical_backfill import BatchReport, CanonicalBackfill
 
 _LOGGER = logging.getLogger(__name__)
 DEFAULT_POLL_SECONDS: Final = 5.0
+DEFAULT_RETRY_SECONDS: Final = 60.0
 
 
 class BatchStage(Protocol):
@@ -54,6 +55,7 @@ class CanonicalBackfillWorker:
         database: Callable[[], Any],
         maintenance_gate: MaintenanceGate,
         poll_seconds: float = DEFAULT_POLL_SECONDS,
+        retry_seconds: float = DEFAULT_RETRY_SECONDS,
         thread_factory: Callable[..., threading.Thread] | None = None,
         followups: Sequence[BackfillStage] = (),
     ) -> None:
@@ -61,6 +63,7 @@ class CanonicalBackfillWorker:
         self._database = database
         self._maintenance_gate = maintenance_gate
         self._poll_seconds = poll_seconds
+        self._retry_seconds = retry_seconds
         self._thread_factory = thread_factory or threading.Thread
         self._followups = tuple(followups)
         self._stop_event = threading.Event()
@@ -114,8 +117,9 @@ class CanonicalBackfillWorker:
 
     def _run_pass(self) -> None:
         """Run the canonical backfill to completion, then each follow-up in order."""
-        if not self._run_stage(self._backfill, "canonical"):
-            return
+        while not self._run_stage(self._backfill, "canonical"):
+            if self._stop_event.wait(self._retry_seconds):
+                return
         for followup in self._followups:
             if not self._run_stage(followup, followup.stage):
                 return
