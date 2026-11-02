@@ -3,7 +3,7 @@
   "base": "4bbc14b8a0f45c786bf1899e497a0aa83f234fce",
   "versions": {
     "ruff": "0.17.3",
-    "mypy": "2.4.0"
+    "mypy": "2.4.1"
   },
   "diagnostics": [
     {
