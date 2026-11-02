@@ -208,6 +208,7 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
     def test_adjust_week_reads_planned_units_back_to_monday(self) -> None:
         missed = {"id": "tue", "date": "2026-09-22", "name": "Schwelle", "type": "Run"}
         self.planned_unit_service.list.return_value = [missed]
+        self.external_calendar_reader.list_events_in_window.return_value = []
         selection = select_coach_context("ok", {}, request_kind="adjust_week")
 
         result = self.service.build(selection=selection)
@@ -222,6 +223,7 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         self.assertIn("Schwelle", [item["name"] for item in result["calendar"]])
 
     def test_other_kinds_keep_reading_from_today(self) -> None:
+        self.external_calendar_reader.list_events_in_window.return_value = []
         for kind in (None, "plan_week", "plan_block", "progress_review"):
             self.planned_unit_service.list.reset_mock()
             selection = select_coach_context("ok", {}, request_kind=kind)
