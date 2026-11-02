@@ -248,6 +248,49 @@ class IllnessOverrideTests(unittest.TestCase):
                 self.assertFalse(decision.allowed)
                 self.assertEqual(decision.reason, "illness_not_confirmed")
 
+    def test_gated_code_is_the_only_blocking_code(self):
+        from backend.planning import plan_checks
+
+        self.assertEqual(plan_checks.BLOCKING_CODES, (gate.ILLNESS_CODE,))
+
+    def test_verdict_parses_the_flag_independently(self):
+        self.assertTrue(
+            gate._verdict({"accepts_illness_override": True}).illness_override
+        )
+        self.assertFalse(gate._verdict({"requests": []}).illness_override)
+        parsed = gate._verdict({"requests": [], "accepts_illness_override": True})
+        self.assertTrue(parsed.illness_override)
+
+    def test_confirmation_of_the_coach_question_is_accepted(self):
+        classifier = _Classifier(_verdict(illness=True))
+        decision = _check(
+            "apply_training_changes",
+            "Ja",
+            "Du bist krank. Willst du trotzdem hart trainieren?",
+            classifier=classifier,
+            arguments=_ILLNESS_ARGS,
+        )
+        self.assertTrue(decision.allowed, decision)
+        self.assertEqual(
+            classifier.calls[0][1], "Du bist krank. Willst du trotzdem hart trainieren?"
+        )
+
+    def test_unconfirmed_denial_tells_the_coach_to_ask(self):
+        turn = CoachTurnWriteGate(
+            message="plane hart",
+            context={"current_user_message_id": 7},
+            model="m",
+            command_receipts=[],
+            read_only_tools=frozenset(),
+            classifier_factory=lambda model: _Classifier(),
+            logger=logging.getLogger("test"),
+        )
+        with self.assertLogs("test", "WARNING"):
+            result = turn.denial("apply_training_changes", _ILLNESS_ARGS)
+        self.assertEqual(result["status"], "not_performed")
+        self.assertEqual(result["gate_reason"], "illness_not_confirmed")
+        self.assertIn("clarify_coach_request", result["message"])
+
     def test_plain_writes_never_call_the_classifier(self):
         classifier = _Classifier()
         decision = self._write(classifier, {"accept_plan_findings": [], "changes": []})

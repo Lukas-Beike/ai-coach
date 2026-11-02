@@ -551,8 +551,9 @@ def check_write(
 
     An allowed call counts toward the per-turn cap and the bulk record count.
     The classifier runs only for a destructive or bulk local call or for the
-    approval of a previewed change, at most once per turn, and never decides a
-    remote write.
+    approval of a previewed change or for a call that lists illness_hard in
+    ``accept_plan_findings``, at most once per turn, and never decides a remote
+    write.
     """
     if tool_name in UNGATED_TOOLS:
         return GateDecision(True, None, "ok")
@@ -678,9 +679,12 @@ def _response_text(response: Any) -> str:
 
 
 def _verdict(parsed: Any) -> ImpactVerdict:
-    requests = parsed.get("requests") if isinstance(parsed, dict) else None
-    if not isinstance(requests, list):
+    if not isinstance(parsed, dict):
         return NO_IMPACT
+    illness = parsed.get("accepts_illness_override") is True
+    requests = parsed.get("requests")
+    if not isinstance(requests, list):
+        return ImpactVerdict(illness_override=illness)
     entries = [
         entry
         for entry in requests
@@ -693,7 +697,7 @@ def _verdict(parsed: Any) -> ImpactVerdict:
         frozenset(entry["domain"] for entry in entries if entry.get(DELETE) is True),
         frozenset(entry["domain"] for entry in entries if entry.get(BULK) is True),
         parsed.get("accepts_proposal") is True,
-        parsed.get("accepts_illness_override") is True,
+        illness,
     )
 
 
