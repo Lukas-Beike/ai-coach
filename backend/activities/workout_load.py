@@ -41,11 +41,11 @@ METHOD = "workout-steps-v1"
 BANDS = ("low", "moderate", "high")
 _MANY_ZONES = 6
 _MILE_M = 1609.344
-_NUMBER = r"\d+(?:\.\d+)?"
-_ZONE = re.compile(r"Z(\d+)(?:-Z(\d+))?")
+_NUMBER = r"\d++(?:\.\d++)?+"
+_ZONE = re.compile(r"Z(\d++)(?:-Z(\d++))?+")
 _PERCENT = re.compile(rf"({_NUMBER})%?(?:-({_NUMBER})%?)?")
 _ABSOLUTE = re.compile(rf"({_NUMBER})(?:-({_NUMBER}))?(W|BPM)")
-_PACE = re.compile(r"(\d+):([0-5]\d)")
+_PACE = re.compile(r"(\d++):([0-5]\d)")
 _PACE_UNIT = re.compile(r"/(KM|MI)\b")
 
 
