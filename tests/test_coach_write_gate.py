@@ -40,13 +40,14 @@ def _check(tool, text, previous="", **kwargs):
     )
 
 
-def _verdict(domains=(), delete=False, bulk=False, accepts=False):
+def _verdict(domains=(), delete=False, bulk=False, accepts=False, illness=False):
     listed = frozenset(domains)
     return gate.ImpactVerdict(
         listed,
         listed if delete else frozenset(),
         listed if bulk else frozenset(),
         accepts,
+        illness,
     )
 
 
@@ -216,6 +217,42 @@ class ApprovalTierTests(unittest.TestCase):
             classifier=_Classifier(_verdict(["planning"], accepts=True)),
         )
         self.assertTrue(allowed.allowed, allowed)
+
+
+_ILLNESS_ARGS = {"accept_plan_findings": ["illness_hard"], "changes": []}
+
+
+class IllnessOverrideTests(unittest.TestCase):
+    def _write(self, classifier, arguments=None):
+        return _check(
+            "apply_training_changes",
+            "Ich bin krank, aber ich will trotzdem hart trainieren",
+            classifier=classifier,
+            arguments=_ILLNESS_ARGS if arguments is None else arguments,
+        )
+
+    def test_override_without_athlete_request_is_rejected(self):
+        classifier = _Classifier(_verdict(["planning"]))
+        decision = self._write(classifier)
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "illness_not_confirmed")
+
+    def test_explicit_request_is_accepted(self):
+        decision = self._write(_Classifier(_verdict(["planning"], illness=True)))
+        self.assertTrue(decision.allowed, decision)
+
+    def test_classifier_failure_asks_instead_of_saving(self):
+        for classifier in (_Classifier(error=RuntimeError("down")), None):
+            with self.subTest(classifier=classifier):
+                decision = self._write(classifier)
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.reason, "illness_not_confirmed")
+
+    def test_plain_writes_never_call_the_classifier(self):
+        classifier = _Classifier()
+        decision = self._write(classifier, {"accept_plan_findings": [], "changes": []})
+        self.assertTrue(decision.allowed)
+        self.assertEqual(classifier.calls, [])
 
 
 class LocalTierTests(unittest.TestCase):
@@ -843,7 +880,10 @@ class OpenAIClassifierTests(unittest.TestCase):
         self.assertIs(fmt["strict"], True)
         schema = fmt["schema"]
         self.assertIs(schema["additionalProperties"], False)
-        self.assertEqual(schema["required"], ["requests", "accepts_proposal"])
+        self.assertEqual(
+            schema["required"],
+            ["requests", "accepts_proposal", "accepts_illness_override"],
+        )
         self.assertEqual(schema["properties"]["accepts_proposal"], {"type": "boolean"})
         items = schema["properties"]["requests"]["items"]
         self.assertIs(items["additionalProperties"], False)

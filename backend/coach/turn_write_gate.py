@@ -37,6 +37,12 @@ _DENIAL_GUIDANCE = {
         "can approve it, so create a fresh preview with preview_adaptive_replan "
         "now and ask once, in your answer, whether to apply it."
     ),
+    "illness_not_confirmed": (
+        "The athlete's message does not explicitly ask to train hard or long "
+        "despite the reported illness. Do not set accept_plan_findings. Ask one "
+        "concise question with clarify_coach_request whether they really want "
+        "this training while ill, or save an easier plan instead."
+    ),
     "remote_not_requested": (
         "The athlete's message does not ask to write to Intervals.icu. Keep the "
         "change local and offer the sync instead."
