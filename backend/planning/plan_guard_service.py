@@ -185,12 +185,7 @@ class PlanGuardService:
         Notes are the new non-blocking findings plus accepted blocking ones; the
         Coach names and justifies them in its answer.
         """
-        known = {plan_checks.finding_key(item) for item in before}
-        new = [
-            item
-            for item in self.findings()
-            if plan_checks.finding_key(item) not in known
-        ]
+        new = plan_checks.new_findings(before, self.findings())
         blocking = [
             item
             for item in new

@@ -179,6 +179,14 @@ class PlanGuardWriteTests(unittest.TestCase):
             self.run_tool("replace_training_plan")
         self.assertEqual(0, self.stored())
 
+    def test_shortening_an_illness_time_session_is_saved(self) -> None:
+        longer = hard_pair()
+        longer[0]["planned_duration_s"] = 9000
+        self.units = longer
+        self.write_units = hard_pair()
+        self.run_tool("replace_training_plan")
+        self.assertEqual(1, self.stored())
+
     def test_spike_growing_into_a_warning_is_a_new_note(self) -> None:
         self.illness = ""
         self.completed = [

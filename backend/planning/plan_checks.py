@@ -380,16 +380,34 @@ def check_plan(
 
 
 def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
-    """Identity of a finding across a write.
+    """Identity of a finding across a write; a taper is one per competition."""
+    if finding["code"] == "missing_taper":
+        return (finding["code"], finding["evidence"]["competition_date"])
+    return (finding["code"], tuple(finding["dates"]), tuple(finding["local_ids"]))
 
-    A taper is one finding per competition. A run spike that grows into a
-    warning and an illness-time session that gets harder or longer are new.
+
+def _risk(finding: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Comparable risk of one finding; higher means riskier."""
+    evidence = finding["evidence"]
+    if finding["code"] == "run_spike":
+        return (evidence.get("severity") == "warning",)
+    if finding["code"] == "illness_hard":
+        return (bool(evidence.get("hard")), evidence.get("planned_minutes") or 0)
+    return ()
+
+
+def new_findings(
+    before: Sequence[Mapping[str, Any]], after: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Findings of ``after`` that are new or riskier than in ``before``.
+
+    A run spike growing into a warning, or an illness-time session made harder
+    or longer, is new; shortening or easing it is not.
     """
-    code, evidence = finding["code"], finding["evidence"]
-    if code == "missing_taper":
-        return (code, evidence["competition_date"])
-    state = {
-        "run_spike": (evidence.get("severity"),),
-        "illness_hard": (evidence.get("planned_minutes"), evidence.get("hard")),
-    }.get(code, ())
-    return (code, tuple(finding["dates"]), tuple(finding["local_ids"]), *state)
+    previous = {finding_key(item): _risk(item) for item in before}
+    result = []
+    for item in after:
+        known = previous.get(finding_key(item))
+        if known is None or _risk(item) > known:
+            result.append(item)
+    return result
