@@ -93,6 +93,8 @@ class NormalizationTests(unittest.TestCase):
             '{"days":{"mon":{"fixed":"run"}}}',
             '{"days":[]}',
             '{"default":{"mon":"06:00-07:00"}}',
+            '{"days":{"mon":"rest"}}',
+            '{"days":{"mon":["06:00-07:00"]}}',
         ):
             with self.subTest(bad=bad), self.assertRaises(AppError):
                 weekly_plan.normalize(bad, strict=True)

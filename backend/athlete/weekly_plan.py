@@ -160,7 +160,7 @@ def _fixed_sessions(value: Any, *, strict: bool) -> list[dict[str, Any]]:
 
 
 def _day(value: Any, *, strict: bool) -> dict[str, Any]:
-    source = value if isinstance(value, Mapping) else {}
+    source = _mapping(value, strict=strict)
     fixed = _fixed_sessions(source.get("fixed"), strict=strict)
     if source.get("rest_day") is True:
         if fixed and strict:
