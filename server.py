@@ -1701,7 +1701,9 @@ def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
     return PlanGuardService(
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
-        completed_activities=lambda: read_completed(database_manager(), CANONICAL_READ),
+        completed_activities=lambda: read_completed(
+            database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
+        ),
         competitions=lambda: PLANNING_DATA.competition().list(),
         illness=lambda: recent_illness(
             ATHLETE_DATA.checkin().list(3), ATHLETE_CLOCK.now().date()

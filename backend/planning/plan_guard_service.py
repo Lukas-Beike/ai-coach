@@ -7,7 +7,6 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
-from backend.athlete.measurements import number
 from backend.errors import AppError
 from backend.planning import plan_checks
 
@@ -28,19 +27,16 @@ class PlanCheckError(AppError):
         codes = ", ".join(sorted({item["code"] for item in findings}))
         super().__init__(
             409,
-            "Nothing was saved: the plan breaks planning checks "
-            f"({codes}). Correct the plan and call the tool again. Only if the "
-            "athlete explicitly wants the deviation, list its codes in "
-            "accept_plan_findings and name it in the answer.",
+            f"Nicht gespeichert: Der Plan verletzt Planungsregeln ({codes}).",
             reason="plan_check_failed",
         )
         self.findings = findings
 
 
-def read_completed(database_manager: Any, activities: Any) -> Any:
-    """All canonical activity summaries, read in the caller's transaction."""
+def read_completed(database_manager: Any, activities: Any, today: date) -> Any:
+    """Activity summaries of the 60-day check window, in the caller's transaction."""
     with database_manager.reader() as db:
-        return activities.activity_summaries(db)
+        return activities.activity_summaries(db, start=today - timedelta(days=60))
 
 
 def read_progress(reports: Any) -> Mapping[str, Any]:
@@ -60,10 +56,8 @@ def recent_illness(checkins: Sequence[Mapping[str, Any]], today: date) -> str:
 
 
 def _hard_completed(row: Mapping[str, Any]) -> bool:
-    value = number(row.get("intensity"))
-    if value is None:
-        return False
-    return (value / 100 if value > 1.5 else value) >= plan_checks.HARD_INTENSITY
+    factor = plan_checks.intensity_factor({"planned_intensity": row.get("intensity")})
+    return factor is not None and factor >= plan_checks.HARD_INTENSITY
 
 
 def _hard_count(
@@ -103,7 +97,8 @@ def _brief_week(
 
 
 def _competition_day(row: Mapping[str, Any]) -> str:
-    return iso_date_prefix(row.get("date") or row.get("start"))
+    day = plan_checks.competition_day(row)
+    return "" if day is None else day.isoformat()
 
 
 def build_planning_brief(

@@ -57,11 +57,21 @@ ILLNESS_DAYS = 3
 LONG_SESSION_S = 5400
 RUN_WINDOW_DAYS = 30
 _ENDURANCE = frozenset({Sport.RUN, Sport.RIDE})
-_HARD_ZONE = re.compile(r"\b(?:z|zone\s*)([4-7])\b", re.IGNORECASE)
-_HEAVY = re.compile(r"\b(?:heavy|schwer|maximal|[1-6]\s*rm)\b", re.IGNORECASE)
+# A Z4+ target counts unless a negation such as "unter Z4" or "kein Z5" precedes it.
+_HARD_ZONE = re.compile(
+    r"(?<!unter )(?<!kein )(?<!keine )(?<!nicht )(?<!below )(?<!under )(?<!no )"
+    r"\b(?:z|zone\s*)[4-7]\b",
+    re.IGNORECASE,
+)
+# "maximal" is left out: in German it mostly means "at most".
+_HEAVY = re.compile(r"\b(?:heavy|schwer|[1-6]\s*rm)\b", re.IGNORECASE)
+# Check-in answers that report no illness.
+_NO_ILLNESS = frozenset(
+    {"", "-", "keine", "kein", "nein", "nichts", "gesund", "none", "no", "n/a"}
+)
 
 
-def _intensity_factor(unit: Mapping[str, Any]) -> float | None:
+def intensity_factor(unit: Mapping[str, Any]) -> float | None:
     value = number(unit.get("planned_intensity"))
     if value is None:
         return None
@@ -92,7 +102,7 @@ def is_hard(unit: Mapping[str, Any]) -> bool:
     """Whether a planned run or ride is hard by its intensity key or Z4+ text."""
     if _sport(unit) not in _ENDURANCE:
         return False
-    factor = _intensity_factor(unit)
+    factor = intensity_factor(unit)
     return (factor is not None and factor >= HARD_INTENSITY) or bool(
         _HARD_ZONE.search(_text(unit))
     )
@@ -101,7 +111,7 @@ def is_hard(unit: Mapping[str, Any]) -> bool:
 def is_heavy_strength(unit: Mapping[str, Any]) -> bool:
     if _sport(unit) is not Sport.STRENGTH:
         return False
-    factor = _intensity_factor(unit)
+    factor = intensity_factor(unit)
     return (factor is not None and factor >= HARD_INTENSITY) or bool(
         _HEAVY.search(_text(unit))
     )
@@ -179,10 +189,12 @@ def _back_to_back(units: Sequence[Mapping[str, Any]]) -> list[dict]:
 
 
 def _start(unit: Mapping[str, Any]) -> datetime | None:
+    """Local wall-clock start; an offset is dropped so aware and naive starts compare."""
     try:
-        return datetime.fromisoformat(str(unit.get("starts_at_local") or ""))
+        start = datetime.fromisoformat(str(unit.get("starts_at_local") or ""))
     except ValueError:
         return None
+    return start.replace(tzinfo=None)
 
 
 def _gap_too_short(first: Mapping[str, Any], second: Mapping[str, Any]) -> bool:
@@ -237,9 +249,11 @@ def _window_seconds(
     return done + planned
 
 
-def _competition_day(row: Mapping[str, Any]) -> date | None:
+def competition_day(row: Mapping[str, Any]) -> date | None:
+    """Day of a stored competition (event_date, else its local start)."""
+    raw = row.get("event_date") or row.get("starts_at_local") or row.get("date")
     try:
-        return date.fromisoformat(iso_date_prefix(row.get("date") or row.get("start")))
+        return date.fromisoformat(iso_date_prefix(raw))
     except ValueError:
         return None
 
@@ -283,7 +297,7 @@ def _missing_taper(
 ) -> list[dict]:
     findings = []
     for row in competitions:
-        day = _competition_day(row)
+        day = competition_day(row)
         if day is None or day < today or str(row.get("priority") or "B") == "C":
             continue
         finding = _taper_for(day, units, completed, today)
@@ -295,7 +309,7 @@ def _missing_taper(
 def _illness_hard(
     units: Sequence[Mapping[str, Any]], illness: str, today: date
 ) -> list[dict]:
-    if not illness.strip():
+    if illness.strip().casefold() in _NO_ILLNESS:
         return []
     last = (today + timedelta(days=ILLNESS_DAYS)).isoformat()
     risky = [
@@ -335,4 +349,7 @@ def check_plan(
 
 
 def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Identity of a finding across a write; a taper is one finding per competition."""
+    if finding["code"] == "missing_taper":
+        return (finding["code"], finding["evidence"]["competition_date"])
     return (finding["code"], tuple(finding["dates"]), tuple(finding["local_ids"]))

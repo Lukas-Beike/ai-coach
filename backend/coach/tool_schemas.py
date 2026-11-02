@@ -213,6 +213,7 @@ def build_structured_tool_schemas(
                             "weather",
                             "daily_planning_context",
                             "nutrition_products",
+                            "planning_brief",
                             "source_policy",
                         ],
                     },
@@ -474,6 +475,7 @@ def build_structured_tool_schemas(
             "apply_training_changes",
             "Apply an explicitly authorized set of local training changes atomically. For a complete-plan edit, always include the planning_revision from read_training_state and expected_payload_hash on every change.",
             {
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
                 "changes": {
                     "type": "array",
                     "minItems": 1,

@@ -83,7 +83,7 @@ class PlanCheckRuleTests(unittest.TestCase):
         self.assertEqual(["strength_hard_same_day"], codes(check(close)))
 
     def test_missing_taper(self) -> None:
-        race = {"date": "2026-12-06", "priority": "A", "name": "Race"}
+        race = {"event_date": "2026-12-06", "priority": "A", "name": "Race"}
         flat = [
             unit(f"u{i}", day, "ride", 60)
             for i, day in enumerate(
@@ -112,6 +112,57 @@ class PlanCheckRuleTests(unittest.TestCase):
         self.assertEqual([], check([easy], illness="Fieber"))
         far = unit("d", "2026-11-09", "run", planned_intensity=0.9)
         self.assertEqual([], check([far], illness="Fieber"))
+
+    def test_taper_finding_keeps_its_identity_when_units_change(self) -> None:
+        race = {"event_date": "2026-12-06", "priority": "A"}
+        flat = [
+            unit(f"u{i}", day, "ride", 60)
+            for i, day in enumerate(
+                ["2026-11-10", "2026-11-14", "2026-11-24", "2026-11-28"]
+            )
+        ]
+        before = check(flat, competitions=[race])
+        after = check([*flat, unit("x", "2026-11-25", "run", 20)], competitions=[race])
+        self.assertEqual(
+            [plan_checks.finding_key(item) for item in before],
+            [plan_checks.finding_key(item) for item in after],
+        )
+
+    def test_negated_zone_and_at_most_are_not_hard_or_heavy(self) -> None:
+        easy = unit("a", "2026-11-04", "run", description="Locker, bleib unter Z4")
+        no_z5 = unit("b", "2026-11-05", "ride", description="kein Z5, nur Z2")
+        light = unit("s", "2026-11-04", "strength", description="Rumpf, maximal 30 min")
+        self.assertFalse(plan_checks.is_hard(easy))
+        self.assertFalse(plan_checks.is_hard(no_z5))
+        self.assertFalse(plan_checks.is_heavy_strength(light))
+        self.assertTrue(
+            plan_checks.is_hard(
+                unit("c", "2026-11-06", "run", description="3x8 min Z4")
+            )
+        )
+
+    def test_aware_and_naive_starts_compare_as_local_times(self) -> None:
+        heavy = unit(
+            "s",
+            "2026-11-04",
+            "strength",
+            description="Heavy 5x5",
+            starts_at_local="2026-11-04T07:00:00+01:00",
+        )
+        hard = unit(
+            "r",
+            "2026-11-04",
+            "run",
+            planned_intensity=0.9,
+            starts_at_local="2026-11-04T18:00:00",
+        )
+        self.assertEqual([], check([heavy, hard]))
+
+    def test_negative_illness_answers_are_not_illness(self) -> None:
+        hard = unit("a", "2026-11-04", "run", planned_intensity=0.9)
+        for answer in ("keine", "Nein", "-", "gesund", "none"):
+            with self.subTest(answer=answer):
+                self.assertEqual([], check([hard], illness=answer))
 
     def test_compliant_mixed_plan_passes(self) -> None:
         done = [run_done("2026-10-28", 60)]

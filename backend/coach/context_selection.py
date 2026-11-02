@@ -28,11 +28,12 @@ CONTEXT_SECTIONS = frozenset(
         "weather",
         "daily_planning_context",
         "nutrition_products",
+        "planning_brief",
         "source_policy",
     }
 )
 # Saved products ride along only when the message reports food or drink.
-FULL_SECTIONS = CONTEXT_SECTIONS - {"nutrition_products"}
+FULL_SECTIONS = CONTEXT_SECTIONS - {"nutrition_products", "planning_brief"}
 BASE_SECTIONS = frozenset(
     {
         "durable_profile",
