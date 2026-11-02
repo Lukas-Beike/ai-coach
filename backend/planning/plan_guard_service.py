@@ -8,7 +8,10 @@ from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.errors import AppError
+from backend.performance.canonical_current import read_current_inputs
+from backend.performance.canonical_inputs import resolve_reader
 from backend.planning import intensity_distribution, plan_checks
+from backend.planning.load_checks import LoadThresholds, load_thresholds
 
 BRIEF_WEEKS = 6
 BRIEF_SPORTS = ("run", "ride", "strength")
@@ -37,6 +40,15 @@ def read_completed(database_manager: Any, activities: Any, today: date) -> Any:
     """Activity summaries of the 60-day check window, in the caller's transaction."""
     with database_manager.reader() as db:
         return activities.activity_summaries(db, start=today - timedelta(days=60))
+
+
+def read_load_thresholds(
+    database_manager: Any, observations: Any, today: date
+) -> LoadThresholds:
+    """Thresholds of the latest Intervals.icu sync, read with a short reader."""
+    with database_manager.reader() as db:
+        current = read_current_inputs(resolve_reader(observations, db), db, as_of=today)
+    return load_thresholds(current, today)
 
 
 def read_progress(reports: Any) -> Mapping[str, Any]:
@@ -158,6 +170,7 @@ class PlanGuardService:
         training_model: Callable[[], str],
         today: Callable[[], date],
         estimate_unit: intensity_distribution.Estimator,
+        thresholds: Callable[[], LoadThresholds | None] = lambda: None,
     ) -> None:
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -167,6 +180,8 @@ class PlanGuardService:
         self._training_model = training_model
         self._today = today
         self._estimate_unit = estimate_unit
+        self._thresholds = thresholds
+        self._threshold_cache: tuple[LoadThresholds | None] | None = None
 
     def _planned_weeks(
         self, units: Sequence[Mapping[str, Any]], today: date
@@ -191,11 +206,18 @@ class PlanGuardService:
                 completed=self._recent(today),
                 competitions=self._competitions(),
                 illness=self._illness(),
+                thresholds=self._load_thresholds(),
             ),
             *intensity_distribution.distribution_findings(
                 self._training_model(), self._planned_weeks(units, today)
             ),
         ]
+
+    def _load_thresholds(self) -> LoadThresholds | None:
+        """One snapshot per service, so before and after a write compare alike."""
+        if self._threshold_cache is None:
+            self._threshold_cache = (self._thresholds(),)
+        return self._threshold_cache[0]
 
     def verify(
         self, before: Sequence[Mapping[str, Any]], accepted: Sequence[str]

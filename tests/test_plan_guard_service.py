@@ -13,12 +13,15 @@ from typing import Any
 from unittest.mock import Mock
 
 from backend.activities.workout_load import AthleteThresholds
+from backend.activities.zone_settings import ZoneSettings
+from backend.canonical.vocabulary import Sport
 from backend.coach.context_selection import select_coach_context
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_schemas import ACCEPT_PLAN_FINDINGS
 from backend.db.manager import DatabaseManager
 from backend.planning import plan_checks
+from backend.planning.load_checks import LoadThresholds
 from backend.planning.plan_guard_service import (
     PlanCheckError,
     PlanGuardService,
@@ -245,6 +248,7 @@ class PlanGuardWriteTests(unittest.TestCase):
                 "sport": "run",
                 "started_at_local": "2026-10-30T08:00:00",
                 "moving_duration_s": 3600,
+                "distance_m": 10000,
             }
         ]
         run = {
@@ -252,13 +256,52 @@ class PlanGuardWriteTests(unittest.TestCase):
             "date": "2026-11-06",
             "sport": "run",
             "planned_duration_s": 4200,
+            "description": "- 12km 70% pace",
         }
         self.units = [run]
-        self.write_units = [{**run, "planned_duration_s": 7200}]
+        self.write_units = [{**run, "description": "- 15km 70% pace"}]
         result = self.run_tool("replace_training_plan")
         note = result["plan_check_notes"][0]
         self.assertEqual("warning", note["evidence"]["severity"])
         self.assertFalse(note["blocking"])
+
+    def test_load_spike_note_flows_through_the_write(self) -> None:
+        self.illness = ""
+        self.guard = PlanGuardService(
+            planned_units=lambda: list(self.units),
+            completed_activities=lambda: list(self.completed),
+            competitions=list,
+            illness=lambda: "",
+            progress=lambda: {"week_list": []},
+            training_model=lambda: "pyramidal",
+            today=lambda: TODAY,
+            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            thresholds=lambda: LoadThresholds(
+                {Sport.RIDE: AthleteThresholds(zones=ZoneSettings(ftp=250.0))}
+            ),
+        )
+        self.completed = [
+            {
+                "sport": "ride",
+                "started_at_local": "2026-10-30T08:00:00",
+                "moving_duration_s": 3600,
+                "normalized_power": 200,
+            }
+        ]
+        self.units = []
+        self.write_units = [
+            {
+                "local_id": "b",
+                "date": "2026-11-06",
+                "sport": "ride",
+                "planned_duration_s": 3600,
+                "description": "- 60m 100%",
+            }
+        ]
+        result = self.run_tool("replace_training_plan")
+        notes = [n for n in result["plan_check_notes"] if n["code"] == "load_spike"]
+        self.assertEqual("warning", notes[0]["evidence"]["severity"])
+        self.assertFalse(notes[0]["blocking"])
 
     def test_existing_findings_do_not_block_unrelated_writes(self) -> None:
         self.units = hard_pair()

@@ -5,12 +5,21 @@ the write until the model corrects the plan or names the accepted deviation;
 the other findings are saved and returned as notes. No I/O.
 
 Rules (references are observational or practice-based, not individual advice):
-- run_spike: a planned run is more than 10 % longer than the longest completed
-  run of the last 30 days (Frandsen et al. 2025, BJSM). Compared by duration;
-  planned distance has no fixed unit. No run in 30 days: no finding.
+- run_spike: a planned run is more than 10 % longer (distance) than the longest
+  completed run of the last 30 days (Frandsen et al. 2025, BJSM). The planned
+  distance comes from the workout steps; unknown distance or no run in 30 days:
+  no finding.
+- load_spike, weekly_load_rise, load_unknown: load = duration x intensity^2 per
+  sport (``load_checks``). A planned run or ride more than 10 % (warning: 30 %)
+  above the highest-load session of its sport in 30 days; a planned weekly load
+  more than 20 % above the mean of the previous 3-4 weeks; load that cannot be
+  computed (missing or stale thresholds, unparsed steps) is named, not guessed.
+  Only with thresholds passed to ``check_plan``.
 - back_to_back_hard: hard run/ride sessions on consecutive days. Hard means a
-  planned intensity of at least 0.85 (percent values above 1.5 are divided by
-  100) or workout text with a Z4-Z7 / zone 4-7 target. Unknown is not hard.
+  computed workout zone (at least five minutes in zone 4+ steps,
+  ``load_checks.computed_hard``), else a planned intensity key of at least 0.85 (percent values above 1.5 are
+  divided by 100) or workout text with a Z4-Z7 / zone 4-7 target. Unknown is not
+  hard.
 - strength_hard_same_day: heavy strength (planned intensity >= 0.85 or text
   naming heavy, schwer, maximal or a 1-6 RM) and a hard run/ride on one date
   with less than 6 h between start times, or an unknown start time
@@ -35,10 +44,14 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
+from backend.planning import load_checks
 from backend.planning.sport import planned_sport_environment
 
 FINDING_CODES = (
     "run_spike",
+    "load_spike",
+    "weekly_load_rise",
+    "load_unknown",
     "back_to_back_hard",
     "strength_hard_same_day",
     "missing_taper",
@@ -51,6 +64,9 @@ FINDING_CODES = (
 BLOCKING_CODES = ("illness_hard",)
 EVIDENCE = {
     "run_spike": "observational, moderate (Frandsen 2025)",
+    "load_spike": load_checks.LOAD_EVIDENCE,
+    "weekly_load_rise": load_checks.LOAD_EVIDENCE,
+    "load_unknown": load_checks.LOAD_EVIDENCE,
     "back_to_back_hard": "practice-based (hard/easy principle)",
     "strength_hard_same_day": "limited, performance studies (Robineau 2016)",
     "missing_taper": "meta-analysis, strong (Bosquet 2007); 20 % floor is a local choice",
@@ -59,6 +75,9 @@ EVIDENCE = {
 }
 _RULE_TEXT = {
     "run_spike": "planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
+    "load_spike": "planned run or ride load more than 10 % (warning above 30 %) above the highest-load session of its sport in 30 days.",
+    "weekly_load_rise": "planned weekly run or ride load more than 20 % above the mean of the previous 3-4 weeks.",
+    "load_unknown": "load of a planned run or ride cannot be computed (missing or stale thresholds or steps).",
     "back_to_back_hard": "hard run or ride on consecutive days.",
     "strength_hard_same_day": "heavy strength and a hard run or ride less than 6 h apart.",
     "missing_taper": "final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
@@ -69,8 +88,6 @@ RULE_SUMMARY = {
     code: f"{'Blocks' if code in BLOCKING_CODES else 'Note'}: {text}"
     for code, text in _RULE_TEXT.items()
 }
-SPIKE_FACTOR = 1.10
-SPIKE_WARNING_FACTOR = 1.30
 HARD_INTENSITY = 0.85
 MIN_STRENGTH_GAP_H = 6
 TAPER_DAYS = 14
@@ -78,6 +95,8 @@ TAPER_MIN_REDUCTION = 0.20
 ILLNESS_DAYS = 3
 LONG_SESSION_S = 5400
 RUN_WINDOW_DAYS = 30
+# Key check_plan sets on a unit copy whose steps give a computed intensity.
+COMPUTED_HARD = "_computed_hard"
 _ENDURANCE = frozenset({Sport.RUN, Sport.RIDE})
 # A Z4+ target counts unless a negation such as "unter Z4" or "kein Z5" precedes it.
 _HARD_ZONE = re.compile(
@@ -121,9 +140,12 @@ def _duration_s(unit: Mapping[str, Any]) -> float:
 
 
 def is_hard(unit: Mapping[str, Any]) -> bool:
-    """Whether a planned run or ride is hard by its intensity key or Z4+ text."""
+    """Whether a planned run or ride is hard: computed intensity, else key or text."""
     if _sport(unit) not in _ENDURANCE:
         return False
+    computed = unit.get(COMPUTED_HARD)
+    if isinstance(computed, bool):
+        return computed
     factor = intensity_factor(unit)
     return (factor is not None and factor >= HARD_INTENSITY) or bool(
         _HARD_ZONE.search(_text(unit))
@@ -172,35 +194,6 @@ def longest_completed_run_s(
     ]
     longest = max(durations, default=0.0)
     return longest or None
-
-
-def _run_spike(units: Sequence[Mapping[str, Any]], longest: float | None) -> list[dict]:
-    if longest is None:
-        return []
-    return [
-        _spike_finding(unit, longest)
-        for unit in units
-        if _sport(unit) is Sport.RUN and _duration_s(unit) > longest * SPIKE_FACTOR
-    ]
-
-
-def _spike_finding(unit: Mapping[str, Any], longest: float) -> dict[str, Any]:
-    """Graded: up to 30 % above the longest run is a notice, beyond that a warning."""
-    planned = _duration_s(unit)
-    warning = planned > longest * SPIKE_WARNING_FACTOR
-    return _finding(
-        "run_spike",
-        [unit],
-        "Planned run is more than 30 % longer than the longest run of the last 30 days."
-        if warning
-        else "Planned run is 10-30 % longer than the longest run of the last 30 days.",
-        {
-            "severity": "warning" if warning else "notice",
-            "planned_minutes": round(planned / 60),
-            "longest_run_30d_minutes": round(longest / 60),
-            "increase_percent": round((planned / longest - 1) * 100),
-        },
-    )
 
 
 def _back_to_back(units: Sequence[Mapping[str, Any]]) -> list[dict]:
@@ -366,6 +359,42 @@ def _illness_hard(
     ]
 
 
+def _with_computed_hard(
+    units: Sequence[Mapping[str, Any]], sessions: Sequence[load_checks.PlannedSession]
+) -> list[Mapping[str, Any]]:
+    """Unit copies carrying the hardness computed from their workout steps."""
+    computed = {
+        id(session.unit): load_checks.computed_hard(session.estimate)
+        for session in sessions
+    }
+    return [
+        {**unit, COMPUTED_HARD: computed[id(unit)]}
+        if computed.get(id(unit)) is not None
+        else unit
+        for unit in units
+    ]
+
+
+def _drafted(drafts: Iterable[load_checks.Draft]) -> list[dict[str, Any]]:
+    return [
+        _finding(code, units, message, evidence)
+        for code, units, message, evidence in drafts
+    ]
+
+
+def _load_findings(
+    sessions: Sequence[load_checks.PlannedSession],
+    completed: Sequence[Mapping[str, Any]],
+    thresholds: load_checks.LoadThresholds,
+    today: date,
+) -> list[dict[str, Any]]:
+    drafts = load_checks.unknown_load(sessions, thresholds)
+    if not thresholds.unavailable:
+        drafts += load_checks.session_spikes(sessions, completed, thresholds, today)
+        drafts += load_checks.weekly_rises(sessions, completed, thresholds, today)
+    return _drafted(drafts)
+
+
 def check_plan(
     *,
     today: date,
@@ -373,10 +402,23 @@ def check_plan(
     completed: Sequence[Mapping[str, Any]],
     competitions: Sequence[Mapping[str, Any]],
     illness: str = "",
+    thresholds: load_checks.LoadThresholds | None = None,
 ) -> list[dict[str, Any]]:
-    """Return all findings for the resulting future planned units."""
+    """Return all findings for the resulting future planned units.
+
+    Without ``thresholds`` only the threshold-free checks run: no load notes.
+    """
+    sessions = load_checks.plan_sessions(
+        units, thresholds or load_checks.LoadThresholds()
+    )
+    units = _with_computed_hard(units, sessions)
     return [
-        *_run_spike(units, longest_completed_run_s(completed, today)),
+        *_drafted(load_checks.run_distance_spikes(sessions, completed, today)),
+        *(
+            _load_findings(sessions, completed, thresholds, today)
+            if thresholds is not None
+            else []
+        ),
         *_back_to_back(units),
         *_strength_same_day(units),
         *_missing_taper(units, completed, competitions, today),
@@ -385,18 +427,28 @@ def check_plan(
 
 
 def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
-    """Identity of a finding across a write; a taper is one per competition."""
+    """Identity of a finding across a write.
+
+    A taper is one per competition, a weekly rise one per sport and week, and
+    the unknown-load note one per plan.
+    """
     if finding["code"] == "missing_taper":
         return (finding["code"], finding["evidence"]["competition_date"])
     if finding["code"] == "intensity_distribution":
         return (finding["code"], finding["evidence"]["week_start"])
+    if finding["code"] == "weekly_load_rise":
+        evidence = finding["evidence"]
+        return (finding["code"], evidence["sport"], evidence["week_start"])
+    if finding["code"] == "load_unknown":
+        # One note for the plan: unrelated edits must not repeat it.
+        return (finding["code"],)
     return (finding["code"], tuple(finding["dates"]), tuple(finding["local_ids"]))
 
 
 def _risk(finding: Mapping[str, Any]) -> tuple[Any, ...]:
     """Comparable risk of one finding; higher means riskier."""
     evidence = finding["evidence"]
-    if finding["code"] == "run_spike":
+    if finding["code"] in load_checks.SEVERITY_CODES:
         return (evidence.get("severity") == "warning",)
     if finding["code"] == "illness_hard":
         return (bool(evidence.get("hard")), evidence.get("planned_minutes") or 0)

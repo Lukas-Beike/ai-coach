@@ -74,6 +74,7 @@ _ZONE_THRESHOLD_KINDS: Final = frozenset(
         MetricKind.INDOOR_FTP,
         MetricKind.THRESHOLD_HR,
         MetricKind.MAX_HR,
+        MetricKind.THRESHOLD_PACE,
     }
 )
 

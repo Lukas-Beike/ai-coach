@@ -71,11 +71,17 @@ test("plan notes render safe labels, dates, evidence and warning emphasis", () =
   const node = new FakeElement("div");
   context.appendMessageChanges(node, { role: "assistant", coach_changes: changes({
     plan_check_notes: [{ code: "run_spike", dates: ["2026-11-02"], severity: "warning" },
-      { code: "back_to_back_hard", dates: [], severity: "notice" }],
+      { code: "back_to_back_hard", dates: [], severity: "notice" },
+      { code: "load_spike", dates: [], severity: "notice" },
+      { code: "weekly_load_rise", dates: [], severity: "notice" },
+      { code: "load_unknown", dates: [], severity: "notice" }],
   }) });
   assert.equal(node.children[1].className, "message-plan-note is-warning");
   assert.match(node.children[1].textContent, /Warnung: Laufsprung · 02\.11\.2026 · Beobachtungsstudie/);
   assert.match(node.children[2].textContent, /Hinweis: Harte Tage in Folge · Praxisbasiert/);
+  assert.match(node.children[3].textContent, /Hinweis: Lastsprung · Aus Distanzstudien übertragen/);
+  assert.match(node.children[4].textContent, /Hinweis: Wochenlast steigt/);
+  assert.match(node.children[5].textContent, /Hinweis: Last unbekannt/);
 });
 
 test("undone, untracked and turn-less changes show no undo button", () => {
