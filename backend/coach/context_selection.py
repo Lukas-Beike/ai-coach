@@ -301,6 +301,10 @@ REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
     ),
     "plan_week": CoachContextSelection("plan_week", _PLAN_SECTIONS, 14, 5, True),
     "plan_block": CoachContextSelection("plan_block", _PLAN_SECTIONS, 35, 5, True),
+    # Plan versus actual comes from get_training_report; weather stays requestable.
+    "adjust_week": CoachContextSelection(
+        "adjust_week", _PLAN_SECTIONS - {"weather"}, 14, 10, True
+    ),
 }
 
 

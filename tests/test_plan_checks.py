@@ -207,5 +207,27 @@ class PlanCheckRuleTests(unittest.TestCase):
         self.assertEqual([], check(plan, done))
 
 
+class AdjustWeekMoveTests(unittest.TestCase):
+    """A missed key session moved to a free day, as the adjust_week playbook asks."""
+
+    week = (
+        unit("easy", "2026-11-03", "run", session_focus="easy"),
+        unit("long", "2026-11-04", "ride", session_focus="long"),
+        unit("legs", "2026-11-06", "strength", session_focus="legs"),
+    )
+
+    def test_move_next_to_a_hard_day_is_flagged(self) -> None:
+        other = unit("tempo", "2026-11-05", "run", session_focus="threshold")
+        moved = unit("key", "2026-11-04", "ride", session_focus="vo2max")
+        found = check([*self.week[:1], other, moved])
+        self.assertIn("back_to_back_hard", codes(found))
+
+    def test_move_to_a_free_day_is_clean(self) -> None:
+        moved = unit("key", "2026-11-05", "ride", session_focus="vo2max")
+        legs = unit("legs", "2026-11-06", "strength", session_focus="legs")
+        found = check([*self.week[:2], moved, legs])
+        self.assertNotIn("back_to_back_hard", codes(found))
+
+
 if __name__ == "__main__":
     unittest.main()

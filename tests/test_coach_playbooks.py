@@ -20,7 +20,13 @@ from backend.coach.request_payload import (
 )
 from backend.errors import AppError
 
-NEW_KINDS = ("session_analysis", "progress_review", "plan_week", "plan_block")
+NEW_KINDS = (
+    "session_analysis",
+    "progress_review",
+    "plan_week",
+    "plan_block",
+    "adjust_week",
+)
 
 
 class RequestKindAllowlistTests(unittest.TestCase):
@@ -70,6 +76,29 @@ class PlaybookInjectionTests(unittest.TestCase):
             self.assertIn("Planning science", playbook_for(kind))
         self.assertIn("week-by-week rationale", playbook_for("plan_block"))
         self.assertNotIn("week-by-week rationale", playbook_for("plan_week"))
+
+    def test_adjust_week_playbook_guards_hard_days_and_writes(self) -> None:
+        text = playbook_for("adjust_week")
+        for marker in (
+            "get_training_report",
+            "session_focus",
+            "never next to another hard day",
+            "24 h",
+            "preview_adaptive_replan",
+            "No Intervals.icu write without a named sync",
+        ):
+            self.assertIn(marker, text)
+        self.assertNotIn("Planning science", text)
+
+    def test_adjust_week_context_is_its_own(self) -> None:
+        sections = select_coach_context("ok", {}, request_kind="adjust_week").sections
+        self.assertLessEqual(
+            {"planning_brief", "planning", "training_plans", "recovery", "calendar"},
+            sections,
+        )
+        self.assertNotIn("weather", sections)
+        self.assertNotIn("nutrition_products", sections)
+        self.assertEqual("", playbook_for("morning_checkin"))
 
     def test_nutrition_rules_only_on_nutrition_turns(self) -> None:
         marker = (

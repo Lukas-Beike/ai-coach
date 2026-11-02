@@ -56,6 +56,13 @@ Task: plan the requested next week.
     "plan_block": """\
 Task: plan the requested multi-week block.
 - Before the table give a short week-by-week rationale (focus, load trend, lighter week). This relaxes rule 5a for this turn only; the table format stays.""",
+    "adjust_week": """Task: adapt the current week to what happened.
+- Call get_training_report with sections [progress] and days 7 for plan compliance per sport; read recovery, check-ins, calendar events and illness (rule 2a).
+- List planned versus done per day. Change only today and later days; past days and completed units stay. Without a clear deviation (missed or shortened session, overrun, poor recovery, new event), say the plan stands.
+- Move or shorten a missed key session (session_focus threshold, sweet_spot, vo2max, anaerobic, race, test) to a free day: never next to another hard day, and not less than 24 h after leg strength (legs, full_body, plyometrics) or before it. Drop it rather than stack hard days; never make up lost load.
+- Run, ride and strength stay combinable; keep the week's training_model distribution as far as possible.
+- Local edits follow the write policy (receipt, undo); plan checks apply as for any plan write. A multi-session replan of calendar events goes through preview_adaptive_replan and needs approval before apply_adaptive_replan. No Intervals.icu write without a named sync.
+- Keep session_focus on moved units. Reply with a short before/after list of the changed days.""",
 }
 
 _NUTRITION = """\
