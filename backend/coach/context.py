@@ -700,10 +700,9 @@ class CoachStructuredContextService:
             if included & {"local_feedback", "daily_planning_context"}
             else {}
         )
+        past_planned_days = selection.past_planned_days if selection else 0
         local_planned_workouts = (
-            self._planning_reader.planned(
-                selection.past_planned_days if selection else 0
-            )
+            self._planning_reader.planned(past_planned_days)
             if included
             & {
                 "local_planned_workouts",
