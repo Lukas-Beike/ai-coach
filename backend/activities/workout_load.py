@@ -45,7 +45,7 @@ _NUMBER = r"\d++(?:\.\d++)?+"
 _ZONE = re.compile(r"Z(\d++)(?:-Z(\d++))?+")
 _PERCENT = re.compile(rf"({_NUMBER})%?(?:-({_NUMBER})%?)?")
 _ABSOLUTE = re.compile(rf"({_NUMBER})(?:-({_NUMBER}))?(W|BPM)")
-_PACE = re.compile(r"b(d{1,3}):([0-5]d)")
+_PACE = re.compile(r"\b(\d{1,3}):([0-5]\d)")
 _PACE_UNIT = re.compile(r"/(KM|MI)\b")
 
 
