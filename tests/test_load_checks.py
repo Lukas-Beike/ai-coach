@@ -161,7 +161,6 @@ class ThresholdTests(unittest.TestCase):
         self.assertIsNone(result.unavailable)
         self.assertEqual(250.0, result.for_sport(Sport.RIDE).zones.ftp)
         self.assertEqual(4.0, result.for_sport(Sport.RUN).threshold_speed_mps)
-        self.assertEqual("intervals", result.for_sport(Sport.RIDE).sources["ftp"])
 
     def test_missing_pace_stays_unknown(self) -> None:
         result = load_checks.load_thresholds(

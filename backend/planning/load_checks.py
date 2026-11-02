@@ -89,17 +89,7 @@ def _sport_thresholds(
 ) -> AthleteThresholds:
     zones = ZoneSettings.from_thresholds(inputs.zone_thresholds, sport, environment)
     speed = sport_threshold_speed(inputs.zone_thresholds, sport)
-    known = {
-        "ftp": zones.ftp,
-        "lthr": zones.lthr,
-        "max_hr": zones.max_hr,
-        "threshold_pace": speed,
-    }
-    return AthleteThresholds(
-        zones=zones,
-        threshold_speed_mps=speed,
-        sources={name: "intervals" for name, value in known.items() if value},
-    )
+    return AthleteThresholds(zones=zones, threshold_speed_mps=speed)
 
 
 def load_thresholds(inputs: Any, today: date) -> LoadThresholds:
