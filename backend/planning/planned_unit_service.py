@@ -37,6 +37,17 @@ def _is_focus_only(values: dict[str, Any]) -> bool:
     )
 
 
+def _without_unset_focus(
+    current: dict[str, Any], target: dict[str, Any]
+) -> dict[str, Any]:
+    """Current payload minus focus keys the audited target does not name."""
+    return {
+        key: value
+        for key, value in current.items()
+        if key not in FOCUS_KEYS or key in target
+    }
+
+
 def _differs_only_in_focus(restored: dict[str, Any], current: dict[str, Any]) -> bool:
     """Whether an undo changes nothing but the local focus (sync state stays)."""
     ignored = {*FOCUS_KEYS, "sync_status"}
@@ -185,12 +196,7 @@ class PlannedUnitService:
             self._reject_restore_conflict(
                 entity_id, {**current_payload, **restored_target}
             )
-        # The audited state names the focus only when it was set.
-        kept = {
-            key: value
-            for key, value in current_payload.items()
-            if key not in FOCUS_KEYS or key in target
-        }
+        kept = _without_unset_focus(current_payload, target)
         restored = planned_units.normalize_planned_unit(
             {
                 **kept,
