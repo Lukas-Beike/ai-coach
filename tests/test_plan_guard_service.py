@@ -396,7 +396,7 @@ class PlanBriefTests(unittest.TestCase):
         self.assertIn("source", brief)
 
     def test_brief_section_only_for_plan_kinds(self) -> None:
-        for kind in ("plan_week", "plan_block"):
+        for kind in ("plan_week", "plan_block", "adjust_week"):
             selection = select_coach_context("Plane", {}, request_kind=kind)
             self.assertIn("planning_brief", selection.sections)
         for other in (None, "progress_review", "session_analysis"):

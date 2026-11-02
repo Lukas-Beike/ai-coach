@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import unittest
+from datetime import date
 from typing import Any
 from unittest.mock import Mock
 
@@ -96,8 +97,14 @@ class PlaybookInjectionTests(unittest.TestCase):
             {"planning_brief", "planning", "training_plans", "recovery", "calendar"},
             sections,
         )
-        self.assertNotIn("weather", sections)
         self.assertNotIn("nutrition_products", sections)
+        selection = select_coach_context("ok", {}, request_kind="adjust_week")
+        items = [{"date": f"2026-11-{day:02d}"} for day in (1, 2, 8, 10)]
+        kept = selection.dated_items(items, date(2026, 11, 5))
+        self.assertEqual(
+            ["2026-11-01", "2026-11-02", "2026-11-08", "2026-11-10"],
+            [i["date"] for i in kept],
+        )
         self.assertEqual("", playbook_for("morning_checkin"))
 
     def test_nutrition_rules_only_on_nutrition_turns(self) -> None:

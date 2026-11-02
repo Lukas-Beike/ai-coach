@@ -200,6 +200,7 @@ class CoachContextSelection:
     include_library: bool = True
     retain_dialogue: bool = False
     retain_pending_request: bool = True
+    past_days: int = 2
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -252,7 +253,7 @@ class CoachContextSelection:
     def dated_items(self, items: Any, today: date) -> Any:
         if not isinstance(items, list) or self.horizon_days is None:
             return items
-        first = (today - timedelta(days=2)).isoformat()
+        first = (today - timedelta(days=self.past_days)).isoformat()
         last = (today + timedelta(days=self.horizon_days)).isoformat()
         return [
             item
@@ -301,9 +302,9 @@ REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
     ),
     "plan_week": CoachContextSelection("plan_week", _PLAN_SECTIONS, 14, 5, True),
     "plan_block": CoachContextSelection("plan_block", _PLAN_SECTIONS, 35, 5, True),
-    # Plan versus actual comes from get_training_report; weather stays requestable.
+    # The current week reaches back to Monday; the next days serve hard/easy spacing.
     "adjust_week": CoachContextSelection(
-        "adjust_week", _PLAN_SECTIONS - {"weather"}, 14, 10, True
+        "adjust_week", _PLAN_SECTIONS, 8, 5, True, past_days=6
     ),
 }
 
@@ -367,6 +368,7 @@ def select_coach_context(
         fixed.include_library,
         retain_dialogue=selection.retain_dialogue,
         retain_pending_request=selection.retain_pending_request,
+        past_days=fixed.past_days,
     )
 
 

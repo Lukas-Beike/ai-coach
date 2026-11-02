@@ -227,6 +227,20 @@ class AdjustWeekMoveTests(unittest.TestCase):
         legs = unit("legs", "2026-11-06", "strength", session_focus="legs")
         found = check([*self.week[:2], moved, legs])
         self.assertNotIn("back_to_back_hard", codes(found))
+        self.assertEqual([], found)
+
+    def test_leg_strength_right_before_the_moved_key_session_is_flagged(self) -> None:
+        moved = unit("key", "2026-11-05", "ride", session_focus="vo2max")
+        legs = unit(
+            "legs",
+            "2026-11-04",
+            "strength",
+            session_focus="legs",
+            strength_intensity="heavy",
+        )
+        found = check([legs, moved])
+        self.assertTrue(found)
+        self.assertNotIn("back_to_back_hard", codes(found))
 
 
 if __name__ == "__main__":
