@@ -286,6 +286,11 @@ class CoachUiParityTests(unittest.TestCase):
         )
         coach = self.coach_report("power_profiles")["power_profiles"]
         self.assertEqual(ui, coach)
+        # The CP/CS model estimate (card M4) travels in the same payload.
+        self.assertEqual(
+            ("critical-power-speed", "experimental"),
+            (coach["critical_power"]["method"], coach["critical_power"]["status"]),
+        )
 
 
 if __name__ == "__main__":

@@ -28,6 +28,8 @@ from backend.performance.canonical_inputs import (
     inputs_for_snapshot,
 )
 from backend.performance.comparisons import recurring_training_comparisons
+from backend.performance.critical_power import WINDOW_DAYS as CP_WINDOW_DAYS
+from backend.performance.critical_power import critical_power_speed
 from backend.performance.mean_max_curve import (
     SessionCurve,
     SessionCurveReader,
@@ -218,9 +220,17 @@ class TrainingProfileSelectionService:
             str(days): self._profile_window(eligible_records, today, days)
             for days in PROFILE_WINDOW_DAYS
         }
+        cp_start = (today - timedelta(days=CP_WINDOW_DAYS - 1)).isoformat()
+        cp_records = [
+            row for row in eligible_records if cp_start <= str(row.get("date") or "")
+        ]
         return {
             "status": "ok" if compatibility or valid else "insufficient_data",
             "best": compatibility,
+            # Before the activity list, so a bounded Coach copy keeps it.
+            "critical_power": critical_power_speed(
+                cp_records, today, input_fingerprint=_records_fingerprint(cp_records)
+            ),
             "activities": records,
             "windows": windows,
             "running": {
