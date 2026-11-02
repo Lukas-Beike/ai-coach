@@ -41,14 +41,25 @@ FINDING_CODES = (
     "missing_taper",
     "illness_hard",
 )
+# Only a health rule blocks a write. The load rules rest on observational or
+# practice-based evidence, so they come back as notes the Coach must name.
+BLOCKING_CODES = ("illness_hard",)
+EVIDENCE = {
+    "run_spike": "observational, moderate (Frandsen 2025)",
+    "back_to_back_hard": "practice-based (hard/easy principle)",
+    "strength_hard_same_day": "limited, performance studies (Robineau 2016)",
+    "missing_taper": "meta-analysis, strong (Bosquet 2007); 20 % floor is a local choice",
+    "illness_hard": "medical caution",
+}
 RULE_SUMMARY = {
-    "run_spike": "Planned run at most 10 % longer than the longest run of the last 30 days.",
-    "back_to_back_hard": "No hard run or ride on consecutive days.",
-    "strength_hard_same_day": "Heavy strength and a hard run or ride at least 6 h apart.",
-    "missing_taper": "Final 14 days before an A/B competition at least 20 % lighter than the 14 days before.",
-    "illness_hard": "No hard or 90+ minute session within 3 days of a reported illness.",
+    "run_spike": "Note: planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
+    "back_to_back_hard": "Note: hard run or ride on consecutive days.",
+    "strength_hard_same_day": "Note: heavy strength and a hard run or ride less than 6 h apart.",
+    "missing_taper": "Note: final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
+    "illness_hard": "Blocks: no hard or 90+ minute session within 3 days of a reported illness.",
 }
 SPIKE_FACTOR = 1.10
+SPIKE_WARNING_FACTOR = 1.30
 HARD_INTENSITY = 0.85
 MIN_STRENGTH_GAP_H = 6
 TAPER_DAYS = 14
@@ -125,6 +136,8 @@ def _finding(
 ) -> dict[str, Any]:
     return {
         "code": code,
+        "blocking": code in BLOCKING_CODES,
+        "evidence_strength": EVIDENCE[code],
         "dates": sorted({_day(unit) for unit in units}),
         "local_ids": sorted(
             str(unit.get("local_id") or unit.get("id")) for unit in units
@@ -154,19 +167,29 @@ def _run_spike(units: Sequence[Mapping[str, Any]], longest: float | None) -> lis
     if longest is None:
         return []
     return [
-        _finding(
-            "run_spike",
-            [unit],
-            "Planned run is more than 10 % longer than the longest run of the last 30 days.",
-            {
-                "planned_minutes": round(_duration_s(unit) / 60),
-                "longest_run_30d_minutes": round(longest / 60),
-                "limit_minutes": round(longest * SPIKE_FACTOR / 60),
-            },
-        )
+        _spike_finding(unit, longest)
         for unit in units
         if _sport(unit) is Sport.RUN and _duration_s(unit) > longest * SPIKE_FACTOR
     ]
+
+
+def _spike_finding(unit: Mapping[str, Any], longest: float) -> dict[str, Any]:
+    """Graded: up to 30 % above the longest run is a notice, beyond that a warning."""
+    planned = _duration_s(unit)
+    warning = planned > longest * SPIKE_WARNING_FACTOR
+    return _finding(
+        "run_spike",
+        [unit],
+        "Planned run is more than 30 % longer than the longest run of the last 30 days."
+        if warning
+        else "Planned run is 10-30 % longer than the longest run of the last 30 days.",
+        {
+            "severity": "warning" if warning else "notice",
+            "planned_minutes": round(planned / 60),
+            "longest_run_30d_minutes": round(longest / 60),
+            "increase_percent": round((planned / longest - 1) * 100),
+        },
+    )
 
 
 def _back_to_back(units: Sequence[Mapping[str, Any]]) -> list[dict]:

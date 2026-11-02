@@ -52,6 +52,21 @@ class PlanCheckRuleTests(unittest.TestCase):
         )
         self.assertEqual([], check([unit("a", "2026-11-05", "run", 66)], done))
 
+    def test_run_spike_is_graded_and_not_blocking(self) -> None:
+        done = [run_done("2026-10-25", 60)]
+        notice = check([unit("a", "2026-11-05", "run", 70)], done)[0]
+        warning = check([unit("a", "2026-11-05", "run", 90)], done)[0]
+        self.assertEqual("notice", notice["evidence"]["severity"])
+        self.assertEqual("warning", warning["evidence"]["severity"])
+        self.assertEqual(50, warning["evidence"]["increase_percent"])
+        self.assertFalse(notice["blocking"])
+        self.assertIn("observational", notice["evidence_strength"])
+
+    def test_only_illness_blocks(self) -> None:
+        self.assertEqual(("illness_hard",), plan_checks.BLOCKING_CODES)
+        hard = unit("a", "2026-11-04", "run", planned_intensity=0.9)
+        self.assertTrue(check([hard], illness="Fieber")[0]["blocking"])
+
     def test_run_spike_counts_a_run_completed_today(self) -> None:
         today = [run_done("2026-11-02", 60)]
         self.assertEqual(

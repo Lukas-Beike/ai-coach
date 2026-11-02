@@ -19,7 +19,8 @@ from backend.planning.plan_guard_service import PlanGuardService
 PROFILE_MUTATING_COACH_TOOLS = frozenset({"update_profile", "undo_training_change"})
 
 # Coach tools that create or move future planned units; the server checks the
-# resulting plan and rolls the write back when it breaks a planning rule.
+# resulting plan, rolls the write back on a blocking finding and returns the
+# other findings as notes.
 PLAN_CHECKED_TOOLS = frozenset(
     {
         "apply_training_patch",
@@ -79,12 +80,8 @@ class CoachStructuredToolExecutionService:
         with self._database_lock, self._database_manager.unit_of_work():
             before = guard.findings()
             result = self._execute_tool({**metadata, "arguments": arguments}, **kwargs)
-            acknowledged = guard.verify(before, accepted)
-        return (
-            {**result, "plan_check_acknowledged": acknowledged}
-            if acknowledged
-            else result
-        )
+            notes = guard.verify(before, accepted)
+        return {**result, "plan_check_notes": notes} if notes else result
 
     def _execute_tool(
         self,

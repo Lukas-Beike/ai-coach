@@ -59,11 +59,13 @@ class PlanGuardWriteTests(unittest.TestCase):
         )
         self.addCleanup(self.manager.close)
         self.units: list[dict[str, Any]] = []
+        # A reported illness makes the hard pair a blocking finding.
+        self.illness = "Fieber"
         self.guard = PlanGuardService(
             planned_units=lambda: list(self.units),
             completed_activities=list,
             competitions=list,
-            illness=lambda: "",
+            illness=lambda: self.illness,
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
@@ -112,9 +114,17 @@ class PlanGuardWriteTests(unittest.TestCase):
         with self.assertRaises(PlanCheckError) as raised:
             self.run_tool("replace_training_plan", workouts=[{}])
         self.assertEqual(
-            ["back_to_back_hard"], [f["code"] for f in raised.exception.findings]
+            ["illness_hard"], [f["code"] for f in raised.exception.findings]
         )
         self.assertEqual(0, self.stored())
+
+    def test_load_findings_save_with_notes(self) -> None:
+        self.illness = ""
+        result = self.run_tool("replace_training_plan", workouts=[{}])
+        self.assertEqual(1, self.stored())
+        note = result["plan_check_notes"][0]
+        self.assertEqual("back_to_back_hard", note["code"])
+        self.assertIn("practice-based", note["evidence_strength"])
 
     def test_failure_projection_carries_findings(self) -> None:
         service = CoachStructuredToolFailureService(
@@ -137,19 +147,19 @@ class PlanGuardWriteTests(unittest.TestCase):
         )
         self.assertFalse(result["ok"])
         self.assertEqual("plan_check_failed", result["reason"])
-        self.assertEqual("back_to_back_hard", result["findings"][0]["code"])
+        self.assertEqual("illness_hard", result["findings"][0]["code"])
 
     def test_acknowledgement_writes_and_reports_text_only(self) -> None:
         result = self.run_tool(
             "replace_training_plan",
             workouts=[{}],
-            accept_plan_findings=["back_to_back_hard"],
+            accept_plan_findings=["illness_hard"],
         )
         self.assertEqual(1, self.stored())
         self.assertNotIn("accept_plan_findings", self.seen_arguments)
         self.assertEqual(
-            ["back_to_back_hard"],
-            [f["code"] for f in result["plan_check_acknowledged"]],
+            ["back_to_back_hard", "illness_hard"],
+            sorted(f["code"] for f in result["plan_check_notes"]),
         )
 
     def test_other_code_does_not_cover_the_finding(self) -> None:
@@ -228,7 +238,7 @@ class PlanBriefTests(unittest.TestCase):
 
     def test_schema_enum_matches_rule_codes(self) -> None:
         self.assertEqual(
-            list(plan_checks.FINDING_CODES), ACCEPT_PLAN_FINDINGS["items"]["enum"]
+            list(plan_checks.BLOCKING_CODES), ACCEPT_PLAN_FINDINGS["items"]["enum"]
         )
 
 
