@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from statistics import linear_regression
 from typing import Any, Final
 
 METHOD_ID: Final = "critical-power-speed"
@@ -73,15 +74,8 @@ def fit_line(
     durations: Sequence[float], values: Sequence[float]
 ) -> tuple[float, float]:
     """Least-squares ``value = slope × t + intercept``; returns (slope, intercept)."""
-    count = len(durations)
-    mean_t = sum(durations) / count
-    mean_v = sum(values) / count
-    spread = sum((t - mean_t) ** 2 for t in durations)
-    slope = (
-        sum((t - mean_t) * (v - mean_v) for t, v in zip(durations, values, strict=True))
-        / spread
-    )
-    return slope, mean_v - slope * mean_t
+    slope, intercept = linear_regression(durations, values)
+    return slope, intercept
 
 
 def _fit(
@@ -149,7 +143,7 @@ def _fit(
             "status": "withheld",
             "reason": "Parameter außerhalb des Plausibilitätsbereichs.",
         }
-    inverse_intercept, inverse_slope = _inverse_time_fit(durations, rates)
+    inverse_cp, inverse_w_prime = _inverse_time_fit(durations, rates)
     return {
         **result,
         "status": "ok",
@@ -161,8 +155,8 @@ def _fit(
         ],
         "sensitivity": {
             "inverse_time": {
-                slope_key: round(inverse_intercept, slope_digits),
-                intercept_key: round(inverse_slope, intercept_digits),
+                slope_key: round(inverse_cp, slope_digits),
+                intercept_key: round(inverse_w_prime, intercept_digits),
             },
             "leave_one_out": leave_one_out,
         },

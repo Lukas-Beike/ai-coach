@@ -53,8 +53,11 @@ recreational marathon runners, no lab reference.
   does not ask the athlete to do maximal tests.
 - Running: a running-specific protocol from R5, with fixed durations or
   distances of 3 to 12 min whose durations differ by at least 7 min, trials
-  longest to shortest or randomised. Recovery comes from the selected original
-  running study, not from R5. CP protocols are not transferred to running.
+  longest to shortest or randomised. Within 3 to 12 min the 7-min rule can
+  only apply to the shortest and longest trial; 3/7/12 min spans 9 min.
+  Recovery is the 30-min product assumption in the numeric rules, released by
+  the athlete; R5's included studies report 30-60 min. CP protocols are not
+  transferred to running.
 - Inputs need real power for cycling and reliable time and distance for
   running. Record test intent, date, recovery, sensor, indoor/outdoor and
   conditions, or mark them unknown.
