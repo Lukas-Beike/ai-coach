@@ -1082,6 +1082,16 @@ def _has_omitted(calendar: Any) -> bool:
     return isinstance(calendar, dict) and "omitted_count" in calendar
 
 
+def _note_dropped_calendar(
+    projection: dict[str, Any], original: Any, clipped: Any
+) -> None:
+    if isinstance(clipped, dict) or not _has_omitted(original):
+        return
+    projection["external_calendar_omitted_count"] = original["omitted_count"] + len(
+        original.get("events", [])
+    )
+
+
 def _reconcile_calendar_clip(original: Any, clipped: Any) -> None:
     """Count events lost to clipping as omitted instead of silently dropping."""
     if not (_has_omitted(original) and isinstance(clipped, dict)):
@@ -1269,12 +1279,7 @@ class CoachTrainingContextService:
                 if isinstance(clipped_projection, dict)
                 else budget_note
             )
-            if not isinstance(clipped_calendar, dict) and _has_omitted(
-                original_calendar
-            ):
-                projection["external_calendar_omitted_count"] = original_calendar[
-                    "omitted_count"
-                ] + len(original_calendar.get("events", []))
+            _note_dropped_calendar(projection, original_calendar, clipped_calendar)
             prompt_context = {
                 "projection": projection,
                 **{
