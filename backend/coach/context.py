@@ -7,7 +7,7 @@ import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from backend.activities.zone_settings import effective_zone_configuration
@@ -415,7 +415,48 @@ class CoachPlanningContextReader:
             )
         ]
 
-    def external_calendar(self) -> dict[str, Any]:
+    def external_calendar(self, horizon_days: int | None = None) -> dict[str, Any]:
+        if horizon_days is not None:
+            start = datetime.combine(self._today(), time.min)
+            end = start + timedelta(days=horizon_days)
+            events = self._external_calendar_reader.list_events_in_window(horizon_days)
+            events = [
+                event
+                for event in events
+                if str(event.get("end_local") or "") > start.isoformat()
+                and str(event.get("start_local") or "") < end.isoformat()
+            ]
+            result: dict[str, Any] = {
+                "provider": "iCalendar",
+                "read_only": True,
+                "trust": "untrusted_external_text",
+                "omitted_count": len(events),
+                "events": [],
+            }
+            keys = (
+                "name",
+                "start_local",
+                "end_local",
+                "all_day",
+                "no_training",
+                "no_intensity",
+                "short_only",
+            )
+            for event in events:
+                item = {key: event.get(key) for key in keys}
+                item["name"] = str(item["name"] or "")[:200]
+                candidate = {
+                    **result,
+                    "omitted_count": len(events) - len(result["events"]) - 1,
+                    "events": [*result["events"], item],
+                }
+                if (
+                    coach_context_json_size(candidate)
+                    > COACH_CONTEXT_SECTION_LIMITS["external_calendar"]
+                ):
+                    break
+                result = candidate
+            return result
         return {
             "provider": "iCalendar",
             "read_only": True,
@@ -686,6 +727,7 @@ class CoachStructuredContextService:
             daily_context,
             performance_inputs=performance_inputs,
             activity_rows=activity_rows,
+            selection=selection,
         )
 
     def _current_performance(
@@ -707,6 +749,7 @@ class CoachStructuredContextService:
         *,
         performance_inputs: CanonicalPerformanceInputs | None = None,
         activity_rows: RecentActivities | None = None,
+        selection: CoachContextSelection | None = None,
     ) -> dict[str, Any]:
         intervals_label = _source_label(ProviderId.INTERVALS)
         garmin_label = _source_label(ProviderId.GARMIN)
@@ -732,7 +775,11 @@ class CoachStructuredContextService:
             "calendar": self._planning_reader.calendar(local_planned_workouts)
             if "calendar" in included
             else None,
-            "external_calendar": self._planning_reader.external_calendar()
+            "external_calendar": (
+                self._planning_reader.external_calendar(selection.horizon_days)
+                if selection and selection.name in {"plan_week", "plan_block"}
+                else self._planning_reader.external_calendar()
+            )
             if "external_calendar" in included
             else None,
             "activities": self._performance_reader.activities(
@@ -1025,7 +1072,7 @@ def coach_context_projection_meta(
     }
 
 
-_TOTAL_BUDGET_NOTE_MARGIN = 32
+_TOTAL_BUDGET_NOTE_MARGIN = 128
 
 
 def coach_context_total_budget_note(
@@ -1176,6 +1223,28 @@ class CoachTrainingContextService:
             )
             if not isinstance(clipped_context, dict):
                 clipped_context = {}
+            original_calendar = prompt_context.get("external_calendar")
+            clipped_calendar = clipped_context.get("external_calendar")
+            if (
+                isinstance(original_calendar, dict)
+                and "omitted_count" in original_calendar
+            ):
+                original_events = original_calendar.get("events", [])
+                if isinstance(clipped_calendar, dict):
+                    retained = clipped_calendar.get("events", [])
+                    if not isinstance(retained, list):
+                        retained = []
+                    retained = [
+                        item
+                        for item, original in zip(retained, original_events)
+                        if item == original
+                    ]
+                    clipped_calendar["events"] = retained
+                    clipped_calendar["omitted_count"] = (
+                        original_calendar["omitted_count"]
+                        + len(original_events)
+                        - len(retained)
+                    )
             omitted_sections = sorted(
                 key for key in prompt_context if key not in clipped_context
             )
@@ -1195,6 +1264,14 @@ class CoachTrainingContextService:
                 if isinstance(clipped_projection, dict)
                 else budget_note
             )
+            if (
+                isinstance(original_calendar, dict)
+                and "omitted_count" in original_calendar
+                and not isinstance(clipped_calendar, dict)
+            ):
+                projection["external_calendar_omitted_count"] = original_calendar[
+                    "omitted_count"
+                ] + len(original_calendar.get("events", []))
             prompt_context = {
                 "projection": projection,
                 **{

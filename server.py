@@ -1731,6 +1731,7 @@ def _plan_guard_service() -> PlanGuardService:
             PLANNING_DATA.competition().list(),
             ATHLETE_CLOCK.now().date(),
         ),
+        calendar_events=lambda: EXTERNAL_CALENDAR.reader().list_events_in_window(56),
     )
 
 

@@ -21,19 +21,20 @@ from __future__ import annotations
 
 _COMMON = """\
 REQUEST PLAYBOOK (this turn only).
-- Separate measured facts from inference, name the data coverage, and label evidence strength as strong, moderate, limited or practice-based. Missing data is unknown, never zero or rest.
-- Never use ACWR (acute:chronic workload ratio; methodologically discredited, Impellizzeri 2020). CTL, ATL and TSB are model estimates, not individual predictions. Rule 8f on session-RPE load stays.
-- The athlete's target intensity distribution is training_model in durable_profile (pyramidal, polarized, threshold or sweet_spot); use pyramidal when it is absent or unrecognized. It is the reference for plans and progress evaluation. You may note when data argues against it, but never change it."""
+- Separate measured facts from inference; name coverage and evidence strength (strong, moderate, limited or practice-based). Missing data is unknown, never zero or rest.
+- Never use ACWR (methodologically discredited, Impellizzeri 2020). CTL, ATL and TSB are estimates, not individual predictions. Rule 8f on session-RPE load stays.
+- Use durable_profile.training_model (pyramidal, polarized, threshold or sweet_spot) as the planning and progress reference; use pyramidal when it is absent or unrecognized. Note contrary evidence, but never change it."""
 
 _PLAN_RULES = """\
 Planning science:
-- Use a periodized structure with progressive overload and a lighter week every 3rd to 4th week (practice-based). No single periodization model is clearly superior (Kiely 2012).
+- Periodize with progressive overload and a lighter week every 3rd to 4th week (practice-based); no model is clearly superior (Kiely 2012).
 - Alternate hard and easy days; no back-to-back hard days. Distribute intensity according to training_model.
 - Do not plan a single run much longer than the longest run of the last 30 days (Frandsen 2025).
 - Heavy strength 2 times per week improves running economy and cycling performance (Ronnestad & Mujika 2014; Blagrove 2018); 1 time maintains it in the competition phase. Keep heavy strength 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): 2 sessions per week in base and build, 1 in peak and taper, at most 3; place it after or on hard days, or 24 h or more before hard or long sessions. Name the reason for any deviation.
 - Taper about 2 weeks before a competition: cut volume by 40-60 %, keep intensity and frequency (Bosquet 2007).
 - When HRV or readiness data exist, adjust load to it (Kiviniemi 2007; Javaloyes 2019; moderate).
 - Respect availability (rule 8b), illness (rule 2a), calendar events and competitions.
+- If an event makes training materially uncertain, use clarify_coach_request to ask whether to train and reduce intensity before writing the affected plan; group questions where practical. Follow the answer, never infer cancellation or reduction from an ordinary event. Respect explicit markers.
 - Set session_focus on every new unit (strength also strength_intensity) and name it in the Typ column.
 - Create local planned units only; no Intervals.icu write.
 - planning_brief covers recent weeks per sport; planned_distribution (low/moderate/high time against training_model) and strength (planned sessions, leg sessions, leg sessions by intensity) cover planned weeks. The server checks every plan. Only illness_hard blocks the save: then correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding (shown in the receipt, not repeated) or adjust the plan. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means the load could not be computed, so say so."""

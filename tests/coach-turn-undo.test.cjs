@@ -74,7 +74,8 @@ test("plan notes render safe labels, dates, evidence and warning emphasis", () =
       { code: "back_to_back_hard", dates: [], severity: "notice" },
       { code: "load_spike", dates: [], severity: "notice" },
       { code: "weekly_load_rise", dates: [], severity: "notice" },
-      { code: "load_unknown", dates: [], severity: "notice" }],
+      { code: "load_unknown", dates: [], severity: "notice" },
+      { code: "calendar_load", dates: ["2026-11-03"], severity: "notice" }],
   }) });
   assert.equal(node.children[1].className, "message-plan-note is-warning");
   assert.match(node.children[1].textContent, /Warnung: Laufsprung · 02\.11\.2026 · Beobachtungsstudie/);
@@ -82,6 +83,7 @@ test("plan notes render safe labels, dates, evidence and warning emphasis", () =
   assert.match(node.children[3].textContent, /Hinweis: Lastsprung · Aus Distanzstudien übertragen/);
   assert.match(node.children[4].textContent, /Hinweis: Wochenlast steigt/);
   assert.match(node.children[5].textContent, /Hinweis: Last unbekannt/);
+  assert.match(node.children[6].textContent, /Hinweis: Kalender und Einheit · 03\.11\.2026/);
 });
 
 test("undone, untracked and turn-less changes show no undo button", () => {

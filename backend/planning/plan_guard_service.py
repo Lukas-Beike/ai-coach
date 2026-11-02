@@ -11,7 +11,12 @@ from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.performance.canonical_current import read_current_inputs
 from backend.performance.canonical_inputs import resolve_reader
-from backend.planning import intensity_distribution, leg_strength, plan_checks
+from backend.planning import (
+    calendar_load,
+    intensity_distribution,
+    leg_strength,
+    plan_checks,
+)
 from backend.planning.load_checks import LoadThresholds, load_thresholds
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
@@ -175,6 +180,7 @@ def build_planning_brief(
     planned_weeks: Sequence[Mapping[str, Any]] = (),
     planned_sessions: Sequence[Mapping[str, Any]] = (),
     planned_strength: Sequence[Mapping[str, Any]] = (),
+    calendar_busy: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """Compact deterministic brief for plan_week and plan_block turns."""
     weeks = [
@@ -205,6 +211,8 @@ def build_planning_brief(
         ),
         "strength": leg_strength.brief_strength(planned_strength, BRIEF_WEEKS),
         "planned_sessions": list(planned_sessions),
+        "calendar_busy_minutes": dict(calendar_busy or {}),
+        "calendar_busy_source": "Read-only iCalendar events; overlapping intervals counted once in local time",
         "plan_checks": plan_checks.RULE_SUMMARY,
     }
 
@@ -225,6 +233,7 @@ class PlanGuardService:
         estimate_unit: intensity_distribution.Estimator,
         thresholds: Callable[[], LoadThresholds | None] = lambda: None,
         expects_strength: Callable[[], bool] = lambda: False,
+        calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
     ) -> None:
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -236,6 +245,8 @@ class PlanGuardService:
         self._estimate_unit = estimate_unit
         self._thresholds = thresholds
         self._expects_strength = expects_strength
+        self._calendar_events = calendar_events
+        self._calendar_cache: tuple[Sequence[Mapping[str, Any]], ...] | None = None
         self._threshold_cache: tuple[LoadThresholds | None] | None = None
 
     def _planned_weeks(
@@ -263,6 +274,7 @@ class PlanGuardService:
                 illness=self._illness(),
                 thresholds=self._load_thresholds(),
                 expects_strength=self._expects_strength(),
+                calendar_events=self._events(),
             ),
             *intensity_distribution.distribution_findings(
                 self._training_model(), self._planned_weeks(units, today)
@@ -274,6 +286,12 @@ class PlanGuardService:
         if self._threshold_cache is None:
             self._threshold_cache = (self._thresholds(),)
         return self._threshold_cache[0]
+
+    def _events(self) -> Sequence[Mapping[str, Any]]:
+        """Compare before and after against the same calendar snapshot."""
+        if self._calendar_cache is None:
+            self._calendar_cache = (self._calendar_events(),)
+        return self._calendar_cache[0]
 
     def verify(
         self, before: Sequence[Mapping[str, Any]], accepted: Sequence[str]
@@ -319,4 +337,5 @@ class PlanGuardService:
             planned_weeks=self._planned_weeks(units, today),
             planned_sessions=planned_focus(units, self._estimate_unit, today),
             planned_strength=leg_strength.planned_weeks(units, today),
+            calendar_busy=calendar_load.busy_minutes(self._events(), today, 35),
         )
