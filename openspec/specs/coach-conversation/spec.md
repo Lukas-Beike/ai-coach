@@ -172,11 +172,11 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 
 #### Scenario: Session analysis context
 - **WHEN** a turn carries `session_analysis`
-- **THEN** its context holds profile, competitions, feedback, planned units around the session and the next one, activities, recovery and current performance with activity validation, while weather, calendars and plan sections stay requestable through `read_coach_context`.
+- **THEN** its context holds profile, competitions, feedback, planned units of the last two days and the next 14 days, activities, recovery and current performance with activity validation, while weather, calendars and plan sections stay requestable through `read_coach_context`.
 
 #### Scenario: Nutrition rules only on nutrition turns
 - **WHEN** the selected context includes `nutrition_products`
-- **THEN** the instructions append the nutrition playbook (reusable meals, food matching), which the base prompt only references; plan and analysis turns carry neither the playbook nor its rules.
+- **THEN** the instructions append the nutrition playbook (reusable meals, food matching), which the base prompt only references; a topic-less reply to a recent food exchange, such as a confirmation, keeps it; plan and analysis turns carry neither the playbook nor its rules.
 
 #### Scenario: Unknown kind
 - **WHEN** a submission names another kind

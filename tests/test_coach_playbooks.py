@@ -168,6 +168,27 @@ class RequestKindSelectionTests(unittest.TestCase):
             self.assertNotIn(heavy, analysis.sections)
         self.assertEqual(analysis.horizon_days, 14)
 
+    def test_confirmation_after_food_exchange_keeps_products(self) -> None:
+        history = {
+            "messages": [
+                {"id": 1, "role": "user", "content": "Speichere Mahlzeit Porridge"},
+                {"id": 2, "role": "assistant", "content": "Soll ich speichern?"},
+            ]
+        }
+        self.assertIn(
+            "nutrition_products", select_coach_context("ja", history).sections
+        )
+        self.assertNotIn(
+            "nutrition_products",
+            select_coach_context("ja", {"messages": []}).sections,
+        )
+
+    def test_message_food_survives_a_fixed_kind(self) -> None:
+        sections = select_coach_context(
+            "80g Haferflocken gegessen", {}, request_kind="plan_week"
+        ).sections
+        self.assertIn("nutrition_products", sections)
+
     def test_every_kind_has_a_selection_and_keeps_message_retention(self) -> None:
         self.assertEqual(set(REQUEST_KIND_SELECTIONS), set(REQUEST_KINDS))
         context = {

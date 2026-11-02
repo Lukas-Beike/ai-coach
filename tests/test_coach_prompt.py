@@ -5,7 +5,7 @@ import unittest
 from backend.coach.dialogue import INSTRUCTIONS
 from backend.coach.prompt import COACH_PROMPT
 
-EXPECTED_SHA256 = "abc6f609fe09d3a163474b847873f229c49a620ea65bf4789c82b6627d35575c"
+EXPECTED_SHA256 = "4509a15ee2c707ea9e25415219d886624b8a6467e541bc3617bd471f827c4bf5"
 
 
 class CoachPromptTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class CoachPromptTests(unittest.TestCase):
             "Never silently change durable athlete facts, target events, constraints, or preferences",
             "Concrete time-window recommendations are only available for the next five days",
             "Reply in German unless the athlete explicitly asks for another language.",
-            "a nutrition playbook is appended to these instructions",
+            "a nutrition playbook with the full rules is appended to these instructions",
             "single Markdown table with exactly three columns (Wochentag, Datum | Workout, Typ und Kurzbeschreibung | Nutzen)",
         )
         for marker in required_markers:

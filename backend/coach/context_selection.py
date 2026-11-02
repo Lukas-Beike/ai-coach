@@ -317,6 +317,19 @@ def _food_sections(normalized: str, attachments: bool) -> set[str]:
     return {"nutrition_products"} if food else set()
 
 
+def _follow_up_food(context: Mapping[str, Any], matched: Sequence[str]) -> set[str]:
+    """Keep saved products for a topic-less reply to a recent food exchange."""
+    messages = context.get("messages")
+    if matched or not isinstance(messages, list):
+        return set()
+    recent = " ".join(
+        str(item.get("content") or "")
+        for item in messages[-4:]
+        if isinstance(item, dict)
+    ).casefold()
+    return _food_sections(recent, False)
+
+
 def select_coach_context(
     message: str,
     dialogue: dict[str, Any],
@@ -333,7 +346,7 @@ def select_coach_context(
         return selection
     return CoachContextSelection(
         fixed.name,
-        fixed.sections,
+        fixed.sections | (selection.sections & {"nutrition_products"}),
         fixed.horizon_days,
         fixed.activity_limit,
         fixed.include_library,
@@ -368,7 +381,7 @@ def _message_selection(
         continuation,
     )
 
-    food = _food_sections(normalized, attachments)
+    food = _food_sections(normalized, attachments) | _follow_up_food(dialogue, matched)
     if _needs_fallback_context(
         is_pending_active, continuation, pronoun, matched, normalized
     ):
