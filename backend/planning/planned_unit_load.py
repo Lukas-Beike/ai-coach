@@ -14,6 +14,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation
+from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_inputs import resolve_reader
 from backend.planning.sport import planned_sport_environment
@@ -38,6 +39,20 @@ def estimate_planned_unit(
     )
 
 
+def sport_threshold_speed(
+    observations: Sequence[Observation], sport: Sport
+) -> float | None:
+    """Threshold running speed (m/s) of ``sport`` from the current thresholds."""
+    return next(
+        (
+            float(item.value.value)
+            for item in observations
+            if item.kind is MetricKind.THRESHOLD_PACE and item.sport is sport
+        ),
+        None,
+    )
+
+
 def unit_thresholds(
     unit: Mapping[str, Any],
     sport_thresholds: Sequence[Observation],
@@ -45,8 +60,8 @@ def unit_thresholds(
 ) -> AthleteThresholds:
     """Current thresholds and zone limits of a unit's sport, as the plan profiles use.
 
-    The threshold running speed is not read here, so absolute pace targets stay
-    unknown.
+    The threshold running speed comes from the same current thresholds; without
+    it absolute pace targets stay unknown.
     """
     sport, environment = planned_sport_environment(unit)
     try:
@@ -62,7 +77,8 @@ def unit_thresholds(
             environment,
             day,
             fallback=ZoneSettings.from_thresholds(sport_thresholds, sport, environment),
-        )
+        ),
+        threshold_speed_mps=sport_threshold_speed(sport_thresholds, sport),
     )
 
 

@@ -189,15 +189,19 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 
 #### Scenario: Checked tools and rules
 - **WHEN** `apply_training_patch`, `apply_training_changes`, `replace_training_plan`, `apply_workout_library_plan` or `commit_training_plan` writes planned units
-- **THEN** the resulting plan is checked for run_spike, back_to_back_hard, strength_hard_same_day, missing_taper, illness_hard and intensity_distribution.
+- **THEN** the resulting plan is checked for run_spike (planned distance against the longest run of 30 days), load_spike and weekly_load_rise (load = duration x intensity^2 per sport, run and ride), load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper, illness_hard and intensity_distribution.
 
 #### Scenario: Blocking violation
 - **WHEN** a Coach plan write would add an illness_hard finding
 - **THEN** the transaction is rolled back, the tool result is a failure with the findings, and the model may correct the plan and call again in the same turn.
 
 #### Scenario: Notes
-- **WHEN** a Coach plan write adds only run_spike, back_to_back_hard, strength_hard_same_day, missing_taper or intensity_distribution findings
-- **THEN** the write is saved and the result carries them as `plan_check_notes` with evidence strength; a run_spike is a notice up to 30 % and a warning beyond.
+- **WHEN** a Coach plan write adds only run_spike, load_spike, weekly_load_rise, load_unknown, back_to_back_hard, strength_hard_same_day, missing_taper or intensity_distribution findings
+- **THEN** the write is saved and the result carries them as `plan_check_notes` with evidence strength; a run_spike or load_spike is a notice up to 30 % and a warning beyond.
+
+#### Scenario: Load notes
+- **WHEN** a planned run or ride has a computed load (workout steps against the latest Intervals.icu thresholds, at most 30 days old)
+- **THEN** it is compared with the highest-load session of its sport in 30 days (ride Normalized Power over FTP, run grade-adjusted pace over threshold pace, heart-rate fallback marked less precise), and the planned weekly load per sport with the mean of the previous 3-4 weeks (notice above 20 %); "hard" uses the computed intensity before text; missing or stale thresholds or unparsed steps give a load_unknown note, never a number; all are non-blocking and labelled as extrapolated from distance/volume studies, not directly validated.
 
 #### Scenario: Intensity distribution
 - **WHEN** the planned run and ride time of a week (low/moderate/high from the workout steps, strength excluded, unknown time reported as uncovered, never as low) lies more than 5 percentage points outside the reference range of the profile's `training_model`
@@ -215,4 +219,4 @@ The system SHALL check the resulting future plan of every Coach tool write that 
 - **WHEN** a successful Coach plan write produces notes
 - **THEN** its change receipt shows their dates, severity and evidence strength without provider text, and the Coach is instructed to justify rather than repeat or contradict them.
 
-Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/planning/intensity_distribution.py:distribution_findings`; `tests/test_intensity_distribution.py`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`; `backend/coach/write_gate.py:check_write`; `tests/test_coach_write_gate.py:IllnessOverrideTests`.
+Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/load_checks.py:session_spikes`; `backend/planning/load_checks.py:weekly_rises`; `backend/planning/load_checks.py:unknown_load`; `tests/test_load_checks.py`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/planning/intensity_distribution.py:distribution_findings`; `tests/test_intensity_distribution.py`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/change_receipts.py:change_summary`; `public/coach.js:appendMessageChanges`; `tests/test_coach_change_receipts.py:test_plan_notes_are_safe_and_only_attached_to_successful_writes`; `tests/coach-turn-undo.test.cjs`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`; `backend/coach/write_gate.py:check_write`; `tests/test_coach_write_gate.py:IllnessOverrideTests`.

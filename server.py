@@ -259,6 +259,7 @@ from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.plan_guard_service import (
     PlanGuardService,
     read_completed,
+    read_load_thresholds,
     read_progress,
     recent_illness,
 )
@@ -1719,6 +1720,9 @@ def _plan_guard_service() -> PlanGuardService:
             ATHLETE_DATA.profile().get().get("training_model") or ""
         ),
         today=lambda: ATHLETE_CLOCK.now().date(),
+        thresholds=lambda: read_load_thresholds(
+            database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
+        ),
     )
 
 

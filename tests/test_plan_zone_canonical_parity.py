@@ -135,7 +135,12 @@ class PlanZoneParityTests(CanonicalReadFixture):
         self.assertTrue(all(item.sport is not None for item in thresholds))
         self.assertEqual(
             {item.kind for item in thresholds},
-            {MetricKind.FTP, MetricKind.THRESHOLD_HR, MetricKind.MAX_HR},
+            {
+                MetricKind.FTP,
+                MetricKind.THRESHOLD_HR,
+                MetricKind.MAX_HR,
+                MetricKind.THRESHOLD_PACE,
+            },
         )
 
     def test_pending_tables_serve_no_thresholds(self) -> None:
