@@ -256,7 +256,12 @@ from backend.planning.assembly import (
     PlanningRuntime as PlanningDataRuntime,
 )
 from backend.planning.compact_activities import ActivitySummarySource
-from backend.planning.plan_guard_service import PlanGuardService, recent_illness
+from backend.planning.plan_guard_service import (
+    PlanGuardService,
+    read_completed,
+    read_progress,
+    recent_illness,
+)
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -1694,23 +1699,14 @@ CHAT_PAGE_MAX = 100
 
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
-
-    def completed():
-        with database_manager().reader() as db:
-            return CANONICAL_READ.activity_summaries(db)
-
-    def progress():
-        reports = HTTP_API.training_reports()
-        return reports.report.progress({"days": 42}, reports.timezone())
-
     return PlanGuardService(
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
-        completed_activities=completed,
+        completed_activities=lambda: read_completed(database_manager(), CANONICAL_READ),
         competitions=lambda: PLANNING_DATA.competition().list(),
         illness=lambda: recent_illness(
             ATHLETE_DATA.checkin().list(3), ATHLETE_CLOCK.now().date()
         ),
-        progress=progress,
+        progress=lambda: read_progress(HTTP_API.training_reports()),
         training_model=lambda: str(
             ATHLETE_DATA.profile().get().get("training_model") or ""
         ),

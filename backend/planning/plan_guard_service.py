@@ -37,6 +37,17 @@ class PlanCheckError(AppError):
         self.findings = findings
 
 
+def read_completed(database_manager: Any, activities: Any) -> Any:
+    """All canonical activity summaries, read in the caller's transaction."""
+    with database_manager.reader() as db:
+        return activities.activity_summaries(db)
+
+
+def read_progress(reports: Any) -> Mapping[str, Any]:
+    """The 42-day weekly progress projection (six ISO weeks, all sports)."""
+    return reports.report.progress({"days": 42}, reports.timezone())
+
+
 def recent_illness(checkins: Sequence[Mapping[str, Any]], today: date) -> str:
     """Illness text of the newest check-in of today or the last two days."""
     first = (today - timedelta(days=2)).isoformat()
