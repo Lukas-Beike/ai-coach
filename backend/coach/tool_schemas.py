@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.planning.plan_checks import FINDING_CODES
+
+ACCEPT_PLAN_FINDINGS: dict[str, Any] = {
+    "type": "array",
+    "maxItems": len(FINDING_CODES),
+    "uniqueItems": True,
+    "items": {"type": "string", "enum": list(FINDING_CODES)},
+    "description": "The server checks the resulting plan and, on findings, saves nothing. Correct the plan first. List finding codes here only when the athlete explicitly wants that deviation, and name it in the answer; otherwise send an empty list.",
+}
+
 
 def _canonical_coach_tool(
     name: str,
@@ -394,7 +404,10 @@ def build_structured_tool_schemas(
         _canonical_coach_tool(
             "commit_training_plan",
             "Commit a referenced local training-plan artifact atomically.",
-            {"artifact_id": {"type": "string"}},
+            {
+                "artifact_id": {"type": "string"},
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
+            },
         ),
         _canonical_coach_tool(
             "replace_training_plan",
@@ -453,6 +466,7 @@ def build_structured_tool_schemas(
                     },
                 },
                 "expected_revision": {"type": "integer"},
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
             },
             strict=True,
         ),
@@ -574,7 +588,8 @@ def build_structured_tool_schemas(
                             "date": {"type": "string", "format": "date"},
                         },
                     },
-                }
+                },
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
             },
         ),
         _canonical_coach_tool(

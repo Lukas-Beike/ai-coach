@@ -51,6 +51,9 @@ class CoachStructuredToolFailureService:
             r"request_[a-z_]{1,72}", validation_reason
         ):
             result["validation_reason"] = validation_reason
+        findings = getattr(exc, "findings", None)
+        if isinstance(findings, list):
+            result["findings"] = findings
         if not result["reason"]:
             result["reason"] = (
                 "tool_arguments_invalid"

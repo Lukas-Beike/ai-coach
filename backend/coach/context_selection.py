@@ -271,6 +271,7 @@ class CoachContextSelection:
 # retention still follow the message, as the write gate and turn outcome decide
 # them from the message too. Selection never authorizes writes.
 _PLAN_SECTIONS = BASE_SECTIONS | {
+    "planning_brief",
     "planning",
     "training_plans",
     "calendar",

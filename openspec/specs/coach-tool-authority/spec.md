@@ -183,3 +183,16 @@ The system SHALL reject malformed tools without partial effects, permit repairs 
 - **THEN** it returns approval-required and the explicit proposal path; creating the proposal does not itself execute the athlete-data effect.
 
 Evidence: `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService.prepare`, `backend/coach/tool_preparation.py:CoachStructuredToolPreparationService._has_unresolved_steps_before_remote_write`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `tests/test_coach_dialogue.py:test_invalid_arguments_can_be_repaired_in_same_dialogue`, `tests/test_coach_dialogue.py:test_failed_local_step_blocks_following_all_pending_push`, `tests/test_coach_dialogue.py:test_plan_replacement_does_not_resolve_invalid_patch_for_other_period`; `tests/test_coach_tool_coverage.py:test_saved_meals_run_through_authorized_coach_and_receipts`, `tests/test_coach_tool_coverage.py:test_confirmed_product_is_saved_locally_through_authorized_coach_receipt`, `tests/test_coach_tool_coverage.py:test_undo_is_a_bound_preview_until_explicit_confirmation`.
+
+### Requirement: CA11 Server-side plan checks before Coach plan writes
+The system SHALL check the resulting future plan of every Coach tool write that creates or moves planned units (`apply_training_patch`, `replace_training_plan`, `apply_workout_library_plan`, `commit_training_plan`) against the rules run_spike, back_to_back_hard, strength_hard_same_day, missing_taper and illness_hard, and SHALL NOT keep the write when it introduces a finding the model has not acknowledged. Explicit athlete UI/API edits are not checked.
+
+#### Scenario: Violation
+- **WHEN** a Coach plan write would add a finding
+- **THEN** the transaction is rolled back, the tool result is a failure with the findings, and the model may correct the plan and call again in the same turn.
+
+#### Scenario: Acknowledged deviation
+- **WHEN** the model resubmits with `accept_plan_findings` listing the finding codes
+- **THEN** the write is saved and the result carries the acknowledged findings as text only; nothing new is persisted.
+
+Evidence: `backend/planning/plan_checks.py:check_plan`; `backend/planning/plan_guard_service.py:PlanGuardService.verify`; `backend/coach/tool_execution_service.py:CoachStructuredToolExecutionService.execute`; `backend/coach/tool_failures.py:CoachStructuredToolFailureService.project`; `tests/test_plan_checks.py`; `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_violation_rolls_back_and_returns_findings`, `tests/test_plan_guard_service.py:PlanGuardWriteTests.test_acknowledgement_writes_and_reports_text_only`.
