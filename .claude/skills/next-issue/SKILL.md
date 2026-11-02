@@ -1,6 +1,6 @@
 ---
 name: next-issue
-description: Find the next sensible open GitHub issue to work on, read-only: exclude issues that are already resolved, in progress, blocked, or waiting for a decision, then rank the rest and recommend one. Use when the user asks what to work on next or which issue comes next; do not use for implementing an issue (deliver-issue) or for editing issues (ai-coach-github-issues).
+description: Find the next sensible open GitHub issue to work on, read-only. Excludes issues that are already resolved, in progress, blocked, or waiting for a decision, then ranks the rest and recommends one. Use when the user asks what to work on next or which issue comes next; do not use for implementing an issue (deliver-issue) or for editing issues (ai-coach-github-issues).
 disable-model-invocation: true
 ---
 
