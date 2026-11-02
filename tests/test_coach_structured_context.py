@@ -205,6 +205,33 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
             self.assertNotIn("description", result["external_calendar"]["events"][0])
             self.external_calendar_reader.list_events_in_window.assert_called_with(days)
 
+    def test_adjust_week_reads_planned_units_back_to_monday(self) -> None:
+        missed = {"id": "tue", "date": "2026-09-22", "name": "Schwelle", "type": "Run"}
+        self.planned_unit_service.list.return_value = [missed]
+        self.external_calendar_reader.list_events_in_window.return_value = []
+        selection = select_coach_context("ok", {}, request_kind="adjust_week")
+
+        result = self.service.build(selection=selection)
+
+        self.planned_unit_service.list.assert_called_once_with(
+            250, future_only=True, since=date(2026, 9, 17)
+        )
+        self.daily_planning_context_service.build.assert_called_once()
+        self.assertEqual(
+            [missed], self.daily_planning_context_service.build.call_args.args[0]
+        )
+        self.assertIn("Schwelle", [item["name"] for item in result["calendar"]])
+
+    def test_other_kinds_keep_reading_from_today(self) -> None:
+        self.external_calendar_reader.list_events_in_window.return_value = []
+        for kind in (None, "plan_week", "plan_block", "progress_review"):
+            self.planned_unit_service.list.reset_mock()
+            selection = select_coach_context("ok", {}, request_kind=kind)
+            with self.subTest(kind=kind):
+                self.service.build(selection=selection)
+                for call in self.planned_unit_service.list.call_args_list:
+                    self.assertEqual(((250,), {"future_only": True}), call[:2])
+
     def test_preserves_intended_repeated_reads_and_source_labels(self) -> None:
         self.service.build()
 

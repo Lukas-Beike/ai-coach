@@ -182,7 +182,7 @@ def build_planning_brief(
     planned_strength: Sequence[Mapping[str, Any]] = (),
     calendar_busy: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Compact deterministic brief for plan_week and plan_block turns."""
+    """Compact deterministic brief for plan_week, plan_block and adjust_week turns."""
     weeks = [
         item for item in progress.get("week_list", []) if item.get("status") != "future"
     ][-BRIEF_WEEKS:]
