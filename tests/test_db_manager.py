@@ -62,6 +62,17 @@ class DatabaseManagerTests(unittest.TestCase):
             self.assertEqual(["inner"], calls)
             manager.after_commit(lambda: calls.append("direct"))
             self.assertEqual(["inner", "direct"], calls)
+
+            def fail():
+                raise ValueError("boom")
+
+            with (
+                self.assertLogs("backend.db.manager", "ERROR"),
+                manager.unit_of_work(),
+            ):
+                manager.after_commit(fail)
+                manager.after_commit(lambda: calls.append("after failure"))
+            self.assertEqual(["inner", "direct", "after failure"], calls)
             manager.close()
 
     def test_readme_states_the_page_cache_budget_of_the_default_pool(self):

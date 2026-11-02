@@ -7,6 +7,7 @@ remains usable with both SQLite test doubles and SQLCipher in production.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
@@ -29,6 +30,7 @@ DATABASE_LOCK = threading.RLock()
 # stream of short foreground writes can delay but never starve background work.
 BACKGROUND_WRITER_BYPASS_LIMIT = 8
 
+_LOGGER = logging.getLogger(__name__)
 _BACKGROUND_WRITER: ContextVar[bool] = ContextVar(
     "database_background_writer", default=False
 )
@@ -247,7 +249,10 @@ class DatabaseManager:
             self._commit_callbacks.reset(callbacks_token)
         # Reached only after the commit; a rollback raised above.
         for callback in callbacks:
-            callback()
+            try:
+                callback()
+            except Exception:  # the commit is already durable
+                _LOGGER.exception("after-commit callback failed")
 
     def after_commit(self, callback: Callable[[], None]) -> None:
         """Run ``callback`` once the outermost unit of work commits.
