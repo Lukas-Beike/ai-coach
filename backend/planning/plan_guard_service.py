@@ -11,7 +11,7 @@ from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.performance.canonical_current import read_current_inputs
 from backend.performance.canonical_inputs import resolve_reader
-from backend.planning import intensity_distribution, plan_checks
+from backend.planning import intensity_distribution, leg_strength, plan_checks
 from backend.planning.load_checks import LoadThresholds, load_thresholds
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
@@ -113,6 +113,13 @@ def _brief_week(
             ),
             "intensity_3zone_s": bucket["intensity_3zone"]["seconds"],
         }
+    if "strength" in result:
+        counts = leg_strength.completed_counts(
+            completed, str(week["week_start"]), str(week["week_end"])
+        )
+        result["strength"].update(
+            {key: counts[key] for key in counts if key != "sessions"}
+        )
     return result
 
 
@@ -167,6 +174,7 @@ def build_planning_brief(
     today: date,
     planned_weeks: Sequence[Mapping[str, Any]] = (),
     planned_sessions: Sequence[Mapping[str, Any]] = (),
+    planned_strength: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Compact deterministic brief for plan_week and plan_block turns."""
     weeks = [
@@ -195,6 +203,7 @@ def build_planning_brief(
         "planned_distribution": intensity_distribution.brief_distribution(
             training_model, planned_weeks, BRIEF_WEEKS
         ),
+        "strength": leg_strength.brief_strength(planned_strength, BRIEF_WEEKS),
         "planned_sessions": list(planned_sessions),
         "plan_checks": plan_checks.RULE_SUMMARY,
     }
@@ -215,6 +224,7 @@ class PlanGuardService:
         today: Callable[[], date],
         estimate_unit: intensity_distribution.Estimator,
         thresholds: Callable[[], LoadThresholds | None] = lambda: None,
+        expects_strength: Callable[[], bool] = lambda: False,
     ) -> None:
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -225,6 +235,7 @@ class PlanGuardService:
         self._today = today
         self._estimate_unit = estimate_unit
         self._thresholds = thresholds
+        self._expects_strength = expects_strength
         self._threshold_cache: tuple[LoadThresholds | None] | None = None
 
     def _planned_weeks(
@@ -251,6 +262,7 @@ class PlanGuardService:
                 competitions=self._competitions(),
                 illness=self._illness(),
                 thresholds=self._load_thresholds(),
+                expects_strength=self._expects_strength(),
             ),
             *intensity_distribution.distribution_findings(
                 self._training_model(), self._planned_weeks(units, today)
@@ -306,4 +318,5 @@ class PlanGuardService:
             today=today,
             planned_weeks=self._planned_weeks(units, today),
             planned_sessions=planned_focus(units, self._estimate_unit, today),
+            planned_strength=leg_strength.planned_weeks(units, today),
         )

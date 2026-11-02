@@ -31,6 +31,8 @@ Rules (references are observational or practice-based, not individual advice):
   into the final 14 days (Bosquet et al. 2007: cut volume 40-60 %).
 - intensity_distribution: computed in ``intensity_distribution`` and added by
   the plan guard, not by ``check_plan``; see that module.
+- leg_strength_before_key_session, leg_strength_frequency: counted and graded in
+  ``leg_strength`` (number and intensity of leg sessions only); see that module.
 - illness_hard: the latest check-in reports illness and a hard session or a
   session of 90 minutes or more is planned within the next 3 days.
 """
@@ -45,7 +47,7 @@ from typing import Any
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
-from backend.planning import load_checks
+from backend.planning import leg_strength, load_checks
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
@@ -59,6 +61,8 @@ FINDING_CODES = (
     "missing_taper",
     "illness_hard",
     "intensity_distribution",
+    leg_strength.BEFORE_KEY,
+    leg_strength.FREQUENCY,
 )
 # Only the health rule blocks a write. The load rules are notes the Coach must
 # name: their evidence is observational or practice-based, or (taper) the
@@ -74,6 +78,8 @@ EVIDENCE = {
     "missing_taper": "meta-analysis, strong (Bosquet 2007); 20 % floor is a local choice",
     "illness_hard": "medical caution",
     "intensity_distribution": "practice-based reference ranges; pyramidal/polarized after Seiler 2010, Stoeggl & Sperlich 2014",
+    leg_strength.BEFORE_KEY: "limited, residual fatigue after lower-body resistance training (Doma et al.)",
+    leg_strength.FREQUENCY: "Ronnestad & Mujika 2014, Blagrove 2018 (2x/week build, 1x/week maintenance); thresholds practice-based",
 }
 _RULE_TEXT = {
     "run_spike": "planned run more than 10 % (warning above 30 %) longer than the longest run of the last 30 days.",
@@ -85,6 +91,8 @@ _RULE_TEXT = {
     "missing_taper": "final 14 days before an A/B competition less than 20 % lighter than the 14 days before.",
     "illness_hard": "hard or 90+ minute session within 3 days of a reported illness.",
     "intensity_distribution": "planned low/moderate/high time of a week clearly outside the training model's reference range (unknown time is uncovered, strength excluded).",
+    leg_strength.BEFORE_KEY: "moderate or heavy leg strength less than about 24 h before a hard run or ride or the week's long one.",
+    leg_strength.FREQUENCY: "more than 3 leg strength sessions or more than 2 heavy ones in a week, or none in a plan of 2+ weeks when strength is expected.",
 }
 RULE_SUMMARY = {
     code: f"{'Blocks' if code in BLOCKING_CODES else 'Note'}: {text}"
@@ -115,10 +123,7 @@ _NO_ILLNESS = frozenset(
 
 
 def intensity_factor(unit: Mapping[str, Any]) -> float | None:
-    value = number(unit.get("planned_intensity"))
-    if value is None:
-        return None
-    return value / 100 if value > 1.5 else value
+    return leg_strength.planned_intensity_factor(unit)
 
 
 def _text(unit: Mapping[str, Any]) -> str:
@@ -413,6 +418,7 @@ def check_plan(
     competitions: Sequence[Mapping[str, Any]],
     illness: str = "",
     thresholds: load_checks.LoadThresholds | None = None,
+    expects_strength: bool = False,
 ) -> list[dict[str, Any]]:
     """Return all findings for the resulting future planned units.
 
@@ -431,6 +437,8 @@ def check_plan(
         ),
         *_back_to_back(units),
         *_strength_same_day(units),
+        *_drafted(leg_strength.before_key_session(units, is_hard)),
+        *_drafted(leg_strength.frequency(units, today, expects_strength)),
         *_missing_taper(units, completed, competitions, today),
         *_illness_hard(units, illness, today),
     ]
@@ -446,6 +454,9 @@ def finding_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
         return (finding["code"], finding["evidence"]["competition_date"])
     if finding["code"] == "intensity_distribution":
         return (finding["code"], finding["evidence"]["week_start"])
+    if finding["code"] == leg_strength.FREQUENCY:
+        evidence = finding["evidence"]
+        return (finding["code"], evidence["reason"], evidence["week_start"])
     if finding["code"] == "weekly_load_rise":
         evidence = finding["evidence"]
         return (finding["code"], evidence["sport"], evidence["week_start"])
