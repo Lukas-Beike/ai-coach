@@ -46,6 +46,35 @@ class DatabaseManagerTests(unittest.TestCase):
                 )
             manager.close()
 
+    def test_after_commit_runs_only_after_the_outermost_commit(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = self.make_manager(root)
+            self.addCleanup(manager.close)
+            calls = []
+            with manager.unit_of_work():
+                with manager.unit_of_work():
+                    manager.after_commit(lambda: calls.append("inner"))
+                self.assertEqual([], calls)
+            self.assertEqual(["inner"], calls)
+            with self.assertRaises(RuntimeError), manager.unit_of_work():
+                manager.after_commit(lambda: calls.append("rolled back"))
+                raise RuntimeError("fail")
+            self.assertEqual(["inner"], calls)
+            manager.after_commit(lambda: calls.append("direct"))
+            self.assertEqual(["inner", "direct"], calls)
+
+            def fail():
+                raise ValueError("boom")
+
+            with (
+                self.assertLogs("backend.db.manager", "ERROR"),
+                manager.unit_of_work(),
+            ):
+                manager.after_commit(fail)
+                manager.after_commit(lambda: calls.append("after failure"))
+            self.assertEqual(["inner", "direct", "after failure"], calls)
+            manager.close()
+
     def test_readme_states_the_page_cache_budget_of_the_default_pool(self):
         readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(
             encoding="utf-8"

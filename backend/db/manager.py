@@ -7,6 +7,7 @@ remains usable with both SQLite test doubles and SQLCipher in production.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
@@ -29,6 +30,7 @@ DATABASE_LOCK = threading.RLock()
 # stream of short foreground writes can delay but never starve background work.
 BACKGROUND_WRITER_BYPASS_LIMIT = 8
 
+_LOGGER = logging.getLogger(__name__)
 _BACKGROUND_WRITER: ContextVar[bool] = ContextVar(
     "database_background_writer", default=False
 )
@@ -169,6 +171,9 @@ class DatabaseManager:
         self._snapshot_context: ContextVar[Any | None] = ContextVar(
             f"database_manager_snapshot_{id(self)}", default=None
         )
+        self._commit_callbacks: ContextVar[list[Callable[[], None]] | None] = (
+            ContextVar(f"database_manager_commit_{id(self)}", default=None)
+        )
         self._lease_held: ContextVar[bool] = ContextVar(
             f"database_manager_lease_{id(self)}", default=False
         )
@@ -235,6 +240,33 @@ class DatabaseManager:
         if current is not None:
             yield current
             return
+        callbacks: list[Callable[[], None]] = []
+        callbacks_token = self._commit_callbacks.set(callbacks)
+        try:
+            with self._outer_unit_of_work(timeout) as connection:
+                yield connection
+        finally:
+            self._commit_callbacks.reset(callbacks_token)
+        # Reached only after the commit; a rollback raised above.
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:  # the commit is already durable
+                _LOGGER.exception("after-commit callback failed")
+
+    def after_commit(self, callback: Callable[[], None]) -> None:
+        """Run ``callback`` once the outermost unit of work commits.
+
+        A rollback drops it; outside a unit of work it runs immediately.
+        """
+        pending = self._commit_callbacks.get()
+        if pending is None:
+            callback()
+        else:
+            pending.append(callback)
+
+    @contextmanager
+    def _outer_unit_of_work(self, timeout: float | None) -> Iterator[Any]:
         with self._lease():
             wait = self.timeout if timeout is None else timeout
             if not self._writer_lock.acquire(timeout=wait):
@@ -473,6 +505,16 @@ class DatabaseManagerCache:
                 yield db
         finally:
             self._current_manager.reset(token)
+
+    def after_commit(self, callback: Callable[[], None]) -> None:
+        """Defer ``callback`` to the current unit of work's commit."""
+        manager = self._current_manager.get()
+        if manager is None:
+            with self._lock:
+                manager = self.manager
+            if manager is None:
+                raise RuntimeError(DATABASE_MANAGER_UNINITIALIZED_MESSAGE)
+        manager.after_commit(callback)
 
     @contextmanager
     def reader(self) -> Iterator[Any]:

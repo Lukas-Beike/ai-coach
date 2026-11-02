@@ -40,8 +40,11 @@ def read_completed(database_manager: Any, activities: Any, today: date) -> Any:
 
 
 def read_progress(reports: Any) -> Mapping[str, Any]:
-    """The 42-day weekly progress projection (six ISO weeks, all sports)."""
-    return reports.report.progress({"days": 42}, reports.timezone())
+    """The 42-day weekly progress projection (six ISO weeks, all sports).
+
+    The brief never uses mean-max curves, so they are not read.
+    """
+    return reports.report.progress({"days": 42}, reports.timezone(), with_curves=False)
 
 
 def recent_illness(checkins: Sequence[Mapping[str, Any]], today: date) -> str:
