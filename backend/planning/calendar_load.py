@@ -9,12 +9,17 @@ from backend.planning.conflicts import calendar_item_window, calendar_items_conf
 HEAVY_DAY_MINUTES = 8 * 60
 
 
+def _timed(events: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """All-day events are day-level context, not busy time."""
+    return [event for event in events if not event.get("all_day")]
+
+
 def busy_minutes(
     events: Sequence[Mapping[str, Any]], first: date, days: int
 ) -> dict[str, int]:
     """Union event intervals per local day, clipping to the requested horizon."""
     result = {}
-    intervals = [calendar_item_window(dict(event)) for event in events]
+    intervals = [calendar_item_window(dict(event)) for event in _timed(events)]
     for offset in range(days):
         day = first + timedelta(days=offset)
         start = datetime.combine(day, time.min)
@@ -46,7 +51,7 @@ def calendar_risk(
     overlap = any(
         conflict and match == "time_window"
         for conflict, match in (
-            calendar_items_conflict(dict(unit), dict(event)) for event in events
+            calendar_items_conflict(dict(unit), dict(event)) for event in _timed(events)
         )
     )
     return overlap, occupied.get(day, 0)

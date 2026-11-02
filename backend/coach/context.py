@@ -418,7 +418,7 @@ class CoachPlanningContextReader:
     def external_calendar(self, horizon_days: int | None = None) -> dict[str, Any]:
         if horizon_days is not None:
             start = datetime.combine(self._today(), time.min)
-            end = start + timedelta(days=horizon_days)
+            end = start + timedelta(days=horizon_days + 1)
             events = self._external_calendar_reader.list_events_in_window(horizon_days)
             events = [
                 event

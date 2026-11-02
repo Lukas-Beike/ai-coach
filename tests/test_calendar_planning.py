@@ -130,3 +130,16 @@ class CalendarPlanningTests(unittest.TestCase):
         self.assertIn("ask whether to train", playbook_for("plan_week"))
         self.assertIn("ask whether to train", playbook_for("plan_block"))
         self.assertNotIn("ask whether to train", playbook_for("session_analysis"))
+
+
+class AllDayEventTests(unittest.TestCase):
+    def test_all_day_events_are_not_busy_time(self):
+        events = [
+            {
+                "name": "Holiday",
+                "all_day": 1,
+                "start_local": "2026-11-03T00:00:00",
+                "end_local": "2026-11-04T00:00:00",
+            }
+        ]
+        self.assertEqual(busy_minutes(events, date(2026, 11, 2), 3), {})

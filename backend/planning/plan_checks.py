@@ -443,7 +443,7 @@ def check_plan(
                 _finding(
                     "calendar_load",
                     [unit],
-                    "Kalendertermin oder stark belegter Tag",
+                    "Calendar event overlaps or day is heavily booked",
                     {"overlap": overlap, "busy_minutes": minutes},
                 )
             )
