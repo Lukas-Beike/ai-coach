@@ -241,6 +241,36 @@ class NoteTests(unittest.TestCase):
         )
         self.assertEqual(["strength_hard_same_day"], codes(found))
 
+    def test_heavy_text_same_day_is_left_to_the_existing_rule(self) -> None:
+        found = check(
+            [
+                legs(
+                    "l",
+                    "2026-11-03",
+                    name="Heavy squats",
+                    planned_intensity=0.75,
+                    starts_at_local="2026-11-03T08:00:00",
+                ),
+                intervals("i", "2026-11-03", starts_at_local="2026-11-03T11:00:00"),
+            ]
+        )
+        self.assertEqual(["strength_hard_same_day"], codes(found))
+
+    def test_synthetic_midnight_start_is_unknown(self) -> None:
+        found = check(
+            [
+                legs(
+                    "l",
+                    "2026-11-03",
+                    strength_intensity="heavy",
+                    starts_at_local="2026-11-03T00:00:00",
+                ),
+                intervals("i", "2026-11-04", starts_at_local="2026-11-04T00:00:00"),
+            ]
+        )
+        self.assertEqual([leg_strength.BEFORE_KEY], codes(found))
+        self.assertFalse(found[0]["evidence"]["time_known"])
+
     def test_too_many_leg_sessions(self) -> None:
         four = [legs(f"l{n}", f"2026-11-0{n + 2}") for n in range(4)]
         found = check(four)

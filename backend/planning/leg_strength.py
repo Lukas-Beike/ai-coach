@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Final
 
 from backend.athlete.local_date import iso_date_prefix
@@ -47,6 +47,7 @@ NOTE = (
     "Count and intensity of strength sessions only, no tonnage and no load. "
     "Leg = legs, full body or plyometrics focus."
 )
+Predicate = Callable[[Mapping[str, Any]], bool]
 Draft = tuple[str, list[Mapping[str, Any]], str, dict[str, Any]]
 _ENDURANCE = frozenset({Sport.RUN, Sport.RIDE})
 _HEAVY = re.compile(r"\b(?:heavy|schwer|[1-6]\s*rm)\b", re.IGNORECASE)
@@ -174,7 +175,9 @@ def _start(unit: Mapping[str, Any]) -> datetime | None:
         start = datetime.fromisoformat(str(unit.get("starts_at_local") or ""))
     except ValueError:
         return None
-    return start.replace(tzinfo=None)
+    start = start.replace(tzinfo=None)
+    # Imported workouts without a time carry a synthetic midnight: unknown.
+    return None if start.time() == time.min else start
 
 
 def _by_week(
@@ -234,7 +237,7 @@ def strength_expected(
 
 
 def key_sessions(
-    units: Sequence[Mapping[str, Any]], is_hard: Callable[[Mapping[str, Any]], bool]
+    units: Sequence[Mapping[str, Any]], is_hard: Predicate
 ) -> list[Mapping[str, Any]]:
     """Hard runs and rides, long-focus ones, and the week's longest 90+ min session."""
     longest: dict[tuple[Sport, date | None], Mapping[str, Any]] = {}
@@ -285,46 +288,48 @@ def _too_close(
     return 0 < gap < KEY_GAP_H and not same_day_rule
 
 
+def _before_key_draft(
+    strength: Mapping[str, Any],
+    keys: Sequence[Mapping[str, Any]],
+    is_hard: Predicate,
+    is_heavy: Predicate,
+) -> Draft | None:
+    """The first key session that follows a moderate or heavy leg session closely."""
+    found = classify(strength)
+    if found is None or not found.leg or found.intensity not in {"moderate", "heavy"}:
+        return None
+    for key in keys:
+        hard = is_hard(key)
+        if not _too_close(strength, key, is_heavy(strength) and hard):
+            continue
+        gap = _gap_hours(strength, key)
+        return (
+            BEFORE_KEY,
+            [strength, key],
+            "Moderate or heavy leg strength less than about 24 h before a hard or long session.",
+            {
+                "strength_intensity": found.intensity,
+                "key_session": "hard" if hard else "long",
+                "strength_day": _day(strength),
+                "key_day": _day(key),
+                "gap_hours": None if gap is None else round(gap, 1),
+                "time_known": gap is not None,
+            },
+        )
+    return None
+
+
 def before_key_session(
-    units: Sequence[Mapping[str, Any]], is_hard: Callable[[Mapping[str, Any]], bool]
+    units: Sequence[Mapping[str, Any]], is_hard: Predicate, is_heavy: Predicate
 ) -> list[Draft]:
     """Moderate or heavy leg strength shortly before a hard or long run or ride.
 
     Heavy leg work within 6 h of a hard session on one day belongs to
-    ``strength_hard_same_day``.
+    ``strength_hard_same_day`` (``is_heavy`` is that rule's own test).
     """
     keys = key_sessions(units, is_hard)
-    drafts: list[Draft] = []
-    for strength in units:
-        found = classify(strength)
-        if (
-            found is None
-            or not found.leg
-            or found.intensity not in {"moderate", "heavy"}
-        ):
-            continue
-        for key in keys:
-            hard = is_hard(key)
-            if not _too_close(strength, key, found.intensity == "heavy" and hard):
-                continue
-            gap = _gap_hours(strength, key)
-            drafts.append(
-                (
-                    BEFORE_KEY,
-                    [strength, key],
-                    "Moderate or heavy leg strength less than about 24 h before a hard or long session.",
-                    {
-                        "strength_intensity": found.intensity,
-                        "key_session": "hard" if hard else "long",
-                        "strength_day": _day(strength),
-                        "key_day": _day(key),
-                        "gap_hours": None if gap is None else round(gap, 1),
-                        "time_known": gap is not None,
-                    },
-                )
-            )
-            break
-    return drafts
+    drafts = (_before_key_draft(unit, keys, is_hard, is_heavy) for unit in units)
+    return [draft for draft in drafts if draft is not None]
 
 
 def _too_many(monday: date, group: Sequence[Mapping[str, Any]]) -> Draft | None:
