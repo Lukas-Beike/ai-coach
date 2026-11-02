@@ -189,6 +189,38 @@ class RequestKindSelectionTests(unittest.TestCase):
         ).sections
         self.assertIn("nutrition_products", sections)
 
+    def test_upload_alone_adds_no_products_to_a_fixed_kind(self) -> None:
+        for kind in ("session_analysis", "plan_week"):
+            sections = select_coach_context(
+                "Analysiere meine letzte Einheit.",
+                {},
+                attachments=True,
+                request_kind=kind,
+            ).sections
+            with self.subTest(kind=kind):
+                self.assertNotIn("nutrition_products", sections)
+
+    def test_nutrition_topics_without_intake_wording_select_products(self) -> None:
+        for message in (
+            "Welche meiner gespeicherten Produkte passen dazu?",
+            "Ändere die Vorlage auf zwei Portionen.",
+            "Whey-Shake nach dem Training",
+        ):
+            with self.subTest(message=message):
+                self.assertIn(
+                    "nutrition_products", select_coach_context(message, {}).sections
+                )
+
+    def test_base_prompt_keeps_core_nutrition_write_rules(self) -> None:
+        for marker in (
+            "log a consumed meal once with save_nutrition_entry",
+            "matching saved local products by exact product_id first",
+            "log_nutrition_template by exact ID",
+            "never save hypothetical or negated consumption",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, COACH_PROMPT)
+
     def test_every_kind_has_a_selection_and_keeps_message_retention(self) -> None:
         self.assertEqual(set(REQUEST_KIND_SELECTIONS), set(REQUEST_KINDS))
         context = {

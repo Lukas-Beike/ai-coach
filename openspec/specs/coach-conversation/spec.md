@@ -176,7 +176,7 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 
 #### Scenario: Nutrition rules only on nutrition turns
 - **WHEN** the selected context includes `nutrition_products`
-- **THEN** the instructions append the nutrition playbook (reusable meals, food matching), which the base prompt only references; a topic-less reply to a recent food exchange, such as a confirmation, keeps it; plan and analysis turns carry neither the playbook nor its rules.
+- **THEN** the instructions append the nutrition playbook (reusable meals, food matching); the base prompt keeps only the core write rules (one complete entry per meal, saved products first, templates by exact ID, no hypothetical or negated saves); a topic-less reply to a recent food exchange keeps the playbook; an upload alone does not add it to plan or analysis turns.
 
 #### Scenario: Unknown kind
 - **WHEN** a submission names another kind

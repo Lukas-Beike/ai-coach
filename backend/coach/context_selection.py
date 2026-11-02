@@ -93,6 +93,11 @@ FOOD_INTAKE_PATTERN = (
 )
 # Quantities such as "60g Whey" or "200 ml" also report intake without a keyword.
 FOOD_AMOUNT_PATTERN = r"\b\d+(?:[.,]\d+)?\s?(?:g|gramm|kg|ml|l)\b"
+# Nutrition topics without intake wording, e.g. saved products or template portions.
+NUTRITION_TOPIC_PATTERN = (
+    r"produkt|\bproducts?\b|portion|rezept|recipe|lebensmittel|\bfood\b|shake"
+    r"|\bessen\b|\btrinken\b|\beat\b|\bdrink\b"
+)
 PROFILE_KEYWORDS = (
     (
         "provider_refresh_or_sync",
@@ -312,7 +317,11 @@ def _food_sections(normalized: str, attachments: bool) -> set[str]:
     """Return the saved-product section when the turn may report intake."""
     food = attachments or any(
         re.search(pattern, normalized)
-        for pattern in (FOOD_INTAKE_PATTERN, FOOD_AMOUNT_PATTERN)
+        for pattern in (
+            FOOD_INTAKE_PATTERN,
+            FOOD_AMOUNT_PATTERN,
+            NUTRITION_TOPIC_PATTERN,
+        )
     )
     return {"nutrition_products"} if food else set()
 
@@ -344,9 +353,11 @@ def select_coach_context(
     fixed = REQUEST_KIND_SELECTIONS.get(request_kind or "")
     if fixed is None:
         return selection
+    # Fixed kinds carry saved products only for food named in the message itself;
+    # an upload alone does not make a plan or analysis turn a nutrition turn.
     return CoachContextSelection(
         fixed.name,
-        fixed.sections | (selection.sections & {"nutrition_products"}),
+        fixed.sections | _food_sections(message.casefold(), False),
         fixed.horizon_days,
         fixed.activity_limit,
         fixed.include_library,
