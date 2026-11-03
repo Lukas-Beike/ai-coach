@@ -51,9 +51,8 @@ model names do not authorize delegation or GitHub comments.
    - Applicable repository instructions and concrete contract violations.
    - Functional bugs, including security/privacy and durable-data effects;
      follow changed values through reachable callers and consumers. For
-     canonical reads and Coach context, trace every wrapper and caller up to
-     the returned or rendered output, including files outside the diff; a
-     review partitioned by file misses these wiring defects.
+     canonical reads and Coach context, apply REVIEW.md's "Canonical read-path
+     wiring" check, including files outside the diff.
    - Git blame/history where it explains an affected invariant or regression.
    - Relevant earlier PR discussions when available; prior comments are leads
      to verify in current code, not findings to copy unquestioningly.

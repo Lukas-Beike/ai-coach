@@ -45,25 +45,27 @@ conflicts, CI failures, and review feedback through the merge.
   behavior is unchanged. Refactors and test-only changes need only that line.
 
 **Sonar pre-push check:** after the rebase and validation, run
-`sonar analyze --base origin/<base> --format json` with the SonarQube CLI on the
-head to be pushed. Its secrets scan runs locally. Its agentic (Vortex) part may
-return 403 on this connection; record that as a limit, not a pass. SonarCloud
-code-quality rules run only in CI, so local output does not cover them. Fix
-findings on the branch's changed lines with new commits and rerun the affected
-checks. Record the outcome and any accepted issues in the PR body. If the CLI is
-missing or not authenticated, record that as an evidence gap in the PR body. Do
-not bypass the check.
+`sonar analyze --base origin/develop --format json` (the resolved base) with the
+SonarQube CLI on the head to be pushed. The push hook runs the same secrets scan
+and refuses the push when the CLI is missing or unauthenticated, so report that
+as a blocker and stop; never bypass the hook. The agentic (Vortex) part may
+return 403 on this connection; record that as a limit, not a pass. Local output
+has shown only the secrets and agentic sections, so do not claim code-quality
+rule coverage from it. Fix findings on changed lines with new commits and rerun
+the affected checks. In the PR body, record the rule key, file, and line of any
+accepted issue; never paste matched secret text or scanner payloads.
 
 ## 2. Review
 
-Run the Sonar pre-push check below first, then exactly one fresh-context review
-of `origin/develop...HEAD` on that same head: the host's `/code-review` at `high`
-when available, otherwise the repository [code-review skill](../code-review/SKILL.md)
-with `depth=high` and `report-only`. The review must trace caller and wrapper
-wiring for canonical consumers, as the code-review skill requires. Record the
-reviewed head SHA in the PR body. Sonar and Gitar review every head in CI, so
-the Sonar check is a pre-push query and there is no further local review round.
-When the diff changes only
+After the Sonar pre-push check above and any fixes it needs, run exactly one
+fresh-context review of `origin/develop...HEAD` on the final head to be pushed:
+the host's `/code-review` at `high` when available, otherwise the repository
+[code-review skill](../code-review/SKILL.md) with `depth=high` and
+`report-only`. It must trace caller and wrapper wiring for canonical consumers,
+as that skill requires. Record the reviewed head SHA in the PR body. If the
+review's fixes change the head, rerun the Sonar check on the new head before
+pushing. Sonar and Gitar review every head in CI, so the Sonar check is a
+pre-push query and there is no further local review round. When the diff changes only
 Markdown instructions, skills, or docs, ask the review for P0/P1 findings and
 real security gaps only; guidelines may have exceptions, and hypothetical edge
 cases in prose are not findings.
