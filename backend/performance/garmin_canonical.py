@@ -78,6 +78,8 @@ HISTORY_KINDS: Mapping[MetricKind, Sport | None] = {
     MetricKind.ENDURANCE_SCORE: None,
     MetricKind.ENDURANCE_SCORE_GROUP_AVERAGE: None,
     MetricKind.ENDURANCE_SCORE_GROUP_MAX: None,
+    MetricKind.STEPS: None,
+    MetricKind.FLOORS: None,
 }
 _MAX_HR_CATEGORIES: Mapping[Sport | None, str] = {
     Sport.RIDE: "cycling",

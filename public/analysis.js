@@ -743,6 +743,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     loadMissing.push("Trainingszeit");
   }
   appendSessionRpeLoadChart(history.session_rpe_load, loadRoot, loadMissing, start, end);
+  appendDailyActivityGroup(history.daily_activity, loadRoot, loadMissing, start, end);
   const loadMissingNote = analysisMissingDataNote(loadMissing);
   if (loadMissingNote) loadRoot.append(loadMissingNote);
   const performanceSeries = [
@@ -818,6 +819,24 @@ function appendSessionRpeLoadChart(report, loadRoot, loadMissing, start, end) {
   if (!chart) { loadMissing.push("Session-RPE-Last"); return; }
   chart.querySelector(".analysis-chart-legend")?.remove();
   loadRoot.append(chart);
+}
+
+function appendDailyActivityGroup(activity, loadRoot, loadMissing, start, end) {
+  if (!activity) return;
+  const weekly = analysisHistoryPeriod === "twelveWeeks";
+  const charts = []; const allSeries = [];
+  for (const [key, label, unit, color] of [["steps", "Schritte", "", 3], ["floors", "Stockwerke", "", 4]]) {
+    const daily = (activity[key] || []).filter((point) => point.date >= start && point.date <= end).map((point) => ({ date: point.date, value: point.value }));
+    const points = weekly ? analysisWeeklyMeanPoints(daily, start, end) : daily;
+    const current = daily.findLast(analysisValidPoint);
+    const series = [{ label: weekly ? `${label} Ø pro Tag` : label, legendLabel: label, source: activity.source, unit, color, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, points, currentPoint: current }];
+    const title = current ? `${label} · ${analysisValue(current.value, unit)}` : label;
+    const chart = collectAnalysisChart(loadMissing, title, series, unit, start, end, `${activity.source}: ${weekly ? "Tagesdurchschnitt je Woche" : "Tageswerte"}. Fehlende Tage bleiben Lücken.`, { calendarWeeks: weekly });
+    if (!chart) continue;
+    chart.querySelector(".analysis-chart-legend")?.remove();
+    charts.push(chart); allSeries.push(series[0]);
+  }
+  if (charts.length) loadRoot.append(analysisChartGroup("Alltagsaktivität", charts, allSeries));
 }
 
 function providerMetricLabel(key) {
@@ -1381,6 +1400,17 @@ function analysisWeeklySumPoints(points, start, end) {
     if (weekEnd > end) weekEnd = end;
     const known = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point));
     weeks.push(known.length ? { date: weekEnd, value: Math.round(known.reduce((sum, point) => sum + Number(point.value), 0) * 10) / 10, observedDate: known.at(-1).date } : { date: weekEnd, value: null });
+  }
+  return weeks;
+}
+
+function analysisWeeklyMeanPoints(points, start, end) {
+  const weeks = [];
+  for (let weekStart = start; weekStart <= end; weekStart = addDateKey(weekStart, 7)) {
+    let weekEnd = addDateKey(weekStart, 6);
+    if (weekEnd > end) weekEnd = end;
+    const known = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point));
+    weeks.push(known.length ? { date: weekEnd, value: Math.round(known.reduce((sum, point) => sum + Number(point.value), 0) / known.length * 10) / 10, observedDate: known.at(-1).date } : { date: weekEnd, value: null });
   }
   return weeks;
 }

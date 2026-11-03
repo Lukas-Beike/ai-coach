@@ -80,6 +80,24 @@ def _load_history(
     return [{"date": day, "value": values.get(day)} for day in dates]
 
 
+def _daily_activity_history(
+    dates: list[str], canonical: GarminCanonicalMetrics
+) -> dict[str, Any]:
+    """Garmin's daily steps and floors climbed; a day without a value is a gap."""
+    series = {}
+    for key, kind in (("steps", MetricKind.STEPS), ("floors", MetricKind.FLOORS)):
+        history = canonical.daily_history.get(kind, {})
+        values = {day.isoformat(): _number(value) for day, value in history.items()}
+        series[key] = [{"date": day, "value": values.get(day)} for day in dates]
+    return {
+        "source": GARMIN_LABEL,
+        "source_provider": ProviderId.GARMIN.value,
+        "start": dates[0],
+        "end": dates[-1],
+        **series,
+    }
+
+
 def _training_time_history(
     summaries: Sequence[Mapping[str, Any]], dates: list[str]
 ) -> list[dict[str, Any]]:
@@ -181,6 +199,7 @@ def analysis_history(
             "end": load_dates[-1],
             "points": load,
         },
+        "daily_activity": _daily_activity_history(load_dates, garmin_canonical),
         "training_time": {
             "source": INTERVALS_SOURCE,
             "start": load_dates[0],
