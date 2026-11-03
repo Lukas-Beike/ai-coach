@@ -192,25 +192,43 @@ def _free_notes(
     matched: Mapping[int, Mapping[str, Any]],
     events: Sequence[Mapping[str, Any]],
 ) -> list[Draft]:
-    """Units longer than the free time left in the day's explicit windows."""
-    if effective.source == "fallback":
-        return []
-    free = free_time.free_minutes(day, effective.windows, events)
-    return [
-        (
-            NO_FREE_WINDOW,
-            [unit],
-            "A unit does not fit the free time of the day's weekly-plan windows.",
-            {
-                "free_minutes": free,
-                "planned_minutes": round(_minutes(unit)),
-                "source": effective.source,
-            },
-        )
-        for unit in day_units
-        if round(_minutes(unit)) > free
-        and not (matched.get(id(unit)) or {}).get("window")
-    ]
+    """Units longer than the free time left in their explicit windows.
+
+    A unit matched to a fixed session with its own window is checked against
+    that window, otherwise against the day's windows; the built-in fallback
+    windows give no note.
+    """
+    drafts: list[Draft] = []
+    for unit in day_units:
+        windows = _free_windows(unit, effective, matched)
+        if not windows:
+            continue
+        free = free_time.free_minutes(day, windows, events)
+        if round(_minutes(unit)) > free:
+            drafts.append(
+                (
+                    NO_FREE_WINDOW,
+                    [unit],
+                    "A unit does not fit the free time of its weekly-plan windows.",
+                    {
+                        "free_minutes": free,
+                        "planned_minutes": round(_minutes(unit)),
+                        "source": effective.source,
+                    },
+                )
+            )
+    return drafts
+
+
+def _free_windows(
+    unit: Mapping[str, Any],
+    effective: weekly_plan.EffectiveDay,
+    matched: Mapping[int, Mapping[str, Any]],
+) -> Sequence[str]:
+    window = (matched.get(id(unit)) or {}).get("window")
+    if window:
+        return [window]
+    return [] if effective.source == "fallback" else effective.windows
 
 
 def _day_notes(

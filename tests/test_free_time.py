@@ -79,6 +79,19 @@ class NoFreeWindowTests(unittest.TestCase):
         self.assertFalse(notes[0]["blocking"])
         self.assertEqual(notes[0]["evidence"]["free_minutes"], 60)
 
+    def test_fixed_session_window_is_checked_against_calendar_events(self) -> None:
+        fixed = {"sport": "run", "minutes": 90, "window": "06:00-08:00"}
+        text = plan(tue={"fixed": [fixed]})
+        found = self.check(
+            text, [unit("2026-11-03", "run", minutes=90)], [event("06:00", "07:00")]
+        )
+        notes = [f for f in found if f["code"] == "no_free_window"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["evidence"]["free_minutes"], 60)
+        self.assertEqual(
+            self.check(text, [unit("2026-11-03", "run", minutes=90)], []), []
+        )
+
     def test_unit_that_fits_or_fallback_windows_give_no_note(self) -> None:
         text = plan(tue={"windows": ["06:00-08:00"]})
         self.assertEqual(
