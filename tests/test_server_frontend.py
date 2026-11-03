@@ -1397,7 +1397,7 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIsNotNone(transition)
         self.assertEqual(
             transition.group(1),
-            "transform .2s ease, opacity .2s ease, width .2s ease, "
+            "transform .2s ease, opacity .2s ease, "
             "background .2s ease, color .2s ease, box-shadow .2s ease, "
             "bottom .2s ease",
         )
