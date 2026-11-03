@@ -431,3 +431,81 @@ def frequency(
     if expects_strength and (draft := _no_legs(weeks, today)) is not None:
         drafts.append(draft)
     return drafts
+
+
+STRENGTH_WINDOW_H: Final = 48
+MAX_BEFORE: Final = 5
+
+
+def _strength_hours(
+    unit: Mapping[str, Any], start: datetime, planned: bool
+) -> tuple[bool, float | None]:
+    """Whether a strength unit lies in the window before ``start``, and its gap."""
+    if planned:
+        when = _start(unit)
+        if when is None:
+            # A date-only plan has no time: only the whole day before counts.
+            day = date.fromisoformat(_day(unit) or "9999-12-31")
+            return day == start.date() - timedelta(days=1), None
+    else:
+        # A recorded start is exact, even at midnight.
+        when = datetime.fromisoformat(str(unit.get("starts_at_local") or ""))
+    hours = (start - when.replace(tzinfo=None)).total_seconds() / 3600
+    return 0 < hours <= STRENGTH_WINDOW_H, round(hours, 1)
+
+
+def _before(
+    units: Iterable[Mapping[str, Any]], start: datetime, planned: bool
+) -> list[dict[str, Any]]:
+    found = []
+    for unit in units:
+        strength = classify(unit)
+        try:
+            inside, hours = _strength_hours(unit, start, planned)
+        except ValueError:
+            continue
+        if strength is not None and inside:
+            found.append(
+                {
+                    "hours_before": hours,
+                    "legs": strength.leg,
+                    "intensity": strength.intensity,
+                }
+            )
+    found.sort(key=lambda row: (row["hours_before"] is None, row["hours_before"] or 0))
+    return found[:MAX_BEFORE]
+
+
+def strength_before(
+    start: datetime,
+    completed: Sequence[Mapping[str, Any]] | None,
+    planned: Callable[[], Sequence[Mapping[str, Any]] | None],
+) -> dict[str, Any]:
+    """Strength sessions in the 48 h before ``start``: completed, else planned.
+
+    ``completed`` are activity summaries (``None`` when not readable). Only
+    legs, intensity and the gap in hours, no load. Planned units are read only
+    when no completed strength session was found.
+    """
+    base = {"window_hours": STRENGTH_WINDOW_H, "scope": NOTE}
+    if completed is None:
+        return {**base, "status": "not_covered", "reason": "Aktivitäten nicht lesbar."}
+    done = _before(
+        (
+            {**completed_unit(row), "starts_at_local": row.get("started_at_local")}
+            for row in completed
+        ),
+        start,
+        False,
+    )
+    if done:
+        return {**base, "status": "ok", "origin": "completed", "sessions": done}
+    units = planned()
+    ahead = [] if units is None else _before(units, start, True)
+    return {
+        **base,
+        "status": "ok",
+        "origin": "planned_not_confirmed" if ahead else "none_found",
+        "planned_checked": units is not None,
+        "sessions": ahead,
+    }

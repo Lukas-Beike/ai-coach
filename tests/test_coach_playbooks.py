@@ -45,6 +45,7 @@ BLOCK_WORD_BUDGETS = {
     "_CALENDAR": 45,
     "_PLAN_CHECK": 80,
     "_ADAPTIVE": 140,
+    "_SESSION_CHECKS": 110,
     "_NUTRITION": 520,
 }
 TASK_WORD_BUDGET = 190
@@ -132,6 +133,13 @@ class PlaybookInjectionTests(unittest.TestCase):
                 self.assertIn("pyramidal when it is absent", text)
                 self.assertIn("training_model", text)
 
+    def test_session_analysis_carries_the_session_checks_only(self) -> None:
+        text = playbook_for("session_analysis")
+        for needle in ("session_focus", "pace_at_heart_rate", "never a proven cause"):
+            self.assertIn(needle, text)
+        self.assertIn("not_covered", text)
+        self.assertNotIn(playbooks._SESSION_CHECKS, playbook_for("block_review"))
+
     def test_kind_specific_content(self) -> None:
         self.assertIn("get_activity_details", playbook_for("session_analysis"))
         self.assertIn("get_training_report", playbook_for("progress_review"))
@@ -160,9 +168,18 @@ class PlaybookInjectionTests(unittest.TestCase):
     def test_adjust_week_context_is_its_own(self) -> None:
         sections = select_coach_context("ok", {}, request_kind="adjust_week").sections
         self.assertLessEqual(
-            {"planning_brief", "planning", "training_plans", "recovery", "calendar"},
+            {
+                "planning_brief",
+                "planning",
+                "training_plans",
+                "recovery",
+                "external_calendar",
+                "daily_planning_context",
+            },
             sections,
         )
+        # Calendar events come once, as external_calendar.
+        self.assertNotIn("calendar", sections)
         self.assertNotIn("nutrition_products", sections)
         selection = select_coach_context("ok", {}, request_kind="adjust_week")
         items = [{"date": f"2026-11-{day:02d}"} for day in (1, 2, 8, 10)]
@@ -231,7 +248,8 @@ class PlaybookInjectionTests(unittest.TestCase):
         }
         with self.assertLogs("intervals_coach", "INFO") as logs:
             planned, _ = service.build(**arguments, request_kind="plan_week")
-            plain, _ = service.build(**arguments)
+            plain, _ = service.build(**{**arguments, "message": "Wie war mein Schlaf?"})
+            typed, _ = service.build(**arguments)
         sizes = [r.context for r in logs.records if hasattr(r, "context")]
         self.assertEqual(
             len(playbook_for("plan_week")), sizes[0]["playbook_characters"]
@@ -239,6 +257,11 @@ class PlaybookInjectionTests(unittest.TestCase):
         self.assertEqual(0, sizes[1]["playbook_characters"])
         self.assertIn("REQUEST PLAYBOOK", planned)
         self.assertNotIn("REQUEST PLAYBOOK", plain)
+        # A typed planning request carries the same playbook as the quick action.
+        self.assertEqual(
+            len(playbook_for("plan_week")), sizes[2]["playbook_characters"]
+        )
+        self.assertIn("Task: plan the requested next week", typed)
         selection = training_context.build.call_args_list[0].kwargs["selection"]
         self.assertEqual(selection.name, "plan_week")
 
@@ -252,29 +275,39 @@ class RequestKindSelectionTests(unittest.TestCase):
                     {
                         "planning",
                         "training_plans",
-                        "calendar",
                         "external_calendar",
+                        "daily_planning_context",
                         "recovery",
                         "weather",
                         "durable_profile",
                     },
                     sections,
                 )
+                self.assertNotIn("calendar", sections)
                 self.assertNotIn("nutrition_products", sections)
 
     def test_review_and_analysis_kinds_load_what_they_need(self) -> None:
         progress = select_coach_context("x", {}, request_kind="progress_review")
         self.assertLessEqual({"planning", "recovery", "activities"}, progress.sections)
+        for dropped in ("training_plans", "daily_planning_context"):
+            self.assertNotIn(dropped, progress.sections)
+        self.assertEqual(progress.horizon_days, 0)
         analysis = select_coach_context("x", {}, request_kind="session_analysis")
-        self.assertEqual(analysis.name, "activity_analysis")
+        self.assertEqual(analysis.name, "session_analysis")
         self.assertIn("durable_profile", analysis.sections)
         self.assertLessEqual(
             {"local_planned_workouts", "activities", "recovery", "current_performance"},
             analysis.sections,
         )
-        for heavy in ("weather", "calendar", "external_calendar", "training_plans"):
+        for heavy in (
+            "weather",
+            "calendar",
+            "external_calendar",
+            "training_plans",
+            "daily_planning_context",
+        ):
             self.assertNotIn(heavy, analysis.sections)
-        self.assertEqual(analysis.horizon_days, 14)
+        self.assertEqual(analysis.horizon_days, 2)
         # The latest session keeps the today-based planned-unit window; an older
         # session brings its own plan with get_activity_details.
         self.assertEqual(analysis.past_planned_days, 0)
@@ -333,12 +366,13 @@ class RequestKindSelectionTests(unittest.TestCase):
                 self.assertIn(marker, COACH_PROMPT)
 
     def test_every_kind_has_a_selection_and_keeps_message_retention(self) -> None:
-        self.assertEqual(set(REQUEST_KIND_SELECTIONS), set(REQUEST_KINDS))
+        kinds = set(REQUEST_KINDS) | {"morning_checkin"}
+        self.assertEqual(set(REQUEST_KIND_SELECTIONS), kinds)
         context = {
             "pending_request": {"status": "needs_clarification", "summary": "x"},
             "messages": [],
         }
-        for kind in REQUEST_KINDS:
+        for kind in kinds:
             for message in ("Plane meine nächste Woche.", "Wie war mein Schlaf?"):
                 expected = select_coach_context(message, context)
                 selection = select_coach_context(message, context, request_kind=kind)
@@ -357,13 +391,14 @@ class RequestKindSelectionTests(unittest.TestCase):
         projected = selection.project(context, "2026-11-01")
         self.assertEqual(projected["current_performance"]["comparisons"], [1])
 
-    def test_morning_checkin_and_unknown_kinds_use_message_selection(self) -> None:
+    def test_unknown_kinds_use_message_selection(self) -> None:
         expected = select_coach_context("Wie geht es mir?", {}).name
-        for kind in (None, "morning_checkin"):
+        for kind in (None, "unknown_kind"):
             self.assertEqual(
                 select_coach_context("Wie geht es mir?", {}, request_kind=kind).name,
                 expected,
             )
+        self.assertEqual("", playbook_for("morning_checkin"))
 
 
 if __name__ == "__main__":

@@ -49,6 +49,7 @@ from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
 from backend.planning import (
     calendar_load,
+    free_allocation,
     leg_strength,
     load_checks,
     weekly_plan_checks,
@@ -56,6 +57,7 @@ from backend.planning import (
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
+ALL_DAY_EVENT = "all_day_event"
 FINDING_CODES = (
     "run_spike",
     "load_spike",
@@ -69,6 +71,7 @@ FINDING_CODES = (
     leg_strength.BEFORE_KEY,
     leg_strength.FREQUENCY,
     "calendar_load",
+    ALL_DAY_EVENT,
     *weekly_plan_checks.CODES,
 )
 # Only the health rule blocks a write. The load rules are notes the Coach must
@@ -88,6 +91,7 @@ EVIDENCE = {
     leg_strength.BEFORE_KEY: "limited, residual fatigue after lower-body resistance training (Doma et al.)",
     leg_strength.FREQUENCY: "Ronnestad & Mujika 2014, Blagrove 2018 (2x/week build, 1x/week maintenance); thresholds practice-based",
     "calendar_load": "calendar overlap and locally chosen eight-hour busy-day threshold",
+    ALL_DAY_EVENT: "calendar all-day event; soft context, not a block",
     **dict.fromkeys(weekly_plan_checks.CODES, "athlete's own weekly plan"),
 }
 _RULE_TEXT = {
@@ -103,11 +107,12 @@ _RULE_TEXT = {
     leg_strength.BEFORE_KEY: "moderate or heavy leg strength less than about 24 h before a hard run or ride or the week's long one.",
     leg_strength.FREQUENCY: "more than 3 leg strength sessions or more than 2 heavy ones in a week, or none in a plan of 2+ weeks when strength is expected.",
     "calendar_load": "long or hard unit overlaps a calendar event or falls on a day with at least eight hours of events.",
+    ALL_DAY_EVENT: "a hard or long unit on a day with an all-day calendar event (soft note; calendar markers still apply).",
     weekly_plan_checks.FIXED_MISSING: "a fixed session of the profile weekly plan is not planned on its day.",
     weekly_plan_checks.REST_DAY: "a unit on a rest day of the weekly plan.",
     weekly_plan_checks.OUTSIDE_WINDOWS: "a unit outside the time windows set by the athlete (built-in fallback windows never trigger it).",
     weekly_plan_checks.OVER_MAX: "planned minutes of a day above the weekly plan's maximum.",
-    weekly_plan_checks.NO_FREE_WINDOW: "a unit longer than the free minutes of the athlete's own windows after timed calendar events (fallback windows never trigger it).",
+    weekly_plan_checks.NO_FREE_WINDOW: "a unit that does not fit the free blocks of the athlete's own windows after timed calendar events (longest contiguous block, several units of a day placed together, timed unit overlapping an event; fallback windows never trigger it).",
 }
 RULE_SUMMARY = {
     code: f"{'Blocks' if code in BLOCKING_CODES else 'Note'}: {text}"
@@ -427,6 +432,56 @@ def _load_findings(
     return _drafted(drafts)
 
 
+def _calendar_findings(
+    units: Sequence[Mapping[str, Any]],
+    events: Sequence[Mapping[str, Any]],
+    today: date,
+) -> tuple[list[dict[str, Any]], set[int]]:
+    """Calendar notes for hard or long units; also the ids of the overlapping ones."""
+    occupied = calendar_load.busy_minutes(events, today, 56)
+    findings: list[dict[str, Any]] = []
+    overlapped: set[int] = set()
+    for unit in units:
+        if not (is_hard(unit) or _duration_s(unit) >= LONG_SESSION_S):
+            continue
+        overlap, minutes = calendar_load.calendar_risk(unit, events, occupied)
+        if overlap or minutes >= calendar_load.HEAVY_DAY_MINUTES:
+            findings.append(
+                _finding(
+                    "calendar_load",
+                    [unit],
+                    "Calendar event overlaps or day is heavily booked",
+                    {"overlap": overlap, "busy_minutes": minutes},
+                )
+            )
+        if overlap:
+            overlapped.add(id(unit))
+        try:
+            day = date.fromisoformat(_day(unit))
+        except ValueError:
+            continue
+        if all_day := calendar_load.all_day_events(events, day):
+            findings.append(
+                _finding(
+                    ALL_DAY_EVENT,
+                    [unit],
+                    "A hard or long unit falls on a day with an all-day calendar event.",
+                    {"events": all_day},
+                )
+            )
+    return findings, overlapped
+
+
+def _duplicate_overlap(draft: load_checks.Draft, overlapped: set[int]) -> bool:
+    """A timed overlap that ``calendar_load`` already names for the same unit."""
+    code, units, _, evidence = draft
+    return (
+        code == weekly_plan_checks.NO_FREE_WINDOW
+        and evidence.get("reason") == free_allocation.OVERLAP
+        and id(units[0]) in overlapped
+    )
+
+
 def check_plan(
     *,
     today: date,
@@ -447,21 +502,7 @@ def check_plan(
         units, thresholds or load_checks.LoadThresholds()
     )
     units = _with_computed_hard(units, sessions)
-    occupied = calendar_load.busy_minutes(calendar_events, today, 56)
-    calendar_notes = []
-    for unit in units:
-        if not (is_hard(unit) or _duration_s(unit) >= LONG_SESSION_S):
-            continue
-        overlap, minutes = calendar_load.calendar_risk(unit, calendar_events, occupied)
-        if overlap or minutes >= calendar_load.HEAVY_DAY_MINUTES:
-            calendar_notes.append(
-                _finding(
-                    "calendar_load",
-                    [unit],
-                    "Calendar event overlaps or day is heavily booked",
-                    {"overlap": overlap, "busy_minutes": minutes},
-                )
-            )
+    calendar_notes, overlapped = _calendar_findings(units, calendar_events, today)
     return [
         *calendar_notes,
         *_drafted(load_checks.run_distance_spikes(sessions, completed, today)),
@@ -476,7 +517,13 @@ def check_plan(
         *_drafted(leg_strength.frequency(units, today, expects_strength, completed)),
         *_missing_taper(units, completed, competitions, today),
         *_illness_hard(units, illness, today),
-        *_drafted(weekly_plan_checks.check(weekly_plan, units, today, calendar_events)),
+        *_drafted(
+            draft
+            for draft in weekly_plan_checks.check(
+                weekly_plan, units, today, calendar_events
+            )
+            if not _duplicate_overlap(draft, overlapped)
+        ),
     ]
 
 

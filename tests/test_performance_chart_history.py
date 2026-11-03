@@ -412,5 +412,34 @@ class AnalysisHistoryTests(unittest.TestCase):
         self.assertEqual(sum(point["value"] is not None for point in points), 1)
 
 
+class DailyActivityHistoryTests(unittest.TestCase):
+    def test_steps_and_floors_come_from_canonical_garmin_days(self):
+        result = analysis_history(
+            None,
+            {
+                "daily_stats": [
+                    {"date": "2026-10-01", "totalSteps": 8200, "floorsAscended": 12},
+                    {"date": "2026-10-02", "totalSteps": 0},
+                ]
+            },
+            date(2026, 10, 3),
+        )["daily_activity"]
+        self.assertEqual("Garmin Connect", result["source"])
+        self.assertEqual("garmin", result["source_provider"])
+        self.assertEqual(90, len(result["steps"]))
+        by_day = {item["date"]: item["value"] for item in result["steps"]}
+        self.assertEqual(8200, by_day["2026-10-01"])
+        self.assertEqual(0, by_day["2026-10-02"])
+        self.assertIsNone(by_day["2026-10-03"])
+        floors = {item["date"]: item["value"] for item in result["floors"]}
+        self.assertEqual(12, floors["2026-10-01"])
+        self.assertIsNone(floors["2026-10-02"])
+
+    def test_without_garmin_days_both_series_are_gaps(self):
+        result = analysis_history(None, {}, date(2026, 10, 3))["daily_activity"]
+        for key in ("steps", "floors"):
+            self.assertTrue(all(item["value"] is None for item in result[key]))
+
+
 if __name__ == "__main__":
     unittest.main()

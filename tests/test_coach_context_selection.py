@@ -12,7 +12,9 @@ from backend.coach.context import (
 from backend.coach.context_selection import (
     BASE_SECTIONS,
     CONTEXT_SECTIONS,
+    DAILY_SECTIONS,
     FULL_SECTIONS,
+    REQUEST_KIND_SELECTIONS,
     CoachContextSelection,
     compact_coach_dialogue,
     infer_coach_domain,
@@ -65,7 +67,7 @@ class CoachContextSelectionTests(unittest.TestCase):
             "Wie geht es meiner Erholung?": "general_coaching",
             "Was trainiere ich heute?": "today_training",
             "Analysiere meine letzte Einheit": "activity_analysis",
-            "Plane nächste Woche": "weekly_planning",
+            "Plane nächste Woche": "plan_week",
             "Verschiebe den Lauf auf Freitag": "plan_editing",
             "Wie steht meine Wettkampfvorbereitung?": "competition_preparation",
             "Speichere meinen Check-in": "profile_or_checkin",
@@ -98,7 +100,7 @@ class CoachContextSelectionTests(unittest.TestCase):
         examples = {
             "Was ist das Training fuer heute?": "today_training",
             "Kannst du diese letzte Einheit analysieren?": "activity_analysis",
-            "Kannst du das Training fuer naechste Woche planen?": "weekly_planning",
+            "Kannst du das Training fuer naechste Woche planen?": "plan_week",
             "Please analyse that latest activity": "activity_analysis",
         }
         for message, expected in examples.items():
@@ -264,12 +266,20 @@ class CoachContextSelectionTests(unittest.TestCase):
             "Plane 8 Wochen",
             "Plane bis 2026-12-01",
             "Plan next month",
-            "Kannst du das Training fuer drei Wochen planen?",
-            "Please plan that for three weeks",
             "Plane das Training fuer die kommenden Tage",
         ):
             with self.subTest(message=message):
                 self.assertIsNone(select_coach_context(message, {}).horizon_days)
+
+    def test_short_block_requests_use_the_block_window(self):
+        for message in (
+            "Kannst du das Training fuer drei Wochen planen?",
+            "Please plan that for three weeks",
+        ):
+            with self.subTest(message=message):
+                selection = select_coach_context(message, {})
+                self.assertEqual("plan_block", selection.name)
+                self.assertEqual(35, selection.horizon_days)
 
     def test_pronoun_requests_with_multiple_topics_keep_conservative_context(self):
         for message in (
@@ -800,16 +810,46 @@ class CoachContextRuleTests(unittest.TestCase):
             infer_coach_domain("Was habe ich letzte Woche gegessen?"),
         )
 
+    def test_planned_unit_wording_is_not_a_planning_request(self):
+        for message in (
+            "Wie lief meine geplante Einheit?",
+            "War das geplant so locker?",
+        ):
+            with self.subTest(message=message):
+                self.assertNotEqual(
+                    "weekly_planning", select_coach_context(message, {}).name
+                )
+        self.assertEqual(
+            "plan_week", select_coach_context("Plane meine Woche", {}).kind
+        )
+
+    def test_morning_checkin_is_a_lean_fixed_selection(self):
+        selection = select_coach_context(
+            "Gib mir den heutigen Morgen-Check-in ... die geplante Einheit ...",
+            {},
+            request_kind="morning_checkin",
+        )
+        self.assertEqual("morning_checkin", selection.name)
+        self.assertEqual(1, selection.horizon_days)
+        self.assertLessEqual({"daily_planning_context", "recovery"}, selection.sections)
+        self.assertFalse(
+            selection.sections
+            & {"planning_brief", "planning", "training_plans", "calendar"}
+        )
+        days = [{"date": f"2026-11-0{day}"} for day in (3, 4, 5)]
+        projected = selection.project({"daily_planning_context": days}, "2026-11-03")
+        self.assertEqual(days[:2], projected["daily_planning_context"])
+
     def test_past_week_with_planning_verb_stays_weekly_planning(self):
         selection = select_coach_context("Plane meine letzte Woche neu", {})
-        self.assertEqual("weekly_planning", selection.name)
+        self.assertEqual("plan_week", selection.name)
         self.assertEqual(14, selection.horizon_days)
 
     def test_planning_request_with_past_week_reference_stays_weekly_planning(self):
         selection = select_coach_context(
             "Plane die nächste Woche basierend auf letzter Woche", {}
         )
-        self.assertEqual("weekly_planning", selection.name)
+        self.assertEqual("plan_week", selection.name)
         self.assertEqual(14, selection.horizon_days)
 
     def test_past_week_pattern_stays_narrow(self):
@@ -830,12 +870,14 @@ class CoachContextRuleTests(unittest.TestCase):
                 self.assertIn("external_calendar", selection.sections)
 
     def test_ordinary_message_shapes_are_unchanged(self):
-        planning = BASE_SECTIONS | {"planning", "training_plans"}
+        planning = DAILY_SECTIONS | {"planning", "training_plans"}
+        recovery = BASE_SECTIONS | {"recovery"}
+        full_plan = (FULL_SECTIONS - {"calendar"}) | {"planning_brief"}
         cases = (
             (
                 "Wie geht es meiner Erholung?",
                 "general_coaching",
-                BASE_SECTIONS,
+                recovery,
                 3,
                 1,
                 False,
@@ -844,7 +886,7 @@ class CoachContextRuleTests(unittest.TestCase):
             (
                 "Was trainiere ich heute?",
                 "today_training",
-                BASE_SECTIONS,
+                DAILY_SECTIONS,
                 3,
                 1,
                 False,
@@ -859,7 +901,15 @@ class CoachContextRuleTests(unittest.TestCase):
                 False,
                 False,
             ),
-            ("Plane nächste Woche", "weekly_planning", planning, 14, 5, True, False),
+            (
+                "Plane nächste Woche",
+                "plan_week",
+                REQUEST_KIND_SELECTIONS["plan_week"].sections,
+                14,
+                5,
+                True,
+                False,
+            ),
             (
                 "Verschiebe den Lauf auf Freitag",
                 "plan_editing",
@@ -908,7 +958,7 @@ class CoachContextRuleTests(unittest.TestCase):
             (
                 "Was trainiere ich am Samstag?",
                 "general_coaching",
-                BASE_SECTIONS,
+                DAILY_SECTIONS,
                 3,
                 1,
                 False,
@@ -916,8 +966,8 @@ class CoachContextRuleTests(unittest.TestCase):
             ),
             (
                 "Kannst du das Training fuer naechste Woche planen?",
-                "weekly_planning",
-                planning,
+                "plan_week",
+                REQUEST_KIND_SELECTIONS["plan_week"].sections,
                 14,
                 5,
                 True,
@@ -926,7 +976,7 @@ class CoachContextRuleTests(unittest.TestCase):
             (
                 "Plane 8 Wochen",
                 "weekly_planning",
-                FULL_SECTIONS,
+                full_plan,
                 None,
                 5,
                 True,
@@ -935,7 +985,7 @@ class CoachContextRuleTests(unittest.TestCase):
             (
                 "How did I sleep last night?",
                 "general_coaching",
-                BASE_SECTIONS,
+                recovery,
                 3,
                 1,
                 False,
@@ -980,7 +1030,7 @@ class CoachContextRuleTests(unittest.TestCase):
             (
                 "Kann ich Mittwochabend lang laufen oder hab ich da was vor?",
                 "general_coaching",
-                BASE_SECTIONS,
+                DAILY_SECTIONS,
                 3,
                 1,
                 False,
@@ -1012,4 +1062,4 @@ class CoachContextRuleTests(unittest.TestCase):
             "Wie habe ich vergangene Nacht geschlafen?", {}
         )
         self.assertEqual(3, selection.horizon_days)
-        self.assertEqual(BASE_SECTIONS, selection.sections)
+        self.assertEqual(BASE_SECTIONS | {"recovery"}, selection.sections)

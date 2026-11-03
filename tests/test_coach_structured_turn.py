@@ -148,7 +148,7 @@ class StructuredTurnTests(unittest.TestCase):
             background_job=True,
         )
 
-        self.assertEqual(expected, "weekly_planning")
+        self.assertEqual(expected, "plan_block")
         state = self.rounds.run.call_args.kwargs["state"]
         self.assertEqual(state.context_profile, expected)
 
