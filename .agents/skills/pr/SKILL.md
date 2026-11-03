@@ -44,13 +44,28 @@ conflicts, CI failures, and review feedback through the merge.
   write in the PR body which capabilities you checked and that their described
   behavior is unchanged. Refactors and test-only changes need only that line.
 
+**Sonar pre-push check:** after the rebase and validation, run
+`sonar analyze --base origin/develop --format json` (the resolved base) with the
+SonarQube CLI on the head to be pushed. The push hook runs the same secrets scan
+and refuses the push when the CLI is missing or unauthenticated, so report that
+as a blocker and stop; never bypass the hook. The agentic (Vortex) part may
+return 403 on this connection; record that as a limit, not a pass. Local output
+has shown only the secrets and agentic sections, so do not claim code-quality
+rule coverage from it. Fix findings on changed lines with new commits and rerun
+the affected checks. In the PR body, record the rule key, file, and line of any
+accepted issue; never paste matched secret text or scanner payloads.
+
 ## 2. Review
 
-Run exactly one fresh-context review of `origin/develop...HEAD`: the host's
-`/code-review` at `high` when available, otherwise the repository
+After the Sonar pre-push check above and any fixes it needs, run exactly one
+fresh-context review of `origin/develop...HEAD` on the final head to be pushed:
+the host's `/code-review` at `high` when available, otherwise the repository
 [code-review skill](../code-review/SKILL.md) with `depth=high` and
-`report-only`. Sonar and Gitar review every head in CI, so there is no local
-re-check and no further local review round. When the diff changes only
+`report-only`. It must trace caller and wrapper wiring for canonical consumers,
+as that skill requires. Record the reviewed head SHA in the PR body. If the
+review's fixes change the head, rerun the Sonar check on the new head before
+pushing. Sonar and Gitar review every head in CI, so the Sonar check is a
+pre-push query and there is no further local review round. When the diff changes only
 Markdown instructions, skills, or docs, ask the review for P0/P1 findings and
 real security gaps only; guidelines may have exceptions, and hypothetical edge
 cases in prose are not findings.
@@ -89,6 +104,10 @@ yield; otherwise poll about every 30 seconds. On each wake:
   branch") and push with `--force-with-lease`.
 - If checks fail, read the logs, fix the cause, and push. The `Gitar` check is
   required (see `.github/AGENTS.md`); no bypass.
+- If Sonar reports new issues, list them for the PR with
+  `sonar list issues --pull-request <number>`, fix the findings on changed lines,
+  and push. Do not accept issues to clear the gate without an evidence line in
+  the PR body.
 - Stop and report if GitHub requires something you cannot satisfy, or if the PR
   is closed without merging.
 
