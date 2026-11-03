@@ -7,11 +7,45 @@ from typing import Any
 from backend.planning.conflicts import calendar_item_window, calendar_items_conflict
 
 HEAVY_DAY_MINUTES = 8 * 60
+ALL_DAY_FLAGS = (
+    "training_impact",
+    "training_relevant",
+    "no_training",
+    "no_intensity",
+    "short_only",
+)
 
 
 def _timed(events: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     """All-day events are day-level context, not busy time."""
     return [event for event in events if not event.get("all_day")]
+
+
+def all_day_events(
+    events: Sequence[Mapping[str, Any]], day: date
+) -> list[dict[str, Any]]:
+    """All-day events of one local day with their training-impact flags.
+
+    They are day-level context: never subtracted from free or busy minutes.
+    """
+    start = datetime.combine(day, time.min)
+    end = start + timedelta(days=1)
+    result = []
+    for event in events:
+        window = calendar_item_window(dict(event)) if event.get("all_day") else None
+        if window and window[0] < end and window[1] > start:
+            result.append(
+                {
+                    "name": str(event.get("name") or "")[:80],
+                    **{
+                        flag: bool(event[flag])
+                        for flag in ALL_DAY_FLAGS
+                        if flag in event
+                    },
+                    "all_day": True,
+                }
+            )
+    return result
 
 
 def busy_minutes(

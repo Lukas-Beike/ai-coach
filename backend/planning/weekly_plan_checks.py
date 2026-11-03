@@ -16,7 +16,7 @@ from typing import Any, Final
 from backend.athlete import weekly_plan
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.planning import free_time
+from backend.planning import free_allocation
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
@@ -192,34 +192,37 @@ def _free_notes(
     matched: Mapping[int, Mapping[str, Any]],
     events: Sequence[Mapping[str, Any]],
 ) -> list[Draft]:
-    """Units longer than the free time left in their explicit windows.
+    """Units of a day that do not fit its free blocks together.
 
     A unit matched to a fixed session with its own window is checked against
     that window, otherwise against the day's windows; the built-in fallback
-    windows give no note.
+    windows give no note. ``free_allocation`` does the placement.
     """
-    drafts: list[Draft] = []
-    for unit in day_units:
-        windows = _free_windows(unit, effective, matched)
-        if not windows:
-            continue
-        free = free_time.free_minutes(day, windows, events)
-        if round(_minutes(unit)) > free:
-            drafts.append(
-                (
-                    NO_FREE_WINDOW,
-                    [unit],
-                    "A unit does not fit the free time of its weekly-plan windows.",
-                    {
-                        "free_minutes": free,
-                        "planned_minutes": round(_minutes(unit)),
-                        "source": "fixed_session"
-                        if (matched.get(id(unit)) or {}).get("window")
-                        else effective.source,
-                    },
-                )
-            )
-    return drafts
+    requests = [
+        free_allocation.Request(
+            index, round(_minutes(unit)), _start_minute(unit), windows
+        )
+        for index, unit in enumerate(day_units)
+        if (windows := _free_windows(unit, effective, matched))
+        and round(_minutes(unit)) > 0
+    ]
+    return [
+        (
+            NO_FREE_WINDOW,
+            [day_units[item.key]],
+            "A unit does not fit the free time of its weekly-plan windows.",
+            {
+                "free_minutes": item.free_minutes,
+                "longest_block_minutes": item.longest_block_minutes,
+                "planned_minutes": round(_minutes(day_units[item.key])),
+                "reason": item.reason,
+                "source": "fixed_session"
+                if (matched.get(id(day_units[item.key])) or {}).get("window")
+                else effective.source,
+            },
+        )
+        for item in free_allocation.allocate(day, requests, events)
+    ]
 
 
 def _free_windows(

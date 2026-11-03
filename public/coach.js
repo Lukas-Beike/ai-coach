@@ -1841,6 +1841,7 @@ function appendPlanNotes(node, planNotes) {
     over_max_minutes: ["Über der maximalen Tagesdauer", "Eigener Wochenplan"],
     leg_strength_frequency: ["Beinkraft pro Woche", "Rønnestad & Mujika 2014, Blagrove 2018; Schwellen praxisbasiert"],
     calendar_load: ["Kalender und Einheit", "Terminüberschneidung oder stark belegter Tag"],
+    all_day_event: ["Ganztägiger Termin", "Kalender; weicher Hinweis"],
   };
   for (const note of Array.isArray(planNotes) ? planNotes : []) {
     const label = planNoteLabels[note?.code];
