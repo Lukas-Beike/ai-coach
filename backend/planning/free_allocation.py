@@ -39,6 +39,10 @@ def _longest(blocks: Sequence[tuple[int, int]]) -> int:
     return max((right - left for left, right in blocks), default=0)
 
 
+def _total(blocks: Sequence[tuple[int, int]]) -> int:
+    return sum(right - left for left, right in blocks)
+
+
 def _timed(
     requests: Sequence[Request], spans: Sequence[tuple[int, int]]
 ) -> tuple[list[Request], list[tuple[int, int]]]:
@@ -55,6 +59,17 @@ def _timed(
     return overlapping, taken
 
 
+def _carve(block: tuple[int, int], taken: tuple[int, int]) -> list[tuple[int, int]]:
+    """The parts of ``block`` left after ``taken``; overlapping windows share minutes."""
+    if taken[1] <= block[0] or taken[0] >= block[1]:
+        return [block]
+    return [
+        piece
+        for piece in ((block[0], taken[0]), (taken[1], block[1]))
+        if piece[1] > piece[0]
+    ]
+
+
 def _place(request: Request, pool: dict[str, list[tuple[int, int]]]) -> bool:
     """Put the request into its smallest fitting block; false when none fits."""
     fits = [
@@ -65,11 +80,10 @@ def _place(request: Request, pool: dict[str, list[tuple[int, int]]]) -> bool:
     ]
     if not fits:
         return False
-    length, left, text = min(fits)
-    blocks = pool[text]
-    blocks.remove((left, left + length))
-    if request.minutes < length:
-        blocks.append((left + request.minutes, left + length))
+    _, left, _ = min(fits)
+    taken = (left, left + request.minutes)
+    for text, blocks in pool.items():
+        pool[text] = [piece for block in blocks for piece in _carve(block, taken)]
     return True
 
 
@@ -93,8 +107,8 @@ def allocate(
         Unplaced(
             item.key,
             reason,
-            free_time.free_minutes(day, item.windows, events),
-            free_time.longest_block(day, item.windows, events),
+            _total(free_time.free_blocks(item.windows, spans)),
+            _longest(free_time.free_blocks(item.windows, spans)),
         )
         for item, reason in sorted(failed, key=lambda value: value[0].key)
     ]

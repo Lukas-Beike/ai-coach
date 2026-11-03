@@ -55,13 +55,6 @@ class FreeMinutesTests(unittest.TestCase):
             {
                 "minutes": 60,
                 "longest_block_minutes": 60,
-                "windows": [
-                    {
-                        "window": "06:00-08:00",
-                        "minutes": 60,
-                        "longest_block_minutes": 60,
-                    }
-                ],
                 "source": "profile",
             },
         )
@@ -175,6 +168,22 @@ class NoFreeWindowTests(unittest.TestCase):
             unit("2026-11-03", "ride", minutes=90, local_id="long"),
         ]
         self.assertEqual(self.notes(text, units, []), [])
+
+    def test_overlapping_fixed_window_shares_minutes_with_the_day_windows(self) -> None:
+        fixed = {"sport": "run", "minutes": 60, "window": "06:30-07:30"}
+        text = plan(tue={"windows": ["06:00-08:00"], "fixed": [fixed]})
+        units = [
+            unit("2026-11-03", "run", minutes=60, local_id="fixed"),
+            unit("2026-11-03", "ride", minutes=90, local_id="other"),
+        ]
+        found = self.notes(text, units, [])
+        self.assertEqual([f["local_ids"] for f in found], [["fixed"]])
+
+    def test_malformed_unit_date_does_not_abort_the_check(self) -> None:
+        from backend.planning import plan_checks
+
+        bad = unit("2026-13-45", "run", minutes=120, local_id="bad")
+        plan_checks.check_plan(today=MONDAY, units=[bad], completed=[], competitions=[])
 
     def test_timed_easy_unit_overlapping_an_event_notes_overlap(self) -> None:
         text = plan(tue={"windows": ["12:00-13:00"]})

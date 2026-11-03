@@ -49,6 +49,7 @@ from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
 from backend.planning import (
     calendar_load,
+    free_allocation,
     leg_strength,
     load_checks,
     weekly_plan_checks,
@@ -455,8 +456,11 @@ def _calendar_findings(
             )
         if overlap:
             overlapped.add(id(unit))
-        day = date.fromisoformat(_day(unit)) if _day(unit) else None
-        if day and (all_day := calendar_load.all_day_events(events, day)):
+        try:
+            day = date.fromisoformat(_day(unit))
+        except ValueError:
+            continue
+        if all_day := calendar_load.all_day_events(events, day):
             findings.append(
                 _finding(
                     ALL_DAY_EVENT,
@@ -473,7 +477,7 @@ def _duplicate_overlap(draft: load_checks.Draft, overlapped: set[int]) -> bool:
     code, units, _, evidence = draft
     return (
         code == weekly_plan_checks.NO_FREE_WINDOW
-        and evidence.get("reason") == "overlap"
+        and evidence.get("reason") == free_allocation.OVERLAP
         and id(units[0]) in overlapped
     )
 

@@ -86,16 +86,17 @@ def free_time_brief(
         entry: dict[str, Any] = {
             "minutes": free_minutes(day, effective.windows, events),
             "longest_block_minutes": longest_block(day, effective.windows, events),
-            "windows": [
+            "source": effective.source,
+        }
+        if len(effective.windows) > 1:
+            entry["windows"] = [
                 {
                     "window": text,
                     "minutes": free_minutes(day, [text], events),
                     "longest_block_minutes": longest_block(day, [text], events),
                 }
                 for text in effective.windows
-            ],
-            "source": effective.source,
-        }
+            ]
         if all_day := calendar_load.all_day_events(events, day):
             entry["all_day_events"] = all_day
         result[day.isoformat()] = entry
