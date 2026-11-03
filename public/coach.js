@@ -2455,9 +2455,10 @@ function setupCoachEvents() {
 
   const startQuickAction = (event) => {
     const button = event.target.closest("button[data-message]");
-    if (!button || state.busy) return;
+    if (!button) return;
     const menu = button.closest("[popover]");
     if (menu?.matches(":popover-open")) menu.hidePopover();
+    if (state.busy) return;
     const input = $("#messageInput");
     input.value = button.dataset.message || "";
     if (button.dataset.requestKind) input.dataset.requestKind = button.dataset.requestKind;
