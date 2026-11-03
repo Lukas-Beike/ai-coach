@@ -22,7 +22,7 @@ import json
 from collections.abc import Mapping
 from copy import replace
 from datetime import date, datetime, tzinfo
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from backend.canonical.coverage import ProviderCoverage, summarize_provider
 from backend.canonical.mapping import IssueReason
@@ -114,12 +114,15 @@ def garmin_ingest_coverage(
         return None
     totals = canonical_store.provider_totals(db, ProviderId.GARMIN.value)
     oldest, newest = totals["oldest"], totals["newest"]
-    return replace(
-        fetched,
-        activity_count=totals["activities"],
-        observation_count=totals["observations"],
-        first_observed_on=None if oldest is None else date.fromisoformat(oldest),
-        last_observed_on=None if newest is None else date.fromisoformat(newest),
+    return cast(
+        ProviderCoverage,
+        replace(
+            fetched,
+            activity_count=totals["activities"],
+            observation_count=totals["observations"],
+            first_observed_on=None if oldest is None else date.fromisoformat(oldest),
+            last_observed_on=None if newest is None else date.fromisoformat(newest),
+        ),
     )
 
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 from backend.canonical.records import Observation
 from backend.canonical.sports import legacy_activity_family
@@ -163,10 +163,13 @@ def read_garmin_state(reader: ObservationReader, db: Any) -> GarminCanonicalStat
         for category in ACTIVITY_MAX_HR_CATEGORIES
     ):
         low, high = _MAX_HR_RANGE
-        metrics = replace(
-            metrics,
-            activity_max_hr=activity_max_hr(
-                reader.activity_max_hr(db, ProviderId.GARMIN, low=low, high=high)
+        metrics = cast(
+            GarminCanonicalMetrics,
+            replace(
+                metrics,
+                activity_max_hr=activity_max_hr(
+                    reader.activity_max_hr(db, ProviderId.GARMIN, low=low, high=high)
+                ),
             ),
         )
     return GarminCanonicalState(
