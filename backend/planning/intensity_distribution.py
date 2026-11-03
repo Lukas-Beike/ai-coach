@@ -88,6 +88,38 @@ def _unit_seconds(unit: Mapping[str, Any], estimate: WorkoutEstimate) -> float:
     return seconds or 0.0
 
 
+def _add_unit(
+    weeks: dict[date, dict[str, Any]], unit: Mapping[str, Any], estimate: Estimator
+) -> None:
+    """Add one planned run or ride unit to the sums of its ISO week."""
+    start = _monday(unit)
+    if start is None or planned_sport_environment(unit)[0] not in {
+        Sport.RUN,
+        Sport.RIDE,
+    }:
+        return
+    week = weeks.setdefault(
+        start,
+        {
+            "week_start": start.isoformat(),
+            "seconds": dict.fromkeys(BANDS, 0.0),
+            "uncovered_s": 0.0,
+            "local_ids": [],
+            "dates": [],
+        },
+    )
+    result = estimate(unit)
+    if result.band_seconds is None:
+        week["uncovered_s"] += _unit_seconds(unit, result)
+    else:
+        for band, seconds in result.band_seconds.items():
+            week["seconds"][band] += seconds
+    week["local_ids"].append(str(unit.get("local_id") or unit.get("id")))
+    week["dates"].append(
+        iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
+    )
+
+
 def planned_weeks(
     units: Sequence[Mapping[str, Any]],
     estimate: Estimator,
@@ -103,32 +135,7 @@ def planned_weeks(
     """
     weeks: dict[date, dict[str, Any]] = {}
     for unit in running_week.without_done_today(units, completed or (), today):
-        start = _monday(unit)
-        if start is None or planned_sport_environment(unit)[0] not in {
-            Sport.RUN,
-            Sport.RIDE,
-        }:
-            continue
-        week = weeks.setdefault(
-            start,
-            {
-                "week_start": start.isoformat(),
-                "seconds": dict.fromkeys(BANDS, 0.0),
-                "uncovered_s": 0.0,
-                "local_ids": [],
-                "dates": [],
-            },
-        )
-        result = estimate(unit)
-        if result.band_seconds is None:
-            week["uncovered_s"] += _unit_seconds(unit, result)
-        else:
-            for band, seconds in result.band_seconds.items():
-                week["seconds"][band] += seconds
-        week["local_ids"].append(str(unit.get("local_id") or unit.get("id")))
-        week["dates"].append(
-            iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
-        )
+        _add_unit(weeks, unit, estimate)
     current = running_week.week_start(today)
     if completed is not None and current in weeks:
         _add_completed(weeks[current], completed, today)
