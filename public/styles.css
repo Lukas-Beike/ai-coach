@@ -611,7 +611,7 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .composer .quick-action-menu button:hover { border-color: var(--focus-accent-border); background: var(--accent-soft); }
 .composer .quick-message-templates button:active,
 .composer .quick-action-menu button:active { transform: scale(.97); }
-.quick-action-menu { position: fixed; inset: auto; margin: 0; width: min(300px, calc(100vw - 24px)); padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); box-shadow: 0 8px 24px var(--tooltip-shadow); }
+.quick-action-menu { position: fixed; inset: auto; margin: 0; max-height: calc(100dvh - 24px); overflow-y: auto; overscroll-behavior: contain; width: min(300px, calc(100vw - 24px)); padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); box-shadow: 0 8px 24px var(--tooltip-shadow); }
 .quick-action-menu:popover-open { display: grid; gap: 4px; }
 .quick-action-menu .quick-action-periods { display: flex; align-items: center; gap: 6px; }
 .quick-action-menu .quick-action-periods > span { flex: 1 1 auto; padding-left: 4px; font-size: .72rem; font-weight: 650; }
