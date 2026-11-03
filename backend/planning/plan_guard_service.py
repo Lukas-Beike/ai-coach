@@ -15,7 +15,9 @@ from backend.errors import AppError
 from backend.performance.canonical_current import read_current_inputs
 from backend.performance.canonical_inputs import resolve_reader
 from backend.planning import (
+    brief_budget,
     calendar_load,
+    free_time,
     intensity_distribution,
     leg_strength,
     plan_checks,
@@ -248,6 +250,7 @@ def build_planning_brief(
     planned_sessions: Sequence[Mapping[str, Any]] = (),
     planned_strength: Sequence[Mapping[str, Any]] = (),
     calendar_busy: Mapping[str, int] | None = None,
+    free_time_minutes: Mapping[str, Any] | None = None,
     weekly_plan_text: str = "",
     lessons: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
@@ -260,33 +263,37 @@ def build_planning_brief(
         (row for row in competitions if _competition_day(row) >= today.isoformat()),
         key=_competition_day,
     )[:BRIEF_COMPETITIONS]
-    return {
-        "source": BRIEF_SOURCE,
-        "training_model": training_model,
-        "weekly_plan": weekly_plan.brief(weekly_plan_text),
-        "weeks": [_brief_week(week, completed) for week in weeks],
-        "weeks_note": "Weeks without records are unknown, not rest; the running week is incomplete.",
-        "longest_run_30d_minutes": None if longest is None else round(longest / 60),
-        "season_phase": season_phase_brief(competitions, today),
-        "next_competitions": [
-            {
-                "date": _competition_day(row),
-                "name": str(row.get("name") or "")[:120],
-                "priority": row.get("priority"),
-                "sport": row.get("sport"),
-            }
-            for row in upcoming
-        ],
-        "planned_distribution": intensity_distribution.brief_distribution(
-            training_model, planned_weeks, BRIEF_WEEKS
-        ),
-        "strength": leg_strength.brief_strength(planned_strength, BRIEF_WEEKS),
-        "planned_sessions": list(planned_sessions),
-        "calendar_busy_minutes": dict(calendar_busy or {}),
-        "calendar_busy_source": "Read-only iCalendar events; overlapping intervals counted once in local time",
-        "plan_checks": plan_checks.RULE_SUMMARY,
-        "lessons": brief_lessons(lessons),
-    }
+    return brief_budget.fit_brief(
+        {
+            "source": BRIEF_SOURCE,
+            "training_model": training_model,
+            "weekly_plan": weekly_plan.brief(weekly_plan_text),
+            "weeks": [_brief_week(week, completed) for week in weeks],
+            "weeks_note": "Weeks without records are unknown, not rest; the running week is incomplete.",
+            "longest_run_30d_minutes": None if longest is None else round(longest / 60),
+            "season_phase": season_phase_brief(competitions, today),
+            "next_competitions": [
+                {
+                    "date": _competition_day(row),
+                    "name": str(row.get("name") or "")[:120],
+                    "priority": row.get("priority"),
+                    "sport": row.get("sport"),
+                }
+                for row in upcoming
+            ],
+            "planned_distribution": intensity_distribution.brief_distribution(
+                training_model, planned_weeks, BRIEF_WEEKS
+            ),
+            "strength": leg_strength.brief_strength(planned_strength, BRIEF_WEEKS),
+            "planned_sessions": list(planned_sessions),
+            "calendar_busy_minutes": dict(calendar_busy or {}),
+            "free_time_minutes": dict(free_time_minutes or {}),
+            "free_time_source": "Minutes of the effective weekly-plan windows per date minus timed calendar events; all-day events ignored; source is profile, default or fallback",
+            "calendar_busy_source": "Read-only iCalendar events; overlapping intervals counted once in local time",
+            "plan_checks": plan_checks.RULE_SUMMARY,
+            "lessons": brief_lessons(lessons),
+        }
+    )
 
 
 def read_lessons(read: Callable[[], Sequence[Mapping[str, Any]]]) -> list[Any]:
@@ -463,6 +470,9 @@ class PlanGuardService:
             planned_sessions=planned_focus(units, self._estimate_unit, today),
             planned_strength=leg_strength.planned_weeks(units, today, completed),
             calendar_busy=calendar_load.busy_minutes(self._events(), today, 35),
+            free_time_minutes=free_time.free_time_brief(
+                self._weekly_plan(), self._events(), today, 35
+            ),
             weekly_plan_text=self._weekly_plan(),
             lessons=self._lessons(),
         )

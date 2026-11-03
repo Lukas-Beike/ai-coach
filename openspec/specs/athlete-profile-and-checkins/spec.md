@@ -19,7 +19,7 @@ The system SHALL persist the known profile fields with normalized bounded text, 
 
 #### Scenario: Weekly plan
 - **WHEN** the athlete saves a `weekly_plan` with per weekday optional time windows (`HH:MM-HH:MM`, at most four, overlaps merged), `max_minutes` (15-600), fixed sessions (run, ride or strength, optional focus of that sport, duration 10-600 and window) and `rest_day`, plus optional profile-wide default windows per weekday
-- **THEN** an explicit save rejects invalid times, unknown sports or focus, and a rest day with fixed sessions; reads drop invalid parts; an empty plan is stored as an empty string. A day uses its own windows (`profile`), else the default (`default`), else the built-in working hours (`fallback`); a rest day has no windows and differs from an unspecified day; fixed sessions and `max_minutes` apply at every level. The field is audited and undoable like any profile field, and the editor shows empty days muted with their inherited windows.
+- **THEN** an explicit save rejects invalid times, unknown sports or focus, and a rest day with fixed sessions; reads drop invalid parts; an empty plan is stored as an empty string. A day uses its own windows (`profile`), else the default (`default`), else the built-in working hours (`fallback`); a rest day has no windows and differs from an unspecified day; fixed sessions and `max_minutes` apply at every level. The field is audited and undoable like any profile field, and the built-in hours come only from the server (`weekly_fallback` of `GET /api/profile`), so the editor keeps no copy and, offline, shows no inherited hours; the editor shows empty days muted with their inherited windows.
 
 #### Scenario: Missing or malformed stored profile
 - **WHEN** no valid profile JSON is stored

@@ -42,6 +42,7 @@ from backend.planning import context as planning_context
 from backend.planning import library as planning_library
 from backend.planning import season as planning_season
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
+from backend.planning.brief_budget import BRIEF_CHARACTER_LIMIT
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.library_service import WorkoutLibraryService
 from backend.providers.source_labels import SourceView, provider_label
@@ -66,6 +67,7 @@ COACH_CONTEXT_SECTION_LIMITS = {
     "daily_planning_context": 24_000,
     "external_calendar": 20_000,
     "nutrition_products": 16_000,
+    "planning_brief": BRIEF_CHARACTER_LIMIT,
 }
 LOGGER = logging.getLogger("intervals_coach")
 

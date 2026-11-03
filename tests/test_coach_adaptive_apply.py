@@ -11,6 +11,8 @@ from unittest.mock import Mock
 
 from backend.activities.workout_load import AthleteThresholds
 from backend.coach.adaptive_apply import CoachAdaptiveApplyService
+from backend.coach.planning_action_tools import CoachPlanningActionToolService
+from backend.coach.proposal_execution import CoachProposalExecutionService
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
 from backend.planning.plan_guard_service import PlanCheckError, PlanGuardService
@@ -219,6 +221,53 @@ class AdaptiveApplyPlanGuardTests(unittest.TestCase):
         result = self.apply(accept_plan_findings=["illness_hard"])
         self.assertEqual(1, self.stored())
         self.assertIn("illness_hard", [n["code"] for n in result["plan_check_notes"]])
+
+    def execute_approved_proposal(self, arguments):
+        """The approved-proposal route: execution service, dispatcher's planning tail."""
+        actions = CoachPlanningActionToolService(
+            Mock(), lambda: self.service, Mock(), Mock(), Mock()
+        )
+        dispatch = Mock()
+        dispatch.execute.side_effect = (
+            lambda name, args, *, intent, client_turn_id, session_csrf_hash, **_: (
+                actions.execute(name, args, intent, client_turn_id, session_csrf_hash)
+            )
+        )
+        executor = CoachProposalExecutionService(
+            self.manager, Mock(), Mock(), Mock(), Mock(), lambda: dispatch
+        )
+        intent = self.intent
+        if arguments.get("sync_illness_to_intervals"):
+            intent = {
+                **intent,
+                "target_system": "intervals",
+                "authorization_scope": [
+                    *intent["authorization_scope"],
+                    "intervals_sync",
+                ],
+            }
+        context = (
+            "apply_adaptive_replan",
+            {"adjustment_id": "adjustment-1", **arguments},
+            intent,
+            "conversation",
+            "turn-2",
+        )
+        return executor._execute_coach_write("csrf", context)
+
+    def test_approved_proposal_is_plan_checked_and_a_block_rolls_back(self):
+        self.illness = "Fieber"
+        with self.assertRaises(PlanCheckError):
+            self.execute_approved_proposal({"sync_illness_to_intervals": True})
+        self.assertEqual(0, self.stored())
+        self.sync.complete.assert_not_called()
+
+    def test_approved_proposal_returns_plan_check_notes(self):
+        result = self.execute_approved_proposal({})
+        self.assertEqual(1, self.stored())
+        self.assertEqual(
+            ["back_to_back_hard"], [n["code"] for n in result["plan_check_notes"]]
+        )
 
 
 if __name__ == "__main__":

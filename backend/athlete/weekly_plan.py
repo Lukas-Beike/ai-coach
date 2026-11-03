@@ -60,6 +60,11 @@ class EffectiveDay:
         }
 
 
+def fallback_windows() -> dict[str, list[str]]:
+    """The built-in windows per weekday, the single source for the profile editor."""
+    return {day: list(windows) for day, windows in FALLBACK_WINDOWS.items()}
+
+
 def parse_window(text: Any) -> tuple[int, int] | None:
     """Minutes of ``HH:MM-HH:MM`` (end may be 24:00); ``None`` when invalid."""
     parts = str(text or "").strip().split("-")
