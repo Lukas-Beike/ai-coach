@@ -24,7 +24,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
 from backend.performance.progress_report import ZONE_MAPPING, intensity_3zone
-from backend.planning import plan_checks, running_week
+from backend.planning import plan_checks, running_week, unit_intensity
 from backend.planning.sport import planned_sport_environment
 
 CODE = "intensity_distribution"
@@ -63,7 +63,9 @@ MIN_COVERAGE = 0.6
 EASY_WEEK_SHARE = 0.10
 NOTE = (
     "Planned endurance time (run, ride) by 3-zone band; strength excluded. "
-    "Reference range of the training model, not a target."
+    "Reference range of the training model, not a target. Units without parseable "
+    "steps count by planned intensity, else by session focus (approximate); "
+    "basis_seconds names the basis."
 )
 Estimator = Callable[[Mapping[str, Any]], WorkoutEstimate]
 
@@ -104,20 +106,39 @@ def _add_unit(
             "week_start": start.isoformat(),
             "seconds": dict.fromkeys(BANDS, 0.0),
             "uncovered_s": 0.0,
+            "basis_seconds": {},
             "local_ids": [],
             "dates": [],
         },
     )
-    result = estimate(unit)
-    if result.band_seconds is None:
-        week["uncovered_s"] += _unit_seconds(unit, result)
-    else:
-        for band, seconds in result.band_seconds.items():
-            week["seconds"][band] += seconds
+    _add_time(week, unit, estimate(unit))
     week["local_ids"].append(str(unit.get("local_id") or unit.get("id")))
     week["dates"].append(
         iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
     )
+
+
+def _add_time(
+    week: dict[str, Any], unit: Mapping[str, Any], result: WorkoutEstimate
+) -> None:
+    """Band time from the steps; without parseable steps from intensity or focus."""
+    if result.band_seconds is not None:
+        for band, seconds in result.band_seconds.items():
+            week["seconds"][band] += seconds
+        _add_basis(week, unit_intensity.STEPS, sum(result.band_seconds.values()))
+        return
+    seconds = _unit_seconds(unit, result)
+    fallback = None if result.steps else unit_intensity.unit_band(unit)
+    if fallback is None or not seconds:
+        week["uncovered_s"] += seconds
+        return
+    band, basis = fallback
+    week["seconds"][band] += seconds
+    _add_basis(week, basis, seconds)
+
+
+def _add_basis(week: dict[str, Any], basis: str, seconds: float) -> None:
+    week["basis_seconds"][basis] = week["basis_seconds"].get(basis, 0.0) + seconds
 
 
 def planned_weeks(
@@ -180,6 +201,10 @@ def _summary(week: dict[str, Any], partial: bool) -> dict[str, Any]:
         "seconds": {band: round(seconds) for band, seconds in week["seconds"].items()},
         "shares": shares,
         "uncovered_s": round(week["uncovered_s"]),
+        "basis_seconds": {
+            basis: round(seconds) for basis, seconds in week["basis_seconds"].items()
+        },
+        "approximate": bool(week["basis_seconds"].get(unit_intensity.SESSION_FOCUS)),
         "coverage": round(known / total, 3) if total else None,
         "local_ids": sorted(week["local_ids"]),
         "dates": sorted(set(week["dates"])),
@@ -243,6 +268,11 @@ def distribution_findings(
                 "message": (
                     f"{_label(week)} of {week['week_start']} deviates clearly from the "
                     f"{model} reference range in: {', '.join(off)}."
+                    + (
+                        " Partly approximate: from session focus."
+                        if week["approximate"]
+                        else ""
+                    )
                 ),
                 "evidence": {
                     "model": model,
@@ -252,6 +282,8 @@ def distribution_findings(
                     "shares": week["shares"],
                     "seconds": week["seconds"],
                     "uncovered_s": week["uncovered_s"],
+                    "basis_seconds": week["basis_seconds"],
+                    "approximate": week["approximate"],
                     "reference_ranges": MODEL_RANGES[model],
                     "deviating_bands": off,
                     "zone_mapping": ZONE_MAPPING,
@@ -283,6 +315,8 @@ def brief_distribution(
                     "seconds",
                     "shares",
                     "uncovered_s",
+                    "basis_seconds",
+                    "approximate",
                     "coverage",
                 )
             }

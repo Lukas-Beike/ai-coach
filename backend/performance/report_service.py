@@ -140,7 +140,10 @@ class TrainingRecordsService:
         ]
         return {
             "status": "ok" if records else "insufficient_data",
-            "activities": records,
+            "activities": [
+                {k: v for k, v in row.items() if k != "pace_at_hr_profile"}
+                for row in records
+            ],
             "scope": "Bis zu 100 lokal gespeicherte Detaildatensätze; nur aktuelle Aktivitäten mit geeigneten Originaldaten.",
             "comparison": "Individual observations, no inferred fitness trend. Compare sport, duration, intensity, terrain, temperature and indoor/outdoor conditions.",
         }
@@ -689,6 +692,7 @@ def _curve_record(
         "source": None if profile is None else profile.get("source"),
         "power_profile": {} if curve is None else curve.power,
         "running_profile": {} if curve is None else curve.running,
+        "pace_at_hr_profile": {} if curve is None else curve.pace_at_hr,
         "fingerprint": None if curve is None else curve.fingerprint,
     }
 

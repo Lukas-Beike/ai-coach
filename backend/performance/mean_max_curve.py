@@ -31,6 +31,8 @@ from backend.performance.canonical_detail import (
     detail_candidates,
     primary_analysis_record,
 )
+from backend.performance.pace_at_hr import METHOD as PACE_METHOD
+from backend.performance.pace_at_hr import pace_at_heart_rate
 from backend.performance.power_profile import (
     METHOD_ID,
     METHOD_VERSION,
@@ -44,11 +46,12 @@ _DEFAULT_CAPACITY: Final = 1024
 
 @dataclass(frozen=True, slots=True)
 class SessionCurve:
-    """The power and running curves of one session and the fingerprint of their input."""
+    """The power and running curves and the pace-at-heart-rate bins of one session and the fingerprint of their input."""
 
     power: dict[str, Any]
     running: dict[str, Any]
     fingerprint: str
+    pace_at_hr: dict[str, Any]
 
 
 class SessionCurveReader:
@@ -146,6 +149,12 @@ def _session_curve(
             source_label=adapted.label_for("velocity_smooth", "distance", "moving"),
         ),
         fingerprint=fingerprint,
+        pace_at_hr=pace_at_heart_rate(
+            adapted.activity,
+            source_label=adapted.label_for(
+                "velocity_smooth", "heartrate", "grade_smooth", "altitude", "moving"
+            ),
+        ),
     )
 
 
@@ -157,6 +166,7 @@ def _fingerprint(
         [
             METHOD_ID,
             METHOD_VERSION,
+            PACE_METHOD,
             analysis_sport(primary_analysis_record(records)),
             sorted(
                 _canonical(

@@ -38,7 +38,6 @@ MIN_HALF_CHECKINS = 3
 LOW_COMPLIANCE = 0.5
 SCORE_SHIFT = 2.0
 RPE_RISING_WEEKS = 3
-NOT_COVERED = ("pace_at_heart_rate",)
 COVERAGE_NOTE = (
     "Descriptive comparison of the local plan with known local records; no causal "
     "claim. A week without records is unknown, not rest. Compliance counts planned "
@@ -205,12 +204,28 @@ def _key_sessions(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _pace_covered(trend: Mapping[str, Any] | None) -> bool:
+    """Whether any environment gives a pace trend; else it stays not covered."""
+    return any(
+        entry.get("status") == "ok"
+        for entry in ((trend or {}).get("run") or {}).values()
+    )
+
+
 def _performance(progress: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    pace = progress.get("pace_at_heart_rate")
+    result = {
         key: progress[key]
         for key in ("ctl", "eftp", "mean_max_power")
         if key in progress
-    } | {"not_covered": list(NOT_COVERED)}
+    }
+    if _pace_covered(pace):
+        return result | {"pace_at_heart_rate": pace, "not_covered": []}
+    # Without usable sessions the key reports why, and the metric is not covered.
+    return result | {
+        **({"pace_at_heart_rate": pace} if pace is not None else {}),
+        "not_covered": ["pace_at_heart_rate"],
+    }
 
 
 def _rpe_weeks(progress: Mapping[str, Any]) -> list[dict[str, Any]]:

@@ -238,7 +238,12 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.assertEqual(1, self.stored())
         self.assertNotIn("accept_plan_findings", self.seen_arguments)
         self.assertEqual(
-            ["back_to_back_hard", "illness_hard", "illness_hard"],
+            [
+                "back_to_back_hard",
+                "illness_hard",
+                "illness_hard",
+                "intensity_distribution",
+            ],
             sorted(f["code"] for f in result["plan_check_notes"]),
         )
 
