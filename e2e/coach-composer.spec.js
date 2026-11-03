@@ -116,3 +116,46 @@ test("analysis and plan menu sends the chosen period with its request kind @resp
   const adjusted = await page.evaluate(() => window.__quickSubmit);
   expect(adjusted.kind).toBe("adjust_week");
 });
+
+test("composer plus menu starts a session analysis anytime and fits the viewport @responsive", async ({ page }) => {
+  await openCoach(page);
+  await page.evaluate(() => {
+    state.quickTemplatesVisible = false;
+    renderQuickMessageTemplates();
+    window.__quickSubmit = null;
+    document.querySelector("#chatForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const input = document.querySelector("#messageInput");
+      window.__quickSubmit = { kind: input.dataset.requestKind, message: input.value };
+    }, { capture: true });
+  });
+  const trigger = page.locator("#attachmentButton");
+  await trigger.click();
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  const menu = page.locator("#composerPlusMenu");
+  await expect(menu).toBeVisible();
+  await expect(page.locator("#composerPlusMenu").getByRole("menuitem", { name: "Datei anhängen" })).toBeFocused();
+  const viewport = page.viewportSize();
+  const box = await menu.boundingBox();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  for (const item of await menu.getByRole("menuitem").all()) {
+    const target = await item.boundingBox();
+    expect(target.height).toBeGreaterThanOrEqual(44);
+    expect(target.width).toBeGreaterThanOrEqual(44);
+  }
+  await page.keyboard.press("Escape");
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await menu.getByRole("menuitem", { name: "Einheit analysieren" }).click();
+  const sent = await page.evaluate(() => window.__quickSubmit);
+  expect(sent.kind).toBe("session_analysis");
+  await trigger.click();
+  const chooser = page.waitForEvent("filechooser");
+  await menu.getByRole("menuitem", { name: "Datei anhängen" }).click();
+  await chooser;
+});

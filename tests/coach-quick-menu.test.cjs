@@ -38,3 +38,14 @@ test("menu items carry a request kind and a German message with the period", () 
 test("morning check-in keeps its request kind outside the menu", () => {
   assert.match(html, /id="quickMorningCheckinButton"[^>]*data-request-kind="morning_checkin"/);
 });
+
+test("composer plus menu is cloned from the quick bar and still opens the file picker", () => {
+  assert.match(html, /id="attachmentButton"[^>]*aria-haspopup="menu"[^>]*aria-controls="composerPlusMenu"[^>]*popovertarget="composerPlusMenu"/);
+  assert.match(html, /id="composerPlusMenu"[^>]*popover="auto"[^>]*role="menu"/);
+  assert.match(html, /role="menuitem" id="attachFileMenuItem">Datei anhängen</);
+  const build = source.slice(source.indexOf("function buildComposerPlusMenu("), source.indexOf("\nfunction setupQuickActionMenu("));
+  assert.ok(build.includes('$("#quickMorningCheckinButton")') && build.includes('$("#quickAnalysisMenu")'));
+  assert.ok(build.includes("menu.append(copy(morning), ...[...source.children].map(copy))"));
+  assert.match(source, /attachFileMenuItem"\)\.addEventListener\("click"[\s\S]*?\$\("#attachmentInput"\)\.click\(\)/);
+  assert.ok(source.includes('$("#composerPlusMenu").addEventListener("click", startQuickAction)'));
+});
