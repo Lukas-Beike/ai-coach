@@ -106,14 +106,17 @@ _WORD_NUMBERS = {
 }
 _ADJUST_VERB = r"\b(?:passe|anpass\w*|adjust\w*|umplan\w*|replan\w*|neu\s+plan\w*)\b"
 _PLAN_ACTION = (
-    r"^\s*(?:bitte\s+|please\s+)?plan\b"
-    r"|\b(?:plane|planen|planst|erstell\w*|schedul\w*|entwirf\w*|entwerf\w*)\b"
+    r"^\s*(?:bitte\s+|please\s+)?(?:plan|schedule)\b"
+    r"|\b(?:plane|planen|planst|entwirf\w*|entwerf\w*)\b"
+    r"|\b(?:erstell\w*|create|build)\b[^.?!]*\b(?:trainings)?plan\b"
+    r"|\bschedule\s+(?:my|the|next|me)\b"
 )
 # Sleep, fatigue and readiness questions need the recovery record, which the
 # daily view used to carry on every turn.
 RECOVERY_PATTERN = (
-    r"schlaf|sleep|erholung|recover|\bhrv\b|müde|muede|erschöpf|erschoepf|erledigt"
-    r"|fatigue|\btired\b|readiness|body battery|\bbereit\b"
+    r"\bschlaf\w*|geschlafen|\bsleep\w*|erholung|\brecover\w*|\bhrv\b|müde|muede"
+    r"|erschöpf\w*|erschoepf\w*|völlig erledigt|voellig erledigt|\bfatigue\b"
+    r"|\btired\b|readiness|body battery"
 )
 HISTORY_PATTERN = (
     r"\b(?:letzte[nrs]?|vergangene[nrsm]?|past|last)\s+(?:\d+|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn"
@@ -259,7 +262,7 @@ class CoachContextSelection:
         }
         if "external_calendar" in result and "daily_planning_context" in result:
             result["daily_planning_context"] = _without_appointments(
-                result["daily_planning_context"]
+                result["daily_planning_context"], local_date
             )
         if self.horizon_days is None:
             return result
@@ -321,13 +324,16 @@ class CoachContextSelection:
         ]
 
 
-def _without_appointments(days: Any) -> Any:
-    """Drop per-day events when the external calendar section carries them once."""
-    if not isinstance(days, list):
+def _without_appointments(days: Any, first_day: str) -> Any:
+    """Drop per-day events from today on, where the external calendar carries them.
+
+    Earlier days keep theirs (the window starts today); markers always stay.
+    """
+    if not isinstance(days, list) or not first_day:
         return days
     return [
         {key: value for key, value in day.items() if key != "appointments"}
-        if isinstance(day, dict)
+        if isinstance(day, dict) and str(day.get("date") or "") >= first_day
         else day
         for day in days
     ]
@@ -388,7 +394,7 @@ def _block_fits(normalized: str) -> bool:
     named = re.search(
         r"\b(\d+|" + "|".join(_WORD_NUMBERS) + r")\s*(?:wochen|weeks)\b", normalized
     )
-    return not named or int(_WORD_NUMBERS.get(named[1], named[1])) <= 5
+    return not named or int(_WORD_NUMBERS.get(named[1], named[1])) <= 4
 
 
 def free_text_plan_kind(message: str) -> str | None:
@@ -450,7 +456,7 @@ def select_coach_context(
         message, dialogue, attachments=attachments, has_receipts=has_receipts
     )
     kind = request_kind if request_kind in REQUEST_KIND_SELECTIONS else None
-    typed = kind is None and selection.name != "fallback"
+    typed = request_kind is None and kind is None and selection.name != "fallback"
     if typed:
         kind = free_text_plan_kind(message)
     if kind is None:

@@ -26,7 +26,6 @@ from backend.coach.context import (
 )
 from backend.coach.context_selection import (
     CONTEXT_SECTIONS,
-    _message_selection,
     select_coach_context,
 )
 from backend.coach.playbooks import playbook_for
@@ -342,6 +341,9 @@ class CoachContextBudgetTests(unittest.TestCase):
 
     def test_ordinary_questions_mentioning_a_week_stay_unplanned(self) -> None:
         for message in (
+            "What do I have scheduled this week?",
+            "Erstelle mir eine Zusammenfassung der letzten Woche",
+            "Hab ich erledigt, was für diese Woche anstand?",
             "Wie war meine Woche?",
             "Wie sieht mein Plan für diese Woche aus?",
             "Wie viele Kilometer bin ich diese Woche gelaufen?",
@@ -356,6 +358,13 @@ class CoachContextBudgetTests(unittest.TestCase):
                 self.assertIsNone(selection.kind)
                 self.assertNotIn("planning_brief", selection.sections)
 
+    def test_blocks_beyond_the_window_keep_complete_context(self) -> None:
+        near = select_coach_context("Plane die nächsten 4 Wochen", {})
+        self.assertEqual(("plan_block", 35), (near.name, near.horizon_days))
+        far = select_coach_context("Plane die nächsten 5 Wochen", {})
+        self.assertEqual("plan_block", far.kind)
+        self.assertIsNone(far.horizon_days)
+
     def test_typed_planning_with_explicit_dates_keeps_complete_context(self) -> None:
         selection = select_coach_context("Plane die Woche ab 2026-12-01", {})
         self.assertEqual("plan_week", selection.kind)
@@ -366,20 +375,24 @@ class CoachContextBudgetTests(unittest.TestCase):
 
     def test_typed_planning_keeps_dialogue_and_pending_retention(self) -> None:
         pending = {"pending_request": {"status": "failed", "source_message_ids": [1]}}
-        for message, dialogue, receipts in (
-            ("Kannst du das für die Woche planen?", {}, False),
-            ("Plane meine nächste Woche", pending, True),
-            ("Plane meine nächste Woche", {}, True),
+        # message, dialogue, receipts, retain_dialogue, retain_pending_request
+        for message, dialogue, receipts, dialogue_kept, pending_kept in (
+            ("Kannst du das für die Woche planen?", {}, False, True, False),
+            ("Plane meine nächste Woche", {}, False, False, False),
+            ("Plane meine nächste Woche", {}, True, True, False),
+            ("Plane meine nächste Woche", pending, False, False, False),
         ):
             with self.subTest(message=message, receipts=receipts):
                 typed = select_coach_context(message, dialogue, has_receipts=receipts)
-                expected = _message_selection(
-                    message, dialogue, attachments=False, has_receipts=receipts
-                )
-                self.assertEqual(expected.retain_dialogue, typed.retain_dialogue)
-                self.assertEqual(
-                    expected.retain_pending_request, typed.retain_pending_request
-                )
+                self.assertEqual("plan_week", typed.kind)
+                self.assertEqual(dialogue_kept, typed.retain_dialogue)
+                self.assertEqual(pending_kept, typed.retain_pending_request)
+
+    def test_system_quick_actions_never_take_a_typed_planning_kind(self) -> None:
+        selection = select_coach_context(
+            "Plane meine nächste Woche", {}, request_kind="morning_checkin"
+        )
+        self.assertIsNone(selection.kind)
 
     def test_daily_context_rides_only_on_planning_morning_and_today_turns(
         self,
