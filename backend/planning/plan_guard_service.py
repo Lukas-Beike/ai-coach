@@ -17,6 +17,7 @@ from backend.planning import (
     intensity_distribution,
     leg_strength,
     plan_checks,
+    season,
 )
 from backend.planning.load_checks import LoadThresholds, load_thresholds
 from backend.planning.session_focus import session_focus
@@ -175,6 +176,20 @@ def _focus_estimate(
     return estimate(unit)
 
 
+def season_phase_brief(
+    competitions: Sequence[Mapping[str, Any]], today: date
+) -> dict[str, Any]:
+    """Phase toward the next A/B race with its weeks, or unknown."""
+    return {
+        **season.target_phase(
+            [{**row, "event_date": _competition_day(row)} for row in competitions],
+            today,
+        ),
+        "source": "derived from competition dates and priority A/B, read-only",
+        "boundaries": season.PHASE_BOUNDARIES,
+    }
+
+
 def build_planning_brief(
     *,
     progress: Mapping[str, Any],
@@ -205,6 +220,7 @@ def build_planning_brief(
         "weeks": [_brief_week(week, completed) for week in weeks],
         "weeks_note": "Weeks without records are unknown, not rest; the running week is incomplete.",
         "longest_run_30d_minutes": None if longest is None else round(longest / 60),
+        "season_phase": season_phase_brief(competitions, today),
         "next_competitions": [
             {
                 "date": _competition_day(row),

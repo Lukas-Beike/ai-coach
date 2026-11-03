@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 
 def season_plan_summary(
     competitions: list[dict[str, Any]], today: date
@@ -38,6 +40,46 @@ def season_plan_summary(
             (event for event in events if event["days_until"] >= 0), None
         ),
     }
+
+
+TARGET_PRIORITIES = frozenset({"A", "B"})
+TRANSITION_DAYS = 28
+PHASE_BOUNDARIES = (
+    "Phase by days to the race: base over 84, build 43-84, peak 15-42, taper 0-14."
+)
+
+
+def target_phase(competitions: list[dict[str, Any]], today: date) -> dict[str, Any]:
+    """Season phase toward the next A/B race; read-only, derived from dates.
+
+    ``transition`` follows an A/B race of the last 28 days when no later one is
+    planned; without any such race the phase is ``unknown``.
+    """
+    targets = [
+        {
+            **row,
+            "priority": str(row.get("priority") or "B"),
+            "name": str(row.get("name") or ""),
+            "event_date": iso_date_prefix(row.get("event_date")),
+        }
+        for row in competitions
+        if str(row.get("priority") or "B") in TARGET_PRIORITIES
+    ]
+    events = season_plan_summary(targets, today)["events"]
+    upcoming = next((e for e in events if e["days_until"] >= 0), None)
+    if upcoming is not None:
+        return {
+            "phase": upcoming["phase"],
+            "weeks_to_race": upcoming["days_until"] // 7,
+            "days_to_race": upcoming["days_until"],
+            "race": {
+                "date": upcoming["event_date"],
+                "name": str(upcoming.get("name") or "")[:120],
+                "priority": upcoming.get("priority"),
+            },
+        }
+    recent = bool(events) and events[-1]["days_until"] >= -TRANSITION_DAYS
+    return {"phase": "transition" if recent else "unknown"}
 
 
 def planning_state(

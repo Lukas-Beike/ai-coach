@@ -394,6 +394,19 @@ class PlanBriefTests(unittest.TestCase):
         self.assertEqual("Race", brief["next_competitions"][0]["name"])
         self.assertEqual(set(plan_checks.FINDING_CODES), set(brief["plan_checks"]))
         self.assertIn("source", brief)
+        phase = brief["season_phase"]
+        self.assertEqual(("peak", 4), (phase["phase"], phase["weeks_to_race"]))
+        self.assertEqual("2026-12-01", phase["race"]["date"])
+
+    def test_brief_phase_unknown_without_target_race(self) -> None:
+        brief = build_planning_brief(
+            progress={},
+            completed=[],
+            competitions=[{"date": "2026-12-01", "name": "Run", "priority": "C"}],
+            training_model="pyramidal",
+            today=TODAY,
+        )
+        self.assertEqual("unknown", brief["season_phase"]["phase"])
 
     def test_brief_section_only_for_plan_kinds(self) -> None:
         for kind in ("plan_week", "plan_block", "adjust_week"):

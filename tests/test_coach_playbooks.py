@@ -76,6 +76,9 @@ class PlaybookInjectionTests(unittest.TestCase):
         self.assertNotIn("Planning science", playbook_for("progress_review"))
         for kind in ("plan_week", "plan_block"):
             self.assertIn("Planning science", playbook_for(kind))
+        for kind in ("plan_week", "plan_block"):
+            self.assertIn("season_phase", playbook_for(kind))
+        self.assertIn("season_phase", playbook_for("adjust_week"))
         self.assertIn("week-by-week rationale", playbook_for("plan_block"))
         self.assertNotIn("week-by-week rationale", playbook_for("plan_week"))
 
