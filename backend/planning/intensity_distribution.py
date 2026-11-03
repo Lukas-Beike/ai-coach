@@ -92,17 +92,17 @@ def planned_weeks(
     units: Sequence[Mapping[str, Any]],
     estimate: Estimator,
     today: date,
-    completed: Sequence[Mapping[str, Any]] = (),
+    completed: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Planned band seconds per ISO week of the run and ride units, oldest first.
 
     The running week adds the completed run and ride days (zone times of the
     weekly progress report, ``ZONE_MAPPING``; completed time without zone times
     is uncovered) to the remaining planned days and is labelled
-    ``running_week.RUNNING_WEEK_BASIS``. Without ``completed`` it stays partial.
+    ``running_week.RUNNING_WEEK_BASIS``. Without ``completed`` (None) it stays partial.
     """
     weeks: dict[date, dict[str, Any]] = {}
-    for unit in running_week.without_done_today(units, completed, today):
+    for unit in running_week.without_done_today(units, completed or (), today):
         start = _monday(unit)
         if start is None or planned_sport_environment(unit)[0] not in {
             Sport.RUN,
@@ -130,10 +130,13 @@ def planned_weeks(
             iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
         )
     current = running_week.week_start(today)
-    if completed and current in weeks:
+    if completed is not None and current in weeks:
         _add_completed(weeks[current], completed, today)
     return [
-        _summary(weeks[start], start < today and not (completed and start == current))
+        _summary(
+            weeks[start],
+            start < today and not (completed is not None and start == current),
+        )
         for start in sorted(weeks)
     ]
 

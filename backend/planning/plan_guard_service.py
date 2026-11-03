@@ -25,6 +25,7 @@ from backend.planning.load_checks import LoadThresholds, load_thresholds
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
+PLAN_FINDINGS_ARGUMENT = "accept_plan_findings"
 BRIEF_WEEKS = 6
 BRIEF_SPORTS = ("run", "ride", "strength")
 BRIEF_COMPETITIONS = 3
@@ -342,6 +343,7 @@ class PlanGuardService:
         self._calendar_events = calendar_events
         self._calendar_cache: tuple[Sequence[Mapping[str, Any]], ...] | None = None
         self._threshold_cache: tuple[LoadThresholds | None] | None = None
+        self._illness_cache: tuple[str] | None = None
 
     def _planned_weeks(
         self,
@@ -371,7 +373,7 @@ class PlanGuardService:
                 units=units,
                 completed=completed,
                 competitions=self._competitions(),
-                illness=self._illness(),
+                illness=self._reported_illness(),
                 thresholds=self._load_thresholds(),
                 expects_strength=self._expects_strength(),
                 calendar_events=self._events(),
@@ -381,6 +383,12 @@ class PlanGuardService:
                 self._training_model(), self._planned_weeks(units, today, completed)
             ),
         ]
+
+    def _reported_illness(self) -> str:
+        """One snapshot per service: check-ins a write creates itself do not count."""
+        if self._illness_cache is None:
+            self._illness_cache = (self._illness(),)
+        return self._illness_cache[0]
 
     def _load_thresholds(self) -> LoadThresholds | None:
         """One snapshot per service, so before and after a write compare alike."""

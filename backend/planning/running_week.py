@@ -7,6 +7,7 @@ and label it ``RUNNING_WEEK_BASIS``. No I/O.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
@@ -19,11 +20,6 @@ RUNNING_WEEK_BASIS = "running week: completed + planned"
 
 def week_start(day: date) -> date:
     return day - timedelta(days=day.weekday())
-
-
-def is_running(monday: date, today: date) -> bool:
-    """Whether the ISO week starting ``monday`` contains ``today``."""
-    return monday == week_start(today)
 
 
 def _day(row: Mapping[str, Any]) -> str:
@@ -45,13 +41,19 @@ def without_done_today(
     completed: Iterable[Mapping[str, Any]],
     today: date,
 ) -> list[Mapping[str, Any]]:
-    """Units without today's planned ones whose sport is already completed today."""
-    done = {
+    """Units without today's planned ones that a completed activity replaces.
+
+    Each completed activity of today replaces one planned unit of its sport, so a
+    second planned session of the day stays.
+    """
+    done = Counter(
         str(row.get("sport")) for row in completed if _day(row) == today.isoformat()
-    }
-    return [
-        unit
-        for unit in units
-        if _day(unit) != today.isoformat()
-        or planned_sport_environment(unit)[0].value not in done
-    ]
+    )
+    kept = []
+    for unit in units:
+        sport = planned_sport_environment(unit)[0].value
+        if _day(unit) == today.isoformat() and done[sport] > 0:
+            done[sport] -= 1
+            continue
+        kept.append(unit)
+    return kept

@@ -143,7 +143,6 @@ _ARCHIVED_STATUSES = frozenset({"archived", "archiviert"})
 _APPROVAL_TOOLS = frozenset({"apply_adaptive_replan"})
 
 # A plan write may override the blocking illness finding only on request.
-ILLNESS_ARGUMENT = "accept_plan_findings"
 ILLNESS_CODE = "illness_hard"
 
 _UMLAUTS = (("ä", "ae"), ("ö", "oe"), ("ü", "ue"))

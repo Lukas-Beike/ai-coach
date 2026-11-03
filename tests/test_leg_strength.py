@@ -370,5 +370,15 @@ class RunningWeekTests(unittest.TestCase):
         self.assertEqual([], leg_strength.frequency(planned, self.TODAY, False, old))
 
 
+class RunningWeekDedupTests(unittest.TestCase):
+    def test_leg_session_done_today_is_not_counted_twice(self) -> None:
+        today = date(2026, 11, 4)
+        completed = [done_legs("2026-11-02"), done_legs("2026-11-04")]
+        planned = [legs("today", "2026-11-04"), legs("later", "2026-11-06")]
+        self.assertEqual([], leg_strength.frequency(planned, today, False, completed))
+        week = leg_strength.planned_weeks(planned, today, completed)[0]
+        self.assertEqual(3, week["leg_sessions"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -206,7 +206,7 @@ def _done_strength(
 def planned_weeks(
     units: Sequence[Mapping[str, Any]],
     today: date,
-    completed: Sequence[Mapping[str, Any]] = (),
+    completed: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Strength counts per ISO week of all planned units, oldest first.
 
@@ -216,13 +216,15 @@ def planned_weeks(
     planned units.
     """
     current = running_week.week_start(today)
-    done = _done_strength(completed, today)
+    done = _done_strength(completed or (), today)
+    units = running_week.without_done_today(units, completed or (), today)
     return [
         {
             "week_start": monday.isoformat(),
-            "partial": monday < today and not (completed and monday == current),
+            "partial": monday < today
+            and not (completed is not None and monday == current),
             "basis": running_week.RUNNING_WEEK_BASIS
-            if completed and monday == current
+            if completed is not None and monday == current
             else "planned",
             **week_counts([*group, *(done if monday == current else [])]),
         }
@@ -417,7 +419,7 @@ def frequency(
 
     The running week counts its completed strength days with the planned ones.
     """
-    weeks = _by_week(units)
+    weeks = _by_week(running_week.without_done_today(units, completed, today))
     current = running_week.week_start(today)
     done = _done_strength(completed, today)
     drafts = [

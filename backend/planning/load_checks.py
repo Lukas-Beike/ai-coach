@@ -83,23 +83,16 @@ class PlannedSession:
     estimate: WorkoutEstimate
 
 
-def _sport_thresholds(
-    observations: Sequence[Any],
-    configurations: Sequence[ZoneConfiguration],
-    today: date,
-    sport: Sport,
-    environment: Environment = Environment.UNKNOWN,
-) -> AthleteThresholds:
-    return resolve_thresholds(observations, configurations, sport, environment, today)
-
-
 def _has_configuration(
     configurations: Sequence[ZoneConfiguration], today: date
 ) -> bool:
     return any(
-        effective_zone_configuration(configurations, metric, sport, day=today)
+        effective_zone_configuration(
+            configurations, metric, sport, indoor=indoor, day=today
+        )
         for sport in LOAD_SPORTS
         for metric in ZoneConfigurationMetric
+        for indoor in (False, True)
     )
 
 
@@ -123,11 +116,13 @@ def load_thresholds(
     observed = () if reason else inputs.zone_thresholds
     return LoadThresholds(
         {
-            sport: _sport_thresholds(observed, configurations, today, sport)
+            sport: resolve_thresholds(
+                observed, configurations, sport, Environment.UNKNOWN, today
+            )
             for sport in LOAD_SPORTS
         },
-        indoor_ride=_sport_thresholds(
-            observed, configurations, today, Sport.RIDE, Environment.INDOOR
+        indoor_ride=resolve_thresholds(
+            observed, configurations, Sport.RIDE, Environment.INDOOR, today
         ),
     )
 

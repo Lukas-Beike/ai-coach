@@ -248,5 +248,24 @@ class RunningWeekTests(unittest.TestCase):
         self.assertEqual(18000 + 3600, week_row["seconds"]["low"])
 
 
+class RunningWeekEdgeTests(unittest.TestCase):
+    TODAY = date(2026, 11, 4)
+
+    def test_second_planned_session_of_the_day_stays(self) -> None:
+        completed = [done("2026-11-04", "run", 45, "Z2")]
+        planned = [
+            unit("morning", "2026-11-04", "Run", "- 45m Z2\n"),
+            unit("evening", "2026-11-04", "Run", "- 30m Z2\n"),
+        ]
+        row = dist.planned_weeks(planned, estimate, self.TODAY, completed)[0]
+        self.assertEqual(["evening"], row["local_ids"])
+
+    def test_running_week_is_combined_even_without_completed_days(self) -> None:
+        planned = [unit("p1", "2026-11-05", "Ride", "- 60m Z2\n")]
+        row = dist.planned_weeks(planned, estimate, self.TODAY, [])[0]
+        self.assertFalse(row["partial"])
+        self.assertEqual("running week: completed + planned", row["basis"])
+
+
 if __name__ == "__main__":
     unittest.main()

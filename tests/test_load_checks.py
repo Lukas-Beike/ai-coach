@@ -477,5 +477,20 @@ class RiskTests(unittest.TestCase):
         self.assertEqual([], plan_checks.new_findings(after, before))
 
 
+class IndoorConfigurationTests(unittest.TestCase):
+    def test_indoor_only_local_configuration_keeps_thresholds_usable(self) -> None:
+        configuration = LocalThresholdPrecedenceTests.local(
+            ZoneConfigurationMetric.POWER,
+            threshold=280.0,
+            environment=Environment.INDOOR,
+        )
+        result = load_checks.load_thresholds(
+            inputs(datetime(2026, 9, 1, tzinfo=UTC)), TODAY, [configuration]
+        )
+        self.assertIsNone(result.unavailable)
+        indoor = result.for_sport(Sport.RIDE, Environment.INDOOR)
+        self.assertEqual(280.0, indoor.zones.ftp)
+
+
 if __name__ == "__main__":
     unittest.main()

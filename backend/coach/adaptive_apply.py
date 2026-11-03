@@ -14,10 +14,11 @@ from backend.coach.authorization import (
 from backend.db.manager import DatabaseManager
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
-from backend.planning.plan_guard_service import PlanGuardService
+from backend.planning.plan_guard_service import (
+    PLAN_FINDINGS_ARGUMENT,
+    PlanGuardService,
+)
 from backend.sync.adaptive import IllnessPauseSyncService
-
-PLAN_FINDINGS_ARGUMENT = "accept_plan_findings"
 
 
 class CoachAdaptiveApplyService:
