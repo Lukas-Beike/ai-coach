@@ -836,6 +836,9 @@ class CoachContextRuleTests(unittest.TestCase):
             selection.sections
             & {"planning_brief", "planning", "training_plans", "calendar"}
         )
+        days = [{"date": f"2026-11-0{day}"} for day in (3, 4, 5)]
+        projected = selection.project({"daily_planning_context": days}, "2026-11-03")
+        self.assertEqual(days[:2], projected["daily_planning_context"])
 
     def test_past_week_with_planning_verb_stays_weekly_planning(self):
         selection = select_coach_context("Plane meine letzte Woche neu", {})
