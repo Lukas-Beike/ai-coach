@@ -81,8 +81,28 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_eight(self) -> None:
-        self.assertEqual(8, MAPPER_VERSION)
+    def test_mapper_version_is_nine(self) -> None:
+        self.assertEqual(9, MAPPER_VERSION)
+
+    def test_strength_duration_is_the_whole_session_not_the_active_timer(
+        self,
+    ) -> None:
+        record, _ = _one(
+            activityType={"typeKey": "strength_training"},
+            duration=1260.0,
+            elapsedDuration=2700.0,
+        )
+
+        assert record is not None
+        self.assertEqual(2700.0, record.duration_s)
+        self.assertEqual(2700.0, record.elapsed_duration_s)
+
+    def test_other_sports_keep_duration_and_read_elapsed_duration(self) -> None:
+        record, _ = _one(duration=3600.0, elapsedDuration=3900.0)
+
+        assert record is not None
+        self.assertEqual(3600.0, record.duration_s)
+        self.assertEqual(3900.0, record.elapsed_duration_s)
 
     def test_fixture_maps_every_record_without_issues(self) -> None:
         result = _map(*_fixture_rows())
