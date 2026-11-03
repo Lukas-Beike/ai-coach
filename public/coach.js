@@ -1837,6 +1837,7 @@ function appendPlanNotes(node, planNotes) {
     fixed_session_missing: ["Feste Einheit fehlt oder liegt an einem anderen Tag", "Eigener Wochenplan"],
     rest_day_session: ["Einheit an einem Ruhetag", "Eigener Wochenplan"],
     outside_windows: ["Einheit außerhalb der Zeitfenster", "Eigener Wochenplan"],
+    no_free_window: ["Einheit passt nicht in die freie Zeit", "Eigener Wochenplan und Kalender"],
     over_max_minutes: ["Über der maximalen Tagesdauer", "Eigener Wochenplan"],
     leg_strength_frequency: ["Beinkraft pro Woche", "Rønnestad & Mujika 2014, Blagrove 2018; Schwellen praxisbasiert"],
     calendar_load: ["Kalender und Einheit", "Terminüberschneidung oder stark belegter Tag"],

@@ -107,6 +107,7 @@ _RULE_TEXT = {
     weekly_plan_checks.REST_DAY: "a unit on a rest day of the weekly plan.",
     weekly_plan_checks.OUTSIDE_WINDOWS: "a unit outside the time windows set by the athlete (built-in fallback windows never trigger it).",
     weekly_plan_checks.OVER_MAX: "planned minutes of a day above the weekly plan's maximum.",
+    weekly_plan_checks.NO_FREE_WINDOW: "a unit longer than the free minutes of the athlete's own windows after timed calendar events (fallback windows never trigger it).",
 }
 RULE_SUMMARY = {
     code: f"{'Blocks' if code in BLOCKING_CODES else 'Note'}: {text}"
@@ -475,7 +476,7 @@ def check_plan(
         *_drafted(leg_strength.frequency(units, today, expects_strength, completed)),
         *_missing_taper(units, completed, competitions, today),
         *_illness_hard(units, illness, today),
-        *_drafted(weekly_plan_checks.check(weekly_plan, units, today)),
+        *_drafted(weekly_plan_checks.check(weekly_plan, units, today, calendar_events)),
     ]
 
 
@@ -520,7 +521,10 @@ def _risk(finding: Mapping[str, Any]) -> tuple[Any, ...]:
         return (max(evidence["deviating_bands"].values()),)
     if finding["code"] == "calendar_load":
         return (bool(evidence.get("overlap")), evidence.get("busy_minutes") or 0)
-    if finding["code"] == weekly_plan_checks.OVER_MAX:
+    if finding["code"] in (
+        weekly_plan_checks.OVER_MAX,
+        weekly_plan_checks.NO_FREE_WINDOW,
+    ):
         return (evidence["planned_minutes"],)
     return ()
 

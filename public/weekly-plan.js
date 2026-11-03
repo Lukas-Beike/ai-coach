@@ -3,10 +3,13 @@
 const WEEKLY_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const WEEKLY_DAY_LABELS = { mon: "Mo", tue: "Di", wed: "Mi", thu: "Do", fri: "Fr", sat: "Sa", sun: "So" };
 const WEEKLY_SPORT_LABELS = { run: "Laufen", ride: "Rad", strength: "Kraft" };
-const WEEKLY_WORKDAY = ["00:00-06:00", "12:00-13:00", "15:30-24:00"];
-const WEEKLY_FALLBACK = { mon: WEEKLY_WORKDAY, tue: WEEKLY_WORKDAY, wed: WEEKLY_WORKDAY, thu: WEEKLY_WORKDAY, fri: ["14:00-24:00"], sat: ["00:00-24:00"], sun: ["00:00-24:00"] };
 const WEEKLY_MAX_ROWS = 4;
-const weeklyPlan = { model: { default: {}, days: {} }, open: new Set() };
+// `fallback` is the server's built-in hours per weekday; it stays empty until /api/profile delivers them.
+const weeklyPlan = { model: { default: {}, days: {} }, open: new Set(), fallback: {} };
+
+function weeklyFallback(day) {
+  return weeklyPlan.fallback[day] || [];
+}
 
 function weeklyRow(text) {
   const [start = "", end = ""] = String(text || "").split("-");
@@ -73,7 +76,7 @@ function weeklySerialize(model) {
   const days = {};
   for (const day of WEEKLY_DAYS) {
     const windows = weeklyWindows(model.default[day]);
-    if (windows.length && windows.join() !== WEEKLY_FALLBACK[day].join()) defaults[day] = windows;
+    if (windows.length && windows.join() !== weeklyFallback(day).join()) defaults[day] = windows;
     const payload = weeklyDayPayload(model.days[day]);
     if (Object.keys(payload).length) days[day] = payload;
   }
@@ -95,7 +98,7 @@ function weeklyEffective(day) {
   if (own.length) return { windows: own, source: "profile" };
   const standard = weeklyWindows(weeklyPlan.model.default[day]);
   if (standard.length) return { windows: standard, source: "default" };
-  return { windows: WEEKLY_FALLBACK[day], source: "fallback" };
+  return { windows: weeklyFallback(day), source: "fallback" };
 }
 
 function weeklySummary(day) {
@@ -230,7 +233,7 @@ function weeklyDefaultEditor(form, rerender) {
   const body = weeklyElement("div", "weekly-body");
   for (const day of WEEKLY_DAYS) {
     // The built-in hours are shown as editable rows but only stored once edited.
-    const rows = weeklyPlan.model.default[day].length ? weeklyPlan.model.default[day] : WEEKLY_FALLBACK[day].map(weeklyRow);
+    const rows = weeklyPlan.model.default[day].length ? weeklyPlan.model.default[day] : weeklyFallback(day).map(weeklyRow);
     const line = weeklyElement("div", "weekly-default-day");
     line.append(weeklyElement("strong", "", WEEKLY_DAY_LABELS[day]), weeklyWindowEditor(rows, `Standard ${WEEKLY_DAY_LABELS[day]}`, (structural) => {
       weeklyPlan.model.default[day] = rows;

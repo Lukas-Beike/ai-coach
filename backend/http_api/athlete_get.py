@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from backend.athlete import weekly_plan
 from backend.athlete.profile import ProfileService
 from backend.coach.context import CoachContextPreviewService
 from backend.http_api.auth import SessionAuthService
@@ -61,6 +62,7 @@ class AthleteGetRoutes:
             payload = {
                 "profile": self._profile_service().get(),
                 "competitions": self._competition_service().list(limit=100),
+                "weekly_fallback": weekly_plan.fallback_windows(),
             }
         elif path == "/api/feedback":
             payload = self._public_feedback_state_service().feedback_state()

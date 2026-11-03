@@ -1,7 +1,7 @@
 """Non-blocking notes against the athlete's structured weekly plan.
 
 Fixed sessions, rest days, explicit windows and the daily maximum come from the
-profile ``weekly_plan``. Windows of the built-in fallback never produce a note.
+profile ``weekly_plan``. Windows of the built-in fallback never produce a note, also not a free-time one.
 Drafts are ``(code, units, message, evidence)`` as in ``leg_strength``; a unit
 that only carries a ``date`` stands for a missing session. No I/O.
 """
@@ -16,6 +16,7 @@ from typing import Any, Final
 from backend.athlete import weekly_plan
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
+from backend.planning import free_time
 from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
@@ -23,7 +24,8 @@ FIXED_MISSING: Final = "fixed_session_missing"
 REST_DAY: Final = "rest_day_session"
 OUTSIDE_WINDOWS: Final = "outside_windows"
 OVER_MAX: Final = "over_max_minutes"
-CODES: Final = (FIXED_MISSING, REST_DAY, OUTSIDE_WINDOWS, OVER_MAX)
+NO_FREE_WINDOW: Final = "no_free_window"
+CODES: Final = (FIXED_MISSING, REST_DAY, OUTSIDE_WINDOWS, OVER_MAX, NO_FREE_WINDOW)
 MAX_SPAN_DAYS: Final = 120
 Draft = tuple[str, list[Mapping[str, Any]], str, dict[str, Any]]
 
@@ -183,11 +185,40 @@ def _unit_windows(
     return [] if effective.source == "fallback" else effective.windows
 
 
+def _free_notes(
+    effective: weekly_plan.EffectiveDay,
+    day: date,
+    day_units: Sequence[Mapping[str, Any]],
+    matched: Mapping[int, Mapping[str, Any]],
+    events: Sequence[Mapping[str, Any]],
+) -> list[Draft]:
+    """Units longer than the free time left in the day's explicit windows."""
+    if effective.source == "fallback":
+        return []
+    free = free_time.free_minutes(day, effective.windows, events)
+    return [
+        (
+            NO_FREE_WINDOW,
+            [unit],
+            "A unit does not fit the free time of the day's weekly-plan windows.",
+            {
+                "free_minutes": free,
+                "planned_minutes": round(_minutes(unit)),
+                "source": effective.source,
+            },
+        )
+        for unit in day_units
+        if round(_minutes(unit)) > free
+        and not (matched.get(id(unit)) or {}).get("window")
+    ]
+
+
 def _day_notes(
     week: Sequence[weekly_plan.EffectiveDay],
     day: date,
     day_units: Sequence[Mapping[str, Any]],
     matched: dict[int, Mapping[str, Any]],
+    events: Sequence[Mapping[str, Any]] = (),
 ) -> list[Draft]:
     effective = week[day.weekday()]
     if effective.rest_day:
@@ -204,6 +235,7 @@ def _day_notes(
         for unit in day_units
         if (note := _window_note(unit, _unit_windows(unit, effective, matched)))
     ]
+    drafts += _free_notes(effective, day, day_units, matched, events)
     total = round(sum(_minutes(unit) for unit in day_units))
     if effective.max_minutes is not None and total > effective.max_minutes:
         drafts.append(
@@ -217,7 +249,12 @@ def _day_notes(
     return drafts
 
 
-def check(plan: Any, units: Sequence[Mapping[str, Any]], today: date) -> list[Draft]:
+def check(
+    plan: Any,
+    units: Sequence[Mapping[str, Any]],
+    today: date,
+    events: Sequence[Mapping[str, Any]] = (),
+) -> list[Draft]:
     """Drafts for the future units; none when the weekly plan is empty."""
     if not str(plan or "").strip():
         return []
@@ -229,5 +266,5 @@ def check(plan: Any, units: Sequence[Mapping[str, Any]], today: date) -> list[Dr
     for text, day_units in sorted(by_day.items()):
         day = _date(text)
         if day is not None and day >= today:
-            drafts += _day_notes(week, day, day_units, matched)
+            drafts += _day_notes(week, day, day_units, matched, events)
     return drafts
