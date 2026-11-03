@@ -27,6 +27,7 @@ from backend.diagnostics.canonical_read import (
 )
 from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
+from backend.diagnostics.plan_sync import summarize_plan_sync
 from backend.observability import DiagnosticCapture, Redactor
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
@@ -210,6 +211,7 @@ class DiagnosticReportService:
                         deps.external_calendar_reader.list_events()
                     ),
                 },
+                "plan_sync": summarize_plan_sync(db, deps.redactor.redact_text),
                 "canonical_coverage": summarize_canonical_coverage(
                     deps.canonical_coverage, db
                 ),
