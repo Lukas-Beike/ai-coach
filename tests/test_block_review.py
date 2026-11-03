@@ -199,6 +199,30 @@ class BlockReviewTests(unittest.TestCase):
         self.assertEqual(10, len(notes))
         self.assertEqual("n12", notes[-1]["notes"])
 
+    def test_projected_origin_and_other_sports_are_kept(self):
+        plan = {
+            "training_calendar": [
+                {
+                    **_unit("2026-09-05", focus="long"),
+                    "session_focus": "long",
+                    "focus_origin": "derived",
+                },
+                _unit("2026-09-06", sport="swim"),
+            ]
+        }
+        rows = [_summary("w", "2026-09-06", sport="swim", moving_duration_s=1800)]
+        review = _service(rows, plan).block_review({}, "UTC")
+        self.assertEqual(1, review["key_sessions"]["derived_focus_units"])
+        other = review["volume"]["other"]
+        self.assertEqual(
+            (1, 1, 1800),
+            (
+                other["planned"],
+                other["completed_sessions"],
+                other["completed_duration_s"],
+            ),
+        )
+
     def test_invalid_period_is_rejected(self):
         with self.assertRaises(AppError):
             _service().block_review({"start": "2026-08-31", "days": 30}, "UTC")

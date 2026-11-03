@@ -75,34 +75,63 @@ def _week_sport(week: Mapping[str, Any], sport: str) -> Mapping[str, Any]:
     return (week.get("sports") or {}).get(sport) or {}
 
 
+def _volume_entry(
+    weeks: Sequence[Mapping[str, Any]], sport: str, rows: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    buckets = [_week_sport(week, sport) for week in weeks]
+    durations = [
+        value
+        for bucket in buckets
+        if (value := number((bucket.get("duration_s") or {}).get("value"))) is not None
+    ]
+    planned = [
+        value
+        for row in rows
+        if (value := number((row.get("compliance") or {}).get("planned_duration")))
+        is not None
+    ]
+    return {
+        **_counts(rows),
+        "planned_duration_s": round(sum(planned)) if planned else None,
+        "planned_duration_known": len(planned),
+        "completed_sessions": sum(int(b.get("sessions") or 0) for b in buckets),
+        "completed_duration_s": round(sum(durations)) if durations else None,
+    }
+
+
+def _other_volume(
+    entries: Mapping[str, Mapping[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
+    weeks: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Sports outside the progress buckets (for example swim): all minus the buckets."""
+    other = _volume_entry(
+        weeks, "all", [row for row in rows if row.get("sport") not in SPORT_BUCKETS]
+    )
+    allsports = _volume_entry(weeks, "all", [])
+    other["completed_sessions"] = allsports["completed_sessions"] - sum(
+        entry["completed_sessions"] for entry in entries.values()
+    )
+    known = allsports["completed_duration_s"]
+    other["completed_duration_s"] = (
+        None
+        if known is None
+        else known - sum(e["completed_duration_s"] or 0 for e in entries.values())
+    )
+    return other
+
+
 def _volume(
     progress: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]
 ) -> dict[str, Any]:
     weeks = progress.get("week_list", [])
-    result: dict[str, Any] = {}
-    for sport in SPORT_BUCKETS:
-        sport_rows = [row for row in rows if row.get("sport") == sport]
-        buckets = [_week_sport(week, sport) for week in weeks]
-        durations = [
-            value
-            for bucket in buckets
-            if (value := number((bucket.get("duration_s") or {}).get("value")))
-            is not None
-        ]
-        planned = [
-            value
-            for row in sport_rows
-            if (value := number((row.get("compliance") or {}).get("planned_duration")))
-            is not None
-        ]
-        result[sport] = {
-            **_counts(sport_rows),
-            "planned_duration_s": round(sum(planned)) if planned else None,
-            "planned_duration_known": len(planned),
-            "completed_sessions": sum(int(b.get("sessions") or 0) for b in buckets),
-            "completed_duration_s": round(sum(durations)) if durations else None,
-        }
-    return result
+    result = {
+        sport: _volume_entry(
+            weeks, sport, [row for row in rows if row.get("sport") == sport]
+        )
+        for sport in SPORT_BUCKETS
+    }
+    return {**result, "other": _other_volume(result, rows, weeks)}
 
 
 def _band_seconds(progress: Mapping[str, Any]) -> tuple[dict[str, float], int, int]:
@@ -152,14 +181,22 @@ def _on_weekday(row: Mapping[str, Any]) -> bool:
     return day.weekday() < 5
 
 
+def _focus_of(row: Mapping[str, Any]) -> tuple[Any, Any]:
+    """Focus and origin; a calendar row already carries its projected origin."""
+    if "focus_origin" in row:
+        return row.get("session_focus"), row.get("focus_origin")
+    focus = session_focus(row)
+    return focus.value, focus.origin
+
+
 def _key_sessions(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     by_focus: dict[str, list[Mapping[str, Any]]] = {}
     derived = 0
     for row in rows:
-        focus = session_focus(row)
-        if focus.value in KEY_FOCI:
-            by_focus.setdefault(focus.value, []).append(row)
-            derived += focus.origin == "derived"
+        value, origin = _focus_of(row)
+        if value in KEY_FOCI:
+            by_focus.setdefault(value, []).append(row)
+            derived += origin == "derived"
     long_weekday = [row for row in by_focus.get("long", []) if _on_weekday(row)]
     return {
         "by_focus": {focus: _counts(by_focus[focus]) for focus in sorted(by_focus)},
