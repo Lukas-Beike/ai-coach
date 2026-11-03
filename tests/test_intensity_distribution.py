@@ -79,7 +79,7 @@ class DistributionTests(unittest.TestCase):
 
     def test_unknown_intensity_is_uncovered_not_low(self) -> None:
         units = [
-            unit("a", "2026-11-03", "Run", "lockerer Lauf", duration_minutes=120),
+            unit("a", "2026-11-03", "Run", "Lauf", duration_minutes=120),
             unit("b", "2026-11-05", "Ride", "- 30m Z2\n"),
         ]
         result = self.weeks(units)[0]
@@ -265,6 +265,150 @@ class RunningWeekEdgeTests(unittest.TestCase):
         row = dist.planned_weeks(planned, estimate, self.TODAY, [])[0]
         self.assertFalse(row["partial"])
         self.assertEqual("running week: completed + planned", row["basis"])
+
+
+class UnitFallbackTests(unittest.TestCase):
+    def weeks(self, units: list[dict]) -> dict:
+        return dist.planned_weeks(units, estimate, TODAY)[0]
+
+    def test_intensity_only_unit_maps_by_zone_mapping(self) -> None:
+        for factor, band in (
+            (0.6, "low"),
+            (0.75, "low"),
+            (0.9, "moderate"),
+            (1.2, "high"),
+        ):
+            result = self.weeks(
+                [
+                    unit(
+                        "a",
+                        "2026-11-03",
+                        "Run",
+                        "",
+                        planned_intensity=factor,
+                        duration_minutes=60,
+                    )
+                ]
+            )
+            self.assertEqual(3600, result["seconds"][band], band)
+            self.assertEqual({"planned_intensity": 3600}, result["basis_seconds"])
+            self.assertFalse(result["approximate"])
+            self.assertEqual(0, result["uncovered_s"])
+
+    def test_percent_intensity_is_divided(self) -> None:
+        result = self.weeks(
+            [
+                unit(
+                    "a",
+                    "2026-11-03",
+                    "Ride",
+                    "",
+                    planned_intensity=95,
+                    duration_minutes=30,
+                )
+            ]
+        )
+        self.assertEqual(1800, result["seconds"]["moderate"])
+
+    def test_focus_only_unit_is_approximate(self) -> None:
+        for focus, band in (
+            ("easy", "low"),
+            ("long", "low"),
+            ("sweet_spot", "moderate"),
+            ("race", "high"),
+        ):
+            result = self.weeks(
+                [
+                    unit(
+                        "a",
+                        "2026-11-03",
+                        "Ride",
+                        "",
+                        session_focus=focus,
+                        duration_minutes=45,
+                    )
+                ]
+            )
+            self.assertEqual(2700, result["seconds"][band], focus)
+            self.assertEqual({"session_focus": 2700}, result["basis_seconds"])
+            self.assertTrue(result["approximate"])
+
+    def test_intensity_wins_over_focus(self) -> None:
+        result = self.weeks(
+            [
+                unit(
+                    "a",
+                    "2026-11-03",
+                    "Run",
+                    "",
+                    planned_intensity=0.6,
+                    session_focus="race",
+                    duration_minutes=60,
+                )
+            ]
+        )
+        self.assertEqual(3600, result["seconds"]["low"])
+
+    def test_steps_win_over_intensity_and_focus(self) -> None:
+        result = self.weeks(
+            [
+                unit(
+                    "a",
+                    "2026-11-03",
+                    "Ride",
+                    "- 60m Z2\n",
+                    planned_intensity=1.2,
+                    session_focus="race",
+                )
+            ]
+        )
+        self.assertEqual(3600, result["seconds"]["low"])
+        self.assertEqual({"steps": 3600}, result["basis_seconds"])
+
+    def test_no_intensity_focus_or_duration_stays_uncovered(self) -> None:
+        result = self.weeks(
+            [unit("a", "2026-11-03", "Run", "Lauf", duration_minutes=40)]
+        )
+        self.assertEqual(2400, result["uncovered_s"])
+        self.assertEqual({}, result["basis_seconds"])
+        self.assertIsNone(result["shares"])
+        none = self.weeks([unit("a", "2026-11-03", "Run", "", session_focus="easy")])
+        self.assertEqual(0, sum(none["seconds"].values()))
+
+    def test_focus_never_gives_a_load_number(self) -> None:
+        planned = unit(
+            "a", "2026-11-03", "Run", "", session_focus="race", duration_minutes=60
+        )
+        self.assertIsNone(estimate(planned).load)
+        self.assertIsNone(estimate(planned).band_seconds)
+
+    def test_strength_takes_no_part(self) -> None:
+        result = dist.planned_weeks(
+            [
+                unit(
+                    "a",
+                    "2026-11-03",
+                    "WeightTraining",
+                    "",
+                    session_focus="legs",
+                    duration_minutes=45,
+                )
+            ],
+            estimate,
+            TODAY,
+        )
+        self.assertEqual([], result)
+
+    def test_hard_detection_uses_numeric_intensity_and_focus(self) -> None:
+        for extra, hard in (
+            ({"planned_intensity": 1.1}, True),
+            ({"planned_intensity": 0.6}, False),
+            ({"session_focus": "vo2max"}, True),
+            ({"session_focus": "easy"}, False),
+        ):
+            self.assertEqual(
+                hard, plan_checks.is_hard(unit("a", "2026-11-03", "Run", "", **extra))
+            )
 
 
 if __name__ == "__main__":

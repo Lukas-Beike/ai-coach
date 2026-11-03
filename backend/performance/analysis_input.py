@@ -31,6 +31,8 @@ _STREAM_KEYS: tuple[tuple[StreamChannel, str], ...] = (
     (StreamChannel.HEART_RATE_BPM, "heartrate"),
     (StreamChannel.SPEED_MPS, "velocity_smooth"),
     (StreamChannel.DISTANCE_M, "distance"),
+    (StreamChannel.ALTITUDE_M, "altitude"),
+    (StreamChannel.GRADE_PCT, "grade_smooth"),
     (StreamChannel.MOVING, "moving"),
 )
 

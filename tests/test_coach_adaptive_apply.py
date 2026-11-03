@@ -204,7 +204,8 @@ class AdaptiveApplyPlanGuardTests(unittest.TestCase):
         result = self.apply()
         self.assertEqual(1, self.stored())
         self.assertEqual(
-            ["back_to_back_hard"], [n["code"] for n in result["plan_check_notes"]]
+            ["back_to_back_hard", "intensity_distribution"],
+            sorted(n["code"] for n in result["plan_check_notes"]),
         )
         self.sync.complete.assert_called_once()
 
