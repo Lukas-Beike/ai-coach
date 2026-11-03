@@ -212,3 +212,16 @@ test("current performance shows the status lines below its heading", () => {
   renderCurrentPerformance({}, undefined);
   assert.equal(root.children.filter((node) => node.text === "Daten werden vorbereitet").length, 0);
 });
+
+test("weekly daily-activity mean averages known days and keeps empty weeks as gaps", () => {
+  const { analysisValidPoint, analysisWeeklyMeanPoints } = loadFunctions("analysis.js", ["analysisValidPoint", "analysisWeeklyMeanPoints"], {
+    addDateKey: (date, days) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10),
+  });
+  const points = [
+    { date: "2026-10-05", value: 1000 }, { date: "2026-10-06", value: 0 }, { date: "2026-10-07", value: null },
+    { date: "2026-10-12", value: null },
+  ];
+  const weeks = analysisWeeklyMeanPoints(points, "2026-10-05", "2026-10-18");
+  assert.equal(analysisValidPoint(weeks[0]) && weeks[0].value, 500, "unknown days are not zero, a real zero counts");
+  assert.equal(weeks[1].value, null);
+});
