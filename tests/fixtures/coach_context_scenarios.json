@@ -86,7 +86,7 @@
      "needs": [{"label": "weather+6d", "sections": ["weather", "daily_planning_context"], "min_horizon_days": 6, "min_activities": null}],
      "retain_pending_request": null},
     {"id": "F4", "category": "follow_up", "message": "Warum?", "dialogue": {}, "attachments": false,
-     "needs": [{"label": "recovery", "sections": ["recovery", "daily_planning_context"], "min_horizon_days": null, "min_activities": null}],
+     "needs": [{"label": "baseline", "sections": ["durable_profile"], "min_horizon_days": null, "min_activities": null}],
      "retain_pending_request": null},
     {"id": "F5", "category": "follow_up", "message": "die zweite", "dialogue": {"pending_request": {"status": "needs_clarification", "domain": "training", "question": "Welche Einheit?", "summary": "Einheit verschieben"}}, "attachments": false,
      "needs": [{"label": "plans", "sections": ["planning", "training_plans"], "min_horizon_days": null, "min_activities": null}],

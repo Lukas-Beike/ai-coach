@@ -55,18 +55,22 @@ The system SHALL bound per-section and total Coach context, retain valid structu
 - **WHEN** the app supplies default full training context
 - **THEN** recent activities, planned events, local planned units and library templates are bounded and the projection exposes the applicable limits.
 
+#### Scenario: Context sized per task
+- **WHEN** a Coach turn is built for an analysis, review, planning, morning check-in, typed planning, general or nutrition request
+- **THEN** only the sections that task needs are included, within a deterministic character budget per kind, and the request diagnostics record the selection name, request kind and the characters of each present section so live sizes can be compared.
+
 #### Scenario: Canonical data is not yet available
 - **WHEN** the first canonical backfill is pending or failed and a scoped Coach context is built
 - **THEN** the context marks the unavailable canonical activity and provider data, preserves that marker through selection, and identifies local plans as still available.
 
-Evidence: `backend/coach/context.py:bounded_coach_context_sections`, `backend/coach/context.py:coach_context_projection_meta`, `backend/coach/context.py:CoachTrainingContextService.build`; `tests/test_coach_training_context.py:test_section_and_total_truncation_keep_valid_bounded_context`; `tests/test_coach_context_reduction.py:test_oversized_single_section_retains_useful_prefix`, `tests/test_coach_context_reduction.py:test_pending_data_marker_survives_scoped_planning_projection`; `tests/test_coach_context_selection.py:test_date_window_and_activity_limits_preserve_provenance`.
+Evidence: `backend/coach/context.py:bounded_coach_context_sections`, `backend/coach/context.py:coach_context_projection_meta`, `backend/coach/context.py:CoachTrainingContextService.build`; `tests/test_coach_training_context.py:test_section_and_total_truncation_keep_valid_bounded_context`; `tests/test_coach_context_reduction.py:test_oversized_single_section_retains_useful_prefix`, `tests/test_coach_context_reduction.py:test_pending_data_marker_survives_scoped_planning_projection`; `tests/test_coach_context_selection.py:test_date_window_and_activity_limits_preserve_provenance`; `tests/test_coach_context_budget.py:CoachContextBudgetTests.test_sections_and_budget_per_kind`, `tests/test_coach_context_budget.py:CoachContextBudgetTests.test_size_diagnostics_name_the_selection_and_sections_for_every_kind`.
 
 ### Requirement: CP4 On-demand omitted context
 The system SHALL support read-only loading of named local Coach context sections, report whether the bounded result is complete, and reject invalid section requests.
 
 #### Scenario: Load omitted recovery or planning
 - **WHEN** the Coach calls `read_coach_context` for valid omitted sections
-- **THEN** the system reads those sections locally and returns requested-section and completeness metadata while retaining the turn's offered tool availability without refreshing providers or authorizing mutations.
+- **THEN** every section a task leaves out, including `daily_planning_context`, `calendar` and `training_plans`, is loadable this way: the system reads those sections locally and returns requested-section and completeness metadata while retaining the turn's offered tool availability without refreshing providers or authorizing mutations.
 
 #### Scenario: Result exceeds detail budget
 - **WHEN** the requested sections exceed the 40000-character result budget

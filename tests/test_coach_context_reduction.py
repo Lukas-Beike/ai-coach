@@ -45,7 +45,7 @@ class CoachContextReductionTests(unittest.TestCase):
     def test_scoped_assembly_skips_unnecessary_reads(self):
         fixture = context_tests.CoachStructuredContextServiceTests()
         fixture.setUp()
-        selection = select_coach_context("How is recovery?", {})
+        selection = select_coach_context("Was trainiere ich heute?", {})
         result = fixture.service.build(selection=selection)
         self.assertEqual(set(result), selection.sections)
         fixture.garmin_projection_service.coach_context.assert_not_called()
@@ -277,7 +277,7 @@ class CoachContextReductionTests(unittest.TestCase):
         full_size = len(service.build())
         library.reset_mock()
         result = service.build(
-            selection=select_coach_context("How is recovery?", {}),
+            selection=select_coach_context("Was trainiere ich heute?", {}),
             local_date="2026-09-30",
         )
         marker = "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"

@@ -357,7 +357,7 @@ class CoachStructuredToolRoundService:
             allow_mutations=state.allow_mutations,
             attachment_summary=LOCAL_ATTACHMENT_SUMMARY_NOTICE
             in state.model_instructions,
-            request_kind=state.request_kind,
+            request_kind=selection.kind,
             nutrition="nutrition_products" in selection.sections,
         )
 
