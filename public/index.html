@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=352">
+  <link rel="stylesheet" href="/styles.css?v=354">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -85,13 +85,14 @@
               <button type="button" role="menuitem" data-request-kind="adjust_week" data-message="Vergleiche in meiner aktuellen Woche Plan und Ist und passe die restlichen Tage an, falls nötig.">Woche anpassen</button>
             </div>
           </div>
+          <div id="composerPlusMenu" class="quick-action-menu" popover="auto" role="menu" aria-label="Aktionen"><button type="button" role="menuitem" id="attachFileMenuItem">Datei anhängen</button></div>
           <div id="chatQueueStatus" class="chat-queue-status" hidden aria-live="polite"></div>
           <div id="chatAttachments" class="chat-attachments" hidden aria-live="polite"></div>
           <label for="attachmentInput" class="sr-only">GPX- oder FIT-Dateien oder Bilder auswählen</label>
           <input id="attachmentInput" type="file" accept=".gpx,.fit,.png,.jpg,.jpeg,.webp" multiple hidden aria-label="GPX- oder FIT-Dateien oder Bilder auswählen">
           <textarea id="messageInput" rows="1" maxlength="12000" placeholder="Frage deinen Coach…" aria-label="Nachricht an deinen Coach"></textarea>
           <div class="composer-actions">
-            <button type="button" id="attachmentButton" class="secondary-button attachment-button" aria-label="GPX- oder FIT-Dateien oder Bilder anhängen" title="Datei anhängen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+            <button type="button" id="attachmentButton" class="secondary-button attachment-button" aria-label="Aktionen und Anhänge" title="Aktionen" aria-haspopup="menu" aria-expanded="false" aria-controls="composerPlusMenu" popovertarget="composerPlusMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
             <button type="button" id="voiceButton" class="voice-button" aria-label="Spracheingabe starten" title="Spracheingabe starten"><svg class="nav-icon" aria-hidden="true"><use href="#icon-microphone"></use></svg></button>
             <button type="button" id="steerButton" class="secondary-button steer-button" aria-label="Als Nächstes senden" aria-describedby="steerButtonHint" title="Als Nächstes senden" hidden>Als Nächstes</button>
             <span id="steerButtonHint" class="sr-only"></span>
@@ -600,14 +601,14 @@
   <script src="/plan-views.js?v=23" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=48" defer></script>
+  <script src="/coach.js?v=50" defer></script>
   <script src="/shared.js?v=20" defer></script>
   <script src="/auth.js?v=13" defer></script>
   <script src="/sync-status.js?v=14" defer></script>
   <script src="/view-refresh.js?v=3" defer></script>
   <script src="/notifications.js?v=5" defer></script>
   <script src="/nutrition.js?v=47" defer></script>
-  <script src="/analysis.js?v=145" defer></script>
+  <script src="/analysis.js?v=147" defer></script>
   <script src="/activity-details.js?v=21" defer></script>
   <script src="/activity-analysis.js?v=6" defer></script>
   <script src="/performance-view.js?v=29" defer></script>

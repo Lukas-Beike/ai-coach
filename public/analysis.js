@@ -743,6 +743,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     loadMissing.push("Trainingszeit");
   }
   appendSessionRpeLoadChart(history.session_rpe_load, loadRoot, loadMissing, start, end);
+  appendSmoothedLoadChart(history.smoothed_session_load, history.session_rpe_load, loadRoot, loadMissing, start, end);
   appendDailyActivityGroup(history.daily_activity, loadRoot, loadMissing, start, end);
   const loadMissingNote = analysisMissingDataNote(loadMissing);
   if (loadMissingNote) loadRoot.append(loadMissingNote);
@@ -801,17 +802,21 @@ function renderAnalysisHistory(history) { // NOSONAR
   for (const target of [root, loadRoot, enduranceRoot]) target.querySelectorAll("details:not([data-analysis-section])").forEach((details) => { details.open = openDetails.has(`${details.closest("section")?.querySelector("h3,h4")?.textContent}:${details.querySelector("summary")?.textContent}`); });
 }
 
+function sessionRpeSourceLabel(days, rated) {
+  const provider = days.reduce((sum, day) => sum + day.rpe_sources.provider, 0);
+  const providerLabel = coachProviderLabel(providerIds().intervals);
+  if (!rated) return "Athletenfeedback";
+  if (provider === rated) return providerLabel;
+  return provider ? `Athletenfeedback + ${providerLabel}` : "Athletenfeedback";
+}
+
 // Session-RPE load (AU) stays its own chart: it is never added to or compared with provider load.
 function appendSessionRpeLoadChart(report, loadRoot, loadMissing, start, end) {
   const days = (report?.days || []).filter((day) => day.date >= start && day.date <= end);
   const rated = days.reduce((sum, day) => sum + day.rated_sessions, 0);
   if (!rated) { loadMissing.push("Session-RPE-Last"); return; }
   const total = days.reduce((sum, day) => sum + day.total_sessions, 0);
-  const provider = days.reduce((sum, day) => sum + day.rpe_sources.provider, 0);
-  const providerLabel = coachProviderLabel(providerIds().intervals);
-  let source = "Athletenfeedback";
-  if (provider === rated) source = providerLabel;
-  else if (provider) source = `Athletenfeedback + ${providerLabel}`;
+  const source = sessionRpeSourceLabel(days, rated);
   const weekly = analysisHistoryPeriod === "twelveWeeks";
   const points = days.map((day) => ({ date: day.date, value: day.value }));
   const series = [{ label: weekly ? "Session-RPE-Last pro Woche" : "Session-RPE-Last pro Tag", legendLabel: "Session-RPE-Last", source, unit: "AU", color: 2, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, points: weekly ? analysisWeeklySumPoints(points, start, end) : points }];
@@ -819,6 +824,22 @@ function appendSessionRpeLoadChart(report, loadRoot, loadMissing, start, end) {
   if (!chart) { loadMissing.push("Session-RPE-Last"); return; }
   chart.querySelector(".analysis-chart-legend")?.remove();
   loadRoot.append(chart);
+}
+
+// Smoothed session-RPE load: own AU curves, never compared with provider load; gaps stay gaps.
+function appendSmoothedLoadChart(report, rpeReport, loadRoot, loadMissing, start, end) {
+  const days = (report?.days || []).filter((day) => day.date >= start && day.date <= end);
+  if (!days.some((day) => day.short != null || day.long != null)) { loadMissing.push("Kurz-/Langzeitbelastung"); return; }
+  const weekly = analysisHistoryPeriod === "twelveWeeks";
+  const rpeDays = (rpeReport?.days || []).filter((day) => day.date >= start && day.date <= end);
+  const source = sessionRpeSourceLabel(rpeDays, rpeDays.reduce((sum, day) => sum + day.rated_sessions, 0));
+  const series = [["short", "Kurzzeitbelastung", 2], ["long", "Langzeitbelastung", 5]].map(([key, label, color]) => {
+    const points = days.map((day) => ({ date: day.date, value: day[key] }));
+    return { label, legendLabel: label, source, unit: "AU", color, connected: true, cadenceDays: weekly ? 7 : 1,
+      points: weekly ? analysisWeeklyLastPoints(points, start, end) : points, currentPoint: points.findLast(analysisValidPoint) };
+  });
+  const chart = collectAnalysisChart(loadMissing, "Kurz-/Langzeitbelastung", series, "AU", start, end, "", { calendarWeeks: weekly });
+  if (chart) loadRoot.append(chart);
 }
 
 function appendDailyActivityGroup(activity, loadRoot, loadMissing, start, end) {
