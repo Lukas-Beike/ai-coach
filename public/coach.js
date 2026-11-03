@@ -615,9 +615,19 @@ function quickMenuTarget(items, current, key) {
   return (current + step + items.length) % items.length;
 }
 
-function setupQuickActionMenu() {
-  const button = $("#quickAnalysisButton");
-  const menu = $("#quickAnalysisMenu");
+// The composer "+" menu lists the file picker plus clones of the quick bar actions.
+function buildComposerPlusMenu() {
+  const menu = $("#composerPlusMenu");
+  const source = $("#quickAnalysisMenu");
+  const morning = $("#quickMorningCheckinButton");
+  if (!menu || !source || !morning) return;
+  const copy = (node) => { const clone = node.cloneNode(true); clone.removeAttribute("id"); return clone; };
+  const morningItem = copy(morning);
+  morningItem.setAttribute("role", "menuitem");
+  menu.append(morningItem, ...[...source.children].map(copy));
+}
+
+function setupQuickActionMenu(button = $("#quickAnalysisButton"), menu = $("#quickAnalysisMenu")) {
   if (!button || !menu) return;
   const items = () => [...menu.querySelectorAll("[role=menuitem]")];
   menu.addEventListener("toggle", (event) => {
@@ -1009,8 +1019,7 @@ async function toggleVoiceInput() {
 
 function renderCoachOverview(data) {
   const actions = data.coach_quick_actions || {};
-  const quickMorning = $("#quickMorningCheckinButton");
-  if (quickMorning) quickMorning.hidden = actions.morning_checkin === false;
+  for (const item of document.querySelectorAll("[data-request-kind=morning_checkin]")) item.hidden = actions.morning_checkin === false;
 }
 
 function renderCoachReceipts() {
@@ -2421,7 +2430,11 @@ function resizeChatInput(input) {
 function setupCoachEvents() {
   publishComposerHeight();
   $("#messageInput").setAttribute("enterkeyhint", hasTouchFirstInput() ? "enter" : "send");
-  $("#attachmentButton").addEventListener("click", () => $("#attachmentInput").click());
+  buildComposerPlusMenu();
+  $("#attachFileMenuItem").addEventListener("click", () => {
+    $("#composerPlusMenu").hidePopover();
+    $("#attachmentInput").click();
+  });
 
   $("#attachmentInput").addEventListener("change", async (event) => {
     const files = [...event.target.files]; event.target.value = "";
@@ -2442,19 +2455,23 @@ function setupCoachEvents() {
   $("#steerButton").addEventListener("click", steerCurrentChat);
   $("#cancelChatButton").addEventListener("click", cancelChat);
 
-  $("#quickMessageTemplates").addEventListener("click", (event) => {
+  const startQuickAction = (event) => {
     const button = event.target.closest("button[data-message]");
-    if (!button || state.busy) return;
-    const menu = button.closest("#quickAnalysisMenu");
+    if (!button) return;
+    const menu = button.closest("[popover]");
     if (menu?.matches(":popover-open")) menu.hidePopover();
+    if (state.busy) return;
     const input = $("#messageInput");
     input.value = button.dataset.message || "";
     if (button.dataset.requestKind) input.dataset.requestKind = button.dataset.requestKind;
     else delete input.dataset.requestKind;
     input.dispatchEvent(new Event("input"));
     $("#chatForm").requestSubmit();
-  });
+  };
+  $("#quickMessageTemplates").addEventListener("click", startQuickAction);
+  $("#composerPlusMenu").addEventListener("click", startQuickAction);
   setupQuickActionMenu();
+  setupQuickActionMenu($("#attachmentButton"), $("#composerPlusMenu"));
   $("#voiceButton").addEventListener("click", toggleVoiceInput);
   $("#chatJumpToComposer").addEventListener("click", () => {
     jumpToLatestMessages();
