@@ -127,7 +127,7 @@ class SmoothedLoadTests(unittest.TestCase):
         sessions = [session(0)]
         end = FIRST + timedelta(days=20)
         result = smoothed_session_load(
-            sessions,  # type: ignore[arg-type]
+            sessions,
             rated(0),
             start=FIRST,
             end=end,
@@ -155,8 +155,9 @@ class SmoothedLoadTests(unittest.TestCase):
         start = today - timedelta(days=83)
         origin = history_start(start, today)
         offsets = range((origin - FIRST).days + 3, 401)
+        sessions: Any = [session(o) for o in offsets]
         result = smoothed_session_load(
-            [session(o) for o in offsets],  # type: ignore[arg-type]
+            sessions,
             rated(*offsets),
             start=start,
             end=today,
