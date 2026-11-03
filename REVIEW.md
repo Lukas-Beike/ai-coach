@@ -187,5 +187,9 @@ flow rather than demanding unrelated changes or a repository-wide redesign.
   unresolved or newly verified Important problems within the PR scope. Do not
   repeat fixed findings, treat old checks as current, or reopen settled cosmetic
   discussions.
+- Treat decisions already recorded as waivers, user decisions, or resolved
+  threads as settled. If a current finding contradicts an earlier round, state
+  the contradiction and cite the earlier decision rather than re-raising the
+  settled point as a new finding.
 
 Reference: [Claude Code review customization](https://code.claude.com/docs/en/code-review#customize-reviews).
