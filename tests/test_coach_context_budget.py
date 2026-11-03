@@ -279,10 +279,7 @@ EXPECTED: dict[str, tuple[set[str], int]] = {
     "plan_week": (PLAN, 49_500),
     "plan_block": (PLAN, 63_500),
     "adjust_week": (PLAN, 45_500),
-    "morning_checkin": (
-        COMMON | {"daily_planning_context", "planning", "recovery", "training_plans"},
-        43_500,
-    ),
+    "morning_checkin": (COMMON | {"daily_planning_context", "recovery"}, 26_000),
     "free_text_planning": (PLAN, 49_500),
     "general_question": (COMMON | {"recovery"}, 25_000),
     "nutrition_message": (COMMON | {"nutrition_products"}, 25_000),
@@ -400,7 +397,8 @@ class CoachContextBudgetTests(unittest.TestCase):
         selection = select_coach_context(
             "Plane meine nächste Woche", {}, request_kind="morning_checkin"
         )
-        self.assertIsNone(selection.kind)
+        self.assertEqual("morning_checkin", selection.kind)
+        self.assertNotIn("planning_brief", selection.sections)
 
     def test_daily_context_rides_only_on_planning_morning_and_today_turns(
         self,

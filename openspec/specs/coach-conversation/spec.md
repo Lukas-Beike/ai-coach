@@ -172,7 +172,7 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 
 #### Scenario: Kind-specific context
 - **WHEN** a turn carries one of the analysis or planning kinds
-- **THEN** its context sections come from the kind rather than the message wording, while dialogue and pending-request retention still follow the message as for an ordinary turn. The day-by-day `daily_planning_context` is part of the planning kinds, `morning_checkin` and today-training questions only; the planning kinds carry calendar events once, as `external_calendar` with markers and the omitted count; `progress_review` and `block_review` carry no future planned units, and `progress_review` no `training_plans`. Every omitted section stays loadable through `read_coach_context`.
+- **THEN** its context sections come from the kind rather than the message wording, while dialogue and pending-request retention still follow the message as for an ordinary turn. The day-by-day `daily_planning_context` is part of the planning kinds, `morning_checkin` and today-training questions only; the planning kinds carry calendar events once, as `external_calendar` with markers and the omitted count; `morning_checkin` carries the base sections, the day view and recovery for today and tomorrow, without plans, brief or calendars; `progress_review` and `block_review` carry no future planned units, and `progress_review` no `training_plans`. Every omitted section stays loadable through `read_coach_context`.
 
 #### Scenario: Typed planning request
 - **WHEN** the athlete types a planning action with a week or block (for example "Plane meine nächste Woche", "Plane die nächsten 4 Wochen", "Passe die Woche an")

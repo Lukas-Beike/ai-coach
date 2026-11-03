@@ -153,7 +153,8 @@ PROFILE_KEYWORDS = (
     ),
     (
         "weekly_planning",
-        r"plan|woche|week|kalender|calendar|schedule|bibliothek|library|template|vorlage",
+        # "geplante Einheit" names an existing unit, not a request to plan.
+        r"(?<!ge)plan|woche|week|kalender|calendar|schedule|bibliothek|library|template|vorlage",
     ),
     ("competition_preparation", r"wettkampf|rennen|race|competition|marathon"),
     (
@@ -380,6 +381,11 @@ REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
         0,
         5,
         False,
+    ),
+    # The check-in judges today and tomorrow from the day view, which already holds
+    # today's calendar events; plans, brief and calendars stay requestable.
+    "morning_checkin": CoachContextSelection(
+        "morning_checkin", DAILY_SECTIONS | {"recovery"}, 1, 5, False
     ),
     "plan_week": CoachContextSelection("plan_week", _PLAN_SECTIONS, 14, 5, True),
     "plan_block": CoachContextSelection("plan_block", _PLAN_SECTIONS, 35, 5, True),
