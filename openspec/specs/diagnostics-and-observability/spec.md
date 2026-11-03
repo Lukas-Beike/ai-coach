@@ -65,7 +65,7 @@ The diagnostic report SHALL compose local configuration flags, provider/job stat
 
 #### Scenario: Plan-sync outcomes
 - **WHEN** the report is generated
-- **THEN** it lists the recent Intervals.icu plan-push jobs with their unsettled items and the unsynced planned units (upcoming first, with their total count), with redacted error text and no workout content
+- **THEN** it lists the recent Intervals.icu plan-push jobs with their unsettled items and the unsynced planned units (upcoming first, with their total count), with error classes only and no provider error text or workout content
 
 Evidence: `backend/diagnostics/report.py::DiagnosticReportService.report`; `backend/diagnostics/plan_sync.py::summarize_plan_sync`; `tests/test_diagnostic_plan_sync.py`; `backend/diagnostics/canonical_counts.py`; `backend/diagnostics/canonical_coverage.py`; `backend/runtime/memory.py::process_memory`. Tests: `tests/test_diagnostic_report.py::test_report_shape_counts_redaction_and_privacy`; `tests/test_diagnostic_report.py::test_database_counts_and_kv_reads_share_one_read_snapshot`; `tests/test_diagnostic_report.py::test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload`.
 

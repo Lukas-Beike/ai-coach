@@ -211,7 +211,7 @@ class DiagnosticReportService:
                         deps.external_calendar_reader.list_events()
                     ),
                 },
-                "plan_sync": summarize_plan_sync(db, deps.redactor.redact_text),
+                "plan_sync": summarize_plan_sync(db),
                 "canonical_coverage": summarize_canonical_coverage(
                     deps.canonical_coverage, db
                 ),

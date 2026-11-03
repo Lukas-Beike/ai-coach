@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from backend.providers.descriptors import INTERVALS_ID
@@ -10,14 +9,10 @@ from backend.sync.jobs import job_dto, read_job
 
 _JOB_LIMIT = 10
 _UNIT_LIMIT = 50
-_ERROR_LIMIT = 300
 
 
-def summarize_plan_sync(db: Any, redact: Callable[[str], str]) -> dict[str, Any]:
-    """Report recent plan_push outcomes and every unit still waiting or failing."""
-
-    def clean(value: Any) -> str | None:
-        return redact(str(value))[:_ERROR_LIMIT] if value else None
+def summarize_plan_sync(db: Any) -> dict[str, Any]:
+    """Report plan_push outcomes by status and error class, never provider error text."""
 
     job_rows = db.execute(
         "SELECT id FROM sync_jobs WHERE provider=? AND type='plan_push' "
@@ -50,7 +45,6 @@ def summarize_plan_sync(db: Any, redact: Callable[[str], str]) -> dict[str, Any]
                     {
                         "status": item["status"],
                         "error_class": item["error_class"],
-                        "error_detail": clean(item["error_detail"]),
                     }
                     for item in job["items"]
                     if item["status"] not in {"completed", "skipped"}
@@ -64,7 +58,7 @@ def summarize_plan_sync(db: Any, redact: Callable[[str], str]) -> dict[str, Any]
                 "local_id": unit["local_id"],
                 "date": unit["date"],
                 "sync_state": unit["sync_state"],
-                "sync_error": clean(unit["sync_error"]),
+                "has_error": bool(unit["sync_error"]),
             }
             for unit in units
         ],

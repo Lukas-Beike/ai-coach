@@ -10,7 +10,7 @@ from backend.diagnostics.plan_sync import summarize_plan_sync
 
 
 class PlanSyncDiagnosticsTests(unittest.TestCase):
-    def test_reports_failed_items_and_unsynced_units_redacted(self):
+    def test_reports_failed_items_and_unsynced_units_without_error_text(self):
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
         db.executescript(
@@ -43,11 +43,14 @@ class PlanSyncDiagnosticsTests(unittest.TestCase):
             (json.dumps({"date": "2026-11-11"}),),
         )
 
-        report = summarize_plan_sync(db, lambda text: text.replace("secret-token", "X"))
+        report = summarize_plan_sync(db)
 
         job = report["recent_jobs"][0]
         self.assertEqual((job["status"], job["entries"]), ("failed", 2))
-        self.assertEqual(job["items"][0]["error_detail"], "X boom")
+        self.assertEqual(
+            job["items"], [{"status": "failed", "error_class": "conflict"}]
+        )
+        self.assertNotIn("secret-token", json.dumps(report))
         self.assertEqual(report["unsynced_total"], 1)
         self.assertEqual(
             report["unsynced_units"],
@@ -56,7 +59,7 @@ class PlanSyncDiagnosticsTests(unittest.TestCase):
                     "local_id": "u1",
                     "date": "2026-11-10",
                     "sync_state": "sync_error",
-                    "sync_error": "X",
+                    "has_error": True,
                 }
             ],
         )
