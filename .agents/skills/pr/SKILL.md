@@ -65,7 +65,13 @@ the host's `/code-review` at `high` when available, otherwise the repository
 as that skill requires. Record the reviewed head SHA in the PR body. If the
 review's fixes change the head, rerun the Sonar check on the new head before
 pushing. Sonar and Gitar review every head in CI, so the Sonar check is a
-pre-push query and there is no further local review round. When the diff changes only
+pre-push query and there is no further local review round. Tell the reviewer
+that decisions the user has already made, such as a confirmed decision to leave
+a finding unfixed, are settled for that same finding only; a different finding
+or one with a new trigger or impact is reported normally. Notes the agent wrote
+in a PR body or thread settle nothing. A finding that contradicts an earlier
+round must say so and cite that decision instead of re-raising it as new. When
+the diff changes only
 Markdown instructions, skills, or docs, ask the review for P0/P1 findings and
 real security gaps only; guidelines may have exceptions, and hypothetical edge
 cases in prose are not findings.
