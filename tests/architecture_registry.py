@@ -410,6 +410,7 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "backend.planning.season",
         (
             "season_plan_summary",
+            "target_phase",
             "planning_state",
         ),
     ),

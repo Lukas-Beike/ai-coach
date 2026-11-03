@@ -26,7 +26,7 @@ from typing import Any, Final
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
-from backend.planning.season import season_plan_summary
+from backend.planning.season import target_phase
 from backend.planning.session_focus import SessionFocus, session_focus
 from backend.planning.sport import planned_sport_environment
 
@@ -229,11 +229,8 @@ def strength_expected(
     text = profile_text.strip()
     if text and not _NO_STRENGTH.match(text):
         return True
-    upcoming = season_plan_summary(
-        [dict(row) for row in competitions if str(row.get("priority") or "B") != "C"],
-        today,
-    )["next_event"]
-    return upcoming is not None and upcoming["phase"] in _EXPECTING_PHASES
+    phase = target_phase([dict(row) for row in competitions], today)["phase"]
+    return phase in _EXPECTING_PHASES
 
 
 def key_sessions(
