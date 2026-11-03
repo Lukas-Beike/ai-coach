@@ -400,9 +400,11 @@ def session_comparison(
         == bool(own.get("grade_adjusted"))
     ]
     shared = _shared_band(own, peers)
+    sources = {own.get("source")}
     if shared is None:
         return _not_covered(base, "Kein gleichmäßiges Tempo in einem Pulsband.")
     low, mine, found = shared
+    sources |= {p.get("source") for p in peers if _band_totals(p, low)}
     window = {"window_days": COMPARE_DAYS, "count": len(found)}
     if len(found) < MIN_COMPARABLE:
         return _not_covered(
@@ -418,6 +420,7 @@ def session_comparison(
         **base,
         "status": "ok",
         "source": own.get("source"),
+        "sources": sorted(str(item) for item in sources if item),
         "heart_rate_band_bpm": [low, low + BAND_BINS * BIN_BPM - 1],
         "grade_adjusted": bool(own.get("grade_adjusted")),
         "session": {"seconds": round(mine[0]), "pace_s_per_km": pace},

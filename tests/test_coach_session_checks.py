@@ -126,6 +126,14 @@ class StrengthAndPaceTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual("not_covered", result["pace_at_heart_rate"]["status"])
 
+    def test_session_older_than_the_curve_window_is_not_covered_with_that_reason(self):
+        summary = {"id": "act_1", "record_ids": {"intervals": "i1"}}
+        service = _service("run", [], [summary], [], started="2026-07-01T08:00:00")
+        pace = _result(service)["pace_at_heart_rate"]
+        self.assertEqual("not_covered", pace["status"])
+        self.assertIn("Auswertungsfensters", pace["reason"])
+        service._report_services.profiles.curve_records.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,8 @@ from backend.coach.context import (
 from backend.coach.session_checks import matched_focus
 from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
-from backend.performance.pace_at_hr import session_comparison
+from backend.performance.pace_at_hr import COMPARE_DAYS, session_comparison
+from backend.performance.report_service import PROFILE_WINDOW_DAYS
 from backend.planning import leg_strength
 from backend.sync.garmin import GarminPayloadService
 
@@ -194,7 +195,9 @@ class CoachActivityReadToolService:
         )
         checks["strength_before"] = self._strength_before(session, nearby, units)
         if session.get("sport") == "run":
-            checks["pace_at_heart_rate"] = self._pace_at_heart_rate(session, nearby)
+            checks["pace_at_heart_rate"] = self._pace_at_heart_rate(
+                session, nearby, day
+            )
         return checks
 
     @staticmethod
@@ -208,7 +211,7 @@ class CoachActivityReadToolService:
         return leg_strength.strength_before(start, nearby, lambda: units)
 
     def _pace_at_heart_rate(
-        self, session: dict[str, Any], nearby: Any
+        self, session: dict[str, Any], nearby: Any, day: date
     ) -> dict[str, Any]:
         own = next(
             (
@@ -222,6 +225,12 @@ class CoachActivityReadToolService:
             return {
                 "status": "not_covered",
                 "reason": "Auswertung der Messreihen nicht verfügbar.",
+            }
+        covered_from = self._today() - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+        if day - timedelta(days=COMPARE_DAYS) < covered_from:
+            return {
+                "status": "not_covered",
+                "reason": f"Die Läufe der letzten {COMPARE_DAYS} Tage vor dieser Aktivität liegen außerhalb des Auswertungsfensters von {PROFILE_WINDOW_DAYS[-1]} Tagen.",
             }
         try:
             records = self._report_services.profiles.curve_records()
