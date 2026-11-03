@@ -27,7 +27,7 @@ def _busy_spans(
             left = max(window[0], start) - start
             right = min(window[1], end) - start
             spans.append(
-                (int(left.total_seconds() // 60), round(right.total_seconds() / 60))
+                (round(left.total_seconds() / 60), round(right.total_seconds() / 60))
             )
     return spans
 

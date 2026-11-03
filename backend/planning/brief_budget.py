@@ -15,7 +15,9 @@ OMITTED_NOTE: Final = "Entries dropped to keep the brief within its size budget;
 
 
 def brief_size(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    return len(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+    )
 
 
 def _trim_list(target: Any, key: str, *, oldest: bool) -> bool:

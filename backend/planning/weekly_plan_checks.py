@@ -235,7 +235,12 @@ def _day_notes(
         for unit in day_units
         if (note := _window_note(unit, _unit_windows(unit, effective, matched)))
     ]
-    drafts += _free_notes(effective, day, day_units, matched, events)
+    outside = {id(note[1][0]) for note in drafts if note[0] == OUTSIDE_WINDOWS}
+    drafts += [
+        note
+        for note in _free_notes(effective, day, day_units, matched, events)
+        if id(note[1][0]) not in outside
+    ]
     total = round(sum(_minutes(unit) for unit in day_units))
     if effective.max_minutes is not None and total > effective.max_minutes:
         drafts.append(
