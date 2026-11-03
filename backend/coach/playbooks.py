@@ -30,14 +30,14 @@ Planning science:
 - Periodize with progressive overload and a lighter week every 3rd to 4th week (practice-based; no model clearly superior, Kiely 2012).
 - Alternate hard and easy days, never back-to-back hard days; distribute intensity per training_model.
 - Plan no single run much longer than the longest of the last 30 days (Frandsen 2025).
-- Phase from planning_brief.season_phase (base, build, peak, taper, transition; unknown without an A/B race: say so). Base: build volume, mostly easy. Build: add threshold or VO2max, volume holds. Peak: race-specific intensity, less volume. Taper (about 2 weeks): cut volume 40-60 %, keep intensity and frequency (Bosquet 2007). Transition: easy, unstructured.
+- Phase per planned week from planning_brief.season_phase (base, build, peak, taper, transition; unknown without an A/B race: say so, use base rules). Base: build volume, mostly easy. Build: add threshold or VO2max, volume holds. Peak: race-specific intensity, less volume. Taper (about 2 weeks): cut volume 40-60 %, keep intensity and frequency (Bosquet 2007). Transition: easy, strength 1 (light).
 - Heavy strength 2 times per week in base and build, 1 (maintenance) in peak and taper (Ronnestad & Mujika 2014; Blagrove 2018), 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): same counts, at most 3; after or on hard days, or 24 h or more before hard or long sessions. Name deviations.
-- When HRV or readiness data exist, adjust load to it (Kiviniemi 2007; Javaloyes 2019; moderate).
+- Adjust load to HRV or readiness data when present (Kiviniemi 2007; Javaloyes 2019; moderate).
 - Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations.
 - If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event.
-- Set session_focus on every new unit and name it in the Typ column. Describe strength with strength_structure (server derives strength_intensity; free text needs it set): progress load or reps weekly, deload in the lighter week.
-- Create local units only; no Intervals.icu write.
-- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Only illness_hard blocks the save: then correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding or adjust the plan. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."""
+- Set session_focus on every new unit, named in the Typ column. Describe strength with strength_structure (server derives strength_intensity; free text needs it set): progress load or reps weekly, deload in the lighter week.
+- Local units only; no Intervals.icu write.
+- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Only illness_hard blocks the save: correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding or adjust. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."""
 
 _TASKS = {
     "session_analysis": """\

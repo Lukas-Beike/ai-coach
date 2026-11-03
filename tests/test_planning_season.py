@@ -134,6 +134,15 @@ class TargetPhaseTests(unittest.TestCase):
         result = target_phase([self.race(2, "C"), self.race(5, "B")], self.today)
         self.assertEqual(("peak", 5), (result["phase"], result["weeks_to_race"]))
 
+    def test_sparse_rows_and_timestamps_are_normalized(self):
+        rows = [
+            {"event_date": "2026-10-20T09:00:00", "priority": None},
+            {"event_date": "2026-10-20", "priority": "A"},
+        ]
+        result = target_phase(rows, self.today)
+        self.assertEqual("peak", result["phase"])
+        self.assertEqual("2026-10-20", result["race"]["date"])
+
     def test_transition_after_recent_race_only(self):
         recent = {"name": "R", "priority": "A", "event_date": "2026-09-01"}
         old = {"name": "R", "priority": "A", "event_date": "2026-06-01"}

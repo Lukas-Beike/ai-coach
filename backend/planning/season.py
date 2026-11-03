@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
+
 
 def season_plan_summary(
     competitions: list[dict[str, Any]], today: date
@@ -42,6 +44,9 @@ def season_plan_summary(
 
 TARGET_PRIORITIES = frozenset({"A", "B"})
 TRANSITION_DAYS = 28
+PHASE_BOUNDARIES = (
+    "Phase by days to the race: base over 84, build 43-84, peak 15-42, taper 0-14."
+)
 
 
 def target_phase(competitions: list[dict[str, Any]], today: date) -> dict[str, Any]:
@@ -51,7 +56,12 @@ def target_phase(competitions: list[dict[str, Any]], today: date) -> dict[str, A
     planned; without any such race the phase is ``unknown``.
     """
     targets = [
-        row
+        {
+            **row,
+            "priority": str(row.get("priority") or "B"),
+            "name": str(row.get("name") or ""),
+            "event_date": iso_date_prefix(row.get("event_date")),
+        }
         for row in competitions
         if str(row.get("priority") or "B") in TARGET_PRIORITIES
     ]

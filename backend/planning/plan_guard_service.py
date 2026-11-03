@@ -186,6 +186,7 @@ def season_phase_brief(
             today,
         ),
         "source": "derived from competition dates and priority A/B, read-only",
+        "boundaries": season.PHASE_BOUNDARIES,
     }
 
 
