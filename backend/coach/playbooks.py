@@ -48,8 +48,8 @@ _PLAN_CHECK = "- planning_brief covers recent weeks per sport; planned_distribut
 
 _SESSION_CHECKS = """Session checks (get_activity_details):
 - focus: judge the session against its session_focus (easy stayed easy; threshold or vo2max work reached and held its target); say when unknown and name a derived origin as a guess.
-- pace_at_heart_rate: compare with comparable runs only when status is ok, and name their count; not_covered is unknown, not zero or a change.
-- strength_before: heavy or moderate leg strength (legs true) within 48 h is a possible explanation for a worse pace, power or heart-rate response, never a proven cause. Count and intensity only, no load."""
+- pace_at_heart_rate: compare with comparable runs only when status is ok, and name their count; a positive difference is slower; not_covered is unknown, not zero or a change.
+- strength_before: heavy or moderate leg strength (legs true) within 48 h (origin completed; planned_not_confirmed is not known to be done) is a possible explanation for a worse pace, power or heart-rate response, never a proven cause. Count and intensity only, no load."""
 
 _TASKS = {
     "session_analysis": """\

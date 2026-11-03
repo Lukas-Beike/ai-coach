@@ -189,7 +189,9 @@ class CoachActivityReadToolService:
         checks: dict[str, Any] = {"focus": matched_focus(session, around)}
         if session.get("sport") not in ("run", "ride"):
             return checks
-        nearby = self._activity_read.summaries_between(day - timedelta(days=2), day)
+        nearby = self._activity_read.summaries_between(
+            day - timedelta(days=3), day + timedelta(days=1)
+        )
         checks["strength_before"] = self._strength_before(session, nearby, units)
         if session.get("sport") == "run":
             checks["pace_at_heart_rate"] = self._pace_at_heart_rate(session, nearby)
@@ -221,7 +223,13 @@ class CoachActivityReadToolService:
                 "status": "not_covered",
                 "reason": "Auswertung der Messreihen nicht verfügbar.",
             }
-        records = self._report_services.profiles.curve_records()
+        try:
+            records = self._report_services.profiles.curve_records()
+        except RuntimeError:
+            return {
+                "status": "not_covered",
+                "reason": "Auswertung der Messreihen nicht verfügbar.",
+            }
         return session_comparison(records, stored_activity_key(own))
 
     @staticmethod

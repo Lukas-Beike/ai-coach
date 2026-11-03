@@ -194,6 +194,7 @@ class SessionComparisonTests(unittest.TestCase):
         self.assertEqual([140, 149], result["heart_rate_band_bpm"])
         self.assertEqual(333.3, result["comparable"]["median_pace_s_per_km"])
         self.assertEqual(-10.7, result["difference_s_per_km"])
+        self.assertIn("positive difference = slower", result["direction"])
 
     def test_too_few_comparable_runs_is_not_covered_with_the_count(self):
         result = session_comparison(self._records(2), "2026-11-02")

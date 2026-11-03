@@ -381,7 +381,7 @@ class RunningWeekDedupTests(unittest.TestCase):
 
 
 class StrengthBeforeTests(unittest.TestCase):
-    START = datetime(2026, 11, 3, 18, 0)
+    START = datetime.fromisoformat("2026-11-03T18:00:00")
 
     @staticmethod
     def done(started, **extra):
@@ -394,7 +394,7 @@ class StrengthBeforeTests(unittest.TestCase):
 
     def test_heavy_leg_session_20_hours_before(self):
         done = self.done("2026-11-02T22:00:00", description="legs heavy")
-        result = leg_strength.strength_before(self.START, [done], lambda: [])
+        result = leg_strength.strength_before(self.START, [done], list)
         self.assertEqual("completed", result["origin"])
         self.assertEqual(
             [{"hours_before": 20.0, "legs": True, "intensity": "heavy"}],
@@ -410,9 +410,33 @@ class StrengthBeforeTests(unittest.TestCase):
             starts_at_local="2026-11-02T10:00:00",
         )
         result = leg_strength.strength_before(self.START, [], lambda: [planned])
-        self.assertEqual("planned", result["origin"])
+        self.assertEqual("planned_not_confirmed", result["origin"])
         self.assertIs(False, result["sessions"][0]["legs"])
         self.assertEqual(32.0, result["sessions"][0]["hours_before"])
+
+    def test_date_only_plan_counts_only_for_the_day_before(self):
+        def plan(day):
+            return unit("u", day, "strength", session_focus="legs")
+
+        for day, expected in (("2026-11-02", 1), ("2026-11-01", 0), ("2026-11-03", 0)):
+            with self.subTest(day=day):
+                result = leg_strength.strength_before(
+                    self.START, [], lambda day=day: [plan(day)]
+                )
+                self.assertEqual(expected, len(result["sessions"]))
+        self.assertEqual(
+            "planned_not_confirmed",
+            leg_strength.strength_before(self.START, [], lambda: [plan("2026-11-02")])[
+                "origin"
+            ],
+        )
+
+    def test_completed_midnight_start_and_the_48_hour_edge(self):
+        midnight = self.done("2026-11-03T00:00:00", description="legs")
+        edge = self.done("2026-11-01T18:00:00", description="legs")
+        late = self.done("2026-11-01T17:59:00", description="legs")
+        result = leg_strength.strength_before(self.START, [midnight, edge, late], list)
+        self.assertEqual([18.0, 48.0], [r["hours_before"] for r in result["sessions"]])
 
     def test_none_and_older_sessions_are_none_found(self):
         old = self.done("2026-10-30T10:00:00")
@@ -423,12 +447,10 @@ class StrengthBeforeTests(unittest.TestCase):
         self.assertFalse(result["planned_checked"])
 
     def test_unreadable_activities_are_not_covered_and_carry_no_load(self):
-        result = leg_strength.strength_before(self.START, None, lambda: [])
+        result = leg_strength.strength_before(self.START, None, list)
         self.assertEqual("not_covered", result["status"])
         done = self.done("2026-11-03T08:00:00", rpe=9, training_load=80)
-        row = leg_strength.strength_before(self.START, [done], lambda: [])["sessions"][
-            0
-        ]
+        row = leg_strength.strength_before(self.START, [done], list)["sessions"][0]
         self.assertEqual({"hours_before", "legs", "intensity"}, set(row))
 
 

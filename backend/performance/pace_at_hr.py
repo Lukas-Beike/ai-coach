@@ -423,4 +423,5 @@ def session_comparison(
         "session": {"seconds": round(mine[0]), "pace_s_per_km": pace},
         "comparable": {**window, "median_pace_s_per_km": median},
         "difference_s_per_km": round(pace - median, 1),
+        "direction": "positive difference = slower than comparable runs",
     }

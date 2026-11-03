@@ -118,6 +118,14 @@ class StrengthAndPaceTests(unittest.TestCase):
         result = _result(_service("run", [], [summary], records))
         self.assertEqual("Zu kurz.", result["pace_at_heart_rate"]["reason"])
 
+    def test_missing_curve_services_do_not_fail_the_detail(self):
+        summary = {"id": "act_1", "record_ids": {"intervals": "i1"}}
+        service = _service("run", [], [summary], [])
+        service._report_services.profiles.curve_records.side_effect = RuntimeError
+        result = _result(service)
+        self.assertTrue(result["ok"])
+        self.assertEqual("not_covered", result["pace_at_heart_rate"]["status"])
+
 
 if __name__ == "__main__":
     unittest.main()

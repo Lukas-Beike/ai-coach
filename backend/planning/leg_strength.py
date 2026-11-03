@@ -441,16 +441,16 @@ def _strength_hours(
     unit: Mapping[str, Any], start: datetime, planned: bool
 ) -> tuple[bool, float | None]:
     """Whether a strength unit lies in the window before ``start``, and its gap."""
-    if planned and _start(unit) is None:
-        # A date-only plan has no time: only whole earlier days count, gap unknown.
-        earlier = start.date() - timedelta(days=STRENGTH_WINDOW_H // 24)
-        return earlier <= date.fromisoformat(
-            _day(unit) or "9999-12-31"
-        ) < start.date(), None
-    when = _start(unit)
-    if when is None:
-        return False, None
-    hours = (start - when).total_seconds() / 3600
+    if planned:
+        when = _start(unit)
+        if when is None:
+            # A date-only plan has no time: only the whole day before counts.
+            day = date.fromisoformat(_day(unit) or "9999-12-31")
+            return day == start.date() - timedelta(days=1), None
+    else:
+        # A recorded start is exact, even at midnight.
+        when = datetime.fromisoformat(str(unit.get("starts_at_local") or ""))
+    hours = (start - when.replace(tzinfo=None)).total_seconds() / 3600
     return 0 < hours <= STRENGTH_WINDOW_H, round(hours, 1)
 
 
@@ -505,7 +505,7 @@ def strength_before(
     return {
         **base,
         "status": "ok",
-        "origin": "planned" if ahead else "none_found",
+        "origin": "planned_not_confirmed" if ahead else "none_found",
         "planned_checked": units is not None,
         "sessions": ahead,
     }
