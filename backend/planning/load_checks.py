@@ -20,7 +20,7 @@ Functions return drafts ``(code, units, message, evidence)`` that
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -57,11 +57,21 @@ class LoadThresholds:
     by_sport: Mapping[Sport, AthleteThresholds] = field(default_factory=dict)
     unavailable: str | None = None
     indoor_ride: AthleteThresholds | None = None
+    # Resolves a sport on a given day; set when local configurations can differ
+    # by validity date, otherwise ``by_sport`` and ``indoor_ride`` apply.
+    resolver: Callable[[Sport, Environment, date | None], AthleteThresholds] | None = (
+        None
+    )
 
     def for_sport(
-        self, sport: Sport, environment: Environment = Environment.UNKNOWN
+        self,
+        sport: Sport,
+        environment: Environment = Environment.UNKNOWN,
+        day: date | None = None,
     ) -> AthleteThresholds:
         """Thresholds of a sport; indoor and virtual rides use the indoor FTP."""
+        if self.resolver is not None:
+            return self.resolver(sport, environment, day)
         indoor = environment in {Environment.INDOOR, Environment.VIRTUAL}
         if sport is Sport.RIDE and indoor and self.indoor_ride is not None:
             return self.indoor_ride
@@ -86,6 +96,7 @@ class PlannedSession:
 def _has_configuration(
     configurations: Sequence[ZoneConfiguration], today: date
 ) -> bool:
+    """Whether a local (athlete-confirmed) configuration applies to a load sport."""
     return any(
         effective_zone_configuration(
             configurations, metric, sport, indoor=indoor, day=today
@@ -111,24 +122,34 @@ def load_thresholds(
         reason = "missing_thresholds"
     elif (today - synced.date()).days > THRESHOLD_MAX_AGE_DAYS:
         reason = "stale_thresholds"
-    if reason and not _has_configuration(configurations, today):
-        return LoadThresholds(unavailable=reason)
+    if reason:
+        # Provider values age with the sync; only athlete-confirmed ones remain.
+        configurations = [
+            item for item in configurations if item.provenance.provider is None
+        ]
+        if not _has_configuration(configurations, today):
+            return LoadThresholds(unavailable=reason)
     observed = () if reason else inputs.zone_thresholds
-    return LoadThresholds(
-        {
-            sport: resolve_thresholds(
-                observed, configurations, sport, Environment.UNKNOWN, today
-            )
-            for sport in LOAD_SPORTS
-        },
-        indoor_ride=resolve_thresholds(
-            observed, configurations, Sport.RIDE, Environment.INDOOR, today
-        ),
-    )
+
+    def resolve(
+        sport: Sport, environment: Environment, day: date | None
+    ) -> AthleteThresholds:
+        return resolve_thresholds(
+            observed, configurations, sport, environment, day or today
+        )
+
+    return LoadThresholds(resolver=resolve)
 
 
 def _day(unit: Mapping[str, Any]) -> str:
     return iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
+
+
+def _unit_date(unit: Mapping[str, Any]) -> date | None:
+    try:
+        return date.fromisoformat(_day(unit))
+    except ValueError:
+        return None
 
 
 def plan_sessions(
@@ -141,7 +162,7 @@ def plan_sessions(
         if sport in LOAD_SPORTS:
             environment = planned_sport_environment(unit)[1]
             estimate = estimate_planned_unit(
-                unit, thresholds.for_sport(sport, environment)
+                unit, thresholds.for_sport(sport, environment, _unit_date(unit))
             )
             sessions.append(PlannedSession(unit, sport, _day(unit), estimate))
     return sessions

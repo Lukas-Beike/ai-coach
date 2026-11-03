@@ -492,5 +492,35 @@ class IndoorConfigurationTests(unittest.TestCase):
         self.assertEqual(280.0, indoor.zones.ftp)
 
 
+class ConfigurationValidityTests(unittest.TestCase):
+    def test_stale_sync_ignores_provider_configurations(self) -> None:
+        provider = zone_configuration(
+            metric=ZoneConfigurationMetric.POWER,
+            sport=Sport.RIDE,
+            threshold=300.0,
+            maximum=None,
+            resting=None,
+            limits=(100.0, 200.0, 300.0, 400.0),
+        )
+        result = load_checks.load_thresholds(
+            inputs(datetime(2026, 9, 1, tzinfo=UTC)), TODAY, [provider]
+        )
+        self.assertEqual("stale_thresholds", result.unavailable)
+
+    def test_workout_date_selects_the_valid_configuration(self) -> None:
+        later = LocalThresholdPrecedenceTests.local(
+            ZoneConfigurationMetric.POWER,
+            threshold=300.0,
+            valid_from=date(2026, 11, 10),
+        )
+        result = load_checks.load_thresholds(
+            inputs(datetime(2026, 11, 1, tzinfo=UTC)), TODAY, [later]
+        )
+        self.assertEqual(250.0, result.for_sport(Sport.RIDE).zones.ftp)
+        self.assertEqual(
+            300.0, result.for_sport(Sport.RIDE, day=date(2026, 11, 12)).zones.ftp
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
