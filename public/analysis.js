@@ -743,7 +743,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     loadMissing.push("Trainingszeit");
   }
   appendSessionRpeLoadChart(history.session_rpe_load, loadRoot, loadMissing, start, end);
-  appendDailyActivityGroup(history.daily_activity, loadRoot, start, end);
+  appendDailyActivityGroup(history.daily_activity, loadRoot, loadMissing, start, end);
   const loadMissingNote = analysisMissingDataNote(loadMissing);
   if (loadMissingNote) loadRoot.append(loadMissingNote);
   const performanceSeries = [
@@ -821,7 +821,7 @@ function appendSessionRpeLoadChart(report, loadRoot, loadMissing, start, end) {
   loadRoot.append(chart);
 }
 
-function appendDailyActivityGroup(activity, loadRoot, start, end) {
+function appendDailyActivityGroup(activity, loadRoot, loadMissing, start, end) {
   if (!activity) return;
   const weekly = analysisHistoryPeriod === "twelveWeeks";
   const charts = []; const allSeries = [];
@@ -831,7 +831,7 @@ function appendDailyActivityGroup(activity, loadRoot, start, end) {
     const current = daily.findLast(analysisValidPoint);
     const series = [{ label: weekly ? `${label} Ø pro Tag` : label, legendLabel: label, source: activity.source, unit, color, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, points, currentPoint: current }];
     const title = current ? `${label} · ${analysisValue(current.value, unit)}` : label;
-    const chart = analysisChart(title, series, unit, start, end, `${activity.source}: ${weekly ? "Tagesdurchschnitt je Woche" : "Tageswerte"}. Fehlende Tage bleiben Lücken.`, { calendarWeeks: weekly });
+    const chart = collectAnalysisChart(loadMissing, label, series, unit, start, end, `${activity.source}: ${weekly ? "Tagesdurchschnitt je Woche" : "Tageswerte"}. Fehlende Tage bleiben Lücken.`, { calendarWeeks: weekly });
     if (!chart) continue;
     chart.querySelector(".analysis-chart-legend")?.remove();
     charts.push(chart); allSeries.push(series[0]);
@@ -1410,7 +1410,7 @@ function analysisWeeklyMeanPoints(points, start, end) {
     let weekEnd = addDateKey(weekStart, 6);
     if (weekEnd > end) weekEnd = end;
     const known = points.filter((point) => point.date >= weekStart && point.date <= weekEnd && analysisValidPoint(point));
-    weeks.push(known.length ? { date: weekEnd, value: Math.round(known.reduce((sum, point) => sum + Number(point.value), 0) / known.length), observedDate: known.at(-1).date } : { date: weekEnd, value: null });
+    weeks.push(known.length ? { date: weekEnd, value: Math.round(known.reduce((sum, point) => sum + Number(point.value), 0) / known.length * 10) / 10, observedDate: known.at(-1).date } : { date: weekEnd, value: null });
   }
   return weeks;
 }

@@ -412,10 +412,6 @@ class AnalysisHistoryTests(unittest.TestCase):
         self.assertEqual(sum(point["value"] is not None for point in points), 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class DailyActivityHistoryTests(unittest.TestCase):
     def test_steps_and_floors_come_from_canonical_garmin_days(self):
         result = analysis_history(
@@ -443,3 +439,7 @@ class DailyActivityHistoryTests(unittest.TestCase):
         result = analysis_history(None, {}, date(2026, 10, 3))["daily_activity"]
         for key in ("steps", "floors"):
             self.assertTrue(all(item["value"] is None for item in result[key]))
+
+
+if __name__ == "__main__":
+    unittest.main()
