@@ -15,6 +15,7 @@ CARD_NAMES = (
     "m2-hrv-resting-hr.md",
     "m3-sleep-duration-timing.md",
     "m4-critical-power-speed.md",
+    "m5-smoothed-session-load.md",
 )
 FRONT_FIELDS = (
     "Card",

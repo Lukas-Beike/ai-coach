@@ -11,10 +11,11 @@ a card by its `Card` ID.
 | [M2](m2-hrv-resting-hr.md) | Personal HRV and resting HR description | descriptive statistic |
 | [M3](m3-sleep-duration-timing.md) | Sleep duration, goal shortfall and timing | descriptive statistic |
 | [M4](m4-critical-power-speed.md) | Critical Power and Critical Speed | model estimate |
+| [M5](m5-smoothed-session-load.md) | Short- and long-term session-RPE load | model estimate |
 
-M5 (own smoothed load curves, passive CP/CS, HRV-based recommendations, #1432)
-is deferred and has no card. It needs its own card and G0 review before work
-starts.
+M5 covers the smoothed load curves (#1432). Passive CP/CS, TRIMP, further
+threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based
+recommendations stay deferred without a card.
 
 Method ids, versions, statuses and limits of the offered methods are
 registered in `openspec/specs/performance-and-readiness/spec.md`;
