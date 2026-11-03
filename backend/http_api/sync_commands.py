@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
@@ -73,16 +73,20 @@ def _build_path_routes(registry: ProviderRegistry) -> dict[str, _PathRoute]:
         manual = descriptor.manual_sync
         if manual is not None:
             current = routes.get(manual.path, _PathRoute())
-            routes[manual.path] = replace(
-                current,
-                manual=_ManualRoute(
-                    descriptor.provider_id, manual.uses_sync_period, manual.payload
+            routes[manual.path] = cast(
+                _PathRoute,
+                replace(
+                    current,
+                    manual=_ManualRoute(
+                        descriptor.provider_id, manual.uses_sync_period, manual.payload
+                    ),
                 ),
             )
         if descriptor.full_resync_path is not None:
             current = routes.get(descriptor.full_resync_path, _PathRoute())
-            routes[descriptor.full_resync_path] = replace(
-                current, full_resync_provider=descriptor.provider_id
+            routes[descriptor.full_resync_path] = cast(
+                _PathRoute,
+                replace(current, full_resync_provider=descriptor.provider_id),
             )
     return routes
 

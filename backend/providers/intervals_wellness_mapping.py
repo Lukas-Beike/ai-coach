@@ -86,7 +86,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from backend.canonical.mapping import (
     MAX_ISSUE_TEXT_LENGTH,
@@ -337,7 +337,10 @@ def _map_wellness_row(
     manual = _Scope(
         record_ref=record_id,
         observed_on=observed_on,
-        provenance=replace(scope.provenance, recorded_by=RecordingOrigin.MANUAL),
+        provenance=cast(
+            Provenance,
+            replace(scope.provenance, recorded_by=RecordingOrigin.MANUAL),
+        ),
     )
     for kind, aliases in _SUBJECTIVE_FIELDS:
         _add_field(collector, manual, row, kind, aliases)
@@ -370,7 +373,10 @@ def _add_form(
             value=MetricValue(form, MetricKind.FORM.unit),
             observed_on=scope.observed_on,
             observed_at=None,
-            provenance=replace(scope.provenance, source_kind=SourceKind.DERIVED),
+            provenance=cast(
+                Provenance,
+                replace(scope.provenance, source_kind=SourceKind.DERIVED),
+            ),
             method=FORM_METHOD,
             method_version=FORM_METHOD_VERSION,
             input_fingerprint=fingerprint_inputs(
