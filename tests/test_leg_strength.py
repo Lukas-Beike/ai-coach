@@ -328,5 +328,57 @@ class NoteTests(unittest.TestCase):
         self.assertFalse(expected("", peak, TODAY))
 
 
+def done_legs(day, **extra):
+    return {
+        "sport": "strength",
+        "started_at_local": f"{day}T08:00:00",
+        "name": "Leg day squats",
+        **extra,
+    }
+
+
+class RunningWeekTests(unittest.TestCase):
+    """Monday-Tuesday completed plus the planned rest of the week."""
+
+    COMPLETED = (done_legs("2026-11-02"), done_legs("2026-11-03"))
+    TODAY = date(2026, 11, 4)
+
+    def test_completed_leg_days_count_toward_the_weekly_limit(self) -> None:
+        planned = [legs("p1", "2026-11-05"), legs("p2", "2026-11-07")]
+        alone = leg_strength.frequency(planned, self.TODAY, False)
+        self.assertEqual([], alone)
+        drafts = leg_strength.frequency(planned, self.TODAY, False, self.COMPLETED)
+        self.assertEqual(1, len(drafts))
+        evidence = drafts[0][3]
+        self.assertEqual(4, evidence["leg_sessions"])
+        self.assertEqual("running week: completed + planned", evidence["basis"])
+        self.assertEqual(["p1", "p2"], [u["local_id"] for u in drafts[0][1]])
+
+    def test_planned_weeks_label_the_combined_running_week(self) -> None:
+        planned = [legs("p1", "2026-11-05")]
+        week = leg_strength.planned_weeks(planned, self.TODAY, self.COMPLETED)[0]
+        self.assertEqual(3, week["leg_sessions"])
+        self.assertFalse(week["partial"])
+        self.assertEqual("running week: completed + planned", week["basis"])
+        without = leg_strength.planned_weeks(planned, self.TODAY)[0]
+        self.assertTrue(without["partial"])
+        self.assertEqual(1, without["leg_sessions"])
+
+    def test_completed_days_of_other_weeks_do_not_count(self) -> None:
+        old = [done_legs("2026-10-30"), done_legs("2026-10-31")]
+        planned = [legs("p1", "2026-11-05"), legs("p2", "2026-11-07")]
+        self.assertEqual([], leg_strength.frequency(planned, self.TODAY, False, old))
+
+
+class RunningWeekDedupTests(unittest.TestCase):
+    def test_leg_session_done_today_is_not_counted_twice(self) -> None:
+        today = date(2026, 11, 4)
+        completed = [done_legs("2026-11-02"), done_legs("2026-11-04")]
+        planned = [legs("today", "2026-11-04"), legs("later", "2026-11-06")]
+        self.assertEqual([], leg_strength.frequency(planned, today, False, completed))
+        week = leg_strength.planned_weeks(planned, today, completed)[0]
+        self.assertEqual(3, week["leg_sessions"])
+
+
 if __name__ == "__main__":
     unittest.main()

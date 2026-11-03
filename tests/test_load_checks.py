@@ -10,8 +10,14 @@ from typing import Any, ClassVar
 
 from backend.activities.workout_load import AthleteThresholds
 from backend.activities.zone_settings import ZoneSettings
-from backend.canonical.vocabulary import Environment, MetricKind, Sport
+from backend.canonical.vocabulary import (
+    Environment,
+    MetricKind,
+    Sport,
+    ZoneConfigurationMetric,
+)
 from backend.planning import load_checks, plan_checks
+from tests.canonical_domain_support import provenance, zone_configuration
 
 TODAY = date(2026, 11, 2)
 
@@ -178,6 +184,63 @@ class ThresholdTests(unittest.TestCase):
         )
         self.assertEqual("stale_thresholds", stale.unavailable)
         self.assertEqual({}, dict(stale.by_sport))
+
+
+class LocalThresholdPrecedenceTests(unittest.TestCase):
+    """Locally confirmed zones win over Intervals.icu, as in the Coach context."""
+
+    @staticmethod
+    def local(metric: ZoneConfigurationMetric, **values: Any) -> Any:
+        return zone_configuration(
+            metric=metric,
+            sport=values.pop("sport", Sport.RIDE),
+            provenance=provenance(None, provider=None),
+            limits=(100.0, 200.0, 300.0, 400.0)
+            if metric is ZoneConfigurationMetric.POWER
+            else (2.0, 3.0, 4.0, 6.0),
+            maximum=None,
+            resting=None,
+            **values,
+        )
+
+    def test_local_values_override_intervals(self) -> None:
+        configurations = [
+            self.local(ZoneConfigurationMetric.POWER, threshold=300.0),
+            self.local(ZoneConfigurationMetric.PACE, sport=Sport.RUN, threshold=5.0),
+        ]
+        result = load_checks.load_thresholds(
+            inputs(datetime(2026, 11, 1, tzinfo=UTC)), TODAY, configurations
+        )
+        self.assertEqual(300.0, result.for_sport(Sport.RIDE).zones.ftp)
+        self.assertEqual(5.0, result.for_sport(Sport.RUN).threshold_speed_mps)
+        self.assertEqual(170.0, result.for_sport(Sport.RUN).zones.lthr)
+
+    def test_stale_sync_keeps_local_values_only(self) -> None:
+        configurations = [self.local(ZoneConfigurationMetric.POWER, threshold=300.0)]
+        result = load_checks.load_thresholds(
+            inputs(datetime(2026, 9, 1, tzinfo=UTC)), TODAY, configurations
+        )
+        self.assertIsNone(result.unavailable)
+        self.assertEqual(300.0, result.for_sport(Sport.RIDE).zones.ftp)
+        self.assertIsNone(result.for_sport(Sport.RUN).zones.lthr)
+
+    def test_planned_load_follows_the_local_ftp(self) -> None:
+        unit = {
+            "date": "2026-11-04",
+            "sport": "ride",
+            "description": "- 60m 225W",
+        }
+        loads = []
+        for ftp in (250.0, 300.0):
+            result = load_checks.load_thresholds(
+                inputs(datetime(2026, 11, 1, tzinfo=UTC)),
+                TODAY,
+                [self.local(ZoneConfigurationMetric.POWER, threshold=ftp)]
+                if ftp != 250.0
+                else [],
+            )
+            loads.append(load_checks.plan_sessions([unit], result)[0].estimate)
+        self.assertNotEqual(loads[0].intensity_factor, loads[1].intensity_factor)
 
 
 class SessionSpikeTests(unittest.TestCase):
@@ -412,6 +475,51 @@ class RiskTests(unittest.TestCase):
         after = check([planned("a", "2026-11-04", "ride", "- 60m 100%")], done)
         self.assertEqual(after, plan_checks.new_findings(before, after))
         self.assertEqual([], plan_checks.new_findings(after, before))
+
+
+class IndoorConfigurationTests(unittest.TestCase):
+    def test_indoor_only_local_configuration_keeps_thresholds_usable(self) -> None:
+        configuration = LocalThresholdPrecedenceTests.local(
+            ZoneConfigurationMetric.POWER,
+            threshold=280.0,
+            environment=Environment.INDOOR,
+        )
+        result = load_checks.load_thresholds(
+            inputs(datetime(2026, 9, 1, tzinfo=UTC)), TODAY, [configuration]
+        )
+        self.assertIsNone(result.unavailable)
+        indoor = result.for_sport(Sport.RIDE, Environment.INDOOR)
+        self.assertEqual(280.0, indoor.zones.ftp)
+
+
+class ConfigurationValidityTests(unittest.TestCase):
+    def test_stale_sync_ignores_provider_configurations(self) -> None:
+        provider = zone_configuration(
+            metric=ZoneConfigurationMetric.POWER,
+            sport=Sport.RIDE,
+            threshold=300.0,
+            maximum=None,
+            resting=None,
+            limits=(100.0, 200.0, 300.0, 400.0),
+        )
+        result = load_checks.load_thresholds(
+            inputs(datetime(2026, 9, 1, tzinfo=UTC)), TODAY, [provider]
+        )
+        self.assertEqual("stale_thresholds", result.unavailable)
+
+    def test_workout_date_selects_the_valid_configuration(self) -> None:
+        later = LocalThresholdPrecedenceTests.local(
+            ZoneConfigurationMetric.POWER,
+            threshold=300.0,
+            valid_from=date(2026, 11, 10),
+        )
+        result = load_checks.load_thresholds(
+            inputs(datetime(2026, 11, 1, tzinfo=UTC)), TODAY, [later]
+        )
+        self.assertEqual(250.0, result.for_sport(Sport.RIDE).zones.ftp)
+        self.assertEqual(
+            300.0, result.for_sport(Sport.RIDE, day=date(2026, 11, 12)).zones.ftp
+        )
 
 
 if __name__ == "__main__":

@@ -185,5 +185,87 @@ class GuardIntegrationTests(unittest.TestCase):
         )
 
 
+def done(day: str, sport: str, minutes: int, zone: str) -> dict:
+    return {
+        "sport": sport,
+        "started_at_local": f"{day}T07:00:00",
+        "moving_duration_s": minutes * 60,
+        "power_zone_times": [
+            {"id": f"Z{number}", "secs": minutes * 60 if f"Z{number}" == zone else 0}
+            for number in range(1, 8)
+        ],
+    }
+
+
+class RunningWeekTests(unittest.TestCase):
+    """Monday and Tuesday completed, the rest of the week planned."""
+
+    TODAY = date(2026, 11, 4)
+
+    def weeks(self, units: list[dict], completed: list[dict]) -> list[dict]:
+        return dist.planned_weeks(units, estimate, self.TODAY, completed)
+
+    def test_completed_days_are_combined_with_the_planned_rest(self) -> None:
+        completed = [
+            done("2026-11-02", "ride", 90, "Z5"),
+            done("2026-11-03", "run", 60, "Z2"),
+        ]
+        planned = [
+            unit("p1", "2026-11-05", "Ride", "- 60m Z2\n"),
+            unit("p2", "2026-11-07", "Ride", "- 60m Z2\n"),
+        ]
+        week = self.weeks(planned, completed)[0]
+        self.assertFalse(week["partial"])
+        self.assertEqual("running week: completed + planned", week["basis"])
+        self.assertEqual(
+            {"low": 3600 + 7200, "moderate": 0, "high": 5400}, week["seconds"]
+        )
+        found = dist.distribution_findings("pyramidal", [week])
+        self.assertEqual(
+            {"moderate", "high"}, set(found[0]["evidence"]["deviating_bands"])
+        )
+        self.assertTrue(found[0]["message"].startswith("Running week: completed"))
+
+    def test_planned_alone_stays_partial_and_unjudged(self) -> None:
+        planned = [unit("p1", "2026-11-05", "Ride", "- 120m Z5\n")]
+        week = dist.planned_weeks(planned, estimate, self.TODAY)[0]
+        self.assertTrue(week["partial"])
+        self.assertEqual("planned", week["basis"])
+        self.assertEqual({}, dist.deviations("pyramidal", week))
+
+    def test_coverage_minimum_still_applies(self) -> None:
+        completed = [{**done("2026-11-02", "ride", 150, "Z2"), "power_zone_times": []}]
+        planned = [unit("p1", "2026-11-05", "Ride", "- 30m Z2\n")]
+        week = self.weeks(planned, completed)[0]
+        self.assertLess(week["coverage"], dist.MIN_COVERAGE)
+        self.assertEqual({}, dist.deviations("polarized", week))
+
+    def test_planned_unit_already_done_today_is_not_counted_twice(self) -> None:
+        completed = [done("2026-11-04", "ride", 60, "Z2")]
+        planned = [unit("p1", "2026-11-04", "Ride", "- 60m Z2\n")] + week(300, 60, 20)
+        week_row = self.weeks(planned, completed)[0]
+        self.assertNotIn("p1", week_row["local_ids"])
+        self.assertEqual(18000 + 3600, week_row["seconds"]["low"])
+
+
+class RunningWeekEdgeTests(unittest.TestCase):
+    TODAY = date(2026, 11, 4)
+
+    def test_second_planned_session_of_the_day_stays(self) -> None:
+        completed = [done("2026-11-04", "run", 45, "Z2")]
+        planned = [
+            unit("morning", "2026-11-04", "Run", "- 45m Z2\n"),
+            unit("evening", "2026-11-04", "Run", "- 30m Z2\n"),
+        ]
+        row = dist.planned_weeks(planned, estimate, self.TODAY, completed)[0]
+        self.assertEqual(["evening"], row["local_ids"])
+
+    def test_running_week_is_combined_even_without_completed_days(self) -> None:
+        planned = [unit("p1", "2026-11-05", "Ride", "- 60m Z2\n")]
+        row = dist.planned_weeks(planned, estimate, self.TODAY, [])[0]
+        self.assertFalse(row["partial"])
+        self.assertEqual("running week: completed + planned", row["basis"])
+
+
 if __name__ == "__main__":
     unittest.main()

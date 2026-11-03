@@ -143,7 +143,6 @@ _ARCHIVED_STATUSES = frozenset({"archived", "archiviert"})
 _APPROVAL_TOOLS = frozenset({"apply_adaptive_replan"})
 
 # A plan write may override the blocking illness finding only on request.
-ILLNESS_ARGUMENT = "accept_plan_findings"
 ILLNESS_CODE = "illness_hard"
 
 _UMLAUTS = (("ä", "ae"), ("ö", "oe"), ("ü", "ue"))
@@ -448,13 +447,6 @@ def _remote_effect(arguments: Mapping[str, Any] | None) -> bool:
     )
 
 
-def _accepts_illness(arguments: Mapping[str, Any] | None) -> bool:
-    if not isinstance(arguments, Mapping):
-        return False
-    accepted = arguments.get(ILLNESS_ARGUMENT)
-    return isinstance(accepted, list) and ILLNESS_CODE in accepted
-
-
 def _items(arguments: Mapping[str, Any], key: str) -> list[Any]:
     value = arguments.get(key)
     return value if isinstance(value, list) else []
@@ -541,13 +533,11 @@ def _classifier_denial(
     tool_name: str,
     domain: str,
     impact: frozenset[str],
-    arguments: Mapping[str, Any] | None,
     classified: tuple[TurnGateState, ImpactClassifier | None, TurnAuthority, str, str],
 ) -> str | None:
     """Return the denial reason when a classifier-confirmed call is unconfirmed."""
     approval = tool_name in _APPROVAL_TOOLS
-    illness = _accepts_illness(arguments)
-    if not (impact or approval or illness):
+    if not (impact or approval):
         return None
     state, classifier, authority, current_text, previous_text = classified
     verdict = (
@@ -555,11 +545,28 @@ def _classifier_denial(
         if classifier is None
         else _classified(state, classifier, authority, current_text, previous_text)
     )
-    if (impact or approval) and not verdict.confirms(domain, impact, approval=approval):
+    if not verdict.confirms(domain, impact, approval=approval):
         return "approval_not_confirmed" if approval else "impact_not_confirmed"
-    if illness and not verdict.illness_override:
-        return "illness_not_confirmed"
     return None
+
+
+def illness_override_confirmed(
+    state: TurnGateState,
+    classifier: ImpactClassifier | None,
+    authority: TurnAuthority,
+    current_text: str,
+    previous_assistant_text: str,
+) -> bool:
+    """Whether the athlete explicitly asks to train hard or long despite illness.
+
+    Called by the plan guard only after a write produced a blocking
+    ``illness_hard`` finding; without a classifier nothing is confirmed.
+    """
+    if classifier is None or not authority.athlete_started:
+        return False
+    return _classified(
+        state, classifier, authority, current_text, previous_assistant_text
+    ).illness_override
 
 
 def check_write(
@@ -576,9 +583,9 @@ def check_write(
 
     An allowed call counts toward the per-turn cap and the bulk record count.
     The classifier runs only for a destructive or bulk local call or for the
-    approval of a previewed change or for a call that lists illness_hard in
-    ``accept_plan_findings``, at most once per turn, and never decides a remote
-    write.
+    approval of a previewed change, at most once per turn, and never decides a
+    remote write. The illness override is asked later, only when the plan guard
+    produced a blocking ``illness_hard`` finding (``illness_override_confirmed``).
     """
     if tool_name in UNGATED_TOOLS:
         return GateDecision(True, None, "ok")
@@ -605,7 +612,6 @@ def check_write(
         tool_name,
         domain,
         impact,
-        arguments,
         (state, classifier, authority, current_text, previous_assistant_text),
     )
     if denied:

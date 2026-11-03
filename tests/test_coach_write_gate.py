@@ -231,22 +231,31 @@ class IllnessOverrideTests(unittest.TestCase):
             arguments=_ILLNESS_ARGS if arguments is None else arguments,
         )
 
-    def test_override_without_athlete_request_is_rejected(self):
+    def test_listing_alone_never_asks_the_classifier(self):
         classifier = _Classifier(_verdict(["planning"]))
         decision = self._write(classifier)
-        self.assertFalse(decision.allowed)
-        self.assertEqual(decision.reason, "illness_not_confirmed")
-
-    def test_explicit_request_is_accepted(self):
-        decision = self._write(_Classifier(_verdict(["planning"], illness=True)))
         self.assertTrue(decision.allowed, decision)
+        self.assertEqual(classifier.calls, [])
 
-    def test_classifier_failure_asks_instead_of_saving(self):
+    def _confirmed(self, classifier, text="Ja", previous=""):
+        state = gate.TurnGateState()
+        authority = gate.build_turn_authority(7, text, previous, None)
+        return gate.illness_override_confirmed(
+            state, classifier, authority, text, previous
+        )
+
+    def test_override_without_athlete_request_is_not_confirmed(self):
+        self.assertFalse(self._confirmed(_Classifier(_verdict(["planning"]))))
+
+    def test_explicit_request_is_confirmed(self):
+        self.assertTrue(
+            self._confirmed(_Classifier(_verdict(["planning"], illness=True)))
+        )
+
+    def test_classifier_failure_or_absence_is_not_confirmed(self):
         for classifier in (_Classifier(error=RuntimeError("down")), None):
             with self.subTest(classifier=classifier):
-                decision = self._write(classifier)
-                self.assertFalse(decision.allowed)
-                self.assertEqual(decision.reason, "illness_not_confirmed")
+                self.assertFalse(self._confirmed(classifier))
 
     def test_gated_code_is_the_only_blocking_code(self):
         from backend.planning import plan_checks
@@ -263,33 +272,24 @@ class IllnessOverrideTests(unittest.TestCase):
 
     def test_confirmation_of_the_coach_question_is_accepted(self):
         classifier = _Classifier(_verdict(illness=True))
-        decision = _check(
-            "apply_training_changes",
-            "Ja",
-            "Du bist krank. Willst du trotzdem hart trainieren?",
-            classifier=classifier,
-            arguments=_ILLNESS_ARGS,
-        )
-        self.assertTrue(decision.allowed, decision)
-        self.assertEqual(
-            classifier.calls[0][1], "Du bist krank. Willst du trotzdem hart trainieren?"
-        )
+        question = "Du bist krank. Willst du trotzdem hart trainieren?"
+        self.assertTrue(self._confirmed(classifier, "Ja", question))
+        self.assertEqual(classifier.calls[0][1], question)
 
-    def test_unconfirmed_denial_tells_the_coach_to_ask(self):
+    def test_turn_gate_asks_once_and_caches_the_verdict(self):
+        classifier = _Classifier(_verdict(illness=True))
         turn = CoachTurnWriteGate(
             message="plane hart",
             context={"current_user_message_id": 7},
             model="m",
             command_receipts=[],
             read_only_tools=frozenset(),
-            classifier_factory=lambda model: _Classifier(),
+            classifier_factory=lambda model: classifier,
             logger=logging.getLogger("test"),
         )
-        with self.assertLogs("test", "WARNING"):
-            result = turn.denial("apply_training_changes", _ILLNESS_ARGS)
-        self.assertEqual(result["status"], "not_performed")
-        self.assertEqual(result["gate_reason"], "illness_not_confirmed")
-        self.assertIn("clarify_coach_request", result["message"])
+        self.assertTrue(turn.confirms_illness_override())
+        self.assertTrue(turn.confirms_illness_override())
+        self.assertEqual(1, len(classifier.calls))
 
     def test_plain_writes_never_call_the_classifier(self):
         classifier = _Classifier()

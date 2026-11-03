@@ -419,9 +419,18 @@ with patch.object(Path, 'read_text', deny):
             first["command_receipts"][1]["result"]["reason"],
             "adaptive_approval_required",
         )
-        with patch.object(
-            IllnessPauseSyncService, "apply", return_value={"status": "applied"}
-        ) as mutation:
+        with (
+            patch.object(
+                IllnessPauseSyncService,
+                "apply_local",
+                return_value={"status": "applied"},
+            ) as mutation,
+            patch.object(
+                IllnessPauseSyncService,
+                "complete",
+                return_value={"status": "applied"},
+            ),
+        ):
             second, _ = self.turn(
                 "Apply that preview.", [apply, {"output_text": "Applied."}]
             )

@@ -14,7 +14,10 @@ from backend.coach.tool_dispatch import CoachToolDispatchService
 from backend.coach.training_patch import CoachTrainingPatchService
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
-from backend.planning.plan_guard_service import PlanGuardService
+from backend.planning.plan_guard_service import (
+    PLAN_FINDINGS_ARGUMENT,
+    PlanGuardService,
+)
 
 PROFILE_MUTATING_COACH_TOOLS = frozenset({"update_profile", "undo_training_change"})
 
@@ -28,9 +31,12 @@ PLAN_CHECKED_TOOLS = frozenset(
         "replace_training_plan",
         "apply_workout_library_plan",
         "commit_training_plan",
+        "apply_adaptive_replan",
     }
 )
-PLAN_FINDINGS_ARGUMENT = "accept_plan_findings"
+# Checked inside the tool: its optional Intervals.icu sync must run after the
+# guarded local commit, so the guard cannot wrap the whole call.
+SELF_GUARDED_TOOLS = frozenset({"apply_adaptive_replan"})
 
 COACH_EXTERNAL_FOOD_LOOKUP_TOOLS = frozenset(
     {
@@ -71,7 +77,12 @@ class CoachStructuredToolExecutionService:
 
     def execute(self, metadata: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         """Run one tool; plan writes are checked, blocked on illness, else noted."""
-        if metadata["name"] not in PLAN_CHECKED_TOOLS or self._plan_guard is None:
+        name = metadata["name"]
+        if (
+            name not in PLAN_CHECKED_TOOLS
+            or name in SELF_GUARDED_TOOLS
+            or self._plan_guard is None
+        ):
             return self._execute_tool(metadata, **kwargs)
         guard = self._plan_guard()
         arguments = dict(metadata["arguments"])

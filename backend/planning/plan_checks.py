@@ -472,7 +472,7 @@ def check_plan(
         *_back_to_back(units),
         *_strength_same_day(units),
         *_drafted(leg_strength.before_key_session(units, is_hard, is_heavy_strength)),
-        *_drafted(leg_strength.frequency(units, today, expects_strength)),
+        *_drafted(leg_strength.frequency(units, today, expects_strength, completed)),
         *_missing_taper(units, completed, competitions, today),
         *_illness_hard(units, illness, today),
         *_drafted(weekly_plan_checks.check(weekly_plan, units, today)),

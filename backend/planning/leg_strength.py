@@ -26,6 +26,7 @@ from typing import Any, Final
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
+from backend.planning import running_week
 from backend.planning.season import target_phase
 from backend.planning.session_focus import SessionFocus, session_focus
 from backend.planning.sport import planned_sport_environment
@@ -191,19 +192,41 @@ def _by_week(
     return weeks
 
 
+def _done_strength(
+    completed: Iterable[Mapping[str, Any]], today: date
+) -> list[dict[str, Any]]:
+    """This week's completed strength activities, shaped like units."""
+    return [
+        completed_unit(row)
+        for row in running_week.completed_this_week(completed, today)
+        if row.get("sport") == Sport.STRENGTH.value
+    ]
+
+
 def planned_weeks(
-    units: Sequence[Mapping[str, Any]], today: date
+    units: Sequence[Mapping[str, Any]],
+    today: date,
+    completed: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Strength counts per ISO week of all planned units, oldest first.
 
-    A week that began before ``today`` is partial: its elapsed days are not in
-    the planned units.
+    The running week also counts this week's completed strength activities and
+    is labelled ``running_week.RUNNING_WEEK_BASIS``; without ``completed`` a
+    week that began before ``today`` is partial: its elapsed days are not in the
+    planned units.
     """
+    current = running_week.week_start(today)
+    done = _done_strength(completed or (), today)
+    units = running_week.without_done_today(units, completed or (), today)
     return [
         {
             "week_start": monday.isoformat(),
-            "partial": monday < today,
-            **week_counts(group),
+            "partial": monday < today
+            and not (completed is not None and monday == current),
+            "basis": running_week.RUNNING_WEEK_BASIS
+            if completed is not None and monday == current
+            else "planned",
+            **week_counts([*group, *(done if monday == current else [])]),
         }
         for monday, group in sorted(_by_week(units).items())
     ]
@@ -329,8 +352,12 @@ def before_key_session(
     return [draft for draft in drafts if draft is not None]
 
 
-def _too_many(monday: date, group: Sequence[Mapping[str, Any]]) -> Draft | None:
-    counts = week_counts(group)
+def _too_many(
+    monday: date,
+    group: Sequence[Mapping[str, Any]],
+    done: Sequence[Mapping[str, Any]] = (),
+) -> Draft | None:
+    counts = week_counts([*group, *done])
     heavy = counts["leg_by_intensity"]["heavy"]
     if counts["leg_sessions"] <= MAX_LEG_SESSIONS and heavy <= MAX_HEAVY_LEG_SESSIONS:
         return None
@@ -345,6 +372,7 @@ def _too_many(monday: date, group: Sequence[Mapping[str, Any]]) -> Draft | None:
             "heavy_leg_sessions": heavy,
             "max_leg_sessions": MAX_LEG_SESSIONS,
             "max_heavy_leg_sessions": MAX_HEAVY_LEG_SESSIONS,
+            "basis": running_week.RUNNING_WEEK_BASIS if done else "planned",
         },
     )
 
@@ -382,14 +410,23 @@ def _no_legs(
 
 
 def frequency(
-    units: Sequence[Mapping[str, Any]], today: date, expects_strength: bool
+    units: Sequence[Mapping[str, Any]],
+    today: date,
+    expects_strength: bool,
+    completed: Sequence[Mapping[str, Any]] = (),
 ) -> list[Draft]:
-    """Too many leg sessions per week, or none in a plan that should have them."""
-    weeks = _by_week(units)
+    """Too many leg sessions per week, or none in a plan that should have them.
+
+    The running week counts its completed strength days with the planned ones.
+    """
+    weeks = _by_week(running_week.without_done_today(units, completed, today))
+    current = running_week.week_start(today)
+    done = _done_strength(completed, today)
     drafts = [
         draft
         for monday, group in sorted(weeks.items())
-        if (draft := _too_many(monday, group)) is not None
+        if (draft := _too_many(monday, group, done if monday == current else ()))
+        is not None
     ]
     if expects_strength and (draft := _no_legs(weeks, today)) is not None:
         drafts.append(draft)

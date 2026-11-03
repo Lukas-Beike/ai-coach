@@ -1734,7 +1734,10 @@ def _plan_guard_service() -> PlanGuardService:
         ),
         today=lambda: ATHLETE_CLOCK.now().date(),
         thresholds=lambda: read_load_thresholds(
-            database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
+            database_manager(),
+            CANONICAL_READ,
+            ATHLETE_CLOCK.now().date(),
+            ATHLETE_DATA.zones().configurations(),
         ),
         expects_strength=lambda: strength_expected(
             str(
@@ -1772,6 +1775,7 @@ COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
             illness_pause_sync_service=SYNC_COMMANDS.illness_pause,
+            plan_guard=_plan_guard_service,
         ),
     )
 )

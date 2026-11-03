@@ -6,8 +6,9 @@ Load = duration x intensity^2 (TSS principle), per sport:
 - Completed activity: ride normalized power (else average power) over FTP; run
   weighted (grade-adjusted) pace, else average pace, over threshold pace; without
   both, a heart-rate fallback over LTHR that is marked less precise.
-Thresholds come from the latest Intervals.icu sync and count only when it is at
-most ``THRESHOLD_MAX_AGE_DAYS`` old. Anything missing or stale is unknown and
+Thresholds follow the Coach precedence: locally confirmed zone configurations
+first, then the latest Intervals.icu sync, which counts only when it is at most
+``THRESHOLD_MAX_AGE_DAYS`` old. Anything missing or stale is unknown and
 named as such; no number is made up. Strength has no planned session-RPE in
 planned units, so it takes no part. The evidence is extrapolated from distance
 and volume studies, not directly validated, and every note is non-blocking.
@@ -19,20 +20,18 @@ Functions return drafts ``(code, units, message, evidence)`` that
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
 from backend.activities.workout_load import AthleteThresholds, WorkoutEstimate
-from backend.activities.zone_settings import ZoneSettings
+from backend.activities.zone_settings import effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.vocabulary import Environment, Sport
-from backend.planning.planned_unit_load import (
-    estimate_planned_unit,
-    sport_threshold_speed,
-)
+from backend.canonical.domain_records import ZoneConfiguration
+from backend.canonical.vocabulary import Environment, Sport, ZoneConfigurationMetric
+from backend.planning.planned_unit_load import estimate_planned_unit, resolve_thresholds
 from backend.planning.sport import planned_sport_environment
 
 LOAD_EVIDENCE = "extrapolated from distance/volume studies, not directly validated"
@@ -58,11 +57,21 @@ class LoadThresholds:
     by_sport: Mapping[Sport, AthleteThresholds] = field(default_factory=dict)
     unavailable: str | None = None
     indoor_ride: AthleteThresholds | None = None
+    # Resolves a sport on a given day; set when local configurations can differ
+    # by validity date, otherwise ``by_sport`` and ``indoor_ride`` apply.
+    resolver: Callable[[Sport, Environment, date | None], AthleteThresholds] | None = (
+        None
+    )
 
     def for_sport(
-        self, sport: Sport, environment: Environment = Environment.UNKNOWN
+        self,
+        sport: Sport,
+        environment: Environment = Environment.UNKNOWN,
+        day: date | None = None,
     ) -> AthleteThresholds:
         """Thresholds of a sport; indoor and virtual rides use the indoor FTP."""
+        if self.resolver is not None:
+            return self.resolver(sport, environment, day)
         indoor = environment in {Environment.INDOOR, Environment.VIRTUAL}
         if sport is Sport.RIDE and indoor and self.indoor_ride is not None:
             return self.indoor_ride
@@ -84,29 +93,63 @@ class PlannedSession:
     estimate: WorkoutEstimate
 
 
-def _sport_thresholds(
-    inputs: Any, sport: Sport, environment: Environment = Environment.UNKNOWN
-) -> AthleteThresholds:
-    zones = ZoneSettings.from_thresholds(inputs.zone_thresholds, sport, environment)
-    speed = sport_threshold_speed(inputs.zone_thresholds, sport)
-    return AthleteThresholds(zones=zones, threshold_speed_mps=speed)
-
-
-def load_thresholds(inputs: Any, today: date) -> LoadThresholds:
-    """Thresholds of the latest Intervals.icu sync, unusable when absent or stale."""
-    synced = inputs.synced_at
-    if synced is None:
-        return LoadThresholds(unavailable="missing_thresholds")
-    if (today - synced.date()).days > THRESHOLD_MAX_AGE_DAYS:
-        return LoadThresholds(unavailable="stale_thresholds")
-    return LoadThresholds(
-        {sport: _sport_thresholds(inputs, sport) for sport in LOAD_SPORTS},
-        indoor_ride=_sport_thresholds(inputs, Sport.RIDE, Environment.INDOOR),
+def _has_configuration(
+    configurations: Sequence[ZoneConfiguration], today: date
+) -> bool:
+    """Whether a local (athlete-confirmed) configuration applies to a load sport."""
+    return any(
+        effective_zone_configuration(
+            configurations, metric, sport, indoor=indoor, day=today
+        )
+        for sport in LOAD_SPORTS
+        for metric in ZoneConfigurationMetric
+        for indoor in (False, True)
     )
+
+
+def load_thresholds(
+    inputs: Any, today: date, configurations: Sequence[ZoneConfiguration] = ()
+) -> LoadThresholds:
+    """Thresholds with the Coach precedence: locally confirmed values, then Intervals.
+
+    Intervals.icu values count only when the latest sync is at most
+    ``THRESHOLD_MAX_AGE_DAYS`` old; local values do not age. Without either the
+    thresholds are unusable and named as missing or stale.
+    """
+    synced = inputs.synced_at
+    reason = None
+    if synced is None:
+        reason = "missing_thresholds"
+    elif (today - synced.date()).days > THRESHOLD_MAX_AGE_DAYS:
+        reason = "stale_thresholds"
+    if reason:
+        # Provider values age with the sync; only athlete-confirmed ones remain.
+        configurations = [
+            item for item in configurations if item.provenance.provider is None
+        ]
+        if not _has_configuration(configurations, today):
+            return LoadThresholds(unavailable=reason)
+    observed = () if reason else inputs.zone_thresholds
+
+    def resolve(
+        sport: Sport, environment: Environment, day: date | None
+    ) -> AthleteThresholds:
+        return resolve_thresholds(
+            observed, configurations, sport, environment, day or today
+        )
+
+    return LoadThresholds(resolver=resolve)
 
 
 def _day(unit: Mapping[str, Any]) -> str:
     return iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
+
+
+def _unit_date(unit: Mapping[str, Any]) -> date | None:
+    try:
+        return date.fromisoformat(_day(unit))
+    except ValueError:
+        return None
 
 
 def plan_sessions(
@@ -119,7 +162,7 @@ def plan_sessions(
         if sport in LOAD_SPORTS:
             environment = planned_sport_environment(unit)[1]
             estimate = estimate_planned_unit(
-                unit, thresholds.for_sport(sport, environment)
+                unit, thresholds.for_sport(sport, environment, _unit_date(unit))
             )
             sessions.append(PlannedSession(unit, sport, _day(unit), estimate))
     return sessions

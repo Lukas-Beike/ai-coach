@@ -34,8 +34,13 @@ from backend.coach.tool_preparation import CoachStructuredToolPreparationService
 from backend.coach.tool_replay import CoachStructuredToolReplayService
 from backend.coach.tool_round_journal import CoachStructuredToolRoundJournal
 from backend.coach.turn_write_gate import CoachTurnWriteGate, CoachWriteGateService
+from backend.coach.write_gate import ILLNESS_CODE
 from backend.db.manager import DatabaseManager
 from backend.errors import AppError
+from backend.planning.plan_guard_service import (
+    PLAN_FINDINGS_ARGUMENT,
+    illness_confirmation,
+)
 
 COACH_TOOL_MAX_ROUNDS = 12
 _TURN_RELEASED = {
@@ -271,6 +276,11 @@ class CoachStructuredToolRoundService:
     ) -> dict[str, Any] | None:
         """Execute one prepared call and append its receipt; None if the turn is released."""
         name = metadata["name"]
+        accepted = (metadata.get("arguments") or {}).get(PLAN_FINDINGS_ARGUMENT)
+        if isinstance(accepted, list) and ILLNESS_CODE in accepted:
+            # The classifier is a network call: ask before the writer lock; the
+            # plan guard reads the cached verdict and asks only on a real finding.
+            self._turn_write_gate(state).confirms_illness_override()
         local_transaction = name not in {
             "start_provider_refresh",
             "apply_adaptive_replan",
@@ -292,16 +302,19 @@ class CoachStructuredToolRoundService:
             # released while this worker was busy cannot finish its writes.
             if not self._jobs.turn_open(state.client_turn_id):
                 return None
-            result = self._execution.execute(
-                metadata,
-                action=action,
-                context=state.context,
-                conversation_id=state.conversation_id,
-                client_turn_id=state.client_turn_id,
-                session_csrf_hash=state.session_csrf_hash,
-                sync_job_ids=state.sync_job_ids,
-                cancel_event=state.cancel_event,
-            )
+            with illness_confirmation(
+                lambda: self._turn_write_gate(state).confirms_illness_override()
+            ):
+                result = self._execution.execute(
+                    metadata,
+                    action=action,
+                    context=state.context,
+                    conversation_id=state.conversation_id,
+                    client_turn_id=state.client_turn_id,
+                    session_csrf_hash=state.session_csrf_hash,
+                    sync_job_ids=state.sync_job_ids,
+                    cancel_event=state.cancel_event,
+                )
             state.command_receipts.append(
                 {
                     "call_id": metadata["call_id"],
