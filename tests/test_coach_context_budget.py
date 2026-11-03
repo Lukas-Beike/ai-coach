@@ -333,6 +333,8 @@ class CoachContextBudgetTests(unittest.TestCase):
             "Please schedule my next 3 weeks": "plan_block",
             "Plane einen Aufbau-Block": "plan_block",
             "Passe die Woche an": "adjust_week",
+            "Passe die nächste Woche an": "plan_week",
+            "Adjust next week": "plan_week",
             "Adjust this week": "adjust_week",
         }
         for message, kind in cases.items():
@@ -357,6 +359,12 @@ class CoachContextBudgetTests(unittest.TestCase):
                 selection = select_coach_context(message, {})
                 self.assertIsNone(selection.kind)
                 self.assertNotIn("planning_brief", selection.sections)
+
+    def test_readiness_wording_loads_recovery(self) -> None:
+        for message in ("Bin ich bereit fürs Training?", "How is my readiness?"):
+            with self.subTest(message=message):
+                sections = select_coach_context(message, {}).sections
+                self.assertIn("recovery", sections)
 
     def test_blocks_beyond_the_window_keep_complete_context(self) -> None:
         near = select_coach_context("Plane die nächsten 4 Wochen", {})

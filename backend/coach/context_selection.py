@@ -104,6 +104,9 @@ _WORD_NUMBERS = {
     "seven": 7,
     "eight": 8,
 }
+_NEXT_WEEK = (
+    r"\b(?:nächste[nrs]?|naechste[nrs]?|kommende[nrs]?|next)\s+(?:woche|week)\b"
+)
 _ADJUST_VERB = r"\b(?:passe|anpass\w*|adjust\w*|umplan\w*|replan\w*|neu\s+plan\w*)\b"
 _PLAN_ACTION = (
     r"^\s*(?:bitte\s+|please\s+)?(?:plan|schedule)\b"
@@ -116,7 +119,7 @@ _PLAN_ACTION = (
 RECOVERY_PATTERN = (
     r"\bschlaf\w*|geschlafen|\bsleep\w*|erholung|\brecover\w*|\bhrv\b|müde|muede"
     r"|erschöpf\w*|erschoepf\w*|völlig erledigt|voellig erledigt|\bfatigue\b"
-    r"|\btired\b|readiness|body battery"
+    r"|\btired\b|readiness|body battery|\bbereit\s+f(?:ür|uer)\w*"
 )
 HISTORY_PATTERN = (
     r"\b(?:letzte[nrs]?|vergangene[nrsm]?|past|last)\s+(?:\d+|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn"
@@ -405,7 +408,8 @@ def free_text_plan_kind(message: str) -> str | None:
     """Map a typed planning request to its fixed plan kind; selection only."""
     normalized = message.casefold()
     if re.search(_ADJUST_VERB, normalized) and re.search(_WEEK_NOUN, normalized):
-        return "adjust_week"
+        # Adapting a coming week is planning it; adjust_week works the current one.
+        return "plan_week" if re.search(_NEXT_WEEK, normalized) else "adjust_week"
     if not re.search(_PLAN_ACTION, normalized):
         return None
     if re.search(_BLOCK_NOUN, normalized):
