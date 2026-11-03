@@ -824,11 +824,7 @@ class CoachStructuredContextService:
                 "conversation": "Nur Dialogkontinuität; keine autoritative Quelle für dauerhafte Athletenfakten",
             },
         }
-        if selection is not None:
-            context["source_policy"]["omitted_sections"] = (
-                "Sections a task does not need, such as daily_planning_context, "
-                "calendar and training_plans, stay loadable with read_coach_context"
-            )
+        _note_omitted_sections(context["source_policy"], selection)
         selected = {key: value for key, value in context.items() if key in included}
         if performance_inputs and performance_inputs.pending:
             selected["canonical_data_status"] = {
@@ -1128,6 +1124,16 @@ def coach_context_total_budget_note(
         "total_budget_omitted_sections": omitted_sections,
         "total_budget_truncated_sections": truncated_sections,
     }
+
+
+def _note_omitted_sections(
+    source_policy: dict[str, Any], selection: CoachContextSelection | None
+) -> None:
+    if selection is not None:
+        source_policy["omitted_sections"] = (
+            "Sections a task does not need, such as daily_planning_context, "
+            "calendar and training_plans, stay loadable with read_coach_context"
+        )
 
 
 class CoachTrainingContextService:

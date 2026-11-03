@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, cast
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.vocabulary import ProviderId
@@ -260,10 +260,7 @@ class CoachContextSelection:
             for key, value in context.items()
             if key in self.sections or key == "canonical_data_status"
         }
-        if "external_calendar" in result and "daily_planning_context" in result:
-            result["daily_planning_context"] = _without_appointments(
-                result["daily_planning_context"], local_date
-            )
+        _dedupe_appointments(result, local_date)
         if self.horizon_days is None:
             return result
         try:
@@ -322,6 +319,13 @@ class CoachContextSelection:
             )
             or first <= value <= last
         ]
+
+
+def _dedupe_appointments(result: dict[str, Any], local_date: str) -> None:
+    if "external_calendar" in result and "daily_planning_context" in result:
+        result["daily_planning_context"] = _without_appointments(
+            result["daily_planning_context"], local_date
+        )
 
 
 def _without_appointments(days: Any, first_day: str) -> Any:
@@ -455,34 +459,58 @@ def select_coach_context(
     selection = _message_selection(
         message, dialogue, attachments=attachments, has_receipts=has_receipts
     )
-    kind = request_kind if request_kind in REQUEST_KIND_SELECTIONS else None
-    typed = request_kind is None and kind is None and selection.name != "fallback"
-    if typed:
-        kind = free_text_plan_kind(message)
+    if request_kind is not None and request_kind in REQUEST_KIND_SELECTIONS:
+        return _fixed_selection(selection, message, request_kind)
+    if request_kind is not None or selection.name == "fallback":
+        return selection
+    kind = free_text_plan_kind(message)
     if kind is None:
         return selection
-    if (
-        typed
-        and selection.horizon_days is None
-        and not (kind == "plan_block" and _block_fits(message.casefold()))
+    if selection.horizon_days is None and not (
+        kind == "plan_block" and _block_fits(message.casefold())
     ):
         # Explicit dates or long ranges keep the complete time context; the typed
         # request still gets the brief and its playbook, with events once.
-        return replace(
-            selection,
-            sections=(selection.sections - {"calendar"}) | {"planning_brief"},
-            kind=kind,
+        return cast(
+            CoachContextSelection,
+            replace(
+                selection,
+                sections=(selection.sections - {"calendar"}) | {"planning_brief"},
+                kind=kind,
+            ),
         )
+    return _fixed_selection(selection, message, kind)
+
+
+def _fixed_selection(
+    selection: CoachContextSelection, message: str, kind: str
+) -> CoachContextSelection:
+    """Return the fixed kind's selection with the message's retention."""
     fixed = REQUEST_KIND_SELECTIONS[kind]
     # Fixed kinds carry saved products only for food named in the message itself;
     # an upload alone does not make a plan or analysis turn a nutrition turn.
-    return replace(
-        fixed,
-        sections=fixed.sections | _food_sections(message.casefold(), False),
-        retain_dialogue=selection.retain_dialogue,
-        retain_pending_request=selection.retain_pending_request,
-        kind=kind,
+    return cast(
+        CoachContextSelection,
+        replace(
+            fixed,
+            sections=fixed.sections | _food_sections(message.casefold(), False),
+            retain_dialogue=selection.retain_dialogue,
+            retain_pending_request=selection.retain_pending_request,
+            kind=kind,
+        ),
     )
+
+
+def _daily_sections(
+    normalized: str, matched: Sequence[str], planning: bool
+) -> set[str]:
+    """Return the day view and recovery a message topic calls for."""
+    sections: set[str] = set()
+    if planning or "today_training" in matched or re.search(DAY_PATTERN, normalized):
+        sections.add("daily_planning_context")
+    if re.search(RECOVERY_PATTERN, normalized):
+        sections.add("recovery")
+    return sections
 
 
 def _message_selection(
@@ -527,8 +555,7 @@ def _message_selection(
     )
     if planning:
         sections.update({"planning", "training_plans"})
-    if planning or "today_training" in matched:
-        sections.add("daily_planning_context")
+    sections |= _daily_sections(normalized, matched, planning)
     if "provider_refresh_or_sync" in matched or _requires_full_time_context(
         planning, normalized
     ):
@@ -540,10 +567,6 @@ def _message_selection(
     weather = bool(re.search(WEATHER_PATTERN, normalized))
     if weather:
         sections.add("weather")
-    if re.search(RECOVERY_PATTERN, normalized):
-        sections.add("recovery")
-    if re.search(DAY_PATTERN, normalized):
-        sections.add("daily_planning_context")
     if re.search(FULL_CALENDAR_PATTERN, normalized):
         sections.add("external_calendar")
     horizon = 14 if planning else 3
