@@ -81,6 +81,8 @@ class CanonicalPerformanceInputs:
     ``intervals_synced_at`` is the newest Intervals.icu fetch time of the
     canonical provider coverage (ISO text), None without an Intervals.icu sync; it
     is the one Intervals.icu sync time of the performance and Coach reads.
+    ``activities_synced_at`` is the fetch time of the activities alone: wellness
+    or profile refreshes do not advance it.
 
     ``pending`` is True while the canonical source serves nothing yet (the first
     backfill has not completed); every value is then empty.
@@ -109,6 +111,7 @@ class CanonicalPerformanceInputs:
     backfill_failed: bool = False
     activities_need_refresh: bool = False
     intervals_synced_at: str | None = None
+    activities_synced_at: str | None = None
 
 
 # The inputs of a consumer without a canonical source: every value is unknown.
@@ -167,10 +170,15 @@ def with_read_status(
     marked = _read_state(source, db, inputs)
     if marked is None or marked.pending or source.coverage is None:
         return marked
-    synced = intervals_synced_at(source.coverage(), db)
+    coverage = source.coverage()
+    synced = intervals_synced_at(coverage, db)
     if synced is None:
         return marked
-    return _changed(marked, intervals_synced_at=synced)
+    return _changed(
+        marked,
+        intervals_synced_at=synced,
+        activities_synced_at=activities_synced_at(coverage, db),
+    )
 
 
 def _changed(

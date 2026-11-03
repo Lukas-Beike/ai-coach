@@ -184,7 +184,7 @@ class PublicPerformanceStateService:
                 end=today,
                 today=today,
                 complete_before=complete_before(
-                    today, inputs.intervals_synced_at, timezone
+                    today, inputs.activities_synced_at, timezone
                 ),
                 timezone=timezone,
                 computed_at=computed_at,
