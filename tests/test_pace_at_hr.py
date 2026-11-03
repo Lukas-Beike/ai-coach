@@ -122,6 +122,29 @@ class TrendTests(unittest.TestCase):
         self.assertEqual(trend["heart_rate_band_bpm"], [145, 154])
         self.assertIsNotNone(trend["change_s_per_km"])
 
+    def test_sessions_outside_the_block_and_one_sided_blocks_are_not_a_trend(self):
+        outside = [
+            _record("2026-07-01", pace_at_heart_rate(_run(grade=0.0))),
+            _record("2026-07-02", pace_at_heart_rate(_run(grade=0.0))),
+            _record("2026-09-20", pace_at_heart_rate(_run(grade=0.0))),
+        ]
+        one_sided = [
+            _record("2026-09-20", pace_at_heart_rate(_run(grade=0.0))),
+            _record("2026-09-21", pace_at_heart_rate(_run(grade=0.0))),
+        ]
+        for records in (outside, one_sided):
+            trend = pace_at_heart_rate_trend(
+                records, date(2026, 8, 31), date(2026, 9, 14), date(2026, 9, 27)
+            )["run"]["outdoor"]
+            self.assertEqual(trend["status"], "insufficient_data")
+            self.assertIsNone(trend["change_s_per_km"])
+        self.assertEqual(
+            _performance({"pace_at_heart_rate": {"run": {"outdoor": trend}}})[
+                "not_covered"
+            ],
+            ["pace_at_heart_rate"],
+        )
+
     def test_single_session_or_no_coverage_is_not_a_trend(self):
         one = [_record("2026-09-01", pace_at_heart_rate(_run(grade=0.0)))]
         unknown = [_record("2026-09-01", {}), _record("2026-09-20", {})]
@@ -130,7 +153,7 @@ class TrendTests(unittest.TestCase):
                 records, date(2026, 8, 31), date(2026, 9, 14), date(2026, 9, 27)
             )["run"]["outdoor"]
             self.assertEqual(trend["status"], "insufficient_data")
-            self.assertNotIn("change_s_per_km", trend)
+            self.assertIsNone(trend["change_s_per_km"])
 
     def test_block_review_marks_coverage(self):
         records = [

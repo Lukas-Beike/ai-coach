@@ -255,10 +255,14 @@ def _environment_trend(
     records: Sequence[Mapping[str, Any]], halves: Mapping[str, tuple[date, date]]
 ) -> dict[str, Any]:
     middle = halves["later"][0].isoformat()
+    first = halves["earlier"][0].isoformat()
+    last = halves["later"][1].isoformat()
+    # Curve records span the whole profile window; only the block counts.
     profiles = [
         (row, row["pace_at_hr_profile"])
         for row in records
-        if (row.get("pace_at_hr_profile") or {}).get("status") == "ok"
+        if first <= str(row.get("date") or "") <= last
+        and (row.get("pace_at_hr_profile") or {}).get("status") == "ok"
     ]
     low = _best_band(
         [(str(row.get("date")) >= middle, profile) for row, profile in profiles]
@@ -277,37 +281,32 @@ def _environment_trend(
                     "grade_adjusted": bool(profile.get("grade_adjusted")),
                 }
             )
-    result: dict[str, Any] = {
+    parts = {
+        name: _half(
+            [
+                row
+                for row in sessions
+                if lo.isoformat() <= str(row["date"]) <= hi.isoformat()
+            ]
+        )
+        for name, (lo, hi) in halves.items()
+    }
+    both = all(part["sessions"] for part in parts.values())
+    later, earlier = parts["later"]["pace_s_per_km"], parts["earlier"]["pace_s_per_km"]
+    return {
         "records": len(records),
         "usable_sessions": len(sessions),
-        "status": "ok" if len(sessions) >= MIN_SESSIONS else "insufficient_data",
+        "status": "ok"
+        if both and len(sessions) >= MIN_SESSIONS
+        else "insufficient_data",
         "heart_rate_band_bpm": None
         if low is None
         else [low, low + BAND_BINS * BIN_BPM - 1],
         "sources": sorted({p["source"] for _, p in profiles if p.get("source")}),
         "sessions": sessions,
+        **parts,
+        "change_s_per_km": round(later - earlier, 1) if both else None,
     }
-    if result["status"] == "ok":
-        parts = {
-            name: _half(
-                [
-                    row
-                    for row in sessions
-                    if first.isoformat() <= str(row["date"]) <= last.isoformat()
-                ]
-            )
-            for name, (first, last) in halves.items()
-        }
-        later, earlier = (
-            parts["later"]["pace_s_per_km"],
-            parts["earlier"]["pace_s_per_km"],
-        )
-        result |= parts | {
-            "change_s_per_km": None
-            if later is None or earlier is None
-            else round(later - earlier, 1)
-        }
-    return result
 
 
 def pace_at_heart_rate_trend(
