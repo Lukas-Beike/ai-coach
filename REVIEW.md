@@ -124,6 +124,17 @@ flow rather than demanding unrelated changes or a repository-wide redesign.
   scheduling, cancellation, retry, and shutdown paths for lost or duplicate jobs,
   stuck state, and contention with restore or other maintenance operations.
 
+### Canonical read-path wiring
+
+- For changed values in canonical reads, analytics, charts, or Coach context,
+  trace every caller, wrapper, and consumer between the changed code and the
+  returned or rendered output, including files outside the diff. A correct
+  function can still be bypassed: a wrapper that drops a field, a fallback
+  applied per metric where the period requires it, or a chart that reads a
+  stale or unwrapped source.
+- Check feedback and undo paths that reverse a canonical change after a merge or
+  reconciliation, and confirm they restore the value the reader actually sees.
+
 ### Backend ownership and browser behavior
 
 - New business logic and use-case orchestration belong in the cohesive
