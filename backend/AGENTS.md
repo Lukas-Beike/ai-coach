@@ -14,7 +14,7 @@ Validate focused tests, architecture guards, syntax, and CI-equivalent Ruff/mypy
 checks for changed backend files. Follow the root secret-scan protocol.
 
 Sonar's S5886/S5890 `DataclassInstance` reports for `dataclasses.replace` on
-frozen dataclasses are exempted for `backend/**/*.py` in
-`sonar-project.properties`, because Sonar cannot infer that return type. mypy
-still checks the result; where a concrete type must be explicit, use a
-`typing.cast` to the dataclass type.
+frozen dataclasses are exempted per module in `sonar-project.properties` for
+modules with uncast `replace()` calls, because Sonar cannot infer that return
+type. Prefer a `typing.cast` to the dataclass type at the call site (mypy still
+checks the result) and do not widen the exemption list.
