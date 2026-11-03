@@ -7,6 +7,11 @@ from typing import Any
 from backend.providers.descriptors import INTERVALS_ID
 from backend.sync.queue import SyncJobQueueService
 
+_NOTHING_QUEUED = (
+    "Es wurde nichts synchronisiert: keine offenen Einträge ausgewählt. "
+    "Das nicht als erfolgreiche Übertragung melden."
+)
+
 
 class PlanPushCommandService:
     """Chunk authorized plan pushes and enqueue their provider jobs."""
@@ -50,7 +55,9 @@ class PlanPushCommandService:
             sync_job_ids.append(job["id"])
 
         job_ids = [job["id"] for job in jobs]
+        note = {} if jobs else {"message": _NOTHING_QUEUED}
         return {
+            **note,
             "ok": True,
             "status": "queued" if jobs else "completed",
             "sync_job_id": job_ids[0] if len(job_ids) == 1 else None,

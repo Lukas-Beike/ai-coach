@@ -32,6 +32,7 @@ class PlanPushCommandServiceTests(unittest.TestCase):
         self.assertEqual(
             result,
             {
+                "message": result["message"],
                 "ok": True,
                 "status": "completed",
                 "sync_job_id": None,
@@ -39,6 +40,7 @@ class PlanPushCommandServiceTests(unittest.TestCase):
                 "entries": 0,
             },
         )
+        self.assertIn("nichts synchronisiert", result["message"])
         self.queue.enqueue.assert_not_called()
 
     def test_chunk_boundaries_preserve_entry_and_job_id_order(self):
