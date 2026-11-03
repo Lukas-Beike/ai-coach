@@ -25,12 +25,13 @@ REQUEST PLAYBOOK (this turn only).
 - Never use ACWR (methodologically discredited, Impellizzeri 2020). CTL, ATL and TSB are estimates, not individual predictions. Rule 8f on session-RPE load stays.
 - Use durable_profile.training_model (pyramidal, polarized, threshold or sweet_spot) as the planning and progress reference; use pyramidal when it is absent or unrecognized. Note contrary evidence, but never change it."""
 
+_PHASE_RULES = "Phase per planned week from planning_brief.season_phase (base, build, peak, taper, transition; unknown without an A/B race: say so, use base rules). Base: build volume, mostly easy. Build: add threshold or VO2max, volume holds. Peak: race-specific intensity, less volume. Taper (about 2 weeks): cut volume 40-60 %, keep intensity and frequency (Bosquet 2007). Transition: easy, strength 1 (light)."
+
 _PLAN_RULES = """\
 Planning science:
 - Periodize with progressive overload and a lighter week every 3rd to 4th week (practice-based; no model clearly superior, Kiely 2012).
 - Alternate hard and easy days, never back-to-back hard days; distribute intensity per training_model.
 - Plan no single run much longer than the longest of the last 30 days (Frandsen 2025).
-- Phase per planned week from planning_brief.season_phase (base, build, peak, taper, transition; unknown without an A/B race: say so, use base rules). Base: build volume, mostly easy. Build: add threshold or VO2max, volume holds. Peak: race-specific intensity, less volume. Taper (about 2 weeks): cut volume 40-60 %, keep intensity and frequency (Bosquet 2007). Transition: easy, strength 1 (light).
 - Heavy strength 2 times per week in base and build, 1 (maintenance) in peak and taper (Ronnestad & Mujika 2014; Blagrove 2018), 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): same counts, at most 3; after or on hard days, or 24 h or more before hard or long sessions. Name deviations.
 - Adjust load to HRV or readiness data when present (Kiviniemi 2007; Javaloyes 2019; moderate).
 - Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations.
@@ -64,7 +65,7 @@ Task: plan the requested next week.
 Task: plan the requested multi-week block.
 - Before the table give a short week-by-week rationale (focus, load trend, lighter week); this relaxes rule 5a for this turn only.""",
     "adjust_week": """Task: adapt the current week to what happened.
-- Call get_training_report with sections [progress] and days 7 for plan compliance per sport; keep the week's emphasis of planning_brief.season_phase; read recovery, check-ins, calendar events and illness (rule 2a).
+- Call get_training_report with sections [progress] and days 7 for plan compliance per sport; read recovery, check-ins, calendar events and illness (rule 2a).
 - List planned units (context) versus done per day. Change only today and later days; past days and completed units stay. Without a clear deviation (missed or shortened session, overrun, poor recovery, new event), say the plan stands.
 - Move or shorten a missed key session (session_focus threshold, sweet_spot, vo2max, anaerobic, race, test) to a free day: never next to another hard day, and leave leg strength (legs, full_body, plyometrics) 24 h or more before it; leg strength on or after hard days is fine. Drop it rather than stack hard days; never make up lost load.
 - Run, ride and strength stay combinable; keep the week's training_model distribution as far as possible.
@@ -88,6 +89,8 @@ def playbook_for(request_kind: str | None) -> str:
     parts = [_COMMON, task]
     if request_kind in {"plan_week", "plan_block"}:
         parts.append(_PLAN_RULES)
+    if request_kind in {"plan_week", "plan_block", "adjust_week"}:
+        parts.append(_PHASE_RULES)
     return "\n\n" + "\n".join(parts) + "\n"
 
 
