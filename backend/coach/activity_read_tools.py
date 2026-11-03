@@ -124,14 +124,13 @@ class CoachActivityReadToolService:
         The context window is anchored on today, so an older session would lose its
         plan; the unit comes with the session instead.
         """
-        if self._planned_units is None:
-            return []
+        session = detail.get("session")
+        if self._planned_units is None or not isinstance(session, dict):
+            return None
         try:
-            day = date.fromisoformat(
-                iso_date_prefix(detail["session"].get("started_at_local"))
-            )
+            day = date.fromisoformat(iso_date_prefix(session.get("started_at_local")))
         except ValueError:
-            return []
+            return None
         first, last = day - timedelta(days=1), day + timedelta(days=1)
         units = self._planned_units.list(250, future_only=True, since=first)
         window = (first.isoformat(), last.isoformat())
@@ -140,7 +139,7 @@ class CoachActivityReadToolService:
             for unit in units
             if window[0] <= iso_date_prefix(unit.get("date")) <= window[1]
         ]
-        return bounded_coach_context_value(around[:10], 8000)
+        return bounded_coach_context_value(around[:10], 4000)
 
     @staticmethod
     def _bounded_integer(

@@ -232,9 +232,9 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             ["unit-2026-09-22"], [u["id"] for u in result["planned_units"]]
         )
 
-    def test_detail_without_planned_units_service_has_an_empty_list(self):
+    def test_detail_without_planned_units_service_reports_unknown(self):
         result = self._detail_with_plan("2026-09-22T07:00:00", None)
-        self.assertEqual([], result["planned_units"])
+        self.assertIsNone(result["planned_units"])
 
     def test_detail_result_size_does_not_grow_with_the_recording(self):
         raw_activity = {

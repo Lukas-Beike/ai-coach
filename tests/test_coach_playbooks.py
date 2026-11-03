@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import unittest
 from datetime import date
@@ -61,7 +62,13 @@ class PlaybookBudgetTests(unittest.TestCase):
                 self.assertLessEqual(len(task.split()), TASK_WORD_BUDGET)
 
     def test_every_block_is_budgeted_and_every_kind_composed(self) -> None:
-        blocks = {n for n in vars(playbooks) if n in BLOCK_WORD_BUDGETS}
+        blocks = {
+            name
+            for name, value in vars(playbooks).items()
+            if isinstance(value, str)
+            and re.fullmatch(r"_[A-Z_]+", name)
+            and name != "_HEADER"
+        }
         self.assertEqual(blocks, set(BLOCK_WORD_BUDGETS))
         self.assertEqual(set(playbooks._BLOCKS), set(REQUEST_KINDS))
 
