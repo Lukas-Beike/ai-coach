@@ -256,3 +256,28 @@ test("@responsive analysis sessions list expands Garmin-style charts", async ({ 
     expect(await link.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBeTruthy();
   }
 });
+
+test("@responsive feedback save and undo show the returned load without a detail refetch", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(async () => {
+    const load = (value) => ({ value, rpe: 5, rpe_source_label: "dein Feedback", duration_min: 60 });
+    const data = { session: { activity_id: "load-1", name: "Synthetic load ride", sport: "ride" }, streams: { time_s: [0, 1, 2], channels: {} }, detail_data: { providers: [] }, activity_feedback: null, equipment: [], session_rpe_load: null };
+    globalThis.syntheticCalls = [];
+    const fakeApi = async (url, options) => {
+      syntheticCalls.push(url);
+      if (url.endsWith("/feedback")) return { status: "ok", activity_feedback: { session_rpe: 5 }, change: { id: "c1", after_hash: "h" }, session_rpe_load: load(300) };
+      if (url === "/api/change-history/undo") return { status: "undone", session_rpe_load: null, echoed: JSON.parse(options.body).activity_id };
+      return data;
+    };
+    await ActivityDetails.open({ id: "load-1" }, { api: fakeApi, showDialog: (dialog) => dialog.showModal() });
+  });
+  const dialog = page.getByRole("dialog", { name: "Synthetic load ride" });
+  await dialog.getByLabel("Session-RPE (0–10)").selectOption("5");
+  await dialog.getByRole("button", { name: "Feedback speichern" }).click();
+  await expect(dialog.locator("[data-session-rpe-load]")).toContainText("300 AU");
+  await dialog.getByRole("button", { name: "Rückgängig" }).click();
+  await expect(dialog.locator("[data-session-rpe-load]")).toBeHidden();
+  expect(await page.evaluate(() => syntheticCalls.filter((url) => url === "/api/activities/load-1").length)).toBe(1);
+  await page.evaluate(() => ActivityDetails.close(false));
+});

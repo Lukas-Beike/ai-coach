@@ -46,13 +46,8 @@ class DetailEnvelopeReader:
         # feedback saved before the merged record resolved, the requested id.
         ids = [reference, str(activity_id)]
         feedback = next(iter(self._feedback_service.for_activity_ids(ids)), None)
-        # A rating whose session is ambiguous stays shown but gives no load.
-        rated = next(
-            iter(self._feedback_service.for_activity_ids(ids, sessions_only=True)),
-            None,
-        )
         summary = self._summary()
-        load = None if summary is None else session_load(summary, rated)[0]
+        load = feedback_session_load(self._feedback_service, ids, summary)
         if summary is None:
             validation = activity_performance_validation([], {}, {})
         else:
@@ -68,6 +63,19 @@ class DetailEnvelopeReader:
             "activity_validation": validation,
             "session_rpe_load": load,
         }
+
+
+def feedback_session_load(
+    feedback_service: Any, ids: list[str], summary: Mapping[str, Any] | None
+) -> dict[str, Any] | None:
+    """The session-RPE load of a session summary from its saved feedback.
+
+    A rating whose session is ambiguous stays shown but gives no load.
+    """
+    if summary is None:
+        return None
+    rated = next(iter(feedback_service.for_activity_ids(ids, sessions_only=True)), None)
+    return session_load(summary, rated)[0]
 
 
 def activity_equipment(equipment: dict, activity_id: str) -> list[dict]:

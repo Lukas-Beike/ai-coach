@@ -18,10 +18,12 @@ class HistoryUndoPostRoutes:
         history_undo_service: Callable[[], HistoryUndoService],
         coach_proposal_creation_service: Callable[[], CoachProposalCreationService],
         coach_turn_undo_service: CoachTurnUndoService,
+        session_rpe_load: Callable[[str], Any] | None = None,
     ) -> None:
         self._history_undo_service = history_undo_service
         self._coach_proposal_creation_service = coach_proposal_creation_service
         self._coach_turn_undo_service = coach_turn_undo_service
+        self._session_rpe_load = session_rpe_load
 
     def handle(self, handler: Any, path: str, session: dict[str, Any]) -> bool:
         if path == "/api/change-history/undo/preview":
@@ -37,7 +39,20 @@ class HistoryUndoPostRoutes:
             )
         elif path == "/api/change-history/undo":
             payload = handler.read_json()
-            handler.send_json(200, self._history_undo_service().apply(payload))
+            result = self._history_undo_service().apply(payload)
+            activity_id = (
+                payload.get("activity_id") if isinstance(payload, dict) else None
+            )
+            if (
+                self._session_rpe_load is not None
+                and result.get("entity_type") == "activity_feedback"
+                and isinstance(activity_id, str)
+            ):
+                result = {
+                    **result,
+                    "session_rpe_load": self._session_rpe_load(activity_id),
+                }
+            handler.send_json(200, result)
         elif path == "/api/change-history/undo-turn":
             client_turn_id = handler.read_json().get("client_turn_id")
             handler.send_json(200, self._coach_turn_undo_service.undo(client_turn_id))
