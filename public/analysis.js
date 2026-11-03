@@ -743,6 +743,7 @@ function renderAnalysisHistory(history) { // NOSONAR
     loadMissing.push("Trainingszeit");
   }
   appendSessionRpeLoadChart(history.session_rpe_load, loadRoot, loadMissing, start, end);
+  appendSmoothedLoadChart(history.smoothed_session_load, loadRoot, loadMissing, start, end);
   appendDailyActivityGroup(history.daily_activity, loadRoot, loadMissing, start, end);
   const loadMissingNote = analysisMissingDataNote(loadMissing);
   if (loadMissingNote) loadRoot.append(loadMissingNote);
@@ -819,6 +820,20 @@ function appendSessionRpeLoadChart(report, loadRoot, loadMissing, start, end) {
   if (!chart) { loadMissing.push("Session-RPE-Last"); return; }
   chart.querySelector(".analysis-chart-legend")?.remove();
   loadRoot.append(chart);
+}
+
+// Smoothed session-RPE load: own AU curves, never compared with provider load; gaps stay gaps.
+function appendSmoothedLoadChart(report, loadRoot, loadMissing, start, end) {
+  const days = (report?.days || []).filter((day) => day.date >= start && day.date <= end);
+  if (!days.some((day) => day.short != null || day.long != null)) { loadMissing.push("Kurz-/Langzeitbelastung"); return; }
+  const weekly = analysisHistoryPeriod === "twelveWeeks";
+  const series = [["short", "Kurzzeitbelastung", 2], ["long", "Langzeitbelastung", 5]].map(([key, label, color]) => {
+    const points = days.map((day) => ({ date: day.date, value: day[key] }));
+    return { label, legendLabel: label, source: "Athletenfeedback", unit: "AU", color, connected: true, cadenceDays: weekly ? 7 : 1,
+      points: weekly ? analysisWeeklyLastPoints(points, start, end) : points, currentPoint: points.findLast(analysisValidPoint) };
+  });
+  const chart = collectAnalysisChart(loadMissing, "Kurz-/Langzeitbelastung", series, "AU", start, end, `Session-RPE-Last, geglättet (τ ${report.parameters.short_tau_days} und ${report.parameters.long_tau_days} Tage). Kein Fitness- oder Verletzungsmaß. Lücken bleiben Lücken.`, { calendarWeeks: weekly });
+  if (chart) loadRoot.append(chart);
 }
 
 function appendDailyActivityGroup(activity, loadRoot, loadMissing, start, end) {

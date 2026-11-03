@@ -26,6 +26,7 @@ from backend.performance.session_rpe_load import (
     feedback_by_session,
     session_rpe_load,
 )
+from backend.performance.smoothed_load import LOOKBACK_DAYS, smoothed_session_load
 from backend.performance.training_focus import training_focus
 from backend.runtime.ports import ObservationReader
 
@@ -120,6 +121,9 @@ class PublicPerformanceStateService:
                 "session_rpe_load": None
                 if inputs.pending
                 else self._session_rpe_load(inputs, today, timezone),
+                "smoothed_session_load": None
+                if inputs.pending
+                else self._smoothed_session_load(inputs, today, timezone),
             },
             # UI-only: the load tab's period selection picks the matching window.
             "training_focus_periods": {
@@ -164,6 +168,29 @@ class PublicPerformanceStateService:
             if self._now is None
             else self._now().isoformat(timespec="seconds"),
             session_limit=0,
+        )
+
+    def _smoothed_session_load(
+        self, inputs: CanonicalPerformanceInputs, today: date, timezone: str
+    ) -> dict[str, Any]:
+        """Smoothed session-RPE load of the load tab's window plus its warm-up."""
+        start = today - timedelta(days=_SESSION_RPE_LOAD_DAYS - 1)
+        history_start = start - timedelta(days=LOOKBACK_DAYS)
+        summaries = [
+            summary
+            for summary in inputs.activities or ()
+            if history_start.isoformat() <= summary_local_date(summary, timezone)
+        ]
+        return smoothed_session_load(
+            summaries,
+            feedback_by_session(summaries, self._session_feedback),
+            start=start,
+            end=today,
+            today=today,
+            timezone=timezone,
+            computed_at=None
+            if self._now is None
+            else self._now().isoformat(timespec="seconds"),
         )
 
 

@@ -997,6 +997,7 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
                     canonical=EMPTY_PERFORMANCE_INPUTS,
                 ),
                 "session_rpe_load": None,
+                "smoothed_session_load": None,
             },
         )
         self.assertNotEqual(

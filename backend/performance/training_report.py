@@ -16,6 +16,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
 from backend.performance.session_rpe_load import session_rpe_load
+from backend.performance.smoothed_load import smoothed_session_load
 
 METHOD = "local-training-report-v1"
 _SUMMARY_METRICS = ("moving_duration_s", "distance_m", "training_load")
@@ -206,6 +207,17 @@ def training_report(
             session_feedback or {},
             start=start,
             end=effective_end,
+            timezone=timezone,
+            computed_at=computed_at,
+        ),
+        "smoothed_session_load": None
+        if sport != "all"
+        else smoothed_session_load(
+            activity_summaries,
+            session_feedback or {},
+            start=start,
+            end=effective_end,
+            today=today,
             timezone=timezone,
             computed_at=computed_at,
         ),

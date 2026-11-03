@@ -50,6 +50,7 @@ from backend.performance.season_inputs import (
     read_season_load_inputs,
 )
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
+from backend.performance.smoothed_load import LOOKBACK_DAYS
 from backend.performance.tag_impact import tag_impact
 from backend.performance.training_report import training_report
 
@@ -558,10 +559,12 @@ class TrainingReportReadService:
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
         summaries, observed_at = activity_summaries_with_sync_time(self._canonical)
+        # The smoothed load needs the ratings of the weeks before the period.
+        history_start = start - timedelta(days=LOOKBACK_DAYS)
         period = [
             summary
             for summary in summaries
-            if start.isoformat()
+            if history_start.isoformat()
             <= summary_local_date(summary, timezone)
             <= min(today, start + timedelta(days=days - 1)).isoformat()
         ]

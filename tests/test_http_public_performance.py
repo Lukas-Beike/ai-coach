@@ -47,6 +47,11 @@ class PublicPerformanceStateTests(unittest.TestCase):
             (len(load["days"]), load["period"]["end"], load["sessions"]),
             (84, today.isoformat(), []),
         )
+        smoothed = result["performance"]["history"].pop("smoothed_session_load")
+        self.assertEqual(
+            (smoothed["status"], smoothed["reason"], len(smoothed["days"])),
+            ("insufficient_data", "no_sessions", 84),
+        )
         self.assertEqual(
             result,
             {

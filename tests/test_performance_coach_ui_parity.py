@@ -224,6 +224,26 @@ class CoachUiParityTests(unittest.TestCase):
         for day in coach["days"]:
             self.assertEqual(day, ui_days[day["date"]])
 
+    def test_m5_smoothed_load_matches_between_coach_and_load_tab(self):
+        coach = self.coach_report("report", start=MONDAY.isoformat(), days=7)["report"][
+            "smoothed_session_load"
+        ]
+        ui = self.ui["history"]["smoothed_session_load"]
+        for key in (
+            "metric_id",
+            "method_id",
+            "method_version",
+            "unit",
+            "evidence_card",
+            "limits",
+            "parameters",
+        ):
+            self.assertEqual(coach[key], ui[key], key)
+        ui_days = {item["date"]: item for item in ui["days"]}
+        self.assertTrue(coach["days"])
+        for day in coach["days"]:
+            self.assertEqual(day, ui_days[day["date"]])
+
     def test_m2_baselines_keep_value_status_and_scope(self):
         ui = self.ui["personal_recovery"]
         coach = self.coach_context["personal_recovery"]

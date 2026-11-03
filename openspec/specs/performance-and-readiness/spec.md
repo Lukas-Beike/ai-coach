@@ -315,7 +315,7 @@ API, UI and Coach output SHALL NOT make statements that the method's card forbid
 - **WHEN** the runtime sources and outputs of the personal recovery comparison, sleep goal shortfall and sleep timing variability are scanned
 - **THEN** none contains a term the M2 or M3 card forbids (sleep debt, normal range, abnormal or clinical quartile positions, the Sleep Regularity Index as a name), and the scan fails with the file, line and term otherwise.
 
-Evidence: claim lists in `docs/performance-methods/m1-session-rpe-load.md`, `m2-hrv-resting-hr.md`, `m3-sleep-duration-timing.md`, `m4-critical-power-speed.md`. Runtime enforcement for M2 and M3 wording: `tests/test_performance_claim_wording.py`; the remaining methods are enforced by their work packages (#1427–#1431).
+Evidence: claim lists in `docs/performance-methods/m1-session-rpe-load.md`, `m2-hrv-resting-hr.md`, `m3-sleep-duration-timing.md`, `m4-critical-power-speed.md`, `m5-smoothed-session-load.md`. Runtime enforcement for M2 and M3 wording: `tests/test_performance_claim_wording.py`; the remaining methods are enforced by their work packages (#1427–#1431).
 
 ### Requirement: Method input fixtures
 Every method with an evidence card SHALL have synthetic input fixtures for one complete, one incomplete and one contradictory input set, each with a defined outcome: a value, no value with a status or reason, or an exclusion. The fixtures SHALL keep transport provider, recording origin and local method apart and SHALL count an activity imported from several providers once.
@@ -628,6 +628,25 @@ Detailed contract: each result names `metric_id`, `method_id`, `method_version`,
 
 Evidence: `backend/performance/session_rpe_load.py`, `backend/performance/training_report.py:training_report`, `backend/performance/report_service.py:TrainingReportReadService`, `backend/http_api/public_performance.py:PublicPerformanceStateService`, `backend/coach/prompt.py`, `public/analysis.js:appendSessionRpeLoadChart`; `tests/test_session_rpe_load.py`, `e2e/activity-details.spec.js`.
 
+### Requirement: Smoothed session-RPE load is a labelled model estimate
+The system SHALL compute the M5 short- and long-term load (`smoothed-session-load` v1) as the exponentially smoothed M1 daily AU with τ 7 and 42 days. The curves start at 0 AU the day before the first recorded session and SHALL NOT be initialised from provider CTL, ATL or load. A past day without a session counts 0 AU; a day with an unrated or invalid session is a gap with no value and an unchanged state; the open current day has no value. Values SHALL appear only 2τ days after the first session. The result SHALL NOT include a ratio, difference, risk, ramp or readiness statement.
+
+#### Scenario: Reference values
+- **WHEN** sessions of 300 AU fall on every second day for 100 days
+- **THEN** the last day shows the recursion values of both curves, rounded to 0.1 AU.
+
+#### Scenario: Warm-up and gaps
+- **WHEN** the first session is 10 days old, or a day has an unrated session
+- **THEN** the short-term curve has no value until day 14 and the long-term curve until day 84, and the gap day shows no value while later days continue from the held state.
+
+#### Scenario: Provider load does not seed
+- **WHEN** activity records carry provider load or CTL values
+- **THEN** the curves are identical to those without them.
+
+Detailed contract: each result names `metric_id` `smoothed_session_load`, `method_id`, `method_version`, unit AU, status `estimate` or `insufficient_data` with reason `warmup` or `no_sessions`, period, parameters, per-state day coverage, the latest valued day, per-day `state`, `load`, `short` and `long`, method note, limits and the card `docs/performance-methods/m5-smoothed-session-load.md`. The Coach training report carries it for all-sport reports, the public performance history for the load tab's 84 days, where the PWA draws one AU chart of both curves. The Coach SHALL name the AU basis and coverage.
+
+Evidence: `backend/performance/smoothed_load.py`, `backend/performance/training_report.py:training_report`, `backend/http_api/public_performance.py:PublicPerformanceStateService`; `tests/test_smoothed_load.py`, `tests/test_performance_coach_ui_parity.py`
+
 ### Requirement: Released local methods are registered and shown the same in Coach and UI
 Each Epic S local method SHALL be listed in the register below with its method id and version, statuses, limits and card. The Coach SHALL receive the value, status, method and period the UI shows for the same inputs; it MAY omit display-only arrays such as per-day history or chart points, but SHALL NOT recompute, round differently or relabel a value.
 
@@ -649,7 +668,8 @@ Detailed contract:
 | Sleep timing variability | `sleep-timing-variability-v2` | `ok`, `provisional`, `insufficient_data` | not the Sleep Regularity Index; no median or deviation below 14 earlier intervals | M3, released |
 | Power and running best-effort curve | `mean-max-curve` v1 | `ok`, `insufficient_data`; per running point also `unknown` | observed bests only, no FTP, CP or pace estimate | M4 card |
 | Critical Power and Critical Speed | `critical-power-speed` v1 | method `experimental`; per fit `ok`, `insufficient_data`, `withheld` | model estimate from the best 3/7/12-min efforts of 28 days; never FTP, threshold or zones | M4, released |
+| Short- and long-term session-RPE load (AU) | `smoothed-session-load` v1 | `estimate`, `insufficient_data` | smoothed subjective load; no fitness, form, ratio, risk or provider comparison | M5, review blocked |
 
-M5 (#1432) is deferred. No observation phase has run.
+Passive CP/CS, TRIMP, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
 
 Evidence: `docs/performance-methods/README.md`, `backend/coach/context.py:coach_performance_projection`, `backend/coach/context.py:coach_sleep_timing_projection`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `tests/test_performance_coach_ui_parity.py`.
