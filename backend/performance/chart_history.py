@@ -131,7 +131,7 @@ def _metric_series(
             today,
         )
     else:
-        source = "Garmin Connect"
+        source = GARMIN_LABEL
         provider = ProviderId.GARMIN
         observations = _garmin_values(key, start, today, canonical)
     return [
@@ -175,7 +175,8 @@ def analysis_history(
         "end": dates[-1],
         "days": 90,
         "load": {
-            "source": "Garmin Connect",
+            "source": GARMIN_LABEL,
+            "source_provider": ProviderId.GARMIN.value,
             "start": load_dates[0],
             "end": load_dates[-1],
             "points": load,
