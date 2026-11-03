@@ -51,6 +51,8 @@ LIMITS: Final = (
     "estimated as zero."
 )
 
+TAUS: Final = {"short": SHORT_TAU_DAYS, "long": LONG_TAU_DAYS}
+
 STATE_RATED: Final = "rated"
 STATE_REST: Final = "rest"
 STATE_GAP: Final = "gap"
@@ -107,6 +109,67 @@ def _daily_loads(
     return days
 
 
+def _reason(valued: Sequence[Any], first: date | None) -> str | None:
+    if valued:
+        return None
+    return "warmup" if first else "no_sessions"
+
+
+def _no_history_days(start: date, last: date) -> list[dict[str, Any]]:
+    return [
+        {"date": day.isoformat(), "state": STATE_NO_HISTORY, "load": None}
+        | {name: None for name in TAUS}
+        for day in (start + timedelta(days=i) for i in range((last - start).days + 1))
+    ]
+
+
+def _day_load(
+    loads: Mapping[str, float | None], cursor: date, open_from: date
+) -> tuple[float | None, str]:
+    key = cursor.isoformat()
+    if key in loads:
+        return loads[key], STATE_RATED if loads[key] is not None else STATE_GAP
+    if cursor >= open_from:
+        return None, STATE_OPEN
+    return 0.0, STATE_REST
+
+
+def _walk(
+    loads: Mapping[str, float | None],
+    first: date,
+    start: date,
+    end: date,
+    open_from: date,
+) -> list[dict[str, Any]]:
+    """Run both recursions from ``first`` and list the days of ``start``..``end``."""
+    state = {name: 0.0 for name in TAUS}
+    days: list[dict[str, Any]] = []
+    for offset in range((end - first).days + 1):
+        cursor = first + timedelta(days=offset)
+        load, kind = _day_load(loads, cursor, open_from)
+        if load is not None:
+            for name, tau in TAUS.items():
+                decay = math.exp(-1 / tau)
+                state[name] = decay * state[name] + (1 - decay) * load
+        if cursor < start:
+            continue
+        values = {
+            name: None
+            if load is None or offset < WARMUP_TAUS * tau
+            else round(state[name], 1)
+            for name, tau in TAUS.items()
+        }
+        days.append(
+            {
+                "date": cursor.isoformat(),
+                "state": kind,
+                "load": None if load is None else round(load, 1),
+                **values,
+            }
+        )
+    return days
+
+
 def smoothed_session_load(
     summaries: Sequence[ActivitySummary],
     feedback: Mapping[str, Mapping[str, Any]],
@@ -128,48 +191,9 @@ def smoothed_session_load(
         summaries, feedback, history_start(start, today), end, timezone
     )
     first = date.fromisoformat(min(loads)) if loads else None
-    taus = {"short": SHORT_TAU_DAYS, "long": LONG_TAU_DAYS}
-    state = {name: 0.0 for name in taus}
-    days: list[dict[str, Any]] = []
-    cursor = first or start
-    while cursor <= end:
-        key = cursor.isoformat()
-        if key in loads:
-            load = loads[key]
-            kind = STATE_RATED if load is not None else STATE_GAP
-        elif cursor >= (complete_before or today):
-            load, kind = None, STATE_OPEN
-        else:
-            load, kind = 0.0, STATE_REST
-        if load is not None:
-            for name, tau in taus.items():
-                decay = math.exp(-1 / tau)
-                state[name] = decay * state[name] + (1 - decay) * load
-        if cursor >= start:
-            elapsed = (cursor - first).days if first else 0
-            days.append(
-                {
-                    "date": key,
-                    "state": kind,
-                    "load": None if load is None else round(load, 1),
-                    **{
-                        name: round(state[name], 1)
-                        if load is not None and elapsed >= WARMUP_TAUS * tau
-                        else None
-                        for name, tau in taus.items()
-                    },
-                }
-            )
-        cursor += timedelta(days=1)
-    pad_end = end if first is None else first - timedelta(days=1)
-    padding = [
-        {"date": day.isoformat(), "state": STATE_NO_HISTORY, "load": None}
-        | {name: None for name in taus}
-        for day in (
-            start + timedelta(days=i) for i in range((pad_end - start).days + 1)
-        )
-    ]
-    days = padding + ([] if first is None else days)
+    days = _no_history_days(start, end if first is None else first - timedelta(days=1))
+    if first is not None:
+        days += _walk(loads, first, start, end, complete_before or today)
     valued = [
         day for day in days if day["short"] is not None or day["long"] is not None
     ]
@@ -183,7 +207,7 @@ def smoothed_session_load(
         "method_version": METHOD_VERSION,
         "unit": UNIT,
         "status": "estimate" if valued else "insufficient_data",
-        "reason": None if valued else ("no_sessions" if first is None else "warmup"),
+        "reason": _reason(valued, first),
         "period": {
             "start": start.isoformat(),
             "end": end.isoformat(),
@@ -196,7 +220,7 @@ def smoothed_session_load(
         "parameters": {
             "short_tau_days": SHORT_TAU_DAYS,
             "long_tau_days": LONG_TAU_DAYS,
-            "warmup_days": {name: WARMUP_TAUS * tau for name, tau in taus.items()},
+            "warmup_days": {name: WARMUP_TAUS * tau for name, tau in TAUS.items()},
             "start_state_au": 0,
             "first_session_date": None if first is None else first.isoformat(),
         },
