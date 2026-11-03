@@ -124,7 +124,7 @@ class SmoothedLoadTests(unittest.TestCase):
         self.assertEqual(len(result["days"]), 50)
 
     def test_days_after_the_last_sync_are_open_not_rest(self) -> None:
-        sessions = [session(0)]
+        sessions: Any = [session(0)]
         end = FIRST + timedelta(days=20)
         result = smoothed_session_load(
             sessions,
