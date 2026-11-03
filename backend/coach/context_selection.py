@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Any
 
@@ -43,14 +43,17 @@ BASE_SECTIONS = frozenset(
         "local_planned_workouts",
         "activities",
         "current_performance",
-        "daily_planning_context",
         "source_policy",
     }
 )
+# The day-by-day view repeats planned units, check-ins, events and weather that
+# have their own sections. It rides only on planning, morning and today turns;
+# every other turn loads it through read_coach_context.
+DAILY_SECTIONS = BASE_SECTIONS | {"daily_planning_context"}
 # A vague follow-up gets the stable core plus the plan sections. Time-bound and
 # external sections (calendar, external calendar, weather, recovery) are loaded on
 # demand through read_coach_context instead of riding along on every "ok".
-FALLBACK_SECTIONS = BASE_SECTIONS | {"planning", "training_plans"}
+FALLBACK_SECTIONS = DAILY_SECTIONS | {"planning", "training_plans"}
 # Provider-named section names from before the domain grouping. They stay accepted
 # on input (tool arguments, persisted selections) and resolve to one canonical name.
 SECTION_ALIASES: Mapping[str, str] = {
@@ -77,6 +80,41 @@ PAST_WEEK_PATTERN = (
     r"\b(?:vor)?(?:letzte[rsmn]?|vergangene[rsmn]?)\s+wochen?\b|\blast\s+weeks?\b"
 )
 PLANNING_VERB_PATTERN = r"\b(?:plan\w*|erstell\w*|schedul\w*|passe\b.*\ban\b)"
+# A free-text planning request names a planning action and a week or block. The
+# noun "Plan" alone ("Wie sieht mein Plan für die Woche aus?") is a question.
+_WEEK_NOUN = r"\b(?:woche|week)\b|wochenplan"
+_BLOCK_NOUN = (
+    r"\b(?:\d+|zwei|drei|vier|fünf|sechs|sieben|acht|two|three|four|five|six|seven"
+    r"|eight)\s*(?:wochen|weeks)\b|\b(?:block|mesozyklus|mehrere\s+wochen"
+    r"|several\s+weeks|nächste[nr]?\s+monat|next\s+month)\b"
+)
+_WORD_NUMBERS = {
+    "zwei": 2,
+    "drei": 3,
+    "vier": 4,
+    "fünf": 5,
+    "sechs": 6,
+    "sieben": 7,
+    "acht": 8,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+}
+_ADJUST_VERB = r"\b(?:passe|anpass\w*|adjust\w*|umplan\w*|replan\w*|neu\s+plan\w*)\b"
+_PLAN_ACTION = (
+    r"^\s*(?:bitte\s+|please\s+)?plan\b"
+    r"|\b(?:plane|planen|planst|erstell\w*|schedul\w*|entwirf\w*|entwerf\w*)\b"
+)
+# Sleep, fatigue and readiness questions need the recovery record, which the
+# daily view used to carry on every turn.
+RECOVERY_PATTERN = (
+    r"schlaf|sleep|erholung|recover|\bhrv\b|müde|muede|erschöpf|erschoepf|erledigt"
+    r"|fatigue|\btired\b|readiness|body battery|\bbereit\b"
+)
 HISTORY_PATTERN = (
     r"\b(?:letzte[nrs]?|vergangene[nrsm]?|past|last)\s+(?:\d+|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn"
     r"|two|three|four|five|six|seven|eight|nine|ten)\s+(?:tage(?:n)?|wochen|monate(?:n)?|days|weeks|months)\b"
@@ -200,6 +238,8 @@ class CoachContextSelection:
     include_library: bool = True
     retain_dialogue: bool = False
     retain_pending_request: bool = True
+    # The quick-action or free-text request kind that selects the playbook.
+    kind: str | None = None
     past_days: int = 2
     # Earlier planned units of this many days are read; 0 keeps today onward.
     past_planned_days: int = 0
@@ -217,6 +257,10 @@ class CoachContextSelection:
             for key, value in context.items()
             if key in self.sections or key == "canonical_data_status"
         }
+        if "external_calendar" in result and "daily_planning_context" in result:
+            result["daily_planning_context"] = _without_appointments(
+                result["daily_planning_context"]
+            )
         if self.horizon_days is None:
             return result
         try:
@@ -242,6 +286,7 @@ class CoachContextSelection:
         performance = result.get("current_performance")
         if isinstance(performance, dict) and self.name not in {
             "activity_analysis",
+            "session_analysis",
             "attachment_analysis",
             "progress_review",
             "block_review",
@@ -276,38 +321,50 @@ class CoachContextSelection:
         ]
 
 
+def _without_appointments(days: Any) -> Any:
+    """Drop per-day events when the external calendar section carries them once."""
+    if not isinstance(days, list):
+        return days
+    return [
+        {key: value for key, value in day.items() if key != "appointments"}
+        if isinstance(day, dict)
+        else day
+        for day in days
+    ]
+
+
 # Quick-action request kinds bring the sections their playbook needs, whatever the
 # message wording; nutrition products stay out. Dialogue and pending-request
 # retention still follow the message, as the write gate and turn outcome decide
 # them from the message too. Selection never authorizes writes.
-_PLAN_SECTIONS = BASE_SECTIONS | {
+# Calendar events come once, as external_calendar with markers and the omitted
+# count; `calendar` repeats them with planned units and competitions. Removed
+# sections stay loadable through read_coach_context.
+_PLAN_SECTIONS = DAILY_SECTIONS | {
     "planning_brief",
     "planning",
     "training_plans",
-    "calendar",
     "external_calendar",
     "recovery",
     "weather",
 }
 REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
-    # The session detail comes from get_activity_details. Plan versus actual and the
-    # next session need the plan window; weather, calendars and the plan sections
-    # stay requestable through read_coach_context.
+    # The session detail comes from get_activity_details, with the planned units
+    # around it. At most two days ahead serve the next-session consequence; the
+    # rest of the plan, weather and calendars stay requestable.
     "session_analysis": CoachContextSelection(
-        "activity_analysis", BASE_SECTIONS | {"recovery"}, 14, 5, False
+        "session_analysis", BASE_SECTIONS | {"recovery"}, 2, 5, False
     ),
+    # Review kinds look back: their data comes from get_training_report, so they
+    # carry no future horizon and no daily view.
     "progress_review": CoachContextSelection(
-        "progress_review",
-        BASE_SECTIONS | {"planning", "training_plans", "recovery"},
-        14,
-        5,
-        False,
+        "progress_review", BASE_SECTIONS | {"planning", "recovery"}, 0, 5, False
     ),
-    # The block comes from get_training_report block_review; plans stay in context.
+    # The block review needs training_plans to date a named plan.
     "block_review": CoachContextSelection(
         "block_review",
         BASE_SECTIONS | {"planning", "training_plans", "recovery"},
-        14,
+        0,
         5,
         False,
     ),
@@ -318,6 +375,32 @@ REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
         "adjust_week", _PLAN_SECTIONS, 8, 5, True, past_days=6, past_planned_days=6
     ),
 }
+
+
+def _block_fits(normalized: str) -> bool:
+    """Return whether a typed block request stays within the 35-day plan_block window."""
+    if re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.", normalized):
+        return False
+    if re.search(HISTORY_PATTERN, normalized) or re.search(
+        r"jahr|year|saison|season|monat|month", normalized
+    ):
+        return False
+    named = re.search(
+        r"\b(\d+|" + "|".join(_WORD_NUMBERS) + r")\s*(?:wochen|weeks)\b", normalized
+    )
+    return not named or int(_WORD_NUMBERS.get(named[1], named[1])) <= 5
+
+
+def free_text_plan_kind(message: str) -> str | None:
+    """Map a typed planning request to its fixed plan kind; selection only."""
+    normalized = message.casefold()
+    if re.search(_ADJUST_VERB, normalized) and re.search(_WEEK_NOUN, normalized):
+        return "adjust_week"
+    if not re.search(_PLAN_ACTION, normalized):
+        return None
+    if re.search(_BLOCK_NOUN, normalized):
+        return "plan_block"
+    return "plan_week" if re.search(_WEEK_NOUN, normalized) else None
 
 
 def is_bare_follow_up(message: str) -> bool:
@@ -366,21 +449,33 @@ def select_coach_context(
     selection = _message_selection(
         message, dialogue, attachments=attachments, has_receipts=has_receipts
     )
-    fixed = REQUEST_KIND_SELECTIONS.get(request_kind or "")
-    if fixed is None:
+    kind = request_kind if request_kind in REQUEST_KIND_SELECTIONS else None
+    typed = kind is None and selection.name != "fallback"
+    if typed:
+        kind = free_text_plan_kind(message)
+    if kind is None:
         return selection
+    if (
+        typed
+        and selection.horizon_days is None
+        and not (kind == "plan_block" and _block_fits(message.casefold()))
+    ):
+        # Explicit dates or long ranges keep the complete time context; the typed
+        # request still gets the brief and its playbook, with events once.
+        return replace(
+            selection,
+            sections=(selection.sections - {"calendar"}) | {"planning_brief"},
+            kind=kind,
+        )
+    fixed = REQUEST_KIND_SELECTIONS[kind]
     # Fixed kinds carry saved products only for food named in the message itself;
     # an upload alone does not make a plan or analysis turn a nutrition turn.
-    return CoachContextSelection(
-        fixed.name,
-        fixed.sections | _food_sections(message.casefold(), False),
-        fixed.horizon_days,
-        fixed.activity_limit,
-        fixed.include_library,
+    return replace(
+        fixed,
+        sections=fixed.sections | _food_sections(message.casefold(), False),
         retain_dialogue=selection.retain_dialogue,
         retain_pending_request=selection.retain_pending_request,
-        past_days=fixed.past_days,
-        past_planned_days=fixed.past_planned_days,
+        kind=kind,
     )
 
 
@@ -426,6 +521,8 @@ def _message_selection(
     )
     if planning:
         sections.update({"planning", "training_plans"})
+    if planning or "today_training" in matched:
+        sections.add("daily_planning_context")
     if "provider_refresh_or_sync" in matched or _requires_full_time_context(
         planning, normalized
     ):
@@ -437,6 +534,10 @@ def _message_selection(
     weather = bool(re.search(WEATHER_PATTERN, normalized))
     if weather:
         sections.add("weather")
+    if re.search(RECOVERY_PATTERN, normalized):
+        sections.add("recovery")
+    if re.search(DAY_PATTERN, normalized):
+        sections.add("daily_planning_context")
     if re.search(FULL_CALENDAR_PATTERN, normalized):
         sections.add("external_calendar")
     horizon = 14 if planning else 3

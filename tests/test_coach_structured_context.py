@@ -220,7 +220,8 @@ class CoachStructuredContextServiceTests(unittest.TestCase):
         self.assertEqual(
             [missed], self.daily_planning_context_service.build.call_args.args[0]
         )
-        self.assertIn("Schwelle", [item["name"] for item in result["calendar"]])
+        self.assertIn("Schwelle", [i["name"] for i in result["local_planned_workouts"]])
+        self.assertNotIn("calendar", result)
 
     def test_other_kinds_keep_reading_from_today(self) -> None:
         self.external_calendar_reader.list_events_in_window.return_value = []

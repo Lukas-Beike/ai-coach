@@ -132,7 +132,7 @@ class CoachRequestPayloadService:
         model_instructions = compose_model_instructions(
             training_context,
             allow_mutations=allow_mutations,
-            request_kind=request_kind,
+            request_kind=selection.kind,
             nutrition="nutrition_products" in selection.sections,
             # Earlier pixels are gone once the conversation rotates or leaves the
             # window, so the summary notice applies to every turn after an upload.
@@ -193,7 +193,7 @@ class CoachRequestPayloadService:
                     if retain_openai_attachment_context
                     else "local",
                     "instruction_characters": len(payload["instructions"]),
-                    "playbook_characters": len(playbook_for(request_kind))
+                    "playbook_characters": len(playbook_for(selection.kind))
                     + len(
                         nutrition_playbook("nutrition_products" in selection.sections)
                     ),

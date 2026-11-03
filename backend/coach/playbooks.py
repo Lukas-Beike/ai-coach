@@ -49,7 +49,7 @@ _PLAN_CHECK = "- planning_brief covers recent weeks per sport; planned_distribut
 _TASKS = {
     "session_analysis": """\
 Task: analyze the last completed session.
-- Load it with get_activity_details; its planned_units hold the local plan one day around that session, for plan versus actual. Rules 6d and 8c-8e stay.
+- Load it with get_activity_details; its planned_units hold the local plan one day around that session, for plan versus actual. Rules 6d and 8c-8e stay. The context holds planned units up to two days ahead; read_coach_context loads more.
 - Cover plan versus actual, load and intensity, pacing, HR drift and decoupling when available, and notable findings.
 - End with the consequence for the next session.""",
     "progress_review": """\

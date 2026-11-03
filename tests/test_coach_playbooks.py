@@ -160,9 +160,18 @@ class PlaybookInjectionTests(unittest.TestCase):
     def test_adjust_week_context_is_its_own(self) -> None:
         sections = select_coach_context("ok", {}, request_kind="adjust_week").sections
         self.assertLessEqual(
-            {"planning_brief", "planning", "training_plans", "recovery", "calendar"},
+            {
+                "planning_brief",
+                "planning",
+                "training_plans",
+                "recovery",
+                "external_calendar",
+                "daily_planning_context",
+            },
             sections,
         )
+        # Calendar events come once, as external_calendar.
+        self.assertNotIn("calendar", sections)
         self.assertNotIn("nutrition_products", sections)
         selection = select_coach_context("ok", {}, request_kind="adjust_week")
         items = [{"date": f"2026-11-{day:02d}"} for day in (1, 2, 8, 10)]
@@ -231,7 +240,8 @@ class PlaybookInjectionTests(unittest.TestCase):
         }
         with self.assertLogs("intervals_coach", "INFO") as logs:
             planned, _ = service.build(**arguments, request_kind="plan_week")
-            plain, _ = service.build(**arguments)
+            plain, _ = service.build(**{**arguments, "message": "Wie war mein Schlaf?"})
+            typed, _ = service.build(**arguments)
         sizes = [r.context for r in logs.records if hasattr(r, "context")]
         self.assertEqual(
             len(playbook_for("plan_week")), sizes[0]["playbook_characters"]
@@ -239,6 +249,11 @@ class PlaybookInjectionTests(unittest.TestCase):
         self.assertEqual(0, sizes[1]["playbook_characters"])
         self.assertIn("REQUEST PLAYBOOK", planned)
         self.assertNotIn("REQUEST PLAYBOOK", plain)
+        # A typed planning request carries the same playbook as the quick action.
+        self.assertEqual(
+            len(playbook_for("plan_week")), sizes[2]["playbook_characters"]
+        )
+        self.assertIn("Task: plan the requested next week", typed)
         selection = training_context.build.call_args_list[0].kwargs["selection"]
         self.assertEqual(selection.name, "plan_week")
 
@@ -252,29 +267,39 @@ class RequestKindSelectionTests(unittest.TestCase):
                     {
                         "planning",
                         "training_plans",
-                        "calendar",
                         "external_calendar",
+                        "daily_planning_context",
                         "recovery",
                         "weather",
                         "durable_profile",
                     },
                     sections,
                 )
+                self.assertNotIn("calendar", sections)
                 self.assertNotIn("nutrition_products", sections)
 
     def test_review_and_analysis_kinds_load_what_they_need(self) -> None:
         progress = select_coach_context("x", {}, request_kind="progress_review")
         self.assertLessEqual({"planning", "recovery", "activities"}, progress.sections)
+        for dropped in ("training_plans", "daily_planning_context"):
+            self.assertNotIn(dropped, progress.sections)
+        self.assertEqual(progress.horizon_days, 0)
         analysis = select_coach_context("x", {}, request_kind="session_analysis")
-        self.assertEqual(analysis.name, "activity_analysis")
+        self.assertEqual(analysis.name, "session_analysis")
         self.assertIn("durable_profile", analysis.sections)
         self.assertLessEqual(
             {"local_planned_workouts", "activities", "recovery", "current_performance"},
             analysis.sections,
         )
-        for heavy in ("weather", "calendar", "external_calendar", "training_plans"):
+        for heavy in (
+            "weather",
+            "calendar",
+            "external_calendar",
+            "training_plans",
+            "daily_planning_context",
+        ):
             self.assertNotIn(heavy, analysis.sections)
-        self.assertEqual(analysis.horizon_days, 14)
+        self.assertEqual(analysis.horizon_days, 2)
         # The latest session keeps the today-based planned-unit window; an older
         # session brings its own plan with get_activity_details.
         self.assertEqual(analysis.past_planned_days, 0)
