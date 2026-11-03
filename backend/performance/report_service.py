@@ -404,7 +404,11 @@ class TrainingReportReadService:
         session_feedback: FeedbackLookup | None = None,
         now: Callable[[], datetime] | None = None,
         curve_records: Callable[[], list[dict[str, Any]]] | None = None,
+        training_model: Callable[[], str] = lambda: "",
+        review_block: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
+        self._review_block = review_block
+        self._training_model = training_model
         self._curve_records = curve_records
         self._read_synced_at = read_synced_at
         self._read_plan = read_plan
@@ -498,6 +502,35 @@ class TrainingReportReadService:
             and start >= today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
             else None,
             observed_at=observed_at,
+        )
+
+    def block_review(
+        self,
+        values: dict[str, Any],
+        timezone: str = "UTC",
+        *,
+        with_curves: bool = True,
+    ) -> dict[str, Any]:
+        """Planned versus completed over a block; default: the last 4 whole weeks."""
+        today = self._today()
+        window = {
+            "days": 28,
+            "start": (today - timedelta(days=today.weekday() + 28)).isoformat(),
+            **{k: v for k, v in values.items() if k in {"start", "days"}},
+            "sport": "all",
+        }
+        progress = self.progress(window, timezone, with_curves=with_curves)
+        if self._review_block is None:
+            raise AppError(503, "Die Blockauswertung ist nicht verfügbar.")
+        summaries, _ = activity_summaries_with_sync_time(self._canonical)
+        return self._review_block(
+            progress=progress,
+            plan=self._read_plan(),
+            checkins=self._read_checkins(),
+            summaries=summaries,
+            activity_feedback=self._read_feedback(),
+            timezone=timezone,
+            training_model=self._training_model(),
         )
 
     def read(self, values: dict[str, Any], timezone: str = "UTC") -> dict[str, Any]:

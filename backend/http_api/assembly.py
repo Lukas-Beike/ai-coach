@@ -77,6 +77,7 @@ from backend.performance.report_service import (
     TrainingReportServices,
     TrainingSeasonReadService,
 )
+from backend.planning.block_review import block_review
 from backend.planning.season_preparation import load_scenarios, season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -510,6 +511,10 @@ class HttpApiAssembly:
                 session_feedback=_session_feedback_lookup(athlete),
                 now=athlete_clock.now,
                 curve_records=profiles.curve_records,
+                review_block=block_review,
+                training_model=lambda: str(
+                    profile_service().get().get("training_model") or ""
+                ),
             )
             return TrainingReportServices(
                 records=records,

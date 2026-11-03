@@ -53,6 +53,9 @@ class CoachActivityReadToolService:
                 "progress": lambda: self._report_services.report.progress(
                     arguments, self._report_services.timezone()
                 ),
+                "block_review": lambda: self._report_services.report.block_review(
+                    arguments, self._report_services.timezone()
+                ),
                 "report": lambda: self._report_services.report.read(
                     arguments, self._report_services.timezone()
                 ),
@@ -128,6 +131,7 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
     sections = arguments.get("sections", ["progress"] if long_window else ["report"])
     allowed = {
         "progress",
+        "block_review",
         "report",
         "endurance",
         "power_profiles",
@@ -139,7 +143,7 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
     }
     if (
         not isinstance(sections, list)
-        or not 1 <= len(sections) <= 9
+        or not 1 <= len(sections) <= 10
         or any(
             not isinstance(section, str) or section not in allowed
             for section in sections
@@ -148,6 +152,9 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
         raise AppError(400, "Unbekannter Analysebereich.")
     # progress uses whole ISO weeks, so it never shares a call with
     # sections that read the requested window as given.
-    if (long_window or "progress" in sections) and sections != ["progress"]:
-        raise AppError(400, "progress und 42 oder 84 Tage nur allein abrufbar.")
+    alone = sections in (["progress"], ["block_review"])
+    if (long_window or {"progress", "block_review"} & set(sections)) and not alone:
+        raise AppError(
+            400, "progress, block_review und 42 oder 84 Tage nur allein abrufbar."
+        )
     return sections
