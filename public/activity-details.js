@@ -139,7 +139,12 @@
     let loadGeneration = 0;
     // Only the newest request may write, so a slow save response cannot overwrite a later undo.
     const applyLoad = async (generation, response) => {
-      if (response && "session_rpe_load" in response) { if (generation === loadGeneration) showLoad(response.session_rpe_load); return; }
+      if (response && "session_rpe_load" in response) {
+        if (generation === loadGeneration) {
+          showLoad(response.session_rpe_load);
+        }
+        return;
+      }
       // The response had no load (it could not be read): fall back to the served detail.
       try {
         const payload = await api(`/api/activities/${encodeURIComponent(activityId)}`);
@@ -155,8 +160,8 @@
         const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });
         const previous = shown; shown = result.activity_feedback;
         status.textContent = result.activity_feedback ? "Feedback gespeichert. " : "Feedback entfernt. ";
-        if (result.change?.id) status.append(feedbackUndoButton(api, result.change, activityId, status, () => ++loadGeneration, (response, generation) => { shown = previous; fill(previous); applyLoad(generation, response); }));
-        applyLoad(generation, result);
+        if (result.change?.id) status.append(feedbackUndoButton(api, result.change, activityId, status, () => ++loadGeneration, (response, generation) => { shown = previous; fill(previous); void applyLoad(generation, response); }));
+        void applyLoad(generation, result);
       } catch (error) { status.textContent = error.message; } finally { save.disabled = false; }
     });
   }
