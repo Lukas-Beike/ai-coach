@@ -13,8 +13,6 @@ Use temporary storage and mocked providers; never weaken SQLCipher startup.
 Validate focused tests, architecture guards, syntax, and CI-equivalent Ruff/mypy
 checks for changed backend files. Follow the root secret-scan protocol.
 
-Sonar's S5886/S5890 `DataclassInstance` reports for `dataclasses.replace` on
-frozen dataclasses are exempted per module in `sonar-project.properties` for
-modules with uncast `replace()` calls, because Sonar cannot infer that return
-type. Prefer a `typing.cast` to the dataclass type at the call site (mypy still
-checks the result) and do not widen the exemption list.
+If Sonar reports `DataclassInstance` for a frozen dataclass returned by
+`dataclasses.replace`, use an explicit `typing.cast` to the concrete dataclass
+type and check it with mypy; keep Sonar's type rules enabled.
