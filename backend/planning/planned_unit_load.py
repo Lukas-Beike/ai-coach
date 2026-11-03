@@ -9,12 +9,17 @@ from backend.activities.workout_load import (
     WorkoutEstimate,
     estimate_workout,
 )
-from backend.activities.zone_settings import ZoneSettings
+from backend.activities.zone_settings import ZoneSettings, effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, Sport
+from backend.canonical.vocabulary import (
+    Environment,
+    MetricKind,
+    Sport,
+    ZoneConfigurationMetric,
+)
 from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_inputs import resolve_reader
 from backend.planning.sport import planned_sport_environment
@@ -53,6 +58,34 @@ def sport_threshold_speed(
     )
 
 
+def resolve_thresholds(
+    sport_thresholds: Sequence[Observation],
+    zone_configurations: Sequence[ZoneConfiguration],
+    sport: Sport,
+    environment: Environment,
+    day: date | None,
+) -> AthleteThresholds:
+    """Thresholds and zone limits of a sport, locally confirmed values first.
+
+    Same precedence as the Coach context: an effective zone configuration (local
+    before provider) wins, the Intervals.icu sync values fill what it leaves out.
+    """
+    pace = effective_zone_configuration(
+        zone_configurations, ZoneConfigurationMetric.PACE, sport, day=day
+    )
+    speed = pace.threshold if pace is not None else None
+    return AthleteThresholds(
+        zones=ZoneSettings.from_configurations(
+            zone_configurations,
+            sport,
+            environment,
+            day,
+            fallback=ZoneSettings.from_thresholds(sport_thresholds, sport, environment),
+        ),
+        threshold_speed_mps=speed or sport_threshold_speed(sport_thresholds, sport),
+    )
+
+
 def unit_thresholds(
     unit: Mapping[str, Any],
     sport_thresholds: Sequence[Observation],
@@ -70,15 +103,8 @@ def unit_thresholds(
         )
     except ValueError:
         day = None
-    return AthleteThresholds(
-        zones=ZoneSettings.from_configurations(
-            zone_configurations,
-            sport,
-            environment,
-            day,
-            fallback=ZoneSettings.from_thresholds(sport_thresholds, sport, environment),
-        ),
-        threshold_speed_mps=sport_threshold_speed(sport_thresholds, sport),
+    return resolve_thresholds(
+        sport_thresholds, zone_configurations, sport, environment, day
     )
 
 

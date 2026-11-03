@@ -63,7 +63,7 @@ def _band(zone: int | None, zone_count: int) -> str | None:
     return "moderate" if zone < high else "high"
 
 
-def _intensity(sessions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def intensity_3zone(sessions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     seconds = {"low": 0.0, "moderate": 0.0, "high": 0.0}
     sensors: set[str] = set()
     measured = 0
@@ -163,7 +163,7 @@ def _bucket(
         "duration_s": metric_sum(sessions, "moving_duration_s"),
         "training_load": _load(sessions),
         "session_rpe_load": _rpe(sessions, feedback, timezone),
-        "intensity_3zone": _intensity(sessions),
+        "intensity_3zone": intensity_3zone(sessions),
         "plan": _plan(plan, week[0], week[1], sport),
     }
 

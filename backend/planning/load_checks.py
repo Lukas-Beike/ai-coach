@@ -6,8 +6,9 @@ Load = duration x intensity^2 (TSS principle), per sport:
 - Completed activity: ride normalized power (else average power) over FTP; run
   weighted (grade-adjusted) pace, else average pace, over threshold pace; without
   both, a heart-rate fallback over LTHR that is marked less precise.
-Thresholds come from the latest Intervals.icu sync and count only when it is at
-most ``THRESHOLD_MAX_AGE_DAYS`` old. Anything missing or stale is unknown and
+Thresholds follow the Coach precedence: locally confirmed zone configurations
+first, then the latest Intervals.icu sync, which counts only when it is at most
+``THRESHOLD_MAX_AGE_DAYS`` old. Anything missing or stale is unknown and
 named as such; no number is made up. Strength has no planned session-RPE in
 planned units, so it takes no part. The evidence is extrapolated from distance
 and volume studies, not directly validated, and every note is non-blocking.
@@ -25,14 +26,12 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.activities.workout_load import AthleteThresholds, WorkoutEstimate
-from backend.activities.zone_settings import ZoneSettings
+from backend.activities.zone_settings import effective_zone_configuration
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.vocabulary import Environment, Sport
-from backend.planning.planned_unit_load import (
-    estimate_planned_unit,
-    sport_threshold_speed,
-)
+from backend.canonical.domain_records import ZoneConfiguration
+from backend.canonical.vocabulary import Environment, Sport, ZoneConfigurationMetric
+from backend.planning.planned_unit_load import estimate_planned_unit, resolve_thresholds
 from backend.planning.sport import planned_sport_environment
 
 LOAD_EVIDENCE = "extrapolated from distance/volume studies, not directly validated"
@@ -85,23 +84,51 @@ class PlannedSession:
 
 
 def _sport_thresholds(
-    inputs: Any, sport: Sport, environment: Environment = Environment.UNKNOWN
+    observations: Sequence[Any],
+    configurations: Sequence[ZoneConfiguration],
+    today: date,
+    sport: Sport,
+    environment: Environment = Environment.UNKNOWN,
 ) -> AthleteThresholds:
-    zones = ZoneSettings.from_thresholds(inputs.zone_thresholds, sport, environment)
-    speed = sport_threshold_speed(inputs.zone_thresholds, sport)
-    return AthleteThresholds(zones=zones, threshold_speed_mps=speed)
+    return resolve_thresholds(observations, configurations, sport, environment, today)
 
 
-def load_thresholds(inputs: Any, today: date) -> LoadThresholds:
-    """Thresholds of the latest Intervals.icu sync, unusable when absent or stale."""
+def _has_configuration(
+    configurations: Sequence[ZoneConfiguration], today: date
+) -> bool:
+    return any(
+        effective_zone_configuration(configurations, metric, sport, day=today)
+        for sport in LOAD_SPORTS
+        for metric in ZoneConfigurationMetric
+    )
+
+
+def load_thresholds(
+    inputs: Any, today: date, configurations: Sequence[ZoneConfiguration] = ()
+) -> LoadThresholds:
+    """Thresholds with the Coach precedence: locally confirmed values, then Intervals.
+
+    Intervals.icu values count only when the latest sync is at most
+    ``THRESHOLD_MAX_AGE_DAYS`` old; local values do not age. Without either the
+    thresholds are unusable and named as missing or stale.
+    """
     synced = inputs.synced_at
+    reason = None
     if synced is None:
-        return LoadThresholds(unavailable="missing_thresholds")
-    if (today - synced.date()).days > THRESHOLD_MAX_AGE_DAYS:
-        return LoadThresholds(unavailable="stale_thresholds")
+        reason = "missing_thresholds"
+    elif (today - synced.date()).days > THRESHOLD_MAX_AGE_DAYS:
+        reason = "stale_thresholds"
+    if reason and not _has_configuration(configurations, today):
+        return LoadThresholds(unavailable=reason)
+    observed = () if reason else inputs.zone_thresholds
     return LoadThresholds(
-        {sport: _sport_thresholds(inputs, sport) for sport in LOAD_SPORTS},
-        indoor_ride=_sport_thresholds(inputs, Sport.RIDE, Environment.INDOOR),
+        {
+            sport: _sport_thresholds(observed, configurations, today, sport)
+            for sport in LOAD_SPORTS
+        },
+        indoor_ride=_sport_thresholds(
+            observed, configurations, today, Sport.RIDE, Environment.INDOOR
+        ),
     )
 
 

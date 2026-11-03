@@ -23,9 +23,11 @@ from backend.db.manager import DatabaseManager
 from backend.planning import plan_checks
 from backend.planning.load_checks import LoadThresholds
 from backend.planning.plan_guard_service import (
+    IllnessNotConfirmedError,
     PlanCheckError,
     PlanGuardService,
     build_planning_brief,
+    illness_confirmation,
     read_progress,
     recent_illness,
 )
@@ -239,6 +241,46 @@ class PlanGuardWriteTests(unittest.TestCase):
             ["back_to_back_hard", "illness_hard", "illness_hard"],
             sorted(f["code"] for f in result["plan_check_notes"]),
         )
+
+    def test_adaptive_replan_is_plan_checked_by_its_own_service(self) -> None:
+        from backend.coach import tool_execution_service as tools
+
+        self.assertIn("apply_adaptive_replan", tools.PLAN_CHECKED_TOOLS)
+        self.assertIn("apply_adaptive_replan", tools.SELF_GUARDED_TOOLS)
+        self.run_tool("apply_adaptive_replan", adjustment_id="x")
+        # The generic wrapper stays out; the tool's own service checks the plan.
+        self.assertEqual(1, self.stored())
+        self.dispatch.execute.assert_called_once()
+
+    def test_listing_without_a_finding_does_not_ask(self) -> None:
+        self.illness = ""
+        asked = []
+        with illness_confirmation(lambda: asked.append(1) or False):
+            self.run_tool(
+                "replace_training_plan", accept_plan_findings=["illness_hard"]
+            )
+        self.assertEqual(1, self.stored())
+        self.assertEqual([], asked)
+
+    def test_finding_without_confirmation_rolls_back(self) -> None:
+        with (
+            illness_confirmation(lambda: False),
+            self.assertRaises(IllnessNotConfirmedError) as raised,
+        ):
+            self.run_tool(
+                "replace_training_plan", accept_plan_findings=["illness_hard"]
+            )
+        self.assertEqual("illness_not_confirmed", raised.exception.reason)
+        self.assertEqual("illness_hard", raised.exception.findings[0]["code"])
+        self.assertEqual(0, self.stored())
+        self.assertEqual([], self.published)
+
+    def test_finding_with_confirmation_is_saved(self) -> None:
+        with illness_confirmation(lambda: True):
+            self.run_tool(
+                "replace_training_plan", accept_plan_findings=["illness_hard"]
+            )
+        self.assertEqual(1, self.stored())
 
     def test_other_code_does_not_cover_the_finding(self) -> None:
         with self.assertRaises(PlanCheckError):

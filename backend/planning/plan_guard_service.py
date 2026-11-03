@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, timedelta
 from typing import Any
 
@@ -42,14 +44,55 @@ BRIEF_SOURCE = (
 class PlanCheckError(AppError):
     """A proposed plan breaks a blocking check; carries the findings for the model."""
 
-    def __init__(self, findings: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        findings: list[dict[str, Any]],
+        *,
+        message: str | None = None,
+        reason: str = "plan_check_failed",
+    ) -> None:
         codes = ", ".join(sorted({item["code"] for item in findings}))
         super().__init__(
             409,
-            f"Nicht gespeichert: Der Plan verletzt Planungsregeln ({codes}).",
-            reason="plan_check_failed",
+            message
+            or f"Nicht gespeichert: Der Plan verletzt Planungsregeln ({codes}).",
+            reason=reason,
         )
         self.findings = findings
+
+
+class IllnessNotConfirmedError(PlanCheckError):
+    """The plan overrides a reported illness without the athlete asking for it."""
+
+    def __init__(self, findings: list[dict[str, Any]]) -> None:
+        super().__init__(
+            findings,
+            message=(
+                "Nicht gespeichert: Die Nachricht verlangt nicht ausdrücklich "
+                "hartes oder langes Training trotz der gemeldeten Krankheit. "
+                "accept_plan_findings nicht setzen. Mit clarify_coach_request "
+                "einmal knapp fragen, ob wirklich so trainiert werden soll, "
+                "oder einen leichteren Plan speichern."
+            ),
+            reason="illness_not_confirmed",
+        )
+
+
+# Set by the Coach turn around a plan write: asks whether the athlete explicitly
+# wants to train despite illness. Without it an accepted finding is not asked.
+_ILLNESS_CONFIRMATION: ContextVar[Callable[[], bool] | None] = ContextVar(
+    "illness_confirmation", default=None
+)
+
+
+@contextmanager
+def illness_confirmation(confirm: Callable[[], bool]) -> Iterator[None]:
+    """Let ``PlanGuardService.verify`` ask ``confirm`` for an overridden illness."""
+    token = _ILLNESS_CONFIRMATION.set(confirm)
+    try:
+        yield
+    finally:
+        _ILLNESS_CONFIRMATION.reset(token)
 
 
 def read_completed(database_manager: Any, activities: Any, today: date) -> Any:
@@ -59,12 +102,15 @@ def read_completed(database_manager: Any, activities: Any, today: date) -> Any:
 
 
 def read_load_thresholds(
-    database_manager: Any, observations: Any, today: date
+    database_manager: Any,
+    observations: Any,
+    today: date,
+    configurations: Sequence[Any] = (),
 ) -> LoadThresholds:
-    """Thresholds of the latest Intervals.icu sync, read with a short reader."""
+    """Local zone configurations, then the latest Intervals.icu sync."""
     with database_manager.reader() as db:
         current = read_current_inputs(resolve_reader(observations, db), db, as_of=today)
-    return load_thresholds(current, today)
+    return load_thresholds(current, today, configurations)
 
 
 def read_progress(reports: Any) -> Mapping[str, Any]:
@@ -298,9 +344,14 @@ class PlanGuardService:
         self._threshold_cache: tuple[LoadThresholds | None] | None = None
 
     def _planned_weeks(
-        self, units: Sequence[Mapping[str, Any]], today: date
+        self,
+        units: Sequence[Mapping[str, Any]],
+        today: date,
+        completed: Sequence[Mapping[str, Any]],
     ) -> list[dict]:
-        return intensity_distribution.planned_weeks(units, self._estimate_unit, today)
+        return intensity_distribution.planned_weeks(
+            units, self._estimate_unit, today, completed
+        )
 
     def _recent(self, today: date) -> list[Mapping[str, Any]]:
         first = (today - timedelta(days=HISTORY_DAYS)).isoformat()
@@ -313,11 +364,12 @@ class PlanGuardService:
     def findings(self) -> list[dict[str, Any]]:
         today = self._today()
         units = self._planned_units()
+        completed = self._recent(today)
         return [
             *plan_checks.check_plan(
                 today=today,
                 units=units,
-                completed=self._recent(today),
+                completed=completed,
                 competitions=self._competitions(),
                 illness=self._illness(),
                 thresholds=self._load_thresholds(),
@@ -326,7 +378,7 @@ class PlanGuardService:
                 weekly_plan=self._weekly_plan(),
             ),
             *intensity_distribution.distribution_findings(
-                self._training_model(), self._planned_weeks(units, today)
+                self._training_model(), self._planned_weeks(units, today, completed)
             ),
         ]
 
@@ -359,6 +411,7 @@ class PlanGuardService:
         ]
         if blocking:
             raise PlanCheckError(blocking)
+        self._require_illness_confirmation(new, accepted)
         return [
             {
                 key: item[key]
@@ -374,18 +427,33 @@ class PlanGuardService:
             for item in new
         ]
 
+    @staticmethod
+    def _require_illness_confirmation(
+        new: Sequence[Mapping[str, Any]], accepted: Sequence[str]
+    ) -> None:
+        """Ask only when this write produced an accepted blocking illness finding."""
+        confirm = _ILLNESS_CONFIRMATION.get()
+        overridden = [
+            dict(item)
+            for item in new
+            if item["code"] in plan_checks.BLOCKING_CODES and item["code"] in accepted
+        ]
+        if overridden and confirm is not None and not confirm():
+            raise IllnessNotConfirmedError(overridden)
+
     def brief(self) -> dict[str, Any]:
         today = self._today()
         units = self._planned_units()
+        completed = self._recent(today)
         return build_planning_brief(
             progress=self._progress(),
-            completed=self._recent(today),
+            completed=completed,
             competitions=self._competitions(),
             training_model=self._training_model(),
             today=today,
-            planned_weeks=self._planned_weeks(units, today),
+            planned_weeks=self._planned_weeks(units, today, completed),
             planned_sessions=planned_focus(units, self._estimate_unit, today),
-            planned_strength=leg_strength.planned_weeks(units, today),
+            planned_strength=leg_strength.planned_weeks(units, today, completed),
             calendar_busy=calendar_load.busy_minutes(self._events(), today, 35),
             weekly_plan_text=self._weekly_plan(),
             lessons=self._lessons(),

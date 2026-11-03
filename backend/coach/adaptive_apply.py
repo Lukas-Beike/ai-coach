@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from backend.canonical.vocabulary import ProviderId
@@ -13,7 +14,10 @@ from backend.coach.authorization import (
 from backend.db.manager import DatabaseManager
 from backend.errors import STRUCTURED_AUTHORIZATION_ERROR, AppError
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
+from backend.planning.plan_guard_service import PlanGuardService
 from backend.sync.adaptive import IllnessPauseSyncService
+
+PLAN_FINDINGS_ARGUMENT = "accept_plan_findings"
 
 
 class CoachAdaptiveApplyService:
@@ -30,7 +34,9 @@ class CoachAdaptiveApplyService:
         illness_sync: IllnessPauseSyncService,
         database_manager: DatabaseManager,
         database_lock: Any,
+        plan_guard: Callable[[], PlanGuardService] | None = None,
     ) -> None:
+        self._plan_guard = plan_guard
         self._preview = preview
         self._illness_sync = illness_sync
         self._database_manager = database_manager
@@ -100,9 +106,27 @@ class CoachAdaptiveApplyService:
                 "erstellen und erneut fragen.",
                 reason="adaptive_approval_required",
             )
-        return {
+        sync_flag = bool(sync_illness)
+        applied, notes = self._apply_checked(adjustment_id, arguments)
+        result = {
             "ok": True,
-            **self._illness_sync.apply(
-                adjustment_id, sync_illness_to_intervals=sync_illness
-            ),
+            **self._illness_sync.complete(applied, sync_illness_to_intervals=sync_flag),
         }
+        return {**result, "plan_check_notes": notes} if notes else result
+
+    def _apply_checked(
+        self, adjustment_id: str, arguments: dict[str, Any]
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Apply the local replan under the plan guard; a block rolls it back.
+
+        The remote illness sync runs only afterwards, outside this transaction.
+        """
+        if self._plan_guard is None:
+            return self._illness_sync.apply_local(adjustment_id), []
+        accepted = arguments.get(PLAN_FINDINGS_ARGUMENT)
+        guard = self._plan_guard()
+        with self._database_lock, self._database_manager.unit_of_work():
+            before = guard.findings()
+            applied = self._illness_sync.apply_local(adjustment_id)
+            notes = guard.verify(before, accepted if isinstance(accepted, list) else [])
+        return applied, notes

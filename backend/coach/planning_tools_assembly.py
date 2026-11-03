@@ -48,6 +48,7 @@ class CoachTrainingPatchDependencies:
 class CoachAdaptivePlanningDependencies:
     adaptive_preview_service: Callable[[], AdaptiveReplanPreviewService]
     illness_pause_sync_service: Callable[[], Any]
+    plan_guard: Callable[[], Any] | None = None
 
 
 class CoachPlanningToolsAssembly:
@@ -80,6 +81,7 @@ class CoachPlanningToolsAssembly:
         self._training_change_limit = patching.training_change_limit
         self._adaptive_preview_service = adaptive.adaptive_preview_service
         self._illness_pause_sync_service = adaptive.illness_pause_sync_service
+        self._plan_guard = adaptive.plan_guard
 
     def training_plan_artifact_service(self) -> TrainingPlanArtifactService:
         return TrainingPlanArtifactService(
@@ -113,4 +115,5 @@ class CoachPlanningToolsAssembly:
             self._illness_pause_sync_service(),
             self._database_manager(),
             self._database_lock,
+            self._plan_guard,
         )

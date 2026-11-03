@@ -879,6 +879,7 @@ def build_structured_tool_schemas(
             {
                 "adjustment_id": {"type": "string"},
                 "sync_illness_to_intervals": {"type": "boolean"},
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
             },
         ),
         _canonical_coach_tool(

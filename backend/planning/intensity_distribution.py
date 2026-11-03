@@ -23,8 +23,8 @@ from backend.activities.workout_load import BANDS, WorkoutEstimate
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import Sport
-from backend.performance.progress_report import ZONE_MAPPING
-from backend.planning import plan_checks
+from backend.performance.progress_report import ZONE_MAPPING, intensity_3zone
+from backend.planning import plan_checks, running_week
 from backend.planning.sport import planned_sport_environment
 
 CODE = "intensity_distribution"
@@ -89,15 +89,20 @@ def _unit_seconds(unit: Mapping[str, Any], estimate: WorkoutEstimate) -> float:
 
 
 def planned_weeks(
-    units: Sequence[Mapping[str, Any]], estimate: Estimator, today: date
+    units: Sequence[Mapping[str, Any]],
+    estimate: Estimator,
+    today: date,
+    completed: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """Planned band seconds per ISO week of the run and ride units, oldest first.
 
-    A week that began before ``today`` is partial: its elapsed days are not in
-    the planned units, so it is shown but never judged.
+    The running week adds the completed run and ride days (zone times of the
+    weekly progress report, ``ZONE_MAPPING``; completed time without zone times
+    is uncovered) to the remaining planned days and is labelled
+    ``running_week.RUNNING_WEEK_BASIS``. Without ``completed`` it stays partial.
     """
     weeks: dict[date, dict[str, Any]] = {}
-    for unit in units:
+    for unit in running_week.without_done_today(units, completed, today):
         start = _monday(unit)
         if start is None or planned_sport_environment(unit)[0] not in {
             Sport.RUN,
@@ -124,7 +129,30 @@ def planned_weeks(
         week["dates"].append(
             iso_date_prefix(unit.get("date") or unit.get("starts_at_local") or "")
         )
-    return [_summary(weeks[start], start < today) for start in sorted(weeks)]
+    current = running_week.week_start(today)
+    if completed and current in weeks:
+        _add_completed(weeks[current], completed, today)
+    return [
+        _summary(weeks[start], start < today and not (completed and start == current))
+        for start in sorted(weeks)
+    ]
+
+
+def _add_completed(
+    week: dict[str, Any], completed: Sequence[Mapping[str, Any]], today: date
+) -> None:
+    """Add this week's completed run and ride days to ``week``."""
+    rows = [
+        row
+        for row in running_week.completed_this_week(completed, today)
+        if row.get("sport") in {Sport.RUN.value, Sport.RIDE.value}
+    ]
+    measured = intensity_3zone(rows)["seconds"] or {}
+    for band, seconds in measured.items():
+        week["seconds"][band] += seconds
+    total = sum(number(row.get("moving_duration_s")) or 0.0 for row in rows)
+    week["uncovered_s"] += max(total - sum(measured.values()), 0.0)
+    week["basis"] = running_week.RUNNING_WEEK_BASIS
 
 
 def _summary(week: dict[str, Any], partial: bool) -> dict[str, Any]:
@@ -138,6 +166,7 @@ def _summary(week: dict[str, Any], partial: bool) -> dict[str, Any]:
     return {
         "week_start": week["week_start"],
         "partial": partial,
+        "basis": week.get("basis", "planned"),
         "seconds": {band: round(seconds) for band, seconds in week["seconds"].items()},
         "shares": shares,
         "uncovered_s": round(week["uncovered_s"]),
@@ -145,6 +174,12 @@ def _summary(week: dict[str, Any], partial: bool) -> dict[str, Any]:
         "local_ids": sorted(week["local_ids"]),
         "dates": sorted(set(week["dates"])),
     }
+
+
+def _label(week: Mapping[str, Any]) -> str:
+    if week["basis"] == running_week.RUNNING_WEEK_BASIS:
+        return running_week.RUNNING_WEEK_BASIS.capitalize()
+    return "Planned week"
 
 
 def _outside(share: float, bounds: tuple[float, float]) -> float:
@@ -196,13 +231,14 @@ def distribution_findings(
                 "dates": week["dates"],
                 "local_ids": week["local_ids"],
                 "message": (
-                    f"Planned week of {week['week_start']} deviates clearly from the "
+                    f"{_label(week)} of {week['week_start']} deviates clearly from the "
                     f"{model} reference range in: {', '.join(off)}."
                 ),
                 "evidence": {
                     "model": model,
                     "model_evidence": EVIDENCE[model],
                     "week_start": week["week_start"],
+                    "basis": week["basis"],
                     "shares": week["shares"],
                     "seconds": week["seconds"],
                     "uncovered_s": week["uncovered_s"],
@@ -233,6 +269,7 @@ def brief_distribution(
                 for key in (
                     "week_start",
                     "partial",
+                    "basis",
                     "seconds",
                     "shares",
                     "uncovered_s",

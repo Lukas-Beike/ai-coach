@@ -17,6 +17,7 @@ from backend.coach.write_gate import (
     TurnGateState,
     build_turn_authority,
     check_write,
+    illness_override_confirmed,
 )
 
 _RETRYABLE_PENDING_STATUSES = frozenset({"needs_clarification", "failed"})
@@ -36,12 +37,6 @@ _DENIAL_GUIDANCE = {
         "Do not apply it. Only the athlete's very next message after a preview "
         "can approve it, so create a fresh preview with preview_adaptive_replan "
         "now and ask once, in your answer, whether to apply it."
-    ),
-    "illness_not_confirmed": (
-        "The athlete's message does not explicitly ask to train hard or long "
-        "despite the reported illness. Do not set accept_plan_findings. Ask one "
-        "concise question with clarify_coach_request whether they really want "
-        "this training while ill, or save an easier plan instead."
     ),
     "remote_not_requested": (
         "The athlete's message does not ask to write to Intervals.icu. Keep the "
@@ -159,6 +154,16 @@ class CoachTurnWriteGate:
         if self._classifier is None:
             self._classifier = self._classifier_factory(self._model)
         return self._classifier(current_text, previous_text, origin_text)
+
+    def confirms_illness_override(self) -> bool:
+        """Whether the athlete asked to train despite the reported illness."""
+        return illness_override_confirmed(
+            self._state,
+            self._classify,
+            self._authority,
+            self._message,
+            self._previous,
+        )
 
     def denial(
         self, tool_name: str, arguments: Mapping[str, Any] | None
