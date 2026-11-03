@@ -80,6 +80,7 @@ class CoachReadToolsAssembly:
             self._profile_service(),
             self._today,
             self._report_services() if self._report_services else None,
+            self._planned_unit_service(),
         )
 
     def read_service(self) -> CoachReadToolService:
