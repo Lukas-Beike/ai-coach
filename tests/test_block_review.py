@@ -177,6 +177,28 @@ class BlockReviewTests(unittest.TestCase):
         self.assertEqual("rpe_rising", lesson["code"])
         self.assertEqual("limited", lesson["evidence_strength"])
 
+    def test_falling_motivation_is_the_concern_and_empty_start_is_ignored(self):
+        checkins = [
+            {"checkin_date": f"2026-09-{day:02d}", "motivation": score}
+            for day, score in zip(range(1, 9), (5, 5, 5, 5, 2, 2, 2, 2))
+        ]
+        review = _service([], None, checkins).block_review(
+            {"start": "", "days": 42}, "UTC"
+        )
+        self.assertEqual(["motivation_falling"], [i["code"] for i in review["lessons"]])
+        self.assertEqual(6, review["weeks"])
+        self.assertEqual("2026-08-17", review["start"])
+        self.assertEqual("2026-09-27", review["effective_end"])
+        self.assertEqual("lessons", list(review)[-4])
+
+    def test_notes_keep_the_newest_sessions(self):
+        rows = [_run(f"r{n}", f"2026-09-{n:02d}") for n in range(1, 13)]
+        feedback = [{"activity_id": f"r{n}", "notes": f"n{n}"} for n in range(1, 13)]
+        review = _service(rows, None, (), feedback).block_review({}, "UTC")
+        notes = review["subjective"]["feedback_notes"]
+        self.assertEqual(10, len(notes))
+        self.assertEqual("n12", notes[-1]["notes"])
+
     def test_invalid_period_is_rejected(self):
         with self.assertRaises(AppError):
             _service().block_review({"start": "2026-08-31", "days": 30}, "UTC")

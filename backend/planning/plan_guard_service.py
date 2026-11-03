@@ -226,6 +226,14 @@ def build_planning_brief(
     }
 
 
+def read_lessons(read: Callable[[], Sequence[Mapping[str, Any]]]) -> list[Any]:
+    """Lessons for the brief; an unavailable review leaves them empty, never blocks."""
+    try:
+        return list(read())
+    except AppError:
+        return []
+
+
 def brief_lessons(lessons: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Lessons of the last 4 whole weeks (``block_review``), labelled as descriptive."""
     return {

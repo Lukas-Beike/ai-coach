@@ -28,6 +28,8 @@ from backend.planning.session_focus import LEG_FOCI, session_focus
 METHOD = "block-review-v1"
 KEY_FOCI = frozenset({"threshold", "vo2max", "long"}) | LEG_FOCI
 SCORE_FIELDS = ("soreness", "stress", "motivation")
+# +1: a rising score is the concern; -1: a falling score is.
+SCORE_CONCERN = {"soreness": 1, "stress": 1, "motivation": -1}
 NOTE_LIMIT = 10
 NOTE_CHARS = 200
 LESSON_LIMIT = 4
@@ -123,7 +125,7 @@ def _intensity(progress: Mapping[str, Any], model: str) -> dict[str, Any]:
     week = {
         "seconds": seconds,
         "shares": shares,
-        "partial": False,
+        "partial": progress["effective_end"] < progress["end"],
         "coverage": measured / total if total else None,
     }
     return {
@@ -246,7 +248,7 @@ def feedback_notes(
                     "session_rpe": item.get("session_rpe"),
                 }
             )
-    return notes[:NOTE_LIMIT]
+    return notes[-NOTE_LIMIT:]
 
 
 def _subjective(
@@ -348,11 +350,12 @@ def _signal_lessons(review: Mapping[str, Any]) -> list[dict[str, Any]]:
         entry = scores[field]
         if (
             min(entry["earlier_n"], entry["later_n"]) >= MIN_HALF_CHECKINS
-            and entry["later_mean"] - entry["earlier_mean"] >= SCORE_SHIFT
+            and SCORE_CONCERN[field] * (entry["later_mean"] - entry["earlier_mean"])
+            >= SCORE_SHIFT
         ):
             lessons.append(
                 _lesson(
-                    f"{field}_rising",
+                    f"{field}_{'rising' if SCORE_CONCERN[field] > 0 else 'falling'}",
                     f"Check-in {field} averaged {entry['earlier_mean']} in the earlier "
                     f"and {entry['later_mean']} in the later half.",
                     entry,
@@ -407,5 +410,9 @@ def block_review(
         ),
         "coverage_note": COVERAGE_NOTE,
     }
-    review["lessons"] = block_lessons(review)
-    return review
+    # Compact sections lead, so a size cap on the Coach payload never drops lessons.
+    tail = {
+        key: review.pop(key) for key in ("performance", "subjective", "coverage_note")
+    }
+    review["lessons"] = block_lessons({**review, **tail})
+    return {**review, **tail}

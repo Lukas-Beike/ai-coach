@@ -512,16 +512,18 @@ class TrainingReportReadService:
         with_curves: bool = True,
     ) -> dict[str, Any]:
         """Planned versus completed over a block; default: the last 4 whole weeks."""
+        if self._review_block is None:
+            raise AppError(503, "Die Blockauswertung ist nicht verfügbar.")
         today = self._today()
+        days = values.get("days") or 28
+        weeks = days // 7 if isinstance(days, int) else 4
         window = {
-            "days": 28,
-            "start": (today - timedelta(days=today.weekday() + 28)).isoformat(),
-            **{k: v for k, v in values.items() if k in {"start", "days"}},
+            "days": days,
+            "start": values.get("start")
+            or (today - timedelta(days=today.weekday() + 7 * weeks)).isoformat(),
             "sport": "all",
         }
         progress = self.progress(window, timezone, with_curves=with_curves)
-        if self._review_block is None:
-            raise AppError(503, "Die Blockauswertung ist nicht verfügbar.")
         summaries, _ = activity_summaries_with_sync_time(self._canonical)
         return self._review_block(
             progress=progress,
