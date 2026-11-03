@@ -50,9 +50,58 @@ class FreeMinutesTests(unittest.TestCase):
     def test_brief_carries_source_per_date(self) -> None:
         text = plan(tue={"windows": ["06:00-08:00"]})
         result = free_time.free_time_brief(text, [event("06:00", "07:00")], MONDAY, 3)
-        self.assertEqual(result["2026-11-03"], {"minutes": 60, "source": "profile"})
+        self.assertEqual(
+            result["2026-11-03"],
+            {
+                "minutes": 60,
+                "longest_block_minutes": 60,
+                "windows": [
+                    {
+                        "window": "06:00-08:00",
+                        "minutes": 60,
+                        "longest_block_minutes": 60,
+                    }
+                ],
+                "source": "profile",
+            },
+        )
         self.assertEqual(result["2026-11-02"]["source"], "fallback")
         self.assertEqual(result["2026-11-02"]["minutes"], 360 + 60 + 510)
+
+
+class FreeBlockTests(unittest.TestCase):
+    def test_two_short_gaps_give_total_but_a_shorter_longest_block(self) -> None:
+        windows = ["06:00-07:00", "12:00-13:00"]
+        self.assertEqual(free_time.free_minutes(TUESDAY, windows, []), 120)
+        self.assertEqual(free_time.longest_block(TUESDAY, windows, []), 60)
+        events = [event("06:30", "06:45")]
+        self.assertEqual(free_time.longest_block(TUESDAY, ["06:00-07:00"], events), 30)
+
+    def test_brief_lists_all_day_events_without_subtracting_them(self) -> None:
+        text = plan(tue={"windows": ["06:00-08:00"]})
+        holiday = event(
+            "00:00",
+            "23:59",
+            all_day=True,
+            name="Messe",
+            no_training=True,
+            training_impact=True,
+        )
+        result = free_time.free_time_brief(text, [holiday], MONDAY, 3)
+        day = result["2026-11-03"]
+        self.assertEqual(day["minutes"], 120)
+        self.assertEqual(
+            day["all_day_events"],
+            [
+                {
+                    "name": "Messe",
+                    "training_impact": True,
+                    "no_training": True,
+                    "all_day": True,
+                }
+            ],
+        )
+        self.assertNotIn("all_day_events", result["2026-11-02"])
 
 
 class NoFreeWindowTests(unittest.TestCase):
@@ -92,6 +141,90 @@ class NoFreeWindowTests(unittest.TestCase):
         self.assertEqual(
             self.check(text, [unit("2026-11-03", "run", minutes=90)], []), []
         )
+
+    def notes(self, text, units, events):
+        return [
+            f for f in self.check(text, units, events) if f["code"] == "no_free_window"
+        ]
+
+    def test_unit_needs_one_contiguous_block_not_the_total(self) -> None:
+        text = plan(tue={"windows": ["06:00-07:00", "12:00-13:00"]})
+        found = self.notes(text, [unit("2026-11-03", "run", minutes=90)], [])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["evidence"]["free_minutes"], 120)
+        self.assertEqual(found[0]["evidence"]["longest_block_minutes"], 60)
+        self.assertEqual(found[0]["evidence"]["reason"], "no_block")
+        self.assertFalse(found[0]["blocking"])
+
+    def test_two_units_share_the_free_time_one_is_placed_one_not(self) -> None:
+        text = plan(tue={"windows": ["06:00-07:30"]})
+        units = [
+            unit("2026-11-03", "run", minutes=60, local_id="a"),
+            unit("2026-11-03", "ride", minutes=60, local_id="b"),
+        ]
+        found = self.notes(text, units, [])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["local_ids"], ["b"])
+        self.assertEqual(found[0]["evidence"]["reason"], "shared_with_other_units")
+        self.assertEqual(self.notes(text, units[:1], []), [])
+
+    def test_longest_unit_goes_first_into_the_best_fitting_block(self) -> None:
+        text = plan(tue={"windows": ["06:00-07:00", "12:00-13:30"]})
+        units = [
+            unit("2026-11-03", "run", minutes=45, local_id="short"),
+            unit("2026-11-03", "ride", minutes=90, local_id="long"),
+        ]
+        self.assertEqual(self.notes(text, units, []), [])
+
+    def test_timed_easy_unit_overlapping_an_event_notes_overlap(self) -> None:
+        text = plan(tue={"windows": ["12:00-13:00"]})
+        easy = unit("2026-11-03", "run", time="12:00", minutes=30)
+        found = self.notes(text, [easy], [event("12:00", "12:30")])
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["evidence"]["reason"], "overlap")
+        self.assertEqual(self.notes(text, [easy], [event("12:30", "13:00")]), [])
+
+    def test_hard_overlap_is_named_once_by_calendar_load(self) -> None:
+        text = plan(tue={"windows": ["12:00-13:00"]})
+        hard = unit(
+            "2026-11-03", "run", time="12:00", minutes=30, session_focus="threshold"
+        )
+        found = self.check(text, [hard], [event("12:00", "12:30")])
+        self.assertEqual([f for f in found if f["code"] == "no_free_window"], [])
+        from backend.planning import plan_checks
+
+        every = plan_checks.check_plan(
+            today=MONDAY,
+            units=[hard],
+            completed=[],
+            competitions=[],
+            weekly_plan=text,
+            calendar_events=[event("12:00", "12:30")],
+        )
+        self.assertEqual([f["code"] for f in every].count("calendar_load"), 1)
+
+    def test_all_day_event_is_a_soft_note_for_hard_or_long_units_only(self) -> None:
+        from backend.planning import plan_checks
+
+        holiday = event("00:00", "23:59", all_day=True, name="Messe")
+        units = [
+            unit(
+                "2026-11-03", "run", minutes=40, session_focus="threshold", local_id="h"
+            ),
+            unit("2026-11-03", "run", minutes=30, session_focus="easy", local_id="e"),
+            unit("2026-11-03", "ride", minutes=120, local_id="l"),
+        ]
+        found = plan_checks.check_plan(
+            today=MONDAY,
+            units=units,
+            completed=[],
+            competitions=[],
+            calendar_events=[holiday],
+        )
+        notes = [f for f in found if f["code"] == "all_day_event"]
+        self.assertEqual(sorted(n["local_ids"][0] for n in notes), ["h", "l"])
+        self.assertFalse(notes[0]["blocking"])
+        self.assertEqual(notes[0]["evidence"]["events"][0]["name"], "Messe")
 
     def test_unit_that_fits_or_fallback_windows_give_no_note(self) -> None:
         text = plan(tue={"windows": ["06:00-08:00"]})
@@ -144,6 +277,32 @@ class BriefBudgetTests(unittest.TestCase):
         )
         self.assertNotIn("omitted", brief)
 
+    def test_trim_order_keeps_completed_weeks_last(self) -> None:
+        full = self.large_brief()
+        order = []
+        for limit in range(brief_budget.brief_size(full), 3_000, -400):
+            counts = (
+                brief_budget.fit_brief(self.large_brief(), limit)
+                .get("omitted", {})
+                .get("counts", {})
+            )
+            for label in counts:
+                if label not in order:
+                    order.append(label)
+        self.assertEqual(
+            order,
+            [
+                "free_time_minutes",
+                "calendar_busy_minutes",
+                "planned_sessions",
+                "weeks",
+            ],
+        )
+        trimmed = brief_budget.fit_brief(self.large_brief(), 9_000)
+        self.assertNotIn("2026-11-01", trimmed["free_time_minutes"])
+        for key in ("lessons", "season_phase", "weekly_plan"):
+            self.assertEqual(trimmed[key], full[key])
+
     def test_large_brief_is_trimmed_by_entries_with_an_omitted_note(self) -> None:
         full = self.large_brief()
         limit = brief_budget.brief_size(full) - 700
@@ -151,9 +310,9 @@ class BriefBudgetTests(unittest.TestCase):
         self.assertLessEqual(brief_budget.brief_size(brief), limit)
         for key in ("lessons", "season_phase", "weekly_plan"):
             self.assertEqual(brief[key], full[key])
-        self.assertEqual(brief["weeks"][-1]["week_start"], "2026-06-01")
+        self.assertEqual(brief["weeks"], full["weeks"])
         counts = brief["omitted"]["counts"]
-        self.assertGreater(counts["weeks"], 0)
+        self.assertGreater(counts["free_time_minutes"], 0)
         self.assertNotIn("planned_sessions", counts)
         deeper = brief_budget.fit_brief(self.large_brief(), 12_000)
         self.assertLessEqual(brief_budget.brief_size(deeper), 12_000)

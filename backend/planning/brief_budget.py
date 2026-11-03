@@ -1,7 +1,9 @@
 """Deterministic character budget of the planning brief.
 
-Trims whole entries (oldest weeks first, then later days), never the JSON text,
-and names what it dropped in ``omitted``. ``lessons``, ``season_phase`` and
+Trims whole entries, never the JSON text: far-future free-time and calendar days
+first, then planned sessions and the planned distribution and strength weeks
+from the end, and the oldest completed weeks last. It names what it dropped
+in ``omitted``. ``lessons``, ``season_phase`` and
 ``weekly_plan`` are never trimmed. No I/O.
 """
 
@@ -11,7 +13,7 @@ import json
 from typing import Any, Final
 
 BRIEF_CHARACTER_LIMIT: Final = 20_000
-OMITTED_NOTE: Final = "Entries dropped to keep the brief within its size budget; oldest weeks and latest days first."
+OMITTED_NOTE: Final = "Entries dropped to keep the brief within its size budget; furthest days and planned entries first, oldest completed weeks last."
 
 
 def brief_size(value: Any) -> int:
@@ -39,7 +41,12 @@ def _trim_dict(target: Any, key: str) -> bool:
 def _steps(brief: dict[str, Any]) -> list[tuple[str, Any]]:
     """(omitted label, trim callable) in trimming order."""
     return [
-        ("weeks", lambda: _trim_list(brief, "weeks", oldest=True)),
+        ("free_time_minutes", lambda: _trim_dict(brief, "free_time_minutes")),
+        ("calendar_busy_minutes", lambda: _trim_dict(brief, "calendar_busy_minutes")),
+        (
+            "planned_sessions",
+            lambda: _trim_list(brief, "planned_sessions", oldest=False),
+        ),
         (
             "planned_distribution.weeks",
             lambda: _trim_list(
@@ -50,12 +57,7 @@ def _steps(brief: dict[str, Any]) -> list[tuple[str, Any]]:
             "strength.weeks",
             lambda: _trim_list(brief.get("strength"), "weeks", oldest=False),
         ),
-        (
-            "planned_sessions",
-            lambda: _trim_list(brief, "planned_sessions", oldest=False),
-        ),
-        ("free_time_minutes", lambda: _trim_dict(brief, "free_time_minutes")),
-        ("calendar_busy_minutes", lambda: _trim_dict(brief, "calendar_busy_minutes")),
+        ("weeks", lambda: _trim_list(brief, "weeks", oldest=True)),
     ]
 
 
