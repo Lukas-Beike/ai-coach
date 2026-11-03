@@ -6,7 +6,7 @@
 - **Status:** implemented as an estimate on the M1 daily load
 - **Classification:** model estimate
 - **Literature checked:** 2026-10-24
-- **Review:** blocked
+- **Review:** released 2026-11-03 (athlete)
 
 ## Target construct
 
@@ -116,7 +116,6 @@ when treated as zero, which this method does not do.
 
 ## Open points
 
-- The athlete's method review is open; the card stays `blocked`.
 - τ 7 and 42 are not evaluated against this athlete's data; no observation
   phase has run.
 - A replacement of the Garmin training-load balance (#1422) is not decided.

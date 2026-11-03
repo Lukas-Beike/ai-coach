@@ -454,6 +454,10 @@ class HttpApiAssembly:
             recent_log_entries_service,
             diagnostic_report_service,
         )
+
+        def session_rpe_load(activity_id: str) -> Any:
+            return activity_read_service().session_rpe_load(activity_id, local_today())
+
         self.sync_get_routes = SyncGetRoutes(
             session_auth_service,
             sync_job_queue_service,
@@ -560,6 +564,7 @@ class HttpApiAssembly:
             CoachTurnUndoService(
                 database_manager, database_lock(), history_undo_service
             ),
+            session_rpe_load,
         )
         self.coach_actions_post_routes = CoachActionsPostRoutes(
             proposal_confirmation_service,
@@ -615,7 +620,7 @@ class HttpApiAssembly:
             coach_provision_service,
         )
         self.feedback_post_routes = FeedbackPostRoutes(
-            checkin_service, athlete.activity_feedback
+            checkin_service, athlete.activity_feedback, session_rpe_load
         )
         self.equipment_post_routes = (
             EquipmentPostRoutes(athlete.equipment) if athlete.equipment else None

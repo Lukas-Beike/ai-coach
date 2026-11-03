@@ -296,10 +296,13 @@ class ProviderCredentialService:
                         "yazio_password",
                     )
                 ):
-                    effective = dataclasses.replace(
-                        effective,
-                        yazio_credential_generation=current.yazio_credential_generation
-                        + 1,
+                    effective = cast(
+                        Config,
+                        dataclasses.replace(
+                            effective,
+                            yazio_credential_generation=current.yazio_credential_generation
+                            + 1,
+                        ),
                     )
                 self._apply_config(effective)
         return effective

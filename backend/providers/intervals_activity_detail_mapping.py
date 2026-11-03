@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from itertools import pairwise
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from backend.canonical.activity_detail import (
     MAX_LAP_NAME_LENGTH,
@@ -493,7 +493,8 @@ def _lap_set(
             origin=header.origin,
             lap_source=LapSource.PROVIDER_INTERVALS,
             laps=tuple(
-                replace(lap, index=position) for position, lap in enumerate(kept)
+                cast(ActivityLap, replace(lap, index=position))
+                for position, lap in enumerate(kept)
             ),
         )
     except TypeError, ValueError:

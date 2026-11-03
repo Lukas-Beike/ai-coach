@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from backend.canonical.activity_detail import (
     MAX_LAPS,
@@ -304,7 +304,8 @@ def _lap_set(
             origin=ActivityDetailOrigin.FETCH,
             lap_source=LapSource.DEVICE_LAPS,
             laps=tuple(
-                replace(lap, index=position) for position, lap in enumerate(kept)
+                cast(ActivityLap, replace(lap, index=position))
+                for position, lap in enumerate(kept)
             ),
         )
     except TypeError, ValueError:

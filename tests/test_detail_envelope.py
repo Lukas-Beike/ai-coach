@@ -142,6 +142,18 @@ class DetailEnvelopeTests(unittest.TestCase):
             with self.subTest(activity_id):
                 self.assertIsNone(self.detail(activity_id)["session_rpe_load"])
 
+    def test_save_response_load_matches_the_served_detail_load(self):
+        read = self.assembly.activity_read()
+        for rating in (None, 5):
+            with self.subTest(rating=rating):
+                self.feedback.rows[0]["session_rpe"] = rating
+                for activity_id in ("i1", "act_i", "act_g", "act_w"):
+                    self.assertEqual(
+                        self.detail(activity_id)["session_rpe_load"],
+                        read.session_rpe_load(activity_id, TODAY),
+                    )
+        self.assertIsNone(read.session_rpe_load("", TODAY))
+
     def test_refresh_is_offered_for_configured_detail_providers_only(self):
         def refreshable(activity_id):
             return {

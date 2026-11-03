@@ -14,7 +14,7 @@ import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, tzinfo
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, cast
 
 from backend.activities.detail_contract import (
     ProviderStatus,
@@ -29,8 +29,12 @@ from backend.activities.detail_merge import (
 )
 from backend.activities.detail_store import summary_fingerprint
 from backend.activities.detail_summary_metrics import intervals_summary_metrics
-from backend.canonical.activity_detail import ActivityStreamSet, ZoneDistribution
-from backend.canonical.records import ActivityRecord
+from backend.canonical.activity_detail import (
+    ActivityDetailSet,
+    ActivityStreamSet,
+    ZoneDistribution,
+)
+from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     ActivitySessionState,
     ProviderId,
@@ -372,8 +376,10 @@ def _with_live_zones(
             and item.provider_activity_id == record.activity_id
         )
         if own and isinstance(detail, ZoneDistribution) and detail.metric in live:
-            stored = replace(item, detail=live.pop(detail.metric))
-            candidate = replace(candidate, stored=stored)
+            stored = cast(
+                StoredDetailSet, replace(item, detail=live.pop(detail.metric))
+            )
+            candidate = cast(DetailCandidate, replace(candidate, stored=stored))
         result.append(candidate)
     retrieved = record.provenance.retrieved_at
     for zone in live.values():
@@ -397,7 +403,9 @@ def _with_live_zones(
 
 def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
     """Attach the record's provenance label; stored sets do not keep labels."""
-    provenance = replace(item.detail.provenance, label=record.provenance.label)
+    provenance = cast(
+        Provenance, replace(item.detail.provenance, label=record.provenance.label)
+    )
     return StoredDetailSet(
         provider=item.provider,
         provider_activity_id=item.provider_activity_id,
@@ -405,7 +413,7 @@ def _labelled(item: StoredDetailSet, record: ActivityRecord) -> StoredDetailSet:
         mapper_version=item.mapper_version,
         summary_sha256=item.summary_sha256,
         fetched_at=item.fetched_at,
-        detail=replace(item.detail, provenance=provenance),
+        detail=cast(ActivityDetailSet, replace(item.detail, provenance=provenance)),
     )
 
 
