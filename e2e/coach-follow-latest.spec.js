@@ -13,6 +13,12 @@ ${"Ausführlicher Trainingskontext für die Scrollprüfung. ".repeat(10)}`,
   created_at: `2000-01-01T10:${String(index).padStart(2, "0")}:00Z`,
 }));
 
+// A stream ends with a start-data refresh that the route handler above may still be reading. The
+// handler must finish before the page closes, or its disposed response fails the test.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 async function openCoach(page) {
   await page.route("**/api/bootstrap*", async (route) => {
     const response = await route.fetch();
@@ -139,6 +145,4 @@ test("returning to the Coach after scrolling away during a stream keeps the posi
   await expect.poll(() => page.evaluate(() => !state.chatScrollRestoring && !state.chatResponseScrollPending)).toBe(true);
   expect(Math.abs(await page.evaluate(() => window.scrollY) - scrollAfterWheel)).toBeLessThanOrEqual(2);
   await expect(page.locator("#chatJumpToComposer")).toBeVisible();
-  // The finished reply refreshes the start data, which may still be on its way when the page closes.
-  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
