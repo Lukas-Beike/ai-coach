@@ -222,7 +222,8 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
             ["unit-2026-09-12", "unit-2026-09-13", "unit-2026-09-14"],
             [unit["id"] for unit in result["planned_units"]],
         )
-        self.assertEqual([date(2026, 9, 12)], planned.calls)
+        # One read from two days before serves the plan and the strength check.
+        self.assertEqual([date(2026, 9, 11)], planned.calls)
 
     def test_detail_of_the_latest_session_carries_its_planned_unit(self):
         planned = _PlannedUnits("2026-09-22", "2026-09-30")

@@ -46,6 +46,11 @@ _CALENDAR = "- If an event makes training materially uncertain, ask via clarify_
 
 _PLAN_CHECK = "- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Only illness_hard blocks the save: correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding or adjust. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."
 
+_SESSION_CHECKS = """Session checks (get_activity_details):
+- focus: judge the session against its session_focus (easy stayed easy; threshold or vo2max work reached and held its target); say when unknown and name a derived origin as a guess.
+- pace_at_heart_rate: compare with comparable runs only when status is ok, and name their count; a positive difference is slower; not_covered is unknown, not zero or a change.
+- strength_before: heavy or moderate leg strength (legs true) within 48 h (origin completed; planned_not_confirmed is not known to be done) is a possible explanation for a worse pace, power or heart-rate response, never a proven cause. Count and intensity only, no load."""
+
 _TASKS = {
     "session_analysis": """\
 Task: analyze the last completed session.
@@ -92,7 +97,7 @@ _PLAN = (
     _PLAN_CHECK,
 )
 _BLOCKS = {
-    "session_analysis": (),
+    "session_analysis": (_SESSION_CHECKS,),
     "progress_review": (),
     "block_review": (),
     "plan_week": _PLAN,

@@ -14,6 +14,7 @@ later half; a session without a value is unknown, never zero. No I/O.
 from __future__ import annotations
 
 import math
+import statistics
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
@@ -330,4 +331,100 @@ def pace_at_heart_rate_trend(
             )
             for environment in ("outdoor", "indoor")
         },
+    }
+
+
+COMPARE_DAYS: Final = 42
+MIN_COMPARABLE: Final = 3
+
+
+def _not_covered(base: Mapping[str, Any], reason: str, **extra: Any) -> dict[str, Any]:
+    return {**base, "status": "not_covered", "reason": reason, **extra}
+
+
+def _shared_band(
+    own: Mapping[str, Any], peers: Sequence[Mapping[str, Any]]
+) -> tuple[int, tuple[float, float, float], list[tuple[float, float, float]]] | None:
+    """The 10 bpm band with the most steady comparable runs that also holds this run."""
+    lows = {
+        int(low) - step * BIN_BPM
+        for low in own.get("bins") or {}
+        for step in range(BAND_BINS)
+    }
+    scored = []
+    for low in lows:
+        mine = _band_totals(own, low)
+        if mine is None:
+            continue
+        found = [totals for peer in peers if (totals := _band_totals(peer, low))]
+        scored.append(((len(found), mine[0], -low), low, mine, found))
+    if not scored:
+        return None
+    _, low, mine, found = max(scored, key=lambda item: item[0])
+    return low, mine, found
+
+
+def session_comparison(
+    records: Sequence[Mapping[str, Any]], activity_key: str
+) -> dict[str, Any]:
+    """Pace of one run in a heart-rate band against comparable steady runs.
+
+    Comparable: earlier runs of the last ``COMPARE_DAYS`` days with the same
+    environment and grade handling that have steady pace in the same band, the
+    eligibility of the block trend. Too few of them, or an ineligible run, is
+    ``not_covered`` with the reason, never zero.
+    """
+    base = {"method": METHOD, "unit": "s/km", "scope": SCOPE}
+    own_row = next((r for r in records if r.get("activity_id") == activity_key), None)
+    own = (own_row or {}).get("pace_at_hr_profile") or {}
+    if own.get("status") != "ok" or own_row is None:
+        return _not_covered(
+            base,
+            own.get("reason")
+            or "Keine Messreihe in voller Auflösung für diese Aktivität.",
+        )
+    day = str(own_row.get("date") or "")
+    try:
+        first = (date.fromisoformat(day) - timedelta(days=COMPARE_DAYS)).isoformat()
+    except ValueError:
+        return _not_covered(base, "Datum der Aktivität unbekannt.")
+    peers = [
+        row["pace_at_hr_profile"]
+        for row in records
+        if row is not own_row
+        and row.get("sport") == "run"
+        and row.get("environment") == own_row.get("environment")
+        and first <= str(row.get("date") or "") < day
+        and (row.get("pace_at_hr_profile") or {}).get("status") == "ok"
+        and bool(row["pace_at_hr_profile"].get("grade_adjusted"))
+        == bool(own.get("grade_adjusted"))
+    ]
+    shared = _shared_band(own, peers)
+    sources = {own.get("source")}
+    if shared is None:
+        return _not_covered(base, "Kein gleichmäßiges Tempo in einem Pulsband.")
+    low, mine, found = shared
+    sources |= {p.get("source") for p in peers if _band_totals(p, low)}
+    window = {"window_days": COMPARE_DAYS, "count": len(found)}
+    if len(found) < MIN_COMPARABLE:
+        return _not_covered(
+            base,
+            f"Nur {len(found)} vergleichbare Läufe, mindestens {MIN_COMPARABLE} nötig.",
+            comparable=window,
+        )
+    median = statistics.median(
+        _pace(seconds, distance) for seconds, distance, _ in found
+    )
+    pace = _pace(mine[0], mine[1])
+    return {
+        **base,
+        "status": "ok",
+        "source": own.get("source"),
+        "sources": sorted(str(item) for item in sources if item),
+        "heart_rate_band_bpm": [low, low + BAND_BINS * BIN_BPM - 1],
+        "grade_adjusted": bool(own.get("grade_adjusted")),
+        "session": {"seconds": round(mine[0]), "pace_s_per_km": pace},
+        "comparable": {**window, "median_pace_s_per_km": median},
+        "difference_s_per_km": round(pace - median, 1),
+        "direction": "positive difference = slower than comparable runs",
     }
