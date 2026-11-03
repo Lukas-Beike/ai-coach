@@ -1395,16 +1395,12 @@ class ServerFrontendTests(ServerTestCase):
         self.assertIsNotNone(toast_rule)
         transition = re.search(r"transition: ([^;]*);", toast_rule.group(1))
         self.assertIsNotNone(transition)
-        self.assertNotRegex(transition.group(1), r"^\.?\d")
-        for property_name in (
-            "transform",
-            "opacity",
-            "background",
-            "color",
-            "box-shadow",
-            "bottom",
-        ):
-            self.assertRegex(transition.group(1), rf"\b{property_name} \.2s ease")
+        self.assertEqual(
+            transition.group(1),
+            "transform .2s ease, opacity .2s ease, width .2s ease, "
+            "background .2s ease, color .2s ease, box-shadow .2s ease, "
+            "bottom .2s ease",
+        )
         self.assertIn("toast-close", shared)
         self.assertNotIn("style.bottom", shared)
         self.assertIn("8000", shared)
