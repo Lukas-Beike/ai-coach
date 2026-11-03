@@ -23,10 +23,12 @@ itself (R17).
 
 - `L_t`: M1 load of local day t, the sum of all sessions of that day.
 - τ = 7 days (short-term) and 42 days (long-term).
-- Start state `E = 0` on the day before the first recorded session. A provider
-  CTL, ATL or load value never initialises or corrects a curve.
+- Start state `E = 0` on the day before the first recorded session within the
+  history window. A provider CTL, ATL or load value never initialises or
+  corrects a curve.
 - A day without any session is a rest day, `L_t = 0`, once the day has passed.
-  The current day without a session is open: no value.
+  The day of the last provider sync and later days without a session are open:
+  no value, since the session may not have synced yet.
 - A day with an unrated or invalid session is a gap: `L_t` is unknown, the
   state is held unchanged and no value is shown for that day.
 - Values appear after a warm-up of 2τ days from the first recorded session
@@ -51,7 +53,9 @@ measured recovery times.
 ## Protocol and data window
 
 Daily M1 AU of all sports, athlete-local days, from the first recorded session
-up to 84 days before the displayed period (lookback) through the period end.
+in the history window through the period end. The window starts 168 days (4τ)
+before the period, but never later than 251 days before today, so Coach and
+load tab seed the same day and agree for the same date.
 Local RPE first, a labelled provider RPE only without it (card M1).
 
 ## Measurement error and uncertainty
@@ -77,7 +81,7 @@ when treated as zero, which this method does not do.
 ## Minimum data and stop rules
 
 - No value before 2τ days after the first recorded session, per curve.
-- No value on a gap day or on the open current day; the state is held.
+- No value on a gap day or an open day; the state is held.
 - No sessions at all: status `insufficient_data`, reason `no_sessions`.
 - No ACWR, ratio, difference, ramp, readiness or risk output, and no use as
   training-plan input (stop rule of Epic S).
@@ -92,7 +96,7 @@ when treated as zero, which this method does not do.
 | Warm-up | 2τ days | product assumption | Leaves about 14 % of the start error. |
 | Rest day | 0 AU for a past day without a session | product assumption | Needed for the decay; a missed sync is indistinguishable from a rest day. |
 | Gap day | unrated or invalid session: state held, no value | product assumption | A missing rating is unknown, not zero (card M1). |
-| Lookback | 84 days before the period | product assumption | Equals the long-term warm-up. |
+| History window | 168 days before the period, at the latest 251 days before today | product assumption | Warm-up of 84 days plus 84 days again: an established athlete has values from the first day, start error below 2 %. |
 | Model form | `E_t = exp(−1/τ) E_(t−1) + (1 − exp(−1/τ)) L_t` | source | R17 exponential response. |
 
 ## Allowed statements

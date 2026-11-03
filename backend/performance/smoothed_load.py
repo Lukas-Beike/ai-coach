@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Final
+from zoneinfo import ZoneInfo
 
 from backend.canonical.activity_summary import (
     ActivitySummary,
@@ -34,8 +35,9 @@ EVIDENCE_CARD: Final = "docs/performance-methods/m5-smoothed-session-load.md"
 SHORT_TAU_DAYS: Final = 7
 LONG_TAU_DAYS: Final = 42
 WARMUP_TAUS: Final = 2
-# Days of history before a period that the recursion needs for the long curve.
-LOOKBACK_DAYS: Final = WARMUP_TAUS * LONG_TAU_DAYS
+# History before a period: the warm-up plus as many days again, so an established
+# athlete has values from the first day and the start error is below 2 %.
+LOOKBACK_DAYS: Final = 2 * WARMUP_TAUS * LONG_TAU_DAYS
 METHOD_NOTE: Final = (
     "Short-term (tau 7 d) and long-term (tau 42 d) exponentially smoothed "
     "session-RPE load, from the athlete's daily AU. Starts at 0 AU at the "
@@ -54,6 +56,29 @@ STATE_REST: Final = "rest"
 STATE_GAP: Final = "gap"
 STATE_OPEN: Final = "open"
 STATE_NO_HISTORY: Final = "no_history"
+
+
+def history_start(start: date, today: date) -> date:
+    """First day of the history the recursion reads.
+
+    Fixed by ``today`` for every period of the last 84 days, so Coach and UI seed
+    the same day and show the same value for the same date.
+    """
+    return min(start - timedelta(days=LOOKBACK_DAYS), today - timedelta(days=251))
+
+
+def complete_before(today: date, synced_at: str | None, timezone: str) -> date:
+    """First day whose missing sessions are not yet known to be rest.
+
+    The day of the last provider sync and later days may still lack sessions.
+    """
+    try:
+        synced = datetime.fromisoformat(str(synced_at))
+        if synced.tzinfo is None:
+            return today
+        return min(today, synced.astimezone(ZoneInfo(timezone)).date())
+    except ValueError, KeyError:
+        return today
 
 
 def _daily_loads(
@@ -89,18 +114,19 @@ def smoothed_session_load(
     start: date,
     end: date,
     today: date,
+    complete_before: date | None = None,
     timezone: str,
     computed_at: str | None = None,
 ) -> dict[str, Any]:
     """Smoothed load per local day of ``start``..``end``.
 
-    ``summaries`` should reach back ``LOOKBACK_DAYS`` before ``start``; sessions
-    outside ``start - LOOKBACK_DAYS``..``end`` are ignored. ``today`` is still
-    open: it has no value unless a session is recorded, since a missing session
-    is not yet a rest day.
+    ``summaries`` should reach back to ``history_start``; sessions before it are
+    ignored. A day from ``complete_before`` (default ``today``) on has no value unless a session is
+    recorded, since a missing session is not yet a rest day.
     """
-    history_start = start - timedelta(days=LOOKBACK_DAYS)
-    loads = _daily_loads(summaries, feedback, history_start, end, timezone)
+    loads = _daily_loads(
+        summaries, feedback, history_start(start, today), end, timezone
+    )
     first = date.fromisoformat(min(loads)) if loads else None
     taus = {"short": SHORT_TAU_DAYS, "long": LONG_TAU_DAYS}
     state = {name: 0.0 for name in taus}
@@ -111,7 +137,7 @@ def smoothed_session_load(
         if key in loads:
             load = loads[key]
             kind = STATE_RATED if load is not None else STATE_GAP
-        elif cursor == today:
+        elif cursor >= (complete_before or today):
             load, kind = None, STATE_OPEN
         else:
             load, kind = 0.0, STATE_REST
@@ -135,20 +161,15 @@ def smoothed_session_load(
                 }
             )
         cursor += timedelta(days=1)
-    if first is None:
-        days = [
-            {"date": day.isoformat(), "state": STATE_NO_HISTORY, "load": None}
-            | {name: None for name in taus}
-            for day in (
-                start + timedelta(days=i) for i in range((end - start).days + 1)
-            )
-        ]
-    elif first > start:
-        days = [
-            {"date": day.isoformat(), "state": STATE_NO_HISTORY, "load": None}
-            | {name: None for name in taus}
-            for day in (start + timedelta(days=i) for i in range((first - start).days))
-        ] + days
+    pad_end = end if first is None else first - timedelta(days=1)
+    padding = [
+        {"date": day.isoformat(), "state": STATE_NO_HISTORY, "load": None}
+        | {name: None for name in taus}
+        for day in (
+            start + timedelta(days=i) for i in range((pad_end - start).days + 1)
+        )
+    ]
+    days = padding + ([] if first is None else days)
     valued = [
         day for day in days if day["short"] is not None or day["long"] is not None
     ]

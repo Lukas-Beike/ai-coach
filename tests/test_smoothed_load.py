@@ -12,6 +12,8 @@ from test_session_rpe_load import summary
 from backend.performance.smoothed_load import (
     LONG_TAU_DAYS,
     SHORT_TAU_DAYS,
+    complete_before,
+    history_start,
     smoothed_session_load,
 )
 
@@ -120,6 +122,49 @@ class SmoothedLoadTests(unittest.TestCase):
         )
         self.assertIsNotNone(result["days"][0]["long"])
         self.assertEqual(len(result["days"]), 50)
+
+    def test_days_after_the_last_sync_are_open_not_rest(self) -> None:
+        sessions = [session(0)]
+        end = FIRST + timedelta(days=20)
+        result = smoothed_session_load(
+            sessions,  # type: ignore[arg-type]
+            rated(0),
+            start=FIRST,
+            end=end,
+            today=end,
+            complete_before=FIRST + timedelta(days=17),
+            timezone="UTC",
+        )
+        self.assertEqual(
+            [day["state"] for day in result["days"][-5:]],
+            ["rest", "open", "open", "open", "open"],
+        )
+        self.assertEqual(result["days"][-1]["short"], None)
+
+    def test_sync_time_gives_the_first_incomplete_day(self) -> None:
+        today = date(2026, 3, 10)
+        self.assertEqual(
+            complete_before(today, "2026-03-07T23:30:00+00:00", "Europe/Berlin"),
+            date(2026, 3, 8),
+        )
+        self.assertEqual(complete_before(today, None, "UTC"), today)
+        self.assertEqual(complete_before(today, "bad", "UTC"), today)
+
+    def test_established_athlete_has_values_from_the_first_day(self) -> None:
+        today = FIRST + timedelta(days=400)
+        start = today - timedelta(days=83)
+        origin = history_start(start, today)
+        offsets = range((origin - FIRST).days + 3, 401)
+        result = smoothed_session_load(
+            [session(o) for o in offsets],  # type: ignore[arg-type]
+            rated(*offsets),
+            start=start,
+            end=today,
+            today=today,
+            timezone="UTC",
+        )
+        self.assertIsNotNone(result["days"][0]["long"])
+        self.assertEqual(history_start(today - timedelta(days=6), today), origin)
 
 
 if __name__ == "__main__":

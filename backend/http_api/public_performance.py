@@ -26,7 +26,11 @@ from backend.performance.session_rpe_load import (
     feedback_by_session,
     session_rpe_load,
 )
-from backend.performance.smoothed_load import LOOKBACK_DAYS, smoothed_session_load
+from backend.performance.smoothed_load import (
+    complete_before,
+    history_start,
+    smoothed_session_load,
+)
 from backend.performance.training_focus import training_focus
 from backend.runtime.ports import ObservationReader
 
@@ -118,12 +122,11 @@ class PublicPerformanceStateService:
             **performance,
             "history": {
                 **analysis_history(garmin, today, canonical=inputs),
-                "session_rpe_load": None
-                if inputs.pending
-                else self._session_rpe_load(inputs, today, timezone),
-                "smoothed_session_load": None
-                if inputs.pending
-                else self._smoothed_session_load(inputs, today, timezone),
+                **(
+                    {"session_rpe_load": None, "smoothed_session_load": None}
+                    if inputs.pending
+                    else self._session_loads(inputs, today, timezone)
+                ),
             },
             # UI-only: the load tab's period selection picks the matching window.
             "training_focus_periods": {
@@ -148,50 +151,45 @@ class PublicPerformanceStateService:
             ),
         }
 
-    def _session_rpe_load(
+    def _session_loads(
         self, inputs: CanonicalPerformanceInputs, today: date, timezone: str
-    ) -> dict[str, Any]:
-        """Daily and weekly session-RPE load of the load tab's 12-week window."""
+    ) -> dict[str, dict[str, Any]]:
+        """Session-RPE load and its smoothed curves of the load tab's 12 weeks."""
         start = today - timedelta(days=_SESSION_RPE_LOAD_DAYS - 1)
+        # One feedback read for both: the smoothed curves need the earlier weeks.
         summaries = [
             summary
             for summary in inputs.activities or ()
-            if start.isoformat() <= summary_local_date(summary, timezone)
+            if history_start(start, today).isoformat()
+            <= summary_local_date(summary, timezone)
         ]
-        return session_rpe_load(
-            summaries,
-            feedback_by_session(summaries, self._session_feedback),
-            start=start,
-            end=today,
-            timezone=timezone,
-            computed_at=None
-            if self._now is None
-            else self._now().isoformat(timespec="seconds"),
-            session_limit=0,
+        feedback = feedback_by_session(summaries, self._session_feedback)
+        computed_at = (
+            None if self._now is None else self._now().isoformat(timespec="seconds")
         )
-
-    def _smoothed_session_load(
-        self, inputs: CanonicalPerformanceInputs, today: date, timezone: str
-    ) -> dict[str, Any]:
-        """Smoothed session-RPE load of the load tab's window plus its warm-up."""
-        start = today - timedelta(days=_SESSION_RPE_LOAD_DAYS - 1)
-        history_start = start - timedelta(days=LOOKBACK_DAYS)
-        summaries = [
-            summary
-            for summary in inputs.activities or ()
-            if history_start.isoformat() <= summary_local_date(summary, timezone)
-        ]
-        return smoothed_session_load(
-            summaries,
-            feedback_by_session(summaries, self._session_feedback),
-            start=start,
-            end=today,
-            today=today,
-            timezone=timezone,
-            computed_at=None
-            if self._now is None
-            else self._now().isoformat(timespec="seconds"),
-        )
+        return {
+            "session_rpe_load": session_rpe_load(
+                summaries,
+                feedback,
+                start=start,
+                end=today,
+                timezone=timezone,
+                computed_at=computed_at,
+                session_limit=0,
+            ),
+            "smoothed_session_load": smoothed_session_load(
+                summaries,
+                feedback,
+                start=start,
+                end=today,
+                today=today,
+                complete_before=complete_before(
+                    today, inputs.intervals_synced_at, timezone
+                ),
+                timezone=timezone,
+                computed_at=computed_at,
+            ),
+        }
 
 
 # The load tab's longest window: the current and the 11 previous ISO weeks.

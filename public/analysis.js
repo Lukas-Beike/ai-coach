@@ -832,7 +832,7 @@ function appendSmoothedLoadChart(report, loadRoot, loadMissing, start, end) {
     return { label, legendLabel: label, source: "Athletenfeedback", unit: "AU", color, connected: true, cadenceDays: weekly ? 7 : 1,
       points: weekly ? analysisWeeklyLastPoints(points, start, end) : points, currentPoint: points.findLast(analysisValidPoint) };
   });
-  const chart = collectAnalysisChart(loadMissing, "Kurz-/Langzeitbelastung", series, "AU", start, end, `Session-RPE-Last, geglättet (τ ${report.parameters.short_tau_days} und ${report.parameters.long_tau_days} Tage). Kein Fitness- oder Verletzungsmaß. Lücken bleiben Lücken.`, { calendarWeeks: weekly });
+  const chart = collectAnalysisChart(loadMissing, "Kurz-/Langzeitbelastung", series, "AU", start, end, "", { calendarWeeks: weekly });
   if (chart) loadRoot.append(chart);
 }
 

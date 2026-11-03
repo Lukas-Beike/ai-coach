@@ -629,7 +629,7 @@ Detailed contract: each result names `metric_id`, `method_id`, `method_version`,
 Evidence: `backend/performance/session_rpe_load.py`, `backend/performance/training_report.py:training_report`, `backend/performance/report_service.py:TrainingReportReadService`, `backend/http_api/public_performance.py:PublicPerformanceStateService`, `backend/coach/prompt.py`, `public/analysis.js:appendSessionRpeLoadChart`; `tests/test_session_rpe_load.py`, `e2e/activity-details.spec.js`.
 
 ### Requirement: Smoothed session-RPE load is a labelled model estimate
-The system SHALL compute the M5 short- and long-term load (`smoothed-session-load` v1) as the exponentially smoothed M1 daily AU with τ 7 and 42 days. The curves start at 0 AU the day before the first recorded session and SHALL NOT be initialised from provider CTL, ATL or load. A past day without a session counts 0 AU; a day with an unrated or invalid session is a gap with no value and an unchanged state; the open current day has no value. Values SHALL appear only 2τ days after the first session. The result SHALL NOT include a ratio, difference, risk, ramp or readiness statement.
+The system SHALL compute the M5 short- and long-term load (`smoothed-session-load` v1) as the exponentially smoothed M1 daily AU with τ 7 and 42 days, starting at 0 AU, never seeded from provider CTL, ATL or load, and without ratio, difference, risk, ramp or readiness output.
 
 #### Scenario: Reference values
 - **WHEN** sessions of 300 AU fall on every second day for 100 days
@@ -639,11 +639,15 @@ The system SHALL compute the M5 short- and long-term load (`smoothed-session-loa
 - **WHEN** the first session is 10 days old, or a day has an unrated session
 - **THEN** the short-term curve has no value until day 14 and the long-term curve until day 84, and the gap day shows no value while later days continue from the held state.
 
+#### Scenario: Missing sessions are not zero
+- **WHEN** a past day has no session, the day of the last sync or later has none, or a day has an unrated session
+- **THEN** the past day counts 0 AU, the other days are open or gaps with no value and an unchanged state.
+
 #### Scenario: Provider load does not seed
 - **WHEN** activity records carry provider load or CTL values
 - **THEN** the curves are identical to those without them.
 
-Detailed contract: each result names `metric_id` `smoothed_session_load`, `method_id`, `method_version`, unit AU, status `estimate` or `insufficient_data` with reason `warmup` or `no_sessions`, period, parameters, per-state day coverage, the latest valued day, per-day `state`, `load`, `short` and `long`, method note, limits and the card `docs/performance-methods/m5-smoothed-session-load.md`. The Coach training report carries it for all-sport reports, the public performance history for the load tab's 84 days, where the PWA draws one AU chart of both curves. The Coach SHALL name the AU basis and coverage.
+Detailed contract: values appear 2τ days after the first session of a 168-day history window. Each result names `metric_id` `smoothed_session_load`, `method_id`, `method_version`, unit AU, status `estimate` or `insufficient_data` with reason `warmup` or `no_sessions`, period, parameters, per-state day coverage, the latest valued day, per-day `state`, `load`, `short` and `long`, method note, limits and the card `docs/performance-methods/m5-smoothed-session-load.md`. The Coach training report carries it for all-sport reports, the public performance history for the load tab's 84 days, where the PWA draws one AU chart of both curves. The Coach SHALL name the AU basis and coverage.
 
 Evidence: `backend/performance/smoothed_load.py`, `backend/performance/training_report.py:training_report`, `backend/http_api/public_performance.py:PublicPerformanceStateService`; `tests/test_smoothed_load.py`, `tests/test_performance_coach_ui_parity.py`
 
