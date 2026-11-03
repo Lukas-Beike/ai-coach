@@ -254,8 +254,13 @@ class PlanGuardWriteTests(unittest.TestCase):
 
     def test_listing_without_a_finding_does_not_ask(self) -> None:
         self.illness = ""
-        asked = []
-        with illness_confirmation(lambda: asked.append(1) or False):
+        asked: list[int] = []
+
+        def confirm() -> bool:
+            asked.append(1)
+            return False
+
+        with illness_confirmation(confirm):
             self.run_tool(
                 "replace_training_plan", accept_plan_findings=["illness_hard"]
             )
