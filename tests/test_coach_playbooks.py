@@ -8,12 +8,13 @@ from datetime import date
 from typing import Any
 from unittest.mock import Mock
 
+from backend.coach import playbooks
 from backend.coach.context_selection import (
     REQUEST_KIND_SELECTIONS,
     select_coach_context,
 )
 from backend.coach.job_submission import CoachJobSubmissionService
-from backend.coach.playbooks import REQUEST_KINDS, playbook_for
+from backend.coach.playbooks import REQUEST_KINDS, nutrition_playbook, playbook_for
 from backend.coach.prompt import COACH_PROMPT
 from backend.coach.request_payload import (
     CoachRequestPayloadService,
@@ -29,6 +30,60 @@ NEW_KINDS = (
     "plan_block",
     "adjust_week",
 )
+
+
+KIND_WORD_BUDGET = 600
+# Per-block word budgets: a block that grows must justify it here.
+BLOCK_WORD_BUDGETS = {
+    "_EVIDENCE": 60,
+    "_INTENSITY_MODEL": 40,
+    "_PLAN_STRUCTURE": 130,
+    "_STRENGTH_LEGS": 75,
+    "_SEASON_PHASE": 75,
+    "_PRECEDENCE": 30,
+    "_CALENDAR": 45,
+    "_PLAN_CHECK": 80,
+    "_ADAPTIVE": 140,
+    "_NUTRITION": 520,
+}
+TASK_WORD_BUDGET = 190
+
+
+class PlaybookBudgetTests(unittest.TestCase):
+    def test_each_block_stays_within_its_budget(self) -> None:
+        for name, budget in BLOCK_WORD_BUDGETS.items():
+            with self.subTest(block=name):
+                self.assertLessEqual(len(getattr(playbooks, name).split()), budget)
+
+    def test_each_task_stays_within_its_budget(self) -> None:
+        for kind, task in playbooks._TASKS.items():
+            with self.subTest(kind=kind):
+                self.assertLessEqual(len(task.split()), TASK_WORD_BUDGET)
+
+    def test_every_block_is_budgeted_and_every_kind_composed(self) -> None:
+        blocks = {n for n in vars(playbooks) if n in BLOCK_WORD_BUDGETS}
+        self.assertEqual(blocks, set(BLOCK_WORD_BUDGETS))
+        self.assertEqual(set(playbooks._BLOCKS), set(REQUEST_KINDS))
+
+    def test_kinds_carry_only_the_blocks_they_need(self) -> None:
+        for kind in ("session_analysis", "progress_review", "block_review"):
+            text = playbook_for(kind)
+            with self.subTest(kind=kind):
+                for block in (
+                    playbooks._SEASON_PHASE,
+                    playbooks._PLAN_CHECK,
+                    playbooks._ADAPTIVE,
+                    playbooks._STRENGTH_LEGS,
+                ):
+                    self.assertNotIn(block, text)
+        self.assertIn(playbooks._ADAPTIVE, playbook_for("adjust_week"))
+        self.assertNotIn(playbooks._ADAPTIVE, playbook_for("plan_week"))
+        for block in playbooks._BLOCKS["plan_block"]:
+            self.assertIn(block, playbook_for("plan_week"))
+
+    def test_nutrition_playbook_is_empty_without_nutrition(self) -> None:
+        self.assertEqual(nutrition_playbook(False), "")
+        self.assertIn("6i.", nutrition_playbook(True))
 
 
 class RequestKindAllowlistTests(unittest.TestCase):
@@ -65,7 +120,7 @@ class PlaybookInjectionTests(unittest.TestCase):
         for kind in NEW_KINDS:
             with self.subTest(kind=kind):
                 text = playbook_for(kind)
-                self.assertLess(len(text.split()), 450)
+                self.assertLessEqual(len(text.split()), KIND_WORD_BUDGET)
                 self.assertIn("Never use ACWR", text)
                 self.assertIn("pyramidal when it is absent", text)
                 self.assertIn("training_model", text)
@@ -167,8 +222,14 @@ class PlaybookInjectionTests(unittest.TestCase):
             "retain_openai_attachment_context": False,
             "has_prior_openai_attachments": False,
         }
-        planned, _ = service.build(**arguments, request_kind="plan_week")
-        plain, _ = service.build(**arguments)
+        with self.assertLogs("intervals_coach", "INFO") as logs:
+            planned, _ = service.build(**arguments, request_kind="plan_week")
+            plain, _ = service.build(**arguments)
+        sizes = [r.context for r in logs.records if hasattr(r, "context")]
+        self.assertEqual(
+            len(playbook_for("plan_week")), sizes[0]["playbook_characters"]
+        )
+        self.assertEqual(0, sizes[1]["playbook_characters"])
         self.assertIn("REQUEST PLAYBOOK", planned)
         self.assertNotIn("REQUEST PLAYBOOK", plain)
         selection = training_context.build.call_args_list[0].kwargs["selection"]
@@ -207,6 +268,9 @@ class RequestKindSelectionTests(unittest.TestCase):
         for heavy in ("weather", "calendar", "external_calendar", "training_plans"):
             self.assertNotIn(heavy, analysis.sections)
         self.assertEqual(analysis.horizon_days, 14)
+        # The latest session keeps the today-based planned-unit window; an older
+        # session brings its own plan with get_activity_details.
+        self.assertEqual(analysis.past_planned_days, 0)
 
     def test_confirmation_after_food_exchange_keeps_products(self) -> None:
         history = {

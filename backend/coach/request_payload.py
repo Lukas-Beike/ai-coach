@@ -193,6 +193,10 @@ class CoachRequestPayloadService:
                     if retain_openai_attachment_context
                     else "local",
                     "instruction_characters": len(payload["instructions"]),
+                    "playbook_characters": len(playbook_for(request_kind))
+                    + len(
+                        nutrition_playbook("nutrition_products" in selection.sections)
+                    ),
                     "input_characters": len(
                         json.dumps(payload["input"], ensure_ascii=False)
                     ),

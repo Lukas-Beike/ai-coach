@@ -19,31 +19,37 @@ References (only author and year appear in the model text):
 
 from __future__ import annotations
 
-_COMMON = """\
-REQUEST PLAYBOOK (this turn only).
-- Separate measured facts from inference; name coverage and evidence strength (strong, moderate, limited or practice-based). Missing data is unknown, never zero or rest.
-- Never use ACWR (methodologically discredited, Impellizzeri 2020). CTL, ATL and TSB are estimates, not individual predictions. Rule 8f on session-RPE load stays.
-- Use durable_profile.training_model (pyramidal, polarized, threshold or sweet_spot) as the planning and progress reference; use pyramidal when it is absent or unrecognized. Note contrary evidence, but never change it."""
+_HEADER = "REQUEST PLAYBOOK (this turn only)."
 
-_PHASE_RULES = "Phase per planned week from planning_brief.season_phase (base, build, peak, taper, transition; unknown without an A/B race: say so, use base rules). Base: build volume, mostly easy. Build: add threshold or VO2max, volume holds. Peak: race-specific intensity, less volume. Taper (about 2 weeks): cut volume 40-60 %, keep intensity and frequency (Bosquet 2007). Transition: easy, strength 1 (light)."
+# Topic blocks. Each has its own word budget (tests/test_coach_playbooks.py);
+# a kind composes only the blocks it needs, with a bounded total per kind.
+_EVIDENCE = """- Separate measured facts from inference; name coverage and evidence strength (strong, moderate, limited or practice-based). Missing data is unknown, never zero or rest.
+- Never use ACWR (methodologically discredited, Impellizzeri 2020). CTL, ATL and TSB are estimates, not individual predictions. Rule 8f on session-RPE load stays."""
 
-_PLAN_RULES = """\
-Planning science:
+_INTENSITY_MODEL = """- Use durable_profile.training_model (pyramidal, polarized, threshold or sweet_spot) as the planning and progress reference; use pyramidal when it is absent or unrecognized. Note contrary evidence, but never change it."""
+
+_PLAN_STRUCTURE = """Planning science:
 - Periodize with progressive overload and a lighter week every 3rd to 4th week (practice-based; no model clearly superior, Kiely 2012).
 - Alternate hard and easy days, never back-to-back hard days; distribute intensity per training_model.
 - Plan no single run much longer than the longest of the last 30 days (Frandsen 2025).
-- Heavy strength 2 times per week in base and build, 1 (maintenance) in peak and taper (Ronnestad & Mujika 2014; Blagrove 2018), 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): same counts, at most 3; after or on hard days, or 24 h or more before hard or long sessions. Name deviations.
 - Adjust load to HRV or readiness data when present (Kiviniemi 2007; Javaloyes 2019; moderate).
-- Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations.
-- If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event.
 - Set session_focus on every new unit, named in the Typ column. Describe strength with strength_structure (server derives strength_intensity; free text needs it set): progress load or reps weekly, deload in the lighter week.
-- Local units only; no Intervals.icu write.
-- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Only illness_hard blocks the save: correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding or adjust. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."""
+- Local units only; no Intervals.icu write."""
+
+_STRENGTH_LEGS = """- Heavy strength 2 times per week in base and build, 1 (maintenance) in peak and taper (Ronnestad & Mujika 2014; Blagrove 2018), 6 h or more from hard endurance (Robineau 2016). Leg strength (legs, full_body, plyometrics): same counts, at most 3; after or on hard days, or 24 h or more before hard or long sessions. Name deviations."""
+
+_SEASON_PHASE = "- Phase per planned week from planning_brief.season_phase (base, build, peak, taper, transition; unknown without an A/B race: say so, use base rules). Base: build volume, mostly easy. Build: add threshold or VO2max, volume holds. Peak: race-specific intensity, less volume. Taper (about 2 weeks): cut volume 40-60 %, keep intensity and frequency (Bosquet 2007). Transition: easy, strength 1 (light)."
+
+_PRECEDENCE = "- Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations."
+
+_CALENDAR = "- If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event."
+
+_PLAN_CHECK = "- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Only illness_hard blocks the save: correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding or adjust. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."
 
 _TASKS = {
     "session_analysis": """\
 Task: analyze the last completed session.
-- Load it with get_activity_details; rules 6d and 8c-8e stay.
+- Load it with get_activity_details; its planned_units hold the local plan one day around that session, for plan versus actual. Rules 6d and 8c-8e stay.
 - Cover plan versus actual, load and intensity, pacing, HR drift and decoupling when available, and notable findings.
 - End with the consequence for the next session.""",
     "progress_review": """\
@@ -67,11 +73,39 @@ Task: plan the requested multi-week block.
     "adjust_week": """Task: adapt the current week to what happened.
 - Call get_training_report with sections [progress] and days 7 for plan compliance per sport; read recovery, check-ins, calendar events and illness (rule 2a).
 - List planned units (context) versus done per day. Change only today and later days; past days and completed units stay. Without a clear deviation (missed or shortened session, overrun, poor recovery, new event), say the plan stands.
+- Reply with a short before/after list of the changed days.""",
+}
+
+_ADAPTIVE = """Adaptive changes:
 - Move or shorten a missed key session (session_focus threshold, sweet_spot, vo2max, anaerobic, race, test) to a free day: never next to another hard day, and leave leg strength (legs, full_body, plyometrics) 24 h or more before it; leg strength on or after hard days is fine. Drop it rather than stack hard days; never make up lost load.
 - Run, ride and strength stay combinable; keep the week's training_model distribution as far as possible.
 - Local edits follow the write policy (receipt, undo); plan checks apply as for any plan write. A multi-session replan of calendar events goes through preview_adaptive_replan and needs approval before apply_adaptive_replan. No Intervals.icu write without a named sync.
-- Set session_focus on moved units. Plan check findings follow the planning rules: only illness_hard blocks; justify the others or adjust. Reply with a short before/after list of the changed days.""",
+- Set session_focus on moved units."""
+
+# Blocks per kind, in prompt order; a kind carries only what it needs.
+_PLAN = (
+    _PLAN_STRUCTURE,
+    _STRENGTH_LEGS,
+    _SEASON_PHASE,
+    _PRECEDENCE,
+    _CALENDAR,
+    _PLAN_CHECK,
+)
+_BLOCKS = {
+    "session_analysis": (),
+    "progress_review": (),
+    "block_review": (),
+    "plan_week": _PLAN,
+    "plan_block": _PLAN,
+    "adjust_week": (
+        _SEASON_PHASE,
+        _PRECEDENCE,
+        _CALENDAR,
+        _PLAN_CHECK,
+        _ADAPTIVE,
+    ),
 }
+
 
 _NUTRITION = """\
 NUTRITION PLAYBOOK (this turn only; rules 6i and 6j).
@@ -86,11 +120,7 @@ def playbook_for(request_kind: str | None) -> str:
     task = _TASKS.get(request_kind or "")
     if task is None:
         return ""
-    parts = [_COMMON, task]
-    if request_kind in {"plan_week", "plan_block"}:
-        parts.append(_PLAN_RULES)
-    if request_kind in {"plan_week", "plan_block", "adjust_week"}:
-        parts.append(_PHASE_RULES)
+    parts = [_HEADER, _EVIDENCE, _INTENSITY_MODEL, task, *_BLOCKS[request_kind or ""]]
     return "\n\n" + "\n".join(parts) + "\n"
 
 

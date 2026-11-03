@@ -201,6 +201,41 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         garmin.sync_status.assert_called_once_with()
         profile.get.assert_called_once_with()
 
+    def _detail_with_plan(self, started: str, planned: _PlannedUnits) -> dict:
+        raw_activity = {
+            "id": "synthetic-1",
+            "name": "Synthetic tempo",
+            "type": "Run",
+            "start_date_local": started,
+        }
+        manager = _sessions(self, raw_activity)
+        garmin = Mock(sync_status=Mock(return_value=NO_GARMIN_SYNC_STATUS))
+        profile = Mock(get=Mock(return_value={}))
+        service = _detail_tool(manager, [raw_activity], garmin, profile, planned)
+        return service.execute("get_activity_details", {"activity_id": "synthetic-1"})
+
+    def test_detail_of_an_old_session_carries_its_planned_units(self):
+        planned = _PlannedUnits("2026-09-12", "2026-09-13", "2026-09-14", "2026-09-16")
+        result = self._detail_with_plan("2026-09-13T07:00:00", planned)
+
+        self.assertEqual(
+            ["unit-2026-09-12", "unit-2026-09-13", "unit-2026-09-14"],
+            [unit["id"] for unit in result["planned_units"]],
+        )
+        self.assertEqual([date(2026, 9, 12)], planned.calls)
+
+    def test_detail_of_the_latest_session_carries_its_planned_unit(self):
+        planned = _PlannedUnits("2026-09-22", "2026-09-30")
+        result = self._detail_with_plan("2026-09-22T07:00:00", planned)
+
+        self.assertEqual(
+            ["unit-2026-09-22"], [u["id"] for u in result["planned_units"]]
+        )
+
+    def test_detail_without_planned_units_service_has_an_empty_list(self):
+        result = self._detail_with_plan("2026-09-22T07:00:00", None)
+        self.assertEqual([], result["planned_units"])
+
     def test_detail_result_size_does_not_grow_with_the_recording(self):
         raw_activity = {
             "id": "synthetic-1",
@@ -347,7 +382,7 @@ def _store_streams(manager, activity_id: str, streams: dict, laps=None) -> None:
         )
 
 
-def _detail_tool(manager, activities: list[dict], garmin, profile):
+def _detail_tool(manager, activities: list[dict], garmin, profile, planned=None):
     """Wire the Coach tool over the canonical detail read of ``manager``."""
     snapshot_repository = Mock()
     snapshot_repository.latest_snapshot.return_value = {
@@ -369,8 +404,25 @@ def _detail_tool(manager, activities: list[dict], garmin, profile):
         session_records=CanonicalTableReader().session_activities,
     )
     return CoachActivityReadToolService(
-        activity_read, garmin, profile, lambda: date(2026, 9, 23)
+        activity_read,
+        garmin,
+        profile,
+        lambda: date(2026, 9, 23),
+        planned_units=planned,
     )
+
+
+class _PlannedUnits:
+    """Local planned units that honor ``since`` like PlannedUnitService.list."""
+
+    def __init__(self, *days: str) -> None:
+        self.units = [{"id": f"unit-{day}", "date": f"{day}T00:00:00"} for day in days]
+        self.calls: list[date | None] = []
+
+    def list(self, limit, *, future_only=False, since=None):
+        self.calls.append(since)
+        lower = since or date(2026, 9, 23)
+        return [u for u in self.units if date.fromisoformat(u["date"][:10]) >= lower]
 
 
 def _canonical_activity_tool(case: unittest.TestCase, snapshot: dict):
