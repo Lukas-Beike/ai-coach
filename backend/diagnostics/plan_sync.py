@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.providers.descriptors import INTERVALS_ID
-from backend.sync.jobs import list_jobs
+from backend.sync.jobs import job_dto, read_job
 
 _JOB_LIMIT = 10
 _UNIT_LIMIT = 50
@@ -19,15 +19,19 @@ def summarize_plan_sync(db: Any, redact: Callable[[str], str]) -> dict[str, Any]
     def clean(value: Any) -> str | None:
         return redact(str(value))[:_ERROR_LIMIT] if value else None
 
-    jobs = [
-        job
-        for job in list_jobs(db, 50)
-        if job["provider"] == INTERVALS_ID and job["type"] == "plan_push"
-    ][:_JOB_LIMIT]
+    job_rows = db.execute(
+        "SELECT id FROM sync_jobs WHERE provider=? AND type='plan_push' "
+        "ORDER BY created_at DESC LIMIT ?",
+        (INTERVALS_ID, _JOB_LIMIT),
+    ).fetchall()
+    jobs = [job_dto(*read_job(db, row["id"])) for row in job_rows]
+    unsynced = "FROM planned_units WHERE tombstone=0 AND sync_state<>'synced'"
+    total = db.execute(f"SELECT COUNT(*) AS count {unsynced}").fetchone()["count"]
+    # Upcoming units first: past units must not hide the ones still to be pushed.
     units = db.execute(
         "SELECT local_id, sync_state, sync_error, "
-        "json_extract(payload, '$.date') AS date FROM planned_units "
-        "WHERE tombstone=0 AND sync_state<>'synced' ORDER BY date LIMIT ?",
+        f"json_extract(payload, '$.date') AS date {unsynced} "
+        "ORDER BY date < date('now'), date LIMIT ?",
         (_UNIT_LIMIT,),
     ).fetchall()
     return {
@@ -54,6 +58,7 @@ def summarize_plan_sync(db: Any, redact: Callable[[str], str]) -> dict[str, Any]
             }
             for job in jobs
         ],
+        "unsynced_total": total,
         "unsynced_units": [
             {
                 "local_id": unit["local_id"],

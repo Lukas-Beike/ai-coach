@@ -48,6 +48,7 @@ class PlanSyncDiagnosticsTests(unittest.TestCase):
         job = report["recent_jobs"][0]
         self.assertEqual((job["status"], job["entries"]), ("failed", 2))
         self.assertEqual(job["items"][0]["error_detail"], "X boom")
+        self.assertEqual(report["unsynced_total"], 1)
         self.assertEqual(
             report["unsynced_units"],
             [

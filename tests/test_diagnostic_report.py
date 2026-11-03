@@ -30,7 +30,7 @@ class _Database:
     def execute(self, query, parameters=()):
         self.queries.append((query, parameters))
         if "sync_jobs" in query or "planned_units" in query:
-            return SimpleNamespace(fetchall=list)
+            return SimpleNamespace(fetchall=list, fetchone=lambda: {"count": 0})
         table = query.rsplit("FROM ", 1)[1]
         count = (
             4096 if table == "kv WHERE key = 'garmin_snapshot'" else self.values[table]
@@ -244,7 +244,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
             for query, _parameters in self.db.queries
             if "sync_jobs" not in query and "planned_units" not in query
         ]
-        self.assertEqual(len(self.db.queries), 9)
+        self.assertEqual(len(self.db.queries), 10)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
