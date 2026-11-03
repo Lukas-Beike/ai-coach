@@ -107,7 +107,6 @@ _ACTIVITY_ID_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _ROW_FIELD: Final = "activity"
 _DURATION_KEYS: Final = ("duration", "movingTime")
 _MOVING_DURATION_KEYS: Final = ("movingDuration",)
-_ELAPSED_DURATION_KEYS: Final = ("elapsedDuration", "duration")
 _POWER_KEYS: Final = ("avgPower", "averagePower")
 _MAX_HR_KEYS: Final = ("maxHR", "maxHeartRate")
 _MAX_SPEED_KEYS: Final = ("maxSpeed",)
@@ -200,13 +199,21 @@ def _map_row(
         row, _DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
     # Issues for ``duration`` are already reported above.
-    elapsed_duration = _optional_number(
-        row, _ELAPSED_DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, []
+    raw_elapsed = _optional_number(
+        row, ("elapsedDuration",), (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
-    if sport is Sport.STRENGTH and elapsed_duration is not None:
+    # Issues for ``duration`` are already reported above.
+    elapsed_duration = (
+        raw_elapsed
+        if raw_elapsed is not None
+        else _optional_number(
+            row, ("duration",), (0.0, MAX_ACTIVITY_DURATION_S), ref, []
+        )
+    )
+    if sport is Sport.STRENGTH and raw_elapsed is not None:
         # Garmin ``duration`` of a strength activity is the active timer time
         # without rest between sets; the whole session is ``elapsedDuration``.
-        duration = max(duration or 0.0, elapsed_duration)
+        duration = max(duration or 0.0, raw_elapsed)
     moving_duration = _optional_number(
         row, _MOVING_DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
