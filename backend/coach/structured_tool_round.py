@@ -276,7 +276,7 @@ class CoachStructuredToolRoundService:
     ) -> dict[str, Any] | None:
         """Execute one prepared call and append its receipt; None if the turn is released."""
         name = metadata["name"]
-        accepted = metadata["arguments"].get(PLAN_FINDINGS_ARGUMENT)
+        accepted = (metadata.get("arguments") or {}).get(PLAN_FINDINGS_ARGUMENT)
         if isinstance(accepted, list) and ILLNESS_CODE in accepted:
             # The classifier is a network call: ask before the writer lock; the
             # plan guard reads the cached verdict and asks only on a real finding.
