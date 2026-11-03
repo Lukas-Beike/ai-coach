@@ -213,7 +213,9 @@ def _free_notes(
                     {
                         "free_minutes": free,
                         "planned_minutes": round(_minutes(unit)),
-                        "source": effective.source,
+                        "source": "fixed_session"
+                        if (matched.get(id(unit)) or {}).get("window")
+                        else effective.source,
                     },
                 )
             )

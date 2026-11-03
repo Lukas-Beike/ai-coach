@@ -88,6 +88,7 @@ class NoFreeWindowTests(unittest.TestCase):
         notes = [f for f in found if f["code"] == "no_free_window"]
         self.assertEqual(len(notes), 1)
         self.assertEqual(notes[0]["evidence"]["free_minutes"], 60)
+        self.assertEqual(notes[0]["evidence"]["source"], "fixed_session")
         self.assertEqual(
             self.check(text, [unit("2026-11-03", "run", minutes=90)], []), []
         )
