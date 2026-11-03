@@ -244,6 +244,7 @@ class CoachContextSelection:
             "activity_analysis",
             "attachment_analysis",
             "progress_review",
+            "block_review",
         }:
             result["current_performance"] = {
                 key: value
@@ -297,6 +298,14 @@ REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
     ),
     "progress_review": CoachContextSelection(
         "progress_review",
+        BASE_SECTIONS | {"planning", "training_plans", "recovery"},
+        14,
+        5,
+        False,
+    ),
+    # The block comes from get_training_report block_review; plans stay in context.
+    "block_review": CoachContextSelection(
+        "block_review",
         BASE_SECTIONS | {"planning", "training_plans", "recovery"},
         14,
         5,

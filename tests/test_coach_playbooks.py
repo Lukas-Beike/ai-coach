@@ -24,6 +24,7 @@ from backend.errors import AppError
 NEW_KINDS = (
     "session_analysis",
     "progress_review",
+    "block_review",
     "plan_week",
     "plan_block",
     "adjust_week",

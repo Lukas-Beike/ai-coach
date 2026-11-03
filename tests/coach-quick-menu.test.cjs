@@ -28,8 +28,8 @@ test("menu items carry a request kind and a German message with the period", () 
   const items = [...html.slice(html.indexOf('id="quickAnalysisMenu"')).matchAll(/<button type="button" role="menuitem"[^>]*data-request-kind="(\w+)" data-message="([^"]+)"/g)];
   const kinds = items.map((item) => item[1]);
   assert.deepEqual(
-    kinds.slice(0, 10),
-    ["session_analysis", "progress_review", "progress_review", "progress_review", "progress_review", "plan_week", "plan_block", "plan_block", "plan_block", "adjust_week"],
+    kinds.slice(0, 11),
+    ["session_analysis", "progress_review", "progress_review", "progress_review", "progress_review", "block_review", "plan_week", "plan_block", "plan_block", "plan_block", "adjust_week"],
   );
   for (const weeks of [2, 4, 8, 12]) assert.ok(items.some((item) => item[1] === "progress_review" && item[2].includes(`${weeks} Wochen`)));
   for (const weeks of [2, 3, 4]) assert.ok(items.some((item) => item[1] === "plan_block" && item[2].includes(`${weeks} Wochen`)));

@@ -77,6 +77,7 @@ from backend.performance.report_service import (
     TrainingReportServices,
     TrainingSeasonReadService,
 )
+from backend.planning.block_review import block_review
 from backend.planning.season_preparation import load_scenarios, season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -305,6 +306,11 @@ def _provider_connection_routes(
     )
 
 
+def _profile_text(profile_service: Any, key: str) -> str:
+    """A text field of the saved profile; empty when unset."""
+    return str(profile_service().get().get(key) or "")
+
+
 def _report_synced_at(canonical: Any, db: Any) -> str | None:
     """The Intervals.icu sync time of the canonical coverage, for reports and season."""
     coverage = None if canonical.coverage is None else canonical.coverage()
@@ -510,6 +516,10 @@ class HttpApiAssembly:
                 session_feedback=_session_feedback_lookup(athlete),
                 now=athlete_clock.now,
                 curve_records=profiles.curve_records,
+                review_block=block_review,
+                training_model=partial(
+                    _profile_text, profile_service, "training_model"
+                ),
             )
             return TrainingReportServices(
                 records=records,

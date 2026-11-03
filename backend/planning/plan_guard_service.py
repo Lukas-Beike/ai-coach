@@ -28,6 +28,10 @@ BRIEF_COMPETITIONS = 3
 BRIEF_FOCUS_DAYS = 14
 BRIEF_FOCUS_UNITS = 40
 HISTORY_DAYS = 60
+LESSONS_SOURCE = (
+    "Block review of the last 4 whole weeks (local plan, records, check-ins); "
+    "descriptive observations, no causes; an empty list means nothing notable or unknown"
+)
 BRIEF_SOURCE = (
     "Local activity records (weekly-progress-v1), local planning and "
     "confirmed profile; derived, not provider-measured"
@@ -183,6 +187,7 @@ def build_planning_brief(
     planned_strength: Sequence[Mapping[str, Any]] = (),
     calendar_busy: Mapping[str, int] | None = None,
     weekly_plan_text: str = "",
+    lessons: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Compact deterministic brief for plan_week, plan_block and adjust_week turns."""
     weeks = [
@@ -217,6 +222,26 @@ def build_planning_brief(
         "calendar_busy_minutes": dict(calendar_busy or {}),
         "calendar_busy_source": "Read-only iCalendar events; overlapping intervals counted once in local time",
         "plan_checks": plan_checks.RULE_SUMMARY,
+        "lessons": brief_lessons(lessons),
+    }
+
+
+def read_lessons(read: Callable[[], Sequence[Mapping[str, Any]]]) -> list[Any]:
+    """Lessons for the brief; an unavailable review leaves them empty, never blocks."""
+    try:
+        return list(read())
+    except AppError:
+        return []
+
+
+def brief_lessons(lessons: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Lessons of the last 4 whole weeks (``block_review``), labelled as descriptive."""
+    return {
+        "source": LESSONS_SOURCE,
+        "items": [
+            {key: item[key] for key in ("code", "text", "evidence_strength")}
+            for item in lessons
+        ],
     }
 
 
@@ -238,7 +263,9 @@ class PlanGuardService:
         expects_strength: Callable[[], bool] = lambda: False,
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
         weekly_plan_text: Callable[[], str] = lambda: "",
+        lessons: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
     ) -> None:
+        self._lessons = lessons
         self._weekly_plan = weekly_plan_text
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -345,4 +372,5 @@ class PlanGuardService:
             planned_strength=leg_strength.planned_weeks(units, today),
             calendar_busy=calendar_load.busy_minutes(self._events(), today, 35),
             weekly_plan_text=self._weekly_plan(),
+            lessons=self._lessons(),
         )

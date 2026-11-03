@@ -260,6 +260,7 @@ from backend.planning.leg_strength import strength_expected
 from backend.planning.plan_guard_service import (
     PlanGuardService,
     read_completed,
+    read_lessons,
     read_load_thresholds,
     read_progress,
     recent_illness,
@@ -1700,6 +1701,14 @@ CHAT_PAGE_MAX = 100
 )
 
 
+def _block_lessons() -> list[dict[str, object]]:
+    """Lessons of the last 4 whole weeks for the planning brief."""
+    reports = HTTP_API.training_reports()
+    return reports.report.block_review({}, reports.timezone(), with_curves=False).get(
+        "lessons", []
+    )
+
+
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
     return PlanGuardService(
@@ -1735,6 +1744,7 @@ def _plan_guard_service() -> PlanGuardService:
             ATHLETE_CLOCK.now().date(),
         ),
         calendar_events=lambda: EXTERNAL_CALENDAR.reader().list_events_in_window(56),
+        lessons=lambda: read_lessons(_block_lessons),
     )
 
 
