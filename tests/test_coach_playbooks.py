@@ -358,12 +358,13 @@ class RequestKindSelectionTests(unittest.TestCase):
                 self.assertIn(marker, COACH_PROMPT)
 
     def test_every_kind_has_a_selection_and_keeps_message_retention(self) -> None:
-        self.assertEqual(set(REQUEST_KIND_SELECTIONS), set(REQUEST_KINDS))
+        kinds = set(REQUEST_KINDS) | {"morning_checkin"}
+        self.assertEqual(set(REQUEST_KIND_SELECTIONS), kinds)
         context = {
             "pending_request": {"status": "needs_clarification", "summary": "x"},
             "messages": [],
         }
-        for kind in REQUEST_KINDS:
+        for kind in kinds:
             for message in ("Plane meine nächste Woche.", "Wie war mein Schlaf?"):
                 expected = select_coach_context(message, context)
                 selection = select_coach_context(message, context, request_kind=kind)
@@ -382,13 +383,14 @@ class RequestKindSelectionTests(unittest.TestCase):
         projected = selection.project(context, "2026-11-01")
         self.assertEqual(projected["current_performance"]["comparisons"], [1])
 
-    def test_morning_checkin_and_unknown_kinds_use_message_selection(self) -> None:
+    def test_unknown_kinds_use_message_selection(self) -> None:
         expected = select_coach_context("Wie geht es mir?", {}).name
-        for kind in (None, "morning_checkin"):
+        for kind in (None, "unknown_kind"):
             self.assertEqual(
                 select_coach_context("Wie geht es mir?", {}, request_kind=kind).name,
                 expected,
             )
+        self.assertEqual("", playbook_for("morning_checkin"))
 
 
 if __name__ == "__main__":

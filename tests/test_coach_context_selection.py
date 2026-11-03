@@ -810,6 +810,36 @@ class CoachContextRuleTests(unittest.TestCase):
             infer_coach_domain("Was habe ich letzte Woche gegessen?"),
         )
 
+    def test_planned_unit_wording_is_not_a_planning_request(self):
+        for message in (
+            "Wie lief meine geplante Einheit?",
+            "War das geplant so locker?",
+        ):
+            with self.subTest(message=message):
+                self.assertNotEqual(
+                    "weekly_planning", select_coach_context(message, {}).name
+                )
+        self.assertEqual(
+            "plan_week", select_coach_context("Plane meine Woche", {}).kind
+        )
+
+    def test_morning_checkin_is_a_lean_fixed_selection(self):
+        selection = select_coach_context(
+            "Gib mir den heutigen Morgen-Check-in ... die geplante Einheit ...",
+            {},
+            request_kind="morning_checkin",
+        )
+        self.assertEqual("morning_checkin", selection.name)
+        self.assertEqual(1, selection.horizon_days)
+        self.assertLessEqual({"daily_planning_context", "recovery"}, selection.sections)
+        self.assertFalse(
+            selection.sections
+            & {"planning_brief", "planning", "training_plans", "calendar"}
+        )
+        days = [{"date": f"2026-11-0{day}"} for day in (3, 4, 5)]
+        projected = selection.project({"daily_planning_context": days}, "2026-11-03")
+        self.assertEqual(days[:2], projected["daily_planning_context"])
+
     def test_past_week_with_planning_verb_stays_weekly_planning(self):
         selection = select_coach_context("Plane meine letzte Woche neu", {})
         self.assertEqual("plan_week", selection.name)
