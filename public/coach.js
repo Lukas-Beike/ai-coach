@@ -622,7 +622,9 @@ function buildComposerPlusMenu() {
   const morning = $("#quickMorningCheckinButton");
   if (!menu || !source || !morning) return;
   const copy = (node) => { const clone = node.cloneNode(true); clone.removeAttribute("id"); return clone; };
-  menu.append(copy(morning), ...[...source.children].map(copy));
+  const morningItem = copy(morning);
+  morningItem.setAttribute("role", "menuitem");
+  menu.append(morningItem, ...[...source.children].map(copy));
 }
 
 function setupQuickActionMenu(button = $("#quickAnalysisButton"), menu = $("#quickAnalysisMenu")) {

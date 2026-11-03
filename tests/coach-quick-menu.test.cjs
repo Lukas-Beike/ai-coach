@@ -45,7 +45,8 @@ test("composer plus menu is cloned from the quick bar and still opens the file p
   assert.match(html, /role="menuitem" id="attachFileMenuItem">Datei anhängen</);
   const build = source.slice(source.indexOf("function buildComposerPlusMenu("), source.indexOf("\nfunction setupQuickActionMenu("));
   assert.ok(build.includes('$("#quickMorningCheckinButton")') && build.includes('$("#quickAnalysisMenu")'));
-  assert.ok(build.includes("menu.append(copy(morning), ...[...source.children].map(copy))"));
+  assert.ok(build.includes('morningItem.setAttribute("role", "menuitem")'));
+  assert.ok(build.includes("menu.append(morningItem, ...[...source.children].map(copy))"));
   assert.match(source, /attachFileMenuItem"\)\.addEventListener\("click"[\s\S]*?\$\("#attachmentInput"\)\.click\(\)/);
   assert.ok(source.includes('$("#composerPlusMenu").addEventListener("click", startQuickAction)'));
 });

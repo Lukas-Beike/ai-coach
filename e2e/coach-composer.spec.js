@@ -142,6 +142,7 @@ test("composer plus menu starts a session analysis anytime and fits the viewport
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  await expect(menu.getByRole("menuitem", { name: "Morgen-Check-in" })).toBeVisible();
   for (const item of await menu.getByRole("menuitem").all()) {
     const target = await item.boundingBox();
     expect(target.height).toBeGreaterThanOrEqual(44);
