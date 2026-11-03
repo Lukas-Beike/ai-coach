@@ -17,6 +17,8 @@ EXECUTOR_CHANGE_FIELDS = {
     "rationale",
     "environment",
     "sport_detail",
+    "session_focus",
+    "strength_intensity",
 }
 
 
@@ -46,6 +48,26 @@ def _nested_objects(node, path=""):
 
 
 class CoachToolSchemaTests(unittest.TestCase):
+    def test_plan_tools_require_the_session_focus_enum(self):
+        for name in ("stage_training_plan", "replace_training_plan"):
+            item = _tools()[name]["parameters"]["properties"]["payload"]["properties"][
+                "workouts"
+            ]["items"]
+            self.assertIn("session_focus", item["required"])
+            self.assertIn("strength_intensity", item["required"])
+            focus = item["properties"]["session_focus"]["enum"]
+            self.assertIn("sweet_spot", focus)
+            self.assertIn("legs", focus)
+            self.assertIsNone(focus[-1])
+        change = _tools()["apply_training_changes"]["parameters"]["properties"][
+            "changes"
+        ]["items"]["properties"]
+        self.assertIn("session_focus", change)
+        template = _tools()["manage_training_templates"]["parameters"]["properties"][
+            "templates"
+        ]["items"]["properties"]
+        self.assertIn("strength_intensity", template)
+
     def test_strict_replace_plan_findings_use_supported_array_schema(self):
         tool = _tools()["replace_training_plan"]
         findings = tool["parameters"]["properties"]["accept_plan_findings"]

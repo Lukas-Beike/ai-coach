@@ -342,3 +342,39 @@ class CoachContextReductionTests(unittest.TestCase):
             len(projection["total_budget_omitted_sections"]),
         )
         self.assertNotIn("synthetic constraint", str(record.__dict__))
+
+    def test_total_budget_reports_omitted_calendar_event_count(self):
+        events = [
+            {"name": f"event {i}", "start_local": "2026-09-30T10:00:00"}
+            for i in range(100)
+        ]
+        structured = {"external_calendar": {"omitted_count": 5, "events": events}}
+        structured_service, library = Mock(), Mock()
+        structured_service.build.return_value = structured
+        library.list.return_value = []
+        service = CoachTrainingContextService(
+            structured_service,
+            library,
+            local_planned_limit=50,
+            library_limit=12,
+            library_description_limit=1500,
+            section_limits={},
+            total_char_limit=15_000,
+            activity_limit_per_sport=5,
+            planned_event_limit=50,
+        )
+        with self.assertLogs("intervals_coach", level="WARNING"):
+            result = service.build()
+        self.assertLessEqual(len(result), 15_000)
+        marker = "LOCAL PLANNED WORKOUTS (compact projection, included once below):\n"
+        start = result.index(marker) + len(marker)
+        parsed = json.loads(
+            result[start : result.index("\nLOCAL TRAINING LIBRARY", start)]
+        )
+        if "external_calendar" in parsed:
+            calendar = parsed["external_calendar"]
+            self.assertEqual(len(calendar["events"]) + calendar["omitted_count"], 105)
+        else:
+            self.assertEqual(
+                parsed["projection"]["external_calendar_omitted_count"], 105
+            )

@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=348">
+  <link rel="stylesheet" href="/styles.css?v=352">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -79,8 +79,10 @@
             <div id="quickAnalysisMenu" class="quick-action-menu" popover="auto" role="menu" aria-label="Analyse und Plan">
               <button type="button" role="menuitem" data-request-kind="session_analysis" data-message="Aktualisiere zuerst meine Intervals.icu-Daten. Analysiere danach meine letzte absolvierte Einheit: Was lief gut, was sollte ich anpassen und wie beeinflusst sie die nächste Einheit? Nutze bei einer nahezu gleichen Wahoo- und Garmin-Radaufzeichnung immer Wahoo.">Einheit analysieren</button>
               <div class="quick-action-periods"><span aria-hidden="true">Fortschritt</span><button type="button" role="menuitem" aria-label="Fortschritt 2 Wochen" data-request-kind="progress_review" data-message="Zeige mir meinen Fortschritt der letzten 2 Wochen: Volumen und Belastung je Sportart, Intensitätsverteilung, Konstanz und Leistungsindikatoren.">2</button><button type="button" role="menuitem" aria-label="Fortschritt 4 Wochen" data-request-kind="progress_review" data-message="Zeige mir meinen Fortschritt der letzten 4 Wochen: Volumen und Belastung je Sportart, Intensitätsverteilung, Konstanz und Leistungsindikatoren.">4</button><button type="button" role="menuitem" aria-label="Fortschritt 8 Wochen" data-request-kind="progress_review" data-message="Zeige mir meinen Fortschritt der letzten 8 Wochen: Volumen und Belastung je Sportart, Intensitätsverteilung, Konstanz und Leistungsindikatoren.">8</button><button type="button" role="menuitem" aria-label="Fortschritt 12 Wochen" data-request-kind="progress_review" data-message="Zeige mir meinen Fortschritt der letzten 12 Wochen: Volumen und Belastung je Sportart, Intensitätsverteilung, Konstanz und Leistungsindikatoren.">12</button></div>
+              <button type="button" role="menuitem" data-request-kind="block_review" data-message="Werte meinen letzten Trainingsblock aus: Soll und Ist je Sportart, Intensitätsverteilung, Schlüsseleinheiten, Leistungsentwicklung und mein subjektives Feedback.">Block auswerten</button>
               <button type="button" role="menuitem" data-request-kind="plan_week" data-message="Plane meine nächste Woche.">Plan nächste Woche</button>
               <div class="quick-action-periods"><span aria-hidden="true">Plan 2–4 Wochen</span><button type="button" role="menuitem" aria-label="Plan 2 Wochen" data-request-kind="plan_block" data-message="Plane meine nächsten 2 Wochen als Trainingsblock.">2</button><button type="button" role="menuitem" aria-label="Plan 3 Wochen" data-request-kind="plan_block" data-message="Plane meine nächsten 3 Wochen als Trainingsblock.">3</button><button type="button" role="menuitem" aria-label="Plan 4 Wochen" data-request-kind="plan_block" data-message="Plane meine nächsten 4 Wochen als Trainingsblock.">4</button></div>
+              <button type="button" role="menuitem" data-request-kind="adjust_week" data-message="Vergleiche in meiner aktuellen Woche Plan und Ist und passe die restlichen Tage an, falls nötig.">Woche anpassen</button>
             </div>
           </div>
           <div id="chatQueueStatus" class="chat-queue-status" hidden aria-live="polite"></div>
@@ -143,7 +145,7 @@
         <section id="sessionPerformance"class="analysis-chart-card" aria-label="Trainingsfokus"></section>
         <section id="activityAnalysis" class="activity-analysis" aria-label="Einzelne Einheiten" hidden></section>
         <section id="personalRecovery" class="analysis-history-charts" aria-label="Persönliche Erholung" hidden></section>
-        <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Garmin-Trainingsbelastung" hidden></div>
+        <div id="analysisLoadCharts" class="analysis-history-charts" aria-label="Belastung und Trainingszeit" hidden></div>
         <section id="currentPerformance" class="analysis-chart-card" aria-label="Aktuelle Leistungswerte" hidden></section>
         <section id="performanceEnduranceCharts" class="analysis-history-charts" aria-label="Ausdauer-Score" hidden></section>
         <div id="trainingZoneCharts" class="analysis-history-charts" aria-label="Trainingszonen" hidden></div>
@@ -233,6 +235,7 @@
             </div>
             <label>Typischer Wochenumfang<input name="typical_weekly_volume" placeholder="Zum Beispiel: 8–10 Stunden, 5 Trainingstage"></label>
             <label>Langfristige Ziele<textarea name="goals" rows="4" placeholder="Saisonziele und Wettkampfziele…"></textarea></label>
+            <fieldset class="profile-subsection"><legend>Wochenplan</legend><input type="hidden" name="weekly_plan"><div id="weeklyPlanEditor" class="weekly-plan"></div></fieldset>
             <label>Verfügbarkeit pro Woche<textarea name="availability" rows="3" placeholder="Tage, Zeiten, bevorzugter Ruhetag…"></textarea></label>
             <label>Rahmenbedingungen<textarea name="constraints" rows="3" placeholder="Verletzungen, Reisen, feste Grenzen…"></textarea></label>
             <label>Ausrüstung<textarea name="equipment" rows="2" placeholder="Rad, Smarttrainer, Gym, Powermeter…"></textarea></label>
@@ -593,27 +596,28 @@
   <script src="/api.js?v=224" defer></script>
   <script src="/navigation.js?v=236" defer></script>
   <script src="/state.js?v=226" defer></script>
-  <script src="/views.js?v=234" defer></script>
-  <script src="/plan-views.js?v=21" defer></script>
+  <script src="/views.js?v=235" defer></script>
+  <script src="/plan-views.js?v=23" defer></script>
   <script src="/forms.js?v=217" defer></script>
   <script src="/components.js?v=217" defer></script>
-  <script src="/coach.js?v=40" defer></script>
+  <script src="/coach.js?v=47" defer></script>
   <script src="/shared.js?v=20" defer></script>
   <script src="/auth.js?v=13" defer></script>
   <script src="/sync-status.js?v=14" defer></script>
   <script src="/view-refresh.js?v=3" defer></script>
   <script src="/notifications.js?v=5" defer></script>
-  <script src="/nutrition.js?v=46" defer></script>
+  <script src="/nutrition.js?v=47" defer></script>
   <script src="/analysis.js?v=143" defer></script>
   <script src="/activity-details.js?v=21" defer></script>
   <script src="/activity-analysis.js?v=6" defer></script>
   <script src="/performance-view.js?v=29" defer></script>
   <script src="/diagnostics.js?v=4" defer></script>
-  <script src="/state-loader.js?v=22" defer></script>
+  <script src="/state-loader.js?v=24" defer></script>
   <script src="/sync-actions.js?v=5" defer></script>
   <script src="/wahoo-connection.js?v=5" defer></script>
   <script src="/provider-connections.js?v=7" defer></script>
   <script src="/provider-checks.js?v=4" defer></script>
+  <script src="/weekly-plan.js?v=4" defer></script>
   <script src="/settings.js?v=17" defer></script>
   <script src="/app.js?v=299" defer></script>
 </body>

@@ -22,12 +22,17 @@ def unit(local_id, day, sport, minutes=60, **extra):
     }
 
 
-def run_done(day, minutes):
+def run_done(day, minutes, distance_km=10):
     return {
         "sport": "run",
         "started_at_local": f"{day}T08:00:00",
         "moving_duration_s": minutes * 60,
+        "distance_m": distance_km * 1000,
     }
+
+
+def run_km(local_id, day, km):
+    return unit(local_id, day, "run", description=f"- {km}km 70% pace")
 
 
 def check(units, completed=(), competitions=(), illness=""):
@@ -45,17 +50,21 @@ def codes(findings):
 
 
 class PlanCheckRuleTests(unittest.TestCase):
-    def test_run_spike(self) -> None:
+    def test_run_spike_is_by_distance(self) -> None:
         done = [run_done("2026-10-25", 60)]
         self.assertEqual(
-            ["run_spike"], codes(check([unit("a", "2026-11-05", "run", 67)], done))
+            ["run_spike"], codes(check([run_km("a", "2026-11-05", 11.2)], done))
         )
-        self.assertEqual([], check([unit("a", "2026-11-05", "run", 66)], done))
+        self.assertEqual([], check([run_km("a", "2026-11-05", 10.9)], done))
+
+    def test_run_spike_ignores_duration_and_unknown_distance(self) -> None:
+        done = [run_done("2026-10-25", 60)]
+        self.assertEqual([], check([unit("a", "2026-11-05", "run", 200)], done))
 
     def test_run_spike_is_graded_and_not_blocking(self) -> None:
         done = [run_done("2026-10-25", 60)]
-        notice = check([unit("a", "2026-11-05", "run", 70)], done)[0]
-        warning = check([unit("a", "2026-11-05", "run", 90)], done)[0]
+        notice = check([run_km("a", "2026-11-05", 12)], done)[0]
+        warning = check([run_km("a", "2026-11-05", 15)], done)[0]
         self.assertEqual("notice", notice["evidence"]["severity"])
         self.assertEqual("warning", warning["evidence"]["severity"])
         self.assertEqual(50, warning["evidence"]["increase_percent"])
@@ -70,13 +79,13 @@ class PlanCheckRuleTests(unittest.TestCase):
     def test_run_spike_counts_a_run_completed_today(self) -> None:
         today = [run_done("2026-11-02", 60)]
         self.assertEqual(
-            ["run_spike"], codes(check([unit("a", "2026-11-03", "run", 120)], today))
+            ["run_spike"], codes(check([run_km("a", "2026-11-03", 20)], today))
         )
 
     def test_run_spike_needs_a_run_in_30_days(self) -> None:
-        self.assertEqual([], check([unit("a", "2026-11-05", "run", 200)]))
+        self.assertEqual([], check([run_km("a", "2026-11-05", 40)]))
         old = [run_done("2026-09-01", 60)]
-        self.assertEqual([], check([unit("a", "2026-11-05", "run", 200)], old))
+        self.assertEqual([], check([run_km("a", "2026-11-05", 40)], old))
 
     def test_back_to_back_hard(self) -> None:
         hard_run = unit("a", "2026-11-04", "run", planned_intensity=0.9)
@@ -196,6 +205,42 @@ class PlanCheckRuleTests(unittest.TestCase):
             unit("5", "2026-11-07", "ride", 120),
         ]
         self.assertEqual([], check(plan, done))
+
+
+class AdjustWeekMoveTests(unittest.TestCase):
+    """A missed key session moved to a free day, as the adjust_week playbook asks."""
+
+    week = (
+        unit("easy", "2026-11-03", "run", session_focus="easy"),
+        unit("long", "2026-11-04", "ride", session_focus="long"),
+        unit("legs", "2026-11-06", "strength", session_focus="legs"),
+    )
+
+    def test_move_next_to_a_hard_day_is_flagged(self) -> None:
+        other = unit("tempo", "2026-11-05", "run", session_focus="threshold")
+        moved = unit("key", "2026-11-04", "ride", session_focus="vo2max")
+        found = check([*self.week[:1], other, moved])
+        self.assertIn("back_to_back_hard", codes(found))
+
+    def test_move_to_a_free_day_is_clean(self) -> None:
+        moved = unit("key", "2026-11-05", "ride", session_focus="vo2max")
+        legs = unit("legs", "2026-11-06", "strength", session_focus="legs")
+        found = check([*self.week[:2], moved, legs])
+        self.assertNotIn("back_to_back_hard", codes(found))
+        self.assertEqual([], found)
+
+    def test_leg_strength_right_before_the_moved_key_session_is_flagged(self) -> None:
+        moved = unit("key", "2026-11-05", "ride", session_focus="vo2max")
+        legs = unit(
+            "legs",
+            "2026-11-04",
+            "strength",
+            session_focus="legs",
+            strength_intensity="heavy",
+        )
+        found = check([legs, moved])
+        self.assertTrue(found)
+        self.assertNotIn("back_to_back_hard", codes(found))
 
 
 if __name__ == "__main__":

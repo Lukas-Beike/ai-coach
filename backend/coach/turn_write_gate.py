@@ -17,6 +17,7 @@ from backend.coach.write_gate import (
     TurnGateState,
     build_turn_authority,
     check_write,
+    illness_override_confirmed,
 )
 
 _RETRYABLE_PENDING_STATUSES = frozenset({"needs_clarification", "failed"})
@@ -153,6 +154,16 @@ class CoachTurnWriteGate:
         if self._classifier is None:
             self._classifier = self._classifier_factory(self._model)
         return self._classifier(current_text, previous_text, origin_text)
+
+    def confirms_illness_override(self) -> bool:
+        """Whether the athlete asked to train despite the reported illness."""
+        return illness_override_confirmed(
+            self._state,
+            self._classify,
+            self._authority,
+            self._message,
+            self._previous,
+        )
 
     def denial(
         self, tool_name: str, arguments: Mapping[str, Any] | None

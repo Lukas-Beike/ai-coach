@@ -283,6 +283,26 @@ class PlannedUnitServiceTests(unittest.TestCase):
 
         self.assertEqual(self.state(), ([], [], 0))
 
+    def test_future_only_since_reads_earlier_units_of_the_week(self):
+        for index, (day, name) in enumerate(
+            (
+                ("2026-09-13", "Last week"),
+                ("2026-09-15", "Missed Tuesday"),
+                ("2026-09-20", "Today"),
+            )
+        ):
+            self.id = uuid.UUID(f"{index + 1}2345678-1234-5678-1234-567812345678")
+            self.service.create(self.workout(date=day, name=name))
+
+        since = date(2026, 9, 14)
+        widened = self.service.list(future_only=True, since=since)
+        default = self.service.list(future_only=True)
+        past_ignored = self.service.list(since=since)
+
+        self.assertEqual(["Missed Tuesday", "Today"], [i["name"] for i in widened])
+        self.assertEqual(["Today"], [i["name"] for i in default])
+        self.assertEqual(3, len(past_ignored))
+
     def test_list_preserves_archive_future_and_limit_filters(self):
         self.service.create(self.workout(date="2026-09-19", name="Past"))
         self.id = uuid.UUID("22345678-1234-5678-1234-567812345678")
@@ -459,6 +479,73 @@ class PlannedUnitServiceTests(unittest.TestCase):
         planned, _history, _revision = self.state()
         payload = json.loads(planned[0]["payload"])
         self.assertEqual(payload["environment"], "indoor")
+
+    def test_focus_update_is_persisted_recorded_and_clearable(self):
+        self.service.create(self.workout())
+
+        self.service.update(str(self.id), {"session_focus": "tempo"})
+        planned, _history, _revision = self.state()
+        self.assertEqual(json.loads(planned[0]["payload"])["session_focus"], "tempo")
+        with self.manager.reader() as db:
+            row = db.execute(
+                "SELECT diff FROM change_history WHERE action='update'"
+            ).fetchone()
+        diff = json.loads(row["diff"])["fields"]
+        self.assertEqual(diff["session_focus"]["after"], "tempo")
+
+        self.service.update(str(self.id), {"session_focus": None})
+        planned, _history, _revision = self.state()
+        self.assertNotIn("session_focus", json.loads(planned[0]["payload"]))
+
+        with self.assertRaises(AppError):
+            self.service.update(str(self.id), {"session_focus": "legs"})
+
+    def test_focus_only_update_keeps_the_sync_state(self):
+        self.service.create(self.workout())
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET sync_state='synced', sync_dirty=0 "
+                "WHERE local_id=?",
+                (str(self.id),),
+            )
+
+        self.service.update(str(self.id), {"session_focus": "easy"})
+
+        planned, _history, _revision = self.state()
+        self.assertEqual(
+            (planned[0]["sync_state"], planned[0]["sync_dirty"]), ("synced", 0)
+        )
+        self.assertEqual(json.loads(planned[0]["payload"])["session_focus"], "easy")
+
+        self.service.update(str(self.id), {"name": "Anders"})
+        planned, _history, _revision = self.state()
+        self.assertEqual(planned[0]["sync_state"], "local")
+
+    def test_undoing_a_focus_edit_keeps_the_sync_state(self):
+        self.service.create(self.workout())
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE planned_units SET sync_state='synced', sync_dirty=0 "
+                "WHERE local_id=?",
+                (str(self.id),),
+            )
+        self.service.update(str(self.id), {"session_focus": "easy"})
+        with self.manager.reader() as db:
+            current = db.execute(
+                "SELECT * FROM planned_units WHERE local_id=?", (str(self.id),)
+            ).fetchone()
+        target = {**json.loads(current["payload"])}
+        target.pop("session_focus")
+        with self.manager.unit_of_work() as db:
+            self.service.restore_in_transaction(
+                db, str(self.id), dict(current), target, "undo"
+            )
+
+        planned, _history, _revision = self.state()
+        self.assertEqual(
+            (planned[0]["sync_state"], planned[0]["sync_dirty"]), ("synced", 0)
+        )
+        self.assertNotIn("session_focus", json.loads(planned[0]["payload"]))
 
     def test_archive_and_restore_are_dirty_local_updates(self):
         self.service.create(self.workout())

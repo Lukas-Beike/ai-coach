@@ -22,6 +22,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import eftp
+from backend.performance.pace_at_hr import pace_at_heart_rate_trend
 from backend.performance.session_rpe_load import period_load, session_load
 from backend.performance.training_report import metric_sum, valid_zones
 from backend.providers.source_labels import SourceView, provider_label
@@ -63,7 +64,7 @@ def _band(zone: int | None, zone_count: int) -> str | None:
     return "moderate" if zone < high else "high"
 
 
-def _intensity(sessions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def intensity_3zone(sessions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     seconds = {"low": 0.0, "moderate": 0.0, "high": 0.0}
     sensors: set[str] = set()
     measured = 0
@@ -163,7 +164,7 @@ def _bucket(
         "duration_s": metric_sum(sessions, "moving_duration_s"),
         "training_load": _load(sessions),
         "session_rpe_load": _rpe(sessions, feedback, timezone),
-        "intensity_3zone": _intensity(sessions),
+        "intensity_3zone": intensity_3zone(sessions),
         "plan": _plan(plan, week[0], week[1], sport),
     }
 
@@ -309,6 +310,20 @@ def _mean_max_window(
     return result
 
 
+def _pace_at_hr_window(
+    records: Sequence[Mapping[str, Any]] | None,
+    start: date,
+    middle: date,
+    end: date,
+    weeks: int,
+) -> dict[str, Any]:
+    if weeks < 2:
+        return {"status": "insufficient_data"}
+    if records is None:
+        return {"status": "outside_curve_window"}
+    return pace_at_heart_rate_trend(records, start, middle, end)
+
+
 def _week_row(
     first: date,
     today: date,
@@ -436,6 +451,15 @@ def weekly_progress(
                 )
             }
             if sport in {"all", "ride", "run"}
+            else {}
+        ),
+        **(
+            {
+                "pace_at_heart_rate": _pace_at_hr_window(
+                    curve_records, start, middle, effective_end, started_weeks
+                )
+            }
+            if sport in {"all", "run"}
             else {}
         ),
         "coverage_note": "Aggregation of known local records. A week without records is unknown, not rest; the running week is incomplete. Missing loads, RPE and zone times stay unknown; AU, TSS-like load and zone seconds are never combined. No training model is applied.",

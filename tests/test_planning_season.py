@@ -6,7 +6,7 @@ import unittest
 from copy import deepcopy
 from datetime import date, timedelta
 
-from backend.planning.season import planning_state, season_plan_summary
+from backend.planning.season import planning_state, season_plan_summary, target_phase
 
 
 class SeasonPlanningTests(unittest.TestCase):
@@ -104,6 +104,53 @@ class SeasonPlanningTests(unittest.TestCase):
             },
         )
         self.assertEqual((competitions, latest_replan, adaptive_status), originals)
+
+
+class TargetPhaseTests(unittest.TestCase):
+    today = date(2026, 9, 20)
+
+    def race(self, weeks, priority="A", extra=0):
+        day = self.today + timedelta(weeks=weeks, days=extra)
+        return {"name": "R", "priority": priority, "event_date": day.isoformat()}
+
+    def test_no_race_is_unknown(self):
+        self.assertEqual({"phase": "unknown"}, target_phase([], self.today))
+        self.assertEqual(
+            "unknown", target_phase([self.race(4, "C")], self.today)["phase"]
+        )
+
+    def test_a_race_phases_and_weeks(self):
+        for weeks, phase in ((12, "build"), (4, "peak"), (1, "taper")):
+            with self.subTest(weeks=weeks):
+                result = target_phase([self.race(weeks)], self.today)
+                self.assertEqual(phase, result["phase"])
+                self.assertEqual(weeks, result["weeks_to_race"])
+                self.assertEqual("A", result["race"]["priority"])
+
+    def test_far_race_is_base(self):
+        self.assertEqual("base", target_phase([self.race(20)], self.today)["phase"])
+
+    def test_b_race_only_counts_and_c_is_ignored(self):
+        result = target_phase([self.race(2, "C"), self.race(5, "B")], self.today)
+        self.assertEqual(("peak", 5), (result["phase"], result["weeks_to_race"]))
+
+    def test_sparse_rows_and_timestamps_are_normalized(self):
+        rows = [
+            {"event_date": "2026-10-20T09:00:00", "priority": None},
+            {"event_date": "2026-10-20", "priority": "A"},
+        ]
+        result = target_phase(rows, self.today)
+        self.assertEqual("peak", result["phase"])
+        self.assertEqual("2026-10-20", result["race"]["date"])
+
+    def test_transition_after_recent_race_only(self):
+        recent = {"name": "R", "priority": "A", "event_date": "2026-09-01"}
+        old = {"name": "R", "priority": "A", "event_date": "2026-06-01"}
+        self.assertEqual("transition", target_phase([recent], self.today)["phase"])
+        self.assertEqual("unknown", target_phase([old], self.today)["phase"])
+        self.assertEqual(
+            "peak", target_phase([recent, self.race(5)], self.today)["phase"]
+        )
 
 
 if __name__ == "__main__":

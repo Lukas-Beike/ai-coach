@@ -5,12 +5,19 @@ from __future__ import annotations
 from typing import Any
 
 from backend.planning.plan_checks import BLOCKING_CODES
+from backend.planning.session_focus import (
+    ALL_FOCI,
+    ENDURANCE_FOCI,
+    RIDE_FOCI,
+    STRENGTH_FOCI,
+    STRENGTH_INTENSITIES,
+)
 
 ACCEPT_PLAN_FINDINGS: dict[str, Any] = {
     "type": "array",
     "maxItems": len(BLOCKING_CODES),
     "items": {"type": "string", "enum": list(BLOCKING_CODES)},
-    "description": "The server checks the resulting plan. A blocking finding (illness_hard) saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. Other findings save the plan and come back as plan_check_notes. Otherwise send an empty list.",
+    "description": "The server checks the resulting plan. A blocking finding (illness_hard) saves nothing: correct the plan first, and list the code here only when the athlete explicitly wants that deviation. Other findings save the plan and come back as plan_check_notes, which are shown in the change receipt. Justify them without repeating or contradicting the receipt. Otherwise send an empty list.",
 }
 
 
@@ -33,6 +40,48 @@ def _canonical_coach_tool(
             "additionalProperties": False,
         },
     }
+
+
+_FOCUS_DESCRIPTION = (
+    "Art der Einheit, set for every new unit. Run: "
+    + ", ".join(ENDURANCE_FOCI)
+    + ". Ride: "
+    + ", ".join(RIDE_FOCI)
+    + ". Strength: "
+    + ", ".join(STRENGTH_FOCI)
+    + ". Null only for sports without focus."
+)
+SESSION_FOCUS_SCHEMA: dict[str, Any] = {
+    "type": ["string", "null"],
+    "enum": [*ALL_FOCI, None],
+    "description": _FOCUS_DESCRIPTION,
+}
+_EXERCISE_PROPERTIES: dict[str, Any] = {
+    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+    "sets": {"type": "integer", "minimum": 1, "maximum": 10},
+    "reps": {"type": "integer", "minimum": 1, "maximum": 100},
+    "kg": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+    "pct_1rm": {"type": ["number", "null"], "minimum": 1, "maximum": 150},
+    "rpe": {"type": ["number", "null"], "minimum": 1, "maximum": 10},
+    "rir": {"type": ["integer", "null"], "minimum": 0, "maximum": 10},
+    "rest_s": {"type": ["integer", "null"], "minimum": 0, "maximum": 600},
+}
+STRENGTH_STRUCTURE_SCHEMA: dict[str, Any] = {
+    "type": ["array", "null"],
+    "maxItems": 12,
+    "description": "Strength only: exercises with sets, reps, optional load and rest. At most one of pct_1rm, rpe or rir per exercise. The server generates the description from it and derives strength_intensity (heavy from 80 % 1RM, RPE 8 or 2 RIR) when not set. Null for free text.",
+    "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(_EXERCISE_PROPERTIES),
+        "properties": _EXERCISE_PROPERTIES,
+    },
+}
+STRENGTH_INTENSITY_SCHEMA: dict[str, Any] = {
+    "type": ["string", "null"],
+    "enum": [*STRENGTH_INTENSITIES, None],
+    "description": "Strength only: load level; null otherwise.",
+}
 
 
 def build_structured_tool_schemas(
@@ -283,7 +332,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "get_training_report",
-            "Read selected deterministic local analyses shown in the Analysis UI. Default section report includes coverage, previous period, recorded sensor zones, local plan execution and the session-RPE load (AU) per session, day, week and sport with its rated-session coverage and RPE sources. Select progress alone for per-ISO-week trends of run, ride and strength (sessions, duration, training load, session-RPE AU, 3-zone low/moderate/high time approximated from recorded power or HR zones, local plan compliance, coverage) plus CTL, ride eFTP and ride power and run speed mean-max change over the window; it uses whole Monday-based weeks, days 7, 28, 42 or 84 (default 42); 42 and 84 are only valid for progress. Select endurance, power_profiles, tag_impact, season, comparisons, body_history (weight, body fat, W/kg history) or sleep_timing_variability only when relevant. sleep_timing_variability reports per source the median sleep onset and wake clock-time deviations from the athlete's own earlier nights and each of the last 14 nights (points_14); it is not the Sleep Regularity Index. power_profiles includes critical_power, an experimental Critical Power/Speed model estimate with its efforts and sensitivity; never present CP or CS as FTP, threshold or zone boundary, nor W′ or D′ as measured capacity. Describe observed values; make no diagnosis and derive no training clearance or change from an isolated deviation. Does not refresh providers, archive reports or change planning. Treat incomplete periods and missing loads as unknown; do not infer rest from absent records.",
+            "Read selected deterministic local analyses shown in the Analysis UI. Default section report includes coverage, previous period, recorded sensor zones, local plan execution and the session-RPE load (AU) per session, day, week and sport with its rated-session coverage and RPE sources. Select progress alone for per-ISO-week trends of run, ride and strength (sessions, duration, training load, session-RPE AU, 3-zone low/moderate/high time approximated from recorded power or HR zones, local plan compliance, coverage) plus CTL, ride eFTP and ride power and run speed mean-max change over the window; it uses whole Monday-based weeks, days 7, 28, 42 or 84 (default 42); 42 and 84 are only valid for progress. Select block_review alone to compare a finished training block with its plan (default: the last 4 whole weeks; start and days 28, 42 or 84 choose another period): planned versus completed volume, compliance, intensity distribution against training_model and key sessions per sport, the performance trend, session-RPE and check-in signals, athlete feedback notes and short lessons for the next plan; descriptive only. Select endurance, power_profiles, tag_impact, season, comparisons, body_history (weight, body fat, W/kg history) or sleep_timing_variability only when relevant. sleep_timing_variability reports per source the median sleep onset and wake clock-time deviations from the athlete's own earlier nights and each of the last 14 nights (points_14); it is not the Sleep Regularity Index. power_profiles includes critical_power, an experimental Critical Power/Speed model estimate with its efforts and sensitivity; never present CP or CS as FTP, threshold or zone boundary, nor W′ or D′ as measured capacity. Describe observed values; make no diagnosis and derive no training clearance or change from an isolated deviation. Does not refresh providers, archive reports or change planning. Treat incomplete periods and missing loads as unknown; do not infer rest from absent records.",
             {
                 "start": {"type": "string", "format": "date"},
                 "days": {"type": "integer", "enum": [7, 28, 42, 84]},
@@ -295,13 +344,14 @@ def build_structured_tool_schemas(
                 "sections": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 9,
+                    "maxItems": 10,
                     "uniqueItems": True,
                     "items": {
                         "type": "string",
                         "enum": [
                             "report",
                             "progress",
+                            "block_review",
                             "endurance",
                             "power_profiles",
                             "tag_impact",
@@ -363,6 +413,9 @@ def build_structured_tool_schemas(
                                     "target",
                                     "rationale",
                                     "starts_at_local",
+                                    "session_focus",
+                                    "strength_intensity",
+                                    "strength_structure",
                                 ],
                                 "properties": {
                                     "date": {
@@ -393,6 +446,9 @@ def build_structured_tool_schemas(
                                         "enum": ["AUTO", "POWER", "HR", "PACE"],
                                     },
                                     "rationale": {"type": "string", "minLength": 1},
+                                    "session_focus": SESSION_FOCUS_SCHEMA,
+                                    "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
+                                    "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                                 },
                             },
                         },
@@ -437,6 +493,9 @@ def build_structured_tool_schemas(
                                     "target",
                                     "rationale",
                                     "starts_at_local",
+                                    "session_focus",
+                                    "strength_intensity",
+                                    "strength_structure",
                                 ],
                                 "properties": {
                                     "date": {
@@ -460,6 +519,9 @@ def build_structured_tool_schemas(
                                         "enum": ["AUTO", "POWER", "HR", "PACE"],
                                     },
                                     "rationale": {"type": "string", "minLength": 1},
+                                    "session_focus": SESSION_FOCUS_SCHEMA,
+                                    "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
+                                    "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                                 },
                             },
                         },
@@ -502,6 +564,9 @@ def build_structured_tool_schemas(
                             "rationale": {"type": "string"},
                             "environment": {"type": "string"},
                             "sport_detail": {"type": "string"},
+                            "session_focus": SESSION_FOCUS_SCHEMA,
+                            "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
+                            "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                         },
                         "additionalProperties": False,
                     },
@@ -567,6 +632,9 @@ def build_structured_tool_schemas(
                                 "type": "string",
                                 "enum": ["AUTO", "POWER", "HR", "PACE"],
                             },
+                            "session_focus": SESSION_FOCUS_SCHEMA,
+                            "strength_intensity": STRENGTH_INTENSITY_SCHEMA,
+                            "strength_structure": STRENGTH_STRUCTURE_SCHEMA,
                         },
                     },
                 }
@@ -811,6 +879,7 @@ def build_structured_tool_schemas(
             {
                 "adjustment_id": {"type": "string"},
                 "sync_illness_to_intervals": {"type": "boolean"},
+                "accept_plan_findings": ACCEPT_PLAN_FINDINGS,
             },
         ),
         _canonical_coach_tool(

@@ -40,13 +40,14 @@ def _check(tool, text, previous="", **kwargs):
     )
 
 
-def _verdict(domains=(), delete=False, bulk=False, accepts=False):
+def _verdict(domains=(), delete=False, bulk=False, accepts=False, illness=False):
     listed = frozenset(domains)
     return gate.ImpactVerdict(
         listed,
         listed if delete else frozenset(),
         listed if bulk else frozenset(),
         accepts,
+        illness,
     )
 
 
@@ -216,6 +217,85 @@ class ApprovalTierTests(unittest.TestCase):
             classifier=_Classifier(_verdict(["planning"], accepts=True)),
         )
         self.assertTrue(allowed.allowed, allowed)
+
+
+_ILLNESS_ARGS = {"accept_plan_findings": ["illness_hard"], "changes": []}
+
+
+class IllnessOverrideTests(unittest.TestCase):
+    def _write(self, classifier, arguments=None):
+        return _check(
+            "apply_training_changes",
+            "Ich bin krank, aber ich will trotzdem hart trainieren",
+            classifier=classifier,
+            arguments=_ILLNESS_ARGS if arguments is None else arguments,
+        )
+
+    def test_listing_alone_never_asks_the_classifier(self):
+        classifier = _Classifier(_verdict(["planning"]))
+        decision = self._write(classifier)
+        self.assertTrue(decision.allowed, decision)
+        self.assertEqual(classifier.calls, [])
+
+    def _confirmed(self, classifier, text="Ja", previous=""):
+        state = gate.TurnGateState()
+        authority = gate.build_turn_authority(7, text, previous, None)
+        return gate.illness_override_confirmed(
+            state, classifier, authority, text, previous
+        )
+
+    def test_override_without_athlete_request_is_not_confirmed(self):
+        self.assertFalse(self._confirmed(_Classifier(_verdict(["planning"]))))
+
+    def test_explicit_request_is_confirmed(self):
+        self.assertTrue(
+            self._confirmed(_Classifier(_verdict(["planning"], illness=True)))
+        )
+
+    def test_classifier_failure_or_absence_is_not_confirmed(self):
+        for classifier in (_Classifier(error=RuntimeError("down")), None):
+            with self.subTest(classifier=classifier):
+                self.assertFalse(self._confirmed(classifier))
+
+    def test_gated_code_is_the_only_blocking_code(self):
+        from backend.planning import plan_checks
+
+        self.assertEqual(plan_checks.BLOCKING_CODES, (gate.ILLNESS_CODE,))
+
+    def test_verdict_parses_the_flag_independently(self):
+        self.assertTrue(
+            gate._verdict({"accepts_illness_override": True}).illness_override
+        )
+        self.assertFalse(gate._verdict({"requests": []}).illness_override)
+        parsed = gate._verdict({"requests": [], "accepts_illness_override": True})
+        self.assertTrue(parsed.illness_override)
+
+    def test_confirmation_of_the_coach_question_is_accepted(self):
+        classifier = _Classifier(_verdict(illness=True))
+        question = "Du bist krank. Willst du trotzdem hart trainieren?"
+        self.assertTrue(self._confirmed(classifier, "Ja", question))
+        self.assertEqual(classifier.calls[0][1], question)
+
+    def test_turn_gate_asks_once_and_caches_the_verdict(self):
+        classifier = _Classifier(_verdict(illness=True))
+        turn = CoachTurnWriteGate(
+            message="plane hart",
+            context={"current_user_message_id": 7},
+            model="m",
+            command_receipts=[],
+            read_only_tools=frozenset(),
+            classifier_factory=lambda model: classifier,
+            logger=logging.getLogger("test"),
+        )
+        self.assertTrue(turn.confirms_illness_override())
+        self.assertTrue(turn.confirms_illness_override())
+        self.assertEqual(1, len(classifier.calls))
+
+    def test_plain_writes_never_call_the_classifier(self):
+        classifier = _Classifier()
+        decision = self._write(classifier, {"accept_plan_findings": [], "changes": []})
+        self.assertTrue(decision.allowed)
+        self.assertEqual(classifier.calls, [])
 
 
 class LocalTierTests(unittest.TestCase):
@@ -843,7 +923,10 @@ class OpenAIClassifierTests(unittest.TestCase):
         self.assertIs(fmt["strict"], True)
         schema = fmt["schema"]
         self.assertIs(schema["additionalProperties"], False)
-        self.assertEqual(schema["required"], ["requests", "accepts_proposal"])
+        self.assertEqual(
+            schema["required"],
+            ["requests", "accepts_proposal", "accepts_illness_override"],
+        )
         self.assertEqual(schema["properties"]["accepts_proposal"], {"type": "boolean"})
         items = schema["properties"]["requests"]["items"]
         self.assertIs(items["additionalProperties"], False)

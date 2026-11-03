@@ -15,6 +15,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.planning import planned_units
 from backend.planning.planned_unit_service import PlannedUnitService
 from backend.planning.revision import PlanningRevisionService
+from backend.planning.session_focus import carry_focus
 from backend.providers.intervals_workouts import planning_fields_from_intervals
 
 _REMOTE_LINKS = RemoteLinkRepository()
@@ -208,6 +209,7 @@ class RemotePlannedUnitReconciler:
         ):
             if current.get(key) is not None:
                 incoming[key] = current[key]
+        carry_focus(incoming, current)
         updated = _update_if_unchanged(
             db,
             current_row,

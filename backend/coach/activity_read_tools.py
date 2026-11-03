@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
+from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
 from backend.coach.context import (
     bounded_coach_context_value,
@@ -27,12 +28,14 @@ class CoachActivityReadToolService:
         profile: ProfileService,
         today: Callable[[], date],
         report_services: Any = None,
+        planned_units: Any = None,
     ) -> None:
         self._activity_read = activity_read
         self._garmin_payload = garmin_payload
         self._profile = profile
         self._today = today
         self._report_services = report_services
+        self._planned_units = planned_units
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
         if name == "read_training_records":
@@ -51,6 +54,9 @@ class CoachActivityReadToolService:
             sections = _report_sections(arguments)
             readers = {
                 "progress": lambda: self._report_services.report.progress(
+                    arguments, self._report_services.timezone()
+                ),
+                "block_review": lambda: self._report_services.report.block_review(
                     arguments, self._report_services.timezone()
                 ),
                 "report": lambda: self._report_services.report.read(
@@ -103,13 +109,37 @@ class CoachActivityReadToolService:
                 **self._activity_read.recent(days, limit, today=self._today()),
             }
         if name == "get_activity_details":
-            return self._activity_read.detail(
+            detail = self._activity_read.detail(
                 arguments.get("activity_id"),
                 garmin_status=self._garmin_payload.sync_status(),
                 profile=self._profile.get(),
                 today=self._today(),
             )
+            return {**detail, "planned_units": self._planned_around(detail)}
         return None
+
+    def _planned_around(self, detail: dict[str, Any]) -> Any:
+        """Local planned units one day around the analysed session's date.
+
+        The context window is anchored on today, so an older session would lose its
+        plan; the unit comes with the session instead.
+        """
+        session = detail.get("session")
+        if self._planned_units is None or not isinstance(session, dict):
+            return None
+        try:
+            day = date.fromisoformat(iso_date_prefix(session.get("started_at_local")))
+        except ValueError:
+            return None
+        first, last = day - timedelta(days=1), day + timedelta(days=1)
+        units = self._planned_units.list(250, future_only=True, since=first)
+        window = (first.isoformat(), last.isoformat())
+        around = [
+            unit
+            for unit in units
+            if window[0] <= iso_date_prefix(unit.get("date")) <= window[1]
+        ]
+        return bounded_coach_context_value(around[:10], 4000)
 
     @staticmethod
     def _bounded_integer(
@@ -128,6 +158,7 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
     sections = arguments.get("sections", ["progress"] if long_window else ["report"])
     allowed = {
         "progress",
+        "block_review",
         "report",
         "endurance",
         "power_profiles",
@@ -139,7 +170,7 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
     }
     if (
         not isinstance(sections, list)
-        or not 1 <= len(sections) <= 9
+        or not 1 <= len(sections) <= 10
         or any(
             not isinstance(section, str) or section not in allowed
             for section in sections
@@ -148,6 +179,9 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
         raise AppError(400, "Unbekannter Analysebereich.")
     # progress uses whole ISO weeks, so it never shares a call with
     # sections that read the requested window as given.
-    if (long_window or "progress" in sections) and sections != ["progress"]:
-        raise AppError(400, "progress und 42 oder 84 Tage nur allein abrufbar.")
+    alone = sections in (["progress"], ["block_review"])
+    if (long_window or {"progress", "block_review"} & set(sections)) and not alone:
+        raise AppError(
+            400, "progress, block_review und 42 oder 84 Tage nur allein abrufbar."
+        )
     return sections

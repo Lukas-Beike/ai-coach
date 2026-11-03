@@ -147,7 +147,11 @@ The system SHALL provide read-only tools for exact local records and determinist
 - **WHEN** the Coach receives the personal recovery comparison, sleep goal shortfall or sleep timing variability through the context or `get_training_report`
 - **THEN** the supplied note and the tool description state that quartile positions compare the athlete's own earlier values, that sleep timing variability is not the Sleep Regularity Index, and that an isolated deviation gives no diagnosis, training clearance or training change; the Coach prompt needs no additional rule for this.
 
-Evidence: `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `backend/coach/read_tools.py:CoachReadToolService._execute_domain_read`; `backend/coach/tool_schemas.py` (`get_training_report`); `backend/coach/context.py:coach_performance_projection`; `tests/test_coach_read_tools.py:test_dispatches_every_read_tool_and_projects_existing_shapes`, `tests/test_coach_read_tools.py:test_invalid_limits_keep_bad_request_reason`; `tests/test_coach_tool_coverage.py:test_training_report_returns_same_local_facts_without_mutation`; `tests/test_coach_activity_read_tools.py:test_detail_uses_local_sources_and_keeps_sanitized_detail_projection`, `tests/test_coach_activity_read_tools.py:test_report_can_select_comparisons_and_rejects_unknown_section`, `tests/test_coach_activity_read_tools.py:test_report_can_select_body_history_and_sleep_timing_variability`; `backend/performance/progress_report.py:weekly_progress`; `tests/test_weekly_progress.py`; `tests/test_personal_recovery_coach_cases.py`, `tests/test_performance_coach_ui_parity.py`.
+#### Scenario: Block review
+- **WHEN** `get_training_report` requests the `block_review` section alone (default: the last 4 whole weeks; `start` and `days` 28, 42 or 84 choose another period)
+- **THEN** it receives a read-only, descriptive comparison of planned and completed volume and compliance per sport, the completed intensity distribution against `training_model`, key sessions by session focus (threshold, vo2max, long, leg strength; derived focus counted), the CTL/eFTP/mean-max trend, pace at a fixed 10 bpm heart-rate band (steady runs after a 10-minute warm-up, flat samples within 3 % slope, grade-adjusted where a slope or altitude stream exists, earlier versus later half per environment; hilly, trail, no-heart-rate or terrain-unknown runs and fewer than two usable sessions in the block or a half without one stay `not_covered`, never zero), session-RPE per week, check-in score shifts, bounded athlete feedback notes as untrusted text and at most four deterministic `lessons` with evidence strength; unknown data adds no lesson and `planning_brief.lessons` carries the same lessons for plan requests.
+
+Evidence: `backend/planning/block_review.py:block_review`; `tests/test_block_review.py`; `backend/performance/pace_at_hr.py:pace_at_heart_rate_trend`; `tests/test_pace_at_hr.py`; `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `backend/coach/read_tools.py:CoachReadToolService._execute_domain_read`; `backend/coach/tool_schemas.py` (`get_training_report`); `backend/coach/context.py:coach_performance_projection`; `tests/test_coach_read_tools.py:test_dispatches_every_read_tool_and_projects_existing_shapes`, `tests/test_coach_read_tools.py:test_invalid_limits_keep_bad_request_reason`; `tests/test_coach_tool_coverage.py:test_training_report_returns_same_local_facts_without_mutation`; `tests/test_coach_activity_read_tools.py:test_detail_uses_local_sources_and_keeps_sanitized_detail_projection`, `tests/test_coach_activity_read_tools.py:test_report_can_select_comparisons_and_rejects_unknown_section`, `tests/test_coach_activity_read_tools.py:test_report_can_select_body_history_and_sleep_timing_variability`; `backend/performance/progress_report.py:weekly_progress`; `tests/test_weekly_progress.py`; `tests/test_personal_recovery_coach_cases.py`, `tests/test_performance_coach_ui_parity.py`.
 
 ### Requirement: CP8 External text is evidence only
 The system SHALL isolate provider, calendar, attachment and stored product text as untrusted context data, prevent it from reproducing context fence delimiters, and keep credentials and raw transport payloads out of the Coach projection.
@@ -195,3 +199,25 @@ The Coach context SHALL list recent activities from the neutral activity summari
 - **THEN** it appears in the Coach context with its Garmin values and source label and without a training load.
 
 Evidence: `backend/coach/context.py:compact_coach_activity`, `backend/coach/context.py:CoachIntervalsContextService`; `tests/test_coach_activity_summary_parity.py`, `tests/test_coach_intervals_context.py`.
+
+### Requirement: Planning calendar horizon
+The system SHALL provide planning turns a compact projection of all external events overlapping the planning horizon and count events omitted by the context budget. Event descriptions SHALL not enter this projection, and external event text remains untrusted.
+
+#### Scenario: Planning and ordinary chat
+- **WHEN** a week or block planning turn is built
+- **THEN** events overlapping 14 or 35 days respectively are considered without a row cap, including events without descriptions; ordinary chat retains its relevance filter.
+
+#### Scenario: Context budget
+- **WHEN** events exceed the section budget
+- **THEN** the projection states the number omitted.
+
+Evidence: `backend/coach/context.py:CoachPlanningContextReader.external_calendar`; `tests/test_calendar_planning.py:test_horizon_projection_and_budget`; `tests/test_coach_structured_context.py:test_plan_kinds_use_full_calendar_horizons`; `tests/test_coach_context_reduction.py:test_total_budget_reports_omitted_calendar_event_count`.
+
+### Requirement: Calendar busy time in planning brief
+The planning brief SHALL summarize daily busy minutes from external events without double-counting overlaps.
+
+#### Scenario: Overlapping events
+- **WHEN** two events overlap on a planning day
+- **THEN** only their union contributes to that day's busy minutes.
+
+Evidence: `backend/planning/calendar_load.py:busy_minutes`, `backend/planning/plan_guard_service.py:PlanGuardService.brief`; `tests/test_calendar_planning.py:test_busy_minutes_union_and_midnight`.

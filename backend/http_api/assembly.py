@@ -40,6 +40,7 @@ from backend.http_api.nutrition import (
     NutritionPostRoutes,
     NutritionPutRoutes,
 )
+from backend.http_api.planned_unit_focus_post import PlannedUnitFocusPostRoutes
 from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 from backend.http_api.planning_get import PlanningGetRoutes
 from backend.http_api.post_dispatch import (
@@ -66,6 +67,7 @@ from backend.http_api.sync_commands_post import SyncCommandPostRoute
 from backend.http_api.sync_get import SyncGetRoutes
 from backend.http_api.transcribe_post import TranscribePostRoutes
 from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
+from backend.nutrition.macro_context import macro_context
 from backend.performance.mean_max_curve import SessionCurveReader
 from backend.performance.report_service import (
     TrainingDerivedReadService,
@@ -75,6 +77,7 @@ from backend.performance.report_service import (
     TrainingReportServices,
     TrainingSeasonReadService,
 )
+from backend.planning.block_review import block_review
 from backend.planning.season_preparation import load_scenarios, season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -271,6 +274,7 @@ class HttpReadRouteServices:
     history: HttpHistoryServices
     diagnostics: HttpDiagnosticsServices
     workout_library: Callable[[], Any]
+    planned_unit: Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -300,6 +304,11 @@ def _provider_connection_routes(
         ProviderConnectionGetRoutes(session_auth_service, checks),
         ProviderConnectionPostRoutes(checks),
     )
+
+
+def _profile_text(profile_service: Any, key: str) -> str:
+    """A text field of the saved profile; empty when unset."""
+    return str(profile_service().get().get(key) or "")
 
 
 def _report_synced_at(canonical: Any, db: Any) -> str | None:
@@ -333,6 +342,7 @@ class HttpApiAssembly:
         history = dependencies.reads.history
         diagnostics = dependencies.reads.diagnostics
         workout_library = dependencies.reads.workout_library
+        planned_unit_service = dependencies.reads.planned_unit
         privacy = dependencies.domains.privacy
         sync = dependencies.domains.sync
         nutrition = dependencies.domains.nutrition
@@ -506,6 +516,10 @@ class HttpApiAssembly:
                 session_feedback=_session_feedback_lookup(athlete),
                 now=athlete_clock.now,
                 curve_records=profiles.curve_records,
+                review_block=block_review,
+                training_model=partial(
+                    _profile_text, profile_service, "training_model"
+                ),
             )
             return TrainingReportServices(
                 records=records,
@@ -615,11 +629,18 @@ class HttpApiAssembly:
             max_backup_bytes,
         )
         self.auth_post_routes = AuthPostRoutes(session_auth_service, maintenance_gate)
+
         self.nutrition_get_routes = NutritionGetRoutes(
             session_auth_service,
             diary_service,
             meal_library_service,
             athlete_clock.now,
+            partial(
+                macro_context,
+                public_performance_state_service,
+                public_plan_state_service,
+                profile_service,
+            ),
         )
         self.nutrition_post_routes = NutritionPostRoutes(
             diary_service,
@@ -702,6 +723,7 @@ class HttpApiAssembly:
             self.metric_export_post_routes,
             self.garmin_post_routes,
             self.provider_connection_post_routes,
+            PlannedUnitFocusPostRoutes(planned_unit_service, database_lock()),
         )
         self.post_dispatcher = HttpPostDispatcher(
             self.auth_post_routes,

@@ -93,6 +93,11 @@ FOOD_INTAKE_PATTERN = (
 )
 # Quantities such as "60g Whey" or "200 ml" also report intake without a keyword.
 FOOD_AMOUNT_PATTERN = r"\b\d+(?:[.,]\d+)?\s?(?:g|gramm|kg|ml|l)\b"
+# Nutrition topics without intake wording, e.g. saved products or template portions.
+NUTRITION_TOPIC_PATTERN = (
+    r"produkt|\bproducts?\b|portion|rezept|recipe|lebensmittel|\bfood\b|shake"
+    r"|\bessen\b|\btrinken\b|\beat\b|\bdrink\b"
+)
 PROFILE_KEYWORDS = (
     (
         "provider_refresh_or_sync",
@@ -195,6 +200,9 @@ class CoachContextSelection:
     include_library: bool = True
     retain_dialogue: bool = False
     retain_pending_request: bool = True
+    past_days: int = 2
+    # Earlier planned units of this many days are read; 0 keeps today onward.
+    past_planned_days: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -236,6 +244,7 @@ class CoachContextSelection:
             "activity_analysis",
             "attachment_analysis",
             "progress_review",
+            "block_review",
         }:
             result["current_performance"] = {
                 key: value
@@ -247,7 +256,7 @@ class CoachContextSelection:
     def dated_items(self, items: Any, today: date) -> Any:
         if not isinstance(items, list) or self.horizon_days is None:
             return items
-        first = (today - timedelta(days=2)).isoformat()
+        first = (today - timedelta(days=self.past_days)).isoformat()
         last = (today + timedelta(days=self.horizon_days)).isoformat()
         return [
             item
@@ -281,8 +290,12 @@ _PLAN_SECTIONS = BASE_SECTIONS | {
     "weather",
 }
 REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
-    # Plan versus actual and the next session need the full plan window.
-    "session_analysis": CoachContextSelection("activity_analysis"),
+    # The session detail comes from get_activity_details. Plan versus actual and the
+    # next session need the plan window; weather, calendars and the plan sections
+    # stay requestable through read_coach_context.
+    "session_analysis": CoachContextSelection(
+        "activity_analysis", BASE_SECTIONS | {"recovery"}, 14, 5, False
+    ),
     "progress_review": CoachContextSelection(
         "progress_review",
         BASE_SECTIONS | {"planning", "training_plans", "recovery"},
@@ -290,8 +303,20 @@ REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
         5,
         False,
     ),
+    # The block comes from get_training_report block_review; plans stay in context.
+    "block_review": CoachContextSelection(
+        "block_review",
+        BASE_SECTIONS | {"planning", "training_plans", "recovery"},
+        14,
+        5,
+        False,
+    ),
     "plan_week": CoachContextSelection("plan_week", _PLAN_SECTIONS, 14, 5, True),
     "plan_block": CoachContextSelection("plan_block", _PLAN_SECTIONS, 35, 5, True),
+    # The current week reaches back to Monday; the next days serve hard/easy spacing.
+    "adjust_week": CoachContextSelection(
+        "adjust_week", _PLAN_SECTIONS, 8, 5, True, past_days=6, past_planned_days=6
+    ),
 }
 
 
@@ -308,9 +333,26 @@ def _food_sections(normalized: str, attachments: bool) -> set[str]:
     """Return the saved-product section when the turn may report intake."""
     food = attachments or any(
         re.search(pattern, normalized)
-        for pattern in (FOOD_INTAKE_PATTERN, FOOD_AMOUNT_PATTERN)
+        for pattern in (
+            FOOD_INTAKE_PATTERN,
+            FOOD_AMOUNT_PATTERN,
+            NUTRITION_TOPIC_PATTERN,
+        )
     )
     return {"nutrition_products"} if food else set()
+
+
+def _follow_up_food(context: Mapping[str, Any], matched: Sequence[str]) -> set[str]:
+    """Keep saved products for a topic-less reply to a recent food exchange."""
+    messages = context.get("messages")
+    if matched or not isinstance(messages, list):
+        return set()
+    recent = " ".join(
+        str(item.get("content") or "")
+        for item in messages[-4:]
+        if isinstance(item, dict)
+    ).casefold()
+    return _food_sections(recent, False)
 
 
 def select_coach_context(
@@ -327,14 +369,18 @@ def select_coach_context(
     fixed = REQUEST_KIND_SELECTIONS.get(request_kind or "")
     if fixed is None:
         return selection
+    # Fixed kinds carry saved products only for food named in the message itself;
+    # an upload alone does not make a plan or analysis turn a nutrition turn.
     return CoachContextSelection(
         fixed.name,
-        fixed.sections,
+        fixed.sections | _food_sections(message.casefold(), False),
         fixed.horizon_days,
         fixed.activity_limit,
         fixed.include_library,
         retain_dialogue=selection.retain_dialogue,
         retain_pending_request=selection.retain_pending_request,
+        past_days=fixed.past_days,
+        past_planned_days=fixed.past_planned_days,
     )
 
 
@@ -364,7 +410,7 @@ def _message_selection(
         continuation,
     )
 
-    food = _food_sections(normalized, attachments)
+    food = _food_sections(normalized, attachments) | _follow_up_food(dialogue, matched)
     if _needs_fallback_context(
         is_pending_active, continuation, pronoun, matched, normalized
     ):

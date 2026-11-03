@@ -256,12 +256,16 @@ from backend.planning.assembly import (
     PlanningRuntime as PlanningDataRuntime,
 )
 from backend.planning.compact_activities import ActivitySummarySource
+from backend.planning.leg_strength import strength_expected
 from backend.planning.plan_guard_service import (
     PlanGuardService,
     read_completed,
+    read_lessons,
+    read_load_thresholds,
     read_progress,
     recent_illness,
 )
+from backend.planning.planned_unit_load import PlannedUnitEstimator
 from backend.planning.revision import PlanningRevisionService
 from backend.planning.workflows_assembly import (
     DailyPlanningSources,
@@ -472,7 +476,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.35"
+APP_VERSION = "1.13.36"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -1697,9 +1701,22 @@ CHAT_PAGE_MAX = 100
 )
 
 
+def _block_lessons() -> list[dict[str, object]]:
+    """Lessons of the last 4 whole weeks for the planning brief."""
+    reports = HTTP_API.training_reports()
+    return reports.report.block_review({}, reports.timezone(), with_curves=False).get(
+        "lessons", []
+    )
+
+
 def _plan_guard_service() -> PlanGuardService:
     """Plan checks and planning brief over the current local state."""
     return PlanGuardService(
+        estimate_unit=PlannedUnitEstimator(
+            database_manager=database_manager,
+            observation_reader=lambda: CANONICAL_READ,
+            zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+        ),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
         completed_activities=lambda: read_completed(
             database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
@@ -1712,7 +1729,25 @@ def _plan_guard_service() -> PlanGuardService:
         training_model=lambda: str(
             ATHLETE_DATA.profile().get().get("training_model") or ""
         ),
+        weekly_plan_text=lambda: str(
+            ATHLETE_DATA.profile().get().get("weekly_plan") or ""
+        ),
         today=lambda: ATHLETE_CLOCK.now().date(),
+        thresholds=lambda: read_load_thresholds(
+            database_manager(),
+            CANONICAL_READ,
+            ATHLETE_CLOCK.now().date(),
+            ATHLETE_DATA.zones().configurations(),
+        ),
+        expects_strength=lambda: strength_expected(
+            str(
+                ATHLETE_DATA.profile().get().get("training_preferences_strength") or ""
+            ),
+            PLANNING_DATA.competition().list(),
+            ATHLETE_CLOCK.now().date(),
+        ),
+        calendar_events=lambda: EXTERNAL_CALENDAR.reader().list_events_in_window(56),
+        lessons=lambda: read_lessons(_block_lessons),
     )
 
 
@@ -1740,6 +1775,7 @@ COACH_PLANNING_TOOLS = CoachPlanningToolsAssembly(
                 PLANNING_WORKFLOWS.adaptive_replan_preview_service()
             ),
             illness_pause_sync_service=SYNC_COMMANDS.illness_pause,
+            plan_guard=_plan_guard_service,
         ),
     )
 )
@@ -2188,6 +2224,7 @@ HTTP_API = HttpApiAssembly(
                 undo=HISTORY.undo_service,
             ),
             workout_library=PLANNING_DATA.workout_library,
+            planned_unit=PLANNING_DATA.planned_unit,
         ),
         domains=HttpDomainRouteServices(
             privacy=HttpPrivacyServices(

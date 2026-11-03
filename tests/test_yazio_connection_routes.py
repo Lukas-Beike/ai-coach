@@ -31,6 +31,7 @@ class YazioRouteTests(unittest.TestCase):
                     "metric_export",
                     "garmin",
                     "provider_connections",
+                    "planned_unit_focus",
                 )
             }
         )

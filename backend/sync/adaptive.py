@@ -60,6 +60,9 @@ class AdaptivePreviewFollowupService:
             return self._preview_service.status()
 
 
+_UNCONFIGURED = "Adaptive replan dependencies were not configured."
+
+
 class IllnessPauseSyncService:
     """Coordinate local adaptive replans and explicitly requested illness sync."""
 
@@ -105,20 +108,37 @@ class IllnessPauseSyncService:
             "category": ILLNESS_CALENDAR_CATEGORY,
         }
 
+    def apply_local(self, adjustment_id: Any) -> dict[str, Any]:
+        """Apply the local preview only; the caller owns the transaction."""
+        service = self._adaptive_replan_apply_service
+        if service is None:
+            raise RuntimeError(_UNCONFIGURED)
+        return service.apply(adjustment_id)
+
     def apply(
         self, adjustment_id: Any, *, sync_illness_to_intervals: bool = False
     ) -> dict[str, Any]:
         """Apply the local preview, then optionally write its illness pause remotely."""
-        if (
-            self._adaptive_replan_apply_service is None
-            or self._competition_service is None
-            or self._adaptive_replan_preview_service is None
-            or self._redactor is None
-            or self._today is None
-        ):
-            raise RuntimeError("Adaptive replan dependencies were not configured.")
+        return self.complete(
+            self.apply_local(adjustment_id),
+            sync_illness_to_intervals=sync_illness_to_intervals,
+        )
 
-        applied = self._adaptive_replan_apply_service.apply(adjustment_id)
+    def complete(
+        self, applied: dict[str, Any], *, sync_illness_to_intervals: bool = False
+    ) -> dict[str, Any]:
+        """Write the optional remote illness pause and build the result."""
+        competitions = self._competition_service
+        previews = self._adaptive_replan_preview_service
+        redactor = self._redactor
+        today = self._today
+        if (
+            competitions is None
+            or previews is None
+            or redactor is None
+            or today is None
+        ):
+            raise RuntimeError(_UNCONFIGURED)
         status = applied["status"]
         if status.startswith("already_"):
             return applied
@@ -136,7 +156,7 @@ class IllnessPauseSyncService:
             except Exception as exc:  # noqa: BLE001 - Keep the committed local result even if the optional provider write fails.
                 remote_sync = {
                     "status": "error",
-                    "error": self._redactor.redact_text(str(exc))[:1000],
+                    "error": redactor.redact_text(str(exc))[:1000],
                 }
 
         result = {
@@ -147,10 +167,10 @@ class IllnessPauseSyncService:
             "illness_pause": illness_pause,
             "intervals_sync": remote_sync,
             "planning": planning_state(
-                self._competition_service.list(),
-                self._today(),
-                self._adaptive_replan_preview_service.latest_preview(),
-                self._adaptive_replan_preview_service.status(),
+                competitions.list(),
+                today(),
+                previews.latest_preview(),
+                previews.status(),
             ),
         }
         if applied["stale"]:

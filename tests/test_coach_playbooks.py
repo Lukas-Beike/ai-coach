@@ -2,24 +2,95 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import unittest
+from datetime import date
 from typing import Any
 from unittest.mock import Mock
 
+from backend.coach import playbooks
 from backend.coach.context_selection import (
     REQUEST_KIND_SELECTIONS,
     select_coach_context,
 )
 from backend.coach.job_submission import CoachJobSubmissionService
-from backend.coach.playbooks import REQUEST_KINDS, playbook_for
+from backend.coach.playbooks import REQUEST_KINDS, nutrition_playbook, playbook_for
+from backend.coach.prompt import COACH_PROMPT
 from backend.coach.request_payload import (
     CoachRequestPayloadService,
     compose_model_instructions,
 )
 from backend.errors import AppError
 
-NEW_KINDS = ("session_analysis", "progress_review", "plan_week", "plan_block")
+NEW_KINDS = (
+    "session_analysis",
+    "progress_review",
+    "block_review",
+    "plan_week",
+    "plan_block",
+    "adjust_week",
+)
+
+
+KIND_WORD_BUDGET = 600
+# Per-block word budgets: a block that grows must justify it here.
+BLOCK_WORD_BUDGETS = {
+    "_EVIDENCE": 60,
+    "_INTENSITY_MODEL": 40,
+    "_PLAN_STRUCTURE": 130,
+    "_STRENGTH_LEGS": 75,
+    "_SEASON_PHASE": 75,
+    "_PRECEDENCE": 30,
+    "_CALENDAR": 45,
+    "_PLAN_CHECK": 80,
+    "_ADAPTIVE": 140,
+    "_NUTRITION": 520,
+}
+TASK_WORD_BUDGET = 190
+
+
+class PlaybookBudgetTests(unittest.TestCase):
+    def test_each_block_stays_within_its_budget(self) -> None:
+        for name, budget in BLOCK_WORD_BUDGETS.items():
+            with self.subTest(block=name):
+                self.assertLessEqual(len(getattr(playbooks, name).split()), budget)
+
+    def test_each_task_stays_within_its_budget(self) -> None:
+        for kind, task in playbooks._TASKS.items():
+            with self.subTest(kind=kind):
+                self.assertLessEqual(len(task.split()), TASK_WORD_BUDGET)
+
+    def test_every_block_is_budgeted_and_every_kind_composed(self) -> None:
+        blocks = {
+            name
+            for name, value in vars(playbooks).items()
+            if isinstance(value, str)
+            and re.fullmatch(r"_[A-Z_]+", name)
+            and name != "_HEADER"
+        }
+        self.assertEqual(blocks, set(BLOCK_WORD_BUDGETS))
+        self.assertEqual(set(playbooks._BLOCKS), set(REQUEST_KINDS))
+
+    def test_kinds_carry_only_the_blocks_they_need(self) -> None:
+        for kind in ("session_analysis", "progress_review", "block_review"):
+            text = playbook_for(kind)
+            with self.subTest(kind=kind):
+                for block in (
+                    playbooks._SEASON_PHASE,
+                    playbooks._PLAN_CHECK,
+                    playbooks._ADAPTIVE,
+                    playbooks._STRENGTH_LEGS,
+                ):
+                    self.assertNotIn(block, text)
+        self.assertIn(playbooks._ADAPTIVE, playbook_for("adjust_week"))
+        self.assertNotIn(playbooks._ADAPTIVE, playbook_for("plan_week"))
+        for block in playbooks._BLOCKS["plan_block"]:
+            self.assertIn(block, playbook_for("plan_week"))
+
+    def test_nutrition_playbook_is_empty_without_nutrition(self) -> None:
+        self.assertEqual(nutrition_playbook(False), "")
+        self.assertIn("6i.", nutrition_playbook(True))
 
 
 class RequestKindAllowlistTests(unittest.TestCase):
@@ -56,7 +127,7 @@ class PlaybookInjectionTests(unittest.TestCase):
         for kind in NEW_KINDS:
             with self.subTest(kind=kind):
                 text = playbook_for(kind)
-                self.assertLess(len(text.split()), 450)
+                self.assertLessEqual(len(text.split()), KIND_WORD_BUDGET)
                 self.assertIn("Never use ACWR", text)
                 self.assertIn("pyramidal when it is absent", text)
                 self.assertIn("training_model", text)
@@ -67,8 +138,59 @@ class PlaybookInjectionTests(unittest.TestCase):
         self.assertNotIn("Planning science", playbook_for("progress_review"))
         for kind in ("plan_week", "plan_block"):
             self.assertIn("Planning science", playbook_for(kind))
+        for kind in ("plan_week", "plan_block"):
+            self.assertIn("season_phase", playbook_for(kind))
+        self.assertIn("season_phase", playbook_for("adjust_week"))
         self.assertIn("week-by-week rationale", playbook_for("plan_block"))
         self.assertNotIn("week-by-week rationale", playbook_for("plan_week"))
+
+    def test_adjust_week_playbook_guards_hard_days_and_writes(self) -> None:
+        text = playbook_for("adjust_week")
+        for marker in (
+            "get_training_report",
+            "session_focus",
+            "never next to another hard day",
+            "24 h",
+            "preview_adaptive_replan",
+            "No Intervals.icu write without a named sync",
+        ):
+            self.assertIn(marker, text)
+        self.assertNotIn("Planning science", text)
+
+    def test_adjust_week_context_is_its_own(self) -> None:
+        sections = select_coach_context("ok", {}, request_kind="adjust_week").sections
+        self.assertLessEqual(
+            {"planning_brief", "planning", "training_plans", "recovery", "calendar"},
+            sections,
+        )
+        self.assertNotIn("nutrition_products", sections)
+        selection = select_coach_context("ok", {}, request_kind="adjust_week")
+        items = [{"date": f"2026-11-{day:02d}"} for day in (1, 2, 8, 10)]
+        kept = selection.dated_items(items, date(2026, 11, 5))
+        self.assertEqual(
+            ["2026-11-01", "2026-11-02", "2026-11-08", "2026-11-10"],
+            [i["date"] for i in kept],
+        )
+        self.assertEqual("", playbook_for("morning_checkin"))
+
+    def test_nutrition_rules_only_on_nutrition_turns(self) -> None:
+        marker = (
+            "first match every ingredient against the athlete's saved local products"
+        )
+        plain = compose_model_instructions("ctx", allow_mutations=True)
+        food = compose_model_instructions("ctx", allow_mutations=True, nutrition=True)
+        self.assertNotIn(marker, plain)
+        self.assertNotIn(marker, COACH_PROMPT)
+        self.assertIn(marker, food)
+        self.assertIn("save_nutrition_template", food)
+        self.assertNotIn("save_nutrition_template", plain)
+        for kind in ("plan_week", "session_analysis"):
+            self.assertNotIn(
+                marker,
+                compose_model_instructions(
+                    "ctx", allow_mutations=True, request_kind=kind
+                ),
+            )
 
     def test_other_turns_carry_no_playbook(self) -> None:
         for kind in (None, "morning_checkin", "unknown"):
@@ -107,8 +229,14 @@ class PlaybookInjectionTests(unittest.TestCase):
             "retain_openai_attachment_context": False,
             "has_prior_openai_attachments": False,
         }
-        planned, _ = service.build(**arguments, request_kind="plan_week")
-        plain, _ = service.build(**arguments)
+        with self.assertLogs("intervals_coach", "INFO") as logs:
+            planned, _ = service.build(**arguments, request_kind="plan_week")
+            plain, _ = service.build(**arguments)
+        sizes = [r.context for r in logs.records if hasattr(r, "context")]
+        self.assertEqual(
+            len(playbook_for("plan_week")), sizes[0]["playbook_characters"]
+        )
+        self.assertEqual(0, sizes[1]["playbook_characters"])
         self.assertIn("REQUEST PLAYBOOK", planned)
         self.assertNotIn("REQUEST PLAYBOOK", plain)
         selection = training_context.build.call_args_list[0].kwargs["selection"]
@@ -140,6 +268,69 @@ class RequestKindSelectionTests(unittest.TestCase):
         analysis = select_coach_context("x", {}, request_kind="session_analysis")
         self.assertEqual(analysis.name, "activity_analysis")
         self.assertIn("durable_profile", analysis.sections)
+        self.assertLessEqual(
+            {"local_planned_workouts", "activities", "recovery", "current_performance"},
+            analysis.sections,
+        )
+        for heavy in ("weather", "calendar", "external_calendar", "training_plans"):
+            self.assertNotIn(heavy, analysis.sections)
+        self.assertEqual(analysis.horizon_days, 14)
+        # The latest session keeps the today-based planned-unit window; an older
+        # session brings its own plan with get_activity_details.
+        self.assertEqual(analysis.past_planned_days, 0)
+
+    def test_confirmation_after_food_exchange_keeps_products(self) -> None:
+        history = {
+            "messages": [
+                {"id": 1, "role": "user", "content": "Speichere Mahlzeit Porridge"},
+                {"id": 2, "role": "assistant", "content": "Soll ich speichern?"},
+            ]
+        }
+        self.assertIn(
+            "nutrition_products", select_coach_context("ja", history).sections
+        )
+        self.assertNotIn(
+            "nutrition_products",
+            select_coach_context("ja", {"messages": []}).sections,
+        )
+
+    def test_message_food_survives_a_fixed_kind(self) -> None:
+        sections = select_coach_context(
+            "80g Haferflocken gegessen", {}, request_kind="plan_week"
+        ).sections
+        self.assertIn("nutrition_products", sections)
+
+    def test_upload_alone_adds_no_products_to_a_fixed_kind(self) -> None:
+        for kind in ("session_analysis", "plan_week"):
+            sections = select_coach_context(
+                "Analysiere meine letzte Einheit.",
+                {},
+                attachments=True,
+                request_kind=kind,
+            ).sections
+            with self.subTest(kind=kind):
+                self.assertNotIn("nutrition_products", sections)
+
+    def test_nutrition_topics_without_intake_wording_select_products(self) -> None:
+        for message in (
+            "Welche meiner gespeicherten Produkte passen dazu?",
+            "Ändere die Vorlage auf zwei Portionen.",
+            "Whey-Shake nach dem Training",
+        ):
+            with self.subTest(message=message):
+                self.assertIn(
+                    "nutrition_products", select_coach_context(message, {}).sections
+                )
+
+    def test_base_prompt_keeps_core_nutrition_write_rules(self) -> None:
+        for marker in (
+            "log a consumed meal once with save_nutrition_entry",
+            "matching saved local products by exact product_id first",
+            "log_nutrition_template by exact ID",
+            "never save hypothetical or negated consumption",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, COACH_PROMPT)
 
     def test_every_kind_has_a_selection_and_keeps_message_retention(self) -> None:
         self.assertEqual(set(REQUEST_KIND_SELECTIONS), set(REQUEST_KINDS))

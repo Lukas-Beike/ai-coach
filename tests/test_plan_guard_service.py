@@ -12,19 +12,26 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+from backend.activities.workout_load import AthleteThresholds
+from backend.activities.zone_settings import ZoneSettings
+from backend.canonical.vocabulary import Sport
 from backend.coach.context_selection import select_coach_context
 from backend.coach.tool_execution_service import CoachStructuredToolExecutionService
 from backend.coach.tool_failures import CoachStructuredToolFailureService
 from backend.coach.tool_schemas import ACCEPT_PLAN_FINDINGS
 from backend.db.manager import DatabaseManager
 from backend.planning import plan_checks
+from backend.planning.load_checks import LoadThresholds
 from backend.planning.plan_guard_service import (
+    IllnessNotConfirmedError,
     PlanCheckError,
     PlanGuardService,
     build_planning_brief,
+    illness_confirmation,
     read_progress,
     recent_illness,
 )
+from backend.planning.planned_unit_load import estimate_planned_unit
 
 TODAY = date(2026, 11, 2)
 
@@ -73,6 +80,7 @@ class PlanGuardWriteTests(unittest.TestCase):
             progress=lambda: {"week_list": []},
             training_model=lambda: "pyramidal",
             today=lambda: TODAY,
+            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
         )
         self.dispatch = Mock()
         self.dispatch.execute.side_effect = self.write
@@ -132,6 +140,33 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.run_tool("replace_training_plan", workouts=[{}])
         self.assertEqual(["replace_training_plan"], self.published)
 
+    def test_distribution_note_in_write_result(self) -> None:
+        self.illness = ""
+        self.guard = PlanGuardService(
+            planned_units=lambda: list(self.units),
+            completed_activities=list,
+            competitions=list,
+            illness=lambda: "",
+            progress=lambda: {"week_list": []},
+            training_model=lambda: "polarized",
+            today=lambda: TODAY,
+            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+        )
+        self.write_units = [
+            {
+                "local_id": "r",
+                "date": "2026-11-04",
+                "sport": "Ride",
+                "description": "- 240m Z2\n- 120m Z3\n- 20m Z6\n",
+            }
+        ]
+        result = self.run_tool("replace_training_plan", workouts=[{}])
+        self.assertEqual(
+            ["intensity_distribution"],
+            [note["code"] for note in result["plan_check_notes"]],
+        )
+        self.assertFalse(result["plan_check_notes"][0]["blocking"])
+
     def test_load_findings_save_with_notes(self) -> None:
         self.illness = ""
         result = self.run_tool("replace_training_plan", workouts=[{}])
@@ -139,6 +174,37 @@ class PlanGuardWriteTests(unittest.TestCase):
         note = result["plan_check_notes"][0]
         self.assertEqual("back_to_back_hard", note["code"])
         self.assertIn("practice-based", note["evidence_strength"])
+
+    def test_calendar_conflict_is_saved_as_note(self) -> None:
+        self.illness = ""
+        self.guard = PlanGuardService(
+            planned_units=lambda: list(self.units),
+            completed_activities=list,
+            competitions=list,
+            illness=lambda: "",
+            progress=lambda: {"week_list": []},
+            training_model=lambda: "pyramidal",
+            today=lambda: TODAY,
+            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            calendar_events=lambda: [
+                {
+                    "start_local": "2026-11-04T09:00:00",
+                    "end_local": "2026-11-04T10:00:00",
+                }
+            ],
+        )
+        self.write_units = [
+            {**hard_pair()[0], "starts_at_local": "2026-11-04T09:30:00"}
+        ]
+        result = self.run_tool("replace_training_plan", workouts=[{}])
+        note = next(
+            item
+            for item in result["plan_check_notes"]
+            if item["code"] == "calendar_load"
+        )
+        self.assertFalse(note["blocking"])
+        self.assertTrue(note["evidence"]["overlap"])
+        self.assertEqual(self.stored(), 1)
 
     def test_failure_projection_carries_findings(self) -> None:
         service = CoachStructuredToolFailureService(
@@ -172,9 +238,59 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.assertEqual(1, self.stored())
         self.assertNotIn("accept_plan_findings", self.seen_arguments)
         self.assertEqual(
-            ["back_to_back_hard", "illness_hard", "illness_hard"],
+            [
+                "back_to_back_hard",
+                "illness_hard",
+                "illness_hard",
+                "intensity_distribution",
+            ],
             sorted(f["code"] for f in result["plan_check_notes"]),
         )
+
+    def test_adaptive_replan_is_plan_checked_by_its_own_service(self) -> None:
+        from backend.coach import tool_execution_service as tools
+
+        self.assertIn("apply_adaptive_replan", tools.PLAN_CHECKED_TOOLS)
+        self.assertIn("apply_adaptive_replan", tools.SELF_GUARDED_TOOLS)
+        self.run_tool("apply_adaptive_replan", adjustment_id="x")
+        # The generic wrapper stays out; the tool's own service checks the plan.
+        self.assertEqual(1, self.stored())
+        self.dispatch.execute.assert_called_once()
+
+    def test_listing_without_a_finding_does_not_ask(self) -> None:
+        self.illness = ""
+        asked: list[int] = []
+
+        def confirm() -> bool:
+            asked.append(1)
+            return False
+
+        with illness_confirmation(confirm):
+            self.run_tool(
+                "replace_training_plan", accept_plan_findings=["illness_hard"]
+            )
+        self.assertEqual(1, self.stored())
+        self.assertEqual([], asked)
+
+    def test_finding_without_confirmation_rolls_back(self) -> None:
+        with (
+            illness_confirmation(lambda: False),
+            self.assertRaises(IllnessNotConfirmedError) as raised,
+        ):
+            self.run_tool(
+                "replace_training_plan", accept_plan_findings=["illness_hard"]
+            )
+        self.assertEqual("illness_not_confirmed", raised.exception.reason)
+        self.assertEqual("illness_hard", raised.exception.findings[0]["code"])
+        self.assertEqual(0, self.stored())
+        self.assertEqual([], self.published)
+
+    def test_finding_with_confirmation_is_saved(self) -> None:
+        with illness_confirmation(lambda: True):
+            self.run_tool(
+                "replace_training_plan", accept_plan_findings=["illness_hard"]
+            )
+        self.assertEqual(1, self.stored())
 
     def test_other_code_does_not_cover_the_finding(self) -> None:
         with self.assertRaises(PlanCheckError):
@@ -215,6 +331,7 @@ class PlanGuardWriteTests(unittest.TestCase):
                 "sport": "run",
                 "started_at_local": "2026-10-30T08:00:00",
                 "moving_duration_s": 3600,
+                "distance_m": 10000,
             }
         ]
         run = {
@@ -222,13 +339,52 @@ class PlanGuardWriteTests(unittest.TestCase):
             "date": "2026-11-06",
             "sport": "run",
             "planned_duration_s": 4200,
+            "description": "- 12km 70% pace",
         }
         self.units = [run]
-        self.write_units = [{**run, "planned_duration_s": 7200}]
+        self.write_units = [{**run, "description": "- 15km 70% pace"}]
         result = self.run_tool("replace_training_plan")
         note = result["plan_check_notes"][0]
         self.assertEqual("warning", note["evidence"]["severity"])
         self.assertFalse(note["blocking"])
+
+    def test_load_spike_note_flows_through_the_write(self) -> None:
+        self.illness = ""
+        self.guard = PlanGuardService(
+            planned_units=lambda: list(self.units),
+            completed_activities=lambda: list(self.completed),
+            competitions=list,
+            illness=lambda: "",
+            progress=lambda: {"week_list": []},
+            training_model=lambda: "pyramidal",
+            today=lambda: TODAY,
+            estimate_unit=lambda unit: estimate_planned_unit(unit, AthleteThresholds()),
+            thresholds=lambda: LoadThresholds(
+                {Sport.RIDE: AthleteThresholds(zones=ZoneSettings(ftp=250.0))}
+            ),
+        )
+        self.completed = [
+            {
+                "sport": "ride",
+                "started_at_local": "2026-10-30T08:00:00",
+                "moving_duration_s": 3600,
+                "normalized_power": 200,
+            }
+        ]
+        self.units = []
+        self.write_units = [
+            {
+                "local_id": "b",
+                "date": "2026-11-06",
+                "sport": "ride",
+                "planned_duration_s": 3600,
+                "description": "- 60m 100%",
+            }
+        ]
+        result = self.run_tool("replace_training_plan")
+        notes = [n for n in result["plan_check_notes"] if n["code"] == "load_spike"]
+        self.assertEqual("warning", notes[0]["evidence"]["severity"])
+        self.assertFalse(notes[0]["blocking"])
 
     def test_existing_findings_do_not_block_unrelated_writes(self) -> None:
         self.units = hard_pair()
@@ -290,9 +446,22 @@ class PlanBriefTests(unittest.TestCase):
         self.assertEqual("Race", brief["next_competitions"][0]["name"])
         self.assertEqual(set(plan_checks.FINDING_CODES), set(brief["plan_checks"]))
         self.assertIn("source", brief)
+        phase = brief["season_phase"]
+        self.assertEqual(("peak", 4), (phase["phase"], phase["weeks_to_race"]))
+        self.assertEqual("2026-12-01", phase["race"]["date"])
+
+    def test_brief_phase_unknown_without_target_race(self) -> None:
+        brief = build_planning_brief(
+            progress={},
+            completed=[],
+            competitions=[{"date": "2026-12-01", "name": "Run", "priority": "C"}],
+            training_model="pyramidal",
+            today=TODAY,
+        )
+        self.assertEqual("unknown", brief["season_phase"]["phase"])
 
     def test_brief_section_only_for_plan_kinds(self) -> None:
-        for kind in ("plan_week", "plan_block"):
+        for kind in ("plan_week", "plan_block", "adjust_week"):
             selection = select_coach_context("Plane", {}, request_kind=kind)
             self.assertIn("planning_brief", selection.sections)
         for other in (None, "progress_review", "session_analysis"):

@@ -46,6 +46,10 @@ REGISTERED_ELSEWHERE = {
         "feedback_post.py",
         '"/api/activities/([^/]+)/feedback"',
     ),
+    "/api/planned-units/{id}/focus": (
+        "planned_unit_focus_post.py",
+        '"/api/planned-units/([^/]+)/focus"',
+    ),
     "/api/sync/jobs/{id}": ("sync_get.py", '"^/api/sync/jobs/([0-9a-f-]+)$"'),
     "/api/sync/jobs/{id}/resolve": (
         "sync_commands.py",

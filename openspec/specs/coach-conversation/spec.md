@@ -160,21 +160,37 @@ The system SHALL treat the morning quick action as a stored athlete-started turn
 Evidence: `backend/coach/morning.py:ManualMorningCheckinService.prepare`, `backend/coach/morning.py:MorningCheckinStateService.state`; `backend/coach/background_job.py:CoachBackgroundJobRunner._execute`; `backend/coach/morning_completion.py:MorningCoachJobCompletionService.complete`; `tests/test_coach_manual_morning.py:test_fresh_sleep_syncs_then_refreshes_battery`, `tests/test_coach_manual_morning.py:test_missing_or_stale_sleep_raises_without_refreshing_battery`, `tests/test_coach_manual_morning.py:test_unconfigured_garmin_returns_without_reading_or_refreshing`, `tests/test_coach_manual_morning.py:test_yesterday_ready_state_is_projected_as_waiting`; `tests/test_coach_dialogue.py:test_morning_quick_action_stays_pending_while_coach_awaits_clarification`.
 
 ### Requirement: CC9a Analysis and planning quick actions
-The system SHALL accept only the quick-action kinds `morning_checkin`, `session_analysis`, `progress_review`, `plan_week` and `plan_block`, store the athlete's visible message with the chosen period, select the context sections the kind needs, and append the kind's playbook to the instructions of that turn only. A playbook never authorizes a write.
+The system SHALL accept only the quick-action kinds `morning_checkin`, `session_analysis`, `progress_review`, `block_review`, `plan_week`, `plan_block` and `adjust_week`, store the athlete's visible message with the chosen period, select the context sections the kind needs, and append the kind's playbook to the instructions of that turn only. A playbook never authorizes a write.
 
 #### Scenario: Playbook only on its own turn
-- **WHEN** a turn carries one of the four analysis or planning kinds
+- **WHEN** a turn carries one of the analysis or planning kinds
 - **THEN** its instructions end with that kind's playbook, while morning check-in and ordinary turns carry none.
 
+#### Scenario: Playbook blocks
+- **WHEN** a playbook is composed
+- **THEN** it consists of small topic blocks (evidence and labels, intensity model, plan structure, strength and legs, season phase, precedence, calendar, plan checks, adaptive changes), each with its own word budget, so a kind carries only the blocks it needs, at most 600 words in total, and the Coach request size diagnostics report `playbook_characters`.
+
 #### Scenario: Kind-specific context
-- **WHEN** a turn carries one of the four analysis or planning kinds
+- **WHEN** a turn carries one of the analysis or planning kinds
 - **THEN** its context sections come from the kind rather than the message wording, while dialogue and pending-request retention still follow the message as for an ordinary turn.
+
+#### Scenario: Adjust the current week
+- **WHEN** a turn carries `adjust_week`
+- **THEN** its playbook compares plan and actual for the current week, changes only today and later days, moves a missed key session by `session_focus` without back-to-back hard days or leg strength less than 24 h before it, keeps run, ride and strength combinable, leaves adaptive replans to the preview and approval rule, and writes nothing to Intervals.icu without a named sync, while its context holds the plan sections, planning brief, calendars, weather and recovery for the current week, including planned units from earlier days of that week, and the days after it.
+
+#### Scenario: Session analysis context
+- **WHEN** a turn carries `session_analysis`
+- **THEN** its context holds profile, competitions, feedback, planned units of the last two days and the next 14 days, activities, recovery and current performance with activity validation, while weather, calendars and plan sections stay requestable through `read_coach_context`. `get_activity_details` returns the local planned units one day around the analysed session's date as `planned_units`, so an older session keeps its plan for the plan-versus-actual comparison.
+
+#### Scenario: Nutrition rules only on nutrition turns
+- **WHEN** the selected context includes `nutrition_products`
+- **THEN** the instructions append the nutrition playbook (reusable meals, food matching); the base prompt keeps only the core write rules (one complete entry per meal, saved products first, templates by exact ID, no hypothetical or negated saves); a topic-less reply to a recent food exchange keeps the playbook; an upload alone does not add it to plan or analysis turns.
 
 #### Scenario: Unknown kind
 - **WHEN** a submission names another kind
 - **THEN** it is rejected as an unsupported quick action before any turn is stored.
 
-Evidence: `backend/coach/playbooks.py:playbook_for`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`; `backend/coach/context_selection.py:select_coach_context`; `backend/coach/request_payload.py:compose_model_instructions`; `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`, `tests/test_coach_playbooks.py:RequestKindSelectionTests.test_every_kind_has_a_selection_and_keeps_message_retention`; plan_week and plan_block also load the deterministic `planning_brief` section (`backend/planning/plan_guard_service.py:build_planning_brief`; `tests/test_plan_guard_service.py:PlanBriefTests.test_brief_section_only_for_plan_kinds`).
+Evidence: `backend/coach/playbooks.py:playbook_for` (`block_review`), `backend/coach/playbooks.py:nutrition_playbook`, `tests/test_coach_playbooks.py:PlaybookBudgetTests`, `tests/test_coach_activity_read_tools.py:CoachActivityReadToolServiceTests.test_detail_of_an_old_session_carries_its_planned_units`; `backend/coach/job_submission.py:CoachJobSubmissionService._validate_submission`; `backend/coach/context_selection.py:select_coach_context`; `backend/coach/request_payload.py:compose_model_instructions`; `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_other_turns_carry_no_playbook`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_nutrition_rules_only_on_nutrition_turns`, `tests/test_coach_playbooks.py:RequestKindAllowlistTests.test_unknown_kind_is_rejected`, `tests/test_coach_playbooks.py:PlaybookInjectionTests.test_adjust_week_playbook_guards_hard_days_and_writes`, `tests/test_coach_playbooks.py:RequestKindSelectionTests.test_every_kind_has_a_selection_and_keeps_message_retention`; plan_week, plan_block and adjust_week also load the deterministic `planning_brief` section (`backend/planning/plan_guard_service.py:build_planning_brief`; `tests/test_plan_guard_service.py:PlanBriefTests.test_brief_section_only_for_plan_kinds`).
 
 ### Requirement: CC10 Composer continuity and user-controlled input
 The system SHALL keep drafts editable while the Coach runs, serialize queued follow-ups, preserve rejected input on session expiry and require the athlete to send editable voice transcripts as chat messages.
@@ -196,3 +212,12 @@ The system SHALL keep drafts editable while the Coach runs, serialize queued fol
 - **THEN** recording is bounded to sixty seconds, recording resources are stopped after capture, and a successful transcript is appended to the editable draft rather than sent automatically; denied/unsupported recording or empty transcription produces an explicit error.
 
 Evidence: `public/coach.js:queueChatMessage`, `public/coach.js:editQueuedChatMessage`, `public/coach.js:chatEnterAction`, `public/coach.js:rejectChatStreamResponse`, `public/coach.js:toggleVoiceInput`, `public/coach.js:transcribeVoice`; `backend/providers/audio.py:AudioTranscriptionClient.transcribe`; `tests/coach-enter.test.cjs:desktop Enter sends the draft`, `tests/coach-enter.test.cjs:IME composition never triggers an action`; `tests/coach-queue-edit.test.cjs:editing a queued message is refused and leaves the queue untouched when the combined count exceeds the limit`; `tests/coach-session-expiry.test.cjs:a chat 401 keeps newer typed text and parks the rejected message once when the input was edited`; `tests/test_provider_audio.py:test_validation_precedes_provider_io_and_keeps_order`, `tests/test_provider_audio.py:test_empty_or_invalid_provider_responses_are_rejected`. Microphone permissions/recording cleanup are source-inspected; no browser/microphone runtime was exercised.
+
+### Requirement: Clarify uncertain calendar impact
+The planning playbook SHALL direct the Coach to ask whether to train and whether to reduce intensity when an event creates material uncertainty, and to use the athlete's answer. An ordinary event alone SHALL not imply a cancellation or reduction.
+
+#### Scenario: Uncertain busy day
+- **WHEN** a calendar event leaves a material training decision unclear
+- **THEN** the Coach asks before making that decision and groups questions where practical.
+
+Evidence: `backend/coach/playbooks.py:playbook_for`; `tests/test_calendar_planning.py:test_plan_playbook_requests_clarification`; `tests/test_coach_dialogue.py:test_calendar_clarification_then_easy_workout`. The scripted dialogue proves mechanics, not natural-language model reliability.

@@ -131,6 +131,24 @@ class ProfileServiceTests(unittest.TestCase):
             self.db.execute("SELECT COUNT(*) FROM change_history").fetchone()[0], 0
         )
 
+    def test_weekly_plan_save_history_and_restore_round_trip(self):
+        plan = json.dumps({"days": {"wed": {"rest_day": True}}})
+        before = self.service.save({"name": "Ada"})
+        saved = self.service.save({**before, "weekly_plan": plan})
+        self.assertEqual(
+            json.loads(saved["weekly_plan"])["days"]["wed"], {"rest_day": True}
+        )
+        diff = json.loads(
+            self.db.execute(
+                "SELECT diff FROM change_history ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()[0]
+        )
+        self.assertIn("weekly_plan", json.dumps(diff))
+        with self.service._manager.unit_of_work() as db:
+            restored = self.service.restore_in_transaction(db, saved, before)
+        self.assertEqual(restored["weekly_plan"], "")
+        self.assertEqual(self.service.get()["weekly_plan"], "")
+
     def test_restore_in_transaction_with_none_target_restores_legacy_defaults(self):
         current = {**DEFAULT_PROFILE, "name": "Current", "sports": "Running"}
 

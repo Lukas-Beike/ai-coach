@@ -12,6 +12,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.errors import AppError
 
 RETENTION_DAYS = 180
@@ -64,6 +65,7 @@ PROFILE_FIELDS = {
     "training_preferences_strength",
     "training_preferences_mobility",
     "training_model",
+    "weekly_plan",
     "coaching_style",
     "timezone",
     "weather_location",
@@ -94,6 +96,7 @@ LIBRARY_FIELDS = {
     "local_marked",
     "private_calendar_adjustment",
     "sync_status",
+    *FOCUS_KEYS,
 }
 PLANNED_UNIT_FIELDS = {
     "id",
@@ -118,6 +121,7 @@ PLANNED_UNIT_FIELDS = {
     "remote_event_id",
     "remote_event_external_id",
     "local_deleted",
+    *FOCUS_KEYS,
 }
 COMPETITION_FIELDS = {
     "id",
@@ -242,8 +246,10 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
             "training_preferences_mobility",
         ),
         ("training_model",),
+        ("weekly_plan",),
     ),
-    "planned_unit": (("starts_at_local",),),
+    "planned_unit": (("starts_at_local",), FOCUS_KEYS),
+    "workout_library": (FOCUS_KEYS,),
 }
 
 # Planning fields renamed by schema version 16: current name -> the name rows

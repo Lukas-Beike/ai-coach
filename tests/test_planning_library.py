@@ -9,6 +9,9 @@ from backend.planning import library
 
 LOCAL_ID = "01234567-89ab-cdef-0123-456789abcdef"
 EXPECTED_LIBRARY_FIELDS = {
+    "session_focus",
+    "strength_intensity",
+    "strength_structure",
     "name",
     "description",
     "type",

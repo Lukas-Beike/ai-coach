@@ -1819,6 +1819,39 @@ function appendMessageChanges(node, message) {
     line.append(undo);
   }
   node.append(line);
+  appendPlanNotes(node, changes.plan_check_notes);
+}
+
+function appendPlanNotes(node, planNotes) {
+  const planNoteLabels = {
+    run_spike: ["Laufsprung", "Beobachtungsstudie, mittlere Evidenz"],
+    load_spike: ["Lastsprung", "Aus Distanzstudien übertragen, nicht direkt validiert"],
+    weekly_load_rise: ["Wochenlast steigt", "Aus Distanzstudien übertragen, nicht direkt validiert"],
+    load_unknown: ["Last unbekannt", "Aus Distanzstudien übertragen, nicht direkt validiert"],
+    back_to_back_hard: ["Harte Tage in Folge", "Praxisbasiert"],
+    strength_hard_same_day: ["Kraft und harte Einheit", "Begrenzte Evidenz"],
+    missing_taper: ["Wettkampf-Taper", "Starke Evidenz; Schwelle lokal gewählt"],
+    illness_hard: ["Belastung bei Krankheit", "Medizinische Vorsicht"],
+    intensity_distribution: ["Intensitätsverteilung der Woche", "Praxisbasierte Referenzbereiche"],
+    leg_strength_before_key_session: ["Beinkraft vor Schlüsseleinheit", "Begrenzte Evidenz"],
+    fixed_session_missing: ["Feste Einheit fehlt oder liegt an einem anderen Tag", "Eigener Wochenplan"],
+    rest_day_session: ["Einheit an einem Ruhetag", "Eigener Wochenplan"],
+    outside_windows: ["Einheit außerhalb der Zeitfenster", "Eigener Wochenplan"],
+    no_free_window: ["Einheit passt nicht in die freie Zeit", "Eigener Wochenplan und Kalender"],
+    over_max_minutes: ["Über der maximalen Tagesdauer", "Eigener Wochenplan"],
+    leg_strength_frequency: ["Beinkraft pro Woche", "Rønnestad & Mujika 2014, Blagrove 2018; Schwellen praxisbasiert"],
+    calendar_load: ["Kalender und Einheit", "Terminüberschneidung oder stark belegter Tag"],
+  };
+  for (const note of Array.isArray(planNotes) ? planNotes : []) {
+    const label = planNoteLabels[note?.code];
+    if (!label) continue;
+    const detail = document.createElement("div");
+    detail.className = `message-plan-note${note.severity === "warning" ? " is-warning" : ""}`;
+    const dates = Array.isArray(note.dates) ? note.dates.map((day) => AppFormat.date(day)).filter(Boolean).join(", ") : "";
+    const dateLabel = dates ? " · " + dates : "";
+    detail.textContent = `${note.severity === "warning" ? "Warnung" : "Hinweis"}: ${label[0]}${dateLabel} · ${label[1]}`;
+    node.append(detail);
+  }
 }
 
 async function undoCoachTurn(clientTurnId, button) {

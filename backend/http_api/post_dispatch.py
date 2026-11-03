@@ -19,6 +19,7 @@ from backend.http_api.garmin_post import GarminPostRoutes
 from backend.http_api.history_undo_post import HistoryUndoPostRoutes
 from backend.http_api.metric_export_post import MetricExportPostRoutes
 from backend.http_api.nutrition import NutritionPostRoutes
+from backend.http_api.planned_unit_focus_post import PlannedUnitFocusPostRoutes
 from backend.http_api.planning_commands_post import PlanningCommandsPostRoutes
 from backend.http_api.privacy_delete_post import PrivacyDeletePostRoutes
 from backend.http_api.privacy_restore_post import PrivacyRestorePostRoutes
@@ -49,6 +50,7 @@ class HttpAuthenticatedPostRoutes:
     metric_export: MetricExportPostRoutes | None = None
     garmin: GarminPostRoutes | None = None
     provider_connections: ProviderConnectionPostRoutes | None = None
+    planned_unit_focus: PlannedUnitFocusPostRoutes | None = None
 
 
 class HttpPostDispatcher:
@@ -81,6 +83,7 @@ class HttpPostDispatcher:
         self._metric_export = authenticated_routes.metric_export
         self._garmin = authenticated_routes.garmin
         self._provider_connections = authenticated_routes.provider_connections
+        self._planned_unit_focus = authenticated_routes.planned_unit_focus
 
     def handle_before_auth(self, handler: Any, path: str) -> bool:
         return self._auth_routes.handle(handler, path) or self._restore_route.handle(
@@ -133,6 +136,7 @@ class HttpPostDispatcher:
                 self._metric_export,
                 self._garmin,
                 self._provider_connections,
+                self._planned_unit_focus,
             )
             if route is not None
         )

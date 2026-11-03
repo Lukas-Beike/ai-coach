@@ -37,6 +37,9 @@ CALENDAR_ACTIVITY_FIELDS = (
     "feel",
     "source",
     "workout_profile",
+    "power_zone_times",
+    "heart_rate_zone_times",
+    "pace_zone_times",
 )
 
 

@@ -140,7 +140,10 @@ class TrainingRecordsService:
         ]
         return {
             "status": "ok" if records else "insufficient_data",
-            "activities": records,
+            "activities": [
+                {k: v for k, v in row.items() if k != "pace_at_hr_profile"}
+                for row in records
+            ],
             "scope": "Bis zu 100 lokal gespeicherte Detaildatensätze; nur aktuelle Aktivitäten mit geeigneten Originaldaten.",
             "comparison": "Individual observations, no inferred fitness trend. Compare sport, duration, intensity, terrain, temperature and indoor/outdoor conditions.",
         }
@@ -404,7 +407,11 @@ class TrainingReportReadService:
         session_feedback: FeedbackLookup | None = None,
         now: Callable[[], datetime] | None = None,
         curve_records: Callable[[], list[dict[str, Any]]] | None = None,
+        training_model: Callable[[], str] = lambda: "",
+        review_block: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
+        self._review_block = review_block
+        self._training_model = training_model
         self._curve_records = curve_records
         self._read_synced_at = read_synced_at
         self._read_plan = read_plan
@@ -498,6 +505,37 @@ class TrainingReportReadService:
             and start >= today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
             else None,
             observed_at=observed_at,
+        )
+
+    def block_review(
+        self,
+        values: dict[str, Any],
+        timezone: str = "UTC",
+        *,
+        with_curves: bool = True,
+    ) -> dict[str, Any]:
+        """Planned versus completed over a block; default: the last 4 whole weeks."""
+        if self._review_block is None:
+            raise AppError(503, "Die Blockauswertung ist nicht verfügbar.")
+        today = self._today()
+        days = values.get("days") or 28
+        weeks = days // 7 if isinstance(days, int) else 4
+        window = {
+            "days": days,
+            "start": values.get("start")
+            or (today - timedelta(days=today.weekday() + 7 * weeks)).isoformat(),
+            "sport": "all",
+        }
+        progress = self.progress(window, timezone, with_curves=with_curves)
+        summaries, _ = activity_summaries_with_sync_time(self._canonical)
+        return self._review_block(
+            progress=progress,
+            plan=self._read_plan(),
+            checkins=self._read_checkins(),
+            summaries=summaries,
+            activity_feedback=self._read_feedback(),
+            timezone=timezone,
+            training_model=self._training_model(),
         )
 
     def read(self, values: dict[str, Any], timezone: str = "UTC") -> dict[str, Any]:
@@ -654,6 +692,7 @@ def _curve_record(
         "source": None if profile is None else profile.get("source"),
         "power_profile": {} if curve is None else curve.power,
         "running_profile": {} if curve is None else curve.running,
+        "pace_at_hr_profile": {} if curve is None else curve.pace_at_hr,
         "fingerprint": None if curve is None else curve.fingerprint,
     }
 

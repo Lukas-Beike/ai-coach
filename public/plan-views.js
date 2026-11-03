@@ -389,6 +389,58 @@ function calendarSportType(item) {
   return { type: indoor ? "VirtualRide" : item.sport };
 }
 
+const FOCUS_LABELS = {
+  recovery: "Regeneration", easy: "Locker", endurance: "Grundlage", long: "Lang", tempo: "Tempo", threshold: "Schwelle", sweet_spot: "Sweet Spot",
+  vo2max: "VO2max", anaerobic: "Anaerob", race: "Wettkampf", test: "Test",
+  legs: "Beine", upper: "Oberkörper", full_body: "Ganzkörper", core: "Rumpf", plyometrics: "Sprungkraft", mobility: "Mobilität",
+};
+const STRENGTH_INTENSITY_LABELS = { light: "Leicht", moderate: "Mittel", heavy: "Schwer" };
+const FOCUS_OPTIONS = {
+  run: ["recovery", "easy", "endurance", "long", "tempo", "threshold", "vo2max", "anaerobic", "race", "test"],
+  ride: ["recovery", "easy", "endurance", "long", "tempo", "threshold", "sweet_spot", "vo2max", "anaerobic", "race", "test"],
+  strength: ["legs", "upper", "full_body", "core", "plyometrics", "mobility"],
+};
+
+function focusSport(entry) {
+  const sport = String(entry?.sport || "").toLowerCase();
+  return FOCUS_OPTIONS[sport] ? sport : null;
+}
+
+function focusChipSpec(entry) {
+  const label = FOCUS_LABELS[entry?.session_focus];
+  if (!label) return null;
+  const intensityLabel = STRENGTH_INTENSITY_LABELS[entry.strength_intensity];
+  const intensity = intensityLabel && entry.intensity_origin === "derived" ? `≈${intensityLabel}` : intensityLabel;
+  const derived = entry.focus_origin === "derived";
+  return { kind: derived ? "focus-derived" : "focus", text: [derived ? "≈" : null, label, intensity].filter(Boolean).join(" "), derived };
+}
+
+function appendFocusChip(root, entry) {
+  const chip = focusChipSpec(entry);
+  if (!chip) return;
+  const row = calendarBadgeRow([chip]);
+  row.dataset.focusChip = chip.derived ? "derived" : "set";
+  if (chip.derived) row.firstElementChild.setAttribute("aria-label", `${chip.text} (abgeleitet)`);
+  root.append(row);
+}
+
+function focusSelect(label, name, options, selected) {
+  const field = document.createElement("label");
+  field.className = "planned-focus-field";
+  field.append(document.createTextNode(label));
+  const select = document.createElement("select");
+  select.name = name;
+  for (const [value, text] of [["", "–"], ...options]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text;
+    option.selected = value === (selected || "");
+    select.append(option);
+  }
+  field.append(select);
+  return { field, select };
+}
+
 function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, formatWhole, distanceLabel, activitySportLabel, analysisSvg, api, showAccessibleDialog, appendHistoryPageButton, AppRouter, dateFromKey, localDateKey, addDateKey, weatherNumber, weatherIconFor, weatherDirection, plannedEventDate, timezoneDateKey, calendarDisplayValue }) {
   function renderAdaptivePlanning(data) {
     const planning = data.planning || {};
@@ -670,6 +722,36 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return analysisSvg("polygon", { points: `${x},54 ${x},${left} ${x + width},${right} ${x + width},54`, "data-zone": zone });
   }
 
+  function plannedFocusForm(entry) {
+    const sport = focusSport(entry);
+    if (!sport || !entry.local_id || entry.is_completed_activity) return null;
+    const isSet = entry.focus_origin === "set";
+    const form = document.createElement("div");
+    form.className = "planned-focus-form";
+    const focus = focusSelect("Art der Einheit", "session_focus", FOCUS_OPTIONS[sport].map((value) => [value, FOCUS_LABELS[value]]), isSet ? entry.session_focus : "");
+    const parts = [focus];
+    if (sport === "strength") parts.push(focusSelect("Intensität", "strength_intensity", Object.entries(STRENGTH_INTENSITY_LABELS), entry.intensity_origin === "set" ? entry.strength_intensity : ""));
+    const status = document.createElement("span");
+    status.className = "planned-focus-status";
+    status.setAttribute("role", "status");
+    const previous = parts.map((part) => part.select.value);
+    const save = async () => {
+      status.textContent = "";
+      try {
+        const body = { session_focus: focus.select.value || null, strength_intensity: parts[1]?.select.value || null };
+        await api(`/api/planned-units/${encodeURIComponent(entry.local_id)}/focus`, { method: "POST", body: JSON.stringify(body) });
+        previous.splice(0, previous.length, ...parts.map((part) => part.select.value));
+        status.textContent = "Gespeichert";
+      } catch (error) {
+        parts.forEach((part, index) => { part.select.value = previous[index]; });
+        status.textContent = error.message;
+      }
+    };
+    for (const part of parts) part.select.addEventListener("change", save);
+    form.append(...parts.map((part) => part.field), status);
+    return form;
+  }
+
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {
     const actual = calendarActualActivity(entry);
     const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -697,6 +779,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const profile = calendarWorkoutProfile(actual?.workout_profile || entry.workout_profile);
     if (profile) cardSummary.append(profile);
     cardSummary.append(cardTitle);
+    appendFocusChip(cardSummary, entry);
     const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
     if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
@@ -715,6 +798,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
       details.append(activityButton);
     }
     appendPlannedCalendarComparison(details, entry, actual);
+    const focusForm = plannedFocusForm(entry);
+    if (focusForm) details.append(focusForm);
     if (entry.description) {
       const description = document.createElement("p");
       description.className = "planned-description";

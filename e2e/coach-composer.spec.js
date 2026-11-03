@@ -107,4 +107,12 @@ test("analysis and plan menu sends the chosen period with its request kind @resp
   const sent = await page.evaluate(() => window.__quickSubmit);
   expect(sent.kind).toBe("plan_block");
   expect(sent.message).toContain("3 Wochen");
+  await trigger.click();
+  const adjust = page.getByRole("menuitem", { name: "Woche anpassen" });
+  await expect(adjust).toBeVisible();
+  const box = await adjust.boundingBox();
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  await adjust.click();
+  const adjusted = await page.evaluate(() => window.__quickSubmit);
+  expect(adjusted.kind).toBe("adjust_week");
 });

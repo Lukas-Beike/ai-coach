@@ -21,8 +21,10 @@ the same moment.
   form, the key as plain text.
 * ``duration``, then ``movingTime`` (seconds). ``movingTime`` is the fallback that
   ``backend.activities.duplicates`` uses for ``duration``.
-* ``duration`` alone (seconds) -> ``elapsed_duration_s``; the ``movingTime`` fallback
-  is not elapsed time and stays out of it.
+* ``elapsedDuration``, then ``duration`` alone (seconds) -> ``elapsed_duration_s``;
+  the ``movingTime`` fallback is not elapsed time and stays out of it. For a
+  strength activity, ``duration`` is only the active timer time, so
+  ``duration_s`` becomes the longer ``elapsedDuration`` (the whole session).
 * ``movingDuration`` (seconds) -> ``moving_duration_s``, with no ``movingTime``
   fallback because ``movingTime`` already feeds ``duration_s``. Garmin
   ``duration`` is elapsed time, so duplicate detection also compares this moving
@@ -95,8 +97,9 @@ from backend.canonical.vocabulary import (
 # Version 4: a row with manualActivity exactly True is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
 # Version 7: maps average speed, elevation gain, normalized power and VO2max.
+# Version 9: strength duration is the elapsed session time.
 # Version 8: maps the training-effect label (#1416).
-MAPPER_VERSION: Final = 8
+MAPPER_VERSION: Final = 9
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -196,9 +199,21 @@ def _map_row(
         row, _DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
     # Issues for ``duration`` are already reported above.
-    elapsed_duration = _optional_number(
-        row, ("duration",), (0.0, MAX_ACTIVITY_DURATION_S), ref, []
+    raw_elapsed = _optional_number(
+        row, ("elapsedDuration",), (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
+    # Issues for ``duration`` are already reported above.
+    elapsed_duration = (
+        raw_elapsed
+        if raw_elapsed is not None
+        else _optional_number(
+            row, ("duration",), (0.0, MAX_ACTIVITY_DURATION_S), ref, []
+        )
+    )
+    if sport is Sport.STRENGTH and raw_elapsed is not None:
+        # Garmin ``duration`` of a strength activity is the active timer time
+        # without rest between sets; the whole session is ``elapsedDuration``.
+        duration = max(duration or 0.0, raw_elapsed)
     moving_duration = _optional_number(
         row, _MOVING_DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )

@@ -14,7 +14,7 @@ from backend.coach.context_selection import (
     compact_coach_dialogue,
     select_coach_context,
 )
-from backend.coach.playbooks import playbook_for
+from backend.coach.playbooks import nutrition_playbook, playbook_for
 from backend.settings import SettingsService
 
 
@@ -51,6 +51,7 @@ def compose_model_instructions(
     allow_mutations: bool,
     attachment_summary: bool = False,
     request_kind: str | None = None,
+    nutrition: bool = False,
 ) -> str:
     """Order instructions for provider prompt caching.
 
@@ -61,7 +62,7 @@ def compose_model_instructions(
     instructions = (
         dialogue.INSTRUCTIONS + _ATTACHMENT_POLICY + "\n\n" + training_context
     )
-    instructions += playbook_for(request_kind)
+    instructions += playbook_for(request_kind) + nutrition_playbook(nutrition)
     if attachment_summary:
         instructions += LOCAL_ATTACHMENT_SUMMARY_NOTICE
     if not allow_mutations:
@@ -132,6 +133,7 @@ class CoachRequestPayloadService:
             training_context,
             allow_mutations=allow_mutations,
             request_kind=request_kind,
+            nutrition="nutrition_products" in selection.sections,
             # Earlier pixels are gone once the conversation rotates or leaves the
             # window, so the summary notice applies to every turn after an upload.
             attachment_summary=has_prior_openai_attachments
@@ -191,6 +193,10 @@ class CoachRequestPayloadService:
                     if retain_openai_attachment_context
                     else "local",
                     "instruction_characters": len(payload["instructions"]),
+                    "playbook_characters": len(playbook_for(request_kind))
+                    + len(
+                        nutrition_playbook("nutrition_products" in selection.sections)
+                    ),
                     "input_characters": len(
                         json.dumps(payload["input"], ensure_ascii=False)
                     ),

@@ -8,10 +8,16 @@ import uuid
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
-from backend.canonical.planning_fields import PLANNED_INTENSITY, PLANNED_LOAD
+from backend.canonical.planning_fields import (
+    PLANNED_INTENSITY,
+    PLANNED_LOAD,
+)
+from backend.canonical.planning_fields import SESSION_FOCUS_KEYS as FOCUS_KEYS
 from backend.canonical.stored_sports import workout_sport_from_record
 from backend.errors import AppError
+from backend.planning import strength_structure
 from backend.planning import workouts as planning_workouts
+from backend.planning.session_focus import normalize_session_focus
 from backend.planning.sport import apply_sport_update
 from backend.providers.intervals_workouts import (
     DERIVED_WORKOUT_KEYS,
@@ -51,6 +57,7 @@ LIBRARY_WORKOUT_FIELDS = {
     "remote_event_external_id",
     "category",
     "paired_event_id",
+    *FOCUS_KEYS,
 }
 
 
@@ -161,6 +168,7 @@ def normalize_library_workout(
     result["sync_status"] = sync_status
     _normalize_library_workout_text_fields(result)
     _normalize_library_workout_duration(result)
+    normalize_session_focus(result)
     result["archived"] = bool(result.get("archived"))
     result["local_marked"] = bool(result.get("local_marked"))
     result["local_deleted"] = bool(result.get("local_deleted"))
@@ -404,9 +412,10 @@ def workout_library_update_candidate(
         return candidate
     if action != "update":
         raise AppError(400, "Unbekannte Aktion für die Bibliothekseinheit.")
-    for key in ("name", "description", "duration_minutes", "target"):
+    for key in ("name", "description", "duration_minutes", "target", *FOCUS_KEYS):
         if key in values:
             candidate[key] = values.get(key)
+    strength_structure.drop_stale(candidate, values)
     if {"type", "sport", "environment"} & values.keys():
         apply_sport_update(candidate, values)
     return candidate
@@ -433,7 +442,14 @@ def _reconcile_updated_library_workout_content(
         )
     if any(
         key in values
-        for key in ("description", "duration_minutes", "target", "type", "sport")
+        for key in (
+            "description",
+            "strength_structure",
+            "duration_minutes",
+            "target",
+            "type",
+            "sport",
+        )
     ):
         for key in DERIVED_WORKOUT_KEYS:
             normalized.pop(key, None)

@@ -27,6 +27,7 @@ function harness({ confirmed = true, apiResult, apiError } = {}) {
   const state = { data: { messages: [] } };
   const context = vm.createContext({
     state,
+    AppFormat: require("../public/format.js"),
     document: { createElement: (tag) => new FakeElement(tag) },
     async requestConfirmation(message, options) {
       calls.confirm.push({ message, options });
@@ -63,6 +64,26 @@ test("an undoable turn lists its changes with one undo button", () => {
   assert.equal(line.children[1].className, "message-undo");
   assert.equal(line.children[1].type, "button");
   assert.equal(line.children[1].textContent, "Rückgängig");
+});
+
+test("plan notes render safe labels, dates, evidence and warning emphasis", () => {
+  const { context } = harness();
+  const node = new FakeElement("div");
+  context.appendMessageChanges(node, { role: "assistant", coach_changes: changes({
+    plan_check_notes: [{ code: "run_spike", dates: ["2026-11-02"], severity: "warning" },
+      { code: "back_to_back_hard", dates: [], severity: "notice" },
+      { code: "load_spike", dates: [], severity: "notice" },
+      { code: "weekly_load_rise", dates: [], severity: "notice" },
+      { code: "load_unknown", dates: [], severity: "notice" },
+      { code: "calendar_load", dates: ["2026-11-03"], severity: "notice" }],
+  }) });
+  assert.equal(node.children[1].className, "message-plan-note is-warning");
+  assert.match(node.children[1].textContent, /Warnung: Laufsprung · 02\.11\.2026 · Beobachtungsstudie/);
+  assert.match(node.children[2].textContent, /Hinweis: Harte Tage in Folge · Praxisbasiert/);
+  assert.match(node.children[3].textContent, /Hinweis: Lastsprung · Aus Distanzstudien übertragen/);
+  assert.match(node.children[4].textContent, /Hinweis: Wochenlast steigt/);
+  assert.match(node.children[5].textContent, /Hinweis: Last unbekannt/);
+  assert.match(node.children[6].textContent, /Hinweis: Kalender und Einheit · 03\.11\.2026/);
 });
 
 test("undone, untracked and turn-less changes show no undo button", () => {

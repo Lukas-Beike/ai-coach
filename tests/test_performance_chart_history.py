@@ -129,6 +129,7 @@ class AnalysisHistoryTests(unittest.TestCase):
             ]
         }
         result = analysis_history(None, garmin, date(2026, 10, 2))
+        self.assertEqual(result["load"]["source_provider"], "garmin")
         self.assertEqual(result["load"]["source"], "Garmin Connect")
         self.assertEqual(
             result["load"]["points"][-2], {"date": "2026-10-01", "value": 475}
