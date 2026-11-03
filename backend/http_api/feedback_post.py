@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.athlete.checkins import CheckinService
+from backend.http_api.session_load_response import with_session_load
 
 
 class FeedbackPostRoutes:
@@ -16,9 +17,11 @@ class FeedbackPostRoutes:
         self,
         checkin_service: Callable[[], CheckinService],
         activity_feedback_service: Callable[[], Any] | None = None,
+        session_rpe_load: Callable[[str], Any] | None = None,
     ) -> None:
         self._checkin_service = checkin_service
         self._activity_feedback_service = activity_feedback_service
+        self._session_rpe_load = session_rpe_load
 
     def handle(self, handler: Any, path: str) -> bool:
         match = re.fullmatch(r"/api/activities/([^/]+)/feedback", path)
@@ -38,6 +41,7 @@ class FeedbackPostRoutes:
                 if has_feedback
                 else feedback.save(activity_id, payload)
             )
+            result = with_session_load(result, self._session_rpe_load, activity_id)
             handler.send_json(200, result)
             return True
         if path != "/api/feedback":

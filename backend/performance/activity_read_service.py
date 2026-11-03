@@ -26,7 +26,10 @@ from backend.performance.canonical_inputs import (
     with_read_status,
 )
 from backend.performance.context import current_performance_context
-from backend.performance.detail_envelope import DetailEnvelopeReader
+from backend.performance.detail_envelope import (
+    DetailEnvelopeReader,
+    feedback_session_load,
+)
 from backend.performance.freshness import GarminSyncStatus
 from backend.runtime.ports import ActivityRowReader
 
@@ -103,6 +106,19 @@ class ActivityAnalysisReadService(ActivityReadService):
             return None
         with source.database_manager().read_snapshot() as db:
             return list(reader.activity_summaries(db, start=start, end=end))
+
+    def session_rpe_load(self, activity_id: Any, today: date) -> dict[str, Any] | None:
+        """The session-RPE load the detail document serves for one activity."""
+        normalized_id = str(activity_id or "").strip()
+        if not normalized_id or len(normalized_id) > 200:
+            return None
+        _canonical, summaries = self._performance_inputs(today, normalized_id)
+        reference = str(self._references.resolve_reference(normalized_id).activity_id)
+        return feedback_session_load(
+            self._feedback_service,
+            [reference, normalized_id],
+            _find_summary(summaries, normalized_id),
+        )
 
     def detail(
         self,

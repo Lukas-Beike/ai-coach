@@ -135,14 +135,20 @@
     form.append(rpeLabel, reasonLabel, notesLabel, save); section.append(load, form, status); content.append(section);
     let shown = feedback;
     const fill = (value) => { setRpe(rpe, value?.session_rpe); reason.value = value?.deviation_reason || ""; notes.value = value?.notes || ""; };
-    // The served document recomputes the load from the saved feedback and its provider fallback.
+    // The save and undo responses carry the load recomputed from the saved feedback and its provider fallback.
     let loadGeneration = 0;
-    // Only the newest refresh may write, so a slow save response cannot overwrite a later undo.
-    const refreshLoad = async () => {
-      const current = ++loadGeneration;
+    // Only the newest request may write, so a slow save response cannot overwrite a later undo.
+    const applyLoad = async (generation, response) => {
+      if (response && "session_rpe_load" in response) {
+        if (generation === loadGeneration) {
+          showLoad(response.session_rpe_load);
+        }
+        return;
+      }
+      // The response had no load (it could not be read): fall back to the served detail.
       try {
         const payload = await api(`/api/activities/${encodeURIComponent(activityId)}`);
-        if (current === loadGeneration) showLoad(payload.session_rpe_load);
+        if (generation === loadGeneration) showLoad(payload.session_rpe_load);
       } catch { /* the saved feedback stays shown */ }
     };
     form.addEventListener("submit", async (event) => {
@@ -150,23 +156,24 @@
       try {
         const raw = rpe.value; const value = { activity_name: session?.name || "", activity_date: session?.started_at_local || "", notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
         if (raw !== "" && (!Number.isFinite(value.session_rpe) || value.session_rpe < 0 || value.session_rpe > 10)) throw new Error("RPE muss zwischen 0 und 10 liegen.");
+        const generation = ++loadGeneration;
         const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });
         const previous = shown; shown = result.activity_feedback;
         status.textContent = result.activity_feedback ? "Feedback gespeichert. " : "Feedback entfernt. ";
-        if (result.change?.id) status.append(feedbackUndoButton(api, result.change, status, () => { shown = previous; fill(previous); void refreshLoad(); }));
-        void refreshLoad();
+        if (result.change?.id) status.append(feedbackUndoButton(api, result.change, activityId, status, () => ++loadGeneration, (response, generation) => { shown = previous; fill(previous); void applyLoad(generation, response); }));
+        void applyLoad(generation, result);
       } catch (error) { status.textContent = error.message; } finally { save.disabled = false; }
     });
   }
 
   // Undo restores the feedback rows as they were before this save or removal.
-  function feedbackUndoButton(api, change, status, restored) {
+  function feedbackUndoButton(api, change, activityId, status, begin, restored) {
     const undo = node("button", "Rückgängig", "message-undo"); undo.type = "button";
     undo.addEventListener("click", async () => {
-      undo.disabled = true;
+      undo.disabled = true; const generation = begin();
       try {
-        await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
-        restored(); status.textContent = "Zurückgenommen.";
+        const response = await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash, activity_id: activityId }) });
+        restored(response, generation); status.textContent = "Zurückgenommen.";
       } catch (error) { undo.disabled = false; status.textContent = error.message; }
     });
     return undo;

@@ -62,3 +62,31 @@ class ActivityFeedbackPostRouteTests(unittest.TestCase):
         handler.send_json.assert_called_once_with(
             200, {"status": "ok", "activity_feedback": {"session_rpe": 6}}
         )
+
+    def test_activity_feedback_save_returns_the_session_load(self) -> None:
+        service = Mock()
+        service.save_coach.return_value = {"status": "ok"}
+        load = Mock(return_value={"value": 300})
+        handler = SimpleNamespace(
+            read_json=Mock(return_value={"session_rpe": 6}), send_json=Mock()
+        )
+        route = FeedbackPostRoutes(lambda: Mock(), lambda: service, load)
+
+        self.assertTrue(route.handle(handler, "/api/activities/ride-1/feedback"))
+        load.assert_called_once_with("ride-1")
+        handler.send_json.assert_called_once_with(
+            200, {"status": "ok", "session_rpe_load": {"value": 300}}
+        )
+
+    def test_failed_load_read_keeps_the_committed_save_response(self) -> None:
+        service = Mock()
+        service.save_coach.return_value = {"status": "ok"}
+        handler = SimpleNamespace(
+            read_json=Mock(return_value={"session_rpe": 6}), send_json=Mock()
+        )
+        route = FeedbackPostRoutes(
+            lambda: Mock(), lambda: service, Mock(side_effect=OSError("synthetic"))
+        )
+
+        self.assertTrue(route.handle(handler, "/api/activities/ride-1/feedback"))
+        handler.send_json.assert_called_once_with(200, {"status": "ok"})
