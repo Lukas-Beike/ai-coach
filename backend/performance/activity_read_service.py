@@ -95,6 +95,15 @@ class ActivityAnalysisReadService(ActivityReadService):
                 summaries = tuple(reader.activity_summaries(db))
         return canonical, summaries
 
+    def summaries_between(self, start: date, end: date) -> list[ActivitySummary] | None:
+        """Canonical activity summaries from ``start`` to ``end``; ``None`` if unreadable."""
+        source = self._canonical
+        reader = source.activity_summary_reader()
+        if reader is None:
+            return None
+        with source.database_manager().read_snapshot() as db:
+            return list(reader.activity_summaries(db, start=start, end=end))
+
     def detail(
         self,
         activity_id: Any,

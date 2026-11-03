@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, datetime
 
 from backend.planning import leg_strength, plan_checks
 from backend.planning.plan_guard_service import build_planning_brief
@@ -378,6 +378,58 @@ class RunningWeekDedupTests(unittest.TestCase):
         self.assertEqual([], leg_strength.frequency(planned, today, False, completed))
         week = leg_strength.planned_weeks(planned, today, completed)[0]
         self.assertEqual(3, week["leg_sessions"])
+
+
+class StrengthBeforeTests(unittest.TestCase):
+    START = datetime(2026, 11, 3, 18, 0)
+
+    @staticmethod
+    def done(started, **extra):
+        return {
+            "sport": "strength",
+            "started_at_local": started,
+            "name": "Gym",
+            **extra,
+        }
+
+    def test_heavy_leg_session_20_hours_before(self):
+        done = self.done("2026-11-02T22:00:00", description="legs heavy")
+        result = leg_strength.strength_before(self.START, [done], lambda: [])
+        self.assertEqual("completed", result["origin"])
+        self.assertEqual(
+            [{"hours_before": 20.0, "legs": True, "intensity": "heavy"}],
+            result["sessions"],
+        )
+
+    def test_upper_body_planned_session_is_listed_as_not_legs(self):
+        planned = unit(
+            "u",
+            "2026-11-02",
+            "strength",
+            session_focus="upper",
+            starts_at_local="2026-11-02T10:00:00",
+        )
+        result = leg_strength.strength_before(self.START, [], lambda: [planned])
+        self.assertEqual("planned", result["origin"])
+        self.assertIs(False, result["sessions"][0]["legs"])
+        self.assertEqual(32.0, result["sessions"][0]["hours_before"])
+
+    def test_none_and_older_sessions_are_none_found(self):
+        old = self.done("2026-10-30T10:00:00")
+        run = {"sport": "run", "started_at_local": "2026-11-03T08:00:00"}
+        result = leg_strength.strength_before(self.START, [old, run], lambda: None)
+        self.assertEqual("none_found", result["origin"])
+        self.assertEqual([], result["sessions"])
+        self.assertFalse(result["planned_checked"])
+
+    def test_unreadable_activities_are_not_covered_and_carry_no_load(self):
+        result = leg_strength.strength_before(self.START, None, lambda: [])
+        self.assertEqual("not_covered", result["status"])
+        done = self.done("2026-11-03T08:00:00", rpe=9, training_load=80)
+        row = leg_strength.strength_before(self.START, [done], lambda: [])["sessions"][
+            0
+        ]
+        self.assertEqual({"hours_before", "legs", "intensity"}, set(row))
 
 
 if __name__ == "__main__":

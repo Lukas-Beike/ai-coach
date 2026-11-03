@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
+from backend.canonical.activity_summary import stored_activity_key
 from backend.coach.context import (
     bounded_coach_context_value,
     coach_context_json_size,
     coach_sleep_timing_projection,
 )
+from backend.coach.session_checks import matched_focus
 from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.pace_at_hr import session_comparison
+from backend.planning import leg_strength
 from backend.sync.garmin import GarminPayloadService
 
 
@@ -115,31 +119,110 @@ class CoachActivityReadToolService:
                 profile=self._profile.get(),
                 today=self._today(),
             )
-            return {**detail, "planned_units": self._planned_around(detail)}
+            return self._with_session_context(detail)
         return None
 
-    def _planned_around(self, detail: dict[str, Any]) -> Any:
-        """Local planned units one day around the analysed session's date.
+    def _session_day(self, detail: dict[str, Any]) -> date | None:
+        session = detail.get("session")
+        if not isinstance(session, dict):
+            return None
+        try:
+            return date.fromisoformat(iso_date_prefix(session.get("started_at_local")))
+        except ValueError:
+            return None
+
+    def _units_since(self, day: date | None) -> list[dict[str, Any]] | None:
+        """Local planned units from two days before the session's date on."""
+        if self._planned_units is None or day is None:
+            return None
+        return self._planned_units.list(
+            250, future_only=True, since=day - timedelta(days=2)
+        )
+
+    @staticmethod
+    def _units_around(
+        units: list[dict[str, Any]] | None, day: date | None
+    ) -> list[dict[str, Any]] | None:
+        """Units one day around the session's date.
 
         The context window is anchored on today, so an older session would lose its
         plan; the unit comes with the session instead.
         """
-        session = detail.get("session")
-        if self._planned_units is None or not isinstance(session, dict):
-            return None
-        try:
-            day = date.fromisoformat(iso_date_prefix(session.get("started_at_local")))
-        except ValueError:
+        if units is None or day is None:
             return None
         first, last = day - timedelta(days=1), day + timedelta(days=1)
-        units = self._planned_units.list(250, future_only=True, since=first)
-        window = (first.isoformat(), last.isoformat())
-        around = [
+        return [
             unit
             for unit in units
-            if window[0] <= iso_date_prefix(unit.get("date")) <= window[1]
+            if first.isoformat()
+            <= iso_date_prefix(unit.get("date"))
+            <= last.isoformat()
         ]
-        return bounded_coach_context_value(around[:10], 4000)
+
+    def _with_session_context(self, detail: dict[str, Any]) -> dict[str, Any]:
+        """The detail with its planned units and the session checks.
+
+        Focus, pace at heart rate and leg strength before a run or ride come
+        with the tool result, not the base context.
+        """
+        day = self._session_day(detail)
+        units = self._units_since(day)
+        around = self._units_around(units, day)
+        result = {
+            **detail,
+            "planned_units": None
+            if around is None
+            else bounded_coach_context_value(around[:10], 4000),
+        }
+        session = detail.get("session")
+        if isinstance(session, dict) and day is not None:
+            result.update(self._session_checks(session, day, around, units))
+        return result
+
+    def _session_checks(
+        self,
+        session: dict[str, Any],
+        day: date,
+        around: list[dict[str, Any]] | None,
+        units: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        checks: dict[str, Any] = {"focus": matched_focus(session, around)}
+        if session.get("sport") not in ("run", "ride"):
+            return checks
+        nearby = self._activity_read.summaries_between(day - timedelta(days=2), day)
+        checks["strength_before"] = self._strength_before(session, nearby, units)
+        if session.get("sport") == "run":
+            checks["pace_at_heart_rate"] = self._pace_at_heart_rate(session, nearby)
+        return checks
+
+    @staticmethod
+    def _strength_before(
+        session: dict[str, Any], nearby: Any, units: list[dict[str, Any]] | None
+    ) -> dict[str, Any]:
+        try:
+            start = datetime.fromisoformat(str(session.get("started_at_local")))
+        except ValueError:
+            return {"status": "not_covered", "reason": "Startzeit unbekannt."}
+        return leg_strength.strength_before(start, nearby, lambda: units)
+
+    def _pace_at_heart_rate(
+        self, session: dict[str, Any], nearby: Any
+    ) -> dict[str, Any]:
+        own = next(
+            (
+                row
+                for row in nearby or ()
+                if row.get("id") == session.get("activity_id")
+            ),
+            None,
+        )
+        if self._report_services is None or own is None:
+            return {
+                "status": "not_covered",
+                "reason": "Auswertung der Messreihen nicht verfügbar.",
+            }
+        records = self._report_services.profiles.curve_records()
+        return session_comparison(records, stored_activity_key(own))
 
     @staticmethod
     def _bounded_integer(

@@ -45,6 +45,7 @@ BLOCK_WORD_BUDGETS = {
     "_CALENDAR": 45,
     "_PLAN_CHECK": 80,
     "_ADAPTIVE": 140,
+    "_SESSION_CHECKS": 95,
     "_NUTRITION": 520,
 }
 TASK_WORD_BUDGET = 190
@@ -131,6 +132,13 @@ class PlaybookInjectionTests(unittest.TestCase):
                 self.assertIn("Never use ACWR", text)
                 self.assertIn("pyramidal when it is absent", text)
                 self.assertIn("training_model", text)
+
+    def test_session_analysis_carries_the_session_checks_only(self) -> None:
+        text = playbook_for("session_analysis")
+        for needle in ("session_focus", "pace_at_heart_rate", "never a proven cause"):
+            self.assertIn(needle, text)
+        self.assertIn("not_covered", text)
+        self.assertNotIn(playbooks._SESSION_CHECKS, playbook_for("block_review"))
 
     def test_kind_specific_content(self) -> None:
         self.assertIn("get_activity_details", playbook_for("session_analysis"))

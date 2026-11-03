@@ -7,6 +7,7 @@ from backend.performance.pace_at_hr import (
     grade_adjusted,
     pace_at_heart_rate,
     pace_at_heart_rate_trend,
+    session_comparison,
 )
 from backend.planning.block_review import _performance
 
@@ -171,6 +172,56 @@ class TrendTests(unittest.TestCase):
         )
         self.assertEqual(missing["not_covered"], ["pace_at_heart_rate"])
         self.assertEqual(_performance({})["not_covered"], ["pace_at_heart_rate"])
+
+
+def _peer(day, pace_speed=3.0, hr=145, environment="outdoor", **extra):
+    profile = pace_at_heart_rate(
+        _run(speed=pace_speed, hr=hr, grade=0.0, environment=environment, **extra)
+    )
+    return _record(day, profile, environment)
+
+
+class SessionComparisonTests(unittest.TestCase):
+    def _records(self, count, own=None):
+        own = own or _peer("2026-11-02", 3.1)
+        peers = [_peer(f"2026-10-{10 + index:02d}") for index in range(count)]
+        return [own, *peers]
+
+    def test_compares_with_the_median_of_comparable_runs(self):
+        result = session_comparison(self._records(3), "2026-11-02")
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(3, result["comparable"]["count"])
+        self.assertEqual([140, 149], result["heart_rate_band_bpm"])
+        self.assertEqual(333.3, result["comparable"]["median_pace_s_per_km"])
+        self.assertEqual(-10.7, result["difference_s_per_km"])
+
+    def test_too_few_comparable_runs_is_not_covered_with_the_count(self):
+        result = session_comparison(self._records(2), "2026-11-02")
+        self.assertEqual("not_covered", result["status"])
+        self.assertEqual(2, result["comparable"]["count"])
+        self.assertNotIn("difference_s_per_km", result)
+
+    def test_runs_older_than_42_days_and_other_environments_do_not_count(self):
+        old = _peer("2026-09-01")
+        indoor = _peer("2026-10-20", environment="indoor")
+        result = session_comparison([*self._records(2), old, indoor], "2026-11-02")
+        self.assertEqual(2, result["comparable"]["count"])
+
+    def test_run_without_heart_rate_is_not_covered_with_the_reason(self):
+        no_hr = _record(
+            "2026-11-02",
+            pace_at_heart_rate(
+                {**_run(grade=0.0), "streams": {"time": list(range(SECONDS))}}
+            ),
+        )
+        result = session_comparison([no_hr, *self._records(3)[1:]], "2026-11-02")
+        self.assertEqual("not_covered", result["status"])
+        self.assertIn("Puls", result["reason"])
+
+    def test_unknown_session_is_not_covered(self):
+        self.assertEqual(
+            "not_covered", session_comparison(self._records(3), "missing")["status"]
+        )
 
 
 if __name__ == "__main__":
