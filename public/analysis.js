@@ -831,7 +831,7 @@ function appendDailyActivityGroup(activity, loadRoot, loadMissing, start, end) {
     const current = daily.findLast(analysisValidPoint);
     const series = [{ label: weekly ? `${label} Ø pro Tag` : label, legendLabel: label, source: activity.source, unit, color, bars: true, connected: true, cadenceDays: weekly ? 7 : 1, points, currentPoint: current }];
     const title = current ? `${label} · ${analysisValue(current.value, unit)}` : label;
-    const chart = collectAnalysisChart(loadMissing, label, series, unit, start, end, `${activity.source}: ${weekly ? "Tagesdurchschnitt je Woche" : "Tageswerte"}. Fehlende Tage bleiben Lücken.`, { calendarWeeks: weekly });
+    const chart = collectAnalysisChart(loadMissing, title, series, unit, start, end, `${activity.source}: ${weekly ? "Tagesdurchschnitt je Woche" : "Tageswerte"}. Fehlende Tage bleiben Lücken.`, { calendarWeeks: weekly });
     if (!chart) continue;
     chart.querySelector(".analysis-chart-legend")?.remove();
     charts.push(chart); allSeries.push(series[0]);
