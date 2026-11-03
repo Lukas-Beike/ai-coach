@@ -8,6 +8,7 @@ from typing import Any
 from backend.coach.proposal_creation import CoachProposalCreationService
 from backend.coach.turn_undo import CoachTurnUndoService
 from backend.history.undo_service import HistoryUndoService
+from backend.http_api.session_load_response import with_session_load
 
 
 class HistoryUndoPostRoutes:
@@ -43,15 +44,10 @@ class HistoryUndoPostRoutes:
             activity_id = (
                 payload.get("activity_id") if isinstance(payload, dict) else None
             )
-            if (
-                self._session_rpe_load is not None
-                and result.get("entity_type") == "activity_feedback"
-                and isinstance(activity_id, str)
+            if result.get("entity_type") == "activity_feedback" and isinstance(
+                activity_id, str
             ):
-                result = {
-                    **result,
-                    "session_rpe_load": self._session_rpe_load(activity_id),
-                }
+                result = with_session_load(result, self._session_rpe_load, activity_id)
             handler.send_json(200, result)
         elif path == "/api/change-history/undo-turn":
             client_turn_id = handler.read_json().get("client_turn_id")

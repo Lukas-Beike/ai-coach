@@ -266,8 +266,9 @@ test("@responsive feedback save and undo show the returned load without a detail
     globalThis.syntheticCalls = [];
     const fakeApi = async (url, options) => {
       syntheticCalls.push(url);
+      if (url === "/api/change-history/undo") globalThis.undoBody = JSON.parse(options.body);
       if (url.endsWith("/feedback")) return { status: "ok", activity_feedback: { session_rpe: 5 }, change: { id: "c1", after_hash: "h" }, session_rpe_load: load(300) };
-      if (url === "/api/change-history/undo") return { status: "undone", session_rpe_load: null, echoed: JSON.parse(options.body).activity_id };
+      if (url === "/api/change-history/undo") return { status: "undone", session_rpe_load: null };
       return data;
     };
     await ActivityDetails.open({ id: "load-1" }, { api: fakeApi, showDialog: (dialog) => dialog.showModal() });
@@ -278,6 +279,7 @@ test("@responsive feedback save and undo show the returned load without a detail
   await expect(dialog.locator("[data-session-rpe-load]")).toContainText("300 AU");
   await dialog.getByRole("button", { name: "Rückgängig" }).click();
   await expect(dialog.locator("[data-session-rpe-load]")).toBeHidden();
+  expect(await page.evaluate(() => undoBody.activity_id)).toBe("load-1");
   expect(await page.evaluate(() => syntheticCalls.filter((url) => url === "/api/activities/load-1").length)).toBe(1);
   await page.evaluate(() => ActivityDetails.close(false));
 });

@@ -138,12 +138,20 @@
     // The save and undo responses carry the load recomputed from the saved feedback and its provider fallback.
     let loadGeneration = 0;
     // Only the newest request may write, so a slow save response cannot overwrite a later undo.
-    const applyLoad = (generation, response) => { if (generation === loadGeneration && response && "session_rpe_load" in response) showLoad(response.session_rpe_load); };
+    const applyLoad = async (generation, response) => {
+      if (response && "session_rpe_load" in response) { if (generation === loadGeneration) showLoad(response.session_rpe_load); return; }
+      // The response had no load (it could not be read): fall back to the served detail.
+      try {
+        const payload = await api(`/api/activities/${encodeURIComponent(activityId)}`);
+        if (generation === loadGeneration) showLoad(payload.session_rpe_load);
+      } catch { /* the saved feedback stays shown */ }
+    };
     form.addEventListener("submit", async (event) => {
-      event.preventDefault(); save.disabled = true; status.textContent = "Speichere …"; const generation = ++loadGeneration;
+      event.preventDefault(); save.disabled = true; status.textContent = "Speichere …";
       try {
         const raw = rpe.value; const value = { activity_name: session?.name || "", activity_date: session?.started_at_local || "", notes: notes.value, deviation_reason: reason.value, session_rpe: raw === "" ? null : Number(raw) };
         if (raw !== "" && (!Number.isFinite(value.session_rpe) || value.session_rpe < 0 || value.session_rpe > 10)) throw new Error("RPE muss zwischen 0 und 10 liegen.");
+        const generation = ++loadGeneration;
         const result = await api(`/api/activities/${encodeURIComponent(activityId)}/feedback`, { method: "POST", body: JSON.stringify(value) });
         const previous = shown; shown = result.activity_feedback;
         status.textContent = result.activity_feedback ? "Feedback gespeichert. " : "Feedback entfernt. ";

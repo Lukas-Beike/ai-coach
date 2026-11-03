@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.athlete.checkins import CheckinService
+from backend.http_api.session_load_response import with_session_load
 
 
 class FeedbackPostRoutes:
@@ -40,11 +41,7 @@ class FeedbackPostRoutes:
                 if has_feedback
                 else feedback.save(activity_id, payload)
             )
-            if self._session_rpe_load is not None:
-                result = {
-                    **result,
-                    "session_rpe_load": self._session_rpe_load(activity_id),
-                }
+            result = with_session_load(result, self._session_rpe_load, activity_id)
             handler.send_json(200, result)
             return True
         if path != "/api/feedback":
