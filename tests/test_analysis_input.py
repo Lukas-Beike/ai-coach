@@ -333,6 +333,19 @@ class AnalysisInputMappingTests(unittest.TestCase):
         )
         self.assertFalse(adapted.activity["trail"])
 
+    def test_garmin_outdoor_runs_are_trail_runs(self) -> None:
+        # Garmin maps only trail_running to an outdoor run.
+        adapted = analysis_input(
+            as_provider(record(Sport.RUN), ProviderId.GARMIN), None, None
+        )
+        self.assertTrue(adapted.activity["trail"])
+        unknown = analysis_input(
+            as_provider(record(Sport.RUN, Environment.UNKNOWN), ProviderId.GARMIN),
+            None,
+            None,
+        )
+        self.assertFalse(unknown.activity["trail"])
+
     def test_moving_flags_map_to_booleans_and_gaps(self) -> None:
         source = candidate(
             ProviderId.INTERVALS, "Intervals.icu", {POWER: (200.0,) * len(TIME)}

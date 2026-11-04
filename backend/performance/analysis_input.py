@@ -91,18 +91,22 @@ def analysis_input(
     )
 
 
+_TRAIL_PROVIDERS = frozenset({ProviderId.INTERVALS, ProviderId.GARMIN})
+
+
 def analysis_sport(record: ActivityRecord) -> dict[str, Any]:
     """Return the canonical sport, environment and trail-run flag of a record.
 
-    Intervals.icu names its outdoor trail runs "TrailRun"; only those are
-    ``trail``, other sources' outdoor runs are not.
+    Intervals.icu ("TrailRun") and Garmin ("trail_running") map only trail
+    runs to an outdoor run, so those are ``trail``; Wahoo maps every outdoor
+    run as outdoor, so its runs are not.
     """
     return {
         "sport": record.sport.value,
         "environment": record.environment.value,
         "trail": record.sport is Sport.RUN
         and record.environment is Environment.OUTDOOR
-        and record.provenance.provider is ProviderId.INTERVALS,
+        and record.provenance.provider in _TRAIL_PROVIDERS,
     }
 
 

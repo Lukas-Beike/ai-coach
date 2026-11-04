@@ -81,8 +81,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_nine(self) -> None:
-        self.assertEqual(9, MAPPER_VERSION)
+    def test_mapper_version_is_ten(self) -> None:
+        self.assertEqual(10, MAPPER_VERSION)
 
     def test_strength_duration_is_the_whole_session_not_the_active_timer(
         self,
@@ -435,6 +435,14 @@ class ActivityTypeTests(unittest.TestCase):
         record, _ = _one(activityType={"typeKey": "road_biking"})
         assert record is not None
         self.assertIs(Sport.RIDE, record.sport)
+
+    def test_only_off_road_runs_are_outdoor_runs(self) -> None:
+        outdoor_runs = {
+            key
+            for key, (sport, environment) in GARMIN_ACTIVITY_TYPES.items()
+            if sport is Sport.RUN and environment is Environment.OUTDOOR
+        }
+        self.assertEqual({"trail_running", "obstacle_run"}, outdoor_runs)
 
     def test_type_key_is_case_and_space_insensitive(self) -> None:
         record, _ = _one(activityType={"typeKey": "  Road_Biking "})
