@@ -88,7 +88,9 @@ confirmation. List every unfixed finding with its reason in the PR body.
   bypass it with `--no-verify`.
 - Create one non-draft PR against `develop` (or reuse the open one for this
   branch) with an English Conventional Commit title and a body covering the
-  change, validation, and review results. Pass bodies with `--body-file`.
+  change, validation, and review results, plus a merge-danger line: one-way or
+  two-way door (schema migrations and remote writes are usually one-way) and
+  the blast radius. Pass bodies with `--body-file`.
   Link the PR with the host's PR-linking tool when available.
 - Enable `gh pr merge <number> --auto --squash` only when the base is `develop`
   and no feedback is open.
