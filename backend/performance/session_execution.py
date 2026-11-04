@@ -11,6 +11,7 @@ compared with other sessions or with norms. Pure: no I/O, inputs unchanged.
 
 from __future__ import annotations
 
+import bisect
 import itertools
 import math
 import statistics
@@ -21,11 +22,11 @@ METHOD: Final = "session-execution-v1"
 SCOPE: Final = (
     "Descriptive execution of this one session from its own streams and laps. "
     "Output is pace in s/km for runs and power in W for rides (speed in km/h "
-    "for rides without power). change_pct is later minus earlier output in "
-    "percent: negative means slower or less power. Heart rate is not judged "
-    "for work laps under 120 s (short). heart_rate_drop_60s is the drop from "
-    "the highest heart rate in the first 15 s of a recovery to the mean "
-    "55-65 s into it."
+    "for rides without power). Every change_pct is computed on speed or power, "
+    "later minus earlier in percent: negative means slower or less power. "
+    "Heart rate is not judged for work laps under 120 s (short). "
+    "heart_rate_drop_60s is the drop from the highest heart rate in the first "
+    "15 s of a recovery to the mean 55-65 s into it."
 )
 SHORT_REP_S: Final = 120.0
 MIN_LAP_S: Final = 20.0
@@ -41,14 +42,18 @@ HR_SPIKE_BPM: Final = 20.0
 HR_SPIKE_SHARE: Final = 0.02
 SPEED_JUMP_MPS: Final = 2.5
 SPEED_JUMP_SHARE: Final = 0.01
+# Heart rate locked onto step cadence: close to it, following its changes.
 CADENCE_LOCK_BPM: Final = 4.0
 CADENCE_LOCK_SHARE: Final = 0.5
 CADENCE_LOCK_MIN_SPM: Final = 140.0
+CADENCE_LOCK_MIN_SPREAD_SPM: Final = 3.0
+CADENCE_LOCK_MIN_CORRELATION: Final = 0.8
 
 _WORK: Final = "work"
 _RECOVERY: Final = "recovery"
 _WARMUP: Final = "warmup"
 _COOLDOWN: Final = "cooldown"
+_LAP: Final = "lap"
 
 
 def session_execution(
@@ -63,6 +68,7 @@ def session_execution(
     times = streams.get("time") or []
     if (
         len(times) < 2
+        or _number(times[0]) is None
         or _number(times[-1]) is None
         or times[-1] - times[0] < MIN_SESSION_S
     ):
@@ -79,17 +85,15 @@ def session_execution(
             "reason": "Tempo oder Leistung fehlt.",
         }
     reader = _Reader(sport, streams, channel)
-    laps = _classified_laps(activity.get("laps") or [], reader)
-    structure = (
-        "intervals" if sum(lap["kind"] == _WORK for lap in laps) >= 2 else "continuous"
-    )
+    laps, origin = _classified_laps(activity.get("laps") or [], reader)
+    structure = "continuous" if origin == "no_work_laps" else "intervals"
     result: dict[str, Any] = {
         **base,
         "status": "ok",
         "output": reader.output_name,
         "output_unit": reader.output_unit,
         "structure": structure,
-        "structure_origin": _structure_origin(laps, structure),
+        "structure_origin": origin,
         "data_quality": _data_quality(sport, streams),
         "duration_s": round(float(times[-1] - times[0])),
     }
@@ -104,6 +108,39 @@ def session_execution(
     return result
 
 
+class _Window:
+    """Prefix sums of one channel's valid sample intervals for fast window means."""
+
+    def __init__(self, lefts: list[float], rights: list[float], values: list[float]):
+        self.lefts = lefts
+        self.rights = rights
+        self.values = values
+        self.weights = [
+            0.0,
+            *itertools.accumulate(r - l for l, r in zip(lefts, rights, strict=True)),
+        ]
+        self.sums = [
+            0.0,
+            *itertools.accumulate(
+                (r - l) * v for l, r, v in zip(lefts, rights, values, strict=True)
+            ),
+        ]
+
+    def mean(self, start: float, end: float) -> float | None:
+        first = bisect.bisect_right(self.rights, start)
+        last = bisect.bisect_left(self.lefts, end)
+        if first >= last:
+            return None
+        weight = self.weights[last] - self.weights[first]
+        total = self.sums[last] - self.sums[first]
+        # Trim the parts of the edge intervals outside the window.
+        head = max(0.0, start - self.lefts[first])
+        tail = max(0.0, self.rights[last - 1] - end)
+        weight -= head + tail
+        total -= head * self.values[first] + tail * self.values[last - 1]
+        return total / weight if weight > 0 else None
+
+
 class _Reader:
     """Time-weighted means of the session's channels over a time window."""
 
@@ -112,6 +149,7 @@ class _Reader:
         self._streams = streams
         self._channel = channel
         self._run = sport == "run"
+        self._windows: dict[tuple[str, bool], _Window | None] = {}
         if channel == "watts":
             self.output_name, self.output_unit = "power", "W"
         elif self._run:
@@ -119,32 +157,41 @@ class _Reader:
         else:
             self.output_name, self.output_unit = "speed", "km/h"
 
-    def mean(
-        self, key: str, start: float, end: float, *, moving_only: bool = True
-    ) -> float | None:
+    def _window(self, key: str, moving_only: bool) -> _Window | None:
+        cached = (key, moving_only)
+        if cached not in self._windows:
+            self._windows[cached] = self._build(key, moving_only)
+        return self._windows[cached]
+
+    def _build(self, key: str, moving_only: bool) -> _Window | None:
         values = self._streams.get(key)
         if not isinstance(values, list) or len(values) != len(self._times):
             return None
         moving = self._streams.get("moving")
-        moving = (
-            moving if isinstance(moving, list) and len(moving) == len(values) else None
-        )
-        total = weight = 0.0
+        if not (isinstance(moving, list) and len(moving) == len(values)):
+            moving = None
+        lefts: list[float] = []
+        rights: list[float] = []
+        kept: list[float] = []
         for index in range(len(self._times) - 1):
             left, right = self._times[index], self._times[index + 1]
             value = _number(values[index])
             if left is None or right is None or value is None:
                 continue
-            if right - left > MAX_GAP_S:
+            if not 0 < right - left <= MAX_GAP_S:
                 continue
             if moving_only and moving is not None and moving[index] is not True:
                 continue
-            span = min(right, end) - max(left, start)
-            if span <= 0:
-                continue
-            total += value * span
-            weight += span
-        return total / weight if weight > 0 else None
+            lefts.append(left)
+            rights.append(right)
+            kept.append(value)
+        return _Window(lefts, rights, kept) if kept else None
+
+    def mean(
+        self, key: str, start: float, end: float, *, moving_only: bool = True
+    ) -> float | None:
+        window = self._window(key, moving_only)
+        return None if window is None else window.mean(start, end)
 
     def peak(self, key: str, start: float, end: float) -> float | None:
         values = self._streams.get(key)
@@ -158,20 +205,20 @@ class _Reader:
         ]
         return max(found) if found else None
 
-    def output(self, start: float, end: float) -> float | None:
-        """Mean output; speed is averaged first, then shown as pace or km/h."""
-        value = self.mean(self._channel, start, end)
-        if value is None or value <= 0:
-            return None
-        if self._channel == "watts":
-            return round(value)
-        if self._run:
-            return round(1000.0 / value)
-        return round(value * 3.6, 1)
-
     def raw_output(self, start: float, end: float) -> float | None:
+        """Mean moving speed (m/s) or power (W) over the window."""
         value = self.mean(self._channel, start, end)
         return value if value is not None and value > 0 else None
+
+    def shown(self, raw: float | None) -> float | None:
+        """Speed shown as pace (runs) or km/h; power as watts."""
+        if raw is None:
+            return None
+        if self._channel == "watts":
+            return round(raw)
+        if self._run:
+            return round(1000.0 / raw)
+        return round(raw * 3.6, 1)
 
     def cadence(self, start: float, end: float) -> float | None:
         value = self.mean("cadence", start, end)
@@ -187,7 +234,7 @@ class _Reader:
         return _drop_none(
             {
                 "duration_s": round(end - start),
-                "output": self.output(start, end),
+                "output": self.shown(self.raw_output(start, end)),
                 "heart_rate_avg": self.heart_rate(start, end),
                 "cadence": self.cadence(start, end),
             }
@@ -195,14 +242,12 @@ class _Reader:
 
 
 def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, Any]:
+    works = [index for index, lap in enumerate(laps) if lap["kind"] == _WORK]
+    raw = [reader.raw_output(laps[i]["start"], laps[i]["end"]) for i in works]
     reps: list[dict[str, Any]] = []
     recoveries: list[dict[str, Any]] = []
-    works = [lap for lap in laps if lap["kind"] == _WORK][:MAX_REPS]
-    following = {
-        id(lap): laps[index + 1] if index + 1 < len(laps) else None
-        for index, lap in enumerate(laps)
-    }
-    for number, lap in enumerate(works, start=1):
+    for number, index in enumerate(works[:MAX_REPS], start=1):
+        lap = laps[index]
         start, end = lap["start"], lap["end"]
         middle = (start + end) / 2
         duration = end - start
@@ -211,9 +256,9 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
             "rep": number,
             "duration_s": round(duration),
             "distance_m": lap.get("distance_m"),
-            "output": reader.output(start, end),
-            "output_first_half": reader.output(start, middle),
-            "output_second_half": reader.output(middle, end),
+            "output": reader.shown(raw[number - 1]),
+            "output_first_half": reader.shown(first),
+            "output_second_half": reader.shown(second),
             "within_rep_change_pct": _change_pct(first, second),
             "heart_rate_avg": reader.heart_rate(start, end),
             "heart_rate_end": reader.heart_rate(max(start, end - 10.0), end),
@@ -221,12 +266,14 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
             "short": duration < SHORT_REP_S,
         }
         reps.append(_drop_none(rep))
-        recovery = following[id(lap)]
-        if recovery is not None and recovery["kind"] == _RECOVERY:
-            recoveries.append({"after_rep": number, **_recovery(recovery, reader)})
-    raw = [reader.raw_output(lap["start"], lap["end"]) for lap in works]
+        if index + 1 < len(laps) and laps[index + 1]["kind"] == _RECOVERY:
+            recoveries.append(
+                {"after_rep": number, **_recovery(laps[index + 1], reader)}
+            )
     known = [value for value in raw if value is not None]
     summary: dict[str, Any] = {"rep_count": len(works)}
+    if len(works) > MAX_REPS:
+        summary["reps_listed"] = MAX_REPS
     if len(known) >= 2:
         summary["first_to_last_change_pct"] = _change_pct(known[0], known[-1])
         summary["output_spread_pct"] = round(
@@ -251,7 +298,7 @@ def _recovery(lap: Mapping[str, Any], reader: _Reader) -> dict[str, Any]:
     start, end = lap["start"], lap["end"]
     item: dict[str, Any] = {
         "duration_s": round(end - start),
-        "output": reader.output(start, end),
+        "output": reader.shown(reader.raw_output(start, end)),
         "heart_rate_avg": reader.heart_rate(start, end),
     }
     if end - start >= 65.0:
@@ -281,8 +328,6 @@ def _halves(
         return {"status": "insufficient_data", "reason": "Hauptteil zu kurz."}
     middle = (start + end) / 2
     halves = {"first": reader.part(start, middle), "second": reader.part(middle, end)}
-    first_hr = halves["first"].get("heart_rate_avg")
-    second_hr = halves["second"].get("heart_rate_avg")
     result: dict[str, Any] = {
         "status": "ok",
         "main_part_s": round(end - start),
@@ -291,24 +336,30 @@ def _halves(
             reader.raw_output(start, middle), reader.raw_output(middle, end)
         ),
     }
-    if first_hr is not None and second_hr is not None:
-        result["heart_rate_change_bpm"] = second_hr - first_hr
-    first_cadence = halves["first"].get("cadence")
-    second_cadence = halves["second"].get("cadence")
-    if first_cadence is not None and second_cadence is not None:
-        result["cadence_change"] = second_cadence - first_cadence
+    for key, name in (
+        ("heart_rate_avg", "heart_rate_change_bpm"),
+        ("cadence", "cadence_change"),
+    ):
+        earlier, later = halves["first"].get(key), halves["second"].get(key)
+        if earlier is not None and later is not None:
+            result[name] = later - earlier
     return _drop_none(result)
 
 
 def _classified_laps(
     raw: Sequence[Mapping[str, Any]], reader: _Reader
-) -> list[dict[str, Any]]:
-    """Laps with a work, recovery, warm-up or cool-down role, in time order."""
+) -> tuple[list[dict[str, Any]], str]:
+    """Laps with a work, recovery, warm-up or cool-down role, and their origin.
+
+    Intervals need at least two work laps with a non-work lap between each
+    pair; otherwise the session is continuous and keeps only the provider's
+    own warm-up and cool-down labels.
+    """
     laps: list[dict[str, Any]] = [
         {
             "start": float(lap["start_time"]),
             "end": float(lap["end_time"]),
-            "kind": lap.get("kind") or "lap",
+            "kind": lap.get("kind") or _LAP,
             "distance_m": lap.get("distance_m"),
         }
         for lap in raw
@@ -316,43 +367,35 @@ def _classified_laps(
         and _number(lap.get("end_time")) is not None
         and float(lap["end_time"]) - float(lap["start_time"]) >= MIN_LAP_S
     ]
-    laps.sort(key=lambda lap: lap["start"])
-    works = [index for index, lap in enumerate(laps) if lap["kind"] == _WORK]
-    if works:
-        # Provider-labelled intervals: unlabelled laps before the first work lap
-        # warm up, after the last cool down, and between them recover.
-        for index, lap in enumerate(laps):
-            if lap["kind"] != "lap":
-                continue
-            if index < works[0]:
-                lap["kind"] = _WARMUP
-            elif index > works[-1]:
-                lap["kind"] = _COOLDOWN
-            else:
-                lap["kind"] = _RECOVERY
-        return laps
-    return _inferred(laps, reader)
+    laps.sort(key=lambda lap: float(lap["start"]))
+    labelled = [lap["kind"] == _WORK for lap in laps]
+    if _alternates(labelled):
+        return _with_roles(laps, labelled), "lap_kinds"
+    if not any(labelled):
+        inferred = _faster_laps(laps, reader)
+        if inferred is not None and _alternates(inferred):
+            return _with_roles(laps, inferred), "lap_output"
+    # Continuous: only the provider's own warm-up and cool-down labels stay.
+    for lap in laps:
+        if lap["kind"] not in {_WARMUP, _COOLDOWN}:
+            lap["kind"] = _LAP
+    return laps, "no_work_laps"
 
 
-def _inferred(laps: list[dict[str, Any]], reader: _Reader) -> list[dict[str, Any]]:
-    """Mark faster laps as work when lap outputs split into two clear groups."""
-    if len(laps) < 3:
-        return laps
-    outputs = [reader.raw_output(lap["start"], lap["end"]) for lap in laps]
-    if any(value is None for value in outputs):
-        return laps
-    known = [float(value) for value in outputs if value is not None]
-    ordered = sorted(known)
-    gaps = [(ordered[i + 1] - ordered[i], i) for i in range(len(ordered) - 1)]
-    gap, position = max(gaps)
-    threshold = ordered[position + 1]
-    if gap < WORK_GAP_SHARE * threshold:
-        return laps
-    work = [value >= threshold for value in known]
-    if sum(work) < 2:
-        return laps
+def _alternates(work: Sequence[bool]) -> bool:
+    """At least two work laps, each pair separated by a non-work lap."""
+    indexes = [index for index, flag in enumerate(work) if flag]
+    return len(indexes) >= 2 and all(
+        later - earlier > 1 for earlier, later in itertools.pairwise(indexes)
+    )
+
+
+def _with_roles(
+    laps: list[dict[str, Any]], work: Sequence[bool]
+) -> list[dict[str, Any]]:
+    """Work laps; others before the first warm up, after the last cool down."""
     first = work.index(True)
-    last = len(work) - 1 - work[::-1].index(True)
+    last = len(work) - 1 - list(reversed(work)).index(True)
     for index, lap in enumerate(laps):
         if work[index]:
             lap["kind"] = _WORK
@@ -362,17 +405,27 @@ def _inferred(laps: list[dict[str, Any]], reader: _Reader) -> list[dict[str, Any
             lap["kind"] = _COOLDOWN
         else:
             lap["kind"] = _RECOVERY
-    for lap in laps:
-        lap["inferred"] = True
     return laps
 
 
-def _structure_origin(laps: Sequence[Mapping[str, Any]], structure: str) -> str:
-    if structure == "continuous":
-        return "no_work_laps"
-    if any(lap.get("inferred") for lap in laps):
-        return "lap_output"
-    return "lap_kinds"
+def _faster_laps(
+    laps: Sequence[Mapping[str, Any]], reader: _Reader
+) -> list[bool] | None:
+    """Faster laps when lap outputs split into two clear groups, else None.
+
+    A lap without moving output (a standing rest) counts as the slowest.
+    """
+    if len(laps) < 3:
+        return None
+    outputs = [reader.raw_output(lap["start"], lap["end"]) or 0.0 for lap in laps]
+    ordered = sorted(outputs)
+    gap, position = max(
+        (ordered[i + 1] - ordered[i], i) for i in range(len(ordered) - 1)
+    )
+    threshold = ordered[position + 1]
+    if threshold <= 0 or gap < WORK_GAP_SHARE * threshold:
+        return None
+    return [value >= threshold for value in outputs]
 
 
 def _data_quality(sport: str, streams: Mapping[str, Any]) -> dict[str, str]:
@@ -416,18 +469,26 @@ def _jump_share(points: Sequence[tuple[float, float]], jump: float) -> float:
 def _cadence_locked(
     heart: Sequence[tuple[float, float]], cadence: Sequence[tuple[float, float]]
 ) -> bool:
+    """Heart rate close to step cadence and following its changes."""
     steps = {time: value * RUN_CADENCE_FACTOR for time, value in cadence}
-    running = [
-        abs(rate - steps[time])
+    pairs = [
+        (rate, steps[time])
         for time, rate in heart
         if time in steps and steps[time] >= CADENCE_LOCK_MIN_SPM
     ]
-    if len(running) < 60:
+    if len(pairs) < 60:
         return False
-    return (
-        sum(gap <= CADENCE_LOCK_BPM for gap in running) / len(running)
-        >= CADENCE_LOCK_SHARE
-    )
+    rates = [rate for rate, _ in pairs]
+    cadences = [step for _, step in pairs]
+    close = sum(abs(rate - step) <= CADENCE_LOCK_BPM for rate, step in pairs)
+    if close / len(pairs) < CADENCE_LOCK_SHARE:
+        return False
+    # Without cadence changes a close value is a coincidence, not a lock.
+    if statistics.pstdev(cadences) < CADENCE_LOCK_MIN_SPREAD_SPM:
+        return False
+    if statistics.pstdev(rates) == 0:
+        return False
+    return statistics.correlation(rates, cadences) >= CADENCE_LOCK_MIN_CORRELATION
 
 
 def _output_channel(sport: str, streams: Mapping[str, Any], length: int) -> str | None:

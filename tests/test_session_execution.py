@@ -160,11 +160,75 @@ class SessionExecutionTests(unittest.TestCase):
             speed[index] = 9.0
         flagged = session_execution(spiky)["data_quality"]
         self.assertEqual(flagged, {"heart_rate": "spikes", "speed": "jumps"})
+        # Heart rate following a changing step cadence is locked onto it.
         locked = _session([("lap", 1800, 3.0, (170.0, 170.0))], cadence=85.0)
+        steps = [
+            80.0 + (index // 60) % 10 for index in range(len(locked["streams"]["time"]))
+        ]
+        locked["streams"]["cadence"] = steps
+        locked["streams"]["heartrate"] = [step * 2 for step in steps]
         self.assertEqual(
             session_execution(locked)["data_quality"]["heart_rate"],
             "possible_cadence_lock",
         )
+        # A tempo run whose heart rate merely equals its steady cadence is fine.
+        tempo = _session([("lap", 1800, 3.5, (170.0, 170.0))], cadence=85.0)
+        self.assertEqual(session_execution(tempo)["data_quality"]["heart_rate"], "ok")
+
+    def test_steady_laps_with_one_slow_lap_stay_continuous(self) -> None:
+        segments = [("lap", 300, 3.3, (140.0, 150.0)) for _ in range(9)]
+        segments.append(("lap", 300, 2.5, (140.0, 130.0)))
+        result = session_execution(_session(segments, kinds=False))
+        self.assertEqual(result["structure"], "continuous")
+        self.assertEqual(result["halves"]["status"], "ok")
+
+    def test_adjacent_work_labels_are_one_continuous_effort(self) -> None:
+        segments = [("work", 300, 3.5, (150.0, 160.0)) for _ in range(10)]
+        result = session_execution(_session(segments))
+        self.assertEqual(result["structure"], "continuous")
+        self.assertIn("halves", result)
+
+    def test_recovery_labelled_warm_up_and_cool_down(self) -> None:
+        # Intervals.icu labels everything that is not work as recovery.
+        segments: list[tuple[str, int, float, tuple[float, float]]] = [
+            ("recovery", 900, 3.0, (120.0, 135.0))
+        ]
+        for rep in range(4):
+            segments.append(("work", 240, 4.5, (150.0, 170.0)))
+            segments.append(("recovery", 900 if rep == 3 else 120, 2.5, (170.0, 140.0)))
+        result = session_execution(_session(segments))
+        self.assertEqual(result["warmup"]["duration_s"], 900)
+        self.assertEqual(result["cooldown"]["duration_s"], 900)
+        self.assertEqual(
+            [item["after_rep"] for item in result["recoveries"]], [1, 2, 3]
+        )
+
+    def test_standing_rests_still_split_into_work_and_rest(self) -> None:
+        segments: list[tuple[str, int, float, tuple[float, float]]] = []
+        for _ in range(5):
+            segments += [
+                ("lap", 240, 4.5, (150.0, 170.0)),
+                ("lap", 120, 0.0, (170.0, 120.0)),
+            ]
+        session = _session(segments, kinds=False)
+        speed = session["streams"]["velocity_smooth"]
+        session["streams"]["moving"] = [value > 0 for value in speed]
+        result = session_execution(session)
+        self.assertEqual(result["structure"], "intervals")
+        self.assertEqual(result["structure_origin"], "lap_output")
+        self.assertEqual(result["rep_summary"]["rep_count"], 5)
+
+    def test_long_rep_lists_name_the_real_count(self) -> None:
+        segments: list[tuple[str, int, float, tuple[float, float]]] = []
+        for _ in range(50):
+            segments += [
+                ("work", 40, 5.0, (150.0, 165.0)),
+                ("recovery", 40, 2.5, (165.0, 150.0)),
+            ]
+        result = session_execution(_session(segments))
+        self.assertEqual(len(result["reps"]), 40)
+        self.assertEqual(result["rep_summary"]["rep_count"], 50)
+        self.assertEqual(result["rep_summary"]["reps_listed"], 40)
 
     def test_unsupported_or_short_sessions_say_why(self) -> None:
         swim = _session([("lap", 1800, 1.2, (130.0, 140.0))], sport="swim")
