@@ -23,6 +23,7 @@ import json
 import os
 import platform
 import statistics
+import subprocess
 import sys
 import time
 import unittest
@@ -83,6 +84,19 @@ def discover_tests(directory: Path | None = None):
     if loader.errors:
         raise RuntimeError(
             "Test discovery failed:\n" + "\n".join(map(str, loader.errors))
+        )
+    return sorted(iter_tests(loaded), key=lambda test: test.id())
+
+
+def load_modules(names) -> list:
+    """Load only the named test modules, failing like discovery on import errors."""
+    loader = unittest.TestLoader()
+    loaded = unittest.TestSuite(
+        loader.loadTestsFromName(name) for name in sorted(names)
+    )
+    if loader.errors:
+        raise RuntimeError(
+            "Test loading failed:\n" + "\n".join(map(str, loader.errors))
         )
     return sorted(iter_tests(loaded), key=lambda test: test.id())
 
@@ -241,27 +255,31 @@ def main() -> int:
             write_result(args.result_json, evidence)
 
     save()
+    modules = None
+    if args.changed:
+        try:
+            paths = changed_tests.changed_paths(args.base)
+        except (OSError, subprocess.CalledProcessError) as error:
+            evidence["status"] = "selection_failed"
+            save()
+            raise SystemExit(f"--changed cannot diff against {args.base}: {error}")
+        modules, reason = changed_tests.select_modules(paths)
+        evidence.update(changed_paths=paths, changed_selection=reason)
+        print(f"Changed-test selection against {args.base}: {reason}", flush=True)
+        for module, why in sorted((modules or {}).items()):
+            print(f"  {module}: {why}", flush=True)
+        if modules == {}:
+            evidence["status"] = "empty"
+            save()
+            print("No Python tests are affected.")
+            return 0
     try:
-        discovered = discover_tests()
+        discovered = discover_tests() if modules is None else load_modules(modules)
     except Exception:
         evidence["status"] = "discovery_failed"
         save()
         raise
     tests = select_suite(discovered, args.suite)
-    if args.changed:
-        paths = changed_tests.changed_paths(args.base)
-        modules, reason = changed_tests.select_modules(paths)
-        evidence.update(changed_paths=paths, changed_selection=reason)
-        print(f"Changed-test selection against {args.base}: {reason}")
-        if modules is not None:
-            for module, why in sorted(modules.items()):
-                print(f"  {module}: {why}")
-            tests = [test for test in tests if module_name(test) in modules]
-            if not tests:
-                evidence["status"] = "empty"
-                save()
-                print("No Python tests are affected.")
-                return 0
     selected = select_shard(tests, args.shard, args.total)
     evidence.update(
         discovered_ids=[test.id() for test in discovered],

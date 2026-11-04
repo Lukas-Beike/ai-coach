@@ -7,10 +7,12 @@ module it imports) names the changed path, a parent directory of it, its file
 name, or its dotted module name. The literal rule catches source-scanning
 contract tests and ``mock.patch("backend...")`` targets that imports miss.
 A bare top-level directory name only counts in a module that iterates
-directories. Imports reached only through ``server.py`` count only when
-``server.py`` itself changed: app-wide tests then stay in CI unless they import
-the changed module another way. Changes under FULL_SUITE_PATHS, or a source
-that cannot be parsed, select the whole suite (returned as ``None``).
+directories. A module whose literals name a changed data file under backend/
+counts as changed. Imports reached only through ``server.py`` count only when
+``server.py`` or a module under SERVER_WIRED_PATHS changed: app-wide tests then
+stay in CI unless they import the changed module another way. Changes under
+FULL_SUITE_PATHS, or a source that cannot be parsed, select the whole suite
+(returned as ``None``).
 """
 
 from __future__ import annotations
@@ -38,7 +40,15 @@ FULL_SUITE_PATHS = (
 )
 # Too generic to identify one file by name alone.
 GENERIC_NAMES = frozenset({"__init__.py", "AGENTS.md", "SKILL.md", "README.md"})
-SOURCE_GLOBS = ("server.py", "backend/**/*.py", "tests/*.py")
+SOURCE_GLOBS = (
+    "server.py",
+    "backend/**/*.py",
+    "tests/*.py",
+    "scripts/*.py",
+    "tools/*.py",
+)
+# Changes here are exercised mostly through the app that server.py assembles.
+SERVER_WIRED_PATHS = ("server.py", "backend/http_api/", "backend/runtime/")
 SCAN_CALLS = frozenset({"glob", "rglob", "iterdir", "walk"})
 COMPOSITION_ROOT = "server"
 
@@ -105,19 +115,26 @@ def _load_sources(root: Path) -> dict[str, _Source]:
         for path in sorted(root.glob(pattern)):
             source = _Source(path, root)
             sources[source.module] = source
-    # `from tests import run_tests` names the same module as `import run_tests`.
+    # `from tests import run_tests` names the same module as `import run_tests`,
+    # and tests that put scripts/ or tools/ on sys.path import them bare.
     for name in list(sources):
         if name.startswith("test") or "." not in name:
             sources.setdefault(f"tests.{name}", sources[name])
+        if name.startswith(("scripts.", "tools.")):
+            sources.setdefault(name.partition(".")[2], sources[name])
     return sources
 
 
-def _resolve(name: str, sources: dict[str, _Source]) -> str | None:
+def _resolve(name: str, sources: dict[str, _Source]) -> list[str]:
+    """The module ``name`` loads plus its parent packages, which import runs too."""
+    while name and name not in sources:
+        name = name.rpartition(".")[0]
+    resolved = []
     while name:
         if name in sources:
-            return sources[name].module
+            resolved.append(sources[name].module)
         name = name.rpartition(".")[0]
-    return None
+    return resolved
 
 
 def _closure(
@@ -130,10 +147,10 @@ def _closure(
         if current == COMPOSITION_ROOT and not through_server:
             continue
         for name in sources[current].imports:
-            resolved = _resolve(name, sources)
-            if resolved and resolved not in seen:
-                seen.add(resolved)
-                pending.append(resolved)
+            for resolved in _resolve(name, sources):
+                if resolved not in seen:
+                    seen.add(resolved)
+                    pending.append(resolved)
     return seen
 
 
@@ -142,7 +159,7 @@ def _needles(path: str) -> tuple[set[str], set[str]]:
     parts = path.split("/")
     exact = {"/".join(parts[:index]) for index in range(1, len(parts) + 1)}
     exact |= {"/".join(parts[index:]) for index in range(1, len(parts))}
-    if parts[-1] in GENERIC_NAMES:
+    if parts[-1] in GENERIC_NAMES and len(parts) > 1:
         exact.discard(parts[-1])
     dotted = set()
     if path.endswith(".py"):
@@ -178,12 +195,25 @@ def select_modules(
         sources = _load_sources(root)
     except SyntaxError as error:
         return None, f"cannot parse {error.filename}"
+    # Deleted or renamed modules count too: a lazy import of one still breaks.
     changed_modules = {
-        _module_name(root / path, root): path
-        for path in paths
-        if path.endswith(".py") and (root / path).is_file()
+        _module_name(root / path, root): path for path in paths if path.endswith(".py")
     }
     needles = {path: _needles(path) for path in paths}
+    for path, (exact, dotted) in needles.items():
+        if path.endswith(".py") or not path.startswith("backend/"):
+            continue
+        for source in sources.values():
+            if not source.path.startswith("tests/") and any(
+                _names(source, x, exact, dotted) for x in source.literals
+            ):
+                changed_modules.setdefault(source.module, path)
+    gone = {m for m in changed_modules if m not in sources}
+    through_server = any(
+        path == prefix or path.startswith(prefix)
+        for path in paths
+        for prefix in SERVER_WIRED_PATHS
+    )
     selected: dict[str, str] = {}
     for module, source in sources.items():
         if module != source.module or not Path(source.path).name.startswith("test_"):
@@ -191,10 +221,20 @@ def select_modules(
         if source.path in paths:
             selected[module] = f"changed {source.path}"
             continue
-        reach = _closure(module, sources, "server.py" in paths)
+        reach = _closure(module, sources, through_server)
         hit = next(
             (changed_modules[m] for m in sorted(reach) if m in changed_modules), None
         )
+        if not hit and gone:
+            names = source.imports.union(*(sources[m].imports for m in reach))
+            hit = next(
+                (
+                    changed_modules[m]
+                    for m in sorted(gone)
+                    if any(n == m or n.startswith(m + ".") for n in names)
+                ),
+                None,
+            )
         if hit:
             selected[module] = f"imports {hit}"
             continue

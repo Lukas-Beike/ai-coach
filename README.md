@@ -946,8 +946,10 @@ Local runs can skip modules a change cannot affect. `--changed` compares the
 merge base with `--base` (default `origin/develop`), including uncommitted and
 untracked files, and runs only the test modules `tests/changed_tests.py` selects:
 modules whose file changed, that transitively import a changed module, or whose
-string literals name a changed path or module. Imports reached only through
-`server.py` count only when `server.py` changed. Changes under
+string literals name a changed path or module; a data file under `backend/`
+selects the tests of the module that names it. Imports reached only through
+`server.py` count only when `server.py`, `backend/http_api/`, or
+`backend/runtime/` changed. Changes under
 `backend/canonical/`, `backend/db/`, `tests/fixtures/`, the test harness, or
 dependency and build files run the full suite. CI always runs everything:
 ```powershell

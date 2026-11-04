@@ -1,22 +1,31 @@
 """Changed-test selection: affected modules in, unrelated modules out."""
 
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import changed_tests
 
 FILES = {
-    "server.py": "import backend.app.wiring\n",
+    "server.py": "import backend.app.wiring\nimport backend.http_api.routes\n",
+    "README.md": "",
     "backend/__init__.py": "",
     "backend/app/__init__.py": "",
     "backend/app/wiring.py": "from . import engine\n",
-    "backend/app/engine.py": "VALUE = 1\n",
+    "backend/app/engine.py": "DATA = 'data.json'\n",
+    "backend/app/data.json": "{}",
+    "backend/http_api/__init__.py": "",
+    "backend/http_api/routes.py": "",
     "backend/other.py": "VALUE = 2\n",
     "public/app.js": "",
-    "tests/fake_support.py": "from backend.app.engine import VALUE\n",
-    "tests/test_engine.py": "from backend.app.engine import VALUE\n",
+    "tools/__init__.py": "",
+    "tools/helper.py": "",
+    "tests/fake_support.py": "from backend.app.engine import DATA\n",
+    "tests/test_engine.py": "from backend.app.engine import DATA\n",
     "tests/test_via_support.py": "import fake_support\n",
     "tests/test_other.py": "from backend import other\n",
     "tests/test_app_wide.py": "import server\n",
@@ -25,6 +34,9 @@ FILES = {
     "tests/test_scan.py": "from pathlib import Path\n"
     "FILES = Path('backend').rglob('*.py')\n",
     "tests/test_named_dir.py": "NAME = 'backend'\n",
+    "tests/test_docs.py": "DOC = 'README.md'\n",
+    "tests/test_tool.py": "from tools import helper\n",
+    "tests/test_lazy.py": "def load():\n    from backend.app import old\n",
 }
 
 
@@ -37,6 +49,15 @@ def _write_tree(root: Path) -> None:
 
 def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _isolate_git_config(case: unittest.TestCase) -> None:
+    """Keep global signing, hooks, and templates out of temporary repositories."""
+    patcher = mock.patch.dict(
+        os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    )
+    patcher.start()
+    case.addCleanup(patcher.stop)
 
 
 class SelectModulesTests(unittest.TestCase):
@@ -59,6 +80,22 @@ class SelectModulesTests(unittest.TestCase):
     def test_app_wide_tests_need_a_composition_root_change(self):
         self.assertNotIn("test_app_wide", self.select("backend/app/wiring.py"))
         self.assertIn("test_app_wide", self.select("server.py"))
+        self.assertIn("test_app_wide", self.select("backend/http_api/routes.py"))
+
+    def test_package_init_runs_for_every_submodule_import(self):
+        self.assertIn("test_engine", self.select("backend/app/__init__.py"))
+
+    def test_data_file_selects_tests_of_the_module_that_names_it(self):
+        self.assertIn("test_engine", self.select("backend/app/data.json"))
+
+    def test_deleted_module_selects_its_lazy_importers(self):
+        self.assertEqual(
+            set(self.select("backend/app/old.py")), {"test_lazy", "test_scan"}
+        )
+
+    def test_root_documents_and_tool_modules_select_their_tests(self):
+        self.assertEqual(set(self.select("README.md")), {"test_docs"})
+        self.assertEqual(set(self.select("tools/helper.py")), {"test_tool"})
 
     def test_literals_select_patch_targets_and_named_paths(self):
         self.assertEqual(
@@ -102,6 +139,21 @@ class SelectModulesTests(unittest.TestCase):
 
 
 class ChangedPathsTests(unittest.TestCase):
+    def setUp(self):
+        _isolate_git_config(self)
+
+    def test_runner_reports_an_unknown_base_instead_of_a_traceback(self):
+        runner = Path(changed_tests.__file__).with_name("run_tests.py")
+        result = subprocess.run(
+            [sys.executable, str(runner), "--changed", "--base", "refs/missing"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--changed cannot diff against refs/missing", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_reports_committed_uncommitted_and_untracked_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
