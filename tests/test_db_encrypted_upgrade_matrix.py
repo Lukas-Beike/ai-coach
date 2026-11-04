@@ -63,28 +63,34 @@ def builders() -> dict[int, Callable[[Any], None]]:
         ),
     }
 
-    def populated(db: Any, build: Callable[[Any], Any]) -> None:
+    def populated(db: Any, build: Callable[[Any], Any], version: int) -> None:
+        # A v19 database already holds the neutral planning metric names.
+        load, intensity = (
+            ("planned_load", "planned_intensity")
+            if version >= 19
+            else ("icu_training_load", "icu_intensity")
+        )
         build(db)
         db.execute(
             "INSERT INTO planned_units(id, local_id, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (
                 "matrix-unit",
                 "matrix-unit",
-                json.dumps({"icu_training_load": 42, "icu_intensity": 0.8}),
+                json.dumps({load: 42, intensity: 0.8}),
                 "now",
                 "now",
             ),
         )
         db.executemany(
             "INSERT INTO workout_library(id, local_id, payload, updated_at) VALUES (?, ?, ?, 'now')",
-            [
-                (f"matrix-{i}", f"matrix-{i}", json.dumps({"icu_training_load": i}))
-                for i in range(130)
-            ],
+            [(f"matrix-{i}", f"matrix-{i}", json.dumps({load: i})) for i in range(130)],
         )
         db.commit()
 
-    return {version: partial(populated, build=build) for version, build in base.items()}
+    return {
+        version: partial(populated, build=build, version=version)
+        for version, build in base.items()
+    }
 
 
 def snapshot(db: Any) -> dict[str, Any]:
