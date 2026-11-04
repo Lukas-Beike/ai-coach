@@ -227,6 +227,11 @@ class PlaybookInjectionTests(unittest.TestCase):
         # A test's evaluation comes with its own session result, not every analysis.
         self.assertNotIn(playbooks._TESTS, playbook_for("session_analysis"))
         self.assertNotIn("about 75 %", playbook_for("session_analysis"))
+        # A ramp test reads power even when erg_like; its evaluation decides.
+        self.assertIn(
+            "unless focus.test_evaluation says otherwise",
+            playbook_for("session_analysis"),
+        )
 
     def test_adjust_week_playbook_guards_hard_days_and_writes(self) -> None:
         text = playbook_for("adjust_week")
