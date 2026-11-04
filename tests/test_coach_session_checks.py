@@ -66,6 +66,19 @@ class FocusTests(unittest.TestCase):
             focus,
         )
 
+    def test_a_test_unit_brings_its_evaluation(self):
+        units = [_unit("2026-11-03", "run", session_focus="test")]
+        focus = _result(_service("run", units))["focus"]
+        self.assertEqual("test", focus["session_focus"])
+        for marker in (
+            "previous test of the same protocol",
+            "about 75 %",
+            "never write them",
+        ):
+            self.assertIn(marker, focus["test_evaluation"])
+        easy = [_unit("2026-11-03", "run", session_focus="easy")]
+        self.assertNotIn("test_evaluation", _result(_service("run", easy))["focus"])
+
     def test_focus_is_unknown_without_a_matching_unit(self):
         for units in (None, [], [_unit("2026-11-03", "ride", session_focus="easy")]):
             with self.subTest(units=units):

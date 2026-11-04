@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete import weekly_plan
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.stored_sports import resolve_competition_sport
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.performance.canonical_current import read_current_inputs
@@ -98,10 +100,12 @@ def illness_confirmation(confirm: Callable[[], bool]) -> Iterator[None]:
         _ILLNESS_CONFIRMATION.reset(token)
 
 
-def read_completed(database_manager: Any, activities: Any, today: date) -> Any:
-    """Activity summaries of the 60-day check window, in the caller's transaction."""
+def read_completed(
+    database_manager: Any, activities: Any, today: date, days: int = 60
+) -> Any:
+    """Activity summaries of the check window (60 days), in the caller's transaction."""
     with database_manager.reader() as db:
-        return activities.activity_summaries(db, start=today - timedelta(days=60))
+        return activities.activity_summaries(db, start=today - timedelta(days=days))
 
 
 def read_load_thresholds(
@@ -253,6 +257,7 @@ def build_planning_brief(
     free_time_minutes: Mapping[str, Any] | None = None,
     weekly_plan_text: str = "",
     lessons: Sequence[Mapping[str, Any]] = (),
+    last_tests: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compact deterministic brief for plan_week, plan_block and adjust_week turns."""
     weeks = [
@@ -292,8 +297,56 @@ def build_planning_brief(
             "calendar_busy_source": "Read-only iCalendar events; overlapping intervals counted once in local time",
             "plan_checks": plan_checks.RULE_SUMMARY,
             "lessons": brief_lessons(lessons),
+            "last_tests": dict(last_tests or {}),
         }
     )
+
+
+# Tests are planned every 6 to 8 weeks, so a longer look-back finds the last one.
+LAST_TEST_DAYS = 120
+LAST_TESTS_SOURCE = (
+    "Local planned units with session_focus test and competitions of the last "
+    f"{LAST_TEST_DAYS} days; null: none known in that time"
+)
+
+
+def last_tests(
+    units: Sequence[Mapping[str, Any]],
+    competitions: Sequence[Mapping[str, Any]],
+    completed: Sequence[Mapping[str, Any]],
+    today: date,
+) -> dict[str, Any]:
+    """Day of the last test or race per sport before today, else None.
+
+    A planned test counts only when a completed activity of its sport exists
+    on its day; local units carry no completion state of their own.
+    """
+    first = (today - timedelta(days=LAST_TEST_DAYS)).isoformat()
+    done = {
+        (row.get("sport"), iso_date_prefix(row.get("started_at_local")))
+        for row in completed
+    }
+    days: dict[str, list[str]] = {"run": [], "ride": []}
+    for unit in units:
+        day = iso_date_prefix(unit.get("date"))
+        sport = planned_sport_environment(unit)[0].value
+        if (
+            sport in days
+            and first <= day < today.isoformat()
+            and (sport, day) in done
+            and session_focus(unit).value == "test"
+        ):
+            days[sport].append(day)
+    for row in competitions:
+        day = _competition_day(row)
+        resolved = resolve_competition_sport(row.get("sport"), row.get("environment"))
+        race_sport = "" if resolved is None else resolved.sport.value
+        if race_sport in days and first <= day < today.isoformat():
+            days[race_sport].append(day)
+    return {
+        "source": LAST_TESTS_SOURCE,
+        **{sport: max(found) if found else None for sport, found in days.items()},
+    }
 
 
 def read_lessons(read: Callable[[], Sequence[Mapping[str, Any]]]) -> list[Any]:
@@ -315,6 +368,16 @@ def brief_lessons(lessons: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class BriefHistory:
+    """What the brief reads about earlier weeks: lessons and the last tests."""
+
+    lessons: Callable[[], Sequence[Mapping[str, Any]]] = lambda: ()
+    # Local units and completed activities of the last LAST_TEST_DAYS days.
+    recent_units: Callable[[], Sequence[Mapping[str, Any]]] = lambda: ()
+    recent_completed: Callable[[], Sequence[Mapping[str, Any]]] = lambda: ()
+
+
 class PlanGuardService:
     """Read the plan inputs and run the checks inside the caller's transaction."""
 
@@ -333,9 +396,9 @@ class PlanGuardService:
         expects_strength: Callable[[], bool] = lambda: False,
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
         weekly_plan_text: Callable[[], str] = lambda: "",
-        lessons: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
+        history: BriefHistory | None = None,
     ) -> None:
-        self._lessons = lessons
+        self._history = history or BriefHistory()
         self._weekly_plan = weekly_plan_text
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -460,10 +523,11 @@ class PlanGuardService:
         today = self._today()
         units = self._planned_units()
         completed = self._recent(today)
+        competitions = self._competitions()
         return build_planning_brief(
             progress=self._progress(),
             completed=completed,
-            competitions=self._competitions(),
+            competitions=competitions,
             training_model=self._training_model(),
             today=today,
             planned_weeks=self._planned_weeks(units, today, completed),
@@ -474,5 +538,11 @@ class PlanGuardService:
                 self._weekly_plan(), self._events(), today, 35
             ),
             weekly_plan_text=self._weekly_plan(),
-            lessons=self._lessons(),
+            lessons=self._history.lessons(),
+            last_tests=last_tests(
+                self._history.recent_units(),
+                competitions,
+                self._history.recent_completed(),
+                today,
+            ),
         )

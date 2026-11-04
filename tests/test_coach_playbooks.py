@@ -49,6 +49,8 @@ BLOCK_WORD_BUDGETS = {
     "_SESSION_CHECKS": 110,
     # The execution and planned-target fields the session analysis reads.
     "_SESSION_NUMBERS": 110,
+    # Test planning from planning_brief.last_tests (plan kinds only).
+    "_TESTS": 125,
     "_ANSWER": 55,
     "_NUTRITION": 520,
 }
@@ -206,6 +208,30 @@ class PlaybookInjectionTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, review)
         self.assertNotIn("Pace at heart rate is not covered", review)
+
+    def test_plans_schedule_tests_and_analyses_judge_them(self) -> None:
+        for kind in ("plan_week", "plan_block"):
+            text = playbook_for(kind)
+            with self.subTest(kind=kind):
+                for marker in (
+                    "critical-speed test",
+                    "Zwift FTP ramp test",
+                    "6 to 8 weeks",
+                    "last 2 weeks before an A race",
+                    "control run",
+                    "30-min time trial",
+                ):
+                    self.assertIn(marker, text)
+        self.assertIn("planning_brief.last_tests", playbook_for("plan_week"))
+        self.assertIn("session_focus easy", playbook_for("plan_week"))
+        # A test's evaluation comes with its own session result, not every analysis.
+        self.assertNotIn(playbooks._TESTS, playbook_for("session_analysis"))
+        self.assertNotIn("about 75 %", playbook_for("session_analysis"))
+        # A ramp test reads power even when erg_like; its evaluation decides.
+        self.assertIn(
+            "unless focus.test_evaluation says otherwise",
+            playbook_for("session_analysis"),
+        )
 
     def test_adjust_week_playbook_guards_hard_days_and_writes(self) -> None:
         text = playbook_for("adjust_week")

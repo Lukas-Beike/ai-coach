@@ -15,6 +15,12 @@ References (only author and year appear in the model text):
 - Kiviniemi et al. 2007, Eur J Appl Physiol; Javaloyes et al. 2019,
   IJSPP, HRV-guided training.
 - Impellizzeri et al. 2020, IJSPP 15:907-913, acute:chronic workload ratio.
+- Galbraith et al. 2014, IJSPP 9(6):931-935, single-visit field test of
+  critical speed (3600/2400/1200 m, CV 0.4 % for CS).
+- McGehee et al. 2005, J Strength Cond Res, 30-min time trial against the
+  laboratory lactate threshold (27 runners).
+- Buchheit 2014, Front Physiol 5:73, monitoring training status with
+  submaximal heart-rate measures.
 """
 
 from __future__ import annotations
@@ -40,6 +46,10 @@ _STRENGTH_LEGS = """- Heavy strength 2 times per week in base and build, 1 (main
 
 _SEASON_PHASE = "- Phase per planned week from planning_brief.season_phase (base, build, peak, taper, transition; unknown without an A/B race: say so, use base rules). Base: build volume, mostly easy. Build: add threshold or VO2max, volume holds. Peak: race-specific intensity, less volume. Taper (about 2 weeks): cut volume 40-60 %, keep intensity and frequency (Bosquet 2007). Transition: easy, strength 1 (light)."
 
+_TESTS = """Tests (session_focus test):
+- When planning_brief.last_tests is 6 to 8 weeks old or null for a sport, plan its test, run and ride in different weeks, after a lighter week or at a block start: a run critical-speed test (3600, 2400, 1200 m on a track or measured flat route, about 30 min easy between; Galbraith 2014), without either a 30-min time trial (McGehee 2005); a Zwift FTP ramp test. None in the last 2 weeks before an A race or with illness or poor recovery; a race counts as a test.
+- Every 2 to 4 weeks an easy run may be a control run at a fixed heart rate on one route (Buchheit 2014): session_focus easy, named in the description."""
+
 _PRECEDENCE = "- Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations."
 
 _CALENDAR = "- If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event."
@@ -58,7 +68,7 @@ _SESSION_CHECKS = """Session checks (get_activity_details):
 _SESSION_NUMBERS = """Session numbers (get_activity_details):
 - Read laps from analysis.execution and targets from planned_targets, not from raw streams. Per rep: deviation_pct and time_in_target_pct against the plan, start_change_pct (started too fast), within_rep_change_pct, variability_pct, heart_rate_end and peak, stride length and cadence halves (fatigue), elevation_change_m (hills). Recoveries: heart_rate_drop_60s, heart_rate_end, recovery_s against planned_recovery_s.
 - Continuous sessions: halves (heart_rate_change_bpm, change_pct, cadence_change).
-- Doubt the reading first when data_quality is not ok; prefer lap_pace for short reps; with erg_like judge heart rate and cadence, not power.
+- Doubt the reading first when data_quality is not ok; prefer lap_pace for short reps; with erg_like judge heart rate and cadence, not power, unless focus.test_evaluation says otherwise.
 - comparable_sessions: only when ok, set this session against the peers' median and name their count and temperatures (heat raises heart rate); not_covered means no comparison."""
 
 _TASKS = {
@@ -103,6 +113,7 @@ _ADAPTIVE = """Adaptive changes:
 _PLAN = (
     _PLAN_STRUCTURE,
     _STRENGTH_LEGS,
+    _TESTS,
     _SEASON_PHASE,
     _PRECEDENCE,
     _CALENDAR,

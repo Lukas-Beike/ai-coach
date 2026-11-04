@@ -186,6 +186,14 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 - **WHEN** a turn carries `session_analysis`, `progress_review` or `block_review`
 - **THEN** its playbook asks for a one-sentence verdict, findings with concrete numbers (two to four for one session), short coverage and unknowns, and the task's consequence or lessons, in plain words; the session-analysis playbook names per session type what to judge (plan, load and intensity, warm-up and cool-down, steadiness and drift of easy sessions, rep execution, recoveries and their heart-rate drop, heart rate not judged under about two minutes) and the confounders to check first, and the progress and block review are one review: it reads the `block_review` section for 4, 8 or 12 weeks or since the last test, leads with performance at equal effort, names plan execution and subjective signals only as possible causes and states when pace at heart rate is `not_covered`. The quick menu offers progress over 4, 8 and 12 weeks and since the last test, without a separate block review.
 
+#### Scenario: Planned and analysed tests
+- **WHEN** a turn carries `plan_week` or `plan_block`
+- **THEN** `planning_brief.last_tests` names per sport the day of the last local test unit with a completed activity of its sport that day, or race, of the last 120 days, and the playbook plans a run critical-speed test (3600, 2400 and 1200 m on a track or measured flat route, else a 30-min time trial) or a Zwift FTP ramp test when that day is 6 to 8 weeks old or unknown, run and ride in different weeks, never in the last 2 weeks before an A race or with illness or poor recovery; an optional fixed-heart-rate control run keeps `session_focus` easy.
+
+#### Scenario: Test evaluation
+- **WHEN** `get_activity_details` matches a planned unit with `session_focus` test
+- **THEN** `focus.test_evaluation` asks to judge the execution first, compare with the previous test of the same protocol, read the ramp test from the session's own best 1-min power and recommend a threshold update without writing it; other sessions carry no test evaluation.
+
 #### Scenario: Adjust the current week
 - **WHEN** a turn carries `adjust_week`
 - **THEN** its playbook compares plan and actual for the current week, changes only today and later days, moves a missed key session by `session_focus` without back-to-back hard days or leg strength less than 24 h before it, keeps run, ride and strength combinable, leaves adaptive replans to the preview and approval rule, and writes nothing to Intervals.icu without a named sync, while its context holds the plan sections, planning brief, calendars, weather and recovery for the current week, including planned units from earlier days of that week, and the days after it.
