@@ -21,7 +21,7 @@ from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.local_time import local_date
 from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.canonical_domain_store import ReplaceResult
-from backend.db.canonical_store import WriteOutcome
+from backend.db.canonical_store import ObservationScope, WriteOutcome
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
@@ -215,8 +215,10 @@ def ingest_plan(
     """Write raw records, activities, observations and domain rows, then apply deletions.
 
     The domain rows of each raw record replace the rows that record projected
-    before. A raw record the plan does not carry keeps its rows, so a payload
-    without a section never retires that section's rows.
+    before. Likewise, an observation owned by one of the plan's
+    ``observation_owners`` that the plan no longer emits is retired. A raw record
+    the plan does not carry keeps its rows, so a payload without a section (a
+    failed or skipped fetch) never retires that section's rows.
 
     The written activities are then linked to duplicates from other providers on
     the athlete's wall clock ``zone`` (see ``link_activity_sessions``).
@@ -247,6 +249,15 @@ def ingest_plan(
                 now=stamp,
             )
         )
+    # First retire what an owner no longer emits, then write: a value that
+    # another record still emits (a fill-only history, a key collision) is then
+    # written again instead of staying behind as the cleared value.
+    counters.retired += canonical_store.retire_unemitted_observations(
+        db,
+        provider=provider,
+        scopes=observation_scopes(plan),
+        now=stamp,
+    )
     seen_keys: set[str] = set()
     for item in plan.observations:
         # Natural-key collisions inside one payload: the first wins, later ones are skipped.
@@ -262,6 +273,7 @@ def ingest_plan(
                 mapper_version=item.mapper_version,
                 now=stamp,
                 fill_only=item.fill_only,
+                owner=item.owner,
             )
         )
     raw_ids = {raw.source_record_id for raw in plan.raw_records}
@@ -311,6 +323,31 @@ def ingest_plan(
             now=stamp,
         )
     return counters
+
+
+def observation_scopes(plan: IngestPlan) -> dict[str, ObservationScope]:
+    """Return what each owning raw record of the plan covers, for retirement.
+
+    Only raw records the plan carries count. An owner covers its own day and every
+    day it still emits, and keeps the natural keys it emits.
+    """
+    raw_ids = {raw.source_record_id for raw in plan.raw_records}
+    days: dict[str, set[str]] = {}
+    emitted: dict[str, set[str]] = {}
+    for owner, day in plan.observation_owners.items():
+        if owner in raw_ids:
+            days[owner] = {day}
+            emitted[owner] = set()
+    for item in plan.observations:
+        if item.owner in days:
+            days[item.owner].add(item.observation.observed_on.isoformat())
+            emitted[item.owner].add(
+                canonical_store.observation_natural_key(item.observation)
+            )
+    return {
+        owner: ObservationScope(frozenset(days[owner]), frozenset(emitted[owner]))
+        for owner in days
+    }
 
 
 def _fetched_at(row_time: datetime | None, stamp: str) -> str:

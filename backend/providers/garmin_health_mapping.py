@@ -204,7 +204,9 @@ from backend.providers.garmin_weight_walk import (
 # Battery and the training sections; sleep sections project canonical sleep periods.
 # Version 13: the stored performance history projects its dated values.
 # Version 14: FTP history range records (``from``/``value``).
-MAPPER_VERSION: Final = 14
+# Version 15: observations record their owning raw element, so re-projection
+# retires the values a stored element no longer carries (schema version 21).
+MAPPER_VERSION: Final = 15
 GARMIN_LABEL: Final = "Garmin Connect"
 
 _DATE_FIELD: Final = "calendarDate"
