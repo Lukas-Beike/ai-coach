@@ -51,10 +51,11 @@ class ComparableSessionsTests(unittest.TestCase):
         ]
         result = comparable_sessions(records, "act_2026-11-03")
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["count"], 4)
-        self.assertEqual(result["median_of_peers"]["output"], 348)
-        self.assertEqual(result["difference"]["output"], -18)
-        self.assertEqual(result["difference"]["heart_rate_avg"], -7)
+        # The 150 bpm run lies outside the 8 bpm band around 140 bpm.
+        self.assertEqual(result["count"], 3)
+        self.assertEqual(result["median_of_peers"]["output"], 345)
+        self.assertEqual(result["difference"]["output"], -15)
+        self.assertEqual(result["difference"]["heart_rate_avg"], -6)
         self.assertEqual(result["this"]["avg_temp_c"], 8.0)
         self.assertEqual(result["peers"][0]["date"], "2026-10-27")
 
@@ -71,6 +72,22 @@ class ComparableSessionsTests(unittest.TestCase):
         result = comparable_sessions(records, "act_2026-11-03")
         self.assertEqual(result["status"], "not_covered")
         self.assertEqual(result["count"], 1)
+
+    def test_a_tempo_run_is_no_peer_of_easy_runs_and_doubtful_data_stays_out(
+        self,
+    ) -> None:
+        doubtful = _easy(340, 165)
+        doubtful["data_quality_ok"] = False
+        records = [
+            _row("2026-11-03", _easy(270, 165)),
+            _row("2026-10-27", _easy(330, 140)),
+            _row("2026-10-20", _easy(335, 142)),
+            _row("2026-10-13", _easy(332, 141)),
+            _row("2026-10-06", doubtful),
+        ]
+        result = comparable_sessions(records, "act_2026-11-03")
+        self.assertEqual(result["status"], "not_covered")
+        self.assertEqual(result["count"], 0)
 
     def test_interval_sessions_need_similar_reps(self) -> None:
         def reps(count: int, seconds: int, output: int) -> dict[str, Any]:

@@ -213,24 +213,28 @@ class CoachActivityReadToolService:
             ),
             None,
         )
-        covered_from = self._today() - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+        covered_from = self._covered_from()
         # A session before the curve window has no curve; nothing is read for it.
         inside = own is not None and day >= covered_from
         records = self._curve_records() if inside else None
         if session.get("sport") == "run":
             checks["pace_at_heart_rate"] = self._pace_at_heart_rate(own, records, day)
-        if not inside:
+        if own is None or (inside and records is None):
+            checks["comparable_sessions"] = _unavailable()
+        elif records is None:
             checks["comparable_sessions"] = {
                 "status": "not_covered",
                 "reason": f"Die Einheit liegt außerhalb des Auswertungsfensters von {PROFILE_WINDOW_DAYS[-1]} Tagen.",
             }
-        elif records is None:
-            checks["comparable_sessions"] = _unavailable()
         else:
             checks["comparable_sessions"] = comparable_sessions(
-                records, stored_activity_key(own)
+                records, stored_activity_key(own), covered_from=covered_from
             )
         return checks
+
+    def _covered_from(self) -> date:
+        """First day of the curve window that the session comparisons read."""
+        return self._today() - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
 
     def _curve_records(self) -> list[dict[str, Any]] | None:
         """Sessions of the curve window with their curves and executions, read once."""
@@ -293,8 +297,10 @@ class CoachActivityReadToolService:
         records: list[dict[str, Any]] | None,
         day: date,
     ) -> dict[str, Any]:
-        covered_from = self._today() - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
-        if own is not None and day - timedelta(days=COMPARE_DAYS) < covered_from:
+        if (
+            own is not None
+            and day - timedelta(days=COMPARE_DAYS) < self._covered_from()
+        ):
             return {
                 "status": "not_covered",
                 "reason": f"Die Läufe der letzten {COMPARE_DAYS} Tage vor dieser Aktivität liegen außerhalb des Auswertungsfensters von {PROFILE_WINDOW_DAYS[-1]} Tagen.",

@@ -17,7 +17,7 @@ import json
 import threading
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Final
 
 from backend.activities.detail_merge import merge_details
@@ -40,7 +40,10 @@ from backend.performance.power_profile import (
     running_profile,
 )
 from backend.performance.session_execution import METHOD as EXECUTION_METHOD
-from backend.performance.session_execution import session_execution
+from backend.performance.session_execution import (
+    comparison_metrics,
+    session_execution,
+)
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 
 _DEFAULT_CAPACITY: Final = 1024
@@ -54,8 +57,9 @@ class SessionCurve:
     running: dict[str, Any]
     fingerprint: str
     pace_at_hr: dict[str, Any]
-    # The session's execution from its streams and current laps, for comparisons.
-    execution: dict[str, Any] = field(default_factory=dict)
+    # The comparison numbers of the session's execution (streams and current
+    # laps); only these are kept, not the full per-rep execution.
+    execution_summary: dict[str, Any] | None = None
 
 
 class SessionCurveReader:
@@ -112,7 +116,7 @@ class SessionCurveReader:
                     self._memo.move_to_end(fingerprint)
             if cached is None:
                 cached = _session_curve(
-                    db, activity_id, records, (*current, *laps), fingerprint
+                    db, activity_id, records, current, laps, fingerprint
                 )
                 with self._lock:
                     self._memo[fingerprint] = cached
@@ -145,18 +149,22 @@ def _session_curve(
     activity_id: str,
     records: tuple[ActivityRecord, ...],
     keys: Sequence[FullStreamKey],
+    laps: Sequence[FullStreamKey],
     fingerprint: str,
 ) -> SessionCurve:
-    wanted = {(key.provider, key.provider_activity_id) for key in keys}
+    # Each kind keeps only its own current sets, so a stale set of one kind
+    # never returns through a current set of the other.
+    streams_wanted = {(key.provider, key.provider_activity_id) for key in keys}
+    laps_wanted = {(key.provider, key.provider_activity_id) for key in laps}
     stored = [
         item
         for item in activity_detail_store.full_stream_sets_for_session(db, activity_id)
-        if (item.provider, item.provider_activity_id) in wanted
+        if (item.provider, item.provider_activity_id) in streams_wanted
     ]
     stored += [
         item
         for item in activity_detail_store.lap_sets_for_session(db, activity_id)
-        if (item.provider, item.provider_activity_id) in wanted
+        if (item.provider, item.provider_activity_id) in laps_wanted
     ]
     merged = merge_details(detail_candidates(records, stored))
     primary = primary_analysis_record(records)
@@ -176,11 +184,13 @@ def _session_curve(
                 "velocity_smooth", "heartrate", "grade_smooth", "altitude", "moving"
             ),
         ),
-        execution=session_execution(
-            adapted.activity,
-            source_label=adapted.label_for(
-                "watts", "heartrate", "velocity_smooth", "cadence", "laps"
-            ),
+        execution_summary=comparison_metrics(
+            session_execution(
+                adapted.activity,
+                source_label=adapted.label_for(
+                    "watts", "heartrate", "velocity_smooth", "cadence", "laps"
+                ),
+            )
         ),
     )
 

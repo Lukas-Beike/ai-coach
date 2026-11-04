@@ -1,13 +1,14 @@
 """One session's execution against comparable earlier sessions of the athlete.
 
 Comparable: earlier runs or rides of the last ``COMPARE_DAYS`` days with the
-same sport, environment (indoor or outdoor) and structure, and a similar shape:
-a continuous main part within ``DURATION_SHARE`` of this one, or interval
-sessions within ``REP_COUNT_SPREAD`` reps whose median rep lasts within
-``DURATION_SHARE`` of this one's. Fewer than ``MIN_PEERS`` of them is
-``not_covered``. Values come from each session's own execution, the median of
-the peers is the reference; nothing is scored, temperature is named so heat is
-not read as fitness. Pure: no I/O, inputs unchanged.
+same sport, environment (indoor or outdoor) and structure, and a similar shape
+and effort: a continuous main part within ``DURATION_SHARE`` of this one and an
+average heart rate within ``HEART_RATE_BAND`` bpm, or interval sessions within
+``REP_COUNT_SPREAD`` reps whose median rep lasts within ``DURATION_SHARE`` of
+this one's. Sessions with doubtful heart rate or speed stay out. Fewer than
+``MIN_PEERS`` of them is ``not_covered``. Values come from each session's own
+execution, the median of the peers is the reference; nothing is scored, and
+temperatures are named so heat is not read as fitness. Pure: no I/O.
 """
 
 from __future__ import annotations
@@ -17,19 +18,26 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
+from backend.performance.session_execution import rounded_metric
+
 METHOD: Final = "comparable-sessions-v1"
 COMPARE_DAYS: Final = 84
 MIN_PEERS: Final = 3
 MAX_LISTED: Final = 6
 DURATION_SHARE: Final = 0.35
 REP_COUNT_SPREAD: Final = 2
+# Continuous sessions compare only at a similar effort, so an easy run is never
+# a tempo run's peer; within the band a faster pace still shows as fitter.
+HEART_RATE_BAND: Final = 8
 SCOPE: Final = (
-    f"This session against earlier comparable sessions of the last {COMPARE_DAYS} "
-    "days: same sport, indoor or outdoor and structure, a continuous main part "
-    "within 35 % of this one's duration or intervals within 2 reps and 35 % of "
-    "the median rep duration. difference is this session minus the peers' median, "
-    "in the metric's unit (pace s/km: negative is faster). Temperatures are listed "
-    "so heat is not read as a fitness change. Descriptive; at least 3 peers."
+    f"This session against earlier comparable sessions of up to {COMPARE_DAYS} "
+    "days: same sport, indoor or outdoor and structure; a continuous main part "
+    "within 35 % of this one's duration and 8 bpm of its average heart rate, or "
+    "intervals within 2 reps and 35 % of the median rep duration; sessions with "
+    "doubtful heart rate or speed stay out. difference is this session minus the "
+    "peers' median in the metric's unit (pace s/km: negative is faster). Terrain "
+    "is not matched. Temperatures are listed so heat is not read as a fitness "
+    "change. Descriptive; at least 3 peers."
 )
 _METRICS: Final = {
     "continuous": ("output", "heart_rate_avg", "heart_rate_change_bpm", "cadence"),
@@ -44,36 +52,54 @@ _METRICS: Final = {
 
 
 def comparable_sessions(
-    records: Sequence[Mapping[str, Any]], activity_key: str
+    records: Sequence[Mapping[str, Any]],
+    activity_key: str,
+    *,
+    covered_from: date | None = None,
 ) -> dict[str, Any]:
-    """Compare one session's execution with its comparable earlier sessions."""
+    """Compare one session's execution with its comparable earlier sessions.
+
+    ``covered_from`` is the first day the records cover; an earlier peer window
+    is cut there and named as truncated.
+    """
     base = {"method": METHOD, "scope": SCOPE}
     own = next((row for row in records if row.get("activity_id") == activity_key), None)
-    mine = (own or {}).get("execution_summary")
-    if own is None or not isinstance(mine, Mapping):
+    if own is None:
         return _not_covered(
-            base, "Keine Ausführung dieser Einheit in voller Auflösung."
+            base, "Keine Messreihe in voller Auflösung für diese Einheit."
+        )
+    mine = own.get("execution_summary")
+    if not isinstance(mine, Mapping):
+        return _not_covered(
+            base,
+            "Keine vergleichbare Ausführung: Hauptteil zu kurz oder keine Intervalle mit Messwerten.",
         )
     try:
         day = date.fromisoformat(str(own.get("date") or ""))
     except ValueError:
         return _not_covered(base, "Datum der Einheit unbekannt.")
-    first = (day - timedelta(days=COMPARE_DAYS)).isoformat()
+    first = day - timedelta(days=COMPARE_DAYS)
+    truncated = covered_from is not None and covered_from > first
+    if covered_from is not None and truncated:
+        first = covered_from
+    window = {"window_days": (day - first).days, "window_truncated": truncated}
     peers = [
         row
         for row in records
         if row is not own
-        and first <= str(row.get("date") or "") < day.isoformat()
+        and first.isoformat() <= str(row.get("date") or "") < day.isoformat()
         and row.get("sport") == own.get("sport")
         and row.get("environment") == own.get("environment")
         and isinstance(row.get("execution_summary"), Mapping)
+        and row["execution_summary"].get("data_quality_ok") is not False
         and _similar(mine, row["execution_summary"])
     ]
     if len(peers) < MIN_PEERS:
         return _not_covered(
             base,
-            f"{len(peers)} vergleichbare Einheiten in {COMPARE_DAYS} Tagen, mindestens {MIN_PEERS} nötig.",
+            f"{len(peers)} vergleichbare Einheiten in {window['window_days']} Tagen, mindestens {MIN_PEERS} nötig.",
             count=len(peers),
+            **window,
         )
     metrics = _METRICS.get(str(mine.get("structure")), ())
     median: dict[str, float] = {}
@@ -86,15 +112,15 @@ def comparable_sessions(
         ]
         if len(values) < MIN_PEERS:
             continue
-        median[metric] = _rounded(statistics.median(values))
+        median[metric] = rounded_metric(statistics.median(values))
         if isinstance(mine.get(metric), (int, float)):
-            difference[metric] = _rounded(float(mine[metric]) - median[metric])
+            difference[metric] = rounded_metric(float(mine[metric]) - median[metric])
     peers.sort(key=lambda row: str(row.get("date")), reverse=True)
     return {
         **base,
         "status": "ok",
         "count": len(peers),
-        "window_days": COMPARE_DAYS,
+        **window,
         "this": {**mine, "date": own.get("date"), "avg_temp_c": own.get("avg_temp_c")},
         "median_of_peers": median,
         "difference": difference,
@@ -120,7 +146,9 @@ def _similar(mine: Mapping[str, Any], other: Mapping[str, Any]) -> bool:
     if mine.get("output_unit") != other.get("output_unit"):
         return False
     if mine.get("structure") == "continuous":
-        return _close(mine.get("main_part_s"), other.get("main_part_s"))
+        return _close(mine.get("main_part_s"), other.get("main_part_s")) and _within(
+            mine.get("heart_rate_avg"), other.get("heart_rate_avg"), HEART_RATE_BAND
+        )
     count, peer_count = mine.get("rep_count"), other.get("rep_count")
     if not isinstance(count, int) or not isinstance(peer_count, int):
         return False
@@ -137,8 +165,10 @@ def _close(value: Any, other: Any) -> bool:
     return abs(other - value) <= DURATION_SHARE * value
 
 
-def _rounded(value: float) -> float:
-    return round(value) if abs(value) >= 50 else round(value, 1)
+def _within(value: Any, other: Any, band: float) -> bool:
+    if not isinstance(value, (int, float)) or not isinstance(other, (int, float)):
+        return False
+    return abs(other - value) <= band
 
 
 def _not_covered(base: Mapping[str, Any], reason: str, **extra: Any) -> dict[str, Any]:

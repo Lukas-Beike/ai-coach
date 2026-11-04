@@ -688,9 +688,14 @@ def comparison_metrics(execution: Mapping[str, Any]) -> dict[str, Any] | None:
     """The few numbers of one execution that comparable sessions are set against."""
     if execution.get("status") != "ok":
         return None
+    quality = execution.get("data_quality") or {}
     base = {
         "structure": execution.get("structure"),
         "output_unit": execution.get("output_unit"),
+        # Peers with doubtful heart rate or speed stay out of the medians.
+        "data_quality_ok": all(
+            value in {"ok", "missing"} for value in quality.values()
+        ),
     }
     if execution.get("structure") == "continuous":
         halves = execution.get("halves") or {}
@@ -722,22 +727,25 @@ def comparison_metrics(execution: Mapping[str, Any]) -> dict[str, Any] | None:
             **base,
             "rep_count": summary.get("rep_count", len(reps)),
             "median_rep_s": round(statistics.median(rep["duration_s"] for rep in reps)),
-            "rep_output_mean": _rounded_mean(rep["output"] for rep in reps),
-            "heart_rate_end_mean": _rounded_mean(
+            "rep_output_mean": rounded_mean(rep["output"] for rep in reps),
+            "heart_rate_end_mean": rounded_mean(
                 rep["heart_rate_end"] for rep in long_reps if "heart_rate_end" in rep
             ),
-            "recovery_drop_mean": _rounded_mean(drops),
+            "recovery_drop_mean": rounded_mean(drops),
             "first_to_last_change_pct": summary.get("first_to_last_change_pct"),
-            "cadence_mean": _rounded_mean(
+            "cadence_mean": rounded_mean(
                 rep["cadence"] for rep in reps if "cadence" in rep
             ),
         }
     )
 
 
-def _rounded_mean(values: Any) -> float | None:
+def rounded_mean(values: Any) -> float | None:
+    """Mean rounded like every comparison value (see ``rounded_metric``)."""
     numbers = [float(value) for value in values]
-    if not numbers:
-        return None
-    mean = statistics.fmean(numbers)
-    return round(mean) if abs(mean) >= 50 else round(mean, 1)
+    return rounded_metric(statistics.fmean(numbers)) if numbers else None
+
+
+def rounded_metric(value: float) -> float:
+    """Whole numbers from 50 on (pace, watts, bpm), else one decimal."""
+    return round(value) if abs(value) >= 50 else round(value, 1)
