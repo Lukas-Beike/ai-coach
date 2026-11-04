@@ -2,7 +2,7 @@
 
 The Coach judges a session against its plan; these values give it the
 numbers it cannot reliably read from thousands of raw samples: the structure
-(intervals or continuous), each work lap with its first and second half and
+(interval or continuous), each work lap with its first and second half and
 its closing heart rate, each recovery with its heart-rate drop after 60 s,
 the first and second half of a continuous session, and sensor-quality flags.
 Everything is descriptive and comes from the session itself; nothing is
@@ -86,7 +86,7 @@ def session_execution(
         }
     reader = _Reader(sport, streams, channel)
     laps, origin = _classified_laps(activity.get("laps") or [], reader)
-    structure = "continuous" if origin == "no_work_laps" else "intervals"
+    structure = "continuous" if origin == "no_work_laps" else "interval"
     result: dict[str, Any] = {
         **base,
         "status": "ok",
@@ -101,7 +101,7 @@ def session_execution(
         part = [lap for lap in laps if lap["kind"] == kind]
         if part:
             result[key] = reader.part(part[0]["start"], part[-1]["end"])
-    if structure == "intervals":
+    if structure == "interval":
         result.update(_intervals(laps, reader))
     else:
         result["halves"] = _halves(laps, reader, float(times[0]), float(times[-1]))

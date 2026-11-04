@@ -67,7 +67,7 @@ class SessionExecutionTests(unittest.TestCase):
     def test_labelled_intervals_give_reps_recoveries_and_summary(self) -> None:
         result = session_execution(_interval_run(), source_label="Garmin Connect")
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["structure"], "intervals")
+        self.assertEqual(result["structure"], "interval")
         self.assertEqual(result["structure_origin"], "lap_kinds")
         self.assertEqual((result["output"], result["output_unit"]), ("pace", "s/km"))
         reps = result["reps"]
@@ -93,7 +93,7 @@ class SessionExecutionTests(unittest.TestCase):
 
     def test_unlabelled_laps_are_split_by_output(self) -> None:
         result = session_execution(_interval_run(kinds=False))
-        self.assertEqual(result["structure"], "intervals")
+        self.assertEqual(result["structure"], "interval")
         self.assertEqual(result["structure_origin"], "lap_output")
         self.assertEqual(len(result["reps"]), 5)
         self.assertEqual(result["warmup"]["duration_s"], 600)
@@ -214,7 +214,7 @@ class SessionExecutionTests(unittest.TestCase):
         speed = session["streams"]["velocity_smooth"]
         session["streams"]["moving"] = [value > 0 for value in speed]
         result = session_execution(session)
-        self.assertEqual(result["structure"], "intervals")
+        self.assertEqual(result["structure"], "interval")
         self.assertEqual(result["structure_origin"], "lap_output")
         self.assertEqual(result["rep_summary"]["rep_count"], 5)
 
