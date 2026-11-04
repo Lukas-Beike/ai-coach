@@ -47,7 +47,7 @@ _CALENDAR = "- If an event makes training materially uncertain, ask via clarify_
 _PLAN_CHECK = "- planning_brief covers recent weeks per sport; planned_distribution and strength cover planned weeks. The server checks every plan. Only illness_hard blocks the save: correct the plan, and use accept_plan_findings only when the athlete explicitly wants that deviation. Justify each plan_check_notes finding or adjust. A run_spike or load_spike warning (over 30 %) needs a concrete reason; load_unknown means unknown load: say so."
 
 _ANSWER = """Answer:
-- One sentence verdict, then 2 to 4 notable findings with concrete numbers (pace, heart rate, power, cadence, duration), then the practical consequence or lessons the task names. Leave out what was unremarkable.
+- One sentence verdict, then the findings with concrete numbers (pace, heart rate, power, cadence, duration), most notable first; for one session 2 to 4. Keep the coverage and unknowns the task asks for short. End with the consequence or lessons the task names.
 - Plain coaching words (rule 7)."""
 
 _SESSION_CHECKS = """Session checks (get_activity_details):
@@ -59,9 +59,9 @@ _TASKS = {
     "session_analysis": """\
 Task: analyze the requested completed session, by default the last one.
 - Load it with get_activity_details; its planned_units hold the local plan one day around that session, for plan versus actual. Rules 6d and 8c-8e stay. The context holds planned units up to two days ahead; read_coach_context loads more.
-- First judge it against its plan: duration and structure, and whether warm-up and cool-down were long and easy enough.
-- Easy, recovery or long sessions: steady pace or power and heart rate, heart rate rising at the same pace in the second half, really easy, cadence holding. Planned strides or a progression are intended, not faults.
-- Intervals, threshold or tests: per work lap, on target and even; reps holding or fading; heart rate across reps; recoveries as long and easy as planned, and the heart-rate drop in them. For reps under about 2 minutes judge pace or power, not heart rate.
+- Judge it against its plan first: duration, structure, load and intensity; warm-up and cool-down long and easy enough.
+- Easy, recovery or long: steady pace or power and heart rate, heart-rate drift or decoupling at the same pace, really easy, cadence holding. Planned strides or a progression are intended, not faults.
+- Intervals, threshold or tests: per work lap on target and even; reps holding or fading; heart rate across reps; recoveries as long and easy as planned, and the heart-rate drop in them. Under about 2 minutes judge pace or power, not heart rate.
 - Before calling a change fitness or fatigue, check heat, hills, wind, sleep, the days before and sensor errors (heart-rate spikes, GPS jumps).
 - End with the consequence for the next session.""",
     "progress_review": """\

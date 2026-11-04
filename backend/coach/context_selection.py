@@ -121,17 +121,29 @@ _REVIEW_ACTION = (
     r"analy[sz]\w*|auswert\w*|\bwerte\b|bewert\w*|beurteil\w*|\breview\w*"
     r"|\bwie\s+(?:war|lief)\b|\bhow\s+(?:was|did)\b"
 )
-_PROGRESS_NOUN = (
-    r"fortschritt\w*|\bprogress\w*|\bentwicklung\b|besser\s+geworden|\bfitter\b"
-    r"|getting\s+(?:better|fitter)"
+# Progress needs a progress noun and a request to see it, or a direct "am I
+# getting fitter" question; "Progressionslauf" or "Wie werde ich fitter?" ask
+# for advice.
+_PROGRESS_NOUN = r"\bfortschritt\w*|leistungsentwicklung|formentwicklung|\bprogress\b"
+_PROGRESS_REQUEST = (
+    _REVIEW_ACTION + r"|zeig\w*|\bwie\s+(?:ist|sieht|steht)\b|\bshow\b|\bhow\s+is\b"
+)
+_PROGRESS_QUESTION = (
+    r"(?<!wie\s)\b(?:werde|bin|wurde)\s+ich\s+(?:fitter|besser|schneller)\b"
+    r"|\bam\s+i\s+getting\s+(?:better|fitter|faster)\b"
 )
 _BLOCK_REVIEW_NOUN = r"\b(?:trainings)?block\b|\bblocks\b|mesozyklus"
+# One list of session words for the activity profile and the review kind.
+_SESSION_WORDS = r"aktivität|aktivitaet|activity|einheit|session|workout"
 _SESSION_NOUN = (
-    r"einheit\b|(?<!ver)lauf\b|\bläufchen\b|\bfahrt\b|ausfahrt\b|\brunde\b"
-    r"|intervall\w*|\btest\b|\bsession\b|\bworkout\b|\brun\b|\bride\b"
-    r"|aktivität\b|aktivitaet\b|\bactivity\b"
+    rf"(?:{_SESSION_WORDS})\b|(?<!ver)lauf\b|\bläufchen\b|\bfahrt\b|ausfahrt\b"
+    r"|\brunde\b|intervall\w*|\btest\b|\brun\b|\bride\b"
 )
-_PERIOD_NOUN = r"\bwoche[n]?\b|\bweeks?\b|\bmonat\w*|\bmonths?\b|\bläufe\b|einheiten\b"
+# Plural session nouns name a period review, not one session.
+_SESSIONS_NOUN = (
+    r"\bläufe\b|einheiten\b|aktivitäten\b|\bsessions\b|\bworkouts\b"
+    r"|\bruns\b|\brides\b|\bactivities\b"
+)
 # Sleep, fatigue and readiness questions need the recovery record, which the
 # daily view used to carry on every turn.
 RECOVERY_PATTERN = (
@@ -185,7 +197,7 @@ PROFILE_KEYWORDS = (
     ),
     (
         "activity_analysis",
-        r"aktivität|aktivitaet|activity|analyse|analy[sz]|einheit|session|workout",
+        r"analyse|analy[sz]|" + _SESSION_WORDS,
     ),
     ("today_training", r"heute|morgen|today|tomorrow|" + WEATHER_PATTERN),
 )
@@ -380,6 +392,7 @@ _PLAN_SECTIONS = DAILY_SECTIONS | {
     "recovery",
     "weather",
 }
+REVIEW_KINDS = frozenset({"session_analysis", "progress_review", "block_review"})
 REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
     # The session detail comes from get_activity_details, with the planned units
     # around it. At most two days ahead serve the next-session consequence; the
@@ -446,14 +459,22 @@ def free_text_review_kind(message: str) -> str | None:
     normalized = message.casefold()
     if re.search(PLANNING_VERB_PATTERN, normalized):
         return None
-    if re.search(_PROGRESS_NOUN, normalized):
+    if re.search(_PROGRESS_QUESTION, normalized) or (
+        re.search(_PROGRESS_NOUN, normalized)
+        and re.search(_PROGRESS_REQUEST, normalized)
+    ):
         return "progress_review"
     if not re.search(_REVIEW_ACTION, normalized):
         return None
+    # Sleep or recovery after a session is a recovery question.
+    if (
+        re.search(_SESSION_NOUN, normalized)
+        and not re.search(_SESSIONS_NOUN, normalized)
+        and not re.search(RECOVERY_PATTERN, normalized)
+    ):
+        return "session_analysis"
     if re.search(_BLOCK_REVIEW_NOUN, normalized):
         return "block_review"
-    if re.search(_SESSION_NOUN, normalized) and not re.search(_PERIOD_NOUN, normalized):
-        return "session_analysis"
     return None
 
 
@@ -512,6 +533,15 @@ def select_coach_context(
         kind = free_text_review_kind(message)
     if kind is None:
         return selection
+    if kind in REVIEW_KINDS:
+        # The review keeps what the message itself asked for, such as weather;
+        # explicit dates or past weeks also keep their complete time context.
+        fixed = _fixed_selection(selection, message, kind)
+        base = selection if selection.horizon_days is None else fixed
+        return cast(
+            CoachContextSelection,
+            replace(base, sections=fixed.sections | selection.sections, kind=kind),
+        )
     if selection.horizon_days is None and not (
         kind == "plan_block" and _block_fits(message.casefold())
     ):

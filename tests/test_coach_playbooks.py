@@ -47,7 +47,7 @@ BLOCK_WORD_BUDGETS = {
     "_PLAN_CHECK": 80,
     "_ADAPTIVE": 140,
     "_SESSION_CHECKS": 110,
-    "_ANSWER": 50,
+    "_ANSWER": 55,
     "_NUTRITION": 520,
 }
 TASK_WORD_BUDGET = 190
@@ -167,11 +167,12 @@ class PlaybookInjectionTests(unittest.TestCase):
         for marker in (
             "by default the last one",
             "warm-up and cool-down",
-            "heart rate rising at the same pace",
+            "decoupling at the same pace",
             "strides or a progression are intended",
             "reps holding or fading",
             "heart-rate drop",
-            "under about 2 minutes",
+            "Under about 2 minutes",
+            "load and intensity",
             "sensor errors",
         ):
             with self.subTest(marker=marker):
@@ -306,6 +307,9 @@ class FreeTextReviewKindTests(unittest.TestCase):
             "Wie war mein Tempolauf?": "session_analysis",
             "Analysiere meinen Lauf vom 2.11.": "session_analysis",
             "How was my ride?": "session_analysis",
+            "Analysiere die letzte Einheit des Blocks": "session_analysis",
+            "Analysiere meinen Lauf von letzter Woche Dienstag": "session_analysis",
+            "Zeig mir meinen Fortschritt": "progress_review",
             "Wie ist mein Fortschritt?": "progress_review",
             "Werde ich fitter?": "progress_review",
             "Bewerte meinen letzten Block": "block_review",
@@ -322,6 +326,12 @@ class FreeTextReviewKindTests(unittest.TestCase):
             "Wie war meine Woche?",
             "Wie ist die Entwicklung meines Gewichts?",
             "Analysiere meine letzte Einheit und plane darauf basierend morgen",
+            "Soll ich einen Progressionslauf machen?",
+            "Was ist ein Progressionslauf?",
+            "Wie werde ich fitter?",
+            "Wie ist die Entwicklung meiner HRV?",
+            "Wie war mein Schlaf nach der Einheit?",
+            "Wie war meine Erholung nach dem Intervalltraining?",
             "Wie geht es meiner Erholung?",
             "Ich habe 60g Whey getrunken",
         ):
@@ -333,6 +343,16 @@ class FreeTextReviewKindTests(unittest.TestCase):
         self.assertEqual(
             select_coach_context("Plane die nächste Woche", {}).kind, "plan_week"
         )
+
+    def test_typed_review_keeps_what_the_message_asked_for(self) -> None:
+        weather = select_coach_context(
+            "How did my interval session go and what is the weather tomorrow?", {}
+        )
+        self.assertEqual(weather.kind, "session_analysis")
+        self.assertIn("weather", weather.sections)
+        dated = select_coach_context("Analysiere meinen Lauf vom 2.11.", {})
+        self.assertEqual(dated.kind, "session_analysis")
+        self.assertNotIn("planning_brief", dated.sections)
 
 
 class RequestKindSelectionTests(unittest.TestCase):
