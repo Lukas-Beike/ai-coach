@@ -153,7 +153,7 @@ The system SHALL provide read-only tools for exact local records and determinist
 
 #### Scenario: Performance at equal effort
 - **WHEN** `get_training_report` returns `progress` or `block_review` for at least two started weeks inside the curve window
-- **THEN** `equal_effort` reports per sport and indoor or outdoor the median output per heart beat of steady sessions with sound data (rides with power W/bpm, runs m/s per bpm x 100; rides without power stay out) for the requested sports for the earlier and the later half, with median heart rate and temperature, the change in percent and `effort_differs` when the halves' median heart rates differ by more than 8 bpm; fewer than three steady sessions in a half stay `not_covered`.
+- **THEN** `equal_effort` reports per sport and indoor or outdoor the median output per heart beat of steady sessions with sound data (rides with power W/bpm, runs m/s per bpm x 100; rides without power stay out) for the requested sports for the earlier and the later half, with median heart rate and temperature, the change in percent and `effort_differs` when the halves' median heart rates differ by more than 8 bpm, with each half's stream sources and `sources_differ` when they change; fewer than three steady sessions in a half stay `not_covered`.
 
 #### Scenario: Block review
 - **WHEN** `get_training_report` requests the `block_review` section alone (default: the last 4 whole weeks; `start` and `days` 28, 42, 56 or 84 choose another period; `since_last_test` starts on the Monday of the last completed local test unit's week with the shortest of 28, 56 or 84 days reaching today, else 56 days, and `last_test` names that day or null)

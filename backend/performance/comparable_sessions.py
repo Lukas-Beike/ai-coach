@@ -216,7 +216,8 @@ EFFORT_SCOPE: Final = (
     "each half. A higher later value means more output at the same heart rate. "
     f"Needs at least {MIN_PEERS} steady sessions per half; halves whose median "
     f"heart rate differs by more than {HEART_RATE_BAND} bpm are named, as effort "
-    "then differs. Rides without power and terrain are not compared."
+    "then differs; sources_differ names a change of stream providers between "
+    "the halves. Rides without power and terrain are not compared."
 )
 # Each sport's output unit; a ride without power has no comparable output.
 _EFFORT_UNITS: Final = {"run": "s/km", "ride": "W"}
@@ -268,6 +269,7 @@ def _effort_halves(
         ),
         "effort_differs": abs(later["heart_rate_median"] - earlier["heart_rate_median"])
         > HEART_RATE_BAND,
+        "sources_differ": earlier["sources"] != later["sources"],
     }
 
 
@@ -304,6 +306,14 @@ def _effort_half(values: Sequence[tuple[float, Mapping[str, Any]]]) -> dict[str,
     ]
     return {
         "sessions": len(values),
+        # The stream providers, so a sensor or provider change is not read as fitness.
+        "sources": sorted(
+            {
+                str(row["execution_summary"].get("source"))
+                for _, row in values
+                if row["execution_summary"].get("source")
+            }
+        ),
         "output_per_beat": round(statistics.median(v for v, _ in values), 3),
         "heart_rate_median": rounded_metric(
             statistics.median(

@@ -195,6 +195,19 @@ class EqualEffortTrendTests(unittest.TestCase):
         self.assertEqual(trend["ride"]["outdoor"]["status"], "not_covered")
         self.assertNotIn("run", trend)
 
+    def test_a_change_of_stream_source_is_named(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        later = self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 210, 140)
+        for row in records:
+            row["execution_summary"]["source"] = "Garmin"
+        for row in later:
+            row["execution_summary"]["source"] = "Wahoo"
+        outdoor = equal_effort_trend(
+            records + later, date(2026, 8, 31), date(2026, 10, 5), date(2026, 11, 2)
+        )["ride"]["outdoor"]
+        self.assertEqual(["Garmin"], outdoor["earlier"]["sources"])
+        self.assertTrue(outdoor["sources_differ"])
+
     def test_a_different_effort_is_named(self) -> None:
         records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
         records += self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 240, 155)
