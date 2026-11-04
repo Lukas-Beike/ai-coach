@@ -393,6 +393,15 @@ class TrainingProfileSelectionService:
         }
 
 
+@dataclass(frozen=True)
+class BlockReviewSource:
+    """The planning use cases the block review reads: the review and the last test."""
+
+    review: Callable[..., dict[str, Any]]
+    # Day of the last completed local test unit in the plan, for since_last_test.
+    last_test: Callable[[Mapping[str, Any] | None], str | None]
+
+
 class TrainingReportReadService:
     def __init__(
         self,
@@ -409,14 +418,9 @@ class TrainingReportReadService:
         now: Callable[[], datetime] | None = None,
         curve_records: Callable[[], list[dict[str, Any]]] | None = None,
         training_model: Callable[[], str] = lambda: "",
-        review_block: Callable[..., dict[str, Any]] | None = None,
-        last_test: Callable[[Mapping[str, Any] | None], str | None] = lambda _plan: (
-            None
-        ),
+        block_review: BlockReviewSource | None = None,
     ) -> None:
-        self._review_block = review_block
-        # Day of the last completed planned test in the local plan, for the review window.
-        self._last_test = last_test
+        self._block_review = block_review
         self._training_model = training_model
         self._curve_records = curve_records
         self._read_synced_at = read_synced_at
@@ -523,12 +527,15 @@ class TrainingReportReadService:
         with_curves: bool = True,
     ) -> dict[str, Any]:
         """Planned versus completed over a block; default: the last 4 whole weeks."""
-        if self._review_block is None:
+        if self._block_review is None:
             raise AppError(503, "Die Blockauswertung ist nicht verfügbar.")
         today = self._today()
         plan = self._read_plan()
         if values.get("since_last_test") is True:
-            values = {**values, **_since_last_test(self._last_test(plan), today)}
+            values = {
+                **values,
+                **_since_last_test(self._block_review.last_test(plan), today),
+            }
         days = values.get("days") or 28
         weeks = days // 7 if isinstance(days, int) else 4
         window = {
@@ -539,7 +546,7 @@ class TrainingReportReadService:
         }
         progress = self.progress(window, timezone, with_curves=with_curves)
         summaries, _ = activity_summaries_with_sync_time(self._canonical)
-        return self._review_block(
+        return self._block_review.review(
             progress=progress,
             plan=plan,
             checkins=self._read_checkins(),

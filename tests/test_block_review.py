@@ -9,6 +9,7 @@ from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.report_service import (
+    BlockReviewSource,
     TrainingReportReadService,
     TrainingReportServices,
 )
@@ -60,8 +61,9 @@ def _service(rows=(), plan=None, checkins=(), feedback=(), model="pyramidal"):
         curve_records=list,
         session_feedback=lambda keys: [],
         training_model=lambda: model,
-        review_block=block_review,
-        last_test=last_completed_test,
+        block_review=BlockReviewSource(
+            review=block_review, last_test=last_completed_test
+        ),
     )
 
 
