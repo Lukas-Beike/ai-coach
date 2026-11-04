@@ -91,6 +91,7 @@ from backend.providers.wahoo_activity_mapping import (
 from backend.providers.wahoo_activity_mapping import (
     map_wahoo_activities,
     raw_workout_for_storage,
+    wahoo_workout_id,
 )
 from backend.providers.wahoo_threshold_mapping import (
     MAPPER_VERSION as WAHOO_THRESHOLD_VERSION,
@@ -216,6 +217,9 @@ class IngestPlan:
 
     ``domain_batches`` hold one batch per raw record that projects to domain rows;
     each batch's source record is among ``raw_records`` of an ingest plan.
+    ``withdrawn_activity_ids`` name listed activities that are no recording yet;
+    a stored copy of one is tombstoned only while it holds no measured value
+    either, and a later recording revives it.
     """
 
     provider: ProviderId
@@ -223,6 +227,7 @@ class IngestPlan:
     activities: tuple[ActivityItem, ...] = ()
     observations: tuple[ObservationItem, ...] = ()
     present_activity_ids: frozenset[str] = field(default_factory=frozenset)
+    withdrawn_activity_ids: frozenset[str] = field(default_factory=frozenset)
     skipped_invalid: int = 0
     domain_batches: tuple[DomainBatch, ...] = ()
 
@@ -658,6 +663,13 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
     and fetched. An absent key means "not fetched", so earlier threshold rows stay.
     Without a usable fetch time nothing is planned, so no row is ever stamped with
     an invented time. A payload whose workout list is not a list plans nothing.
+
+    Wahoo lists a workout without a measured value before it processed the
+    recording, and for a loaded plan that was never recorded. Such a workout has
+    no value a duplicate rule can compare, so it is withdrawn instead of planned
+    as an activity; once its summary arrives it is planned as usual. A workout
+    whose summary offers a recording file, or a copy of the same id that
+    carries values in the same payload, is never withdrawn.
     """
     retrieved_at = wahoo_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None or not isinstance(payload, Mapping):
@@ -673,16 +685,69 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         retrieved_at=retrieved_at,
         stored=raw_workout_for_storage,
     )
+    with_file = _wahoo_ids_with_file(payload.get(WAHOO_WORKOUTS_KEY))
+    recorded = {
+        item.record.activity_id for item in items if _wahoo_recorded(item.record)
+    }
+    # Each raw record was planned together with its activity, in the same order.
+    # A copy with values wins over every empty copy of its id; the file only
+    # keeps an id none of whose copies carries values yet.
+    kept = [
+        (raw, item)
+        for raw, item in zip(raw_records, items, strict=True)
+        if _wahoo_recorded(item.record)
+        or (
+            item.record.activity_id in with_file
+            and item.record.activity_id not in recorded
+        )
+    ]
+    withdrawn = {item.record.activity_id for item in items} - {
+        item.record.activity_id for _raw, item in kept
+    }
     threshold_raw, threshold_observations, threshold_skipped = _wahoo_threshold_items(
         payload, zone=zone, retrieved_at=retrieved_at
     )
     return IngestPlan(
         provider=ProviderId.WAHOO,
-        raw_records=tuple(raw_records) + threshold_raw,
-        activities=tuple(items),
+        raw_records=tuple(raw for raw, _item in kept) + threshold_raw,
+        activities=tuple(item for _raw, item in kept),
         observations=threshold_observations,
         present_activity_ids=frozenset(present),
+        withdrawn_activity_ids=frozenset(withdrawn),
         skipped_invalid=skipped + threshold_skipped,
+    )
+
+
+def _wahoo_ids_with_file(rows: object) -> set[str]:
+    """Return the ids of listed workouts whose summary offers a recording file.
+
+    A file is a recording even while the summary holds no value yet; its detail
+    import needs the stored activity.
+    """
+    if not isinstance(rows, list):
+        return set()
+    ids: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        summary = row.get("workout_summary")
+        file = summary.get("file") if isinstance(summary, Mapping) else None
+        if not isinstance(file, Mapping) or not isinstance(file.get("url"), str):
+            continue
+        workout_id = wahoo_workout_id(row)
+        if workout_id is not None:
+            ids.add(workout_id)
+    return ids
+
+
+def _wahoo_recorded(record: ActivityRecord) -> bool:
+    """Return True when a Wahoo workout carries a measured summary value."""
+    return (
+        record.duration_s is not None
+        or bool(record.distance_m)
+        or record.avg_hr is not None
+        or record.avg_power is not None
+        or record.load is not None
     )
 
 
