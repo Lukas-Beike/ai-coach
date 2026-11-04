@@ -285,7 +285,7 @@ def ingest_plan(
             )
         )
     for provider_activity_id in sorted(plan.withdrawn_activity_ids):
-        counters.deleted += canonical_store.mark_activity_deleted(
+        counters.deleted += canonical_store.mark_placeholder_deleted(
             db,
             provider,
             record_kind=ACTIVITY_RECORD_KIND,

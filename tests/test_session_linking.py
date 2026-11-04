@@ -327,6 +327,16 @@ class WahooPlaceholderTests(LinkingCase):
         self.assertEqual(sessions[WAHOO_ID]["state"], "duplicate")
         self.assertIsNotNone(sessions[WAHOO_ID]["merged_into"])
 
+    def test_a_stored_recording_listed_without_its_summary_is_kept(self) -> None:
+        self._ingest_intervals([intervals_ride()], FIRST)
+        self._ingest_wahoo([wahoo_workout()], SECOND)
+        before = self._snapshot()
+
+        counters = self._ingest_wahoo([wahoo_workout(workout_summary=None)], THIRD)
+
+        self.assertEqual(counters.deleted, 0)
+        self.assertEqual(before, self._snapshot())
+
 
 class IdempotenceTests(LinkingCase):
     def test_reingesting_changes_neither_rows_nor_states(self) -> None:
