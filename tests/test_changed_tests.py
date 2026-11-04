@@ -154,6 +154,20 @@ class ChangedPathsTests(unittest.TestCase):
         self.assertIn("--changed cannot diff against refs/missing", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_runner_treats_a_suite_without_affected_tests_as_empty(self):
+        import run_tests
+
+        selection = ({"test_changed_tests": "changed"}, "1 module")
+        with (
+            mock.patch.object(
+                sys, "argv", ["run_tests.py", "--changed", "--suite", "container"]
+            ),
+            mock.patch.object(changed_tests, "changed_paths", return_value=["x.py"]),
+            mock.patch.object(changed_tests, "select_modules", return_value=selection),
+            mock.patch("sys.stdout"),
+        ):
+            self.assertEqual(run_tests.main(), 0)
+
     def test_reports_committed_uncommitted_and_untracked_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

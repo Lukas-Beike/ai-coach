@@ -280,6 +280,13 @@ def main() -> int:
         save()
         raise
     tests = select_suite(discovered, args.suite)
+    if args.changed and not tests:
+        evidence.update(
+            status="empty", discovered_ids=[test.id() for test in discovered]
+        )
+        save()
+        print(f"No affected tests in suite {args.suite}.")
+        return 0
     selected = select_shard(tests, args.shard, args.total)
     evidence.update(
         discovered_ids=[test.id() for test in discovered],
