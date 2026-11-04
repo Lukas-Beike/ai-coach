@@ -383,3 +383,91 @@ def estimate_workout(
             if name in thresholds.sources
         },
     )
+
+
+# A single-value target (no range) is read as this share either side of it.
+SINGLE_TARGET_SHARE = 0.025
+
+
+@dataclass(frozen=True)
+class TargetRange:
+    """Absolute bounds of one planned step's target, or why there are none.
+
+    ``metric`` is ``watts``, ``heartrate`` or ``speed`` (m/s); ``low`` and
+    ``high`` are in W, bpm or m/s. Ramps have no single range.
+    """
+
+    metric: str | None = None
+    low: float | None = None
+    high: float | None = None
+    unknown: str | None = None
+
+
+def step_target_range(
+    step: Mapping[str, Any], thresholds: AthleteThresholds, sport: Sport
+) -> TargetRange:
+    """Bounds of a parsed workout step's target from the athlete's thresholds."""
+    if step.get("ramp"):
+        return TargetRange(unknown="ramp")
+    text, kind = str(step["target"]), str(step["kind"])
+    target = _resolve_target(step, thresholds, sport)
+    if ":" in text and kind == "pace":
+        return _pace_range(text) or TargetRange(unknown="pace_unit_unknown")
+    if target.unknown or target.intensity is None:
+        return TargetRange(unknown=target.unknown or "unsupported_target")
+    bounds = _fraction_bounds(text, kind, target.intensity, thresholds.zones)
+    reference = {
+        "power": ("watts", thresholds.zones.ftp),
+        "hr": ("heartrate", _hr_reference(thresholds.zones)),
+        "pace": ("speed", thresholds.threshold_speed_mps),
+    }[kind]
+    metric, value = reference
+    if not value:
+        return TargetRange(unknown=f"missing_{kind}_threshold")
+    return _widened(metric, bounds[0] * value, bounds[1] * value)
+
+
+def _fraction_bounds(
+    text: str, kind: str, intensity: float, zones: ZoneSettings
+) -> tuple[float, float]:
+    """Lower and upper bound as fractions of the threshold."""
+    first = text.split()[0]
+    zone = _ZONE.fullmatch(first)
+    if zone:
+        limits = _limits(kind, zones)
+        low_zone, high_zone = int(zone[1]), int(zone[2] or zone[1])
+        low = limits[low_zone - 2] / 100 if low_zone > 1 else 0.0
+        high = limits[high_zone - 1] / 100 if high_zone <= len(limits) else intensity
+        return low, max(high, low)
+    match = _PERCENT.fullmatch(first) or _ABSOLUTE.fullmatch(first)
+    if match is None:
+        return intensity, intensity
+    mean = _mean(match)
+    numbers = (float(match[1]), float(match[2] or match[1]))
+    return (
+        intensity * min(numbers) / mean,
+        intensity * max(numbers) / mean,
+    )
+
+
+def _hr_reference(zones: ZoneSettings) -> float | None:
+    """The heart rate an HR intensity of 1.0 means: LTHR, else its assumed share."""
+    if zones.lthr:
+        return zones.lthr
+    return zones.max_hr * LTHR_SHARE_OF_MAX_HR if zones.max_hr else None
+
+
+def _pace_range(text: str) -> TargetRange | None:
+    unit = _PACE_UNIT.search(text)
+    times = [int(m) * 60 + int(s) for m, s in _PACE.findall(text)]
+    if unit is None or not times or not all(times):
+        return None
+    metres = 1000.0 if unit[1] == "KM" else _MILE_M
+    speeds = [metres / time for time in times]
+    return _widened("speed", min(speeds), max(speeds))
+
+
+def _widened(metric: str, low: float, high: float) -> TargetRange:
+    if high - low <= 1e-9:
+        low, high = low * (1 - SINGLE_TARGET_SHARE), high * (1 + SINGLE_TARGET_SHARE)
+    return TargetRange(metric=metric, low=low, high=high)

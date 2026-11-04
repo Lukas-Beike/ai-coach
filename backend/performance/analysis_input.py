@@ -85,6 +85,10 @@ def analysis_input(
         "streams": stream_fields,
         "laps": lap_fields,
     }
+    if laps is not None and lap_fields:
+        detail = laps.chosen.stored.detail
+        if isinstance(detail, ActivityLapSet):
+            activity["lap_source"] = detail.lap_source.value
     return AnalysisInput(
         activity=activity,
         source_label=" / ".join(labels) if labels else _label(record.provenance),

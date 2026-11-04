@@ -25,10 +25,22 @@ SCOPE: Final = (
     "for rides without power). Every change_pct is computed on speed or power, "
     "later minus earlier in percent: negative means slower or less power. "
     "Heart rate is not judged for work laps under 120 s (short). "
+    "start_change_pct is the first 30 s against the rest of a rep (positive: "
+    "started faster). variability_pct is the spread of the output after the "
+    "first 10 s in percent of its mean. Stride length is speed over step rate. "
+    "lap_pace comes from the lap distance and is steadier than GPS pace for "
+    "short reps. erg_like marks an indoor ride whose power the trainer held. "
+    "start_s is a lap's start on the clock of the session's streams. "
     "heart_rate_drop_60s is the drop from the highest heart rate in the first "
     "15 s of a recovery to the mean 55-65 s into it."
 )
 SHORT_REP_S: Final = 120.0
+# The opening of a rep: its first 30 s against the rest shows a too-fast start.
+START_S: Final = 30.0
+START_REP_S: Final = 90.0
+# Variability leaves out the first 10 s of acceleration.
+SETTLE_S: Final = 10.0
+ERG_VARIABILITY_PCT: Final = 3.0
 MIN_LAP_S: Final = 20.0
 MIN_SESSION_S: Final = 600.0
 WARMUP_EXCLUDED_S: Final = 600.0
@@ -101,8 +113,19 @@ def session_execution(
         part = [lap for lap in laps if lap["kind"] == kind]
         if part:
             result[key] = reader.part(part[0]["start"], part[-1]["end"])
+    if activity.get("lap_source"):
+        result["lap_source"] = activity["lap_source"]
     if structure == "interval":
         result.update(_intervals(laps, reader))
+        variabilities = [rep.get("variability_pct") for rep in result["reps"]]
+        if (
+            reader.output_name == "power"
+            and activity.get("environment") in {"indoor", "virtual"}
+            and variabilities
+            and all(v is not None and v < ERG_VARIABILITY_PCT for v in variabilities)
+        ):
+            # Power held by the trainer says little; heart rate and cadence do.
+            result["erg_like"] = True
     else:
         result["halves"] = _halves(laps, reader, float(times[0]), float(times[-1]))
     return result
@@ -125,20 +148,37 @@ class _Window:
                 (r - l) * v for l, r, v in zip(lefts, rights, values, strict=True)
             ),
         ]
+        self.squares = [
+            0.0,
+            *itertools.accumulate(
+                (r - l) * v * v for l, r, v in zip(lefts, rights, values, strict=True)
+            ),
+        ]
 
     def mean(self, start: float, end: float) -> float | None:
+        stats = self.stats(start, end)
+        return None if stats is None else stats[0]
+
+    def stats(self, start: float, end: float) -> tuple[float, float] | None:
+        """Time-weighted mean and standard deviation over the window."""
         first = bisect.bisect_right(self.rights, start)
         last = bisect.bisect_left(self.lefts, end)
         if first >= last:
             return None
         weight = self.weights[last] - self.weights[first]
         total = self.sums[last] - self.sums[first]
+        squares = self.squares[last] - self.squares[first]
         # Trim the parts of the edge intervals outside the window.
         head = max(0.0, start - self.lefts[first])
         tail = max(0.0, self.rights[last - 1] - end)
+        first_value, last_value = self.values[first], self.values[last - 1]
         weight -= head + tail
-        total -= head * self.values[first] + tail * self.values[last - 1]
-        return total / weight if weight > 0 else None
+        total -= head * first_value + tail * last_value
+        squares -= head * first_value**2 + tail * last_value**2
+        if weight <= 0:
+            return None
+        mean = total / weight
+        return mean, math.sqrt(max(0.0, squares / weight - mean * mean))
 
 
 class _Reader:
@@ -146,6 +186,9 @@ class _Reader:
 
     def __init__(self, sport: str, streams: Mapping[str, Any], channel: str) -> None:
         self._times = [_number(value) for value in streams["time"]]
+        self._sorted_times = [
+            time if time is not None else -math.inf for time in self._times
+        ]
         self._streams = streams
         self._channel = channel
         self._run = sport == "run"
@@ -203,7 +246,45 @@ class _Reader:
             if time is not None and start <= time <= end
             if (number := _number(value)) is not None
         ]
-        return max(found) if found else None
+        return round(max(found)) if found else None
+
+    def variability_pct(self, start: float, end: float) -> float | None:
+        """Spread of the output within the window, in percent of its mean."""
+        window = self._window(self._channel, True)
+        stats = None if window is None else window.stats(start, end)
+        if stats is None or stats[0] <= 0:
+            return None
+        return round(stats[1] / stats[0] * 100, 1)
+
+    def stride_length(self, start: float, end: float) -> float | None:
+        """Mean metres per step of a run: speed over step rate."""
+        if not self._run:
+            return None
+        speed = self.mean("velocity_smooth", start, end)
+        cadence = self.mean("cadence", start, end)
+        if speed is None or cadence is None or speed <= 0 or cadence <= 0:
+            return None
+        return round(speed / (cadence * RUN_CADENCE_FACTOR / 60.0), 2)
+
+    def elevation_change(self, start: float, end: float) -> float | None:
+        """Altitude at the window end minus at its start, in metres."""
+        values = self._streams.get("altitude")
+        if not isinstance(values, list) or len(values) != len(self._times):
+            return None
+        first, last = self._value_at(values, start), self._value_at(values, end)
+        if first is None or last is None:
+            return None
+        return round(last - first, 1)
+
+    def _value_at(self, values: Sequence[Any], moment: float) -> float | None:
+        times = self._sorted_times
+        index = min(bisect.bisect_left(times, moment), len(times) - 1)
+        for candidate in (index, index - 1):
+            if 0 <= candidate < len(values):
+                number = _number(values[candidate])
+                if number is not None:
+                    return number
+        return None
 
     def raw_output(self, start: float, end: float) -> float | None:
         """Mean moving speed (m/s) or power (W) over the window."""
@@ -252,17 +333,39 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
         middle = (start + end) / 2
         duration = end - start
         first, second = reader.raw_output(start, middle), reader.raw_output(middle, end)
+        settled = min(start + SETTLE_S, middle)
+        distance = _number(lap.get("distance_m"))
         rep = {
             "rep": number,
+            "start_s": round(start),
             "duration_s": round(duration),
             "distance_m": lap.get("distance_m"),
             "output": reader.shown(raw[number - 1]),
+            "lap_pace": round(duration / distance * 1000)
+            if reader.output_name == "pace" and distance
+            else None,
             "output_first_half": reader.shown(first),
             "output_second_half": reader.shown(second),
             "within_rep_change_pct": _change_pct(first, second),
+            "start_change_pct": _change_pct(
+                reader.raw_output(start + START_S, end),
+                reader.raw_output(start, start + START_S),
+            )
+            if duration >= START_REP_S
+            else None,
+            "variability_pct": reader.variability_pct(settled, end),
             "heart_rate_avg": reader.heart_rate(start, end),
+            "heart_rate_first_half": reader.heart_rate(start, middle),
+            "heart_rate_second_half": reader.heart_rate(middle, end),
+            "heart_rate_peak": reader.peak("heartrate", start, end),
             "heart_rate_end": reader.heart_rate(max(start, end - 10.0), end),
             "cadence": reader.cadence(start, end),
+            "cadence_first_half": reader.cadence(start, middle),
+            "cadence_second_half": reader.cadence(middle, end),
+            "stride_length_m": reader.stride_length(start, end),
+            "stride_length_first_half_m": reader.stride_length(start, middle),
+            "stride_length_second_half_m": reader.stride_length(middle, end),
+            "elevation_change_m": reader.elevation_change(start, end),
             "short": duration < SHORT_REP_S,
         }
         reps.append(_drop_none(rep))
@@ -283,6 +386,14 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
     if len(long_reps) >= 2:
         summary["heart_rate_end_first"] = long_reps[0]["heart_rate_end"]
         summary["heart_rate_end_last"] = long_reps[-1]["heart_rate_end"]
+    for key in ("cadence", "stride_length_m"):
+        measured = [rep[key] for rep in reps if key in rep]
+        if len(measured) >= 2:
+            summary[f"{key}_first"] = measured[0]
+            summary[f"{key}_last"] = measured[-1]
+    variability = [rep["variability_pct"] for rep in reps if "variability_pct" in rep]
+    if variability:
+        summary["variability_pct_max"] = max(variability)
     drops = [
         item["heart_rate_drop_60s"]
         for item in recoveries
@@ -297,9 +408,11 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
 def _recovery(lap: Mapping[str, Any], reader: _Reader) -> dict[str, Any]:
     start, end = lap["start"], lap["end"]
     item: dict[str, Any] = {
+        "start_s": round(start),
         "duration_s": round(end - start),
         "output": reader.shown(reader.raw_output(start, end)),
         "heart_rate_avg": reader.heart_rate(start, end),
+        "heart_rate_end": reader.heart_rate(max(start, end - 10.0), end),
     }
     if end - start >= 65.0:
         peak = reader.peak("heartrate", start, start + 15.0)

@@ -5,49 +5,9 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
+from session_stream_support import synthetic_session as _session
+
 from backend.performance.session_execution import session_execution
-
-
-def _session(
-    segments: list[tuple[str, int, float, tuple[float, float]]],
-    *,
-    sport: str = "run",
-    output: str = "velocity_smooth",
-    cadence: float | None = 85.0,
-    kinds: bool = True,
-) -> dict[str, Any]:
-    """1 Hz streams from (kind, seconds, output, (start hr, end hr)) segments."""
-    times: list[int] = []
-    values: list[float] = []
-    heart: list[float] = []
-    laps: list[dict[str, Any]] = []
-    clock = 0
-    for kind, seconds, value, (hr_start, hr_end) in segments:
-        laps.append(
-            {
-                "start_time": float(clock),
-                "end_time": float(clock + seconds),
-                "kind": kind if kinds else "lap",
-                "distance_m": None,
-            }
-        )
-        for second in range(seconds):
-            times.append(clock + second)
-            values.append(value)
-            heart.append(hr_start + (hr_end - hr_start) * second / max(1, seconds - 1))
-        clock += seconds
-    times.append(clock)
-    values.append(values[-1])
-    heart.append(heart[-1])
-    streams: dict[str, Any] = {
-        "time": times,
-        output: values,
-        "heartrate": heart,
-        "moving": [True] * len(times),
-    }
-    if cadence is not None:
-        streams["cadence"] = [cadence] * len(times)
-    return {"sport": sport, "streams": streams, "laps": laps}
 
 
 def _interval_run(kinds: bool = True, last_speed: float = 4.2) -> dict[str, Any]:
@@ -229,6 +189,68 @@ class SessionExecutionTests(unittest.TestCase):
         self.assertEqual(len(result["reps"]), 40)
         self.assertEqual(result["rep_summary"]["rep_count"], 50)
         self.assertEqual(result["rep_summary"]["reps_listed"], 40)
+
+    def test_rep_detail_shows_start_heart_rate_stride_and_terrain(self) -> None:
+        session = _interval_run()
+        streams = session["streams"]
+        work = [lap for lap in session["laps"] if lap["kind"] == "work"]
+        first = work[0]
+        start = int(first["start_time"])
+        # The first rep starts 30 s too fast and climbs 12 m.
+        for second in range(start, start + 30):
+            streams["velocity_smooth"][second] = 5.0
+        streams["altitude"] = [100.0] * len(streams["time"])
+        for index in range(start, int(first["end_time"]) + 1):
+            streams["altitude"][index] = 100.0 + 12.0 * (index - start) / 180
+        for index in range(int(first["end_time"]) + 1, len(streams["time"])):
+            streams["altitude"][index] = 112.0
+        session["lap_source"] = "device_laps"
+        result = session_execution(session)
+        rep = result["reps"][0]
+        self.assertGreater(rep["start_change_pct"], 10)
+        self.assertEqual(result["reps"][1]["start_change_pct"], 0.0)
+        self.assertEqual(result["reps"][1]["variability_pct"], 0.0)
+        self.assertEqual(rep["elevation_change_m"], 12.0)
+        self.assertEqual(rep["stride_length_m"], 1.62)
+        self.assertEqual(rep["heart_rate_peak"], 170)
+        self.assertLess(rep["heart_rate_first_half"], rep["heart_rate_second_half"])
+        self.assertEqual(rep["cadence_first_half"], 170)
+        self.assertEqual(result["lap_source"], "device_laps")
+        self.assertIn("heart_rate_end", result["recoveries"][0])
+        self.assertEqual(result["rep_summary"]["stride_length_m_first"], 1.62)
+        self.assertEqual(result["rep_summary"]["stride_length_m_last"], 1.48)
+
+    def test_short_reps_with_lap_distance_get_a_lap_pace(self) -> None:
+        segments: list[tuple[str, int, float, tuple[float, float]]] = [
+            ("warmup", 600, 3.0, (120.0, 130.0))
+        ]
+        for _ in range(6):
+            segments += [
+                ("work", 50, 5.0, (150.0, 165.0)),
+                ("recovery", 60, 2.5, (165.0, 150.0)),
+            ]
+        session = _session(segments)
+        for lap in session["laps"]:
+            if lap["kind"] == "work":
+                lap["distance_m"] = 245.0
+        rep = session_execution(session)["reps"][0]
+        self.assertEqual(rep["lap_pace"], 204)
+        self.assertEqual(rep["output"], 200)
+
+    def test_indoor_rides_with_held_power_are_erg_like(self) -> None:
+        segments = [
+            ("warmup", 600, 150.0, (110.0, 125.0)),
+            ("work", 480, 280.0, (150.0, 165.0)),
+            ("recovery", 240, 120.0, (165.0, 130.0)),
+            ("work", 480, 280.0, (150.0, 168.0)),
+            ("cooldown", 300, 130.0, (130.0, 115.0)),
+        ]
+        indoor = _session(segments, sport="ride", output="watts", cadence=90.0)
+        indoor["environment"] = "virtual"
+        self.assertTrue(session_execution(indoor)["erg_like"])
+        outdoor = _session(segments, sport="ride", output="watts", cadence=90.0)
+        outdoor["environment"] = "outdoor"
+        self.assertNotIn("erg_like", session_execution(outdoor))
 
     def test_unsupported_or_short_sessions_say_why(self) -> None:
         swim = _session([("lap", 1800, 1.2, (130.0, 140.0))], sport="swim")

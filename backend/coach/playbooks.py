@@ -55,6 +55,11 @@ _SESSION_CHECKS = """Session checks (get_activity_details):
 - pace_at_heart_rate: compare with comparable runs only when status is ok, and name their count; a positive difference is slower; not_covered is unknown, not zero or a change.
 - strength_before: heavy or moderate leg strength (legs true) within 48 h (origin completed; planned_not_confirmed is not known to be done) is a possible explanation for a worse pace, power or heart-rate response, never a proven cause. Count and intensity only, no load."""
 
+_SESSION_NUMBERS = """Session numbers (get_activity_details):
+- Read laps from analysis.execution and targets from planned_targets, not from raw streams. Per rep: deviation_pct and time_in_target_pct against the plan, start_change_pct (started too fast), within_rep_change_pct, variability_pct, heart_rate_end and peak, stride length and cadence halves (fatigue), elevation_change_m (hills). Recoveries: heart_rate_drop_60s, heart_rate_end, recovery_s against planned_recovery_s.
+- Continuous sessions: halves (heart_rate_change_bpm, change_pct, cadence_change).
+- Doubt the reading first when data_quality is not ok; prefer lap_pace for short reps; with erg_like judge heart rate and cadence, not power."""
+
 _TASKS = {
     "session_analysis": """\
 Task: analyze the requested completed session, by default the last one.
@@ -104,7 +109,7 @@ _PLAN = (
     _PLAN_CHECK,
 )
 _BLOCKS = {
-    "session_analysis": (_SESSION_CHECKS, _ANSWER),
+    "session_analysis": (_SESSION_CHECKS, _SESSION_NUMBERS, _ANSWER),
     "progress_review": (_ANSWER,),
     "block_review": (_ANSWER,),
     "plan_week": _PLAN,

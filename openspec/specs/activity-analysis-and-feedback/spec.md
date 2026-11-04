@@ -91,7 +91,7 @@ The system SHALL describe how one run or ride was executed from its own merged s
 
 #### Scenario: Interval session
 - **WHEN** a run or ride has at least two work laps
-- **THEN** each work lap reports its output (pace in s/km for runs, power in W for rides, else km/h), first and second half, closing heart rate and cadence, each following recovery its heart-rate drop 60 s in, and a rep summary; work laps under 120 s are marked short so their heart rate is not judged.
+- **THEN** each work lap reports its output (pace in s/km for runs, power in W for rides, else km/h), first and second half, the first 30 s against the rest, the spread after the first 10 s, average, peak, half and closing heart rate, cadence and stride length per half, altitude change and, with a lap distance, the lap pace; each following recovery reports its heart-rate drop 60 s in and closing heart rate, and a rep summary closes the list; work laps under 120 s are marked short so their heart rate is not judged, and an indoor ride with power held within 3 % is `erg_like`.
 
 #### Scenario: Unlabelled interval laps
 - **WHEN** a run has laps without work or recovery labels whose outputs split into a faster and a slower group
@@ -102,6 +102,19 @@ The system SHALL describe how one run or ride was executed from its own merged s
 - **THEN** `data_quality` names `spikes`, `possible_cadence_lock` or `jumps`, so the Coach can doubt the reading before calling it fatigue.
 
 Evidence: `backend/performance/session_execution.py:session_execution`, `backend/performance/canonical_detail.py:CanonicalDetailReader._analysis`, `backend/performance/analysis_input.py:analysis_input`; `tests/test_session_execution.py`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`.
+
+### Requirement: Work laps against planned targets
+The system SHALL compare the n-th executed work lap of a run or ride with the n-th planned work step of its matched local planned unit, without requiring matching durations: work steps are those within 10 % of the hardest target as a fraction of its threshold; zone, percent, absolute and pace targets resolve from the athlete's current thresholds as the planned-workout estimate reads them; single values count as plus or minus 2.5 %; ramps and unresolved targets stay unscored.
+
+#### Scenario: Rep slower than its target
+- **WHEN** a planned 4:20-4:30/km rep is run at 4:38/km
+- **THEN** the rep reports its target pace range, a negative `deviation_pct` to the nearer bound, `time_in_target_pct` from the displayed streams, planned and actual duration and recovery, and the summary counts it below target.
+
+#### Scenario: Nothing to compare
+- **WHEN** the session is continuous, no planned unit matches, or no planned step has a resolvable target
+- **THEN** no comparison is invented: the result is absent or `not_covered` with the reason and any unknown target reasons.
+
+Evidence: `backend/performance/planned_targets.py:planned_target_execution`, `backend/activities/workout_load.py:step_target_range`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService._planned_targets`, `backend/planning/planned_unit_load.py:PlannedUnitEstimator.thresholds`; `tests/test_planned_targets.py`.
 
 ### Requirement: Conservative planned-workout matching and interval quality
 The system SHALL match planned units to compatible completed activities using the implemented identity/time/sport rules and freeze targets only for an unambiguous local plan match. Interval-quality calculations SHALL use frozen target basis and original measured samples/laps, report missing steps as partial, and leave ambiguous or unsupported targets unscored. Completed duration alone SHALL not establish target achievement.
