@@ -83,17 +83,7 @@ def comparable_sessions(
     if covered_from is not None and truncated:
         first = covered_from
     window = {"window_days": (day - first).days, "window_truncated": truncated}
-    peers = [
-        row
-        for row in records
-        if row is not own
-        and first.isoformat() <= str(row.get("date") or "") < day.isoformat()
-        and row.get("sport") == own.get("sport")
-        and row.get("environment") == own.get("environment")
-        and isinstance(row.get("execution_summary"), Mapping)
-        and row["execution_summary"].get("data_quality_ok") is not False
-        and _similar(mine, row["execution_summary"])
-    ]
+    peers = _peers(records, own, mine, first, day)
     if len(peers) < MIN_PEERS:
         return _not_covered(
             base,
@@ -102,19 +92,7 @@ def comparable_sessions(
             **window,
         )
     metrics = _METRICS.get(str(mine.get("structure")), ())
-    median: dict[str, float] = {}
-    difference: dict[str, float] = {}
-    for metric in metrics:
-        values = [
-            float(row["execution_summary"][metric])
-            for row in peers
-            if isinstance(row["execution_summary"].get(metric), (int, float))
-        ]
-        if len(values) < MIN_PEERS:
-            continue
-        median[metric] = rounded_metric(statistics.median(values))
-        if isinstance(mine.get(metric), (int, float)):
-            difference[metric] = rounded_metric(float(mine[metric]) - median[metric])
+    median, difference = _medians(mine, peers, metrics)
     peers.sort(key=lambda row: str(row.get("date")), reverse=True)
     return {
         **base,
@@ -138,6 +116,55 @@ def comparable_sessions(
             for row in peers[:MAX_LISTED]
         ],
     }
+
+
+def _peers(
+    records: Sequence[Mapping[str, Any]],
+    own: Mapping[str, Any],
+    mine: Mapping[str, Any],
+    first: date,
+    day: date,
+) -> list[Mapping[str, Any]]:
+    """Earlier sessions of the window with this one's kind, sound data and shape."""
+    return [
+        row
+        for row in records
+        if row is not own
+        and first.isoformat() <= str(row.get("date") or "") < day.isoformat()
+        and row.get("sport") == own.get("sport")
+        and row.get("environment") == own.get("environment")
+        and _sound_peer(mine, row.get("execution_summary"))
+    ]
+
+
+def _sound_peer(mine: Mapping[str, Any], other: Any) -> bool:
+    return (
+        isinstance(other, Mapping)
+        and other.get("data_quality_ok") is not False
+        and _similar(mine, other)
+    )
+
+
+def _medians(
+    mine: Mapping[str, Any],
+    peers: Sequence[Mapping[str, Any]],
+    metrics: Sequence[str],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """The peers' median of each metric and this session's difference to it."""
+    median: dict[str, float] = {}
+    difference: dict[str, float] = {}
+    for metric in metrics:
+        values = [
+            float(row["execution_summary"][metric])
+            for row in peers
+            if isinstance(row["execution_summary"].get(metric), (int, float))
+        ]
+        if len(values) < MIN_PEERS:
+            continue
+        median[metric] = rounded_metric(statistics.median(values))
+        if isinstance(mine.get(metric), (int, float)):
+            difference[metric] = rounded_metric(float(mine[metric]) - median[metric])
+    return median, difference
 
 
 def _similar(mine: Mapping[str, Any], other: Mapping[str, Any]) -> bool:

@@ -92,23 +92,13 @@ class SessionCurveReader:
         keys_by_session = activity_detail_store.full_stream_keys(db, wanted)
         laps_by_session = activity_detail_store.lap_set_keys(db, wanted)
         for activity_id, keys in keys_by_session.items():
-            current = [
-                key
-                for key in keys
-                if not _stale(
-                    db, key, intervals_fingerprints.get(key.provider_activity_id)
-                )
-            ]
+            current = _current(db, keys, intervals_fingerprints)
             records = tuple(self._session_records(db, activity_id))
             if not current or not records:
                 continue
-            laps = [
-                key
-                for key in laps_by_session.get(activity_id, ())
-                if not _stale(
-                    db, key, intervals_fingerprints.get(key.provider_activity_id)
-                )
-            ]
+            laps = _current(
+                db, laps_by_session.get(activity_id, ()), intervals_fingerprints
+            )
             fingerprint = _fingerprint(records, current, laps)
             with self._lock:
                 cached = self._memo.get(fingerprint)
@@ -129,6 +119,19 @@ class SessionCurveReader:
 def input_fingerprint(parts: Iterable[object]) -> str:
     """Fingerprint of a result built from several inputs, independent of order."""
     return _sha256(sorted({_canonical(part) for part in parts}))
+
+
+def _current(
+    db: Any,
+    keys: Iterable[FullStreamKey],
+    intervals_fingerprints: Mapping[str, str],
+) -> list[FullStreamKey]:
+    """The keys whose sets still belong to the provider's current summary."""
+    return [
+        key
+        for key in keys
+        if not _stale(db, key, intervals_fingerprints.get(key.provider_activity_id))
+    ]
 
 
 def _stale(db: Any, key: FullStreamKey, intervals_fingerprint: str | None) -> bool:

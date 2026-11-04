@@ -124,6 +124,7 @@ class ComparisonMetricsTests(unittest.TestCase):
             synthetic_session([("lap", 3600, 3.0, (135.0, 150.0))], kinds=False)
         )
         metrics = comparison_metrics(easy)
+        assert metrics is not None
         self.assertEqual(metrics["structure"], "continuous")
         self.assertEqual(metrics["output"], 333)
         self.assertEqual(metrics["main_part_s"], 3000)
@@ -136,6 +137,7 @@ class ComparisonMetricsTests(unittest.TestCase):
                 ("recovery", 90, 2.5, (170.0, 140.0)),
             ]
         intervals = comparison_metrics(session_execution(synthetic_session(segments)))
+        assert intervals is not None
         self.assertEqual(intervals["rep_count"], 4)
         self.assertEqual(intervals["median_rep_s"], 180)
         self.assertEqual(intervals["rep_output_mean"], 222)

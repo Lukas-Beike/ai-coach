@@ -293,7 +293,7 @@ class CoachActivityReadToolService:
 
     def _pace_at_heart_rate(
         self,
-        own: dict[str, Any] | None,
+        own: Mapping[str, Any] | None,
         records: list[dict[str, Any]] | None,
         day: date,
     ) -> dict[str, Any]:
