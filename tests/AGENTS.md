@@ -3,9 +3,14 @@
 - Run tests from the repository root with:
 
   ```powershell
-  python -m unittest discover -s tests -v
+  python tests/run_tests.py --changed
   python -m compileall -q server.py backend tests
   ```
+
+- `tests/changed_tests.py` selects modules by imports and by string literals
+  naming changed paths or modules. A test that depends on a file another way
+  (computed paths, dynamic imports) must name it as a literal, or the selector
+  misses it locally.
 
 - Helpers shared by several `TestCase` subclasses are module-level functions
   taking the case or its fixtures as arguments, not methods of a base `TestCase`

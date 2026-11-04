@@ -10,6 +10,9 @@ full run, for example inside the image used by run_sqlcipher_tests.ps1.
 
 ``--suite container`` runs only the container-sensitive modules named in
 CONTAINER_SUITE_PATTERNS. The default ``--suite all`` runs everything.
+``--changed`` keeps only the modules changed_tests.py finds affected by the
+diff against ``--base``; it falls back to the whole suite where that selector
+says so, and CI never uses it.
 """
 
 from __future__ import annotations
@@ -27,6 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import changed_tests
 
 DURATIONS_FILE = Path(__file__).resolve().parent / "test_durations.json"
 
@@ -188,6 +193,16 @@ def parse_args() -> argparse.Namespace:
         help="'container' runs only the container-sensitive test modules",
     )
     parser.add_argument(
+        "--changed",
+        action="store_true",
+        help="run only modules affected by the diff against --base (local use)",
+    )
+    parser.add_argument(
+        "--base",
+        default="origin/develop",
+        help="ref whose merge base --changed compares against",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="list selected test IDs without executing them",
@@ -203,7 +218,9 @@ def parse_args() -> argparse.Namespace:
         parser.error(
             "--shard must be between 1 and --total, and --total must be positive"
         )
-    if args.record_durations and (args.total != 1 or args.suite != "all" or args.list):
+    if args.record_durations and (
+        args.total != 1 or args.suite != "all" or args.list or args.changed
+    ):
         parser.error("--record-durations needs the full suite in a single shard")
     return args
 
@@ -231,6 +248,20 @@ def main() -> int:
         save()
         raise
     tests = select_suite(discovered, args.suite)
+    if args.changed:
+        paths = changed_tests.changed_paths(args.base)
+        modules, reason = changed_tests.select_modules(paths)
+        evidence.update(changed_paths=paths, changed_selection=reason)
+        print(f"Changed-test selection against {args.base}: {reason}")
+        if modules is not None:
+            for module, why in sorted(modules.items()):
+                print(f"  {module}: {why}")
+            tests = [test for test in tests if module_name(test) in modules]
+            if not tests:
+                evidence["status"] = "empty"
+                save()
+                print("No Python tests are affected.")
+                return 0
     selected = select_shard(tests, args.shard, args.total)
     evidence.update(
         discovered_ids=[test.id() for test in discovered],

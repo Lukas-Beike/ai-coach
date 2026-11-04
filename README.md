@@ -941,6 +941,20 @@ python -m unittest discover -s tests -v
 python -m compileall -q server.py backend tests
 ```
 
+#### Changed-Test Selection
+Local runs can skip modules a change cannot affect. `--changed` compares the
+merge base with `--base` (default `origin/develop`), including uncommitted and
+untracked files, and runs only the test modules `tests/changed_tests.py` selects:
+modules whose file changed, that transitively import a changed module, or whose
+string literals name a changed path or module. Imports reached only through
+`server.py` count only when `server.py` changed. Changes under
+`backend/canonical/`, `backend/db/`, `tests/fixtures/`, the test harness, or
+dependency and build files run the full suite. CI always runs everything:
+```powershell
+python tests/run_tests.py --changed
+python tests/run_tests.py --changed --list
+```
+
 #### Parallel Sharded CI Runner
 CI splits the native suite into `PYTHON_TEST_SHARDS` shards (currently 4). Each
 shard keeps every `TestCase` class whole, so class-level fixtures such as

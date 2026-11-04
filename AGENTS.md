@@ -142,10 +142,12 @@ outgoing commits for secrets; never bypass either.
   with the Codex Security plugin or `--auth chatgpt`; no API key or GitHub
   Actions workflow for it.
 
-Run from the repository root:
+Run from the repository root. Locally, run the Python tests the change affects;
+CI runs the full suite on every PR. Run the full suite locally only when the
+selector falls back to it, to reproduce a CI failure, or when asked:
 
 ```powershell
-python -m unittest discover -s tests -v
+python tests/run_tests.py --changed
 python -m compileall -q server.py backend tests
 node --test tests/*.cjs
 ```
