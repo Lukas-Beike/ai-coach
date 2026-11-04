@@ -662,10 +662,11 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
     Without a usable fetch time nothing is planned, so no row is ever stamped with
     an invented time. A payload whose workout list is not a list plans nothing.
 
-    Wahoo lists a workout without a duration before it processed the recording,
-    and for a loaded plan that was never recorded. Such a workout has no value a
-    duplicate rule can compare, so it is withdrawn instead of planned as an
-    activity; once its summary arrives it is planned as usual.
+    Wahoo lists a workout without a measured value before it processed the
+    recording, and for a loaded plan that was never recorded. Such a workout has
+    no value a duplicate rule can compare, so it is withdrawn instead of planned
+    as an activity; once its summary arrives it is planned as usual. A copy of
+    the same id that carries values in the same payload is never withdrawn.
     """
     retrieved_at = wahoo_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None or not isinstance(payload, Mapping):
@@ -681,25 +682,37 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         retrieved_at=retrieved_at,
         stored=raw_workout_for_storage,
     )
-    withdrawn = {
-        item.record.activity_id for item in items if item.record.duration_s is None
+    # Each raw record was planned together with its activity, in the same order.
+    kept = [
+        (raw, item)
+        for raw, item in zip(raw_records, items, strict=True)
+        if _wahoo_recorded(item.record)
+    ]
+    withdrawn = {item.record.activity_id for item in items} - {
+        item.record.activity_id for _raw, item in kept
     }
     threshold_raw, threshold_observations, threshold_skipped = _wahoo_threshold_items(
         payload, zone=zone, retrieved_at=retrieved_at
     )
     return IngestPlan(
         provider=ProviderId.WAHOO,
-        raw_records=tuple(
-            raw for raw in raw_records if raw.source_record_id not in withdrawn
-        )
-        + threshold_raw,
-        activities=tuple(
-            item for item in items if item.record.activity_id not in withdrawn
-        ),
+        raw_records=tuple(raw for raw, _item in kept) + threshold_raw,
+        activities=tuple(item for _raw, item in kept),
         observations=threshold_observations,
         present_activity_ids=frozenset(present),
         withdrawn_activity_ids=frozenset(withdrawn),
         skipped_invalid=skipped + threshold_skipped,
+    )
+
+
+def _wahoo_recorded(record: ActivityRecord) -> bool:
+    """Return True when a Wahoo workout carries a measured summary value."""
+    return (
+        record.duration_s is not None
+        or bool(record.distance_m)
+        or record.avg_hr is not None
+        or record.avg_power is not None
+        or record.load is not None
     )
 
 

@@ -431,23 +431,39 @@ class SummaryMetricTests(unittest.TestCase):
 
 
 class PlaceholderWorkoutTests(unittest.TestCase):
-    def test_workouts_without_a_duration_are_withdrawn_not_planned(self) -> None:
+    def test_workouts_without_a_measured_value_are_withdrawn(self) -> None:
         # Wahoo lists an unprocessed copy and a loaded, never recorded plan
         # without a summary, or with a summary that holds no duration yet.
         workouts = [
             row(id=1),
             row(id=2, workout_summary=None),
             row(id=3, workout_summary={"distance_accum": "0.0"}),
+            row(id=4, workout_summary={"distance_accum": "9800"}),
         ]
         payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": workouts}
 
         plan = wahoo_ingest_plan(payload, zone=UTC)
 
-        self.assertEqual(["1"], [item.record.activity_id for item in plan.activities])
-        self.assertEqual(["1"], [raw.source_record_id for raw in plan.raw_records])
+        self.assertEqual(
+            ["1", "4"], [item.record.activity_id for item in plan.activities]
+        )
+        self.assertEqual(["1", "4"], [raw.source_record_id for raw in plan.raw_records])
         self.assertEqual(frozenset({"2", "3"}), plan.withdrawn_activity_ids)
-        self.assertEqual(frozenset({"1", "2", "3"}), plan.present_activity_ids)
+        self.assertEqual(frozenset({"1", "2", "3", "4"}), plan.present_activity_ids)
         self.assertEqual(0, plan.skipped_invalid)
+
+    def test_a_recorded_copy_in_the_same_payload_is_never_withdrawn(self) -> None:
+        # Pages can shift while Wahoo processes a workout, so one id can be
+        # listed once with and once without its summary.
+        workouts = [row(id=5), row(id=5, workout_summary=None)]
+        payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": workouts}
+
+        plan = wahoo_ingest_plan(payload, zone=UTC)
+
+        self.assertEqual(frozenset(), plan.withdrawn_activity_ids)
+        self.assertEqual(["5"], [item.record.activity_id for item in plan.activities])
+        self.assertIsNotNone(plan.activities[0].record.duration_s)
+        self.assertEqual(["5"], [raw.source_record_id for raw in plan.raw_records])
 
 
 class StoredRawRecordTests(unittest.TestCase):
