@@ -249,44 +249,13 @@ def _effort_halves(
 ) -> dict[str, Any]:
     parts: dict[str, dict[str, Any]] = {}
     for name, (first, last) in halves.items():
-        rows = [
-            row
-            for row in records
-            if row.get("sport") == sport
-            and row.get("environment") == environment
-            and first.isoformat() <= str(row.get("date") or "") <= last.isoformat()
-        ]
-        values = [
-            (efficiency, row)
-            for row in rows
-            if (summary := row.get("execution_summary")) is not None
-            and isinstance(summary, Mapping)
-            and summary.get("output_unit") == _EFFORT_UNITS[sport]
-            and (efficiency := _efficiency(summary)) is not None
-        ]
+        values = _steady_sessions(records, sport, environment, first, last)
         if len(values) < MIN_PEERS:
             return {
                 "status": "not_covered",
                 "reason": f"{len(values)} gleichmäßige Einheiten in der Hälfte {name}, mindestens {MIN_PEERS} nötig.",
             }
-        temperatures = [
-            float(row["avg_temp_c"])
-            for _, row in values
-            if isinstance(row.get("avg_temp_c"), (int, float))
-        ]
-        parts[name] = {
-            "sessions": len(values),
-            "output_per_beat": round(statistics.median(v for v, _ in values), 3),
-            "heart_rate_median": rounded_metric(
-                statistics.median(
-                    float(row["execution_summary"]["heart_rate_avg"])
-                    for _, row in values
-                )
-            ),
-            "temperature_median_c": rounded_metric(statistics.median(temperatures))
-            if temperatures
-            else None,
-        }
+        parts[name] = _effort_half(values)
     earlier, later = parts["earlier"], parts["later"]
     return {
         "status": "ok",
@@ -299,6 +268,51 @@ def _effort_halves(
         ),
         "effort_differs": abs(later["heart_rate_median"] - earlier["heart_rate_median"])
         > HEART_RATE_BAND,
+    }
+
+
+def _steady_sessions(
+    records: Sequence[Mapping[str, Any]],
+    sport: str,
+    environment: str,
+    first: date,
+    last: date,
+) -> list[tuple[float, Mapping[str, Any]]]:
+    """Output per beat of the steady sessions of one half, sport and place."""
+    values = []
+    for row in records:
+        summary = row.get("execution_summary")
+        if (
+            row.get("sport") != sport
+            or row.get("environment") != environment
+            or not first.isoformat() <= str(row.get("date") or "") <= last.isoformat()
+            or not isinstance(summary, Mapping)
+            or summary.get("output_unit") != _EFFORT_UNITS[sport]
+        ):
+            continue
+        efficiency = _efficiency(summary)
+        if efficiency is not None:
+            values.append((efficiency, row))
+    return values
+
+
+def _effort_half(values: Sequence[tuple[float, Mapping[str, Any]]]) -> dict[str, Any]:
+    temperatures = [
+        float(row["avg_temp_c"])
+        for _, row in values
+        if isinstance(row.get("avg_temp_c"), (int, float))
+    ]
+    return {
+        "sessions": len(values),
+        "output_per_beat": round(statistics.median(v for v, _ in values), 3),
+        "heart_rate_median": rounded_metric(
+            statistics.median(
+                float(row["execution_summary"]["heart_rate_avg"]) for _, row in values
+            )
+        ),
+        "temperature_median_c": rounded_metric(statistics.median(temperatures))
+        if temperatures
+        else None,
     }
 
 
