@@ -410,8 +410,13 @@ class TrainingReportReadService:
         curve_records: Callable[[], list[dict[str, Any]]] | None = None,
         training_model: Callable[[], str] = lambda: "",
         review_block: Callable[..., dict[str, Any]] | None = None,
+        last_test: Callable[[Mapping[str, Any] | None], str | None] = lambda _plan: (
+            None
+        ),
     ) -> None:
         self._review_block = review_block
+        # Day of the last completed planned test in the local plan, for the review window.
+        self._last_test = last_test
         self._training_model = training_model
         self._curve_records = curve_records
         self._read_synced_at = read_synced_at
@@ -521,6 +526,9 @@ class TrainingReportReadService:
         if self._review_block is None:
             raise AppError(503, "Die Blockauswertung ist nicht verfügbar.")
         today = self._today()
+        plan = self._read_plan()
+        if values.get("since_last_test") is True:
+            values = {**values, **_since_last_test(self._last_test(plan), today)}
         days = values.get("days") or 28
         weeks = days // 7 if isinstance(days, int) else 4
         window = {
@@ -533,7 +541,7 @@ class TrainingReportReadService:
         summaries, _ = activity_summaries_with_sync_time(self._canonical)
         return self._review_block(
             progress=progress,
-            plan=self._read_plan(),
+            plan=plan,
             checkins=self._read_checkins(),
             summaries=summaries,
             activity_feedback=self._read_feedback(),
@@ -665,6 +673,23 @@ class TrainingReportServices:
     derived: TrainingDerivedReadService
     season: TrainingSeasonReadService
     timezone: Callable[[], str]
+
+
+def _since_last_test(last_test: str | None, today: date) -> dict[str, Any]:
+    """Window from the Monday of the last test's week, the shortest reaching today.
+
+    Without a known test, or with one older than 84 days, the review covers the
+    last 8 or 12 whole weeks instead.
+    """
+    if last_test is None:
+        return {"days": 56}
+    monday = date.fromisoformat(last_test) - timedelta(
+        days=date.fromisoformat(last_test).weekday()
+    )
+    for days in (28, 56, 84):
+        if monday + timedelta(days=days) > today:
+            return {"start": monday.isoformat(), "days": days}
+    return {"days": 84}
 
 
 def summary_fields(summary: Mapping[str, Any]) -> dict[str, Any]:

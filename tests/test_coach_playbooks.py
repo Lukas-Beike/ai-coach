@@ -199,7 +199,7 @@ class PlaybookInjectionTests(unittest.TestCase):
             "getting fitter",
             "sections [block_review]",
             "56 for 8",
-            "Since the last test",
+            "since_last_test true",
             "equal_effort",
             "only when they may explain missing progress",
         ):

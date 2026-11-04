@@ -61,6 +61,18 @@ def _plan_rows(
     ]
 
 
+def last_completed_test(plan: Mapping[str, Any] | None) -> str | None:
+    """Day of the last completed local planned unit with session_focus test."""
+    days = [
+        iso_date_prefix(str(row.get("starts_at_local") or row.get("date") or ""))
+        for row in (plan or {}).get("training_calendar", [])
+        if not row.get("is_completed_activity")
+        and _done(row)
+        and _focus_of(row)[0] == "test"
+    ]
+    return max(days) if days else None
+
+
 def _done(row: Mapping[str, Any]) -> bool:
     return (row.get("compliance") or {}).get("status") == "completed"
 
@@ -453,6 +465,7 @@ def block_review(
         "intensity": _intensity(progress, training_model),
         "key_sessions": _key_sessions(rows),
         "performance": _performance(progress),
+        "last_test": last_completed_test(plan),
         "subjective": _subjective(
             progress,
             checkins,

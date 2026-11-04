@@ -336,6 +336,10 @@ def build_structured_tool_schemas(
             {
                 "start": {"type": "string", "format": "date"},
                 "days": {"type": "integer", "enum": [7, 28, 42, 56, 84]},
+                "since_last_test": {
+                    "type": "boolean",
+                    "description": "block_review only: start on the Monday of the last completed test's week with the shortest window reaching today; without a known test 56 days. The result names last_test.",
+                },
                 "sport": {
                     "type": "string",
                     "maxLength": 40,

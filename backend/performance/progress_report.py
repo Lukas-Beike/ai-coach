@@ -311,6 +311,13 @@ def _mean_max_window(
     return result
 
 
+def _effort_sports(sport: str) -> tuple[str, ...]:
+    """The sports the equal-effort trend covers for a report's sport filter."""
+    if sport == "all":
+        return ("run", "ride")
+    return (sport,)
+
+
 def _curve_trend_window(
     trend: Callable[..., dict[str, Any]],
     records: Sequence[Mapping[str, Any]] | None,
@@ -480,7 +487,7 @@ def weekly_progress(
                     middle,
                     effective_end,
                     started_weeks,
-                    sports=("run", "ride") if sport == "all" else (sport,),
+                    sports=_effort_sports(sport),
                 )
             }
             if sport in {"all", "ride", "run"}
