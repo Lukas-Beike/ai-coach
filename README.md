@@ -69,7 +69,9 @@ Version 20 adds the favorite flag of saved products; every existing product
 starts as no favorite. Version 21 gives canonical observations a lifecycle: a
 value that Intervals.icu, Garmin or Wahoo clears or deletes is retired after
 the next sync or reprojection of its source record, and it stays stored but is
-no longer served. Existing rows stay active.
+no longer served. A dateless snapshot record such as the athlete profile only
+retires values of its fetch day; values of earlier days stay as history.
+Existing rows stay active.
 
 Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types. Likewise only that adapter maps `starts_at_local` and `planned_duration_s` to the Intervals.icu event and workout fields, and Coach tools take `starts_at_local` and `planned_duration_s` as well.
 

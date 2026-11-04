@@ -11,7 +11,7 @@ import hashlib
 import json
 import math
 import uuid
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Final, NamedTuple
@@ -137,6 +137,17 @@ _OBSERVATION_COLUMNS: Final = (
 )
 _ACTIVE_OBSERVATION: Final = f"state = '{ProjectionState.ACTIVE.value}'"
 _RETIRE_BATCH: Final = 500
+
+
+class ObservationScope(NamedTuple):
+    """What the latest projection of one owning raw record covers.
+
+    ``days`` are the ISO days whose owned rows the projection speaks for;
+    ``emitted`` are the natural keys it produced.
+    """
+
+    days: frozenset[str]
+    emitted: frozenset[str]
 
 
 class WriteOutcome(StrEnum):
@@ -1017,32 +1028,41 @@ def retire_unemitted_observations(
     db: Any,
     *,
     provider: str,
-    owner: str,
-    emitted: Collection[str],
+    scopes: Mapping[str, ObservationScope],
     now: str,
 ) -> int:
-    """Retire the active observations ``owner`` holds that are not in ``emitted``.
+    """Retire the active observations each owner holds on its days but no longer emits.
 
-    ``emitted`` are the natural keys the latest projection of the owning raw
-    record produced. The rows stay in the table, so history, backups and a later
-    projection that emits them again (which makes them active) still see them.
-    Returns how many rows were retired.
+    ``scopes`` maps the source record id of an owning raw record to what its
+    latest projection covers. Rows of other days or other owners are untouched.
+    The rows stay in the table, so history, backups and a later projection that
+    emits them again (which makes them active) still see them. Returns how many
+    rows were retired.
     """
-    rows = _fetch_all(
-        db,
-        "SELECT natural_key FROM observations WHERE provider = ? "
-        f"AND owner_record_id = ? AND {_ACTIVE_OBSERVATION}",
-        (provider, owner),
-    )
-    stale = [
-        str(row["natural_key"]) for row in rows if row["natural_key"] not in emitted
-    ]
+    owners = sorted(scopes)
+    stale: list[str] = []
+    for start in range(0, len(owners), _RETIRE_BATCH):
+        batch = owners[start : start + _RETIRE_BATCH]
+        rows = _fetch_all(
+            db,
+            "SELECT natural_key, owner_record_id, observed_on FROM observations "
+            f"WHERE provider = ? AND {_ACTIVE_OBSERVATION} "
+            f"AND owner_record_id IN ({', '.join('?' * len(batch))})",
+            (provider, *batch),
+        )
+        for row in rows:
+            scope = scopes[str(row["owner_record_id"])]
+            if (
+                row["observed_on"] in scope.days
+                and row["natural_key"] not in scope.emitted
+            ):
+                stale.append(str(row["natural_key"]))
     for start in range(0, len(stale), _RETIRE_BATCH):
-        batch = stale[start : start + _RETIRE_BATCH]
+        keys = stale[start : start + _RETIRE_BATCH]
         db.execute(
             "UPDATE observations SET state = ?, updated_at = ? "
-            f"WHERE natural_key IN ({', '.join('?' * len(batch))})",
-            (ProjectionState.RETIRED.value, now, *batch),
+            f"WHERE natural_key IN ({', '.join('?' * len(keys))})",
+            (ProjectionState.RETIRED.value, now, *keys),
         )
     return len(stale)
 

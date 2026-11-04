@@ -97,7 +97,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, tzinfo
 from enum import StrEnum
 from functools import partial
@@ -179,8 +179,8 @@ class _Work:
     superseded: int = 0
     # Re-projection only: the domain rows of the raw record, written on completion.
     domain_batches: tuple[DomainBatch, ...] = ()
-    # Re-projection only: the raw record ids whose unemitted observations retire.
-    observation_owners: frozenset[str] = frozenset()
+    # Re-projection only: the owning raw record ids and their days (see IngestPlan).
+    observation_owners: Mapping[str, str] = field(default_factory=dict)
 
 
 # Wahoo is ingested live and has no legacy snapshot to backfill, so persisted
@@ -673,8 +673,8 @@ def _retire_unemitted(db: Any, row: Mapping[str, Any], work: _Work, *, now: str)
     """Mark the activity this raw row owns invalid when the new projection drops it.
 
     Ownership is the same provider and source record id. Only activity raw records are
-    retired; observations keep their old mapper version instead (see the module
-    docstring). Returns 1 when an active activity was marked invalid, otherwise 0.
+    handled here; ``_retire_unemitted_observations`` retires observations. Returns 1
+    when an active activity was marked invalid, otherwise 0.
     """
     if row["record_kind"] != ACTIVITY_RECORD_KIND:
         return 0
@@ -702,15 +702,20 @@ def _retire_unemitted_observations(
     so it retires nothing. Returns how many observations were retired.
     """
     source_id = str(row["source_record_id"])
-    if source_id not in work.observation_owners:
+    day = work.observation_owners.get(source_id)
+    if day is None:
         return 0
-    emitted = {
-        canonical_store.observation_natural_key(item.value.observation)
+    observations = [
+        item.value.observation
         for item in work.items
         if isinstance(item.value, ObservationItem)
-    }
+    ]
+    scope = canonical_store.ObservationScope(
+        days=frozenset({day, *(o.observed_on.isoformat() for o in observations)}),
+        emitted=frozenset(map(canonical_store.observation_natural_key, observations)),
+    )
     return canonical_store.retire_unemitted_observations(
-        db, provider=str(row["provider"]), owner=source_id, emitted=emitted, now=now
+        db, provider=str(row["provider"]), scopes={source_id: scope}, now=now
     )
 
 

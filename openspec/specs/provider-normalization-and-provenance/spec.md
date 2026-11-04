@@ -129,7 +129,7 @@ The system SHALL preserve provider raw-record identity and mapper version, inges
 
 #### Scenario: Provider clears or deletes a value
 - **WHEN** a sync or reprojection maps a raw record again (an Intervals.icu wellness day or athlete record, a Garmin health element, a Wahoo threshold record) and it no longer emits an observation that record owns
-- **THEN** the observation is retired: it stays stored and in backups, but no canonical read, Coach context or readiness serves it; a later projection that emits it again makes it active. A raw record the sync did not fetch (failed, skipped or empty section) retires nothing, and an observation another record emits or without an owner is untouched.
+- **THEN** the observation is retired: it stays stored and in backups, but no canonical read, Coach context or readiness serves it; a later projection that emits it again makes it active. A record retires only on the days it speaks for: its own day (a wellness day, a dated element) or, for a dateless snapshot (athlete profile, Wahoo profile, a whole Garmin section), its fetch day, plus the days it still emits; values of earlier days stay as history. A raw record the sync did not fetch (failed, skipped or empty section) retires nothing, and an observation another record emits or without an owner is untouched.
 
 #### Scenario: First backfill has not completed
 - **WHEN** initial backfill is pending, running, or failed

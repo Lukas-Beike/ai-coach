@@ -21,13 +21,14 @@ from backend.db import canonical_store
 from backend.db.schema import initialize_schema
 from backend.providers.canonical_plans import (
     current_observation_mapper_versions,
-    reprojection_plan,
 )
+from backend.sync import canonical_backfill
 from backend.sync import canonical_ingest as ingest
 
 ZONE = ZoneInfo("Europe/Berlin")
 NOW = "2026-09-20T08:00:00+00:00"
 LATER = "2026-09-20T09:00:00+00:00"
+NEXT_DAY = "2026-09-21T08:00:00+00:00"
 DAY = "2026-09-18"
 OTHER_DAY = "2026-09-17"
 
@@ -123,6 +124,26 @@ class ObservationRetirementTests(unittest.TestCase):
         )
         self.assertEqual(self.served("ftp"), [])
 
+    def test_a_snapshot_record_keeps_the_values_of_earlier_days(self) -> None:
+        athlete = {"id": "i1", "sportSettings": [{"types": ["Ride"], "ftp": 250}]}
+        self.ingest_intervals(intervals([], athlete=athlete))
+        self.ingest_intervals(intervals([], synced_at=NEXT_DAY, athlete=athlete))
+        self.assertEqual(sorted(self.states("ftp").values()), ["active", "active"])
+
+        cleared = {"id": "i1", "sportSettings": [{"types": ["Ride"]}]}
+        counters = self.ingest_intervals(
+            intervals([], synced_at=NEXT_DAY, athlete=cleared)
+        )
+        # Only the day the record speaks for is retired; the earlier day is history.
+        self.assertEqual(counters.retired, 1)
+        self.assertEqual(self.served("ftp"), [("2026-09-20", 250.0)])
+
+    def test_a_whole_garmin_section_keeps_the_values_of_earlier_days(self) -> None:
+        ftp = {"sport": "CYCLING", "functionalThresholdPower": 260}
+        self.ingest_garmin(garmin(cycling_ftp=ftp))
+        self.ingest_garmin(garmin(NEXT_DAY, cycling_ftp=ftp))
+        self.assertEqual(sorted(self.states("ftp").values()), ["active", "active"])
+
     def test_a_payload_without_the_record_retires_nothing(self) -> None:
         self.ingest_intervals(intervals([{"id": DAY, "restingHR": 50}]))
         counters = self.ingest_intervals(
@@ -172,21 +193,15 @@ class ObservationRetirementTests(unittest.TestCase):
             "UPDATE provider_records SET payload = ? WHERE record_kind = 'wellness'",
             (f'{{"id": "{DAY}"}}',),
         )
-        row = self.db.execute(
-            "SELECT * FROM provider_records WHERE record_kind = 'wellness'"
-        ).fetchone()
-        plan = reprojection_plan(dict(row), zone=ZONE)
-        assert plan is not None
-        self.assertEqual(plan.observation_owners, frozenset({DAY}))
-        retired = canonical_store.retire_unemitted_observations(
-            self.db,
-            provider="intervals",
-            owner=DAY,
-            emitted={
-                canonical_store.observation_natural_key(item.observation)
-                for item in plan.observations
-            },
-            now=LATER,
+        row = dict(
+            self.db.execute(
+                "SELECT * FROM provider_records WHERE record_kind = 'wellness'"
+            ).fetchone()
+        )
+        work = canonical_backfill._reprojection_work(row, ZONE)
+        self.assertEqual(work.observation_owners, {DAY: DAY})
+        retired = canonical_backfill._retire_unemitted_observations(
+            self.db, row, work, now=LATER
         )
         self.assertEqual(retired, 1)
         self.assertEqual(self.served("resting_hr"), [])
