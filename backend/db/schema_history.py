@@ -23,7 +23,8 @@ type SchemaSignature = tuple[tuple[str, str, str, str], ...]
 SHAPE_SCHEMA_V16: Final = "schema-v16"
 # Schema version 17: the canonical power curve.
 SHAPE_SCHEMA_V17: Final = "schema-v17"
-# Schema version 18: feedback rating time.
+# Schema versions 18 and 19: feedback rating time; version 19 changed stored
+# planning metric keys only, so both versions share one table shape.
 SHAPE_SCHEMA_V18: Final = "schema-v18"
 # The live schema of this build, derived from code rather than frozen.
 SHAPE_CURRENT: Final = "current"
@@ -42,6 +43,7 @@ ACCEPTED_SHAPES_BY_VERSION: Final[Mapping[int, frozenset[str]]] = {
     16: frozenset({SHAPE_SCHEMA_V16}),
     17: frozenset({SHAPE_SCHEMA_V17}),
     18: frozenset({SHAPE_SCHEMA_V18}),
+    19: frozenset({SHAPE_SCHEMA_V18}),
     CURRENT_SCHEMA_VERSION: frozenset({SHAPE_CURRENT}),
 }
 

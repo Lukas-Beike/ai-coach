@@ -51,8 +51,8 @@ class NutritionFrontendContractTests(unittest.TestCase):
 
         draft = nutrition[
             nutrition.index(
-                "async function createNutritionProductDraft()"
-            ) : nutrition.index("async function loadNutritionProducts(")
+                "function addNutritionProductToCoachDraft()"
+            ) : nutrition.index("async function addNutritionProductToMeal()")
         ]
         self.assertIn("Produkt-ID: ${product.id}", draft)
         self.assertNotIn("product.name ||", draft)

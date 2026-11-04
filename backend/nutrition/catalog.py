@@ -41,6 +41,7 @@ class ProductCatalogService:
         barcode: str | None = None,
         include_archived: bool = False,
         limit: int = 50,
+        favorites_first: bool = False,
     ) -> list[dict[str, Any]]:
         with self._database_manager.reader() as db:
             found = self._products.list(
@@ -49,6 +50,7 @@ class ProductCatalogService:
                 barcode=barcode,
                 include_archived=include_archived,
                 limit=limit,
+                favorites_first=favorites_first,
             )
             if found or not (query and query.strip()) or barcode:
                 return found
@@ -56,7 +58,10 @@ class ProductCatalogService:
             # find a saved product before any database is asked; every word
             # must fit, so a loose match never hides a better database food.
             recent = self._products.list(
-                db, include_archived=include_archived, limit=100
+                db,
+                include_archived=include_archived,
+                limit=100,
+                favorites_first=favorites_first,
             )
         return [
             product
@@ -98,6 +103,18 @@ class ProductCatalogService:
         merged = {**current, **(payload if isinstance(payload, dict) else {})}
         merged["id"] = str(product_id)
         return self.save_product(merged)
+
+    def set_favorite(self, product_id: str, favorite: Any) -> dict[str, Any]:
+        if not isinstance(favorite, bool):
+            raise AppError(400, "favorite muss true oder false sein.")
+        product_id = str(product_id or "").strip()
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            if not self._products.set_favorite(db, product_id, favorite):
+                raise AppError(
+                    404, PRODUCT_NOT_FOUND, reason="nutrition_product_not_found"
+                )
+            product = self._products.get(db, product_id)
+        return product or {"id": product_id, "favorite": int(favorite)}
 
     def archive_product(self, product_id: str) -> dict[str, Any]:
         product_id = str(product_id or "").strip()

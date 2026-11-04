@@ -63,7 +63,7 @@ test("@responsive nutrition diary and saved meals remain read-only and preserve 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test("@responsive nutrition product library supports review, local save, and preserving an existing Coach draft", async ({ page }) => {
+test("@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft", async ({ page }) => {
   const productName = `Fixture Whey ${Date.now()}`;
   const barcode = String(Date.now()).slice(-13);
   await page.goto("/#nutrition/products");
@@ -96,14 +96,16 @@ test("@responsive nutrition product library supports review, local save, and pre
     input.value = "Bestehender Entwurf";
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await card.getByRole("button", { name: "In Mahlzeit erfassen" }).click();
+  await card.getByRole("button", { name: "Verwenden" }).click();
   await page.locator("#nutritionProductUseAmount").fill("25");
-  await page.locator("#nutritionProductUseForm").getByRole("button", { name: "Coach-Entwurf erstellen" }).click();
-  await expect(page.locator("#confirmationDialog")).toBeVisible();
-  await page.locator("#confirmationDialogCancel").click();
-  await expect.poll(() => page.locator("#messageInput").evaluate((input) => input.value)).toBe("Bestehender Entwurf");
-  await expect(page.locator("#nutritionProductUseDialog")).toBeVisible();
-  await page.locator("#nutritionProductUseCancel").click();
+  await page.locator("#nutritionProductUseCoach").click();
+  await expect.poll(() => page.locator("#messageInput").evaluate((input) => input.value)).toMatch(/^Bestehender Entwurf\nDazu 25 g \(Produkt-ID: /);
+  await page.goto("/#nutrition/products");
+  card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
+  await card.getByRole("button", { name: /Als Favorit markieren/ }).click();
+  card = page.locator("#nutritionProducts .nutrition-product-card").filter({ hasText: productName });
+  await expect(card.getByRole("button", { name: /Favorit entfernen/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#nutritionProducts .nutrition-product-card").first()).toContainText(productName);
 
   await card.getByRole("button", { name: "Archivieren" }).click();
   await expect(page.locator("#confirmationDialog")).toBeVisible();

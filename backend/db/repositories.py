@@ -55,7 +55,7 @@ class NutritionProductRepository:
     _SELECT = (
         "SELECT id, barcode, name, brand, basis_amount, basis_unit, kcal, carbs_g, "
         "protein_g, fat_g, sugar_g, fiber_g, salt_g, source, source_url, external_id, "
-        "provenance, extraction_confidence, status, created_at, updated_at FROM nutrition_products"
+        "provenance, extraction_confidence, favorite, status, created_at, updated_at FROM nutrition_products"
     )
 
     @staticmethod
@@ -75,6 +75,7 @@ class NutritionProductRepository:
         barcode: str | None = None,
         include_archived: bool = False,
         limit: int = 50,
+        favorites_first: bool = False,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -117,7 +118,8 @@ class NutritionProductRepository:
         rows = db.execute(
             self._SELECT
             + where
-            + " ORDER BY updated_at DESC, name COLLATE NOCASE LIMIT ?",
+            + (" ORDER BY favorite DESC," if favorites_first else " ORDER BY")
+            + " updated_at DESC, name COLLATE NOCASE LIMIT ?",
             (*params, max(1, min(int(limit), 100))),
         ).fetchall()
         return [self._row(row) for row in rows]
@@ -146,6 +148,7 @@ class NutritionProductRepository:
             "external_id",
             "provenance",
             "extraction_confidence",
+            "favorite",
             "status",
             "created_at",
             "updated_at",
@@ -157,16 +160,30 @@ class NutritionProductRepository:
             + ",".join("?" for _ in columns)
             + ") ON CONFLICT(id) DO UPDATE SET "
             + ",".join(
-                f"{column}=excluded.{column}" for column in columns if column != "id"
+                f"{column}=excluded.{column}"
+                for column in columns
+                if column not in {"id", "favorite"}
             ),
             tuple(
                 json.dumps(product.get(column), ensure_ascii=False)
                 if column == "provenance"
+                else int(bool(product.get(column)))
+                if column == "favorite"
                 else product.get(column)
                 for column in columns
             ),
         )
         return self.get(db, str(product["id"])) or product
+
+    def set_favorite(self, db: Any, product_id: str, favorite: bool) -> bool:
+        # Only the flag changes: saving a product again never resets it.
+        return (
+            db.execute(
+                "UPDATE nutrition_products SET favorite=? WHERE id=?",
+                (int(favorite), product_id),
+            ).rowcount
+            > 0
+        )
 
     def archive(self, db: Any, product_id: str, updated_at: str) -> bool:
         return (

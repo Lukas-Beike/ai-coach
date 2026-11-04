@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=355">
+  <link rel="stylesheet" href="/styles.css?v=356">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -570,10 +570,12 @@
   </dialog>
   <dialog id="nutritionProductUseDialog" aria-labelledby="nutritionProductUseTitle">
     <form id="nutritionProductUseForm" class="confirmation-dialog">
-      <span class="eyebrow">MAHLZEIT</span><h2 id="nutritionProductUseTitle">Produkt erfassen</h2>
+      <span class="eyebrow">PRODUKT</span><h2 id="nutritionProductUseTitle">Produkt verwenden</h2>
       <p id="nutritionProductUseName"></p>
-      <label for="nutritionProductUseAmount">Verzehrte Menge <span id="nutritionProductUseUnit"></span><input id="nutritionProductUseAmount" type="number" min="0.1" step="0.1" required></label>
-      <div class="dialog-actions"><button type="button" id="nutritionProductUseCancel" class="secondary-button">Abbrechen</button><button type="submit" class="adaptive-planning-button">Coach-Entwurf erstellen</button></div>
+      <label for="nutritionProductUseAmount">Menge <span id="nutritionProductUseUnit"></span><input id="nutritionProductUseAmount" type="number" min="0.1" step="0.1" required></label>
+      <label for="nutritionProductUseMeal">Mahlzeit<select id="nutritionProductUseMeal"></select></label>
+      <output id="nutritionProductUseStatus" class="tab-sync-detail" aria-live="polite"></output>
+      <div class="dialog-actions"><button type="button" id="nutritionProductUseCancel" class="secondary-button">Abbrechen</button><button type="button" id="nutritionProductUseCoach" class="secondary-button">Zur Coach-Nachricht</button><button type="submit" id="nutritionProductUseAdd" class="adaptive-planning-button" disabled>Zur Mahlzeit</button></div>
     </form>
   </dialog>
   <dialog id="confirmationDialog" aria-labelledby="confirmationDialogTitle" aria-describedby="confirmationDialogMessage">
@@ -607,7 +609,7 @@
   <script src="/sync-status.js?v=14" defer></script>
   <script src="/view-refresh.js?v=3" defer></script>
   <script src="/notifications.js?v=5" defer></script>
-  <script src="/nutrition.js?v=47" defer></script>
+  <script src="/nutrition.js?v=48" defer></script>
   <script src="/analysis.js?v=147" defer></script>
   <script src="/activity-details.js?v=24" defer></script>
   <script src="/activity-analysis.js?v=6" defer></script>

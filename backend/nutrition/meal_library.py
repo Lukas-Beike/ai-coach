@@ -78,9 +78,14 @@ class NutritionMealLibraryService:
         barcode: str | None = None,
         include_archived: bool = False,
         limit: int = 50,
+        favorites_first: bool = False,
     ) -> list[dict[str, Any]]:
         return self._product_catalog.list_products(
-            query=query, barcode=barcode, include_archived=include_archived, limit=limit
+            query=query,
+            barcode=barcode,
+            include_archived=include_archived,
+            limit=limit,
+            favorites_first=favorites_first,
         )
 
     def list_database_foods(self, query: str | None = None) -> list[dict[str, Any]]:
@@ -100,6 +105,9 @@ class NutritionMealLibraryService:
         self, product_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         return self._product_catalog.update_product(product_id, payload)
+
+    def set_product_favorite(self, product_id: str, favorite: Any) -> dict[str, Any]:
+        return self._product_catalog.set_favorite(product_id, favorite)
 
     def archive_product(self, product_id: str) -> dict[str, Any]:
         return self._product_catalog.archive_product(product_id)

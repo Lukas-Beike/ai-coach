@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v19 and supports upgrades from v16; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v20 and supports upgrades from v16; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from schema v16 through released v18 and the current schema v19, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from schema v16 through released v19 and the current schema v20, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Skipped-release upgrade
 - **WHEN** a populated released v16 database is opened by this build
@@ -193,6 +193,8 @@ The database SHALL reject schema versions older than v16 before changing their d
 ### Requirement: Planning metric upgrade preservation
 
 The v18 to v19 upgrade SHALL rename stored local planning metrics and frozen target FTP without losing their values, identities or sync state. It SHALL preserve retired detail KV records and normalize their target basis on canonical backfill.
+
+The v18 and v19 schemas share one table shape, so the v18 to v20 step also upgrades a v19 database. It SHALL add `nutrition_products.favorite` as 0 for every existing product and leave all other product values unchanged.
 
 #### Scenario: Existing planning records
 - **WHEN** a supported database contains local planning metrics under the former names
