@@ -76,7 +76,10 @@ def planned_target_execution(
         return {**base, "status": "not_covered", "reason": "Sportart unbekannt."}
     ranges = [step_target_range(step, thresholds, canonical_sport) for step in steps]
     reps = list(execution.get("reps") or [])
-    work = _work_steps(_levels(ranges, thresholds), len(reps))
+    # The real lap count, not the listed reps (at most 40).
+    counted = (execution.get("rep_summary") or {}).get("rep_count")
+    executed = counted if isinstance(counted, int) else len(reps)
+    work = _work_steps(_levels(ranges, thresholds), executed)
     if not work:
         reasons = sorted({r.unknown for r in ranges if r.unknown})
         return {
@@ -102,7 +105,7 @@ def planned_target_execution(
     deviations = [item["deviation_pct"] for item in compared if "deviation_pct" in item]
     summary = {
         "planned_work_steps": len(work),
-        "executed_work_laps": len(reps),
+        "executed_work_laps": executed,
         "compared": len(compared),
         "in_target": sum(value == 0 for value in deviations),
         "above_target": sum(value > 0 for value in deviations),
@@ -193,23 +196,29 @@ def _compare(
     if target.metric == "heartrate" and rep.get("short"):
         item["target_unknown"] = "short_rep_heart_rate"
         return item
+    window = _window(rep, target.metric)
     actual = _actual(rep, target.metric, execution)
+    if actual is None and target.metric == "speed" and window is not None:
+        # A ride shown in watts still has its speed in the displayed streams.
+        actual = timeline.mean("speed", *window)
     if actual is None:
         item["target_unknown"] = "missing_measurement"
         return item
     item["deviation_pct"] = _deviation(actual, target.low, target.high)
-    start, duration = rep.get("start_s"), rep.get("duration_s")
-    if isinstance(start, (int, float)) and isinstance(duration, (int, float)):
-        share = timeline.share_inside(
-            target.metric,
-            float(start),
-            float(start + duration),
-            target.low,
-            target.high,
-        )
+    if window is not None:
+        share = timeline.share_inside(target.metric, *window, target.low, target.high)
         if share is not None:
             item["time_in_target_pct"] = share
     return item
+
+
+def _window(rep: Mapping[str, Any], metric: str) -> tuple[float, float] | None:
+    """The rep's time window; heart rate is read over its second half only."""
+    start, duration = rep.get("start_s"), rep.get("duration_s")
+    if not isinstance(start, (int, float)) or not isinstance(duration, (int, float)):
+        return None
+    first = float(start) + (float(duration) / 2 if metric == "heartrate" else 0.0)
+    return first, float(start) + float(duration)
 
 
 def _shown_range(target: TargetRange, execution: Mapping[str, Any]) -> dict[str, Any]:
@@ -236,7 +245,8 @@ def _actual(
 ) -> float | None:
     """The rep's measured value on the target's metric."""
     if metric == "heartrate":
-        value = rep.get("heart_rate_second_half") or rep.get("heart_rate_avg")
+        # Heart rate lags; without its second half the rep stays unscored.
+        value = rep.get("heart_rate_second_half")
         return float(value) if isinstance(value, (int, float)) else None
     output = rep.get("output")
     if not isinstance(output, (int, float)) or output <= 0:
@@ -273,15 +283,29 @@ class _Timeline:
     def share_inside(
         self, metric: str, start: float, end: float, low: float, high: float
     ) -> float | None:
+        spans = self._spans(metric, start, end)
+        total = sum(span for _, span in spans)
+        inside = sum(span for value, span in spans if low <= value <= high)
+        return round(inside / total * 100) if total > 0 else None
+
+    def mean(self, metric: str, start: float, end: float) -> float | None:
+        spans = self._spans(metric, start, end)
+        total = sum(span for _, span in spans)
+        return sum(value * span for value, span in spans) / total if total > 0 else None
+
+    def _spans(
+        self, metric: str, start: float, end: float
+    ) -> list[tuple[float, float]]:
+        """Each displayed value with the time it covers inside the window."""
         channel = self._channels.get(_STREAM_KEYS[metric])
         values = channel.get("values") if isinstance(channel, Mapping) else None
         times = self._times
         if not isinstance(values, list) or len(values) != len(times) or not times:
-            return None
+            return []
         # The sample interval that straddles the lap start counts in part.
         first = max(0, bisect.bisect_right(times, start) - 1)
         last = bisect.bisect_left(times, end)
-        inside = total = 0.0
+        spans = []
         for index in range(first, min(last, len(times) - 1)):
             value, left, right = values[index], times[index], times[index + 1]
             if not all(isinstance(item, (int, float)) for item in (value, left, right)):
@@ -289,8 +313,6 @@ class _Timeline:
             if not 0 < right - left <= MAX_DISPLAY_GAP_S:
                 continue
             span = min(right, end) - max(left, start)
-            if span <= 0:
-                continue
-            total += span
-            inside += span if low <= value <= high else 0.0
-        return round(inside / total * 100) if total > 0 else None
+            if span > 0:
+                spans.append((float(value), span))
+        return spans

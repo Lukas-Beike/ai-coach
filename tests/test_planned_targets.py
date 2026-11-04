@@ -198,6 +198,46 @@ class PlannedTargetExecutionTests(unittest.TestCase):
         self.assertEqual(result["reps"][0]["target_bpm"], [160, 170])
         self.assertEqual(result["reps"][0]["deviation_pct"], 0.0)
 
+    def test_heart_rate_time_in_target_reads_the_second_half(self) -> None:
+        session = _run()
+        streams = _display_streams(session)
+        streams["channels"]["heart_rate_bpm"] = {
+            "values": list(session["streams"]["heartrate"])
+        }
+        plan = "- 10m Z2 Pace\n\n5x\n- 3m 160-170bpm HR\n- 90s Z1 Pace"
+        result = planned_target_execution(
+            session_execution(session),
+            structured_steps(plan),
+            THRESHOLDS,
+            "run",
+            streams=streams,
+        )
+        # Heart rate climbs 150-168 bpm: its second half is inside 160-170.
+        self.assertGreaterEqual(result["reps"][0]["time_in_target_pct"], 85)
+
+    def test_rep_counts_beyond_the_listed_reps_and_speed_targets_on_power_rides(
+        self,
+    ) -> None:
+        execution = session_execution(_ride([250.0, 250.0]))
+        execution["rep_summary"]["rep_count"] = 50
+        session = _ride([250.0, 250.0])
+        times = list(session["streams"]["time"])
+        streams = {
+            "time_s": times,
+            "channels": {"speed_mps": {"values": [9.0] * len(times)}},
+        }
+        result = planned_target_execution(
+            execution,
+            structured_steps("- 10m Z1\n\n2x\n- 6m 1:50-2:00/km Pace\n- 3m Z1"),
+            THRESHOLDS,
+            "ride",
+            streams=streams,
+        )
+        self.assertEqual(result["summary"]["executed_work_laps"], 50)
+        # 9 m/s from the displayed speed is inside 1:50-2:00/km.
+        self.assertEqual(result["reps"][0]["target_kmh"], [30.0, 32.7])
+        self.assertEqual(result["reps"][0]["deviation_pct"], 0.0)
+
     def test_continuous_sessions_and_unresolved_plans_are_not_covered(self) -> None:
         steady = session_execution(
             synthetic_session([("lap", 1800, 3.0, (140.0, 145.0))], kinds=False)
