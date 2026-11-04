@@ -259,6 +259,7 @@ from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.leg_strength import strength_expected
 from backend.planning.plan_guard_service import (
     LAST_TEST_DAYS,
+    BriefHistory,
     PlanGuardService,
     read_completed,
     read_lessons,
@@ -1724,11 +1725,6 @@ def _plan_guard_service() -> PlanGuardService:
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
         ),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
-        recent_units=lambda: PLANNING_DATA.planned_unit().list(
-            1000,
-            future_only=True,
-            since=ATHLETE_CLOCK.now().date() - timedelta(days=LAST_TEST_DAYS),
-        ),
         completed_activities=lambda: read_completed(
             database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
         ),
@@ -1758,7 +1754,20 @@ def _plan_guard_service() -> PlanGuardService:
             ATHLETE_CLOCK.now().date(),
         ),
         calendar_events=lambda: EXTERNAL_CALENDAR.reader().list_events_in_window(56),
-        lessons=lambda: read_lessons(_block_lessons),
+        history=BriefHistory(
+            lessons=lambda: read_lessons(_block_lessons),
+            recent_units=lambda: PLANNING_DATA.planned_unit().list(
+                1000,
+                future_only=True,
+                since=ATHLETE_CLOCK.now().date() - timedelta(days=LAST_TEST_DAYS),
+            ),
+            recent_completed=lambda: read_completed(
+                database_manager(),
+                CANONICAL_READ,
+                ATHLETE_CLOCK.now().date(),
+                days=LAST_TEST_DAYS,
+            ),
+        ),
     )
 
 

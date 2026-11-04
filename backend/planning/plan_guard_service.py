@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
@@ -99,10 +100,12 @@ def illness_confirmation(confirm: Callable[[], bool]) -> Iterator[None]:
         _ILLNESS_CONFIRMATION.reset(token)
 
 
-def read_completed(database_manager: Any, activities: Any, today: date) -> Any:
-    """Activity summaries of the 60-day check window, in the caller's transaction."""
+def read_completed(
+    database_manager: Any, activities: Any, today: date, days: int = 60
+) -> Any:
+    """Activity summaries of the check window (60 days), in the caller's transaction."""
     with database_manager.reader() as db:
-        return activities.activity_summaries(db, start=today - timedelta(days=60))
+        return activities.activity_summaries(db, start=today - timedelta(days=days))
 
 
 def read_load_thresholds(
@@ -310,19 +313,27 @@ LAST_TESTS_SOURCE = (
 def last_tests(
     units: Sequence[Mapping[str, Any]],
     competitions: Sequence[Mapping[str, Any]],
+    completed: Sequence[Mapping[str, Any]],
     today: date,
 ) -> dict[str, Any]:
-    """Day of the last test or race per sport before today, else None."""
+    """Day of the last test or race per sport before today, else None.
+
+    A planned test counts only when a completed activity of its sport exists
+    on its day; local units carry no completion state of their own.
+    """
     first = (today - timedelta(days=LAST_TEST_DAYS)).isoformat()
+    done = {
+        (row.get("sport"), iso_date_prefix(row.get("started_at_local")))
+        for row in completed
+    }
     days: dict[str, list[str]] = {"run": [], "ride": []}
     for unit in units:
         day = iso_date_prefix(unit.get("date"))
         sport = planned_sport_environment(unit)[0].value
-        missed = (unit.get("compliance") or {}).get("status") == "missed"
         if (
             sport in days
             and first <= day < today.isoformat()
-            and not missed
+            and (sport, day) in done
             and session_focus(unit).value == "test"
         ):
             days[sport].append(day)
@@ -357,6 +368,16 @@ def brief_lessons(lessons: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class BriefHistory:
+    """What the brief reads about earlier weeks: lessons and the last tests."""
+
+    lessons: Callable[[], Sequence[Mapping[str, Any]]] = lambda: ()
+    # Local units and completed activities of the last LAST_TEST_DAYS days.
+    recent_units: Callable[[], Sequence[Mapping[str, Any]]] = lambda: ()
+    recent_completed: Callable[[], Sequence[Mapping[str, Any]]] = lambda: ()
+
+
 class PlanGuardService:
     """Read the plan inputs and run the checks inside the caller's transaction."""
 
@@ -375,12 +396,9 @@ class PlanGuardService:
         expects_strength: Callable[[], bool] = lambda: False,
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
         weekly_plan_text: Callable[[], str] = lambda: "",
-        lessons: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
-        recent_units: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
+        history: BriefHistory | None = None,
     ) -> None:
-        self._lessons = lessons
-        # Local units from LAST_TEST_DAYS ago on, for the last test per sport.
-        self._recent_units = recent_units
+        self._history = history or BriefHistory()
         self._weekly_plan = weekly_plan_text
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -520,6 +538,11 @@ class PlanGuardService:
                 self._weekly_plan(), self._events(), today, 35
             ),
             weekly_plan_text=self._weekly_plan(),
-            lessons=self._lessons(),
-            last_tests=last_tests(self._recent_units(), competitions, today),
+            lessons=self._history.lessons(),
+            last_tests=last_tests(
+                self._history.recent_units(),
+                competitions,
+                self._history.recent_completed(),
+                today,
+            ),
         )

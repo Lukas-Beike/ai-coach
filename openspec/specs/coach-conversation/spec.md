@@ -188,7 +188,7 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 
 #### Scenario: Planned and analysed tests
 - **WHEN** a turn carries `plan_week` or `plan_block`
-- **THEN** `planning_brief.last_tests` names per sport the day of the last local test unit or race of the last 120 days, and the playbook plans a run critical-speed test (3600, 2400 and 1200 m on a track or measured flat route, else a 30-min time trial) or a Zwift FTP ramp test when that day is 6 to 8 weeks old or unknown, run and ride in different weeks, never in the last 2 weeks before an A race or with illness or poor recovery; an optional fixed-heart-rate control run keeps `session_focus` easy.
+- **THEN** `planning_brief.last_tests` names per sport the day of the last local test unit with a completed activity of its sport that day, or race, of the last 120 days, and the playbook plans a run critical-speed test (3600, 2400 and 1200 m on a track or measured flat route, else a 30-min time trial) or a Zwift FTP ramp test when that day is 6 to 8 weeks old or unknown, run and ride in different weeks, never in the last 2 weeks before an A race or with illness or poor recovery; an optional fixed-heart-rate control run keeps `session_focus` easy.
 
 #### Scenario: Test evaluation
 - **WHEN** `get_activity_details` matches a planned unit with `session_focus` test

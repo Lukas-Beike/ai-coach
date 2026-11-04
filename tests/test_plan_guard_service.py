@@ -400,25 +400,28 @@ class PlanGuardWriteTests(unittest.TestCase):
 
 
 class LastTestsTests(unittest.TestCase):
-    def test_last_test_or_race_per_sport(self):
+    def test_last_completed_test_or_race_per_sport(self):
         units = [
             {"date": "2026-09-20", "sport": "run", "session_focus": "test"},
-            {
-                "date": "2026-10-10",
-                "sport": "run",
-                "session_focus": "test",
-                "compliance": {"status": "missed"},
-            },
+            # Planned but never run: no completed activity on that day.
+            {"date": "2026-10-10", "sport": "run", "session_focus": "test"},
             {"date": "2026-10-20", "sport": "run", "session_focus": "easy"},
             {"date": "2026-11-05", "sport": "ride", "session_focus": "test"},
             {"date": "2026-05-01", "sport": "ride", "session_focus": "test"},
         ]
-        competitions = [{"date": "2026-10-04", "sport": "Running", "name": "10k"}]
-        result = last_tests(units, competitions, TODAY)
-        # The race beats the older test; missed, future and too old tests do not count.
-        self.assertEqual("2026-10-04", result["run"])
+        completed = [
+            {"sport": "run", "started_at_local": "2026-09-20T08:00:00"},
+            {"sport": "run", "started_at_local": "2026-10-20T08:00:00"},
+            {"sport": "ride", "started_at_local": "2026-05-01T08:00:00"},
+        ]
+        competitions = [{"date": "2026-09-27", "sport": "Running", "name": "10k"}]
+        result = last_tests(units, competitions, completed, TODAY)
+        # The race beats the older completed test; missed, future and old tests do not count.
+        self.assertEqual("2026-09-27", result["run"])
         self.assertIsNone(result["ride"])
         self.assertIn("session_focus test", result["source"])
+        without_race = last_tests(units, [], completed, TODAY)
+        self.assertEqual("2026-09-20", without_race["run"])
 
 
 class PlanBriefTests(unittest.TestCase):
