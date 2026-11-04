@@ -99,7 +99,8 @@ from backend.canonical.vocabulary import (
 # Version 7: maps average speed, elevation gain, normalized power and VO2max.
 # Version 9: strength duration is the elapsed session time.
 # Version 8: maps the training-effect label (#1416).
-# Version 10: trail runs are outdoor, so analyses leave them out like Intervals.icu trail runs.
+# Version 10: trail and obstacle runs are outdoor, so analyses leave them out like
+# Intervals.icu trail runs.
 MAPPER_VERSION: Final = 10
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
@@ -138,6 +139,8 @@ GARMIN_ACTIVITY_TYPES: Final[Mapping[str, tuple[Sport, Environment]]] = {
     "running": (Sport.RUN, Environment.UNKNOWN),
     "street_running": (Sport.RUN, Environment.UNKNOWN),
     "trail_running": (Sport.RUN, Environment.OUTDOOR),
+    # Obstacle runs are off-road; ultra runs may be road or trail, so they stay unknown.
+    "obstacle_run": (Sport.RUN, Environment.OUTDOOR),
     "track_running": (Sport.RUN, Environment.UNKNOWN),
     "treadmill_running": (Sport.RUN, Environment.INDOOR),
     "indoor_running": (Sport.RUN, Environment.INDOOR),

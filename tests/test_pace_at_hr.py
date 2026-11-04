@@ -79,6 +79,15 @@ class SessionProfileTests(unittest.TestCase):
             pace_at_heart_rate(_run(environment="virtual"))["status"], "ok"
         )
 
+    def test_indoor_and_virtual_runs_ignore_course_altitude(self):
+        for environment in ("indoor", "virtual"):
+            with self.subTest(environment=environment):
+                result = pace_at_heart_rate(
+                    _run(environment=environment, altitude=lambda t: 0.5 * 3.0 * t)
+                )
+                self.assertEqual(result["status"], "ok")
+                self.assertFalse(result["grade_adjusted"])
+
     def test_trail_and_ride_give_no_value(self):
         self.assertEqual(
             pace_at_heart_rate(_run(grade=0.0, trail=True))["status"],

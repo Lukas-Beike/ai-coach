@@ -20,11 +20,13 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
+from backend.canonical.activity_summary import summary_is_indoor
 from backend.performance.power_profile import METHOD_ID, METHOD_VERSION
 from backend.performance.session_analysis import _number, _samples
 from backend.providers.intervals_activity_mapping import INTERVALS_LABEL
 
-METHOD: Final = "pace-at-heart-rate-v1"
+# v2: treadmill and virtual runs are flat and never grade-adjusted.
+METHOD: Final = "pace-at-heart-rate-v2"
 WARMUP_S: Final = 600
 MIN_DURATION_S: Final = 1800
 BIN_BPM: Final = 5
@@ -148,9 +150,10 @@ def pace_at_heart_rate(
     reason = _ineligible(activity)
     if reason is not None:
         return {**base, "status": "insufficient_data", "reason": reason, "bins": {}}
-    grades = _grade_stream(activity["streams"])
-    # Treadmill and virtual runs have no terrain; their pace needs no grade.
-    indoor = activity.get("environment") in {"indoor", "virtual"}
+    # Treadmill and virtual runs have no terrain; a virtual course's altitude
+    # or barometric drift never grade-adjusts or filters their pace.
+    indoor = summary_is_indoor(activity)
+    grades = None if indoor else _grade_stream(activity["streams"])
     if grades is None and not indoor:
         return {
             **base,
