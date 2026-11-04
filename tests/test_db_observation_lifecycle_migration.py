@@ -1,7 +1,9 @@
-"""Schema version 21: the observation lifecycle, upgraded in place from every release.
+"""Schema version 21: the observation lifecycle, upgraded in place from v20.
 
-A populated release keeps every observation value and makes each row active.
-Rows whose raw record is known exactly get it as their owner: Intervals.icu
+The only production database runs schema v20 (release 1.13.40), so v20 is the
+only starting point this step is tested from. A populated v20 database keeps
+every observation value and makes each row active. Rows whose raw record is
+known exactly get it as their owner: Intervals.icu
 wellness and Wahoo threshold rows by their source record id, other Intervals.icu
 rows by the athlete record. Garmin rows and rows without a stored raw record keep
 no owner. A failure rolls back to the unchanged release and a restart changes
@@ -21,7 +23,7 @@ from backend.db.schema import CURRENT_SCHEMA_VERSION, database_schema_is_current
 from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V20
 
 FIXTURES = Path(__file__).with_name("fixtures")
-RELEASES = (16, 17, 18, 19, 20)
+RELEASES = (20,)
 STAMP = "2026-11-04T08:00:00+00:00"
 DAY = "2026-11-01"
 RAW = (

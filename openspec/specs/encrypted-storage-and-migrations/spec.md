@@ -215,7 +215,7 @@ Evidence: `backend/db/planning_metrics_migration.py`, `backend/sync/activity_det
 The v20 to v21 step SHALL add `observations.state` and `observations.owner_record_id`, keep every existing row active with all values unchanged, and set the owner only where the raw record is known exactly.
 
 #### Scenario: Populated release upgrade
-- **WHEN** a populated v16 to v20 database is opened by this build
+- **WHEN** a populated v20 database is opened by this build
 - **THEN** Intervals.icu wellness and Wahoo threshold rows are owned by their source record, other Intervals.icu rows by the stored athlete record, and Garmin rows or rows without a stored raw record keep no owner; a failure rolls back to the unchanged release.
 
 Evidence: `backend/db/migrations.py:_assign_observation_owners`; `tests/test_db_observation_lifecycle_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
