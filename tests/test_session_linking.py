@@ -20,7 +20,14 @@ from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.schema import initialize_schema
-from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND, wahoo_ingest_plan
+from backend.providers.canonical_plans import (
+    ACTIVITY_RECORD_KIND,
+    ActivityItem,
+    IngestPlan,
+    wahoo_ingest_plan,
+)
+from backend.providers.wahoo_activity_mapping import MAPPER_VERSION as WAHOO_VERSION
+from backend.providers.wahoo_activity_mapping import map_wahoo_activities
 from backend.sync import canonical_ingest as ingest
 
 ZONE = ZoneInfo("Europe/Berlin")
@@ -261,6 +268,64 @@ class PersistedLinkTests(LinkingCase):
         self.assertEqual(counters.linked, 1)
         other = self._sessions()["o-1"]
         self.assertEqual((other["state"], other["merged_into"]), ("active", None))
+
+
+class WahooPlaceholderTests(LinkingCase):
+    def _store_placeholder_as_an_older_build_did(self) -> None:
+        workout = wahoo_workout(workout_summary=None)
+        mapped = map_wahoo_activities([workout], zone=ZONE, retrieved_at=SECOND)
+        record = mapped.records[0]
+        plan = IngestPlan(
+            provider=ProviderId.WAHOO,
+            activities=(
+                ActivityItem(
+                    record=record,
+                    local_date=record.started_at.astimezone(ZONE).date(),
+                    mapper_version=WAHOO_VERSION,
+                ),
+            ),
+        )
+        with self.manager.unit_of_work() as db:
+            ingest.ingest_plan(
+                db, plan, retrieved_at=SECOND, deletion_window=None, zone=ZONE
+            )
+
+    def _states(self) -> dict[str, str]:
+        with self.manager.reader() as db:
+            return {
+                row["primary_provider_activity_id"]: row["state"]
+                for row in db.execute(
+                    "SELECT primary_provider_activity_id, state FROM activity_sessions"
+                )
+            }
+
+    def test_a_listed_placeholder_never_becomes_a_session(self) -> None:
+        self._ingest_intervals([intervals_ride()], FIRST)
+        counters = self._ingest_wahoo([wahoo_workout(workout_summary=None)], SECOND)
+
+        self.assertEqual((counters.written, counters.deleted), (0, 0))
+        self.assertEqual({INTERVALS_ID: "active"}, self._states())
+
+    def test_a_stored_placeholder_is_withdrawn_and_revived_with_its_summary(
+        self,
+    ) -> None:
+        self._ingest_intervals([intervals_ride()], FIRST)
+        self._store_placeholder_as_an_older_build_did()
+        self.assertEqual({INTERVALS_ID: "active", WAHOO_ID: "active"}, self._states())
+
+        withdrawn = self._ingest_wahoo([wahoo_workout(workout_summary=None)], THIRD)
+        self.assertEqual(withdrawn.deleted, 1)
+        self.assertEqual({INTERVALS_ID: "active", WAHOO_ID: "deleted"}, self._states())
+        self.assertEqual(
+            self._ingest_wahoo([wahoo_workout(workout_summary=None)], LATER).deleted,
+            0,
+        )
+
+        recorded = self._ingest_wahoo([wahoo_workout()], LATER)
+        self.assertEqual((recorded.updated, recorded.linked), (1, 1))
+        sessions = self._sessions()
+        self.assertEqual(sessions[WAHOO_ID]["state"], "duplicate")
+        self.assertIsNotNone(sessions[WAHOO_ID]["merged_into"])
 
 
 class IdempotenceTests(LinkingCase):

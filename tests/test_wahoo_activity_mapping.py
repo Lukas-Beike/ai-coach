@@ -430,6 +430,26 @@ class SummaryMetricTests(unittest.TestCase):
         self.assertNotIn("8.2", repr(record))
 
 
+class PlaceholderWorkoutTests(unittest.TestCase):
+    def test_workouts_without_a_duration_are_withdrawn_not_planned(self) -> None:
+        # Wahoo lists an unprocessed copy and a loaded, never recorded plan
+        # without a summary, or with a summary that holds no duration yet.
+        workouts = [
+            row(id=1),
+            row(id=2, workout_summary=None),
+            row(id=3, workout_summary={"distance_accum": "0.0"}),
+        ]
+        payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": workouts}
+
+        plan = wahoo_ingest_plan(payload, zone=UTC)
+
+        self.assertEqual(["1"], [item.record.activity_id for item in plan.activities])
+        self.assertEqual(["1"], [raw.source_record_id for raw in plan.raw_records])
+        self.assertEqual(frozenset({"2", "3"}), plan.withdrawn_activity_ids)
+        self.assertEqual(frozenset({"1", "2", "3"}), plan.present_activity_ids)
+        self.assertEqual(0, plan.skipped_invalid)
+
+
 class StoredRawRecordTests(unittest.TestCase):
     def test_stored_raw_record_drops_the_summary_file_url_only(self) -> None:
         workout = row(
@@ -438,6 +458,7 @@ class StoredRawRecordTests(unittest.TestCase):
                     "url": "https://files.example.invalid/w.fit?sig=placeholder",
                     "name": "w.fit",
                 },
+                "duration_total_accum": "3600",
                 "calories_accum": "700",
                 "ascent_accum": "412.5",
             }
@@ -464,7 +485,9 @@ class StoredRawRecordTests(unittest.TestCase):
 
 
 class ReprojectionTests(unittest.TestCase):
-    def test_mapper_version_is_three_and_newer_than_the_stored_version_one(self) -> None:
+    def test_mapper_version_is_three_and_newer_than_the_stored_version_one(
+        self,
+    ) -> None:
         self.assertEqual(3, MAPPER_VERSION)
         self.assertEqual(3, reprojection_mapper_version("wahoo", "activity"))
 

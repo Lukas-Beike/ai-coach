@@ -216,6 +216,8 @@ class IngestPlan:
 
     ``domain_batches`` hold one batch per raw record that projects to domain rows;
     each batch's source record is among ``raw_records`` of an ingest plan.
+    ``withdrawn_activity_ids`` name listed activities that are no recording yet;
+    a stored copy of one is tombstoned, and a later recording revives it.
     """
 
     provider: ProviderId
@@ -223,6 +225,7 @@ class IngestPlan:
     activities: tuple[ActivityItem, ...] = ()
     observations: tuple[ObservationItem, ...] = ()
     present_activity_ids: frozenset[str] = field(default_factory=frozenset)
+    withdrawn_activity_ids: frozenset[str] = field(default_factory=frozenset)
     skipped_invalid: int = 0
     domain_batches: tuple[DomainBatch, ...] = ()
 
@@ -658,6 +661,11 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
     and fetched. An absent key means "not fetched", so earlier threshold rows stay.
     Without a usable fetch time nothing is planned, so no row is ever stamped with
     an invented time. A payload whose workout list is not a list plans nothing.
+
+    Wahoo lists a workout without a duration before it processed the recording,
+    and for a loaded plan that was never recorded. Such a workout has no value a
+    duplicate rule can compare, so it is withdrawn instead of planned as an
+    activity; once its summary arrives it is planned as usual.
     """
     retrieved_at = wahoo_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None or not isinstance(payload, Mapping):
@@ -673,15 +681,24 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         retrieved_at=retrieved_at,
         stored=raw_workout_for_storage,
     )
+    withdrawn = {
+        item.record.activity_id for item in items if item.record.duration_s is None
+    }
     threshold_raw, threshold_observations, threshold_skipped = _wahoo_threshold_items(
         payload, zone=zone, retrieved_at=retrieved_at
     )
     return IngestPlan(
         provider=ProviderId.WAHOO,
-        raw_records=tuple(raw_records) + threshold_raw,
-        activities=tuple(items),
+        raw_records=tuple(
+            raw for raw in raw_records if raw.source_record_id not in withdrawn
+        )
+        + threshold_raw,
+        activities=tuple(
+            item for item in items if item.record.activity_id not in withdrawn
+        ),
         observations=threshold_observations,
         present_activity_ids=frozenset(present),
+        withdrawn_activity_ids=frozenset(withdrawn),
         skipped_invalid=skipped + threshold_skipped,
     )
 

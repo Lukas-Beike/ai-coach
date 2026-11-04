@@ -951,7 +951,12 @@ class ReprojectionTests(BackfillFixture):
         payload = {
             "synced_at": NOW,
             "workouts": [
-                {"id": 7, "starts": "2026-09-19T06:00:00Z", "workout_type_id": 1}
+                {
+                    "id": 7,
+                    "starts": "2026-09-19T06:00:00Z",
+                    "workout_type_id": 1,
+                    "workout_summary": {"duration_total_accum": "1800"},
+                }
             ],
         }
         plan = wahoo_ingest_plan(payload, zone=ZONE)
