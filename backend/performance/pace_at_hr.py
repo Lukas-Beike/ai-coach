@@ -149,7 +149,8 @@ def pace_at_heart_rate(
     if reason is not None:
         return {**base, "status": "insufficient_data", "reason": reason, "bins": {}}
     grades = _grade_stream(activity["streams"])
-    indoor = activity.get("environment") == "indoor"
+    # Treadmill and virtual runs have no terrain; their pace needs no grade.
+    indoor = activity.get("environment") in {"indoor", "virtual"}
     if grades is None and not indoor:
         return {
             **base,
