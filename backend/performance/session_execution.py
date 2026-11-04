@@ -692,6 +692,8 @@ def comparison_metrics(execution: Mapping[str, Any]) -> dict[str, Any] | None:
     base = {
         "structure": execution.get("structure"),
         "output_unit": execution.get("output_unit"),
+        # The stream providers, so a sensor or provider change shows beside the values.
+        "source": execution.get("source") or None,
         # Peers with doubtful heart rate or speed stay out of the medians.
         "data_quality_ok": all(
             value in {"ok", "missing"} for value in quality.values()

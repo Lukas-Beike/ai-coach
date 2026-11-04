@@ -64,7 +64,8 @@ def comparable_sessions(
     """
     base = {"method": METHOD, "scope": SCOPE}
     own = next((row for row in records if row.get("activity_id") == activity_key), None)
-    if own is None:
+    # A session without a curve has no full-resolution streams.
+    if own is None or own.get("fingerprint") is None:
         return _not_covered(
             base, "Keine Messreihe in voller Auflösung für diese Einheit."
         )
@@ -73,6 +74,10 @@ def comparable_sessions(
         return _not_covered(
             base,
             "Keine vergleichbare Ausführung: Hauptteil zu kurz oder keine Intervalle mit Messwerten.",
+        )
+    if mine.get("data_quality_ok") is False:
+        return _not_covered(
+            base, "Puls oder Tempo dieser Einheit sind zweifelhaft (data_quality)."
         )
     try:
         day = date.fromisoformat(str(own.get("date") or ""))
@@ -107,6 +112,7 @@ def comparable_sessions(
                 "date": row.get("date"),
                 "name": row.get("name"),
                 "avg_temp_c": row.get("avg_temp_c"),
+                "source": row["execution_summary"].get("source"),
                 **{
                     key: row["execution_summary"][key]
                     for key in metrics

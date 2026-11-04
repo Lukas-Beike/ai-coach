@@ -150,6 +150,7 @@ class StrengthAndPaceTests(unittest.TestCase):
 
 def _easy(day, activity_id, output):
     return {
+        "fingerprint": f"curve-{activity_id}",
         "activity_id": activity_id,
         "date": day,
         "sport": "ride",

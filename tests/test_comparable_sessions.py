@@ -30,6 +30,7 @@ def _easy(
 
 def _row(day: str, summary: dict[str, Any] | None, **fields: Any) -> dict[str, Any]:
     return {
+        "fingerprint": None if summary is None else f"curve-{day}",
         "activity_id": f"act_{day}",
         "date": day,
         "sport": fields.get("sport", "run"),
@@ -112,6 +113,33 @@ class ComparableSessionsTests(unittest.TestCase):
         result = comparable_sessions(records, "act_2026-11-03")
         self.assertEqual(result["count"], 3)
         self.assertEqual(result["difference"]["rep_output_mean"], -8)
+
+    def test_doubtful_own_data_and_missing_streams_say_why(self) -> None:
+        doubtful = _easy(330, 140)
+        doubtful["data_quality_ok"] = False
+        records = [_row("2026-11-03", doubtful)] + [
+            _row(day, _easy(340, 142))
+            for day in ("2026-10-27", "2026-10-20", "2026-10-13")
+        ]
+        result = comparable_sessions(records, "act_2026-11-03")
+        self.assertEqual(result["status"], "not_covered")
+        self.assertIn("zweifelhaft", result["reason"])
+        missing = comparable_sessions([_row("2026-11-03", None)], "act_2026-11-03")
+        self.assertIn("voller Auflösung", missing["reason"])
+
+    def test_peers_name_their_stream_source(self) -> None:
+        summaries = [_easy(330, 140)] + [_easy(340, 142) for _ in range(3)]
+        for summary, source in zip(
+            summaries, ("Garmin", "Wahoo", "Garmin", "Garmin"), strict=True
+        ):
+            summary["source"] = source
+        days = ("2026-11-03", "2026-10-27", "2026-10-20", "2026-10-13")
+        records = [
+            _row(day, summary) for day, summary in zip(days, summaries, strict=True)
+        ]
+        result = comparable_sessions(records, "act_2026-11-03")
+        self.assertEqual(result["this"]["source"], "Garmin")
+        self.assertEqual(result["peers"][0]["source"], "Wahoo")
 
     def test_a_session_without_execution_is_not_covered(self) -> None:
         result = comparable_sessions([_row("2026-11-03", None)], "act_2026-11-03")

@@ -332,15 +332,15 @@ class SessionExecutionCurveTests(unittest.TestCase):
     def test_a_lap_change_recomputes_and_a_stale_lap_set_stays_out(self):
         store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS)
         first = self.reader.curves(self.db, ["act_1"], {})["act_1"]
-        store_laps(
-            self.db, INTERVALS, "i-1", INTERVAL_LAPS[:2], summary_sha256="a" * 64
-        )
+        store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS, summary_sha256="a" * 64)
+        current = self.reader.curves(self.db, ["act_1"], {"i-1": "a" * 64})["act_1"]
         stale = self.reader.curves(self.db, ["act_1"], {"i-1": "b" * 64})["act_1"]
+        assert current.execution_summary is not None
+        assert stale.execution_summary is not None
         self.assertNotEqual(first.fingerprint, stale.fingerprint)
-        # Without its stale laps the session is one continuous ride.
-        self.assertEqual(
-            "continuous", (stale.execution_summary or {}).get("structure", "continuous")
-        )
+        # The same laps count while current and stay out once stale.
+        self.assertEqual("interval", current.execution_summary["structure"])
+        self.assertEqual("continuous", stale.execution_summary["structure"])
 
 
 class ProfileSelectionTests(unittest.TestCase):
