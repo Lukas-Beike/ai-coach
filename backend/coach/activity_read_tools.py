@@ -18,6 +18,7 @@ from backend.coach.context import (
 from backend.coach.session_checks import matched_focus
 from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.comparable_sessions import comparable_sessions
 from backend.performance.pace_at_hr import COMPARE_DAYS, session_comparison
 from backend.performance.planned_targets import planned_target_execution
 from backend.performance.report_service import PROFILE_WINDOW_DAYS
@@ -204,11 +205,41 @@ class CoachActivityReadToolService:
             day - timedelta(days=3), day + timedelta(days=1)
         )
         checks["strength_before"] = self._strength_before(session, nearby, units)
+        own = next(
+            (
+                row
+                for row in nearby or ()
+                if row.get("id") == session.get("activity_id")
+            ),
+            None,
+        )
+        covered_from = self._today() - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+        # A session before the curve window has no curve; nothing is read for it.
+        inside = own is not None and day >= covered_from
+        records = self._curve_records() if inside else None
         if session.get("sport") == "run":
-            checks["pace_at_heart_rate"] = self._pace_at_heart_rate(
-                session, nearby, day
+            checks["pace_at_heart_rate"] = self._pace_at_heart_rate(own, records, day)
+        if not inside:
+            checks["comparable_sessions"] = {
+                "status": "not_covered",
+                "reason": f"Die Einheit liegt außerhalb des Auswertungsfensters von {PROFILE_WINDOW_DAYS[-1]} Tagen.",
+            }
+        elif records is None:
+            checks["comparable_sessions"] = _unavailable()
+        else:
+            checks["comparable_sessions"] = comparable_sessions(
+                records, stored_activity_key(own)
             )
         return checks
+
+    def _curve_records(self) -> list[dict[str, Any]] | None:
+        """Sessions of the curve window with their curves and executions, read once."""
+        if self._report_services is None:
+            return None
+        try:
+            return self._report_services.profiles.curve_records()
+        except RuntimeError:
+            return None
 
     def _planned_targets(
         self,
@@ -257,34 +288,19 @@ class CoachActivityReadToolService:
         return leg_strength.strength_before(start, nearby, lambda: units)
 
     def _pace_at_heart_rate(
-        self, session: dict[str, Any], nearby: Any, day: date
+        self,
+        own: dict[str, Any] | None,
+        records: list[dict[str, Any]] | None,
+        day: date,
     ) -> dict[str, Any]:
-        own = next(
-            (
-                row
-                for row in nearby or ()
-                if row.get("id") == session.get("activity_id")
-            ),
-            None,
-        )
-        if self._report_services is None or own is None:
-            return {
-                "status": "not_covered",
-                "reason": "Auswertung der Messreihen nicht verfügbar.",
-            }
         covered_from = self._today() - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
-        if day - timedelta(days=COMPARE_DAYS) < covered_from:
+        if own is not None and day - timedelta(days=COMPARE_DAYS) < covered_from:
             return {
                 "status": "not_covered",
                 "reason": f"Die Läufe der letzten {COMPARE_DAYS} Tage vor dieser Aktivität liegen außerhalb des Auswertungsfensters von {PROFILE_WINDOW_DAYS[-1]} Tagen.",
             }
-        try:
-            records = self._report_services.profiles.curve_records()
-        except RuntimeError:
-            return {
-                "status": "not_covered",
-                "reason": "Auswertung der Messreihen nicht verfügbar.",
-            }
+        if own is None or records is None:
+            return _unavailable()
         return session_comparison(records, stored_activity_key(own))
 
     @staticmethod
@@ -353,3 +369,10 @@ def _matched_unit(
         and planned_sport_environment(unit)[0].value == session.get("sport")
     ]
     return same[0] if len(same) == 1 else None
+
+
+def _unavailable() -> dict[str, Any]:
+    return {
+        "status": "not_covered",
+        "reason": "Auswertung der Messreihen nicht verfügbar.",
+    }

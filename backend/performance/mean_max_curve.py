@@ -17,7 +17,7 @@ import json
 import threading
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from backend.activities.detail_merge import merge_details
@@ -39,6 +39,8 @@ from backend.performance.power_profile import (
     power_profile,
     running_profile,
 )
+from backend.performance.session_execution import METHOD as EXECUTION_METHOD
+from backend.performance.session_execution import session_execution
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 
 _DEFAULT_CAPACITY: Final = 1024
@@ -52,6 +54,8 @@ class SessionCurve:
     running: dict[str, Any]
     fingerprint: str
     pace_at_hr: dict[str, Any]
+    # The session's execution from its streams and current laps, for comparisons.
+    execution: dict[str, Any] = field(default_factory=dict)
 
 
 class SessionCurveReader:
@@ -80,7 +84,9 @@ class SessionCurveReader:
         fingerprint of its current summary row.
         """
         curves: dict[str, SessionCurve] = {}
-        keys_by_session = activity_detail_store.full_stream_keys(db, activity_ids)
+        wanted = list(activity_ids)
+        keys_by_session = activity_detail_store.full_stream_keys(db, wanted)
+        laps_by_session = activity_detail_store.lap_set_keys(db, wanted)
         for activity_id, keys in keys_by_session.items():
             current = [
                 key
@@ -92,13 +98,22 @@ class SessionCurveReader:
             records = tuple(self._session_records(db, activity_id))
             if not current or not records:
                 continue
-            fingerprint = _fingerprint(records, current)
+            laps = [
+                key
+                for key in laps_by_session.get(activity_id, ())
+                if not _stale(
+                    db, key, intervals_fingerprints.get(key.provider_activity_id)
+                )
+            ]
+            fingerprint = _fingerprint(records, current, laps)
             with self._lock:
                 cached = self._memo.get(fingerprint)
                 if cached is not None:
                     self._memo.move_to_end(fingerprint)
             if cached is None:
-                cached = _session_curve(db, activity_id, records, current, fingerprint)
+                cached = _session_curve(
+                    db, activity_id, records, (*current, *laps), fingerprint
+                )
                 with self._lock:
                     self._memo[fingerprint] = cached
                     while len(self._memo) > self._capacity:
@@ -138,8 +153,14 @@ def _session_curve(
         for item in activity_detail_store.full_stream_sets_for_session(db, activity_id)
         if (item.provider, item.provider_activity_id) in wanted
     ]
+    stored += [
+        item
+        for item in activity_detail_store.lap_sets_for_session(db, activity_id)
+        if (item.provider, item.provider_activity_id) in wanted
+    ]
     merged = merge_details(detail_candidates(records, stored))
-    adapted = analysis_input(primary_analysis_record(records), merged.streams, None)
+    primary = primary_analysis_record(records)
+    adapted = analysis_input(primary, merged.streams, merged.laps)
     return SessionCurve(
         power=power_profile(
             adapted.activity, source_label=adapted.label_for("watts", "moving")
@@ -155,18 +176,28 @@ def _session_curve(
                 "velocity_smooth", "heartrate", "grade_smooth", "altitude", "moving"
             ),
         ),
+        execution=session_execution(
+            adapted.activity,
+            source_label=adapted.label_for(
+                "watts", "heartrate", "velocity_smooth", "cadence", "laps"
+            ),
+        ),
     )
 
 
 def _fingerprint(
-    records: Sequence[ActivityRecord], keys: Sequence[FullStreamKey]
+    records: Sequence[ActivityRecord],
+    keys: Sequence[FullStreamKey],
+    laps: Sequence[FullStreamKey] = (),
 ) -> str:
-    """Hash every input that changes the merged streams, their labels or the sport."""
+    """Hash every input that changes the merged streams, laps, labels or the sport."""
     return _sha256(
         [
             METHOD_ID,
             METHOD_VERSION,
             PACE_METHOD,
+            EXECUTION_METHOD,
+            sorted([key.content_sha256, key.fetched_at] for key in laps),
             analysis_sport(primary_analysis_record(records)),
             sorted(
                 _canonical(

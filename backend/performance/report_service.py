@@ -49,6 +49,7 @@ from backend.performance.season_inputs import (
     read_activity_summaries,
     read_season_load_inputs,
 )
+from backend.performance.session_execution import comparison_metrics
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.smoothed_load import history_start
 from backend.performance.tag_impact import tag_impact
@@ -696,6 +697,10 @@ def _curve_record(
         "power_profile": {} if curve is None else curve.power,
         "running_profile": {} if curve is None else curve.running,
         "pace_at_hr_profile": {} if curve is None else curve.pace_at_hr,
+        "execution_summary": None
+        if curve is None
+        else comparison_metrics(curve.execution),
+        "avg_temp_c": summary.get("avg_temp_c"),
         "fingerprint": None if curve is None else curve.fingerprint,
     }
 
