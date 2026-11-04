@@ -49,6 +49,9 @@ BLOCK_WORD_BUDGETS = {
     "_SESSION_CHECKS": 110,
     # The execution and planned-target fields the session analysis reads.
     "_SESSION_NUMBERS": 110,
+    # Test planning (plan kinds) and test evaluation (session analysis).
+    "_TESTS": 110,
+    "_TEST_RESULTS": 90,
     "_ANSWER": 55,
     "_NUTRITION": 520,
 }
@@ -206,6 +209,25 @@ class PlaybookInjectionTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, review)
         self.assertNotIn("Pace at heart rate is not covered", review)
+
+    def test_plans_schedule_tests_and_analyses_judge_them(self) -> None:
+        for kind in ("plan_week", "plan_block"):
+            text = playbook_for(kind)
+            with self.subTest(kind=kind):
+                for marker in (
+                    "critical-speed test",
+                    "Zwift FTP ramp test",
+                    "6 to 8 weeks",
+                    "last 2 weeks before an A race",
+                    "control run",
+                    "30-min time trial",
+                ):
+                    self.assertIn(marker, text)
+        analysis = playbook_for("session_analysis")
+        for marker in ("about 75 %", "never write them", "same protocol"):
+            self.assertIn(marker, analysis)
+        self.assertNotIn(playbooks._TESTS, analysis)
+        self.assertNotIn(playbooks._TEST_RESULTS, playbook_for("plan_week"))
 
     def test_adjust_week_playbook_guards_hard_days_and_writes(self) -> None:
         text = playbook_for("adjust_week")
