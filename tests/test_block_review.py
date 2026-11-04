@@ -131,6 +131,11 @@ class BlockReviewTests(unittest.TestCase):
         self.assertEqual([], review["lessons"])
         self.assertEqual(0, review["subjective"]["checkin_scores"]["checkins"])
 
+    def test_the_review_passes_equal_effort_on(self):
+        performance = _service().block_review({}, "UTC")["performance"]
+        self.assertIn("equal_effort", performance)
+        self.assertIn("ride", performance["equal_effort"])
+
     def test_subjective_signals_and_notes(self):
         checkins = [
             {"checkin_date": f"2026-09-{day:02d}", "soreness": score}

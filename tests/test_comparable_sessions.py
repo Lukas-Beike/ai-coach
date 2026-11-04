@@ -180,6 +180,21 @@ class EqualEffortTrendTests(unittest.TestCase):
         self.assertFalse(outdoor["effort_differs"])
         self.assertEqual(trend["run"]["outdoor"]["status"], "not_covered")
 
+    def test_rides_without_power_and_other_sports_are_left_out(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        for row in self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 30, 140):
+            row["execution_summary"]["output_unit"] = "km/h"
+            records.append(row)
+        trend = equal_effort_trend(
+            records,
+            date(2026, 8, 31),
+            date(2026, 10, 5),
+            date(2026, 11, 2),
+            sports=("ride",),
+        )
+        self.assertEqual(trend["ride"]["outdoor"]["status"], "not_covered")
+        self.assertNotIn("run", trend)
+
     def test_a_different_effort_is_named(self) -> None:
         records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
         records += self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 240, 155)

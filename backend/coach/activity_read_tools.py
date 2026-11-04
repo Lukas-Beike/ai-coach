@@ -350,7 +350,7 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
     alone = sections in (["progress"], ["block_review"])
     if (long_window or {"progress", "block_review"} & set(sections)) and not alone:
         raise AppError(
-            400, "progress, block_review und 42 oder 84 Tage nur allein abrufbar."
+            400, "progress, block_review und 42, 56 oder 84 Tage nur allein abrufbar."
         )
     return sections
 

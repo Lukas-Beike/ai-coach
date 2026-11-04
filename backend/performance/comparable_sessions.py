@@ -211,21 +211,29 @@ def _not_covered(base: Mapping[str, Any], reason: str, **extra: Any) -> dict[str
 EFFORT_METHOD: Final = "equal-effort-trend-v1"
 EFFORT_SCOPE: Final = (
     "Steady sessions of the earlier and the later half of the period: median "
-    "output per heart beat (ride W/bpm, run m/s per bpm x 100) per sport and "
-    "indoor or outdoor, with the median heart rate and temperature of each half. "
-    "A higher later value means more output at the same heart rate. Needs at "
-    "least 3 steady sessions per half; halves whose median heart rate differs "
-    "by more than 8 bpm are named, as effort then differs. Terrain is not matched."
+    "output per heart beat (rides with power W/bpm, runs m/s per bpm x 100) per "
+    "sport and indoor or outdoor, with the median heart rate and temperature of "
+    "each half. A higher later value means more output at the same heart rate. "
+    f"Needs at least {MIN_PEERS} steady sessions per half; halves whose median "
+    f"heart rate differs by more than {HEART_RATE_BAND} bpm are named, as effort "
+    "then differs. Rides without power and terrain are not compared."
 )
+# Each sport's output unit; a ride without power has no comparable output.
+_EFFORT_UNITS: Final = {"run": "s/km", "ride": "W"}
 
 
 def equal_effort_trend(
-    records: Sequence[Mapping[str, Any]], start: date, middle: date, end: date
+    records: Sequence[Mapping[str, Any]],
+    start: date,
+    middle: date,
+    end: date,
+    *,
+    sports: Sequence[str] = ("run", "ride"),
 ) -> dict[str, Any]:
     """Earlier-versus-later output per heart beat of steady runs and rides."""
     halves = {"earlier": (start, middle - timedelta(days=1)), "later": (middle, end)}
     result: dict[str, Any] = {"method": EFFORT_METHOD, "scope": EFFORT_SCOPE}
-    for sport in ("run", "ride"):
+    for sport in sports:
         result[sport] = {
             environment: _effort_halves(records, sport, environment, halves)
             for environment in ("outdoor", "indoor")
@@ -251,7 +259,10 @@ def _effort_halves(
         values = [
             (efficiency, row)
             for row in rows
-            if (efficiency := _efficiency(row.get("execution_summary"))) is not None
+            if (summary := row.get("execution_summary")) is not None
+            and isinstance(summary, Mapping)
+            and summary.get("output_unit") == _EFFORT_UNITS[sport]
+            and (efficiency := _efficiency(summary)) is not None
         ]
         if len(values) < MIN_PEERS:
             return {
@@ -307,6 +318,4 @@ def _efficiency(summary: Any) -> float | None:
         return float(output) / float(heart)
     if unit == "s/km":
         return 1000.0 / float(output) / float(heart) * 100
-    if unit == "km/h":
-        return float(output) / 3.6 / float(heart) * 100
     return None

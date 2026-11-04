@@ -9,7 +9,7 @@ recalculates zones from current thresholds.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
@@ -311,32 +311,21 @@ def _mean_max_window(
     return result
 
 
-def _pace_at_hr_window(
+def _curve_trend_window(
+    trend: Callable[..., dict[str, Any]],
     records: Sequence[Mapping[str, Any]] | None,
     start: date,
     middle: date,
     end: date,
     weeks: int,
+    **options: Any,
 ) -> dict[str, Any]:
+    """A session-curve trend of the window, or why there is none."""
     if weeks < 2:
         return {"status": "insufficient_data"}
     if records is None:
         return {"status": "outside_curve_window"}
-    return pace_at_heart_rate_trend(records, start, middle, end)
-
-
-def _equal_effort_window(
-    records: Sequence[Mapping[str, Any]] | None,
-    start: date,
-    middle: date,
-    end: date,
-    weeks: int,
-) -> dict[str, Any]:
-    if weeks < 2:
-        return {"status": "insufficient_data"}
-    if records is None:
-        return {"status": "outside_curve_window"}
-    return equal_effort_trend(records, start, middle, end)
+    return trend(records, start, middle, end, **options)
 
 
 def _week_row(
@@ -470,8 +459,13 @@ def weekly_progress(
         ),
         **(
             {
-                "pace_at_heart_rate": _pace_at_hr_window(
-                    curve_records, start, middle, effective_end, started_weeks
+                "pace_at_heart_rate": _curve_trend_window(
+                    pace_at_heart_rate_trend,
+                    curve_records,
+                    start,
+                    middle,
+                    effective_end,
+                    started_weeks,
                 )
             }
             if sport in {"all", "run"}
@@ -479,8 +473,14 @@ def weekly_progress(
         ),
         **(
             {
-                "equal_effort": _equal_effort_window(
-                    curve_records, start, middle, effective_end, started_weeks
+                "equal_effort": _curve_trend_window(
+                    equal_effort_trend,
+                    curve_records,
+                    start,
+                    middle,
+                    effective_end,
+                    started_weeks,
+                    sports=("run", "ride") if sport == "all" else (sport,),
                 )
             }
             if sport in {"all", "ride", "run"}

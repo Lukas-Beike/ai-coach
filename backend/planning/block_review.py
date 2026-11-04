@@ -216,7 +216,7 @@ def _performance(progress: Mapping[str, Any]) -> dict[str, Any]:
     pace = progress.get("pace_at_heart_rate")
     result = {
         key: progress[key]
-        for key in ("ctl", "eftp", "mean_max_power")
+        for key in ("ctl", "eftp", "mean_max_power", "equal_effort")
         if key in progress
     }
     if _pace_covered(pace):

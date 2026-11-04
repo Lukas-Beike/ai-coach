@@ -411,8 +411,9 @@ class RequestKindSelectionTests(unittest.TestCase):
     def test_review_and_analysis_kinds_load_what_they_need(self) -> None:
         progress = select_coach_context("x", {}, request_kind="progress_review")
         self.assertLessEqual({"planning", "recovery", "activities"}, progress.sections)
-        for dropped in ("training_plans", "daily_planning_context"):
-            self.assertNotIn(dropped, progress.sections)
+        # The one review dates a named plan or the last test from training_plans.
+        self.assertIn("training_plans", progress.sections)
+        self.assertNotIn("daily_planning_context", progress.sections)
         self.assertEqual(progress.horizon_days, 0)
         analysis = select_coach_context("x", {}, request_kind="session_analysis")
         self.assertEqual(analysis.name, "session_analysis")

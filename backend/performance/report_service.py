@@ -503,7 +503,9 @@ class TrainingReportReadService:
             and self._curve_records is not None
             and days >= 14
             and sport in {"all", "ride", "run"}
-            and start >= today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+            # A window from a Monday up to six days before the curve window
+            # (a 12-week review on a Sunday) still reads it; those days miss.
+            and start >= today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1 + 6)
             else None,
             observed_at=observed_at,
         )
