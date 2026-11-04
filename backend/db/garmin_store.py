@@ -119,7 +119,9 @@ def prune_section(
 
     With ``start`` and ``end`` (inclusive ISO days) only elements of that window go;
     an element without a day is then kept. The canonical domain rows (sleep periods,
-    statuses, zones, gear) projected from a deleted element are retired with it.
+    statuses, zones, gear) projected from a deleted element are retired with it, and
+    so are the observations it owns on its own day; an element without a day keeps
+    its observations, which are the history of the days they were fetched on.
     Returns how many rows were deleted.
     """
     prefix = f"{section}/"
@@ -151,6 +153,18 @@ def prune_section(
                 source_record_id=str(row["source_record_id"]),
                 now=now,
             )
+            if row["observed_on"] is not None:
+                canonical_store.retire_unemitted_observations(
+                    db,
+                    provider=GARMIN_PROVIDER,
+                    scopes={
+                        str(row["source_record_id"]): canonical_store.ObservationScope(
+                            days=frozenset({str(row["observed_on"])}),
+                            emitted=frozenset(),
+                        )
+                    },
+                    now=now,
+                )
     for row_id in stale:
         db.execute("DELETE FROM provider_records WHERE id = ?", (row_id,))
     return len(stale)
