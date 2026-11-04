@@ -143,6 +143,7 @@ class BlockReviewTests(unittest.TestCase):
                 _unit("2026-08-01", focus="test"),
                 _unit("2026-09-20", focus="test", status="missed"),
                 _unit("2026-09-25", focus="threshold"),
+                {**_unit("2026-09-26", focus="test"), "starts_at_local": "kaputt"},
             ]
         }
         review = _service(plan=plan).block_review({"since_last_test": True}, "UTC")
