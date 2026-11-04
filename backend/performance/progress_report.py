@@ -22,6 +22,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import eftp
+from backend.performance.comparable_sessions import equal_effort_trend
 from backend.performance.pace_at_hr import pace_at_heart_rate_trend
 from backend.performance.session_rpe_load import period_load, session_load
 from backend.performance.training_report import metric_sum, valid_zones
@@ -324,6 +325,20 @@ def _pace_at_hr_window(
     return pace_at_heart_rate_trend(records, start, middle, end)
 
 
+def _equal_effort_window(
+    records: Sequence[Mapping[str, Any]] | None,
+    start: date,
+    middle: date,
+    end: date,
+    weeks: int,
+) -> dict[str, Any]:
+    if weeks < 2:
+        return {"status": "insufficient_data"}
+    if records is None:
+        return {"status": "outside_curve_window"}
+    return equal_effort_trend(records, start, middle, end)
+
+
 def _week_row(
     first: date,
     today: date,
@@ -460,6 +475,15 @@ def weekly_progress(
                 )
             }
             if sport in {"all", "run"}
+            else {}
+        ),
+        **(
+            {
+                "equal_effort": _equal_effort_window(
+                    curve_records, start, middle, effective_end, started_weeks
+                )
+            }
+            if sport in {"all", "ride", "run"}
             else {}
         ),
         "coverage_note": "Aggregation of known local records. A week without records is unknown, not rest; the running week is incomplete. Missing loads, RPE and zone times stay unknown; AU, TSS-like load and zone seconds are never combined. No training model is applied.",

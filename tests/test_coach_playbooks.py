@@ -192,12 +192,20 @@ class PlaybookInjectionTests(unittest.TestCase):
             self.assertIn(marker, text)
         self.assertNotIn(playbooks._SESSION_NUMBERS, playbook_for("progress_review"))
 
-    def test_reviews_lead_with_fitness_and_block_review_reads_pace_at_hr(self) -> None:
-        self.assertIn("getting fitter", playbook_for("progress_review"))
-        self.assertIn("possible cause", playbook_for("progress_review"))
-        block = playbook_for("block_review")
-        self.assertNotIn("Pace at heart rate is not covered", block)
-        self.assertIn("pace at heart rate is not_covered", block)
+    def test_progress_and_block_review_are_one_fitness_review(self) -> None:
+        review = playbook_for("progress_review")
+        self.assertEqual(review, playbook_for("block_review"))
+        for marker in (
+            "getting fitter",
+            "sections [block_review]",
+            "56 for 8",
+            "Since the last test",
+            "equal_effort",
+            "only when they may explain missing progress",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, review)
+        self.assertNotIn("Pace at heart rate is not covered", review)
 
     def test_adjust_week_playbook_guards_hard_days_and_writes(self) -> None:
         text = playbook_for("adjust_week")

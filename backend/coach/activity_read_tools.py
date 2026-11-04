@@ -322,7 +322,7 @@ class CoachActivityReadToolService:
 def _report_sections(arguments: dict[str, Any]) -> list[str]:
     """Validated report sections; progress and its long windows stand alone."""
     days = arguments.get("days")
-    long_window = isinstance(days, int) and days in {42, 84}
+    long_window = isinstance(days, int) and days in {42, 56, 84}
     sections = arguments.get("sections", ["progress"] if long_window else ["report"])
     allowed = {
         "progress",

@@ -206,3 +206,107 @@ def _within(value: Any, other: Any, band: float) -> bool:
 
 def _not_covered(base: Mapping[str, Any], reason: str, **extra: Any) -> dict[str, Any]:
     return {**base, "status": "not_covered", "reason": reason, **extra}
+
+
+EFFORT_METHOD: Final = "equal-effort-trend-v1"
+EFFORT_SCOPE: Final = (
+    "Steady sessions of the earlier and the later half of the period: median "
+    "output per heart beat (ride W/bpm, run m/s per bpm x 100) per sport and "
+    "indoor or outdoor, with the median heart rate and temperature of each half. "
+    "A higher later value means more output at the same heart rate. Needs at "
+    "least 3 steady sessions per half; halves whose median heart rate differs "
+    "by more than 8 bpm are named, as effort then differs. Terrain is not matched."
+)
+
+
+def equal_effort_trend(
+    records: Sequence[Mapping[str, Any]], start: date, middle: date, end: date
+) -> dict[str, Any]:
+    """Earlier-versus-later output per heart beat of steady runs and rides."""
+    halves = {"earlier": (start, middle - timedelta(days=1)), "later": (middle, end)}
+    result: dict[str, Any] = {"method": EFFORT_METHOD, "scope": EFFORT_SCOPE}
+    for sport in ("run", "ride"):
+        result[sport] = {
+            environment: _effort_halves(records, sport, environment, halves)
+            for environment in ("outdoor", "indoor")
+        }
+    return result
+
+
+def _effort_halves(
+    records: Sequence[Mapping[str, Any]],
+    sport: str,
+    environment: str,
+    halves: Mapping[str, tuple[date, date]],
+) -> dict[str, Any]:
+    parts: dict[str, dict[str, Any]] = {}
+    for name, (first, last) in halves.items():
+        rows = [
+            row
+            for row in records
+            if row.get("sport") == sport
+            and row.get("environment") == environment
+            and first.isoformat() <= str(row.get("date") or "") <= last.isoformat()
+        ]
+        values = [
+            (efficiency, row)
+            for row in rows
+            if (efficiency := _efficiency(row.get("execution_summary"))) is not None
+        ]
+        if len(values) < MIN_PEERS:
+            return {
+                "status": "not_covered",
+                "reason": f"{len(values)} gleichmäßige Einheiten in der Hälfte {name}, mindestens {MIN_PEERS} nötig.",
+            }
+        temperatures = [
+            float(row["avg_temp_c"])
+            for _, row in values
+            if isinstance(row.get("avg_temp_c"), (int, float))
+        ]
+        parts[name] = {
+            "sessions": len(values),
+            "output_per_beat": round(statistics.median(v for v, _ in values), 3),
+            "heart_rate_median": rounded_metric(
+                statistics.median(
+                    float(row["execution_summary"]["heart_rate_avg"])
+                    for _, row in values
+                )
+            ),
+            "temperature_median_c": rounded_metric(statistics.median(temperatures))
+            if temperatures
+            else None,
+        }
+    earlier, later = parts["earlier"], parts["later"]
+    return {
+        "status": "ok",
+        **parts,
+        "change_pct": round(
+            (later["output_per_beat"] - earlier["output_per_beat"])
+            / earlier["output_per_beat"]
+            * 100,
+            1,
+        ),
+        "effort_differs": abs(later["heart_rate_median"] - earlier["heart_rate_median"])
+        > HEART_RATE_BAND,
+    }
+
+
+def _efficiency(summary: Any) -> float | None:
+    """Output per heart beat of a steady session with sound data."""
+    if not isinstance(summary, Mapping) or summary.get("structure") != "continuous":
+        return None
+    if summary.get("data_quality_ok") is False:
+        return None
+    output, heart = summary.get("output"), summary.get("heart_rate_avg")
+    if not isinstance(output, (int, float)) or not isinstance(heart, (int, float)):
+        return None
+    if output <= 0 or heart <= 0:
+        return None
+    unit = summary.get("output_unit")
+    if unit == "W":
+        return float(output) / float(heart)
+    if unit == "s/km":
+        return 1000.0 / float(output) / float(heart) * 100
+    if unit == "km/h":
+        return float(output) / 3.6 / float(heart) * 100
+    return None

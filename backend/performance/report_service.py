@@ -56,7 +56,7 @@ from backend.performance.training_report import training_report
 
 # Analysis windows of the power and running profiles, shortest first.
 PROFILE_WINDOW_DAYS = (28, 90)
-PROGRESS_DAYS = frozenset({7, 28, 42, 84})
+PROGRESS_DAYS = frozenset({7, 28, 42, 56, 84})
 
 
 def report_sport(value: Any) -> str | None:
@@ -451,7 +451,7 @@ class TrainingReportReadService:
         *,
         with_curves: bool = True,
     ) -> dict[str, Any]:
-        """Weekly per-sport progress over whole ISO weeks (7, 28, 42 or 84 days).
+        """Weekly per-sport progress over whole ISO weeks (7, 28, 42, 56 or 84 days).
 
         ``with_curves=False`` skips the mean-max curve read for callers that
         never use it.

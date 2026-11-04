@@ -278,7 +278,7 @@ class WeeklyProgressTests(unittest.TestCase):
         self.assertEqual([1], reads)
 
     def test_accepted_windows_and_rejected_values(self):
-        for days in (7, 28, 42, 84):
+        for days in (7, 28, 42, 56, 84):
             self.assertEqual(days // 7, self._progress({"days": days})["weeks"])
         for values in ({"days": 14}, {"days": 3660}, {"sport": "ride; drop"}):
             with self.subTest(values=values), self.assertRaises(AppError):
@@ -318,7 +318,7 @@ class ProgressToolTests(unittest.TestCase):
             if tool["name"] == "get_training_report"
         )
         properties = tool["parameters"]["properties"]
-        self.assertEqual([7, 28, 42, 84], properties["days"]["enum"])
+        self.assertEqual([7, 28, 42, 56, 84], properties["days"]["enum"])
         self.assertIn("progress", properties["sections"]["items"]["enum"])
 
 
