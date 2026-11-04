@@ -686,11 +686,20 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         stored=raw_workout_for_storage,
     )
     with_file = _wahoo_ids_with_file(payload.get(WAHOO_WORKOUTS_KEY))
+    recorded = {
+        item.record.activity_id for item in items if _wahoo_recorded(item.record)
+    }
     # Each raw record was planned together with its activity, in the same order.
+    # A copy with values wins over every empty copy of its id; the file only
+    # keeps an id none of whose copies carries values yet.
     kept = [
         (raw, item)
         for raw, item in zip(raw_records, items, strict=True)
-        if item.record.activity_id in with_file or _wahoo_recorded(item.record)
+        if _wahoo_recorded(item.record)
+        or (
+            item.record.activity_id in with_file
+            and item.record.activity_id not in recorded
+        )
     ]
     withdrawn = {item.record.activity_id for item in items} - {
         item.record.activity_id for _raw, item in kept

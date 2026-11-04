@@ -466,6 +466,21 @@ class PlaceholderWorkoutTests(unittest.TestCase):
         self.assertEqual(frozenset(), plan.withdrawn_activity_ids)
         self.assertEqual(["6"], [item.record.activity_id for item in plan.activities])
 
+    def test_an_empty_copy_never_replaces_a_recorded_copy_with_a_file(self) -> None:
+        summary = {
+            **row()["workout_summary"],
+            "file": {"url": "https://files.example.invalid/w.fit?sig=x"},
+        }
+        workouts = [row(id=7, workout_summary=summary), row(id=7, workout_summary=None)]
+        payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": workouts}
+
+        plan = wahoo_ingest_plan(payload, zone=UTC)
+
+        self.assertEqual(frozenset(), plan.withdrawn_activity_ids)
+        self.assertEqual(["7"], [item.record.activity_id for item in plan.activities])
+        self.assertIsNotNone(plan.activities[0].record.duration_s)
+        self.assertEqual(["7"], [raw.source_record_id for raw in plan.raw_records])
+
     def test_a_recorded_copy_in_the_same_payload_is_never_withdrawn(self) -> None:
         # Pages can shift while Wahoo processes a workout, so one id can be
         # listed once with and once without its summary.
