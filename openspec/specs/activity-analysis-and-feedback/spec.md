@@ -120,6 +120,19 @@ The system SHALL pair the executed work laps of a run or ride in order with the 
 
 Evidence: `backend/performance/planned_targets.py:planned_target_execution`, `backend/activities/workout_load.py:step_target_range`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService._planned_targets`, `backend/planning/planned_unit_load.py:PlannedUnitEstimator.thresholds`; `tests/test_planned_targets.py`.
 
+### Requirement: Comparable earlier sessions
+The system SHALL set a run's or ride's execution against comparable earlier sessions of the last 84 days, read from each session's execution in the curve window, and report this session, the peers' median and the difference with peer count and temperatures; nothing is scored.
+
+#### Scenario: Comparable peers
+- **WHEN** at least three earlier sessions with sound heart rate and speed share sport, indoor or outdoor and structure, with a continuous main part within 35 % of this one's duration and 8 bpm of its average heart rate, or intervals within 2 reps and 35 % of the median rep duration
+- **THEN** `comparable_sessions` lists the median and difference of output, heart rate, drift and cadence (continuous) or rep output, closing heart rate, recovery drop, fade and cadence (intervals), and up to six peers with their temperatures.
+
+#### Scenario: Too few peers
+- **WHEN** fewer than three sessions compare, or the session lies outside the curve window
+- **THEN** the result is `not_covered` with the reason and the count, never a trend; a peer window reaching before the curve window is cut there and named `window_truncated`.
+
+Evidence: `backend/performance/comparable_sessions.py:comparable_sessions`, `backend/performance/session_execution.py:comparison_metrics`, `backend/performance/mean_max_curve.py:SessionCurveReader.curves`, `backend/db/activity_detail_store.py:lap_set_keys`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService._session_checks`; `tests/test_comparable_sessions.py`, `tests/test_coach_session_checks.py:ComparableSessionsCheckTests`, `tests/test_mean_max_curve.py:SessionExecutionCurveTests`.
+
 ### Requirement: Conservative planned-workout matching and interval quality
 The system SHALL match planned units to compatible completed activities using the implemented identity/time/sport rules and freeze targets only for an unambiguous local plan match. Interval-quality calculations SHALL use frozen target basis and original measured samples/laps, report missing steps as partial, and leave ambiguous or unsupported targets unscored. Completed duration alone SHALL not establish target achievement.
 

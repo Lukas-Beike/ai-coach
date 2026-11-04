@@ -7,10 +7,16 @@ from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.canonical.activity_detail import ActivityStreamSet
+from backend.canonical.activity_detail import (
+    ActivityLap,
+    ActivityLapSet,
+    ActivityStreamSet,
+)
 from backend.canonical.records import Provenance
 from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
+    LapKind,
+    LapSource,
     ProviderId,
     RecordingOrigin,
     SourceKind,
@@ -18,7 +24,11 @@ from backend.canonical.vocabulary import (
     StreamResolution,
 )
 from backend.db import row_factory
-from backend.db.activity_detail_store import replace_detail_set
+from backend.db.activity_detail_store import (
+    lap_set_keys,
+    lap_sets_for_session,
+    replace_detail_set,
+)
 from backend.db.schema import initialize_schema
 from backend.performance import mean_max_curve
 from backend.performance.canonical_detail import CanonicalDetailReader
@@ -93,6 +103,51 @@ def store_streams(
     )
     replace_detail_set(
         db, detail, mapper_version=1, summary_sha256=summary_sha256, now=STAMP
+    )
+
+
+def store_laps(db, provider, provider_activity_id, windows, summary_sha256=None):
+    """Lap set of (kind, start, end) windows on the stream clock."""
+    detail = ActivityLapSet(
+        provider_activity_id=provider_activity_id,
+        provenance=Provenance(
+            provider=provider,
+            source_kind=SourceKind.PROVIDER_REPORTED,
+            source_record_id=None,
+            recorded_by=RecordingOrigin.GARMIN,
+            retrieved_at=RETRIEVED,
+            label=provider.value.title(),
+        ),
+        origin=ActivityDetailOrigin.FETCH,
+        lap_source=LapSource.DEVICE_LAPS,
+        laps=tuple(
+            ActivityLap(
+                index=index,
+                kind=LapKind(kind),
+                start_offset_s=start,
+                end_offset_s=end,
+            )
+            for index, (kind, start, end) in enumerate(windows)
+        ),
+    )
+    replace_detail_set(
+        db, detail, mapper_version=1, summary_sha256=summary_sha256, now=STAMP
+    )
+
+
+INTERVAL_LAPS = (
+    ("warmup", 0.0, 300.0),
+    ("work", 300.0, 480.0),
+    ("recovery", 480.0, 600.0),
+    ("work", 600.0, 780.0),
+    ("cooldown", 780.0, 900.0),
+)
+
+
+def interval_power() -> tuple[float, ...]:
+    return tuple(
+        300.0 if 300 <= second < 480 or 600 <= second < 780 else 150.0
+        for second in range(len(TIME))
     )
 
 
@@ -244,6 +299,48 @@ class SessionCurveReaderTests(unittest.TestCase):
         }
 
         self.assertEqual({"act_1": "downsampled", "act_2": "full"}, labels)
+
+
+class SessionExecutionCurveTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = row_factory
+        self.addCleanup(self.db.close)
+        initialize_schema(self.db)
+        self.reader = SessionCurveReader(CanonicalTableReader().session_activities)
+        add_session(self.db, "act_1")
+        add_record(self.db, INTERVALS, "i-1", "act_1")
+        store_streams(
+            self.db, INTERVALS, "i-1", interval_power(), StreamResolution.FULL
+        )
+
+    def test_lap_sets_are_read_by_key_and_alone(self):
+        store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS)
+        keys = lap_set_keys(self.db, ["act_1"])
+        self.assertEqual(["i-1"], [key.provider_activity_id for key in keys["act_1"]])
+        sets = lap_sets_for_session(self.db, "act_1")
+        self.assertEqual(1, len(sets))
+        self.assertIsInstance(sets[0].detail, ActivityLapSet)
+
+    def test_the_curve_holds_the_execution_summary_of_its_laps(self):
+        store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS)
+        curve = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+        self.assertEqual("interval", curve.execution_summary["structure"])
+        self.assertEqual(2, curve.execution_summary["rep_count"])
+        self.assertEqual(300, curve.execution_summary["rep_output_mean"])
+
+    def test_a_lap_change_recomputes_and_a_stale_lap_set_stays_out(self):
+        store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS)
+        first = self.reader.curves(self.db, ["act_1"], {})["act_1"]
+        store_laps(self.db, INTERVALS, "i-1", INTERVAL_LAPS, summary_sha256="a" * 64)
+        current = self.reader.curves(self.db, ["act_1"], {"i-1": "a" * 64})["act_1"]
+        stale = self.reader.curves(self.db, ["act_1"], {"i-1": "b" * 64})["act_1"]
+        assert current.execution_summary is not None
+        assert stale.execution_summary is not None
+        self.assertNotEqual(first.fingerprint, stale.fingerprint)
+        # The same laps count while current and stay out once stale.
+        self.assertEqual("interval", current.execution_summary["structure"])
+        self.assertEqual("continuous", stale.execution_summary["structure"])
 
 
 class ProfileSelectionTests(unittest.TestCase):

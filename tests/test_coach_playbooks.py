@@ -48,7 +48,7 @@ BLOCK_WORD_BUDGETS = {
     "_ADAPTIVE": 140,
     "_SESSION_CHECKS": 110,
     # The execution and planned-target fields the session analysis reads.
-    "_SESSION_NUMBERS": 90,
+    "_SESSION_NUMBERS": 110,
     "_ANSWER": 55,
     "_NUTRITION": 520,
 }
@@ -182,7 +182,13 @@ class PlaybookInjectionTests(unittest.TestCase):
 
     def test_session_analysis_reads_execution_and_planned_targets(self) -> None:
         text = playbook_for("session_analysis")
-        for marker in ("analysis.execution", "planned_targets", "erg_like", "lap_pace"):
+        for marker in (
+            "analysis.execution",
+            "planned_targets",
+            "erg_like",
+            "lap_pace",
+            "comparable_sessions",
+        ):
             self.assertIn(marker, text)
         self.assertNotIn(playbooks._SESSION_NUMBERS, playbook_for("progress_review"))
 

@@ -491,6 +491,7 @@ def _halves(
     result: dict[str, Any] = {
         "status": "ok",
         "main_part_s": round(end - start),
+        "main": reader.part(start, end),
         **halves,
         "change_pct": _change_pct(
             reader.raw_output(start, middle), reader.raw_output(middle, end)
@@ -681,3 +682,72 @@ def _number(value: Any) -> float | None:
 
 def _drop_none(item: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in item.items() if value is not None}
+
+
+def comparison_metrics(execution: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The few numbers of one execution that comparable sessions are set against."""
+    if execution.get("status") != "ok":
+        return None
+    quality = execution.get("data_quality") or {}
+    base = {
+        "structure": execution.get("structure"),
+        "output_unit": execution.get("output_unit"),
+        # The stream providers, so a sensor or provider change shows beside the values.
+        "source": execution.get("source") or None,
+        # Peers with doubtful heart rate or speed stay out of the medians.
+        "data_quality_ok": all(
+            value in {"ok", "missing"} for value in quality.values()
+        ),
+    }
+    if execution.get("structure") == "continuous":
+        halves = execution.get("halves") or {}
+        main = halves.get("main") or {}
+        if halves.get("status") != "ok" or main.get("output") is None:
+            return None
+        return _drop_none(
+            {
+                **base,
+                "main_part_s": halves.get("main_part_s"),
+                "output": main.get("output"),
+                "heart_rate_avg": main.get("heart_rate_avg"),
+                "heart_rate_change_bpm": halves.get("heart_rate_change_bpm"),
+                "cadence": main.get("cadence"),
+            }
+        )
+    reps = [rep for rep in execution.get("reps") or [] if rep.get("output") is not None]
+    if len(reps) < 2:
+        return None
+    long_reps = [rep for rep in reps if not rep.get("short")]
+    drops = [
+        item["heart_rate_drop_60s"]
+        for item in execution.get("recoveries") or []
+        if "heart_rate_drop_60s" in item
+    ]
+    summary = execution.get("rep_summary") or {}
+    return _drop_none(
+        {
+            **base,
+            "rep_count": summary.get("rep_count", len(reps)),
+            "median_rep_s": round(statistics.median(rep["duration_s"] for rep in reps)),
+            "rep_output_mean": rounded_mean(rep["output"] for rep in reps),
+            "heart_rate_end_mean": rounded_mean(
+                rep["heart_rate_end"] for rep in long_reps if "heart_rate_end" in rep
+            ),
+            "recovery_drop_mean": rounded_mean(drops),
+            "first_to_last_change_pct": summary.get("first_to_last_change_pct"),
+            "cadence_mean": rounded_mean(
+                rep["cadence"] for rep in reps if "cadence" in rep
+            ),
+        }
+    )
+
+
+def rounded_mean(values: Any) -> float | None:
+    """Mean rounded like every comparison value (see ``rounded_metric``)."""
+    numbers = [float(value) for value in values]
+    return rounded_metric(statistics.fmean(numbers)) if numbers else None
+
+
+def rounded_metric(value: float) -> float:
+    """Whole numbers from 50 on (pace, watts, bpm), else one decimal."""
+    return round(value) if abs(value) >= 50 else round(value, 1)

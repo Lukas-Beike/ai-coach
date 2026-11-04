@@ -696,6 +696,8 @@ def _curve_record(
         "power_profile": {} if curve is None else curve.power,
         "running_profile": {} if curve is None else curve.running,
         "pace_at_hr_profile": {} if curve is None else curve.pace_at_hr,
+        "execution_summary": None if curve is None else curve.execution_summary,
+        "avg_temp_c": summary.get("avg_temp_c"),
         "fingerprint": None if curve is None else curve.fingerprint,
     }
 
