@@ -86,6 +86,23 @@ Detailed contract: The current summary row of a session SHALL be found in the ca
 
 Evidence: `backend/performance/activity_read_service.py:ActivityAnalysisReadService.detail`, `backend/performance/report_service.py:TrainingRecordsService.observations`, `backend/performance/canonical_detail.py:CanonicalDetailReader.read`; `tests/test_activity_read_service.py:test_detail_reads_an_activity_older_than_the_performance_window`, `tests/test_activity_read_service.py:test_page_keeps_activities_with_failed_details_and_names_the_error`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`. `tests/test_canonical_detail_reader.py:test_live_zone_times_replace_stored_zones_without_marking_stale`, `tests/test_canonical_detail_reader.py:test_stale_provider_withholds_analysis_and_shows_current_scalars`, `tests/test_canonical_detail_reader.py:test_set_without_a_fingerprint_is_never_stale`, `tests/test_characterization_activity_reads.py:test_changed_provider_summary_marks_record_stale_and_hides_analysis`. Missing evidence (planned in this change): lookup with a snapshot that has no activity rows and construction without a canonical source.
 
+### Requirement: Descriptive session execution
+The system SHALL describe how one run or ride was executed from its own merged streams and laps, without a plan match, norms or other sessions: structure, work laps, recoveries, warm-up, cool-down, halves of a continuous main part, and sensor-quality flags. Other sports are not applicable.
+
+#### Scenario: Interval session
+- **WHEN** a run or ride has at least two work laps
+- **THEN** each work lap reports its output (pace in s/km for runs, power in W for rides, else km/h), first and second half, closing heart rate and cadence, each following recovery its heart-rate drop 60 s in, and a rep summary; work laps under 120 s are marked short so their heart rate is not judged.
+
+#### Scenario: Unlabelled interval laps
+- **WHEN** a run has laps without work or recovery labels whose outputs split into a faster and a slower group
+- **THEN** the faster laps are work laps, slower laps before and after them warm-up and cool-down, the ones between recoveries, and `structure_origin` is `lap_output`; equal automatic laps stay one continuous session.
+
+#### Scenario: Sensor doubt
+- **WHEN** heart rate jumps by more than 20 bpm within 2 s in over 2 % of samples, a run's heart rate follows its step cadence, or speed jumps by more than 2.5 m/s within 2 s in over 1 % of samples
+- **THEN** `data_quality` names `spikes`, `possible_cadence_lock` or `jumps`, so the Coach can doubt the reading before calling it fatigue.
+
+Evidence: `backend/performance/session_execution.py:session_execution`, `backend/performance/canonical_detail.py:CanonicalDetailReader._analysis`, `backend/performance/analysis_input.py:analysis_input`; `tests/test_session_execution.py`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`.
+
 ### Requirement: Conservative planned-workout matching and interval quality
 The system SHALL match planned units to compatible completed activities using the implemented identity/time/sport rules and freeze targets only for an unambiguous local plan match. Interval-quality calculations SHALL use frozen target basis and original measured samples/laps, report missing steps as partial, and leave ambiguous or unsupported targets unscored. Completed duration alone SHALL not establish target achievement.
 

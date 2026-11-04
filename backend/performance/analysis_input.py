@@ -34,6 +34,7 @@ _STREAM_KEYS: tuple[tuple[StreamChannel, str], ...] = (
     (StreamChannel.ALTITUDE_M, "altitude"),
     (StreamChannel.GRADE_PCT, "grade_smooth"),
     (StreamChannel.MOVING, "moving"),
+    (StreamChannel.CADENCE_RPM, "cadence"),
 )
 
 
@@ -140,7 +141,7 @@ def _moving(value: float | None) -> bool | float | None:
 
 def _laps(
     laps: SetChoice | None, streams: MergedStreams | None
-) -> list[dict[str, float]]:
+) -> list[dict[str, Any]]:
     """Lap windows on the clock of the primary streams, or none when unalignable."""
     if laps is None:
         return []
@@ -154,6 +155,8 @@ def _laps(
         {
             "start_time": lap.start_offset_s + offset,
             "end_time": lap.end_offset_s + offset,
+            "kind": lap.kind.value,
+            "distance_m": lap.distance_m,
         }
         for lap in detail.laps
     ]
