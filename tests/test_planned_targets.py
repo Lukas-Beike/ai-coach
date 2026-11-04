@@ -23,6 +23,12 @@ THRESHOLDS = AthleteThresholds(
 PLAN = "- 10m Z2 Pace\n\n5x\n- 3m 4:20-4:30/km Pace\n- 90s Z1 Pace\n\n- 5m Z1 Pace"
 
 
+def _bound(value: float | None) -> float:
+    """A resolved target bound; the test fails when it is unknown."""
+    assert value is not None
+    return value
+
+
 def _run(last_speed: float = 3.6) -> dict[str, Any]:
     segments: list[tuple[str, int, float, tuple[float, float]]] = [
         ("warmup", 600, 3.0, (120.0, 135.0))
@@ -60,15 +66,15 @@ class StepTargetRangeTests(unittest.TestCase):
             with self.subTest(text=text):
                 target = step_target_range(step, THRESHOLDS, sport)
                 self.assertEqual(target.metric, metric)
-                self.assertAlmostEqual(target.low, low, places=2)
-                self.assertAlmostEqual(target.high, high, places=2)
+                self.assertAlmostEqual(_bound(target.low), low, places=2)
+                self.assertAlmostEqual(_bound(target.high), high, places=2)
 
     def test_single_values_widen_and_unknowns_say_why(self) -> None:
         single = step_target_range(
             structured_steps("- 10m 250W")[0], THRESHOLDS, Sport.RIDE
         )
-        self.assertAlmostEqual(single.low, 243.75)
-        self.assertAlmostEqual(single.high, 256.25)
+        self.assertAlmostEqual(_bound(single.low), 243.75)
+        self.assertAlmostEqual(_bound(single.high), 256.25)
         ramp = structured_steps("- 10m ramp 50-75%")[0]
         self.assertEqual(
             step_target_range(ramp, THRESHOLDS, Sport.RIDE).unknown, "ramp"
@@ -85,7 +91,7 @@ class OpenTopZoneTests(unittest.TestCase):
     def test_the_top_zone_has_no_upper_bound(self) -> None:
         sprint = structured_steps("- 20s Z7")[0]
         target = step_target_range(sprint, THRESHOLDS, Sport.RIDE)
-        self.assertAlmostEqual(target.low, 375.0)
+        self.assertAlmostEqual(_bound(target.low), 375.0)
         self.assertEqual(target.high, float("inf"))
 
 
@@ -274,6 +280,7 @@ class CoachPlannedTargetsTests(unittest.TestCase):
         result = self._service(thresholds)._planned_targets(
             detail, {"sport": "run"}, {"planned_unit_id": "unit-1"}, [unit]
         )
+        assert result is not None
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["planned_unit_id"], "unit-1")
         thresholds.thresholds.assert_called_once_with(unit)
@@ -301,6 +308,7 @@ class CoachPlannedTargetsTests(unittest.TestCase):
             {"status": "unknown"},
             [unit, other],
         )
+        assert result is not None
         self.assertEqual(result["planned_unit_id"], "unit-1")
 
     def test_without_a_matched_unit_or_thresholds_there_is_none(self) -> None:
@@ -320,6 +328,7 @@ class CoachPlannedTargetsTests(unittest.TestCase):
         result = self._service(Mock())._planned_targets(
             detail, {"sport": "run"}, {"planned_unit_id": "unit-1"}, [broken]
         )
+        assert result is not None
         self.assertEqual(result["status"], "not_covered")
 
 

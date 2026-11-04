@@ -79,24 +79,10 @@ def session_execution(
         return {**base, "status": "not_applicable", "reason": "Nur Lauf und Rad."}
     streams = activity.get("streams") or {}
     times = streams.get("time") or []
-    if (
-        len(times) < 2
-        or _number(times[0]) is None
-        or _number(times[-1]) is None
-        or times[-1] - times[0] < MIN_SESSION_S
-    ):
-        return {
-            **base,
-            "status": "insufficient_data",
-            "reason": "Zu kurze oder fehlende Messreihe.",
-        }
     channel = _output_channel(sport, streams, len(times))
-    if channel is None:
-        return {
-            **base,
-            "status": "insufficient_data",
-            "reason": "Tempo oder Leistung fehlt.",
-        }
+    reason = _missing_input(times, channel)
+    if reason is not None or channel is None:
+        return {**base, "status": "insufficient_data", "reason": reason}
     reader = _Reader(sport, streams, channel)
     laps, origin = _classified_laps(activity.get("laps") or [], reader)
     structure = "continuous" if origin == "no_work_laps" else "interval"
@@ -118,18 +104,39 @@ def session_execution(
         result["lap_source"] = activity["lap_source"]
     if structure == "interval":
         result.update(_intervals(laps, reader))
-        variabilities = [rep.get("variability_pct") for rep in result["reps"]]
-        if (
-            reader.output_name == "power"
-            and activity.get("environment") in {"indoor", "virtual"}
-            and variabilities
-            and all(v is not None and v < ERG_VARIABILITY_PCT for v in variabilities)
-        ):
+        if _erg_like(activity, reader, result["reps"]):
             # Power held by the trainer says little; heart rate and cadence do.
             result["erg_like"] = True
     else:
         result["halves"] = _halves(laps, reader, float(times[0]), float(times[-1]))
     return result
+
+
+def _missing_input(times: Sequence[Any], channel: str | None) -> str | None:
+    """Why the streams cannot describe the session, or None when they can."""
+    if (
+        len(times) < 2
+        or _number(times[0]) is None
+        or _number(times[-1]) is None
+        or times[-1] - times[0] < MIN_SESSION_S
+    ):
+        return "Zu kurze oder fehlende Messreihe."
+    if channel is None:
+        return "Tempo oder Leistung fehlt."
+    return None
+
+
+def _erg_like(
+    activity: Mapping[str, Any], reader: _Reader, reps: Sequence[Mapping[str, Any]]
+) -> bool:
+    """An indoor ride whose work laps all held power within a few percent."""
+    variabilities = [rep.get("variability_pct") for rep in reps]
+    return (
+        reader.output_name == "power"
+        and activity.get("environment") in {"indoor", "virtual"}
+        and bool(variabilities)
+        and all(v is not None and v < ERG_VARIABILITY_PCT for v in variabilities)
+    )
 
 
 class _Window:
@@ -329,32 +336,54 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
     reps: list[dict[str, Any]] = []
     recoveries: list[dict[str, Any]] = []
     for number, index in enumerate(works[:MAX_REPS], start=1):
-        lap = laps[index]
-        start, end = lap["start"], lap["end"]
-        middle = (start + end) / 2
-        duration = end - start
-        first, second = reader.raw_output(start, middle), reader.raw_output(middle, end)
-        settled = min(start + SETTLE_S, middle)
-        distance = _number(lap.get("distance_m"))
-        rep = {
+        reps.append(_rep(number, laps[index], raw[number - 1], reader))
+        rest = _rest_after(laps, index)
+        if rest is not None:
+            recoveries.append({"after_rep": number, **_recovery(rest, reader)})
+    return {
+        "reps": reps,
+        "recoveries": recoveries,
+        "rep_summary": _rep_summary(len(works), raw, reps, recoveries),
+    }
+
+
+def _rep(
+    number: int, lap: Mapping[str, Any], raw: float | None, reader: _Reader
+) -> dict[str, Any]:
+    """One work lap: output, its halves and opening, heart rate, cadence, terrain."""
+    start, end = lap["start"], lap["end"]
+    middle = (start + end) / 2
+    duration = end - start
+    first, second = reader.raw_output(start, middle), reader.raw_output(middle, end)
+    distance = _number(lap.get("distance_m"))
+    opening = (
+        _change_pct(
+            reader.raw_output(start + START_S, end),
+            reader.raw_output(start, start + START_S),
+        )
+        if duration >= START_REP_S
+        else None
+    )
+    lap_pace = (
+        round(duration / distance * 1000)
+        if reader.output_name == "pace" and distance
+        else None
+    )
+    return _drop_none(
+        {
             "rep": number,
             "start_s": round(start),
             "duration_s": round(duration),
             "distance_m": lap.get("distance_m"),
-            "output": reader.shown(raw[number - 1]),
-            "lap_pace": round(duration / distance * 1000)
-            if reader.output_name == "pace" and distance
-            else None,
+            "output": reader.shown(raw),
+            "lap_pace": lap_pace,
             "output_first_half": reader.shown(first),
             "output_second_half": reader.shown(second),
             "within_rep_change_pct": _change_pct(first, second),
-            "start_change_pct": _change_pct(
-                reader.raw_output(start + START_S, end),
-                reader.raw_output(start, start + START_S),
-            )
-            if duration >= START_REP_S
-            else None,
-            "variability_pct": reader.variability_pct(settled, end),
+            "start_change_pct": opening,
+            "variability_pct": reader.variability_pct(
+                min(start + SETTLE_S, middle), end
+            ),
             "heart_rate_avg": reader.heart_rate(start, end),
             "heart_rate_first_half": reader.heart_rate(start, middle),
             "heart_rate_second_half": reader.heart_rate(middle, end),
@@ -369,13 +398,19 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
             "elevation_change_m": reader.elevation_change(start, end),
             "short": duration < SHORT_REP_S,
         }
-        reps.append(_drop_none(rep))
-        rest = _rest_after(laps, index)
-        if rest is not None:
-            recoveries.append({"after_rep": number, **_recovery(rest, reader)})
+    )
+
+
+def _rep_summary(
+    count: int,
+    raw: Sequence[float | None],
+    reps: Sequence[Mapping[str, Any]],
+    recoveries: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Counts and first-against-last values over all work laps."""
     known = [value for value in raw if value is not None]
-    summary: dict[str, Any] = {"rep_count": len(works)}
-    if len(works) > MAX_REPS:
+    summary: dict[str, Any] = {"rep_count": count}
+    if count > MAX_REPS:
         summary["reps_listed"] = MAX_REPS
     if len(known) >= 2:
         summary["first_to_last_change_pct"] = _change_pct(known[0], known[-1])
@@ -402,7 +437,7 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
     if len(drops) >= 2:
         summary["recovery_drop_first"] = drops[0]
         summary["recovery_drop_last"] = drops[-1]
-    return {"reps": reps, "recoveries": recoveries, "rep_summary": summary}
+    return summary
 
 
 def _rest_after(laps: Sequence[Mapping[str, Any]], index: int) -> dict[str, Any] | None:
