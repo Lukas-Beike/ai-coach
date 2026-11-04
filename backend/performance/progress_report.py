@@ -9,7 +9,7 @@ recalculates zones from current thresholds.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
@@ -22,6 +22,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import eftp
+from backend.performance.comparable_sessions import equal_effort_trend
 from backend.performance.pace_at_hr import pace_at_heart_rate_trend
 from backend.performance.session_rpe_load import period_load, session_load
 from backend.performance.training_report import metric_sum, valid_zones
@@ -310,18 +311,28 @@ def _mean_max_window(
     return result
 
 
-def _pace_at_hr_window(
+def _effort_sports(sport: str) -> tuple[str, ...]:
+    """The sports the equal-effort trend covers for a report's sport filter."""
+    if sport == "all":
+        return ("run", "ride")
+    return (sport,)
+
+
+def _curve_trend_window(
+    trend: Callable[..., dict[str, Any]],
     records: Sequence[Mapping[str, Any]] | None,
     start: date,
     middle: date,
     end: date,
     weeks: int,
+    **options: Any,
 ) -> dict[str, Any]:
+    """A session-curve trend of the window, or why there is none."""
     if weeks < 2:
         return {"status": "insufficient_data"}
     if records is None:
         return {"status": "outside_curve_window"}
-    return pace_at_heart_rate_trend(records, start, middle, end)
+    return trend(records, start, middle, end, **options)
 
 
 def _week_row(
@@ -455,11 +466,31 @@ def weekly_progress(
         ),
         **(
             {
-                "pace_at_heart_rate": _pace_at_hr_window(
-                    curve_records, start, middle, effective_end, started_weeks
+                "pace_at_heart_rate": _curve_trend_window(
+                    pace_at_heart_rate_trend,
+                    curve_records,
+                    start,
+                    middle,
+                    effective_end,
+                    started_weeks,
                 )
             }
             if sport in {"all", "run"}
+            else {}
+        ),
+        **(
+            {
+                "equal_effort": _curve_trend_window(
+                    equal_effort_trend,
+                    curve_records,
+                    start,
+                    middle,
+                    effective_end,
+                    started_weeks,
+                    sports=_effort_sports(sport),
+                )
+            }
+            if sport in {"all", "ride", "run"}
             else {}
         ),
         "coverage_note": "Aggregation of known local records. A week without records is unknown, not rest; the running week is incomplete. Missing loads, RPE and zone times stay unknown; AU, TSS-like load and zone seconds are never combined. No training model is applied.",

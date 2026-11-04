@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import unittest
+from datetime import date
 from typing import Any
 
 from session_stream_support import synthetic_session
 
-from backend.performance.comparable_sessions import comparable_sessions
+from backend.performance.comparable_sessions import (
+    comparable_sessions,
+    equal_effort_trend,
+)
 from backend.performance.session_execution import (
     comparison_metrics,
     session_execution,
@@ -144,6 +148,73 @@ class ComparableSessionsTests(unittest.TestCase):
     def test_a_session_without_execution_is_not_covered(self) -> None:
         result = comparable_sessions([_row("2026-11-03", None)], "act_2026-11-03")
         self.assertEqual(result["status"], "not_covered")
+
+
+class EqualEffortTrendTests(unittest.TestCase):
+    def _rides(self, days: list[str], watts: int, heart: int) -> list[dict[str, Any]]:
+        return [
+            _row(
+                day,
+                {
+                    "structure": "continuous",
+                    "output_unit": "W",
+                    "data_quality_ok": True,
+                    "main_part_s": 3600,
+                    "output": watts,
+                    "heart_rate_avg": heart,
+                },
+                sport="ride",
+            )
+            for day in days
+        ]
+
+    def test_more_watts_at_the_same_heart_rate_is_a_positive_change(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        records += self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 210, 140)
+        trend = equal_effort_trend(
+            records, date(2026, 8, 31), date(2026, 10, 5), date(2026, 11, 2)
+        )
+        outdoor = trend["ride"]["outdoor"]
+        self.assertEqual(outdoor["status"], "ok")
+        self.assertEqual(outdoor["change_pct"], 5.0)
+        self.assertFalse(outdoor["effort_differs"])
+        self.assertEqual(trend["run"]["outdoor"]["status"], "not_covered")
+
+    def test_rides_without_power_and_other_sports_are_left_out(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        for row in self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 30, 140):
+            row["execution_summary"]["output_unit"] = "km/h"
+            records.append(row)
+        trend = equal_effort_trend(
+            records,
+            date(2026, 8, 31),
+            date(2026, 10, 5),
+            date(2026, 11, 2),
+            sports=("ride",),
+        )
+        self.assertEqual(trend["ride"]["outdoor"]["status"], "not_covered")
+        self.assertNotIn("run", trend)
+
+    def test_a_change_of_stream_source_is_named(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        later = self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 210, 140)
+        for row in records:
+            row["execution_summary"]["source"] = "Garmin"
+        for row in later:
+            row["execution_summary"]["source"] = "Wahoo"
+        outdoor = equal_effort_trend(
+            records + later, date(2026, 8, 31), date(2026, 10, 5), date(2026, 11, 2)
+        )["ride"]["outdoor"]
+        self.assertEqual(["Garmin"], outdoor["earlier"]["sources"])
+        self.assertTrue(outdoor["sources_differ"])
+
+    def test_a_different_effort_is_named(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        records += self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 240, 155)
+        outdoor = equal_effort_trend(
+            records, date(2026, 8, 31), date(2026, 10, 5), date(2026, 11, 2)
+        )["ride"]["outdoor"]
+        self.assertTrue(outdoor["effort_differs"])
 
 
 class ComparisonMetricsTests(unittest.TestCase):

@@ -274,7 +274,8 @@ PLAN = COMMON | {
 # Exact present sections and a character ceiling (whole prompt context) per case.
 EXPECTED: dict[str, tuple[set[str], int]] = {
     "session_analysis": (COMMON | {"recovery"}, 26_000),
-    "progress_review": (COMMON | {"planning", "recovery"}, 25_500),
+    # Progress and block review are one review with the same sections.
+    "progress_review": (COMMON | {"planning", "recovery", "training_plans"}, 31_000),
     "block_review": (COMMON | {"planning", "recovery", "training_plans"}, 31_000),
     "plan_week": (PLAN, 49_500),
     "plan_block": (PLAN, 63_500),
@@ -452,11 +453,12 @@ class CoachContextBudgetTests(unittest.TestCase):
                 latest = max(item["date"] for item in planned)
                 self.assertLessEqual(latest, last)
 
-    def test_progress_review_drops_training_plans_block_review_keeps_them(
-        self,
-    ) -> None:
-        self.assertNotIn("training_plans", present(self.measured["progress_review"]))
-        self.assertIn("training_plans", present(self.measured["block_review"]))
+    def test_progress_and_block_review_load_the_same_sections(self) -> None:
+        self.assertEqual(
+            present(self.measured["progress_review"]),
+            present(self.measured["block_review"]),
+        )
+        self.assertIn("training_plans", present(self.measured["progress_review"]))
 
     def test_every_removed_section_stays_loadable_by_the_read_tool(self) -> None:
         tool = next(

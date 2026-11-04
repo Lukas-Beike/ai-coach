@@ -184,7 +184,7 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 
 #### Scenario: Review answers
 - **WHEN** a turn carries `session_analysis`, `progress_review` or `block_review`
-- **THEN** its playbook asks for a one-sentence verdict, findings with concrete numbers (two to four for one session), short coverage and unknowns, and the task's consequence or lessons, in plain words; the session-analysis playbook names per session type what to judge (plan, load and intensity, warm-up and cool-down, steadiness and drift of easy sessions, rep execution, recoveries and their heart-rate drop, heart rate not judged under about two minutes) and the confounders to check first, and the block review states when pace at heart rate is `not_covered`.
+- **THEN** its playbook asks for a one-sentence verdict, findings with concrete numbers (two to four for one session), short coverage and unknowns, and the task's consequence or lessons, in plain words; the session-analysis playbook names per session type what to judge (plan, load and intensity, warm-up and cool-down, steadiness and drift of easy sessions, rep execution, recoveries and their heart-rate drop, heart rate not judged under about two minutes) and the confounders to check first, and the progress and block review are one review: it reads the `block_review` section for 4, 8 or 12 weeks or since the last test, leads with performance at equal effort, names plan execution and subjective signals only as possible causes and states when pace at heart rate is `not_covered`. The quick menu offers progress over 4, 8 and 12 weeks and since the last test, without a separate block review.
 
 #### Scenario: Adjust the current week
 - **WHEN** a turn carries `adjust_week`

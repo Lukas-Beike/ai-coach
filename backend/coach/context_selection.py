@@ -402,8 +402,14 @@ REQUEST_KIND_SELECTIONS: Mapping[str, CoachContextSelection] = {
     ),
     # Review kinds look back: their data comes from get_training_report, so they
     # carry no future horizon and no daily view.
+    # Progress and block review are one review; both date a named plan or the
+    # last test from training_plans.
     "progress_review": CoachContextSelection(
-        "progress_review", BASE_SECTIONS | {"planning", "recovery"}, 0, 5, False
+        "progress_review",
+        BASE_SECTIONS | {"planning", "training_plans", "recovery"},
+        0,
+        5,
+        False,
     ),
     # The block review needs training_plans to date a named plan.
     "block_review": CoachContextSelection(

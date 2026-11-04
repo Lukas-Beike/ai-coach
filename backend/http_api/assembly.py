@@ -70,6 +70,7 @@ from backend.http_api.wahoo import WahooGetRoutes, WahooPostRoutes
 from backend.nutrition.macro_context import macro_context
 from backend.performance.mean_max_curve import SessionCurveReader
 from backend.performance.report_service import (
+    BlockReviewSource,
     TrainingDerivedReadService,
     TrainingProfileSelectionService,
     TrainingRecordsService,
@@ -77,7 +78,7 @@ from backend.performance.report_service import (
     TrainingReportServices,
     TrainingSeasonReadService,
 )
-from backend.planning.block_review import block_review
+from backend.planning.block_review import block_review, last_completed_test
 from backend.planning.season_preparation import load_scenarios, season_preparation
 from backend.sync.analysis_refresh import AnalysisRefreshService
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -520,7 +521,9 @@ class HttpApiAssembly:
                 session_feedback=_session_feedback_lookup(athlete),
                 now=athlete_clock.now,
                 curve_records=profiles.curve_records,
-                review_block=block_review,
+                block_review=BlockReviewSource(
+                    review=block_review, last_test=last_completed_test
+                ),
                 training_model=partial(
                     _profile_text, profile_service, "training_model"
                 ),

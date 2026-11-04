@@ -206,3 +206,140 @@ def _within(value: Any, other: Any, band: float) -> bool:
 
 def _not_covered(base: Mapping[str, Any], reason: str, **extra: Any) -> dict[str, Any]:
     return {**base, "status": "not_covered", "reason": reason, **extra}
+
+
+EFFORT_METHOD: Final = "equal-effort-trend-v1"
+EFFORT_SCOPE: Final = (
+    "Steady sessions of the earlier and the later half of the period: median "
+    "output per heart beat (rides with power W/bpm, runs m/s per bpm x 100) per "
+    "sport and indoor or outdoor, with the median heart rate and temperature of "
+    "each half. A higher later value means more output at the same heart rate. "
+    f"Needs at least {MIN_PEERS} steady sessions per half; halves whose median "
+    f"heart rate differs by more than {HEART_RATE_BAND} bpm are named, as effort "
+    "then differs; sources_differ names a change of stream providers between "
+    "the halves. Rides without power and terrain are not compared."
+)
+# Each sport's output unit; a ride without power has no comparable output.
+_EFFORT_UNITS: Final = {"run": "s/km", "ride": "W"}
+
+
+def equal_effort_trend(
+    records: Sequence[Mapping[str, Any]],
+    start: date,
+    middle: date,
+    end: date,
+    *,
+    sports: Sequence[str] = ("run", "ride"),
+) -> dict[str, Any]:
+    """Earlier-versus-later output per heart beat of steady runs and rides."""
+    halves = {"earlier": (start, middle - timedelta(days=1)), "later": (middle, end)}
+    result: dict[str, Any] = {"method": EFFORT_METHOD, "scope": EFFORT_SCOPE}
+    for sport in sports:
+        result[sport] = {
+            environment: _effort_halves(records, sport, environment, halves)
+            for environment in ("outdoor", "indoor")
+        }
+    return result
+
+
+def _effort_halves(
+    records: Sequence[Mapping[str, Any]],
+    sport: str,
+    environment: str,
+    halves: Mapping[str, tuple[date, date]],
+) -> dict[str, Any]:
+    parts: dict[str, dict[str, Any]] = {}
+    for name, (first, last) in halves.items():
+        values = _steady_sessions(records, sport, environment, first, last)
+        if len(values) < MIN_PEERS:
+            return {
+                "status": "not_covered",
+                "reason": f"{len(values)} gleichmäßige Einheiten in der Hälfte {name}, mindestens {MIN_PEERS} nötig.",
+            }
+        parts[name] = _effort_half(values)
+    earlier, later = parts["earlier"], parts["later"]
+    return {
+        "status": "ok",
+        **parts,
+        "change_pct": round(
+            (later["output_per_beat"] - earlier["output_per_beat"])
+            / earlier["output_per_beat"]
+            * 100,
+            1,
+        ),
+        "effort_differs": abs(later["heart_rate_median"] - earlier["heart_rate_median"])
+        > HEART_RATE_BAND,
+        "sources_differ": earlier["sources"] != later["sources"],
+    }
+
+
+def _steady_sessions(
+    records: Sequence[Mapping[str, Any]],
+    sport: str,
+    environment: str,
+    first: date,
+    last: date,
+) -> list[tuple[float, Mapping[str, Any]]]:
+    """Output per beat of the steady sessions of one half, sport and place."""
+    values = []
+    for row in records:
+        summary = row.get("execution_summary")
+        if (
+            row.get("sport") != sport
+            or row.get("environment") != environment
+            or not first.isoformat() <= str(row.get("date") or "") <= last.isoformat()
+            or not isinstance(summary, Mapping)
+            or summary.get("output_unit") != _EFFORT_UNITS[sport]
+        ):
+            continue
+        efficiency = _efficiency(summary)
+        if efficiency is not None:
+            values.append((efficiency, row))
+    return values
+
+
+def _effort_half(values: Sequence[tuple[float, Mapping[str, Any]]]) -> dict[str, Any]:
+    temperatures = [
+        float(row["avg_temp_c"])
+        for _, row in values
+        if isinstance(row.get("avg_temp_c"), (int, float))
+    ]
+    return {
+        "sessions": len(values),
+        # The stream providers, so a sensor or provider change is not read as fitness.
+        "sources": sorted(
+            {
+                str(row["execution_summary"].get("source"))
+                for _, row in values
+                if row["execution_summary"].get("source")
+            }
+        ),
+        "output_per_beat": round(statistics.median(v for v, _ in values), 3),
+        "heart_rate_median": rounded_metric(
+            statistics.median(
+                float(row["execution_summary"]["heart_rate_avg"]) for _, row in values
+            )
+        ),
+        "temperature_median_c": rounded_metric(statistics.median(temperatures))
+        if temperatures
+        else None,
+    }
+
+
+def _efficiency(summary: Any) -> float | None:
+    """Output per heart beat of a steady session with sound data."""
+    if not isinstance(summary, Mapping) or summary.get("structure") != "continuous":
+        return None
+    if summary.get("data_quality_ok") is False:
+        return None
+    output, heart = summary.get("output"), summary.get("heart_rate_avg")
+    if not isinstance(output, (int, float)) or not isinstance(heart, (int, float)):
+        return None
+    if output <= 0 or heart <= 0:
+        return None
+    unit = summary.get("output_unit")
+    if unit == "W":
+        return float(output) / float(heart)
+    if unit == "s/km":
+        return 1000.0 / float(output) / float(heart) * 100
+    return None
