@@ -37,7 +37,11 @@ Choose the first option that satisfies the actual request:
 4. Use an existing dependency before adding one; a few clear lines need no new package.
 5. Otherwise write the minimum clear implementation in the correct layer.
 
-Avoid speculative wrappers and abstractions. A compact diff must remain readable;
+Avoid speculative wrappers and abstractions. Apply the deletion test (after
+Matt Pocock's codebase-design): if deleting a module makes complexity vanish,
+it only passed calls through; if complexity reappears in its callers, it
+earns its place. A seam with one implementation is hypothetical; add it only
+when two vary across it. A compact diff must remain readable;
 do not compress code or relocate orchestration to bypass ownership rules. Remove
 code only when the requested change makes it unnecessary.
 

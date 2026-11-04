@@ -7,7 +7,8 @@ license: MIT adaptation; see ../THIRD_PARTY.md.
 # Debugging Intervals Coach
 
 Adapted from Superpowers systematic-debugging, root-cause-tracing, and
-condition-based-waiting. Modified for this project's ownership, privacy,
+condition-based-waiting, with the feedback-loop and ranked-hypothesis steps of
+Matt Pocock's diagnosing-bugs. Modified for this project's ownership, privacy,
 SQLCipher, fixture, and authorization contracts; see [provenance](../THIRD_PARTY.md).
 
 ## Establish the failure
@@ -22,6 +23,10 @@ SQLCipher, fixture, and authorization contracts; see [provenance](../THIRD_PARTY
   fixture. Use [navigation](../ai-coach-navigator/SKILL.md) to locate the owner and
   [browser validation](../ai-coach-pwa-e2e/SKILL.md) for UI failures. If reproduction
   is unavailable, record that limit and trace the reachable path statically.
+- Before theorizing, name one command you have already run that goes red on
+  the reported symptom (not merely "does not crash"), gives the same verdict on
+  every run, and takes seconds. Then cut inputs and steps one at a time until
+  every remaining element is needed for the failure.
 
 ## Trace one cause at a time
 
@@ -32,8 +37,9 @@ SQLCipher, fixture, and authorization contracts; see [provenance](../THIRD_PARTY
 2. Compare a working case or adjacent implementation. Inspect recent changes and
    the exact child-job/test output. Do not infer an application regression solely
    from a wrapper's exit status, stale selector, or fixture date window.
-3. Write one falsifiable hypothesis and the observation that would disprove it.
-   Run the smallest experiment; change one variable. For races, wait on observable
+3. Rank 3-5 falsifiable hypotheses, each with the observation that would
+   disprove it, before testing the first; one idea anchors too early. Run the
+   smallest experiment; change one variable. For races, wait on observable
    readiness or job state with a timeout instead of adding arbitrary sleeps.
 4. If evidence rejects the hypothesis, revise it before another code change.
    Repeated unsuccessful fixes call for rechecking ownership and assumptions,
@@ -41,7 +47,8 @@ SQLCipher, fixture, and authorization contracts; see [provenance](../THIRD_PARTY
 
 Use synthetic inputs and redacted metadata such as status, field presence,
 counts, and timings for instrumentation. Keep it temporary or within the existing
-redaction contract; never log raw payloads to diagnose a boundary.
+redaction contract; never log raw payloads to diagnose a boundary. Tag temporary
+logs with a unique prefix such as `[DEBUG-a4f2]` and grep it away before finishing.
 
 ## Fix and prove
 
@@ -52,7 +59,9 @@ redaction contract; never log raw payloads to diagnose a boundary.
   startup. A workaround that disables any of these does not resolve the failure.
 - For a functional regression, choose a focused check that exposes the original
   failure and passes with the fix. Keep tests about observable behavior; do not
-  demand a new test for a reversible instruction or cosmetic edit.
+  demand a new test for a reversible instruction or cosmetic edit. If no seam
+  reproduces the real call pattern, report that as an architecture finding
+  instead of adding a shallow test that cannot catch the bug.
 - Inspect the final diff and run [appropriate validation](../ai-coach-validation/SKILL.md).
   Report the cause, changed behavior, executed proof, and remaining limits. An
   untested hypothesis remains a hypothesis; local proof is not a merge or release.
