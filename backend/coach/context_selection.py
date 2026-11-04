@@ -457,7 +457,9 @@ def free_text_plan_kind(message: str) -> str | None:
 def free_text_review_kind(message: str) -> str | None:
     """Map a typed review request to its fixed review kind; selection only."""
     normalized = message.casefold()
-    if re.search(PLANNING_VERB_PATTERN, normalized):
+    # A planning or adjusting action makes it a plan turn; the noun "Plan"
+    # ("gegen meinen Plan") still reviews.
+    if re.search(_PLAN_ACTION, normalized) or re.search(_ADJUST_VERB, normalized):
         return None
     if re.search(_PROGRESS_QUESTION, normalized) or (
         re.search(_PROGRESS_NOUN, normalized)
@@ -529,15 +531,23 @@ def select_coach_context(
     if request_kind is not None or selection.name == "fallback":
         return selection
     kind = free_text_plan_kind(message)
-    if kind is None and selection.name in {"activity_analysis", "general_coaching"}:
+    # Food, profile and editing turns keep their own selection.
+    if kind is None and selection.name not in {"profile_or_checkin", "plan_editing"}:
         kind = free_text_review_kind(message)
     if kind is None:
         return selection
     if kind in REVIEW_KINDS:
         # The review keeps what the message itself asked for, such as weather;
         # explicit dates or past weeks also keep their complete time context.
+        # A weekday or weather question keeps its longer horizon.
         fixed = _fixed_selection(selection, message, kind)
-        base = selection if selection.horizon_days is None else fixed
+        if selection.horizon_days is None:
+            base = selection
+        else:
+            base = replace(
+                fixed,
+                horizon_days=max(fixed.horizon_days or 0, selection.horizon_days),
+            )
         return cast(
             CoachContextSelection,
             replace(base, sections=fixed.sections | selection.sections, kind=kind),

@@ -894,10 +894,11 @@ class CoachContextRuleTests(unittest.TestCase):
             ),
             (
                 "Analysiere meine letzte Einheit",
-                # A typed single-session review gets the session_analysis kind.
+                # A typed single-session review gets the session_analysis kind
+                # and keeps the message's three-day horizon.
                 "session_analysis",
                 recovery,
-                2,
+                3,
                 5,
                 False,
                 False,
@@ -1012,10 +1013,11 @@ class CoachContextRuleTests(unittest.TestCase):
             ),
             (
                 "Analyse the latest activity",
-                # A typed single-session review gets the session_analysis kind.
+                # A typed single-session review gets the session_analysis kind
+                # and keeps the message's three-day horizon.
                 "session_analysis",
                 recovery,
-                2,
+                3,
                 5,
                 False,
                 False,

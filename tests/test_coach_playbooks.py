@@ -310,6 +310,8 @@ class FreeTextReviewKindTests(unittest.TestCase):
             "Analysiere die letzte Einheit des Blocks": "session_analysis",
             "Analysiere meinen Lauf von letzter Woche Dienstag": "session_analysis",
             "Zeig mir meinen Fortschritt": "progress_review",
+            "Analyze my last run against my plan": "session_analysis",
+            "Wie lief meine letzte Einheit im Vergleich zum Plan?": "session_analysis",
             "Wie ist mein Fortschritt?": "progress_review",
             "Werde ich fitter?": "progress_review",
             "Bewerte meinen letzten Block": "block_review",
@@ -350,6 +352,15 @@ class FreeTextReviewKindTests(unittest.TestCase):
         )
         self.assertEqual(weather.kind, "session_analysis")
         self.assertIn("weather", weather.sections)
+        saturday = select_coach_context(
+            "How did my interval session go and what's the weather on Saturday?", {}
+        )
+        self.assertEqual(saturday.kind, "session_analysis")
+        self.assertGreaterEqual(saturday.horizon_days or 0, 7)
+        self.assertIn("daily_planning_context", saturday.sections)
+        self.assertIsNone(
+            free_text_review_kind("Analysiere die Einheit und passe die Woche an")
+        )
         dated = select_coach_context("Analysiere meinen Lauf vom 2.11.", {})
         self.assertEqual(dated.kind, "session_analysis")
         self.assertNotIn("planning_brief", dated.sections)
