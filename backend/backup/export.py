@@ -446,7 +446,7 @@ class PrivacyArchiveExportService:
                         for row in db.execute(
                             "SELECT id, natural_key, metric, value, unit, method, aggregation, source_kind, "
                             "recorded_by, provider, source_record_id, sport, observed_on, observed_at, "
-                            "retrieved_at, label, details, mapper_version, created_at, updated_at "
+                            "retrieved_at, label, details, mapper_version, state, owner_record_id, created_at, updated_at "
                             "FROM observations ORDER BY observed_on, metric, id"
                         )
                     ),

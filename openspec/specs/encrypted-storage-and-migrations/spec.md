@@ -4,7 +4,7 @@
 
 Preserve durable athlete state through encrypted creation, bounded transactions, supported schema upgrades and restarts.
 
-Owns database lifecycle and upgrade contracts. The baseline records current schema v20 and supports upgrades from v16; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
+Owns database lifecycle and upgrade contracts. The baseline records current schema v21 and supports upgrades from v16; canonical/domain records are described in their capability specs. SQLCipher conformance requires encrypted fixtures, separate from SQLite test doubles.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ Evidence: `backend/db/schema.py::configure_cipher`; `backend/db/manager.py::Data
 
 ### Requirement: Supported released-schema upgrades
 
-The database SHALL recognize supported version-and-shape pairs from schema v16 through released v19 and the current schema v20, executing required versioned steps within one rollback-capable migration transaction.
+The database SHALL recognize supported version-and-shape pairs from schema v16 through released v20 and the current schema v21, executing required versioned steps within one rollback-capable migration transaction.
 
 #### Scenario: Skipped-release upgrade
 - **WHEN** a populated released v16 database is opened by this build
@@ -209,3 +209,13 @@ The v18 and v19 schemas share one table shape, so the v18 to v20 step also upgra
 - **THEN** canonical analysis stores the equivalent neutral basis while the source record stays unchanged until safely retired.
 
 Evidence: `backend/db/planning_metrics_migration.py`, `backend/sync/activity_detail_canonical.py`, `backend/sync/activity_detail_retirement.py`; `tests/test_db_planning_metrics_migration.py`, `tests/test_activity_detail_canonical.py`, `tests/test_activity_detail_retirement.py`, `tests/test_db_encrypted_upgrade_matrix.py`.
+
+### Requirement: Observation lifecycle upgrade
+
+The v20 to v21 step SHALL add `observations.state` and `observations.owner_record_id`, keep every existing row active with all values unchanged, and set the owner only where the raw record is known exactly.
+
+#### Scenario: Populated release upgrade
+- **WHEN** a populated v16 to v20 database is opened by this build
+- **THEN** Intervals.icu wellness and Wahoo threshold rows are owned by their source record, other Intervals.icu rows by the stored athlete record, and Garmin rows or rows without a stored raw record keep no owner; a failure rolls back to the unchanged release.
+
+Evidence: `backend/db/migrations.py:_assign_observation_owners`; `tests/test_db_observation_lifecycle_migration.py`, `tests/test_db_encrypted_upgrade_matrix.py`.

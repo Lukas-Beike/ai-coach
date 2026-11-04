@@ -14,7 +14,7 @@ with the payload's latest sync time.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, tzinfo
 from typing import Any, Final
@@ -175,6 +175,9 @@ class ObservationItem:
     # A fill-only value never replaces a stored value of another source record:
     # the accumulated Garmin performance history yields to dedicated sections.
     fill_only: bool = False
+    # Source record id of the raw record whose projection emits the observation,
+    # or None when that is not known exactly; an unowned row is never retired.
+    owner: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +223,10 @@ class IngestPlan:
     ``withdrawn_activity_ids`` name listed activities that are no recording yet;
     a stored copy of one is tombstoned only while it holds no measured value
     either, and a later recording revives it.
+    ``observation_owners`` name the raw records whose observations the plan maps
+    completely; the stored observations they own and no longer emit are retired.
+    A raw record the plan does not carry, such as a section that failed to load,
+    retires nothing.
     """
 
     provider: ProviderId
@@ -230,6 +237,7 @@ class IngestPlan:
     withdrawn_activity_ids: frozenset[str] = field(default_factory=frozenset)
     skipped_invalid: int = 0
     domain_batches: tuple[DomainBatch, ...] = ()
+    observation_owners: frozenset[str] = field(default_factory=frozenset)
 
 
 def intervals_ingest_plan(
@@ -263,6 +271,7 @@ def intervals_ingest_plan(
     )
     observations: list[ObservationItem] = []
     batches: list[DomainBatch] = []
+    owners: set[str] = set()
     wellness_rows = raw.get("wellness")
     if isinstance(wellness_rows, list):
         valid_rows: list[Any] = []
@@ -272,6 +281,7 @@ def intervals_ingest_plan(
                 skipped += 1
                 continue
             valid_rows.append(row)
+            owners.add(row_id)
             raw_records.append(
                 RawRecord(WELLNESS_RECORD_KIND, row_id, row, INTERVALS_WELLNESS_VERSION)
             )
@@ -279,8 +289,13 @@ def intervals_ingest_plan(
                 _wellness_batch(row, row_id, zone=zone, retrieved_at=retrieved_at)
             )
         wellness = map_intervals_wellness(valid_rows, retrieved_at=retrieved_at)
+        # A wellness value names its row id as its source record.
         observations.extend(
-            ObservationItem(observation, INTERVALS_WELLNESS_VERSION)
+            ObservationItem(
+                observation,
+                INTERVALS_WELLNESS_VERSION,
+                owner=_owned_by(observation, owners),
+            )
             for observation in wellness.records
         )
     athlete = raw.get("athlete")
@@ -298,8 +313,11 @@ def intervals_ingest_plan(
             observed_on=local_date(retrieved_at, zone),
             retrieved_at=retrieved_at,
         )
+        owners.add(ATHLETE_RECORD_ID)
         observations.extend(
-            ObservationItem(observation, INTERVALS_WELLNESS_VERSION)
+            ObservationItem(
+                observation, INTERVALS_WELLNESS_VERSION, owner=ATHLETE_RECORD_ID
+            )
             for observation in thresholds.records
         )
         batches.append(_athlete_batch(athlete, retrieved_at=retrieved_at))
@@ -313,7 +331,14 @@ def intervals_ingest_plan(
         present_activity_ids=frozenset(present),
         skipped_invalid=skipped,
         domain_batches=(*batches, *curve.batches),
+        observation_owners=frozenset(owners),
     )
+
+
+def _owned_by(observation: Observation, owners: Collection[str]) -> str | None:
+    """Return the observation's source record id when it is one of ``owners``."""
+    source_id = observation.provenance.source_record_id
+    return source_id if source_id in owners else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,6 +589,8 @@ def garmin_ingest_plan(
         is not None
     )
     observations: list[ObservationItem] = []
+    raw_ids = {raw.source_record_id for raw in raw_records}
+    owners: set[str] = set()
     for name in GARMIN_HEALTH_SECTION_NAMES:
         section_at = garmin_section_retrieved_at(payload, name, zone=zone)
         if section_at is None:
@@ -571,7 +598,12 @@ def garmin_ingest_plan(
         for section in WEIGHT_SECTIONS if name == GARMIN_WEIGHT_SECTION else (name,):
             observations.extend(
                 _garmin_section_observations(
-                    section, payload.get(section), zone=zone, retrieved_at=section_at
+                    section,
+                    payload.get(section),
+                    zone=zone,
+                    retrieved_at=section_at,
+                    raw_ids=raw_ids,
+                    owners=owners,
                 )
             )
     return IngestPlan(
@@ -582,6 +614,7 @@ def garmin_ingest_plan(
         present_activity_ids=frozenset(present),
         skipped_invalid=skipped,
         domain_batches=batches,
+        observation_owners=frozenset(owners),
     )
 
 
@@ -603,10 +636,24 @@ def _stored_garmin_batch(
 
 
 def _garmin_section_observations(
-    section: str, value: object, *, zone: tzinfo, retrieved_at: Any
+    section: str,
+    value: object,
+    *,
+    zone: tzinfo,
+    retrieved_at: Any,
+    raw_ids: Collection[str],
+    owners: set[str],
 ) -> Iterator[ObservationItem]:
-    """Map each stored element as stored, so re-projection rebuilds the same rows."""
+    """Map each stored element as stored, so re-projection rebuilds the same rows.
+
+    An element stored as a raw record of the plan owns its observations and is
+    added to ``owners``; the observations of any other element have no owner.
+    """
     for item in split_section(value):
+        element_id = record_id(section, item.key)
+        owner = element_id if element_id in raw_ids else None
+        if owner is not None:
+            owners.add(owner)
         if item.value is None:
             continue
         health = map_garmin_health(
@@ -617,6 +664,7 @@ def _garmin_section_observations(
                 observation,
                 GARMIN_HEALTH_VERSION,
                 fill_only=section == GARMIN_PERFORMANCE_HISTORY_SECTION,
+                owner=owner,
             )
 
 
@@ -789,8 +837,12 @@ def _wahoo_threshold_items(
                 retrieved_at=retrieved_at,
             )
         )
+    # A threshold value names its raw record as its source record.
+    raw_ids = {record.source_record_id for record in raw}
     observations = tuple(
-        ObservationItem(observation, WAHOO_THRESHOLD_VERSION)
+        ObservationItem(
+            observation, WAHOO_THRESHOLD_VERSION, owner=_owned_by(observation, raw_ids)
+        )
         for observation in mapped.records
     )
     return tuple(raw), observations, len(mapped.issues)
@@ -922,14 +974,18 @@ def reprojection_plan(
             fetched=fetched,
             training_loads=training_loads,
         )
+    source_id = str(raw_row["source_record_id"])
     if kind == WELLNESS_RECORD_KIND:
         wellness = map_intervals_wellness([payload], retrieved_at=fetched)
         return IngestPlan(
             provider=provider,
             observations=tuple(
-                ObservationItem(observation, INTERVALS_WELLNESS_VERSION)
+                ObservationItem(
+                    observation, INTERVALS_WELLNESS_VERSION, owner=source_id
+                )
                 for observation in wellness.records
             ),
+            observation_owners=frozenset({source_id}),
             domain_batches=(
                 _wellness_batch(
                     payload,
@@ -946,9 +1002,12 @@ def reprojection_plan(
         return IngestPlan(
             provider=provider,
             observations=tuple(
-                ObservationItem(observation, INTERVALS_WELLNESS_VERSION)
+                ObservationItem(
+                    observation, INTERVALS_WELLNESS_VERSION, owner=source_id
+                )
                 for observation in thresholds.records
             ),
+            observation_owners=frozenset({source_id}),
             domain_batches=(_athlete_batch(payload, retrieved_at=fetched),),
         )
     if kind == POWER_CURVE_RECORD_KIND:
@@ -960,28 +1019,27 @@ def reprojection_plan(
         )
     if kind == WAHOO_POWER_ZONES_RECORD_KIND:
         zones = map_wahoo_power_zones([payload], zone=zone, retrieved_at=fetched)
-        return _threshold_observation_plan(provider, zones)
+        return _threshold_observation_plan(provider, zones, source_id)
     if kind == WAHOO_USER_RECORD_KIND:
         profile = map_wahoo_user(
             payload, observed_on=local_date(fetched, zone), retrieved_at=fetched
         )
-        return _threshold_observation_plan(provider, profile)
-    return _reprojected_health(
-        provider, str(raw_row["source_record_id"]), payload, zone, fetched
-    )
+        return _threshold_observation_plan(provider, profile, source_id)
+    return _reprojected_health(provider, source_id, payload, zone, fetched)
 
 
 def _threshold_observation_plan(
-    provider: ProviderId, mapped: MappingResult[Observation]
+    provider: ProviderId, mapped: MappingResult[Observation], source_id: str
 ) -> IngestPlan:
-    """Return the observations of one re-mapped Wahoo threshold row."""
+    """Return the observations of one re-mapped Wahoo threshold row, which owns them."""
     return IngestPlan(
         provider=provider,
         observations=tuple(
-            ObservationItem(observation, WAHOO_THRESHOLD_VERSION)
+            ObservationItem(observation, WAHOO_THRESHOLD_VERSION, owner=source_id)
             for observation in mapped.records
         ),
         skipped_invalid=len(mapped.issues),
+        observation_owners=frozenset({source_id}),
     )
 
 
@@ -1061,10 +1119,12 @@ def _reprojected_health(
                 observation,
                 GARMIN_HEALTH_VERSION,
                 fill_only=section == GARMIN_PERFORMANCE_HISTORY_SECTION,
+                owner=section_name,
             )
             for observation in health.records
         ),
         domain_batches=batches,
+        observation_owners=frozenset({section_name}),
     )
 
 

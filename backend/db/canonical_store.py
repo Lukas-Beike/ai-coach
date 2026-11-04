@@ -11,7 +11,7 @@ import hashlib
 import json
 import math
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Final, NamedTuple
@@ -33,6 +33,7 @@ from backend.canonical.vocabulary import (
     ActivitySessionState,
     DeviceType,
     MetricKind,
+    ProjectionState,
     ProviderId,
     ProviderRecordState,
 )
@@ -131,7 +132,11 @@ _OBSERVATION_COLUMNS: Final = (
     "method",
     "aggregation",
     "details",
+    "state",
+    "owner_record_id",
 )
+_ACTIVE_OBSERVATION: Final = f"state = '{ProjectionState.ACTIVE.value}'"
+_RETIRE_BATCH: Final = 500
 
 
 class WriteOutcome(StrEnum):
@@ -465,16 +470,26 @@ def insert_activity_record_if_absent(
 
 
 def insert_observation_if_absent(
-    db: Any, observation: Observation, *, mapper_version: int, now: str
+    db: Any,
+    observation: Observation,
+    *,
+    mapper_version: int,
+    now: str,
+    owner: str | None = None,
 ) -> bool:
-    """Insert one observation when its natural key is absent; return True when inserted."""
+    """Insert one observation when its natural key is absent; return True when inserted.
+
+    A retired row counts as present, so this never revives it.
+    """
     natural_key = observation_natural_key(observation)
     if _fetch_row(db, _OBSERVATION_EXISTS, (natural_key,)) is not None:
         return False
     _insert_observation(
         db,
         natural_key=natural_key,
-        values=_observation_values(observation, mapper_version=mapper_version),
+        values=_observation_values(
+            observation, mapper_version=mapper_version, owner=owner
+        ),
         now=now,
     )
     return True
@@ -771,7 +786,7 @@ def current_observation_rows(
     sport: str | None = None,
     oldest_versions: Mapping[str, int] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return observation rows of one metric at each provider's current mapper version.
+    """Return active observation rows of one metric at each provider's current mapper version.
 
     ``versions`` maps a provider value to its current observation mapper version;
     rows of any other version, or of no provider, are not returned. Bounds are
@@ -784,7 +799,7 @@ def current_observation_rows(
     """
     version_clause, version_params = _current_version_clause(versions, oldest_versions)
     params: list[object] = [metric, *version_params]
-    clauses = ["metric = ?", version_clause]
+    clauses = ["metric = ?", version_clause, _ACTIVE_OBSERVATION]
     if start is not None:
         clauses.append("observed_on >= ?")
         params.append(start)
@@ -823,7 +838,7 @@ def observation_metric_windows(
         db,
         "SELECT provider, metric, COUNT(*) AS observations, "
         "MIN(observed_on) AS oldest, MAX(observed_on) AS newest FROM observations "
-        f"WHERE {version_clause} GROUP BY provider, metric",
+        f"WHERE {version_clause} AND {_ACTIVE_OBSERVATION} GROUP BY provider, metric",
         tuple(params),
     )
 
@@ -843,7 +858,8 @@ def provider_totals(db: Any, provider: str) -> dict[str, Any]:
     observations = _fetch_row(
         db,
         "SELECT COUNT(*) AS count, MIN(observed_on) AS oldest, "
-        "MAX(observed_on) AS newest FROM observations WHERE provider = ?",
+        "MAX(observed_on) AS newest FROM observations WHERE provider = ? "
+        f"AND {_ACTIVE_OBSERVATION}",
         (provider,),
     )
     return {
@@ -949,15 +965,21 @@ def upsert_observation(
     mapper_version: int,
     now: str,
     fill_only: bool = False,
+    owner: str | None = None,
 ) -> WriteOutcome:
-    """Insert or update one observation by its natural key.
+    """Insert or update one observation by its natural key; the row becomes active.
 
-    A ``fill_only`` observation never replaces a current row another source
-    record wrote; it inserts, updates its own row, or replaces a row left at an
-    older mapper version, which no stored record re-projects any more.
+    ``owner`` is the source record id of the raw record whose projection emits the
+    observation (see ``retire_unemitted_observations``); None keeps the stored
+    owner. A ``fill_only`` observation never replaces an active row another
+    source record wrote; it inserts, updates its own row, revives a retired row,
+    or replaces a row left at an older mapper version, which no stored record
+    re-projects any more.
     """
     natural_key = observation_natural_key(observation)
-    values = _observation_values(observation, mapper_version=mapper_version)
+    values = _observation_values(
+        observation, mapper_version=mapper_version, owner=owner
+    )
     existing = _fetch_row(
         db,
         "SELECT "
@@ -970,10 +992,13 @@ def upsert_observation(
         return WriteOutcome.WRITTEN
     if (
         fill_only
+        and existing["state"] == ProjectionState.ACTIVE.value
         and existing["source_record_id"] != values["source_record_id"]
         and existing["mapper_version"] >= values["mapper_version"]
     ):
         return WriteOutcome.UNCHANGED
+    if owner is None:
+        values["owner_record_id"] = existing["owner_record_id"]
     if all(existing[column] == values[column] for column in _OBSERVATION_COLUMNS):
         return WriteOutcome.UNCHANGED
     assignments = ", ".join(f"{column} = ?" for column in _OBSERVATION_COLUMNS)
@@ -986,6 +1011,40 @@ def upsert_observation(
         ),
     )
     return WriteOutcome.UPDATED
+
+
+def retire_unemitted_observations(
+    db: Any,
+    *,
+    provider: str,
+    owner: str,
+    emitted: Collection[str],
+    now: str,
+) -> int:
+    """Retire the active observations ``owner`` holds that are not in ``emitted``.
+
+    ``emitted`` are the natural keys the latest projection of the owning raw
+    record produced. The rows stay in the table, so history, backups and a later
+    projection that emits them again (which makes them active) still see them.
+    Returns how many rows were retired.
+    """
+    rows = _fetch_all(
+        db,
+        "SELECT natural_key FROM observations WHERE provider = ? "
+        f"AND owner_record_id = ? AND {_ACTIVE_OBSERVATION}",
+        (provider, owner),
+    )
+    stale = [
+        str(row["natural_key"]) for row in rows if row["natural_key"] not in emitted
+    ]
+    for start in range(0, len(stale), _RETIRE_BATCH):
+        batch = stale[start : start + _RETIRE_BATCH]
+        db.execute(
+            "UPDATE observations SET state = ?, updated_at = ? "
+            f"WHERE natural_key IN ({', '.join('?' * len(batch))})",
+            (ProjectionState.RETIRED.value, now, *batch),
+        )
+    return len(stale)
 
 
 def mark_missing_deleted(
@@ -1587,7 +1646,7 @@ def _activity_details_object(details: object) -> dict[str, Any]:
 
 
 def _observation_values(
-    observation: Observation, *, mapper_version: int
+    observation: Observation, *, mapper_version: int, owner: str | None = None
 ) -> dict[str, Any]:
     provenance = observation.provenance
     return {
@@ -1621,6 +1680,8 @@ def _observation_values(
             else None
         ),
         "details": _observation_details(observation),
+        "state": ProjectionState.ACTIVE.value,
+        "owner_record_id": owner,
     }
 
 

@@ -52,11 +52,14 @@ restores it. In the same transaction, the sessions near the re-projected activit
 are linked to duplicates from other providers (``link_activity_sessions``), so a
 mapper fix that lets two copies match merges stored history without a new provider
 refresh. The first ingest links the same way when each source finishes, so copies
-stored by Garmin and Intervals.icu snapshots form one session. Observations have no state column and no exact ownership for athlete and
-health records, so observations that an upgraded mapper no longer emits are not retired;
-they keep their old ``mapper_version``. The table reader that follows this phase serves
-only observations whose ``mapper_version`` equals the current version of their mapper,
-so stale observations are never served as current. The cursor is bound to the mapper
+stored by Garmin and Intervals.icu snapshots form one session. Each re-projected
+observation records the raw row as its owner; on completion, the active observations
+that row owns and the new projection no longer emits are retired (counted as
+``retired``). An observation without an owner, such as a Garmin value stored before
+schema version 21 that no stored element emits any more, is not retired; it keeps its
+old ``mapper_version``. The table reader that follows this phase serves only active
+observations whose ``mapper_version`` equals the current version of their mapper, so
+such stale observations are never served as current. The cursor is bound to the mapper
 version, so a version bump during a partial run restarts that record from its first
 item. Domain rows have exact ownership: on completion, in the transaction that advances
 ``mapped_version``, the rows of the re-projected source record are replaced by its new
@@ -176,6 +179,8 @@ class _Work:
     superseded: int = 0
     # Re-projection only: the domain rows of the raw record, written on completion.
     domain_batches: tuple[DomainBatch, ...] = ()
+    # Re-projection only: the raw record ids whose unemitted observations retire.
+    observation_owners: frozenset[str] = frozenset()
 
 
 # Wahoo is ingested live and has no legacy snapshot to backfill, so persisted
@@ -637,6 +642,7 @@ def _complete_reprojection(
         row["provider"], dict.fromkeys(COUNTER_NAMES, 0)
     )
     bucket["retired"] += _retire_unemitted(db, row, work, now=now)
+    bucket["retired"] += _retire_unemitted_observations(db, row, work, now=now)
     bucket["retired"] += _replace_domain_rows(db, row, work, version=version, now=now)
     # After the retirement, so an activity the new projection drops is never bundled.
     _link_work_sessions(db, work, zone=zone, now=now)
@@ -684,6 +690,27 @@ def _retire_unemitted(db: Any, row: Mapping[str, Any], work: _Work, *, now: str)
         canonical_store.retire_unemitted_activity(
             db, provider=row["provider"], provider_activity_id=source_id, now=now
         )
+    )
+
+
+def _retire_unemitted_observations(
+    db: Any, row: Mapping[str, Any], work: _Work, *, now: str
+) -> int:
+    """Retire the observations the raw row owns and its new projection drops.
+
+    A row whose stored payload is unusable maps no observations and names no owner,
+    so it retires nothing. Returns how many observations were retired.
+    """
+    source_id = str(row["source_record_id"])
+    if source_id not in work.observation_owners:
+        return 0
+    emitted = {
+        canonical_store.observation_natural_key(item.value.observation)
+        for item in work.items
+        if isinstance(item.value, ObservationItem)
+    }
+    return canonical_store.retire_unemitted_observations(
+        db, provider=str(row["provider"]), owner=source_id, emitted=emitted, now=now
     )
 
 
@@ -839,6 +866,7 @@ def _work_from_plan(
         duplicates=duplicates,
         superseded=superseded,
         domain_batches=tuple(batches),
+        observation_owners=plan.observation_owners,
     )
 
 
@@ -932,6 +960,7 @@ def _write_ingest(
             value.observation,
             mapper_version=value.mapper_version,
             now=now,
+            owner=value.owner,
         )
     bucket["inserted" if inserted else "already_present"] += 1
 
@@ -955,6 +984,7 @@ def _write_reprojection(db: Any, item: _Item, now: str) -> None:
             mapper_version=value.mapper_version,
             now=now,
             fill_only=value.fill_only,
+            owner=value.owner,
         )
     else:
         # Re-projection plans carry activities and observations as items; raw records

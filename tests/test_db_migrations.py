@@ -49,6 +49,7 @@ RELEASED_FIXTURES = (
     FIXTURES / "schema_v17.sql.txt",
     FIXTURES / "schema_v18.sql.txt",
     FIXTURES / "schema_v19.sql.txt",
+    FIXTURES / "schema_v20.sql.txt",
     V17_FIXTURE,
 )
 # Columns an upgrade renamed: (table, released name) -> current name. Rows read
@@ -211,7 +212,6 @@ class DatabaseSchemaGateTests(unittest.TestCase):
             )
         )
 
-
     GARMIN_BLOB: ClassVar[dict[str, Any]] = {
         "synced_at": "2026-10-20T06:00:00+00:00",
         "start": "2026-10-01",
@@ -239,8 +239,6 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         ],
         "empty_section": [],
     }
-
-
 
     # (activity_id, primary provider, provider activity id, state, merged_into)
     V13_SESSIONS: ClassVar[tuple[tuple[str, str, str, str, str | None], ...]] = (
@@ -286,9 +284,6 @@ class DatabaseSchemaGateTests(unittest.TestCase):
         self.assertEqual(
             released_shape(database_schema_signature(db)), SHAPE_SCHEMA_V16
         )
-
-
-
 
     def test_every_released_schema_upgrades_to_the_frozen_current_signature(self):
         frozen = self.connect()

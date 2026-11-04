@@ -215,8 +215,10 @@ def ingest_plan(
     """Write raw records, activities, observations and domain rows, then apply deletions.
 
     The domain rows of each raw record replace the rows that record projected
-    before. A raw record the plan does not carry keeps its rows, so a payload
-    without a section never retires that section's rows.
+    before. Likewise, an observation owned by one of the plan's
+    ``observation_owners`` that the plan no longer emits is retired. A raw record
+    the plan does not carry keeps its rows, so a payload without a section (a
+    failed or skipped fetch) never retires that section's rows.
 
     The written activities are then linked to duplicates from other providers on
     the athlete's wall clock ``zone`` (see ``link_activity_sessions``).
@@ -262,9 +264,16 @@ def ingest_plan(
                 mapper_version=item.mapper_version,
                 now=stamp,
                 fill_only=item.fill_only,
+                owner=item.owner,
             )
         )
     raw_ids = {raw.source_record_id for raw in plan.raw_records}
+    # A value the provider cleared or deleted is no longer emitted by its record.
+    # Every key of the plan is kept, so a value another record emits survives.
+    for owner in sorted(plan.observation_owners & raw_ids):
+        counters.retired += canonical_store.retire_unemitted_observations(
+            db, provider=provider, owner=owner, emitted=seen_keys, now=stamp
+        )
     for batch in plan.domain_batches:
         if batch.source_record_id not in raw_ids:
             raise ValueError("a domain batch needs its raw record in the same plan")
