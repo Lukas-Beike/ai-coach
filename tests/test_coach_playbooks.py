@@ -49,9 +49,8 @@ BLOCK_WORD_BUDGETS = {
     "_SESSION_CHECKS": 110,
     # The execution and planned-target fields the session analysis reads.
     "_SESSION_NUMBERS": 110,
-    # Test planning (plan kinds) and test evaluation (session analysis).
-    "_TESTS": 110,
-    "_TEST_RESULTS": 90,
+    # Test planning from planning_brief.last_tests (plan kinds only).
+    "_TESTS": 125,
     "_ANSWER": 55,
     "_NUTRITION": 520,
 }
@@ -223,11 +222,11 @@ class PlaybookInjectionTests(unittest.TestCase):
                     "30-min time trial",
                 ):
                     self.assertIn(marker, text)
-        analysis = playbook_for("session_analysis")
-        for marker in ("about 75 %", "never write them", "same protocol"):
-            self.assertIn(marker, analysis)
-        self.assertNotIn(playbooks._TESTS, analysis)
-        self.assertNotIn(playbooks._TEST_RESULTS, playbook_for("plan_week"))
+        self.assertIn("planning_brief.last_tests", playbook_for("plan_week"))
+        self.assertIn("session_focus easy", playbook_for("plan_week"))
+        # A test's evaluation comes with its own session result, not every analysis.
+        self.assertNotIn(playbooks._TESTS, playbook_for("session_analysis"))
+        self.assertNotIn("about 75 %", playbook_for("session_analysis"))
 
     def test_adjust_week_playbook_guards_hard_days_and_writes(self) -> None:
         text = playbook_for("adjust_week")

@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from contextlib import AbstractContextManager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from http.server import (
     BaseHTTPRequestHandler,  # noqa: F401 - compatibility export for tests
@@ -258,6 +258,7 @@ from backend.planning.assembly import (
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.leg_strength import strength_expected
 from backend.planning.plan_guard_service import (
+    LAST_TEST_DAYS,
     PlanGuardService,
     read_completed,
     read_lessons,
@@ -1723,6 +1724,11 @@ def _plan_guard_service() -> PlanGuardService:
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
         ),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
+        recent_units=lambda: PLANNING_DATA.planned_unit().list(
+            1000,
+            future_only=True,
+            since=ATHLETE_CLOCK.now().date() - timedelta(days=LAST_TEST_DAYS),
+        ),
         completed_activities=lambda: read_completed(
             database_manager(), CANONICAL_READ, ATHLETE_CLOCK.now().date()
         ),

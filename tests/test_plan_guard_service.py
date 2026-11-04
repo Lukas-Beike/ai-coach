@@ -28,6 +28,7 @@ from backend.planning.plan_guard_service import (
     PlanGuardService,
     build_planning_brief,
     illness_confirmation,
+    last_tests,
     read_progress,
     recent_illness,
 )
@@ -396,6 +397,28 @@ class PlanGuardWriteTests(unittest.TestCase):
         self.run_tool("save_checkin")
         self.guard.findings.assert_not_called()
         self.assertEqual(1, self.stored())
+
+
+class LastTestsTests(unittest.TestCase):
+    def test_last_test_or_race_per_sport(self):
+        units = [
+            {"date": "2026-09-20", "sport": "run", "session_focus": "test"},
+            {
+                "date": "2026-10-10",
+                "sport": "run",
+                "session_focus": "test",
+                "compliance": {"status": "missed"},
+            },
+            {"date": "2026-10-20", "sport": "run", "session_focus": "easy"},
+            {"date": "2026-11-05", "sport": "ride", "session_focus": "test"},
+            {"date": "2026-05-01", "sport": "ride", "session_focus": "test"},
+        ]
+        competitions = [{"date": "2026-10-04", "sport": "Running", "name": "10k"}]
+        result = last_tests(units, competitions, TODAY)
+        # The race beats the older test; missed, future and too old tests do not count.
+        self.assertEqual("2026-10-04", result["run"])
+        self.assertIsNone(result["ride"])
+        self.assertIn("session_focus test", result["source"])
 
 
 class PlanBriefTests(unittest.TestCase):

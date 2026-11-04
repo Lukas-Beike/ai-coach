@@ -10,6 +10,7 @@ from typing import Any
 
 from backend.athlete import weekly_plan
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.stored_sports import resolve_competition_sport
 from backend.canonical.vocabulary import Sport
 from backend.errors import AppError
 from backend.performance.canonical_current import read_current_inputs
@@ -253,6 +254,7 @@ def build_planning_brief(
     free_time_minutes: Mapping[str, Any] | None = None,
     weekly_plan_text: str = "",
     lessons: Sequence[Mapping[str, Any]] = (),
+    last_tests: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compact deterministic brief for plan_week, plan_block and adjust_week turns."""
     weeks = [
@@ -292,8 +294,48 @@ def build_planning_brief(
             "calendar_busy_source": "Read-only iCalendar events; overlapping intervals counted once in local time",
             "plan_checks": plan_checks.RULE_SUMMARY,
             "lessons": brief_lessons(lessons),
+            "last_tests": dict(last_tests or {}),
         }
     )
+
+
+# Tests are planned every 6 to 8 weeks, so a longer look-back finds the last one.
+LAST_TEST_DAYS = 120
+LAST_TESTS_SOURCE = (
+    "Local planned units with session_focus test and competitions of the last "
+    f"{LAST_TEST_DAYS} days; null: none known in that time"
+)
+
+
+def last_tests(
+    units: Sequence[Mapping[str, Any]],
+    competitions: Sequence[Mapping[str, Any]],
+    today: date,
+) -> dict[str, Any]:
+    """Day of the last test or race per sport before today, else None."""
+    first = (today - timedelta(days=LAST_TEST_DAYS)).isoformat()
+    days: dict[str, list[str]] = {"run": [], "ride": []}
+    for unit in units:
+        day = iso_date_prefix(unit.get("date"))
+        sport = planned_sport_environment(unit)[0].value
+        missed = (unit.get("compliance") or {}).get("status") == "missed"
+        if (
+            sport in days
+            and first <= day < today.isoformat()
+            and not missed
+            and session_focus(unit).value == "test"
+        ):
+            days[sport].append(day)
+    for row in competitions:
+        day = _competition_day(row)
+        resolved = resolve_competition_sport(row.get("sport"), row.get("environment"))
+        race_sport = "" if resolved is None else resolved.sport.value
+        if race_sport in days and first <= day < today.isoformat():
+            days[race_sport].append(day)
+    return {
+        "source": LAST_TESTS_SOURCE,
+        **{sport: max(found) if found else None for sport, found in days.items()},
+    }
 
 
 def read_lessons(read: Callable[[], Sequence[Mapping[str, Any]]]) -> list[Any]:
@@ -334,8 +376,11 @@ class PlanGuardService:
         calendar_events: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
         weekly_plan_text: Callable[[], str] = lambda: "",
         lessons: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
+        recent_units: Callable[[], Sequence[Mapping[str, Any]]] = lambda: (),
     ) -> None:
         self._lessons = lessons
+        # Local units from LAST_TEST_DAYS ago on, for the last test per sport.
+        self._recent_units = recent_units
         self._weekly_plan = weekly_plan_text
         self._planned_units = planned_units
         self._completed = completed_activities
@@ -460,10 +505,11 @@ class PlanGuardService:
         today = self._today()
         units = self._planned_units()
         completed = self._recent(today)
+        competitions = self._competitions()
         return build_planning_brief(
             progress=self._progress(),
             completed=completed,
-            competitions=self._competitions(),
+            competitions=competitions,
             training_model=self._training_model(),
             today=today,
             planned_weeks=self._planned_weeks(units, today, completed),
@@ -475,4 +521,5 @@ class PlanGuardService:
             ),
             weekly_plan_text=self._weekly_plan(),
             lessons=self._lessons(),
+            last_tests=last_tests(self._recent_units(), competitions, today),
         )

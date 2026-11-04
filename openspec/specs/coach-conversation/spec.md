@@ -188,7 +188,11 @@ The system SHALL accept only the quick-action kinds `morning_checkin`, `session_
 
 #### Scenario: Planned and analysed tests
 - **WHEN** a turn carries `plan_week` or `plan_block`
-- **THEN** its playbook schedules a run critical-speed test (3600, 2400 and 1200 m on a track or measured flat route) and a Zwift FTP ramp test about every 6 to 8 weeks per sport, in different weeks, after a lighter week or at a block start, never in the last 2 weeks before an A race or with illness or poor recovery, offers a 30-min time trial without a track and an optional control run at a fixed heart rate every 2 to 4 weeks; a `session_analysis` of a test session judges its execution first, compares it with the last test of the same protocol and recommends a threshold update without writing it.
+- **THEN** `planning_brief.last_tests` names per sport the day of the last local test unit or race of the last 120 days, and the playbook plans a run critical-speed test (3600, 2400 and 1200 m on a track or measured flat route, else a 30-min time trial) or a Zwift FTP ramp test when that day is 6 to 8 weeks old or unknown, run and ride in different weeks, never in the last 2 weeks before an A race or with illness or poor recovery; an optional fixed-heart-rate control run keeps `session_focus` easy.
+
+#### Scenario: Test evaluation
+- **WHEN** `get_activity_details` matches a planned unit with `session_focus` test
+- **THEN** `focus.test_evaluation` asks to judge the execution first, compare with the previous test of the same protocol, read the ramp test from the session's own best 1-min power and recommend a threshold update without writing it; other sessions carry no test evaluation.
 
 #### Scenario: Adjust the current week
 - **WHEN** a turn carries `adjust_week`

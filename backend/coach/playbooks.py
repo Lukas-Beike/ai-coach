@@ -47,8 +47,8 @@ _STRENGTH_LEGS = """- Heavy strength 2 times per week in base and build, 1 (main
 _SEASON_PHASE = "- Phase per planned week from planning_brief.season_phase (base, build, peak, taper, transition; unknown without an A/B race: say so, use base rules). Base: build volume, mostly easy. Build: add threshold or VO2max, volume holds. Peak: race-specific intensity, less volume. Taper (about 2 weeks): cut volume 40-60 %, keep intensity and frequency (Bosquet 2007). Transition: easy, strength 1 (light)."
 
 _TESTS = """Tests (session_focus test):
-- Every 6 to 8 weeks per sport, in different weeks, after a lighter week or at a block start: a run critical-speed test (3600, 2400, 1200 m on a track or measured flat route, about 30 min easy between; Galbraith 2014) and a Zwift FTP ramp test. None in the last 2 weeks before an A race or with illness or poor recovery; a race counts as a test.
-- Without a track: a 30-min time trial (McGehee 2005). Every 2 to 4 weeks an easy run may be a control run at a fixed heart rate on one route (Buchheit 2014)."""
+- When planning_brief.last_tests is 6 to 8 weeks old or null for a sport, plan its test, run and ride in different weeks, after a lighter week or at a block start: a run critical-speed test (3600, 2400, 1200 m on a track or measured flat route, about 30 min easy between; Galbraith 2014), without either a 30-min time trial (McGehee 2005); a Zwift FTP ramp test. None in the last 2 weeks before an A race or with illness or poor recovery; a race counts as a test.
+- Every 2 to 4 weeks an easy run may be a control run at a fixed heart rate on one route (Buchheit 2014): session_focus easy, named in the description."""
 
 _PRECEDENCE = "- Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations."
 
@@ -103,11 +103,6 @@ Task: plan the requested multi-week block.
 # A typed or older block review gets the same review.
 _TASKS["block_review"] = _TASKS["progress_review"]
 
-_TEST_RESULTS = """Test sessions (session_focus test):
-- First the execution (even, started too fast, stopped early), then the result against the last test of the same protocol.
-- Critical-speed test: each effort's time and distance, plus power_profiles critical_power. Ramp test: best 1-min power; Zwift's FTP is about 75 % of it, a self-comparison. Control run: pace at the fixed heart rate against earlier ones, with temperature.
-- Recommend updating FTP, threshold pace or zones in Intervals.icu or Garmin; never write them."""
-
 _ADAPTIVE = """Adaptive changes:
 - Move or shorten a missed key session (session_focus threshold, sweet_spot, vo2max, anaerobic, race, test) to a free day: never next to another hard day, and leave leg strength (legs, full_body, plyometrics) 24 h or more before it; leg strength on or after hard days is fine. Drop it rather than stack hard days; never make up lost load.
 - Run, ride and strength stay combinable; keep the week's training_model distribution as far as possible.
@@ -125,7 +120,7 @@ _PLAN = (
     _PLAN_CHECK,
 )
 _BLOCKS = {
-    "session_analysis": (_SESSION_CHECKS, _SESSION_NUMBERS, _TEST_RESULTS, _ANSWER),
+    "session_analysis": (_SESSION_CHECKS, _SESSION_NUMBERS, _ANSWER),
     "progress_review": (_ANSWER,),
     "block_review": (_ANSWER,),
     "plan_week": _PLAN,
