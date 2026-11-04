@@ -12,6 +12,7 @@ from unittest.mock import Mock
 from backend.coach import playbooks
 from backend.coach.context_selection import (
     REQUEST_KIND_SELECTIONS,
+    free_text_review_kind,
     select_coach_context,
 )
 from backend.coach.job_submission import CoachJobSubmissionService
@@ -46,6 +47,7 @@ BLOCK_WORD_BUDGETS = {
     "_PLAN_CHECK": 80,
     "_ADAPTIVE": 140,
     "_SESSION_CHECKS": 110,
+    "_ANSWER": 50,
     "_NUTRITION": 520,
 }
 TASK_WORD_BUDGET = 190
@@ -151,6 +153,36 @@ class PlaybookInjectionTests(unittest.TestCase):
         self.assertIn("season_phase", playbook_for("adjust_week"))
         self.assertIn("week-by-week rationale", playbook_for("plan_block"))
         self.assertNotIn("week-by-week rationale", playbook_for("plan_week"))
+
+    def test_review_kinds_share_the_answer_format_and_plain_language(self) -> None:
+        self.assertIn("explain a term like CTL, TSB or eFTP", COACH_PROMPT)
+        for kind in ("session_analysis", "progress_review", "block_review"):
+            with self.subTest(kind=kind):
+                self.assertIn(playbooks._ANSWER, playbook_for(kind))
+        for kind in ("plan_week", "plan_block", "adjust_week"):
+            self.assertNotIn(playbooks._ANSWER, playbook_for(kind))
+
+    def test_session_analysis_names_what_to_look_at_per_session_type(self) -> None:
+        text = playbook_for("session_analysis")
+        for marker in (
+            "by default the last one",
+            "warm-up and cool-down",
+            "heart rate rising at the same pace",
+            "strides or a progression are intended",
+            "reps holding or fading",
+            "heart-rate drop",
+            "under about 2 minutes",
+            "sensor errors",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
+    def test_reviews_lead_with_fitness_and_block_review_reads_pace_at_hr(self) -> None:
+        self.assertIn("getting fitter", playbook_for("progress_review"))
+        self.assertIn("possible cause", playbook_for("progress_review"))
+        block = playbook_for("block_review")
+        self.assertNotIn("Pace at heart rate is not covered", block)
+        self.assertIn("pace at heart rate is not_covered", block)
 
     def test_adjust_week_playbook_guards_hard_days_and_writes(self) -> None:
         text = playbook_for("adjust_week")
@@ -264,6 +296,43 @@ class PlaybookInjectionTests(unittest.TestCase):
         self.assertIn("Task: plan the requested next week", typed)
         selection = training_context.build.call_args_list[0].kwargs["selection"]
         self.assertEqual(selection.name, "plan_week")
+
+
+class FreeTextReviewKindTests(unittest.TestCase):
+    def test_typed_reviews_get_their_kind_and_playbook(self) -> None:
+        cases = {
+            "Analysiere meine letzte Einheit": "session_analysis",
+            "Wie lief mein Intervalltraining gestern?": "session_analysis",
+            "Wie war mein Tempolauf?": "session_analysis",
+            "Analysiere meinen Lauf vom 2.11.": "session_analysis",
+            "How was my ride?": "session_analysis",
+            "Wie ist mein Fortschritt?": "progress_review",
+            "Werde ich fitter?": "progress_review",
+            "Bewerte meinen letzten Block": "block_review",
+        }
+        for message, kind in cases.items():
+            with self.subTest(message=message):
+                self.assertEqual(free_text_review_kind(message), kind)
+                self.assertEqual(select_coach_context(message, {}).kind, kind)
+
+    def test_other_messages_keep_their_selection(self) -> None:
+        for message in (
+            "Analysiere den Verlauf meiner HRV",
+            "Analysiere meine Läufe der letzten Woche",
+            "Wie war meine Woche?",
+            "Wie ist die Entwicklung meines Gewichts?",
+            "Analysiere meine letzte Einheit und plane darauf basierend morgen",
+            "Wie geht es meiner Erholung?",
+            "Ich habe 60g Whey getrunken",
+        ):
+            with self.subTest(message=message):
+                self.assertNotIn(
+                    select_coach_context(message, {}).kind,
+                    {"session_analysis", "progress_review", "block_review"},
+                )
+        self.assertEqual(
+            select_coach_context("Plane die nächste Woche", {}).kind, "plan_week"
+        )
 
 
 class RequestKindSelectionTests(unittest.TestCase):

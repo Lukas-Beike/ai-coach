@@ -114,6 +114,24 @@ _PLAN_ACTION = (
     r"|\b(?:erstell\w*|create|build)\b[^.?!]*\b(?:trainings)?plan\b"
     r"|\bschedule\s+(?:my|the|next|me)\b"
 )
+# A typed review names a review action and its subject: progress, a training
+# block, or one session. Period nouns keep a session word ("Läufe der Woche")
+# out of the single-session analysis.
+_REVIEW_ACTION = (
+    r"analy[sz]\w*|auswert\w*|\bwerte\b|bewert\w*|beurteil\w*|\breview\w*"
+    r"|\bwie\s+(?:war|lief)\b|\bhow\s+(?:was|did)\b"
+)
+_PROGRESS_NOUN = (
+    r"fortschritt\w*|\bprogress\w*|\bentwicklung\b|besser\s+geworden|\bfitter\b"
+    r"|getting\s+(?:better|fitter)"
+)
+_BLOCK_REVIEW_NOUN = r"\b(?:trainings)?block\b|\bblocks\b|mesozyklus"
+_SESSION_NOUN = (
+    r"einheit\b|(?<!ver)lauf\b|\bläufchen\b|\bfahrt\b|ausfahrt\b|\brunde\b"
+    r"|intervall\w*|\btest\b|\bsession\b|\bworkout\b|\brun\b|\bride\b"
+    r"|aktivität\b|aktivitaet\b|\bactivity\b"
+)
+_PERIOD_NOUN = r"\bwoche[n]?\b|\bweeks?\b|\bmonat\w*|\bmonths?\b|\bläufe\b|einheiten\b"
 # Sleep, fatigue and readiness questions need the recovery record, which the
 # daily view used to carry on every turn.
 RECOVERY_PATTERN = (
@@ -423,6 +441,22 @@ def free_text_plan_kind(message: str) -> str | None:
     return "plan_week" if re.search(_WEEK_NOUN, normalized) else None
 
 
+def free_text_review_kind(message: str) -> str | None:
+    """Map a typed review request to its fixed review kind; selection only."""
+    normalized = message.casefold()
+    if re.search(PLANNING_VERB_PATTERN, normalized):
+        return None
+    if re.search(_PROGRESS_NOUN, normalized):
+        return "progress_review"
+    if not re.search(_REVIEW_ACTION, normalized):
+        return None
+    if re.search(_BLOCK_REVIEW_NOUN, normalized):
+        return "block_review"
+    if re.search(_SESSION_NOUN, normalized) and not re.search(_PERIOD_NOUN, normalized):
+        return "session_analysis"
+    return None
+
+
 def is_bare_follow_up(message: str) -> bool:
     """Return whether the message only retries or continues, with no request of its own."""
     normalized = message.casefold()
@@ -474,6 +508,8 @@ def select_coach_context(
     if request_kind is not None or selection.name == "fallback":
         return selection
     kind = free_text_plan_kind(message)
+    if kind is None and selection.name in {"activity_analysis", "general_coaching"}:
+        kind = free_text_review_kind(message)
     if kind is None:
         return selection
     if selection.horizon_days is None and not (

@@ -66,7 +66,7 @@ class CoachContextSelectionTests(unittest.TestCase):
         examples = {
             "Wie geht es meiner Erholung?": "general_coaching",
             "Was trainiere ich heute?": "today_training",
-            "Analysiere meine letzte Einheit": "activity_analysis",
+            "Analysiere meine letzte Einheit": "session_analysis",
             "Plane nächste Woche": "plan_week",
             "Verschiebe den Lauf auf Freitag": "plan_editing",
             "Wie steht meine Wettkampfvorbereitung?": "competition_preparation",
@@ -99,9 +99,9 @@ class CoachContextSelectionTests(unittest.TestCase):
     def test_explicit_topics_with_pronouns_keep_compact_context_and_full_dialogue(self):
         examples = {
             "Was ist das Training fuer heute?": "today_training",
-            "Kannst du diese letzte Einheit analysieren?": "activity_analysis",
+            "Kannst du diese letzte Einheit analysieren?": "session_analysis",
             "Kannst du das Training fuer naechste Woche planen?": "plan_week",
-            "Please analyse that latest activity": "activity_analysis",
+            "Please analyse that latest activity": "session_analysis",
         }
         for message, expected in examples.items():
             with self.subTest(message=message):
@@ -137,7 +137,7 @@ class CoachContextSelectionTests(unittest.TestCase):
 
     def test_food_keyword_does_not_match_latest_or_weather(self):
         for message, expected in (
-            ("Analyse the latest activity", "activity_analysis"),
+            ("Analyse the latest activity", "session_analysis"),
             ("How is the weather today?", "today_training"),
             ("I ate lunch", "profile_or_checkin"),
         ):
@@ -894,9 +894,10 @@ class CoachContextRuleTests(unittest.TestCase):
             ),
             (
                 "Analysiere meine letzte Einheit",
-                "activity_analysis",
-                BASE_SECTIONS,
-                3,
+                # A typed single-session review gets the session_analysis kind.
+                "session_analysis",
+                recovery,
+                2,
                 5,
                 False,
                 False,
@@ -1011,9 +1012,10 @@ class CoachContextRuleTests(unittest.TestCase):
             ),
             (
                 "Analyse the latest activity",
-                "activity_analysis",
-                BASE_SECTIONS,
-                3,
+                # A typed single-session review gets the session_analysis kind.
+                "session_analysis",
+                recovery,
+                2,
                 5,
                 False,
                 False,
