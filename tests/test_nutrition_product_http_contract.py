@@ -45,7 +45,9 @@ class NutritionProductHttpContractTests(unittest.TestCase):
         self.assertTrue(self.get_routes.handle(self.handler, "/api/nutrition/products"))
 
         self.auth.require_auth.assert_called_once_with(self.handler)
-        self.meal_library.list_products.assert_called_once_with(query="Whey")
+        self.meal_library.list_products.assert_called_once_with(
+            query="Whey", favorites_first=True
+        )
         self.handler.send_json.assert_called_once_with(
             200,
             {"ok": True, "products": [{"id": "product-1", "name": "Whey"}]},

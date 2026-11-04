@@ -19,6 +19,7 @@ from backend.nutrition.meal_library import (
     validate_component_payload,
 )
 from backend.nutrition.models import (
+    MAX_DESCRIPTION_LEN,
     NutritionDaySummary,
     NutritionEntry,
     normalize_nutrition_entry,
@@ -343,7 +344,9 @@ class NutritionDiaryService:
                 )
             entry = {
                 **existing,
-                "description": f"{existing['description']} + {added['name']}",
+                "description": self._extended_description(
+                    existing["description"], added["name"]
+                ),
                 "nutrition_basis": {
                     "kind": "composite",
                     "version": 1,
@@ -362,8 +365,18 @@ class NutritionDiaryService:
         return updated
 
     @staticmethod
+    def _extended_description(description: str, name: str) -> str:
+        # The newest product always stays visible; earlier text gives way.
+        suffix = f" + {name}"[:MAX_DESCRIPTION_LEN]
+        return str(description)[: MAX_DESCRIPTION_LEN - len(suffix)] + suffix
+
+    @staticmethod
     def _meal_component(entry: dict[str, Any]) -> dict[str, Any]:
         basis = entry.get("nutrition_basis") or {"kind": "manual"}
+        # The intake totals scale a product or database basis by its component
+        # amount, so the wrapped component keeps the amount of that basis.
+        amount = basis.get("amount")
+        unit = basis.get("unit")
         estimated = basis.get("kind") == "estimate" or entry.get("source") in {
             "coach",
             "photo",
@@ -372,8 +385,12 @@ class NutritionDiaryService:
         return {
             "kind": "estimate" if estimated else "manual",
             "name": str(entry.get("description") or "Mahlzeit")[:200],
-            "amount": 1,
-            "unit": "portion",
+            "amount": amount
+            if isinstance(amount, (int, float))
+            and not isinstance(amount, bool)
+            and amount > 0
+            else 1,
+            "unit": unit if unit in {"g", "ml", "portion"} else "portion",
             **{key: entry.get(key) for key in NUTRIENTS},
             "nutrition_basis": basis,
         }

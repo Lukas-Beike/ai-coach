@@ -57,14 +57,16 @@ class FavoritesAndMealAdditionTests(unittest.TestCase):
         hafer = self.product("Haferflocken")
         self.assertEqual(skyr["favorite"], 0)
         self.assertEqual(
-            [p["name"] for p in self.library.list_products()], ["Haferflocken", "Skyr"]
+            [p["name"] for p in self.library.list_products(favorites_first=True)],
+            ["Haferflocken", "Skyr"],
         )
 
         self.assertEqual(
             self.library.set_product_favorite(skyr["id"], True)["favorite"], 1
         )
         self.assertEqual(
-            [p["name"] for p in self.library.list_products()], ["Skyr", "Haferflocken"]
+            [p["name"] for p in self.library.list_products(favorites_first=True)],
+            ["Skyr", "Haferflocken"],
         )
 
         self.library.update_product(skyr["id"], {"kcal": 120})
@@ -143,6 +145,34 @@ class FavoritesAndMealAdditionTests(unittest.TestCase):
             self.diary.add_product_to_meal(entry["id"], skyr["id"], 100, "g")
         self.assertEqual(archived.exception.status, 409)
         self.assertEqual(self.diary.get_meal(entry["id"]), before)
+
+    def test_wrapped_meal_keeps_sugar_and_salt_totals(self) -> None:
+        skyr = self.product("Skyr", sugar_g=4, salt_g=0.1)
+        banana = self.product("Banane", sugar_g=12, salt_g=0)
+        entry = self.diary.log_product(skyr["id"], 250, "g")
+        self.diary.add_product_to_meal(entry["id"], banana["id"], 100, "g")
+
+        day = self.diary.get_day_summary("2026-11-04")
+        self.assertEqual(day["total_sugar_g"], 22)
+        self.assertEqual(day["total_salt_g"], 0.2)
+
+    def test_description_keeps_the_newest_product_within_the_limit(self) -> None:
+        banana = self.product("Banane")
+        entry = self.diary.log_meal(
+            {"description": "x" * 500, "kcal": 100, "source": "manual"}
+        )
+        updated = self.diary.add_product_to_meal(entry["id"], banana["id"], 50, "g")
+        self.assertEqual(len(updated["description"]), 500)
+        self.assertTrue(updated["description"].endswith(" + Banane"))
+
+    def test_default_listing_stays_most_recent_first(self) -> None:
+        skyr = self.product("Skyr")
+        self.product("Haferflocken")
+        self.library.set_product_favorite(skyr["id"], True)
+        self.assertEqual(
+            [p["name"] for p in self.library.list_products()],
+            ["Haferflocken", "Skyr"],
+        )
 
 
 if __name__ == "__main__":

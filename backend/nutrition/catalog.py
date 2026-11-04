@@ -41,6 +41,7 @@ class ProductCatalogService:
         barcode: str | None = None,
         include_archived: bool = False,
         limit: int = 50,
+        favorites_first: bool = False,
     ) -> list[dict[str, Any]]:
         with self._database_manager.reader() as db:
             found = self._products.list(
@@ -49,6 +50,7 @@ class ProductCatalogService:
                 barcode=barcode,
                 include_archived=include_archived,
                 limit=limit,
+                favorites_first=favorites_first,
             )
             if found or not (query and query.strip()) or barcode:
                 return found
@@ -56,7 +58,10 @@ class ProductCatalogService:
             # find a saved product before any database is asked; every word
             # must fit, so a loose match never hides a better database food.
             recent = self._products.list(
-                db, include_archived=include_archived, limit=100
+                db,
+                include_archived=include_archived,
+                limit=100,
+                favorites_first=favorites_first,
             )
         return [
             product

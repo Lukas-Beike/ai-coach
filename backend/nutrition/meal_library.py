@@ -78,9 +78,14 @@ class NutritionMealLibraryService:
         barcode: str | None = None,
         include_archived: bool = False,
         limit: int = 50,
+        favorites_first: bool = False,
     ) -> list[dict[str, Any]]:
         return self._product_catalog.list_products(
-            query=query, barcode=barcode, include_archived=include_archived, limit=limit
+            query=query,
+            barcode=barcode,
+            include_archived=include_archived,
+            limit=limit,
+            favorites_first=favorites_first,
         )
 
     def list_database_foods(self, query: str | None = None) -> list[dict[str, Any]]:

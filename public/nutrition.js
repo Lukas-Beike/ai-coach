@@ -593,6 +593,7 @@ let nutritionBarcodeFrame = null;
 let nutritionBarcodeDetector = null;
 let nutritionBarcodeSession = 0;
 let nutritionProductForUse = null;
+let nutritionProductUseSequence = 0;
 let nutritionProductLoadSequence = 0;
 let nutritionLookupResultShown = false;
 
@@ -741,7 +742,7 @@ function nutritionFavoriteButton(product) {
     button.disabled = true;
     try {
       await api("/api/nutrition/products/favorite", { method: "POST", body: JSON.stringify({ id: product.id, favorite: !favorite }) });
-      await loadNutritionProducts(document.querySelector("#nutritionProductQuery").value.trim());
+      await loadNutritionProducts(document.querySelector("#nutritionProductQuery").value.trim(), { refresh: true });
     } catch (error) {
       document.querySelector("#nutritionProductStatus").textContent = `Favorit konnte nicht geändert werden: ${error.message}`;
       button.disabled = false;
@@ -800,6 +801,7 @@ async function loadNutritionDatabase(query = "") {
 async function useNutritionProduct(product) {
   const unit = nutritionProductUnit(product);
   nutritionProductForUse = product;
+  const useSequence = ++nutritionProductUseSequence;
   const dialog = document.querySelector("#nutritionProductUseDialog");
   document.querySelector("#nutritionProductUseName").textContent = product.name || "Lokales Produkt";
   document.querySelector("#nutritionProductUseUnit").textContent = `(in ${unit})`;
@@ -812,7 +814,7 @@ async function useNutritionProduct(product) {
   const generation = state.sessionGeneration;
   try {
     const day = await api(`/api/nutrition/day?date=${encodeURIComponent(document.querySelector("#nutritionDate").value || todayIso())}`);
-    if (generation !== state.sessionGeneration || nutritionProductForUse !== product) return;
+    if (generation !== state.sessionGeneration || useSequence !== nutritionProductUseSequence) return;
     const meals = day.entries || [];
     for (const meal of meals) {
       const option = document.createElement("option"); option.value = meal.id;
@@ -822,7 +824,7 @@ async function useNutritionProduct(product) {
     if (!meals.length) { const option = document.createElement("option"); option.textContent = "Keine Mahlzeit an diesem Tag"; select.append(option); }
     addButton.disabled = !meals.length;
   } catch (error) {
-    if (generation === state.sessionGeneration && nutritionProductForUse === product) status.textContent = `Mahlzeiten konnten nicht geladen werden: ${error.message}`;
+    if (generation === state.sessionGeneration && useSequence === nutritionProductUseSequence) status.textContent = `Mahlzeiten konnten nicht geladen werden: ${error.message}`;
   }
 }
 
@@ -1021,6 +1023,7 @@ document.querySelector("#nutritionBarcodeCancel")?.addEventListener("click", () 
 document.querySelector("#nutritionBarcodeDialog")?.addEventListener("close", stopNutritionBarcode);
 document.querySelector("#nutritionBarcodeForm")?.addEventListener("submit", (event) => { event.preventDefault(); void lookupNutritionProduct(document.querySelector("#nutritionBarcodeManual").value); });
 document.querySelector("#nutritionProductUseCancel")?.addEventListener("click", () => document.querySelector("#nutritionProductUseDialog")?.close());
+document.querySelector("#nutritionProductUseDialog")?.addEventListener("close", () => { nutritionProductForUse = null; ++nutritionProductUseSequence; });
 document.querySelector("#nutritionProductUseForm")?.addEventListener("submit", (event) => { event.preventDefault(); void addNutritionProductToMeal(); });
 document.querySelector("#nutritionProductUseCoach")?.addEventListener("click", addNutritionProductToCoachDraft);
 function handleNutritionRoute(route) {

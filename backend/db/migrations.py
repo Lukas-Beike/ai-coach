@@ -106,8 +106,9 @@ def _upgrade_v17_to_v18(db: Any) -> None:
 
 def _upgrade_v18_to_v20(db: Any) -> None:
     # Schema v19 changed stored planning metric keys only, so its tables have the
-    # shape of v18; the rename is repeatable and a no-op on a v19 database.
-    rename_planning_metrics(db)
+    # shape of v18. A v19 database already holds the renamed records.
+    if db.execute("PRAGMA user_version").fetchone()["user_version"] < 19:
+        rename_planning_metrics(db)
     # Adds the product favorite flag; every existing product is no favorite.
     execute_ddl(db, PRODUCT_FAVORITE_DDL)
 

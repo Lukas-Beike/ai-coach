@@ -61,7 +61,10 @@ class NutritionGetRoutes:
             return {"ok": True, "foods": meal_library.list_database_foods(term)}
         if barcode:
             return meal_library.lookup_product({"barcode": barcode})
-        return {"ok": True, "products": meal_library.list_products(query=term)}
+        return {
+            "ok": True,
+            "products": meal_library.list_products(query=term, favorites_first=True),
+        }
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {

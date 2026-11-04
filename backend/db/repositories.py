@@ -75,6 +75,7 @@ class NutritionProductRepository:
         barcode: str | None = None,
         include_archived: bool = False,
         limit: int = 50,
+        favorites_first: bool = False,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -117,7 +118,8 @@ class NutritionProductRepository:
         rows = db.execute(
             self._SELECT
             + where
-            + " ORDER BY favorite DESC, updated_at DESC, name COLLATE NOCASE LIMIT ?",
+            + (" ORDER BY favorite DESC," if favorites_first else " ORDER BY")
+            + " updated_at DESC, name COLLATE NOCASE LIMIT ?",
             (*params, max(1, min(int(limit), 100))),
         ).fetchall()
         return [self._row(row) for row in rows]

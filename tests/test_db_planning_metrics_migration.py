@@ -58,7 +58,7 @@ class PlanningMetricsMigrationTests(unittest.TestCase):
         return db
 
     def test_populated_supported_releases_upgrade_and_restart(self):
-        for version in (16, 17, 18, 19):
+        for version in (16, 17, 18):
             with self.subTest(version=version):
                 db = self.database(version)
                 migrations.migrate_schema(db)
@@ -138,6 +138,14 @@ class PlanningMetricsMigrationTests(unittest.TestCase):
         )
         self.assertEqual(actual["target_snapshot"]["basis"], {"ftp": 250})
         self.assertEqual(actual["activity"], old)
+
+    def test_a_v19_database_keeps_its_records_untouched_by_the_rename(self):
+        db = self.database(19)
+        before = db.execute("SELECT payload FROM planned_units").fetchall()
+        migrations.migrate_schema(db)
+        self.assertEqual(
+            db.execute("SELECT payload FROM planned_units").fetchall(), before
+        )
 
     def test_failure_rolls_back_schema_and_data(self):
         db = self.database(18)
