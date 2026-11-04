@@ -19,6 +19,7 @@ from backend.db.schema import (
     CURRENT_SCHEMA_VERSION,
     FEEDBACK_RATING_TIME_DDL,
     POWER_CURVE_DDL,
+    PRODUCT_FAVORITE_DDL,
     database_schema_is_current,
     database_schema_signature,
     execute_ddl,
@@ -103,12 +104,16 @@ def _upgrade_v17_to_v18(db: Any) -> None:
     execute_ddl(db, FEEDBACK_RATING_TIME_DDL)
 
 
-def _upgrade_v18_to_v19(db: Any) -> None:
+def _upgrade_v18_to_v20(db: Any) -> None:
+    # Schema v19 changed stored planning metric keys only, so its tables have the
+    # shape of v18; the rename is repeatable and a no-op on a v19 database.
     rename_planning_metrics(db)
+    # Adds the product favorite flag; every existing product is no favorite.
+    execute_ddl(db, PRODUCT_FAVORITE_DDL)
 
 
 UPGRADE_STEPS: Final[Mapping[str, tuple[str, Callable[[Any], None]]]] = {
     SHAPE_SCHEMA_V16: (SHAPE_SCHEMA_V17, _upgrade_v16_to_v17),
     SHAPE_SCHEMA_V17: (SHAPE_SCHEMA_V18, _upgrade_v17_to_v18),
-    SHAPE_SCHEMA_V18: (SHAPE_CURRENT, _upgrade_v18_to_v19),
+    SHAPE_SCHEMA_V18: (SHAPE_CURRENT, _upgrade_v18_to_v20),
 }

@@ -39,7 +39,7 @@ container, and do not replace or reset the data directory to resolve a
 rejected schema. A fresh database is only required when the athlete explicitly
 chooses to start over. Future schema changes add explicit, versioned and
 transactional migrations from version 16 with upgrade regression tests.
-The current schema is version 19. Version 10 adds canonical activity detail
+The current schema is version 20. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
 `garmin_snapshot` value, version 13 adds the maximum speed of each lap, and
@@ -52,7 +52,7 @@ workout-library entries, competitions, staged Coach plans and adaptive previews)
 `starts_at_local` and `planned_duration_s` instead of the Intervals.icu fields
 `start_date_local` and `moving_time`, and version 17 stores the Intervals.icu
 cycling power curve (best power per duration with its day and activity, plus the
-status and window of the latest fetch) as canonical rows. A version 16 to 18 database or backup is
+status and window of the latest fetch) as canonical rows. A version 16 to 19 database or backup is
 upgraded to it in place within one transaction, and a failed upgrade leaves it
 unchanged. The version 16 schema uses the neutral start and duration fields;
 the change history is not rewritten, so earlier changes stay undoable, and recorded Intervals.icu sync
@@ -65,6 +65,8 @@ profile shows it again once the canonical backfill has projected it.
 Version 18 records the session-RPE rating time. Version 19 names local planned
 load and intensity `planned_load` and `planned_intensity` and the frozen target
 FTP basis `ftp`; the Intervals.icu adapter retains its provider wire names.
+Version 20 adds the favorite flag of saved products; every existing product
+starts as no favorite.
 
 Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types. Likewise only that adapter maps `starts_at_local` and `planned_duration_s` to the Intervals.icu event and workout fields, and Coach tools take `starts_at_local` and `planned_duration_s` as well.
 
@@ -618,7 +620,7 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`. The restore is refused with HTTP 507 when `/data` lacks the free space for this copy, and a partial copy is deleted.
-5. The replacement database must have the current schema (version 19) or a supported released schema from version 16 onward; a version 16 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must have the current schema (version 20) or a supported released schema from version 16 onward; a version 16 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Privacy Export & Data Purge
@@ -1389,7 +1391,7 @@ Equipment and maintenance has its own More section, separate from Profile. Coach
 
 Calendar cards include a compact interval profile when explicit timed workout steps or current locally cached original samples are available. Width represents time, height represents intensity, and known zones supply colors. Recorded sample gaps remain empty; stale detail profiles are excluded. Zone limits follow the canonical zone configurations of the unit's sport (3 to 7 zones; indoor and virtual units use an indoor configuration when one exists) and fall back to the standard limits. Per metric, local zones valid on the unit's day win over the Intervals.icu sport settings; a sport without any canonical configuration still reads the synced sport settings. Absolute watt or bpm targets are colored as an estimate from the sport's FTP or LTHR and the card says so; without that threshold they use neutral colors. No provider requests are triggered by rendering the calendar.
 
-Die Ernährungsnavigation enthält Tagebuch, Verlauf, Body und Produkte. Der Verlauf zeigt 14 abgeschlossene Tage oder 12 Wochen bis gestern, mit Tageswerten beziehungsweise Wochendurchschnitten im Diagramm und einer aufklappbaren Tageswerttabelle. Fehlende Werte bleiben unbekannt; Summen und Durchschnitte nennen ihre Datenabdeckung. Body ist aus Analyse in den Ernährungsbereich verschoben. Das Erfassen eines lokalen Produkts erstellt einen bearbeitbaren Coach-Entwurf; es wird nichts automatisch gesendet oder gespeichert. Coach-Anfragen bleiben über die Hauptnavigation verfügbar.
+Die Ernährungsnavigation enthält Tagebuch, Verlauf, Body und Produkte. Der Verlauf zeigt 14 abgeschlossene Tage oder 12 Wochen bis gestern, mit Tageswerten beziehungsweise Wochendurchschnitten im Diagramm und einer aufklappbaren Tageswerttabelle. Fehlende Werte bleiben unbekannt; Summen und Durchschnitte nennen ihre Datenabdeckung. Body ist aus Analyse in den Ernährungsbereich verschoben. Im Tab „Produkte“ lassen sich gespeicherte Produkte mit dem Stern als Favorit markieren; Favoriten stehen oben in der Liste. „Verwenden“ fragt die Menge ab und ergänzt entweder die Coach-Nachricht (ein vorhandener Entwurf bleibt erhalten und wird um eine Zeile erweitert; es wird nichts automatisch gesendet) oder direkt ohne Coach eine bestehende Mahlzeit des gewählten Tages. Eine so ergänzte Mahlzeit wird zur Zusammensetzung aus ihren bisherigen Werten und dem Produkt, wobei die Nährwerte des Produkts zum Zeitpunkt der Ergänzung festgehalten werden. Coach-Anfragen bleiben über die Hauptnavigation verfügbar.
 
 Unter Profil → „Zonen & Schwellen“ lassen sich lokale Zonen für Radfahren, Laufen und Schwimmen je Messgröße (Leistung in % der FTP, Herzfrequenz in bpm mit LTHR und Maximum, Pace in % der Schwellenpace) und optional nur für Indoor-Einheiten speichern (`GET /api/zones`, `PUT /api/zones`). Die Werte des Anbieters bleiben daneben sichtbar; lokale Zonen gelten vorrangig, bleiben bei jeder Synchronisation, nach Neustart und Backup-Wiederherstellung erhalten und werden nie zu Intervals.icu übertragen. Der Coach sieht die jeweils geltenden Zonen mit ihrer Quelle. Ungültige Eingaben (zu wenige oder nicht aufsteigende Grenzen, unbekannte Einheiten) ändern nichts. Speichern und das bestätigte Entfernen (`PUT /api/zones/remove`) zeigen eine Quittung mit „Rückgängig“.
 

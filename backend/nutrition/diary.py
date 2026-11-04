@@ -307,6 +307,77 @@ class NutritionDiaryService:
             raise AppError(404, ENTRY_NOT_FOUND)
         return updated
 
+    def add_product_to_meal(
+        self, entry_id: str, product_id: str, amount: Any, unit: str
+    ) -> dict[str, Any]:
+        """Add a saved product to a logged meal as one more component.
+
+        A meal that is not yet a composite becomes one whose first component is
+        its previous values, so no earlier nutrient or origin is lost.
+        """
+        clean_id = str(entry_id or "").strip()
+        if not clean_id:
+            raise AppError(400, INVALID_ENTRY_ID)
+        component = {
+            "kind": "local_product",
+            "product_id": str(product_id or "").strip(),
+            "amount": amount,
+            "unit": unit,
+        }
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            existing = self._nutrition_repository.get(db, clean_id)
+            if not existing:
+                raise AppError(404, ENTRY_NOT_FOUND)
+            added = self._meal_library.calculate_components_in_transaction(
+                db, [component]
+            )["nutrition_basis"]["components"][0]
+            basis = existing.get("nutrition_basis") or {}
+            earlier = (
+                list(basis["components"])
+                if basis.get("kind") == "composite" and basis.get("components")
+                else [self._meal_component(existing)]
+            )
+            if len(earlier) >= 20:
+                raise AppError(
+                    400, "Eine Mahlzeit kann höchstens 20 Komponenten enthalten."
+                )
+            entry = {
+                **existing,
+                "description": f"{existing['description']} + {added['name']}",
+                "nutrition_basis": {
+                    "kind": "composite",
+                    "version": 1,
+                    "components": [*earlier, added],
+                },
+            }
+            self._set_composite_totals(entry)
+            updated = self._nutrition_repository.update(
+                db,
+                clean_id,
+                normalize_nutrition_entry(entry, local_now_factory=self._local_now)
+                | {"id": clean_id},
+            )
+        if not updated:
+            raise AppError(404, ENTRY_NOT_FOUND)
+        return updated
+
+    @staticmethod
+    def _meal_component(entry: dict[str, Any]) -> dict[str, Any]:
+        basis = entry.get("nutrition_basis") or {"kind": "manual"}
+        estimated = basis.get("kind") == "estimate" or entry.get("source") in {
+            "coach",
+            "photo",
+            "voice",
+        }
+        return {
+            "kind": "estimate" if estimated else "manual",
+            "name": str(entry.get("description") or "Mahlzeit")[:200],
+            "amount": 1,
+            "unit": "portion",
+            **{key: entry.get(key) for key in NUTRIENTS},
+            "nutrition_basis": basis,
+        }
+
     def correct_meal(self, entry_id: str, changes: Any) -> dict[str, Any]:
         clean_id = str(entry_id or "").strip()
         if not clean_id:

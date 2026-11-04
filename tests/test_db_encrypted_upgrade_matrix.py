@@ -1,6 +1,6 @@
 """SQLCipher upgrade, rollback, restart and backup/restore from every released schema.
 
-Each supported released schema (v16 to v18) is populated in an encrypted temporary database
+Each supported released schema (v16 to v19) is populated in an encrypted temporary database
 with the rows of the native migration tests. The upgrade keeps every original
 value, the file stays encrypted, a failing upgrade leaves the database exactly as
 it was, a restart with the same build changes nothing, a wrong key reads nothing,
@@ -57,6 +57,9 @@ def builders() -> dict[int, Callable[[Any], None]]:
         17: rating_time.populated_feedback_database,
         18: lambda db: rating_time.populated_feedback_database(
             db, gate.FIXTURES / "schema_v18.sql.txt"
+        ),
+        19: lambda db: rating_time.populated_feedback_database(
+            db, gate.FIXTURES / "schema_v19.sql.txt"
         ),
     }
 
@@ -194,7 +197,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
 
     def test_a_failing_upgrade_leaves_every_released_schema_unchanged(self) -> None:
         def failing_last_step(connection: Any) -> None:
-            migrations._upgrade_v18_to_v19(connection)
+            migrations._upgrade_v18_to_v20(connection)
             raise RuntimeError("injected migration failure")
 
         for version in builders():

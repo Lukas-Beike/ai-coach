@@ -58,7 +58,7 @@ class PlanningMetricsMigrationTests(unittest.TestCase):
         return db
 
     def test_populated_supported_releases_upgrade_and_restart(self):
-        for version in (16, 17, 18):
+        for version in (16, 17, 18, 19):
             with self.subTest(version=version):
                 db = self.database(version)
                 migrations.migrate_schema(db)

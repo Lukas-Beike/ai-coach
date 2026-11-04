@@ -177,6 +177,40 @@ class NutritionProductHttpContractTests(unittest.TestCase):
             {"ok": True, "product": {"id": "product-1", "status": "archived"}},
         )
 
+    def test_favorite_and_add_to_meal_target_explicit_ids(self):
+        self.handler.read_json.return_value = {"id": "product-1", "favorite": True}
+        self.meal_library.set_product_favorite.return_value = {
+            "id": "product-1",
+            "favorite": 1,
+        }
+        self.assertTrue(
+            self.post_routes.handle(self.handler, "/api/nutrition/products/favorite")
+        )
+        self.meal_library.set_product_favorite.assert_called_once_with(
+            "product-1", True
+        )
+        self.handler.send_json.assert_called_once_with(
+            200, {"ok": True, "product": {"id": "product-1", "favorite": 1}}
+        )
+
+        self.handler.reset_mock()
+        self.handler.read_json.return_value = {
+            "id": "entry-1",
+            "product_id": "product-1",
+            "amount": 50,
+            "unit": "g",
+        }
+        self.diary.add_product_to_meal.return_value = {"id": "entry-1"}
+        self.assertTrue(
+            self.post_routes.handle(self.handler, "/api/nutrition/entry/add-product")
+        )
+        self.diary.add_product_to_meal.assert_called_once_with(
+            "entry-1", "product-1", 50, "g"
+        )
+        self.handler.send_json.assert_called_once_with(
+            200, {"ok": True, "entry": {"id": "entry-1"}}
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -99,6 +99,18 @@ class ProductCatalogService:
         merged["id"] = str(product_id)
         return self.save_product(merged)
 
+    def set_favorite(self, product_id: str, favorite: Any) -> dict[str, Any]:
+        if not isinstance(favorite, bool):
+            raise AppError(400, "favorite muss true oder false sein.")
+        product_id = str(product_id or "").strip()
+        with self._db_lock, self._database_manager.unit_of_work() as db:
+            if not self._products.set_favorite(db, product_id, favorite):
+                raise AppError(
+                    404, PRODUCT_NOT_FOUND, reason="nutrition_product_not_found"
+                )
+            product = self._products.get(db, product_id)
+        return product or {"id": product_id, "favorite": int(favorite)}
+
     def archive_product(self, product_id: str) -> dict[str, Any]:
         product_id = str(product_id or "").strip()
         with self._db_lock, self._database_manager.unit_of_work() as db:

@@ -101,6 +101,9 @@ class NutritionMealLibraryService:
     ) -> dict[str, Any]:
         return self._product_catalog.update_product(product_id, payload)
 
+    def set_product_favorite(self, product_id: str, favorite: Any) -> dict[str, Any]:
+        return self._product_catalog.set_favorite(product_id, favorite)
+
     def archive_product(self, product_id: str) -> dict[str, Any]:
         return self._product_catalog.archive_product(product_id)
 
