@@ -23,6 +23,7 @@ Definitions (intensity = fraction of the threshold, 1.0 = threshold):
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -394,7 +395,8 @@ class TargetRange:
     """Absolute bounds of one planned step's target, or why there are none.
 
     ``metric`` is ``watts``, ``heartrate`` or ``speed`` (m/s); ``low`` and
-    ``high`` are in W, bpm or m/s. Ramps have no single range.
+    ``high`` are in W, bpm or m/s; ``high`` is ``math.inf`` for the open top
+    zone. Ramps have no single range.
     """
 
     metric: str | None = None
@@ -418,7 +420,7 @@ def step_target_range(
     bounds = _fraction_bounds(text, kind, target.intensity, thresholds.zones)
     reference = {
         "power": ("watts", thresholds.zones.ftp),
-        "hr": ("heartrate", _hr_reference(thresholds.zones)),
+        "hr": ("heartrate", hr_reference(thresholds.zones)),
         "pace": ("speed", thresholds.threshold_speed_mps),
     }[kind]
     metric, value = reference
@@ -437,7 +439,8 @@ def _fraction_bounds(
         limits = _limits(kind, zones)
         low_zone, high_zone = int(zone[1]), int(zone[2] or zone[1])
         low = limits[low_zone - 2] / 100 if low_zone > 1 else 0.0
-        high = limits[high_zone - 1] / 100 if high_zone <= len(limits) else intensity
+        # The top zone is open: it has no upper bound.
+        high = limits[high_zone - 1] / 100 if high_zone <= len(limits) else math.inf
         return low, max(high, low)
     match = _PERCENT.fullmatch(first) or _ABSOLUTE.fullmatch(first)
     if match is None:
@@ -450,7 +453,7 @@ def _fraction_bounds(
     )
 
 
-def _hr_reference(zones: ZoneSettings) -> float | None:
+def hr_reference(zones: ZoneSettings) -> float | None:
     """The heart rate an HR intensity of 1.0 means: LTHR, else its assumed share."""
     if zones.lthr:
         return zones.lthr
@@ -468,6 +471,6 @@ def _pace_range(text: str) -> TargetRange | None:
 
 
 def _widened(metric: str, low: float, high: float) -> TargetRange:
-    if high - low <= 1e-9:
+    if math.isfinite(high) and high - low <= 1e-9:
         low, high = low * (1 - SINGLE_TARGET_SHARE), high * (1 + SINGLE_TARGET_SHARE)
     return TargetRange(metric=metric, low=low, high=high)

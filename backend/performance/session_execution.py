@@ -41,7 +41,8 @@ START_REP_S: Final = 90.0
 # Variability leaves out the first 10 s of acceleration.
 SETTLE_S: Final = 10.0
 ERG_VARIABILITY_PCT: Final = 3.0
-MIN_LAP_S: Final = 20.0
+# Shorter laps are lap-button slips; short work or rest laps of 15 s stay.
+MIN_LAP_S: Final = 5.0
 MIN_SESSION_S: Final = 600.0
 WARMUP_EXCLUDED_S: Final = 600.0
 MAX_GAP_S: Final = 5.0
@@ -369,10 +370,9 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
             "short": duration < SHORT_REP_S,
         }
         reps.append(_drop_none(rep))
-        if index + 1 < len(laps) and laps[index + 1]["kind"] == _RECOVERY:
-            recoveries.append(
-                {"after_rep": number, **_recovery(laps[index + 1], reader)}
-            )
+        rest = _rest_after(laps, index)
+        if rest is not None:
+            recoveries.append({"after_rep": number, **_recovery(rest, reader)})
     known = [value for value in raw if value is not None]
     summary: dict[str, Any] = {"rep_count": len(works)}
     if len(works) > MAX_REPS:
@@ -403,6 +403,18 @@ def _intervals(laps: Sequence[Mapping[str, Any]], reader: _Reader) -> dict[str, 
         summary["recovery_drop_first"] = drops[0]
         summary["recovery_drop_last"] = drops[-1]
     return {"reps": reps, "recoveries": recoveries, "rep_summary": summary}
+
+
+def _rest_after(laps: Sequence[Mapping[str, Any]], index: int) -> dict[str, Any] | None:
+    """The recovery after a work lap, joined over consecutive recovery laps."""
+    following = []
+    for lap in laps[index + 1 :]:
+        if lap["kind"] != _RECOVERY:
+            break
+        following.append(lap)
+    if not following:
+        return None
+    return {"start": following[0]["start"], "end": following[-1]["end"]}
 
 
 def _recovery(lap: Mapping[str, Any], reader: _Reader) -> dict[str, Any]:

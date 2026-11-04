@@ -252,6 +252,32 @@ class SessionExecutionTests(unittest.TestCase):
         outdoor["environment"] = "outdoor"
         self.assertNotIn("erg_like", session_execution(outdoor))
 
+    def test_short_labelled_rests_keep_the_session_an_interval_one(self) -> None:
+        segments: list[tuple[str, int, float, tuple[float, float]]] = [
+            ("warmup", 600, 3.0, (120.0, 130.0))
+        ]
+        for _ in range(10):
+            segments += [
+                ("work", 30, 5.5, (150.0, 170.0)),
+                ("recovery", 15, 2.0, (170.0, 160.0)),
+            ]
+        result = session_execution(_session(segments))
+        self.assertEqual(result["structure"], "interval")
+        self.assertEqual(result["rep_summary"]["rep_count"], 10)
+
+    def test_a_recovery_split_into_laps_counts_as_one(self) -> None:
+        segments: list[tuple[str, int, float, tuple[float, float]]] = [
+            ("warmup", 600, 3.0, (120.0, 130.0)),
+            ("work", 180, 4.5, (150.0, 170.0)),
+            ("recovery", 60, 0.5, (170.0, 140.0)),
+            ("recovery", 120, 2.5, (140.0, 130.0)),
+            ("work", 180, 4.5, (150.0, 170.0)),
+            ("cooldown", 300, 2.8, (140.0, 125.0)),
+        ]
+        recovery = session_execution(_session(segments))["recoveries"][0]
+        self.assertEqual(recovery["duration_s"], 180)
+        self.assertEqual(recovery["heart_rate_end"], 130)
+
     def test_unsupported_or_short_sessions_say_why(self) -> None:
         swim = _session([("lap", 1800, 1.2, (130.0, 140.0))], sport="swim")
         self.assertEqual(session_execution(swim)["status"], "not_applicable")

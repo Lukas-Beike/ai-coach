@@ -104,7 +104,11 @@ The system SHALL describe how one run or ride was executed from its own merged s
 Evidence: `backend/performance/session_execution.py:session_execution`, `backend/performance/canonical_detail.py:CanonicalDetailReader._analysis`, `backend/performance/analysis_input.py:analysis_input`; `tests/test_session_execution.py`, `tests/test_canonical_detail_reader.py:test_analysis_is_recomputed_from_the_merged_streams`.
 
 ### Requirement: Work laps against planned targets
-The system SHALL compare the n-th executed work lap of a run or ride with the n-th planned work step of its matched local planned unit, without requiring matching durations: work steps are those within 10 % of the hardest target as a fraction of its threshold; zone, percent, absolute and pace targets resolve from the athlete's current thresholds as the planned-workout estimate reads them; single values count as plus or minus 2.5 %; ramps and unresolved targets stay unscored.
+The system SHALL pair the executed work laps of a run or ride in order with the planned work steps of its matched local planned unit, without requiring matching durations, and describe each rep against its target from the athlete's current thresholds; ramps and unresolved targets stay unscored.
+
+#### Scenario: Choosing the work steps
+- **WHEN** a plan mixes warm-up, work and recovery steps or rises in a progression
+- **THEN** the hardest steps form the work steps when their count fits the executed laps, else the steps within 10 % of the hardest target, each as a fraction of its threshold; the unit is the focus unit, else the one unit of that day and sport; single values count as plus or minus 2.5 %, the top zone is open upwards, and heart-rate targets of laps under 120 s stay unscored.
 
 #### Scenario: Rep slower than its target
 - **WHEN** a planned 4:20-4:30/km rep is run at 4:38/km

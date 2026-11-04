@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -22,6 +22,7 @@ from backend.performance.pace_at_hr import COMPARE_DAYS, session_comparison
 from backend.performance.planned_targets import planned_target_execution
 from backend.performance.report_service import PROFILE_WINDOW_DAYS
 from backend.planning import leg_strength
+from backend.planning.sport import planned_sport_environment
 from backend.sync.garmin import GarminPayloadService
 
 
@@ -219,11 +220,8 @@ class CoachActivityReadToolService:
         """Work laps against the matched planned unit's steps, for runs and rides."""
         if session.get("sport") not in ("run", "ride") or self._unit_thresholds is None:
             return None
-        unit_id = focus.get("planned_unit_id") if isinstance(focus, dict) else None
-        unit = next(
-            (item for item in around or () if unit_id and item.get("id") == unit_id),
-            None,
-        )
+        unit = _matched_unit(session, focus, around)
+        unit_id = None if unit is None else unit.get("id")
         analysis = detail.get("analysis")
         execution = analysis.get("execution") if isinstance(analysis, dict) else None
         if unit is None or not isinstance(execution, dict):
@@ -333,3 +331,25 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
             400, "progress, block_review und 42 oder 84 Tage nur allein abrufbar."
         )
     return sections
+
+
+def _matched_unit(
+    session: Mapping[str, Any], focus: Any, around: list[dict[str, Any]] | None
+) -> dict[str, Any] | None:
+    """The focus's planned unit, else the one unit of the session's day and sport.
+
+    A unit without a session focus still has steps to compare, so the same
+    unique day-and-sport rule as the focus applies without needing a focus.
+    """
+    units = around or []
+    unit_id = focus.get("planned_unit_id") if isinstance(focus, dict) else None
+    if unit_id:
+        return next((unit for unit in units if unit.get("id") == unit_id), None)
+    day = iso_date_prefix(session.get("started_at_local"))
+    same = [
+        unit
+        for unit in units
+        if iso_date_prefix(unit.get("date")) == day
+        and planned_sport_environment(unit)[0].value == session.get("sport")
+    ]
+    return same[0] if len(same) == 1 else None

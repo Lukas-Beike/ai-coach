@@ -81,7 +81,79 @@ class StepTargetRangeTests(unittest.TestCase):
         self.assertIsNotNone(target.unknown)
 
 
+class OpenTopZoneTests(unittest.TestCase):
+    def test_the_top_zone_has_no_upper_bound(self) -> None:
+        sprint = structured_steps("- 20s Z7")[0]
+        target = step_target_range(sprint, THRESHOLDS, Sport.RIDE)
+        self.assertAlmostEqual(target.low, 375.0)
+        self.assertEqual(target.high, float("inf"))
+
+
+def _ride(watts: list[float]) -> dict[str, Any]:
+    segments: list[tuple[str, int, float, tuple[float, float]]] = [
+        ("warmup", 600, 150.0, (110.0, 125.0))
+    ]
+    for value in watts:
+        segments += [
+            ("work", 360, value, (145.0, 165.0)),
+            ("recovery", 180, 120.0, (165.0, 130.0)),
+        ]
+    return synthetic_session(segments, sport="ride", output="watts", cadence=90.0)
+
+
 class PlannedTargetExecutionTests(unittest.TestCase):
+    def test_progressions_pair_every_rep_with_its_own_step(self) -> None:
+        plan = "- 10m Z1\n\n- 6m 85%\n- 3m 50%\n- 6m 95%\n- 3m 50%\n- 6m 105%\n- 3m 50%"
+        result = planned_target_execution(
+            session_execution(_ride([212.0, 238.0, 262.0])),
+            structured_steps(plan),
+            THRESHOLDS,
+            "ride",
+        )
+        self.assertEqual(
+            [rep["planned_target"] for rep in result["reps"]], ["85%", "95%", "105%"]
+        )
+        self.assertEqual(result["summary"]["in_target"], 3)
+
+    def test_open_top_zone_reps_above_its_floor_are_in_target(self) -> None:
+        result = planned_target_execution(
+            session_execution(_ride([425.0, 430.0])),
+            structured_steps("- 10m Z1\n\n2x\n- 6m Z7\n- 3m Z1"),
+            THRESHOLDS,
+            "ride",
+        )
+        self.assertEqual(result["reps"][0]["target_watts"], [375, None])
+        self.assertEqual(result["reps"][0]["deviation_pct"], 0.0)
+
+    def test_short_reps_leave_heart_rate_targets_unscored(self) -> None:
+        segments: list[tuple[str, int, float, tuple[float, float]]] = [
+            ("warmup", 600, 3.0, (120.0, 130.0))
+        ]
+        for _ in range(4):
+            segments += [
+                ("work", 45, 5.0, (140.0, 160.0)),
+                ("recovery", 60, 2.5, (160.0, 140.0)),
+            ]
+        result = planned_target_execution(
+            session_execution(synthetic_session(segments)),
+            structured_steps("- 10m Z1 Pace\n\n4x\n- 45s 170-175bpm HR\n- 60s Z1 Pace"),
+            THRESHOLDS,
+            "run",
+        )
+        self.assertEqual(result["reps"][0]["target_unknown"], "short_rep_heart_rate")
+        self.assertNotIn("deviation_pct", result["reps"][0])
+
+    def test_absolute_paces_count_without_a_threshold_pace(self) -> None:
+        no_pace = AthleteThresholds(zones=ZoneSettings())
+        result = planned_target_execution(
+            session_execution(_run()),
+            structured_steps("5x\n- 3m 4:20-4:30/km Pace\n- 90s 6:00-7:00/km Pace"),
+            no_pace,
+            "run",
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["summary"]["in_target"], 4)
+
     def test_each_rep_is_compared_with_its_planned_step(self) -> None:
         session = _run()
         execution = session_execution(session)
@@ -165,6 +237,31 @@ class CoachPlannedTargetsTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["planned_unit_id"], "unit-1")
         thresholds.thresholds.assert_called_once_with(unit)
+
+    def test_a_unit_without_focus_matches_by_day_and_sport(self) -> None:
+        session = _run()
+        detail = {"analysis": {"execution": session_execution(session)}}
+        thresholds = Mock()
+        thresholds.thresholds.return_value = THRESHOLDS
+        unit = {
+            "id": "unit-1",
+            "date": "2026-11-03T00:00:00",
+            "description": PLAN,
+            "type": "Run",
+        }
+        other = {
+            "id": "unit-2",
+            "date": "2026-11-04T00:00:00",
+            "description": PLAN,
+            "type": "Run",
+        }
+        result = self._service(thresholds)._planned_targets(
+            detail,
+            {"sport": "run", "started_at_local": "2026-11-03T07:00:00"},
+            {"status": "unknown"},
+            [unit, other],
+        )
+        self.assertEqual(result["planned_unit_id"], "unit-1")
 
     def test_without_a_matched_unit_or_thresholds_there_is_none(self) -> None:
         detail = {"analysis": {"execution": session_execution(_run())}}

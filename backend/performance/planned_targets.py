@@ -1,40 +1,49 @@
 """Each executed work lap against its planned step's target.
 
-The n-th executed work lap of ``session_execution`` is compared with the n-th
-planned work step of the matched local planned unit; no duration match is
-required. Work steps are the planned steps within 10 % of the hardest target,
-each as a fraction of its threshold. Targets come
-from the athlete's current thresholds as the planned-workout estimate reads
-them, so zone, percent, absolute and pace targets all count; ramps stay
-unscored. Time in target reads the session's displayed streams. Descriptive
-only: no score, no threshold change. Pure: no I/O, inputs unchanged.
+The executed work laps of ``session_execution`` are paired in order with the
+planned work steps of the matched local planned unit; no duration match is
+required. Work steps are chosen so their count fits the executed laps when the
+plan allows it (the hardest steps, else the steps within 10 % of the hardest
+target, each as a fraction of its threshold). Targets come from the athlete's
+current thresholds as the planned-workout estimate reads them, so zone,
+percent, absolute and pace targets all count; ramps stay unscored. Time in
+target reads the session's displayed streams. Descriptive only: no score, no
+threshold change. Pure: no I/O, inputs unchanged.
 """
 
 from __future__ import annotations
 
 import bisect
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 from backend.activities.workout_load import (
     AthleteThresholds,
     TargetRange,
+    hr_reference,
     step_target_range,
 )
-from backend.activities.zone_settings import LTHR_SHARE_OF_MAX_HR
 from backend.canonical.vocabulary import Sport
 
 METHOD: Final = "planned-target-execution-v1"
 SCOPE: Final = (
-    "The n-th executed work lap against the n-th planned work step, from the "
-    "athlete's current thresholds. deviation_pct is 0 inside the target, else "
+    "Executed work laps against the planned work steps in order, from the "
+    "athlete's current thresholds; for an older session the planned targets may "
+    "have rested on other thresholds. deviation_pct is 0 inside the target, else "
     "the distance to the nearer bound on speed, power or heart rate in percent "
-    "(positive: faster, more power or higher heart rate). Heart-rate targets "
-    "use the second half of the lap. time_in_target_pct comes from the "
-    "displayed streams. Single-value targets count as plus or minus 2.5 %."
+    "(positive: faster, more power or higher heart rate). Heart-rate targets use "
+    "the second half of the lap and are not scored for laps under 120 s. "
+    "time_in_target_pct comes from the displayed streams. Single-value targets "
+    "count as plus or minus 2.5 %; the top zone is open upwards."
 )
 # Work steps are within this share of the hardest planned target.
 WORK_SHARE: Final = 0.10
+# A step count fits the executed laps only when the next easier step is
+# clearly easier than the easiest chosen one.
+COUNT_GAP_SHARE: Final = 0.10
+# Display samples further apart than this are a pause, not part of the lap.
+MAX_DISPLAY_GAP_S: Final = 15.0
 _STREAM_KEYS: Final = {
     "speed": "speed_mps",
     "watts": "power_w",
@@ -66,7 +75,8 @@ def planned_target_execution(
     except ValueError:
         return {**base, "status": "not_covered", "reason": "Sportart unbekannt."}
     ranges = [step_target_range(step, thresholds, canonical_sport) for step in steps]
-    work = _work_steps(ranges, thresholds)
+    reps = list(execution.get("reps") or [])
+    work = _work_steps(_levels(ranges, thresholds), len(reps))
     if not work:
         reasons = sorted({r.unknown for r in ranges if r.unknown})
         return {
@@ -75,15 +85,13 @@ def planned_target_execution(
             "reason": "Keine auswertbaren Zielschritte im Plan.",
             "unknown_targets": reasons,
         }
-    reps = list(execution.get("reps") or [])
     recoveries = {
         item.get("after_rep"): item for item in execution.get("recoveries") or []
     }
     timeline = _Timeline(streams)
     compared = []
     for number, (index, rep) in enumerate(zip(work, reps, strict=False), start=1):
-        step, target = steps[index], ranges[index]
-        item = _compare(rep, step, target, execution, timeline)
+        item = _compare(rep, steps[index], ranges[index], execution, timeline)
         planned_rest = _planned_rest(steps, work, index)
         actual_rest = recoveries.get(number)
         if planned_rest is not None:
@@ -91,42 +99,58 @@ def planned_target_execution(
         if actual_rest is not None:
             item["recovery_s"] = actual_rest.get("duration_s")
         compared.append(item)
+    deviations = [item["deviation_pct"] for item in compared if "deviation_pct" in item]
     summary = {
         "planned_work_steps": len(work),
         "executed_work_laps": len(reps),
         "compared": len(compared),
-        "in_target": sum(item.get("deviation_pct") == 0 for item in compared),
-        "above_target": sum((item.get("deviation_pct") or 0) > 0 for item in compared),
-        "below_target": sum((item.get("deviation_pct") or 0) < 0 for item in compared),
+        "in_target": sum(value == 0 for value in deviations),
+        "above_target": sum(value > 0 for value in deviations),
+        "below_target": sum(value < 0 for value in deviations),
     }
     return {**base, "status": "ok", "reps": compared, "summary": summary}
 
 
-def _work_steps(
+def _levels(
     ranges: Sequence[TargetRange], thresholds: AthleteThresholds
-) -> list[int]:
-    """Indexes of the planned work steps: within 10 % of the hardest target.
+) -> list[tuple[int, float]]:
+    """Each resolved step's target level as a fraction of its threshold.
 
-    Every target is compared as a fraction of its threshold (speed over
-    threshold speed, watts over FTP, bpm over LTHR), so pace and heart-rate
-    steps of one plan share a scale.
+    Pace targets without a threshold pace are scaled by the fastest pace target,
+    so a plan of absolute paces still has levels.
     """
+    speeds = [r.low for r in ranges if r.metric == "speed" and r.low]
     references = {
-        "speed": thresholds.threshold_speed_mps,
+        "speed": thresholds.threshold_speed_mps or (max(speeds) if speeds else None),
         "watts": thresholds.zones.ftp,
-        "heartrate": thresholds.zones.lthr
-        or (thresholds.zones.max_hr or 0) * LTHR_SHARE_OF_MAX_HR,
+        "heartrate": hr_reference(thresholds.zones),
     }
     levels = []
     for index, target in enumerate(ranges):
         reference = references.get(target.metric or "")
         if target.low is None or target.high is None or not reference:
             continue
-        levels.append((index, (target.low + target.high) / 2 / reference))
+        # The open top zone counts from its lower bound.
+        middle = (
+            target.low if math.isinf(target.high) else (target.low + target.high) / 2
+        )
+        levels.append((index, middle / reference))
+    return levels
+
+
+def _work_steps(levels: Sequence[tuple[int, float]], executed: int) -> list[int]:
+    """Planned work steps in plan order, fitted to the executed lap count."""
     if not levels:
         return []
-    hardest = max(level for _, level in levels)
-    return [index for index, level in levels if level >= hardest * (1 - WORK_SHARE)]
+    ordered = sorted(levels, key=lambda item: item[1], reverse=True)
+    if 0 < executed < len(ordered):
+        chosen, following = ordered[executed - 1][1], ordered[executed][1]
+        if following < chosen * (1 - COUNT_GAP_SHARE):
+            return sorted(index for index, _ in ordered[:executed])
+    hardest = ordered[0][1]
+    return sorted(
+        index for index, level in levels if level >= hardest * (1 - WORK_SHARE)
+    )
 
 
 def _planned_rest(
@@ -166,6 +190,9 @@ def _compare(
         item["target_unknown"] = target.unknown
         return item
     item.update(_shown_range(target, execution))
+    if target.metric == "heartrate" and rep.get("short"):
+        item["target_unknown"] = "short_rep_heart_rate"
+        return item
     actual = _actual(rep, target.metric, execution)
     if actual is None:
         item["target_unknown"] = "missing_measurement"
@@ -186,19 +213,22 @@ def _compare(
 
 
 def _shown_range(target: TargetRange, execution: Mapping[str, Any]) -> dict[str, Any]:
+    """Target bounds in the units the athlete reads; ``None`` for an open bound."""
     low, high = float(target.low or 0), float(target.high or 0)
+    upper = high if math.isfinite(high) else None
     if target.metric == "speed" and execution.get("output") == "pace":
+        fastest = round(1000 / upper) if upper else None
+        slowest = round(1000 / low) if low else None
+        return {"target_pace_s_per_km": [fastest, slowest]}
+    if target.metric == "speed":
         return {
-            "target_pace_s_per_km": [
-                round(1000 / high),
-                round(1000 / low) if low else None,
+            "target_kmh": [
+                round(low * 3.6, 1),
+                None if upper is None else round(upper * 3.6, 1),
             ]
         }
-    if target.metric == "speed":
-        return {"target_kmh": [round(low * 3.6, 1), round(high * 3.6, 1)]}
-    if target.metric == "watts":
-        return {"target_watts": [round(low), round(high)]}
-    return {"target_bpm": [round(low), round(high)]}
+    key = "target_watts" if target.metric == "watts" else "target_bpm"
+    return {key: [round(low), None if upper is None else round(upper)]}
 
 
 def _actual(
@@ -245,22 +275,18 @@ class _Timeline:
     ) -> float | None:
         channel = self._channels.get(_STREAM_KEYS[metric])
         values = channel.get("values") if isinstance(channel, Mapping) else None
-        if not isinstance(values, list) or len(values) != len(self._times):
+        times = self._times
+        if not isinstance(values, list) or len(values) != len(times) or not times:
             return None
-        first = bisect.bisect_left(self._times, start)
-        last = bisect.bisect_right(self._times, end)
+        # The sample interval that straddles the lap start counts in part.
+        first = max(0, bisect.bisect_right(times, start) - 1)
+        last = bisect.bisect_left(times, end)
         inside = total = 0.0
-        for index in range(first, min(last, len(self._times) - 1)):
-            value, left, right = (
-                values[index],
-                self._times[index],
-                self._times[index + 1],
-            )
-            if not isinstance(value, (int, float)) or not isinstance(
-                left, (int, float)
-            ):
+        for index in range(first, min(last, len(times) - 1)):
+            value, left, right = values[index], times[index], times[index + 1]
+            if not all(isinstance(item, (int, float)) for item in (value, left, right)):
                 continue
-            if not isinstance(right, (int, float)) or right <= left:
+            if not 0 < right - left <= MAX_DISPLAY_GAP_S:
                 continue
             span = min(right, end) - max(left, start)
             if span <= 0:
