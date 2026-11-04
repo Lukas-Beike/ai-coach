@@ -28,6 +28,8 @@ class CoachPlanningReadSources:
     change_history_service: Callable[[], Any]
     competition_service: Callable[[], Any]
     training_plan_service: Callable[[], Any]
+    # Thresholds of a planned unit's sport, for its targets against a session.
+    unit_thresholds: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,7 @@ class CoachReadToolsAssembly:
         self._change_history_service = planning.change_history_service
         self._competition_service = planning.competition_service
         self._training_plan_service = planning.training_plan_service
+        self._unit_thresholds = planning.unit_thresholds
         self._nutrition_diary = policy.nutrition_diary
         self._nutrition_meal_library = policy.nutrition_meal_library
         self._training_change_limit = policy.training_change_limit
@@ -81,6 +84,7 @@ class CoachReadToolsAssembly:
             self._today,
             self._report_services() if self._report_services else None,
             self._planned_unit_service(),
+            self._unit_thresholds() if self._unit_thresholds else None,
         )
 
     def read_service(self) -> CoachReadToolService:

@@ -49,7 +49,13 @@ WORK_LAPS = tuple(
         ((0.0, 600.0), (900.0, 1500.0), (1800.0, 2400.0))
     )
 )
-ANALYSIS_KEYS = {"interval_quality", "aerobic", "power_profile", "running_profile"}
+ANALYSIS_KEYS = {
+    "interval_quality",
+    "execution",
+    "aerobic",
+    "power_profile",
+    "running_profile",
+}
 
 
 def heart_rate() -> tuple[float, ...]:

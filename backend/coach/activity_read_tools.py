@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
 from backend.canonical.activity_summary import stored_activity_key
@@ -17,9 +18,12 @@ from backend.coach.context import (
 from backend.coach.session_checks import matched_focus
 from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.comparable_sessions import comparable_sessions
 from backend.performance.pace_at_hr import COMPARE_DAYS, session_comparison
+from backend.performance.planned_targets import planned_target_execution
 from backend.performance.report_service import PROFILE_WINDOW_DAYS
 from backend.planning import leg_strength
+from backend.planning.sport import planned_sport_environment
 from backend.sync.garmin import GarminPayloadService
 
 
@@ -34,6 +38,7 @@ class CoachActivityReadToolService:
         today: Callable[[], date],
         report_services: Any = None,
         planned_units: Any = None,
+        unit_thresholds: Any = None,
     ) -> None:
         self._activity_read = activity_read
         self._garmin_payload = garmin_payload
@@ -41,6 +46,7 @@ class CoachActivityReadToolService:
         self._today = today
         self._report_services = report_services
         self._planned_units = planned_units
+        self._unit_thresholds = unit_thresholds
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
         if name == "read_training_records":
@@ -178,6 +184,11 @@ class CoachActivityReadToolService:
         session = detail.get("session")
         if isinstance(session, dict) and day is not None:
             result.update(self._session_checks(session, day, around, units))
+            targets = self._planned_targets(
+                detail, session, result.get("focus"), around
+            )
+            if targets is not None:
+                result["planned_targets"] = targets
         return result
 
     def _session_checks(
@@ -194,11 +205,81 @@ class CoachActivityReadToolService:
             day - timedelta(days=3), day + timedelta(days=1)
         )
         checks["strength_before"] = self._strength_before(session, nearby, units)
+        own = next(
+            (
+                row
+                for row in nearby or ()
+                if row.get("id") == session.get("activity_id")
+            ),
+            None,
+        )
+        covered_from = self._covered_from()
+        # A session before the curve window has no curve; nothing is read for it.
+        inside = own is not None and day >= covered_from
+        records = self._curve_records() if inside else None
         if session.get("sport") == "run":
-            checks["pace_at_heart_rate"] = self._pace_at_heart_rate(
-                session, nearby, day
+            checks["pace_at_heart_rate"] = self._pace_at_heart_rate(own, records, day)
+        if own is None or (inside and records is None):
+            checks["comparable_sessions"] = _unavailable()
+        elif records is None:
+            checks["comparable_sessions"] = {
+                "status": "not_covered",
+                "reason": f"Die Einheit liegt außerhalb des Auswertungsfensters von {PROFILE_WINDOW_DAYS[-1]} Tagen.",
+            }
+        else:
+            checks["comparable_sessions"] = comparable_sessions(
+                records, stored_activity_key(own), covered_from=covered_from
             )
         return checks
+
+    def _covered_from(self) -> date:
+        """First day of the curve window that the session comparisons read."""
+        return self._today() - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+
+    def _curve_records(self) -> list[dict[str, Any]] | None:
+        """Sessions of the curve window with their curves and executions, read once."""
+        if self._report_services is None:
+            return None
+        try:
+            return self._report_services.profiles.curve_records()
+        except RuntimeError:
+            return None
+
+    def _planned_targets(
+        self,
+        detail: dict[str, Any],
+        session: dict[str, Any],
+        focus: Any,
+        around: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        """Work laps against the matched planned unit's steps, for runs and rides."""
+        if session.get("sport") not in ("run", "ride") or self._unit_thresholds is None:
+            return None
+        unit = _matched_unit(session, focus, around)
+        unit_id = None if unit is None else unit.get("id")
+        analysis = detail.get("analysis")
+        execution = analysis.get("execution") if isinstance(analysis, dict) else None
+        if unit is None or not isinstance(execution, dict):
+            return None
+        description = unit.get("description")
+        if not isinstance(description, str) or len(description) > 20000:
+            return None
+        try:
+            steps = structured_steps(description, str(unit.get("target") or "AUTO"))
+        except WorkoutTextError as error:
+            return {
+                "status": "not_covered",
+                "planned_unit_id": unit_id,
+                "reason": error.reason,
+            }
+        return planned_target_execution(
+            execution,
+            steps,
+            self._unit_thresholds.thresholds(unit),
+            str(session.get("sport")),
+            planned_unit_id=str(unit_id),
+            streams=detail.get("streams"),
+        )
 
     @staticmethod
     def _strength_before(
@@ -211,34 +292,21 @@ class CoachActivityReadToolService:
         return leg_strength.strength_before(start, nearby, lambda: units)
 
     def _pace_at_heart_rate(
-        self, session: dict[str, Any], nearby: Any, day: date
+        self,
+        own: Mapping[str, Any] | None,
+        records: list[dict[str, Any]] | None,
+        day: date,
     ) -> dict[str, Any]:
-        own = next(
-            (
-                row
-                for row in nearby or ()
-                if row.get("id") == session.get("activity_id")
-            ),
-            None,
-        )
-        if self._report_services is None or own is None:
-            return {
-                "status": "not_covered",
-                "reason": "Auswertung der Messreihen nicht verfügbar.",
-            }
-        covered_from = self._today() - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
-        if day - timedelta(days=COMPARE_DAYS) < covered_from:
+        if (
+            own is not None
+            and day - timedelta(days=COMPARE_DAYS) < self._covered_from()
+        ):
             return {
                 "status": "not_covered",
                 "reason": f"Die Läufe der letzten {COMPARE_DAYS} Tage vor dieser Aktivität liegen außerhalb des Auswertungsfensters von {PROFILE_WINDOW_DAYS[-1]} Tagen.",
             }
-        try:
-            records = self._report_services.profiles.curve_records()
-        except RuntimeError:
-            return {
-                "status": "not_covered",
-                "reason": "Auswertung der Messreihen nicht verfügbar.",
-            }
+        if own is None or records is None:
+            return _unavailable()
         return session_comparison(records, stored_activity_key(own))
 
     @staticmethod
@@ -254,7 +322,7 @@ class CoachActivityReadToolService:
 def _report_sections(arguments: dict[str, Any]) -> list[str]:
     """Validated report sections; progress and its long windows stand alone."""
     days = arguments.get("days")
-    long_window = isinstance(days, int) and days in {42, 84}
+    long_window = isinstance(days, int) and days in {42, 56, 84}
     sections = arguments.get("sections", ["progress"] if long_window else ["report"])
     allowed = {
         "progress",
@@ -282,6 +350,35 @@ def _report_sections(arguments: dict[str, Any]) -> list[str]:
     alone = sections in (["progress"], ["block_review"])
     if (long_window or {"progress", "block_review"} & set(sections)) and not alone:
         raise AppError(
-            400, "progress, block_review und 42 oder 84 Tage nur allein abrufbar."
+            400, "progress, block_review und 42, 56 oder 84 Tage nur allein abrufbar."
         )
     return sections
+
+
+def _matched_unit(
+    session: Mapping[str, Any], focus: Any, around: list[dict[str, Any]] | None
+) -> dict[str, Any] | None:
+    """The focus's planned unit, else the one unit of the session's day and sport.
+
+    A unit without a session focus still has steps to compare, so the same
+    unique day-and-sport rule as the focus applies without needing a focus.
+    """
+    units = around or []
+    unit_id = focus.get("planned_unit_id") if isinstance(focus, dict) else None
+    if unit_id:
+        return next((unit for unit in units if unit.get("id") == unit_id), None)
+    day = iso_date_prefix(session.get("started_at_local"))
+    same = [
+        unit
+        for unit in units
+        if iso_date_prefix(unit.get("date")) == day
+        and planned_sport_environment(unit)[0].value == session.get("sport")
+    ]
+    return same[0] if len(same) == 1 else None
+
+
+def _unavailable() -> dict[str, Any]:
+    return {
+        "status": "not_covered",
+        "reason": "Auswertung der Messreihen nicht verfügbar.",
+    }

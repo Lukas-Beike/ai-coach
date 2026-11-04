@@ -333,6 +333,19 @@ class AnalysisInputMappingTests(unittest.TestCase):
         )
         self.assertFalse(adapted.activity["trail"])
 
+    def test_garmin_outdoor_runs_are_trail_runs(self) -> None:
+        # Garmin maps only trail_running to an outdoor run.
+        adapted = analysis_input(
+            as_provider(record(Sport.RUN), ProviderId.GARMIN), None, None
+        )
+        self.assertTrue(adapted.activity["trail"])
+        unknown = analysis_input(
+            as_provider(record(Sport.RUN, Environment.UNKNOWN), ProviderId.GARMIN),
+            None,
+            None,
+        )
+        self.assertFalse(unknown.activity["trail"])
+
     def test_moving_flags_map_to_booleans_and_gaps(self) -> None:
         source = candidate(
             ProviderId.INTERVALS, "Intervals.icu", {POWER: (200.0,) * len(TIME)}
@@ -402,8 +415,18 @@ class AnalysisInputMappingTests(unittest.TestCase):
         adapted = analysis_input(record(Sport.RIDE, label="Record"), None, laps)
         self.assertEqual(
             [
-                {"start_time": 0.0, "end_time": 60.0},
-                {"start_time": 60.0, "end_time": 130.0},
+                {
+                    "start_time": 0.0,
+                    "end_time": 60.0,
+                    "kind": "lap",
+                    "distance_m": None,
+                },
+                {
+                    "start_time": 60.0,
+                    "end_time": 130.0,
+                    "kind": "lap",
+                    "distance_m": None,
+                },
             ],
             adapted.activity["laps"],
         )
@@ -418,7 +441,8 @@ class AnalysisInputMappingTests(unittest.TestCase):
         later = lap_choice(ProviderId.GARMIN, STARTED + timedelta(seconds=30))
         adapted = analysis_input(record(Sport.RIDE), stream, later)
         self.assertEqual(
-            [{"start_time": 30.0, "end_time": 90.0}], adapted.activity["laps"]
+            [{"start_time": 30.0, "end_time": 90.0, "kind": "lap", "distance_m": None}],
+            adapted.activity["laps"],
         )
         self.assertEqual("Garmin", adapted.label_for("laps"))
 
@@ -440,7 +464,8 @@ class AnalysisInputMappingTests(unittest.TestCase):
             record(Sport.RIDE), stream, lap_choice(ProviderId.GARMIN, None)
         )
         self.assertEqual(
-            [{"start_time": 0.0, "end_time": 60.0}], adapted.activity["laps"]
+            [{"start_time": 0.0, "end_time": 60.0, "kind": "lap", "distance_m": None}],
+            adapted.activity["laps"],
         )
 
     def test_decoupling_is_passed_through(self) -> None:

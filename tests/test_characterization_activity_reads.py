@@ -619,7 +619,13 @@ class ActivityDetailStalenessCharacterizationTests(_StorageCase):
         result = self._detail([self.RAW])
         # The analysis is recomputed from the canonical streams, not the cached one.
         self.assertEqual(
-            {"interval_quality", "aerobic", "power_profile", "running_profile"},
+            {
+                "interval_quality",
+                "execution",
+                "aerobic",
+                "power_profile",
+                "running_profile",
+            },
             set(result["analysis"]),
         )
         entry = _intervals_entry(result)

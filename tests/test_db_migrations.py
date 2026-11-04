@@ -48,6 +48,7 @@ RELEASED_FIXTURES = (
     V16_FIXTURE,
     FIXTURES / "schema_v17.sql.txt",
     FIXTURES / "schema_v18.sql.txt",
+    FIXTURES / "schema_v19.sql.txt",
     V17_FIXTURE,
 )
 # Columns an upgrade renamed: (table, released name) -> current name. Rows read

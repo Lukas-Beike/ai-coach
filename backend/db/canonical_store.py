@@ -1065,6 +1065,42 @@ def mark_activity_deleted(
     return True
 
 
+def mark_placeholder_deleted(
+    db: Any,
+    provider: str,
+    *,
+    record_kind: str,
+    provider_activity_id: str,
+    now: str,
+) -> bool:
+    """Tombstone one stored activity only while it holds no measured value.
+
+    A provider can list a recording without its values for a while; a stored copy
+    that has a duration, a positive distance, heart rate, power or load is a
+    recording and is never tombstoned here. Returns True when a placeholder was
+    tombstoned.
+    """
+    found = _fetch_all(
+        db,
+        "SELECT activity_id FROM activity_records "
+        "WHERE provider = ? AND provider_activity_id = ? AND state = ? "
+        "AND duration_s IS NULL AND COALESCE(distance_m, 0) = 0 "
+        "AND avg_hr IS NULL AND avg_power IS NULL AND load IS NULL",
+        (provider, provider_activity_id, ActivityRecordState.ACTIVE.value),
+    )
+    if not found:
+        return False
+    _delete_activity(
+        db,
+        provider,
+        record_kind=record_kind,
+        provider_activity_id=provider_activity_id,
+        activity_id=found[0]["activity_id"],
+        now=now,
+    )
+    return True
+
+
 def _delete_activity(
     db: Any,
     provider: str,

@@ -147,21 +147,29 @@ The system SHALL create a new diary entry when a saved meal is consumed, scale i
 Evidence: `backend/nutrition/diary.py::NutritionDiaryService.log_template`, `backend/nutrition/diary.py::NutritionDiaryService._scale_composite_basis`; `tests/test_nutrition.py::NutritionRepositoryAndServiceTests.test_template_without_meal_time_stores_unknown_time_and_keeps_meal_type`, `tests/test_nutrition_composition.py::NutritionCompositionTests.test_component_replacement_metadata_and_template_portion_snapshots`, `tests/test_nutrition_composition.py::NutritionCompositionTests.test_restart_and_database_backup_keep_composite_entries_and_templates`.
 
 ### Requirement: Product UI separates review from recording consumption
-The client SHALL present product and label candidates for review and explicit local save, and prepare editable Coach drafts for consumption or saved-meal actions. Browsing, candidate review, and draft preparation SHALL not automatically send a Coach turn or export nutrition.
+The client SHALL present product and label candidates for review and explicit local save, and prepare editable Coach drafts for consumption or saved-meal actions. The athlete SHALL be able to mark saved products as favorites, which the product list shows first, and to add a product with a quantity directly to a logged meal of the selected day without a Coach turn. Browsing, candidate review, and draft preparation SHALL not automatically send a Coach turn or export nutrition.
 
 #### Scenario: Use a saved product
 - **WHEN** the athlete selects a product and consumed quantity
 - **THEN** a Coach draft names the product/quantity for review before the athlete sends it.
 
 #### Scenario: Preserve an existing draft
-- **WHEN** a product action would replace an unsent Coach draft
-- **THEN** the client asks before discarding that draft and leaves it intact on cancellation.
+- **WHEN** a product is added to the Coach message while an unsent draft exists
+- **THEN** the draft stays intact and gains one line naming the quantity and product id, never the product name.
+
+#### Scenario: Favorite products
+- **WHEN** the athlete marks a saved product as a favorite
+- **THEN** the product list shows it before other products, and saving or editing the product keeps the mark.
+
+#### Scenario: Add a product to a logged meal
+- **WHEN** the athlete adds a saved product and quantity to a logged meal
+- **THEN** the meal becomes a composite of its earlier values and the product's nutrients frozen at that time, with at most 20 components.
 
 #### Scenario: Safe ingredient details
 - **WHEN** the diary displays a composite meal
 - **THEN** expandable details display escaped frozen ingredient names, amounts, origins, and unknown values rather than live catalog recalculations.
 
-Evidence: `public/nutrition.js::useNutritionProduct`, `public/nutrition.js::nutritionComponentDetails`, `public/nutrition.js::saveNutritionProduct`; `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, and preserving an existing Coach draft`, `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`, `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`. These browser scenarios were inspected, not executed by this worker.
+Evidence: `public/nutrition.js::useNutritionProduct`, `public/nutrition.js::addNutritionProductToCoachDraft`, `public/nutrition.js::addNutritionProductToMeal`, `backend/nutrition/diary.py::NutritionDiaryService.add_product_to_meal`, `backend/nutrition/catalog.py::ProductCatalogService.set_favorite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_adding_a_product_turns_a_single_product_meal_into_a_composite`, `tests/test_nutrition_favorites_and_meal_additions.py::FavoritesAndMealAdditionTests.test_favorites_are_listed_first_and_survive_edits`, `tests/test_db_product_favorite_migration.py::ProductFavoriteMigrationTests.test_every_supported_release_upgrades_without_favorites`, `public/nutrition.js::nutritionComponentDetails`, `public/nutrition.js::saveNutritionProduct`; `e2e/nutrition.spec.js::@responsive nutrition product library supports review, local save, favorites, and extending an existing Coach draft`, `e2e/nutrition.spec.js::@responsive composite meal shows immutable ingredient snapshots and provenance`, `e2e/nutrition.spec.js::@responsive nutrition diary and saved meals remain read-only and preserve confirmed consumption`. These browser scenarios were inspected, not executed by this worker.
 
 ### Requirement: Coach food reads preserve explicit source and batch results
 The system SHALL support explicit database source selection and bounded batched ingredient lookup through the Coach read interface. Source selection SHALL retain separately labelled matching saved products rather than hiding them or silently replacing the chosen database.

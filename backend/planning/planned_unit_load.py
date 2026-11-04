@@ -134,6 +134,10 @@ class PlannedUnitEstimator:
         return thresholds, self._read_configurations()
 
     def __call__(self, unit: Mapping[str, Any]) -> WorkoutEstimate:
+        return estimate_planned_unit(unit, self.thresholds(unit))
+
+    def thresholds(self, unit: Mapping[str, Any]) -> AthleteThresholds:
+        """The current thresholds of the unit's sport, as its estimate uses."""
         if self._inputs is None:
             self._inputs = self._read_inputs()
-        return estimate_planned_unit(unit, unit_thresholds(unit, *self._inputs))
+        return unit_thresholds(unit, *self._inputs)

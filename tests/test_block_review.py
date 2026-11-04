@@ -9,11 +9,16 @@ from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.errors import AppError
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.report_service import (
+    BlockReviewSource,
     TrainingReportReadService,
     TrainingReportServices,
 )
 from backend.planning import block_review as block_review_module
-from backend.planning.block_review import block_lessons, block_review
+from backend.planning.block_review import (
+    block_lessons,
+    block_review,
+    last_completed_test,
+)
 from backend.planning.plan_guard_service import build_planning_brief
 from backend.planning.season_preparation import load_scenarios
 from tests.test_training_report import (
@@ -56,7 +61,9 @@ def _service(rows=(), plan=None, checkins=(), feedback=(), model="pyramidal"):
         curve_records=list,
         session_feedback=lambda keys: [],
         training_model=lambda: model,
-        review_block=block_review,
+        block_review=BlockReviewSource(
+            review=block_review, last_test=last_completed_test
+        ),
     )
 
 
@@ -130,6 +137,30 @@ class BlockReviewTests(unittest.TestCase):
         self.assertEqual("insufficient_data", review["performance"]["eftp"]["status"])
         self.assertEqual([], review["lessons"])
         self.assertEqual(0, review["subjective"]["checkin_scores"]["checkins"])
+
+    def test_since_last_test_starts_on_the_test_week_and_names_it(self):
+        plan = {
+            "training_calendar": [
+                _unit("2026-09-09", focus="test"),
+                _unit("2026-08-01", focus="test"),
+                _unit("2026-09-20", focus="test", status="missed"),
+                _unit("2026-09-25", focus="threshold"),
+                {**_unit("2026-09-26", focus="test"), "starts_at_local": "kaputt"},
+            ]
+        }
+        review = _service(plan=plan).block_review({"since_last_test": True}, "UTC")
+        self.assertEqual("2026-09-09", review["last_test"])
+        # Monday of the test week, the shortest window reaching 2026-10-02.
+        self.assertEqual("2026-09-07", review["start"])
+        self.assertEqual(4, review["weeks"])
+        unknown = _service().block_review({"since_last_test": True}, "UTC")
+        self.assertIsNone(unknown["last_test"])
+        self.assertEqual(8, unknown["weeks"])
+
+    def test_the_review_passes_equal_effort_on(self):
+        performance = _service().block_review({}, "UTC")["performance"]
+        self.assertIn("equal_effort", performance)
+        self.assertIn("ride", performance["equal_effort"])
 
     def test_subjective_signals_and_notes(self):
         checkins = [

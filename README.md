@@ -39,7 +39,7 @@ container, and do not replace or reset the data directory to resolve a
 rejected schema. A fresh database is only required when the athlete explicitly
 chooses to start over. Future schema changes add explicit, versioned and
 transactional migrations from version 16 with upgrade regression tests.
-The current schema is version 19. Version 10 adds canonical activity detail
+The current schema is version 20. Version 10 adds canonical activity detail
 (streams, laps and zone times), version 11 the food-database mirror, version 12
 stores the Garmin collection as one keyed row per element instead of one large
 `garmin_snapshot` value, version 13 adds the maximum speed of each lap, and
@@ -52,7 +52,7 @@ workout-library entries, competitions, staged Coach plans and adaptive previews)
 `starts_at_local` and `planned_duration_s` instead of the Intervals.icu fields
 `start_date_local` and `moving_time`, and version 17 stores the Intervals.icu
 cycling power curve (best power per duration with its day and activity, plus the
-status and window of the latest fetch) as canonical rows. A version 16 to 18 database or backup is
+status and window of the latest fetch) as canonical rows. A version 16 to 19 database or backup is
 upgraded to it in place within one transaction, and a failed upgrade leaves it
 unchanged. The version 16 schema uses the neutral start and duration fields;
 the change history is not rewritten, so earlier changes stay undoable, and recorded Intervals.icu sync
@@ -65,6 +65,8 @@ profile shows it again once the canonical backfill has projected it.
 Version 18 records the session-RPE rating time. Version 19 names local planned
 load and intensity `planned_load` and `planned_intensity` and the frozen target
 FTP basis `ftp`; the Intervals.icu adapter retains its provider wire names.
+Version 20 adds the favorite flag of saved products; every existing product
+starts as no favorite.
 
 Schema version 9 stores sports in the canonical vocabulary (`sport` such as `ride`, `run` or `strength`, plus `environment` and, for text without a canonical sport, a lossless `sport_detail`) for equipment, competitions, the workout library and planned units. The HTTP API and coach tools keep accepting the previous Intervals.icu-style tokens (for example `VirtualRide` becomes `ride` + `virtual`), and Intervals.icu payloads are unchanged because only the Intervals.icu adapter maps canonical values back to its activity types. Likewise only that adapter maps `starts_at_local` and `planned_duration_s` to the Intervals.icu event and workout fields, and Coach tools take `starts_at_local` and `planned_duration_s` as well.
 
@@ -84,7 +86,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 - **Request-Specific Context Projection**: Compact daily, activity and dialogue windows for routine turns; detailed local context and additional tools are available on demand, with conservative fallback for continuations.
 - **Targeted Clarification Protocol**: Ambiguous coaching prompts generate a single, concrete clarification question stored locally across reloads and model switches until answered.
 - **Atomic Training Changesets**: Plan updates, session moves, and workout creations use transactional revision tracking and object hashes to prevent race conditions.
-- **Contextual Quick Actions**: Start buttons for the Morning Check-in and an "Analyse & Plan" menu: analyse the latest session, review progress over 2/4/8/12 weeks, evaluate the last training block ("Block auswerten": planned versus completed volume, intensity distribution, key sessions, performance trend including pace at a fixed heart-rate band on steady flat runs, and subjective signals, descriptive and read-only), plan the next week, plan a 2–4 week block, or adjust the current week to what happened. Each action carries its own request kind, so the server adds the matching context and a sourced training-science playbook (intensity distribution from the profile training model, hard/easy spacing, strength with endurance, taper) to that turn only. Plans may combine running, cycling and strength.
+- **Contextual Quick Actions**: Start buttons for the Morning Check-in and an "Analyse & Plan" menu: analyse the latest session (each interval against its planned target, recoveries, steadiness, and the comparison with comparable earlier sessions), review progress over 4/8/12 weeks or since the last test (one review that leads with performance at equal effort: output per heart beat of steady sessions and pace at a fixed heart-rate band, and names plan execution and subjective signals only as possible causes; descriptive and read-only), plan the next week, plan a 2–4 week block, or adjust the current week to what happened. Each action carries its own request kind, so the server adds the matching context and a sourced training-science playbook (intensity distribution from the profile training model, hard/easy spacing, strength with endurance, taper) to that turn only. Plans may combine running, cycling and strength, and schedule a run critical-speed test and a Zwift FTP ramp test about every 6 to 8 weeks; the Coach evaluates a test against the last one of the same protocol and recommends threshold updates without writing them.
 - **Intelligent Duplicate Resolution**: Automated inspection of dual-recorded workouts (e.g., Wahoo and Garmin cycling files) that designates canonical recordings while protecting against accidental cloud deletions.
 - **Structured Error Recovery**: Robust recovery from provider rate limits and transient network errors with transparent diagnostic reporting and safe rollback of incomplete actions.
 
@@ -537,7 +539,7 @@ Conversational turns are persisted in `coach_commands`; provider synchronization
 To optimize API token consumption and response latency, Intervals Coach uses a strictly bounded context projection rather than dumping entire databases into prompts:
 - **Request Profiles**: General coaching, today's training, activity analysis, weekly planning, plan edits, competition preparation, profile/check-in, provider sync and attachments select different projections. Selection is not an authorization decision.
 - **Activity Projection**: Routine turns include the newest completed activity per sport; planning and analysis retain up to five. Exact activity details remain available through the existing read tools.
-- **Planning Projection**: Routine turns include a three-day outlook and two recent days; weekly planning includes a 14-day outlook. The day-by-day planning view (recovery, illness/check-ins, weather, calendar markers) rides only on planning, morning check-in and today-training turns and carries calendar events once, in the external calendar section. Review kinds (progress, block) have no future horizon, a session analysis at most two days ahead, and a progress review no training-plan list. A typed planning request ("Plane meine nächste Woche", "Plane die nächsten 4 Wochen", "Passe die Woche an") gets the same planning brief and playbook as the matching quick action. Confirmed profile constraints, competitions and labeled current performance remain available; every omitted section stays loadable with `read_coach_context`. The request-size diagnostics log the selection name, request kind and per-section characters.
+- **Planning Projection**: Routine turns include a three-day outlook and two recent days; weekly planning includes a 14-day outlook. The day-by-day planning view (recovery, illness/check-ins, weather, calendar markers) rides only on planning, morning check-in and today-training turns and carries calendar events once, in the external calendar section. Review kinds (progress, block) have no future horizon, a session analysis at most two days ahead, and a progress review no training-plan list. A typed planning request ("Plane meine nächste Woche", "Plane die nächsten 4 Wochen", "Passe die Woche an") gets the same planning brief and playbook as the matching quick action. A typed review of one session ("Wie lief mein Intervalltraining?"), of progress ("Zeig mir meinen Fortschritt", "Werde ich fitter?") or of a block ("Bewerte meinen letzten Block") gets that review's playbook and keeps the sections the message itself asked for; questions about a period, recovery after a session, or advice keep their own selection. Confirmed profile constraints, competitions and labeled current performance remain available; every omitted section stays loadable with `read_coach_context`. The request-size diagnostics log the selection name, request kind and per-section characters.
 - **On-Demand Details**: `read_coach_context` loads selected omitted local sections without a provider refresh. Its output is bounded to 40,000 characters and marks incomplete results. Successful reads also expose remaining tools already permitted for the turn, without granting mutation or remote-write authorization.
 - **Conservative Fallback**: Pending requests, short continuations, explicit provider refresh/sync requests and long-range or explicitly dated planning retain full bounded context and tools. A clear topical request does not select full training context merely because it contains a pronoun such as "das" or "diese". The 120,000-character training-context cap, model selection, attachment handling and output-token limits remain unchanged.
 - **Refresh Follow-Ups**: After refresh results, the Coach rebuilds current data using the original request topic and attachment context. Existing tool receipts retain dialogue continuity without automatically expanding all training sections or tools.
@@ -618,7 +620,7 @@ When a database restore is initiated:
 2. The application enters an exclusive maintenance mode, rejecting new incoming API mutations with an HTTP 503 maintenance notice.
 3. Active background sync jobs and Coach turns are allowed to finish gracefully.
 4. If an active database exists, a timestamped pre-restore copy is saved beside it in `/data` using the name `intervals-coach.db.pre-restore-<timestamp>-<id>`. The restore is refused with HTTP 507 when `/data` lacks the free space for this copy, and a partial copy is deleted.
-5. The replacement database must have the current schema (version 19) or a supported released schema from version 16 onward; a version 16 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
+5. The replacement database must have the current schema (version 20) or a supported released schema from version 16 onward; a version 16 backup is upgraded on the staged copy during validation, and older, newer or unknown schemas are rejected unchanged. It must also pass SQLite integrity and foreign-key checks. Restored sessions are cleared before it is installed; failed validation rolls back the staged changes.
 6. If valid, the new database is swapped into place and the maintenance gate is lifted; if invalid, the original database is preserved without data loss. A storage failure during the copy or swap returns HTTP 507 (disk full) or 500 instead of a validation error and leaves the original database and its WAL files in place.
 
 ### Privacy Export & Data Purge
@@ -937,6 +939,22 @@ Run standard unit tests with temporary in-memory fixtures (mocking external prov
 ```powershell
 python -m unittest discover -s tests -v
 python -m compileall -q server.py backend tests
+```
+
+#### Changed-Test Selection
+Local runs can skip modules a change cannot affect. `--changed` compares the
+merge base with `--base` (default `origin/develop`), including uncommitted and
+untracked files, and runs only the test modules `tests/changed_tests.py` selects:
+modules whose file changed, that transitively import a changed module, or whose
+string literals name a changed path or module; a data file under `backend/`
+selects the tests of the module that names it. Imports reached only through
+`server.py` count only when `server.py`, `backend/http_api/`, or
+`backend/runtime/` changed. Changes under
+`backend/canonical/`, `backend/db/`, `tests/fixtures/`, the test harness, or
+dependency and build files run the full suite. CI always runs everything:
+```powershell
+python tests/run_tests.py --changed
+python tests/run_tests.py --changed --list
 ```
 
 #### Parallel Sharded CI Runner
@@ -1389,7 +1407,7 @@ Equipment and maintenance has its own More section, separate from Profile. Coach
 
 Calendar cards include a compact interval profile when explicit timed workout steps or current locally cached original samples are available. Width represents time, height represents intensity, and known zones supply colors. Recorded sample gaps remain empty; stale detail profiles are excluded. Zone limits follow the canonical zone configurations of the unit's sport (3 to 7 zones; indoor and virtual units use an indoor configuration when one exists) and fall back to the standard limits. Per metric, local zones valid on the unit's day win over the Intervals.icu sport settings; a sport without any canonical configuration still reads the synced sport settings. Absolute watt or bpm targets are colored as an estimate from the sport's FTP or LTHR and the card says so; without that threshold they use neutral colors. No provider requests are triggered by rendering the calendar.
 
-Die Ernährungsnavigation enthält Tagebuch, Verlauf, Body und Produkte. Der Verlauf zeigt 14 abgeschlossene Tage oder 12 Wochen bis gestern, mit Tageswerten beziehungsweise Wochendurchschnitten im Diagramm und einer aufklappbaren Tageswerttabelle. Fehlende Werte bleiben unbekannt; Summen und Durchschnitte nennen ihre Datenabdeckung. Body ist aus Analyse in den Ernährungsbereich verschoben. Das Erfassen eines lokalen Produkts erstellt einen bearbeitbaren Coach-Entwurf; es wird nichts automatisch gesendet oder gespeichert. Coach-Anfragen bleiben über die Hauptnavigation verfügbar.
+Die Ernährungsnavigation enthält Tagebuch, Verlauf, Body und Produkte. Der Verlauf zeigt 14 abgeschlossene Tage oder 12 Wochen bis gestern, mit Tageswerten beziehungsweise Wochendurchschnitten im Diagramm und einer aufklappbaren Tageswerttabelle. Fehlende Werte bleiben unbekannt; Summen und Durchschnitte nennen ihre Datenabdeckung. Body ist aus Analyse in den Ernährungsbereich verschoben. Im Tab „Produkte“ lassen sich gespeicherte Produkte mit dem Stern als Favorit markieren; Favoriten stehen oben in der Liste. „Verwenden“ fragt die Menge ab und ergänzt entweder die Coach-Nachricht (ein vorhandener Entwurf bleibt erhalten und wird um eine Zeile erweitert; es wird nichts automatisch gesendet) oder direkt ohne Coach eine bestehende Mahlzeit des gewählten Tages. Eine so ergänzte Mahlzeit wird zur Zusammensetzung aus ihren bisherigen Werten und dem Produkt, wobei die Nährwerte des Produkts zum Zeitpunkt der Ergänzung festgehalten werden. Coach-Anfragen bleiben über die Hauptnavigation verfügbar.
 
 Unter Profil → „Zonen & Schwellen“ lassen sich lokale Zonen für Radfahren, Laufen und Schwimmen je Messgröße (Leistung in % der FTP, Herzfrequenz in bpm mit LTHR und Maximum, Pace in % der Schwellenpace) und optional nur für Indoor-Einheiten speichern (`GET /api/zones`, `PUT /api/zones`). Die Werte des Anbieters bleiben daneben sichtbar; lokale Zonen gelten vorrangig, bleiben bei jeder Synchronisation, nach Neustart und Backup-Wiederherstellung erhalten und werden nie zu Intervals.icu übertragen. Der Coach sieht die jeweils geltenden Zonen mit ihrer Quelle. Ungültige Eingaben (zu wenige oder nicht aufsteigende Grenzen, unbekannte Einheiten) ändern nichts. Speichern und das bestätigte Entfernen (`PUT /api/zones/remove`) zeigen eine Quittung mit „Rückgängig“.
 

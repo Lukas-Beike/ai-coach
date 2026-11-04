@@ -61,7 +61,10 @@ class NutritionGetRoutes:
             return {"ok": True, "foods": meal_library.list_database_foods(term)}
         if barcode:
             return meal_library.lookup_product({"barcode": barcode})
-        return {"ok": True, "products": meal_library.list_products(query=term)}
+        return {
+            "ok": True,
+            "products": meal_library.list_products(query=term, favorites_first=True),
+        }
 
     def handle(self, handler: Any, path: str) -> bool:
         if path not in {
@@ -142,12 +145,14 @@ class NutritionPostRoutes:
             "/api/nutrition/yazio/check": self._check_yazio,
             NUTRITION_ENTRY_PATH: self._create,
             f"{NUTRITION_ENTRY_PATH}/delete": self._delete,
+            f"{NUTRITION_ENTRY_PATH}/add-product": self._add_product,
             "/api/nutrition/sync": self._sync,
             "/api/nutrition/refresh": self._refresh,
             NUTRITION_PRODUCTS_PATH: self._save_product,
             f"{NUTRITION_PRODUCTS_PATH}/lookup": self._lookup_product,
             f"{NUTRITION_PRODUCTS_PATH}/extract": self._extract_product,
             f"{NUTRITION_PRODUCTS_PATH}/archive": self._archive_product,
+            f"{NUTRITION_PRODUCTS_PATH}/favorite": self._favorite_product,
             f"{NUTRITION_PRODUCTS_PATH}/database/delete": self._forget_database_food,
         }
         route = routes.get(path)
@@ -164,6 +169,16 @@ class NutritionPostRoutes:
 
     def _create(self, handler: Any) -> None:
         entry = self._diary_service().log_meal(handler.read_json())
+        handler.send_json(200, {"ok": True, "entry": entry})
+
+    def _add_product(self, handler: Any) -> None:
+        payload = _read_object(handler)
+        entry = self._diary_service().add_product_to_meal(
+            str(payload.get("id") or ""),
+            str(payload.get("product_id") or ""),
+            payload.get("amount"),
+            str(payload.get("unit") or ""),
+        )
         handler.send_json(200, {"ok": True, "entry": entry})
 
     def _delete(self, handler: Any) -> None:
@@ -302,6 +317,13 @@ class NutritionPostRoutes:
                 str(payload.get("id") or "")
             ),
         )
+
+    def _favorite_product(self, handler: Any) -> None:
+        payload = _read_object(handler)
+        product = self._meal_library_service().set_product_favorite(
+            str(payload.get("id") or ""), payload.get("favorite")
+        )
+        handler.send_json(200, {"ok": True, "product": product})
 
     def _archive_product(self, handler: Any) -> None:
         payload = _read_object(handler)

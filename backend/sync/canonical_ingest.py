@@ -284,8 +284,16 @@ def ingest_plan(
                 power_curve_fetch=batch.power_curve_fetch,
             )
         )
+    for provider_activity_id in sorted(plan.withdrawn_activity_ids):
+        counters.deleted += canonical_store.mark_placeholder_deleted(
+            db,
+            provider,
+            record_kind=ACTIVITY_RECORD_KIND,
+            provider_activity_id=provider_activity_id,
+            now=stamp,
+        )
     if deletion_window is not None:
-        counters.deleted = canonical_store.mark_missing_deleted(
+        counters.deleted += canonical_store.mark_missing_deleted(
             db,
             provider,
             record_kind=ACTIVITY_RECORD_KIND,

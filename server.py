@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from contextlib import AbstractContextManager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from http.server import (
     BaseHTTPRequestHandler,  # noqa: F401 - compatibility export for tests
@@ -258,6 +258,8 @@ from backend.planning.assembly import (
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.planning.leg_strength import strength_expected
 from backend.planning.plan_guard_service import (
+    LAST_TEST_DAYS,
+    BriefHistory,
     PlanGuardService,
     read_completed,
     read_lessons,
@@ -476,7 +478,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.39"
+APP_VERSION = "1.13.40"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -1501,6 +1503,11 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
             workout_library_service=PLANNING_DATA.workout_library,
             planned_unit_service=PLANNING_DATA.planned_unit,
+            unit_thresholds=lambda: PlannedUnitEstimator(
+                database_manager=database_manager,
+                observation_reader=lambda: CANONICAL_READ,
+                zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+            ),
             change_history_service=HISTORY.change_history_service,
             competition_service=PLANNING_DATA.competition,
             training_plan_service=PLANNING_DATA.training_plan,
@@ -1747,7 +1754,20 @@ def _plan_guard_service() -> PlanGuardService:
             ATHLETE_CLOCK.now().date(),
         ),
         calendar_events=lambda: EXTERNAL_CALENDAR.reader().list_events_in_window(56),
-        lessons=lambda: read_lessons(_block_lessons),
+        history=BriefHistory(
+            lessons=lambda: read_lessons(_block_lessons),
+            recent_units=lambda: PLANNING_DATA.planned_unit().list(
+                1000,
+                future_only=True,
+                since=ATHLETE_CLOCK.now().date() - timedelta(days=LAST_TEST_DAYS),
+            ),
+            recent_completed=lambda: read_completed(
+                database_manager(),
+                CANONICAL_READ,
+                ATHLETE_CLOCK.now().date(),
+                days=LAST_TEST_DAYS,
+            ),
+        ),
     )
 
 

@@ -81,10 +81,10 @@ provider-keyed.
 | POST | `/api/privacy/delete`, `/api/privacy/restore` | Delete or restore privacy data | CSRF |
 | POST | `/api/logs/delete`, `/api/diagnostics/delete` | Clear diagnostics data | CSRF |
 | POST | `/api/equipment/maintenance` | Record equipment maintenance | CSRF |
-| POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/sync` | Write, delete or synchronize nutrition entries | CSRF |
+| POST | `/api/nutrition/entry`, `/api/nutrition/entry/delete`, `/api/nutrition/entry/add-product`, `/api/nutrition/sync` | Write, delete or synchronize nutrition entries, or add a saved product to a logged meal | CSRF |
 | POST | `/api/nutrition/yazio/check` | Explicitly check Yazio authentication and record an in-memory result | CSRF |
 | POST | `/api/providers/{id}/check` | Explicitly run one bounded read-only connection check for an OpenAI, Intervals.icu, Garmin, Wahoo or Open-Meteo provider and record an in-memory result | CSRF |
-| POST | `/api/nutrition/products`, `/api/nutrition/products/lookup`, `/api/nutrition/products/extract`, `/api/nutrition/products/archive`, `/api/nutrition/products/database/delete` | Save, look up, extract or archive products, or forget a food database entry | CSRF |
+| POST | `/api/nutrition/products`, `/api/nutrition/products/lookup`, `/api/nutrition/products/extract`, `/api/nutrition/products/archive`, `/api/nutrition/products/favorite`, `/api/nutrition/products/database/delete` | Save, look up, extract, archive or mark as favorite products, or forget a food database entry | CSRF |
 | POST | `/api/wahoo/connect`, `/api/wahoo/disconnect` | Start the Wahoo OAuth connection or disconnect Wahoo | CSRF |
 | POST | `/api/metric-export/preview` | Preview metric values for export without writing | CSRF |
 | POST | `/api/metric-export/execute` | Intervals.icu write: send the confirmed metric selection | CSRF |

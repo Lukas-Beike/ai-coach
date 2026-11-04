@@ -1,0 +1,248 @@
+"""One session's execution against comparable earlier sessions."""
+
+from __future__ import annotations
+
+import unittest
+from datetime import date
+from typing import Any
+
+from session_stream_support import synthetic_session
+
+from backend.performance.comparable_sessions import (
+    comparable_sessions,
+    equal_effort_trend,
+)
+from backend.performance.session_execution import (
+    comparison_metrics,
+    session_execution,
+)
+
+
+def _easy(
+    output: int, heart: int, drift: int = 3, seconds: int = 3000
+) -> dict[str, Any]:
+    return {
+        "structure": "continuous",
+        "output_unit": "s/km",
+        "main_part_s": seconds,
+        "output": output,
+        "heart_rate_avg": heart,
+        "heart_rate_change_bpm": drift,
+        "cadence": 170,
+    }
+
+
+def _row(day: str, summary: dict[str, Any] | None, **fields: Any) -> dict[str, Any]:
+    return {
+        "fingerprint": None if summary is None else f"curve-{day}",
+        "activity_id": f"act_{day}",
+        "date": day,
+        "sport": fields.get("sport", "run"),
+        "environment": fields.get("environment", "outdoor"),
+        "name": "Easy",
+        "avg_temp_c": fields.get("temp", 12.0),
+        "execution_summary": summary,
+    }
+
+
+class ComparableSessionsTests(unittest.TestCase):
+    def test_easy_runs_compare_with_the_median_of_their_peers(self) -> None:
+        records = [
+            _row("2026-11-03", _easy(330, 140, drift=2), temp=8.0),
+            _row("2026-10-27", _easy(340, 145)),
+            _row("2026-10-20", _easy(345, 146)),
+            _row("2026-10-13", _easy(350, 148)),
+            _row("2026-10-06", _easy(352, 150), temp=24.0),
+        ]
+        result = comparable_sessions(records, "act_2026-11-03")
+        self.assertEqual(result["status"], "ok")
+        # The 150 bpm run lies outside the 8 bpm band around 140 bpm.
+        self.assertEqual(result["count"], 3)
+        self.assertEqual(result["median_of_peers"]["output"], 345)
+        self.assertEqual(result["difference"]["output"], -15)
+        self.assertEqual(result["difference"]["heart_rate_avg"], -6)
+        self.assertEqual(result["this"]["avg_temp_c"], 8.0)
+        self.assertEqual(result["peers"][0]["date"], "2026-10-27")
+
+    def test_other_shapes_places_and_old_sessions_are_not_peers(self) -> None:
+        records = [
+            _row("2026-11-03", _easy(330, 140)),
+            _row("2026-10-30", _easy(340, 145), environment="indoor"),
+            _row("2026-10-29", _easy(340, 145), sport="ride"),
+            _row("2026-10-28", _easy(340, 145, seconds=6000)),
+            _row("2026-07-01", _easy(340, 145)),
+            _row("2026-10-27", _easy(340, 145)),
+            _row("2026-11-05", _easy(340, 145)),
+        ]
+        result = comparable_sessions(records, "act_2026-11-03")
+        self.assertEqual(result["status"], "not_covered")
+        self.assertEqual(result["count"], 1)
+
+    def test_a_tempo_run_is_no_peer_of_easy_runs_and_doubtful_data_stays_out(
+        self,
+    ) -> None:
+        doubtful = _easy(340, 165)
+        doubtful["data_quality_ok"] = False
+        records = [
+            _row("2026-11-03", _easy(270, 165)),
+            _row("2026-10-27", _easy(330, 140)),
+            _row("2026-10-20", _easy(335, 142)),
+            _row("2026-10-13", _easy(332, 141)),
+            _row("2026-10-06", doubtful),
+        ]
+        result = comparable_sessions(records, "act_2026-11-03")
+        self.assertEqual(result["status"], "not_covered")
+        self.assertEqual(result["count"], 0)
+
+    def test_interval_sessions_need_similar_reps(self) -> None:
+        def reps(count: int, seconds: int, output: int) -> dict[str, Any]:
+            return {
+                "structure": "interval",
+                "output_unit": "s/km",
+                "rep_count": count,
+                "median_rep_s": seconds,
+                "rep_output_mean": output,
+                "heart_rate_end_mean": 170,
+                "recovery_drop_mean": 25,
+                "first_to_last_change_pct": -2.0,
+            }
+
+        records = [
+            _row("2026-11-03", reps(5, 180, 240)),
+            _row("2026-10-27", reps(6, 180, 245)),
+            _row("2026-10-20", reps(5, 200, 248)),
+            _row("2026-10-13", reps(4, 170, 250)),
+            _row("2026-10-06", reps(10, 60, 220)),
+        ]
+        result = comparable_sessions(records, "act_2026-11-03")
+        self.assertEqual(result["count"], 3)
+        self.assertEqual(result["difference"]["rep_output_mean"], -8)
+
+    def test_doubtful_own_data_and_missing_streams_say_why(self) -> None:
+        doubtful = _easy(330, 140)
+        doubtful["data_quality_ok"] = False
+        records = [_row("2026-11-03", doubtful)] + [
+            _row(day, _easy(340, 142))
+            for day in ("2026-10-27", "2026-10-20", "2026-10-13")
+        ]
+        result = comparable_sessions(records, "act_2026-11-03")
+        self.assertEqual(result["status"], "not_covered")
+        self.assertIn("zweifelhaft", result["reason"])
+        missing = comparable_sessions([_row("2026-11-03", None)], "act_2026-11-03")
+        self.assertIn("voller Auflösung", missing["reason"])
+
+    def test_peers_name_their_stream_source(self) -> None:
+        summaries = [_easy(330, 140)] + [_easy(340, 142) for _ in range(3)]
+        for summary, source in zip(
+            summaries, ("Garmin", "Wahoo", "Garmin", "Garmin"), strict=True
+        ):
+            summary["source"] = source
+        days = ("2026-11-03", "2026-10-27", "2026-10-20", "2026-10-13")
+        records = [
+            _row(day, summary) for day, summary in zip(days, summaries, strict=True)
+        ]
+        result = comparable_sessions(records, "act_2026-11-03")
+        self.assertEqual(result["this"]["source"], "Garmin")
+        self.assertEqual(result["peers"][0]["source"], "Wahoo")
+
+    def test_a_session_without_execution_is_not_covered(self) -> None:
+        result = comparable_sessions([_row("2026-11-03", None)], "act_2026-11-03")
+        self.assertEqual(result["status"], "not_covered")
+
+
+class EqualEffortTrendTests(unittest.TestCase):
+    def _rides(self, days: list[str], watts: int, heart: int) -> list[dict[str, Any]]:
+        return [
+            _row(
+                day,
+                {
+                    "structure": "continuous",
+                    "output_unit": "W",
+                    "data_quality_ok": True,
+                    "main_part_s": 3600,
+                    "output": watts,
+                    "heart_rate_avg": heart,
+                },
+                sport="ride",
+            )
+            for day in days
+        ]
+
+    def test_more_watts_at_the_same_heart_rate_is_a_positive_change(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        records += self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 210, 140)
+        trend = equal_effort_trend(
+            records, date(2026, 8, 31), date(2026, 10, 5), date(2026, 11, 2)
+        )
+        outdoor = trend["ride"]["outdoor"]
+        self.assertEqual(outdoor["status"], "ok")
+        self.assertEqual(outdoor["change_pct"], 5.0)
+        self.assertFalse(outdoor["effort_differs"])
+        self.assertEqual(trend["run"]["outdoor"]["status"], "not_covered")
+
+    def test_rides_without_power_and_other_sports_are_left_out(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        for row in self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 30, 140):
+            row["execution_summary"]["output_unit"] = "km/h"
+            records.append(row)
+        trend = equal_effort_trend(
+            records,
+            date(2026, 8, 31),
+            date(2026, 10, 5),
+            date(2026, 11, 2),
+            sports=("ride",),
+        )
+        self.assertEqual(trend["ride"]["outdoor"]["status"], "not_covered")
+        self.assertNotIn("run", trend)
+
+    def test_a_change_of_stream_source_is_named(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        later = self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 210, 140)
+        for row in records:
+            row["execution_summary"]["source"] = "Garmin"
+        for row in later:
+            row["execution_summary"]["source"] = "Wahoo"
+        outdoor = equal_effort_trend(
+            records + later, date(2026, 8, 31), date(2026, 10, 5), date(2026, 11, 2)
+        )["ride"]["outdoor"]
+        self.assertEqual(["Garmin"], outdoor["earlier"]["sources"])
+        self.assertTrue(outdoor["sources_differ"])
+
+    def test_a_different_effort_is_named(self) -> None:
+        records = self._rides(["2026-09-01", "2026-09-08", "2026-09-15"], 200, 140)
+        records += self._rides(["2026-10-06", "2026-10-13", "2026-10-20"], 240, 155)
+        outdoor = equal_effort_trend(
+            records, date(2026, 8, 31), date(2026, 10, 5), date(2026, 11, 2)
+        )["ride"]["outdoor"]
+        self.assertTrue(outdoor["effort_differs"])
+
+
+class ComparisonMetricsTests(unittest.TestCase):
+    def test_continuous_and_interval_summaries(self) -> None:
+        easy = session_execution(
+            synthetic_session([("lap", 3600, 3.0, (135.0, 150.0))], kinds=False)
+        )
+        metrics = comparison_metrics(easy)
+        assert metrics is not None
+        self.assertEqual(metrics["structure"], "continuous")
+        self.assertEqual(metrics["output"], 333)
+        self.assertEqual(metrics["main_part_s"], 3000)
+        segments: list[tuple[str, int, float, tuple[float, float]]] = [
+            ("warmup", 600, 3.0, (120.0, 130.0))
+        ]
+        for _ in range(4):
+            segments += [
+                ("work", 180, 4.5, (150.0, 170.0)),
+                ("recovery", 90, 2.5, (170.0, 140.0)),
+            ]
+        intervals = comparison_metrics(session_execution(synthetic_session(segments)))
+        assert intervals is not None
+        self.assertEqual(intervals["rep_count"], 4)
+        self.assertEqual(intervals["median_rep_s"], 180)
+        self.assertEqual(intervals["rep_output_mean"], 222)
+        self.assertEqual(intervals["heart_rate_end_mean"], 169)
+        self.assertIsNone(comparison_metrics({"status": "insufficient_data"}))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -56,7 +56,7 @@ from backend.performance.training_report import training_report
 
 # Analysis windows of the power and running profiles, shortest first.
 PROFILE_WINDOW_DAYS = (28, 90)
-PROGRESS_DAYS = frozenset({7, 28, 42, 84})
+PROGRESS_DAYS = frozenset({7, 28, 42, 56, 84})
 
 
 def report_sport(value: Any) -> str | None:
@@ -393,6 +393,15 @@ class TrainingProfileSelectionService:
         }
 
 
+@dataclass(frozen=True)
+class BlockReviewSource:
+    """The planning use cases the block review reads: the review and the last test."""
+
+    review: Callable[..., dict[str, Any]]
+    # Day of the last completed local test unit in the plan, for since_last_test.
+    last_test: Callable[[Mapping[str, Any] | None], str | None]
+
+
 class TrainingReportReadService:
     def __init__(
         self,
@@ -409,9 +418,9 @@ class TrainingReportReadService:
         now: Callable[[], datetime] | None = None,
         curve_records: Callable[[], list[dict[str, Any]]] | None = None,
         training_model: Callable[[], str] = lambda: "",
-        review_block: Callable[..., dict[str, Any]] | None = None,
+        block_review: BlockReviewSource | None = None,
     ) -> None:
-        self._review_block = review_block
+        self._block_review = block_review
         self._training_model = training_model
         self._curve_records = curve_records
         self._read_synced_at = read_synced_at
@@ -451,7 +460,7 @@ class TrainingReportReadService:
         *,
         with_curves: bool = True,
     ) -> dict[str, Any]:
-        """Weekly per-sport progress over whole ISO weeks (7, 28, 42 or 84 days).
+        """Weekly per-sport progress over whole ISO weeks (7, 28, 42, 56 or 84 days).
 
         ``with_curves=False`` skips the mean-max curve read for callers that
         never use it.
@@ -503,7 +512,9 @@ class TrainingReportReadService:
             and self._curve_records is not None
             and days >= 14
             and sport in {"all", "ride", "run"}
-            and start >= today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1)
+            # A window from a Monday up to six days before the curve window
+            # (a 12-week review on a Sunday) still reads it; those days miss.
+            and start >= today - timedelta(days=PROFILE_WINDOW_DAYS[-1] - 1 + 6)
             else None,
             observed_at=observed_at,
         )
@@ -516,9 +527,15 @@ class TrainingReportReadService:
         with_curves: bool = True,
     ) -> dict[str, Any]:
         """Planned versus completed over a block; default: the last 4 whole weeks."""
-        if self._review_block is None:
+        if self._block_review is None:
             raise AppError(503, "Die Blockauswertung ist nicht verfügbar.")
         today = self._today()
+        plan = self._read_plan()
+        if values.get("since_last_test") is True:
+            values = {
+                **values,
+                **_since_last_test(self._block_review.last_test(plan), today),
+            }
         days = values.get("days") or 28
         weeks = days // 7 if isinstance(days, int) else 4
         window = {
@@ -529,9 +546,9 @@ class TrainingReportReadService:
         }
         progress = self.progress(window, timezone, with_curves=with_curves)
         summaries, _ = activity_summaries_with_sync_time(self._canonical)
-        return self._review_block(
+        return self._block_review.review(
             progress=progress,
-            plan=self._read_plan(),
+            plan=plan,
             checkins=self._read_checkins(),
             summaries=summaries,
             activity_feedback=self._read_feedback(),
@@ -665,6 +682,23 @@ class TrainingReportServices:
     timezone: Callable[[], str]
 
 
+def _since_last_test(last_test: str | None, today: date) -> dict[str, Any]:
+    """Window from the Monday of the last test's week, the shortest reaching today.
+
+    Without a known test, or with one older than 84 days, the review covers the
+    last 8 or 12 whole weeks instead.
+    """
+    if last_test is None:
+        return {"days": 56}
+    monday = date.fromisoformat(last_test) - timedelta(
+        days=date.fromisoformat(last_test).weekday()
+    )
+    for days in (28, 56, 84):
+        if monday + timedelta(days=days) > today:
+            return {"start": monday.isoformat(), "days": days}
+    return {"days": 84}
+
+
 def summary_fields(summary: Mapping[str, Any]) -> dict[str, Any]:
     """Session fields every analysis row takes from its canonical summary."""
     sport = summary.get("sport")
@@ -696,6 +730,8 @@ def _curve_record(
         "power_profile": {} if curve is None else curve.power,
         "running_profile": {} if curve is None else curve.running,
         "pace_at_hr_profile": {} if curve is None else curve.pace_at_hr,
+        "execution_summary": None if curve is None else curve.execution_summary,
+        "avg_temp_c": summary.get("avg_temp_c"),
         "fingerprint": None if curve is None else curve.fingerprint,
     }
 

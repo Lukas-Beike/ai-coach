@@ -1,0 +1,194 @@
+"""Changed-test selection: affected modules in, unrelated modules out."""
+
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import changed_tests
+
+FILES = {
+    "server.py": "import backend.app.wiring\nimport backend.http_api.routes\n",
+    "README.md": "",
+    "backend/__init__.py": "",
+    "backend/app/__init__.py": "",
+    "backend/app/wiring.py": "from . import engine\n",
+    "backend/app/engine.py": "DATA = 'data.json'\n",
+    "backend/app/data.json": "{}",
+    "backend/http_api/__init__.py": "",
+    "backend/http_api/routes.py": "",
+    "backend/other.py": "VALUE = 2\n",
+    "public/app.js": "",
+    "tools/__init__.py": "",
+    "tools/helper.py": "",
+    "tests/fake_support.py": "from backend.app.engine import DATA\n",
+    "tests/test_engine.py": "from backend.app.engine import DATA\n",
+    "tests/test_via_support.py": "import fake_support\n",
+    "tests/test_other.py": "from backend import other\n",
+    "tests/test_app_wide.py": "import server\n",
+    "tests/test_patch.py": "PATCH = 'backend.other.VALUE'\n",
+    "tests/test_frontend_text.py": "ASSET = 'public/app.js'\n",
+    "tests/test_scan.py": "from pathlib import Path\n"
+    "FILES = Path('backend').rglob('*.py')\n",
+    "tests/test_named_dir.py": "NAME = 'backend'\n",
+    "tests/test_docs.py": "DOC = 'README.md'\n",
+    "tests/test_tool.py": "from tools import helper\n",
+    "tests/test_lazy.py": "def load():\n    from backend.app import old\n",
+}
+
+
+def _write_tree(root: Path) -> None:
+    for relative, text in FILES.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _isolate_git_config(case: unittest.TestCase) -> None:
+    """Keep global signing, hooks, and templates out of temporary repositories."""
+    patcher = mock.patch.dict(
+        os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    )
+    patcher.start()
+    case.addCleanup(patcher.stop)
+
+
+class SelectModulesTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        _write_tree(self.root)
+
+    def select(self, *paths):
+        modules, _reason = changed_tests.select_modules(list(paths), self.root)
+        return modules
+
+    def test_transitive_imports_and_support_modules_select_importers(self):
+        self.assertEqual(
+            set(self.select("backend/app/engine.py")),
+            {"test_engine", "test_via_support", "test_scan"},
+        )
+
+    def test_app_wide_tests_need_a_composition_root_change(self):
+        self.assertNotIn("test_app_wide", self.select("backend/app/wiring.py"))
+        self.assertIn("test_app_wide", self.select("server.py"))
+        self.assertIn("test_app_wide", self.select("backend/http_api/routes.py"))
+
+    def test_package_init_runs_for_every_submodule_import(self):
+        self.assertIn("test_engine", self.select("backend/app/__init__.py"))
+
+    def test_data_file_selects_tests_of_the_module_that_names_it(self):
+        self.assertIn("test_engine", self.select("backend/app/data.json"))
+
+    def test_deleted_module_selects_its_lazy_importers(self):
+        self.assertEqual(
+            set(self.select("backend/app/old.py")), {"test_lazy", "test_scan"}
+        )
+
+    def test_root_documents_and_tool_modules_select_their_tests(self):
+        self.assertEqual(set(self.select("README.md")), {"test_docs"})
+        self.assertEqual(set(self.select("tools/helper.py")), {"test_tool"})
+
+    def test_literals_select_patch_targets_and_named_paths(self):
+        self.assertEqual(
+            set(self.select("backend/other.py")),
+            {"test_other", "test_patch", "test_scan"},
+        )
+        self.assertEqual(set(self.select("public/app.js")), {"test_frontend_text"})
+
+    def test_bare_directory_name_counts_only_in_a_scanning_module(self):
+        selected = self.select("backend/app/engine.py")
+        self.assertIn("test_scan", selected)
+        self.assertNotIn("test_named_dir", selected)
+
+    def test_changed_test_selects_itself_and_unrelated_paths_select_nothing(self):
+        self.assertEqual(set(self.select("tests/test_other.py")), {"test_other"})
+        self.assertEqual(self.select("docs/notes.md"), {})
+
+    def test_full_suite_paths_and_unparsable_sources_select_everything(self):
+        modules, reason = changed_tests.select_modules(
+            ["backend/db/schema.py"], self.root
+        )
+        self.assertIsNone(modules)
+        self.assertIn("backend/db/", reason)
+        (self.root / "tests/test_broken.py").write_text("def (:\n", encoding="utf-8")
+        self.assertIsNone(self.select("backend/other.py"))
+
+    def test_full_suite_paths_name_existing_repository_paths(self):
+        root = changed_tests.ROOT
+        for prefix in changed_tests.FULL_SUITE_PATHS:
+            with self.subTest(prefix=prefix):
+                self.assertTrue(
+                    (root / prefix).exists() or list(root.glob(prefix + "*")), prefix
+                )
+
+    def test_repository_selection_is_narrower_than_the_suite(self):
+        modules, _reason = changed_tests.select_modules(
+            ["backend/nutrition/macro_ranges.py"]
+        )
+        self.assertIn("test_nutrition_macro_ranges", modules)
+        self.assertNotIn("test_fixture_standard_data", modules)
+
+
+class ChangedPathsTests(unittest.TestCase):
+    def setUp(self):
+        _isolate_git_config(self)
+
+    def test_runner_reports_an_unknown_base_instead_of_a_traceback(self):
+        runner = Path(changed_tests.__file__).with_name("run_tests.py")
+        result = subprocess.run(
+            [sys.executable, str(runner), "--changed", "--base", "refs/missing"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--changed cannot diff against refs/missing", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_runner_treats_a_suite_without_affected_tests_as_empty(self):
+        import run_tests
+
+        selection = ({"test_changed_tests": "changed"}, "1 module")
+        with (
+            mock.patch.object(
+                sys, "argv", ["run_tests.py", "--changed", "--suite", "container"]
+            ),
+            mock.patch.object(changed_tests, "changed_paths", return_value=["x.py"]),
+            mock.patch.object(changed_tests, "select_modules", return_value=selection),
+            mock.patch("sys.stdout"),
+        ):
+            self.assertEqual(run_tests.main(), 0)
+
+    def test_reports_committed_uncommitted_and_untracked_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _git(root, "init", "-q", "-b", "base")
+            _git(root, "config", "user.email", "test@example.invalid")
+            _git(root, "config", "user.name", "Test")
+            (root / "kept.py").write_text("", encoding="utf-8")
+            (root / "edited.py").write_text("", encoding="utf-8")
+            _git(root, "add", ".")
+            _git(root, "commit", "-q", "-m", "base")
+            _git(root, "switch", "-q", "-c", "work")
+            (root / "committed.py").write_text("", encoding="utf-8")
+            _git(root, "add", ".")
+            _git(root, "commit", "-q", "-m", "work")
+            (root / "edited.py").write_text("x = 1\n", encoding="utf-8")
+            (root / "new.py").write_text("", encoding="utf-8")
+            self.assertEqual(
+                changed_tests.changed_paths("base", root),
+                ["committed.py", "edited.py", "new.py"],
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

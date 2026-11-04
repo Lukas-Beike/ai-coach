@@ -19,6 +19,14 @@ NUTRITION = "nutrition.py"
 REGISTERED_ELSEWHERE = {
     # Built from the nutrition path constants.
     "/api/nutrition/entry/delete": (NUTRITION, 'f"{NUTRITION_ENTRY_PATH}/delete"'),
+    "/api/nutrition/entry/add-product": (
+        NUTRITION,
+        'f"{NUTRITION_ENTRY_PATH}/add-product"',
+    ),
+    "/api/nutrition/products/favorite": (
+        NUTRITION,
+        'f"{NUTRITION_PRODUCTS_PATH}/favorite"',
+    ),
     "/api/nutrition/products/lookup": (
         NUTRITION,
         'f"{NUTRITION_PRODUCTS_PATH}/lookup"',

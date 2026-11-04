@@ -1391,6 +1391,16 @@ class ServerFrontendTests(ServerTestCase):
         )
         self.assertIsNotNone(toast_error_rule)
         self.assertIn("color: var(--white);", toast_error_rule.group(1))
+        toast_rule = re.search(r"^\.toast \{([^}]*)\}", styles, re.MULTILINE)
+        self.assertIsNotNone(toast_rule)
+        transition = re.search(r"transition: ([^;]*);", toast_rule.group(1))
+        self.assertIsNotNone(transition)
+        self.assertEqual(
+            transition.group(1),
+            "transform .2s ease, opacity .2s ease, "
+            "background .2s ease, color .2s ease, box-shadow .2s ease, "
+            "bottom .2s ease",
+        )
         self.assertIn("toast-close", shared)
         self.assertNotIn("style.bottom", shared)
         self.assertIn("8000", shared)

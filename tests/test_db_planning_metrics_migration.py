@@ -139,6 +139,14 @@ class PlanningMetricsMigrationTests(unittest.TestCase):
         self.assertEqual(actual["target_snapshot"]["basis"], {"ftp": 250})
         self.assertEqual(actual["activity"], old)
 
+    def test_a_v19_database_keeps_its_records_untouched_by_the_rename(self):
+        db = self.database(19)
+        before = db.execute("SELECT payload FROM planned_units").fetchall()
+        migrations.migrate_schema(db)
+        self.assertEqual(
+            db.execute("SELECT payload FROM planned_units").fetchall(), before
+        )
+
     def test_failure_rolls_back_schema_and_data(self):
         db = self.database(18)
         before = list(db.iterdump())

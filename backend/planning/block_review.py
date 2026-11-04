@@ -61,6 +61,25 @@ def _plan_rows(
     ]
 
 
+def last_completed_test(plan: Mapping[str, Any] | None) -> str | None:
+    """Day of the last completed local planned unit with session_focus test.
+
+    A row with an unreadable date drops out, as in ``_on_weekday``.
+    """
+    days = []
+    for row in (plan or {}).get("training_calendar", []):
+        if row.get("is_completed_activity") or not _done(row):
+            continue
+        if _focus_of(row)[0] != "test":
+            continue
+        text = iso_date_prefix(str(row.get("starts_at_local") or row.get("date") or ""))
+        try:
+            days.append(date.fromisoformat(text))
+        except ValueError:
+            continue
+    return max(days).isoformat() if days else None
+
+
 def _done(row: Mapping[str, Any]) -> bool:
     return (row.get("compliance") or {}).get("status") == "completed"
 
@@ -216,7 +235,7 @@ def _performance(progress: Mapping[str, Any]) -> dict[str, Any]:
     pace = progress.get("pace_at_heart_rate")
     result = {
         key: progress[key]
-        for key in ("ctl", "eftp", "mean_max_power")
+        for key in ("ctl", "eftp", "mean_max_power", "equal_effort")
         if key in progress
     }
     if _pace_covered(pace):
@@ -453,6 +472,7 @@ def block_review(
         "intensity": _intensity(progress, training_model),
         "key_sessions": _key_sessions(rows),
         "performance": _performance(progress),
+        "last_test": last_completed_test(plan),
         "subjective": _subjective(
             progress,
             checkins,

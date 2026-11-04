@@ -15,6 +15,20 @@ from backend.planning.session_focus import session_focus
 from backend.planning.sport import planned_sport_environment
 
 LOCAL_PLAN = "local planned unit"
+TEST_EVALUATION = (
+    "Judge the execution first (even pacing, too fast a start, stopped early), "
+    "then compare with the previous test of the same protocol: find it with "
+    "list_recent_activities and read it with get_activity_details; without one "
+    "say there is no comparison. Critical-speed test: each effort's time, "
+    "distance and pace against the last test; power_profiles critical_power is a "
+    "separate 28-day estimate, not this test's result. Ramp test: the best 1-min "
+    "power in analysis.power_profile, even when erg_like; Zwift's FTP is about "
+    "75 % of it, a self-comparison. 30-min time trial: pace and average heart "
+    "rate of the last 20 min as a threshold estimate (McGehee 2005). Control "
+    "run: pace at the fixed heart rate against earlier control runs, with "
+    "temperature. Recommend updating FTP, threshold pace or zones in "
+    "Intervals.icu or Garmin only from a sound test; never write them."
+)
 
 
 def matched_focus(
@@ -39,13 +53,19 @@ def matched_focus(
     focus = session_focus(same[0])
     if focus.value is None:
         return _unknown("Die geplante Einheit hat kein Ziel.")
-    return {
+    matched = {
         "status": "matched",
         "session_focus": focus.value,
         "origin": focus.origin,
         "planned_unit_id": same[0].get("id"),
         "source": LOCAL_PLAN,
     }
+    # A test carries its own evaluation, so other analyses do not pay for it.
+    return (
+        {**matched, "test_evaluation": TEST_EVALUATION}
+        if focus.value == "test"
+        else matched
+    )
 
 
 def _unknown(reason: str) -> dict[str, Any]:

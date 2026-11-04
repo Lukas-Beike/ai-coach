@@ -32,9 +32,13 @@ The system SHALL preserve explicit instants and derive athlete-local days using 
 - **WHEN** a Wahoo workout has an unrecognized type identifier
 - **THEN** it maps to other sport and unknown environment rather than claiming a known activity type.
 
+#### Scenario: Trail runs since Garmin mapper version 10
+- **WHEN** a Garmin activity has type `trail_running` or `obstacle_run`, or an Intervals.icu activity has type `TrailRun`
+- **THEN** it maps to an outdoor run, the only outdoor run of those two providers, so the session analyses (decoupling, pace at heart rate) leave it out as a trail run; Wahoo outdoor runs stay ordinary runs, and treadmill and virtual runs count as flat for pace at heart rate (method `pace-at-heart-rate-v2`), never grade-adjusted by a course altitude.
+
 Detailed contract: Wahoo's naive `starts` SHALL be interpreted as UTC, and workout-local timezone metadata SHALL not replace the athlete timezone used for local dates.
 
-Evidence: `backend/canonical/local_time.py:localize_wall_time`, `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`; `tests/test_intervals_activity_mapping.py:test_aware_start_date_wins_over_local_wall_time`, `tests/test_intervals_activity_mapping.py:test_naive_start_date_alone_drops_the_record`, `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`, `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`.
+Evidence: `backend/canonical/local_time.py:localize_wall_time`, `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`, `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_TYPES`, `backend/performance/analysis_input.py:analysis_sport`, `backend/performance/pace_at_hr.py:pace_at_heart_rate`; `tests/test_garmin_activity_mapping.py:test_only_off_road_runs_are_outdoor_runs`, `tests/test_pace_at_hr.py:test_indoor_and_virtual_runs_ignore_course_altitude`, `tests/test_analysis_input.py:test_garmin_outdoor_runs_are_trail_runs`, `tests/test_pace_at_hr.py:test_outdoor_run_without_terrain_is_unknown_but_indoor_is_flat`, `tests/test_intervals_activity_mapping.py:test_aware_start_date_wins_over_local_wall_time`, `tests/test_intervals_activity_mapping.py:test_naive_start_date_alone_drops_the_record`, `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`, `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`.
 
 ### Requirement: Activity field and load semantics
 The system SHALL retain distinct moving and elapsed durations from every provider, distance in metres, power in watts, heart rate in bpm, ascent in metres, speed in metres per second, cadence in rpm, energy in kJ where mapped, and provider-specific load models. Intervals SHALL prefer moving time and average-watts aliases; Wahoo SHALL use summary active duration before total duration and never use planned workout minutes as completed duration.
@@ -42,6 +46,10 @@ The system SHALL retain distinct moving and elapsed durations from every provide
 #### Scenario: Planned versus completed Wahoo duration
 - **WHEN** a workout has planned minutes but no processed summary duration
 - **THEN** actual duration remains unknown rather than using the plan as a measurement.
+
+#### Scenario: Listed Wahoo workout without a recording
+- **WHEN** Wahoo lists a workout without any measured duration, distance, heart rate, power or TSS, such as an unprocessed copy or a loaded plan that was never recorded
+- **THEN** it is not stored as a completed activity and a copy stored earlier is tombstoned only when that copy holds no measured value either, so the calendar shows no extra activity; once a later sync brings its summary, the activity is stored or revived and linked as usual. A workout whose summary offers a recording file is a recording and is never withdrawn.
 
 #### Scenario: Elapsed duration beside moving duration
 - **WHEN** a Wahoo workout has both an active and a total duration, or a Garmin activity has `duration` and `movingTime`
@@ -57,7 +65,7 @@ The system SHALL retain distinct moving and elapsed durations from every provide
 
 Detailed contract: Wahoo work in joules SHALL convert to kJ; zero ascent remains measured, while zero unsupported/unmeasured summary power, cadence, energy, and TSS remain absent under its mapper rules.
 
-Evidence: `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/providers/wahoo_activity_mapping.py:map_wahoo_activities`; `tests/test_intervals_activity_mapping.py:test_moving_time_precedes_elapsed_time`, `tests/test_intervals_activity_mapping.py:test_zero_load_is_kept_with_the_intervals_model`, `tests/test_wahoo_activity_mapping.py:test_summary_metrics_map_from_decimal_text`, `tests/test_wahoo_activity_mapping.py:test_planned_minutes_are_never_the_duration`, `tests/test_garmin_activity_mapping.py:test_strength_duration_is_the_whole_session_not_the_active_timer`.
+Evidence: `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/providers/wahoo_activity_mapping.py:map_wahoo_activities`; `tests/test_intervals_activity_mapping.py:test_moving_time_precedes_elapsed_time`, `tests/test_intervals_activity_mapping.py:test_zero_load_is_kept_with_the_intervals_model`, `tests/test_wahoo_activity_mapping.py:test_summary_metrics_map_from_decimal_text`, `tests/test_wahoo_activity_mapping.py:test_planned_minutes_are_never_the_duration`, `tests/test_garmin_activity_mapping.py:test_strength_duration_is_the_whole_session_not_the_active_timer`, `backend/providers/canonical_plans.py:wahoo_ingest_plan`, `backend/sync/canonical_ingest.py:ingest_plan`, `tests/test_wahoo_activity_mapping.py:test_workouts_without_a_measured_value_are_withdrawn`, `tests/test_session_linking.py:test_a_stored_placeholder_is_withdrawn_and_revived_with_its_summary`, `tests/test_session_linking.py:test_a_stored_recording_listed_without_its_summary_is_kept`, `tests/test_wahoo_activity_mapping.py:test_a_workout_with_a_recording_file_is_never_withdrawn`.
 
 ### Requirement: Health and body unit normalization
 The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.

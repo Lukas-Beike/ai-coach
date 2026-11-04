@@ -430,6 +430,71 @@ class SummaryMetricTests(unittest.TestCase):
         self.assertNotIn("8.2", repr(record))
 
 
+class PlaceholderWorkoutTests(unittest.TestCase):
+    def test_workouts_without_a_measured_value_are_withdrawn(self) -> None:
+        # Wahoo lists an unprocessed copy and a loaded, never recorded plan
+        # without a summary, or with a summary that holds no duration yet.
+        workouts = [
+            row(id=1),
+            row(id=2, workout_summary=None),
+            row(id=3, workout_summary={"distance_accum": "0.0"}),
+            row(id=4, workout_summary={"distance_accum": "9800"}),
+        ]
+        payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": workouts}
+
+        plan = wahoo_ingest_plan(payload, zone=UTC)
+
+        self.assertEqual(
+            ["1", "4"], [item.record.activity_id for item in plan.activities]
+        )
+        self.assertEqual(["1", "4"], [raw.source_record_id for raw in plan.raw_records])
+        self.assertEqual(frozenset({"2", "3"}), plan.withdrawn_activity_ids)
+        self.assertEqual(frozenset({"1", "2", "3", "4"}), plan.present_activity_ids)
+        self.assertEqual(0, plan.skipped_invalid)
+
+    def test_a_workout_with_a_recording_file_is_never_withdrawn(self) -> None:
+        workout = row(
+            id=6,
+            workout_summary={
+                "file": {"url": "https://files.example.invalid/w.fit?sig=x"}
+            },
+        )
+        payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": [workout]}
+
+        plan = wahoo_ingest_plan(payload, zone=UTC)
+
+        self.assertEqual(frozenset(), plan.withdrawn_activity_ids)
+        self.assertEqual(["6"], [item.record.activity_id for item in plan.activities])
+
+    def test_an_empty_copy_never_replaces_a_recorded_copy_with_a_file(self) -> None:
+        summary = {
+            **row()["workout_summary"],
+            "file": {"url": "https://files.example.invalid/w.fit?sig=x"},
+        }
+        workouts = [row(id=7, workout_summary=summary), row(id=7, workout_summary=None)]
+        payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": workouts}
+
+        plan = wahoo_ingest_plan(payload, zone=UTC)
+
+        self.assertEqual(frozenset(), plan.withdrawn_activity_ids)
+        self.assertEqual(["7"], [item.record.activity_id for item in plan.activities])
+        self.assertIsNotNone(plan.activities[0].record.duration_s)
+        self.assertEqual(["7"], [raw.source_record_id for raw in plan.raw_records])
+
+    def test_a_recorded_copy_in_the_same_payload_is_never_withdrawn(self) -> None:
+        # Pages can shift while Wahoo processes a workout, so one id can be
+        # listed once with and once without its summary.
+        workouts = [row(id=5), row(id=5, workout_summary=None)]
+        payload = {"synced_at": "2026-10-12T08:00:00Z", "workouts": workouts}
+
+        plan = wahoo_ingest_plan(payload, zone=UTC)
+
+        self.assertEqual(frozenset(), plan.withdrawn_activity_ids)
+        self.assertEqual(["5"], [item.record.activity_id for item in plan.activities])
+        self.assertIsNotNone(plan.activities[0].record.duration_s)
+        self.assertEqual(["5"], [raw.source_record_id for raw in plan.raw_records])
+
+
 class StoredRawRecordTests(unittest.TestCase):
     def test_stored_raw_record_drops_the_summary_file_url_only(self) -> None:
         workout = row(
@@ -438,6 +503,7 @@ class StoredRawRecordTests(unittest.TestCase):
                     "url": "https://files.example.invalid/w.fit?sig=placeholder",
                     "name": "w.fit",
                 },
+                "duration_total_accum": "3600",
                 "calories_accum": "700",
                 "ascent_accum": "412.5",
             }
@@ -464,7 +530,9 @@ class StoredRawRecordTests(unittest.TestCase):
 
 
 class ReprojectionTests(unittest.TestCase):
-    def test_mapper_version_is_three_and_newer_than_the_stored_version_one(self) -> None:
+    def test_mapper_version_is_three_and_newer_than_the_stored_version_one(
+        self,
+    ) -> None:
         self.assertEqual(3, MAPPER_VERSION)
         self.assertEqual(3, reprojection_mapper_version("wahoo", "activity"))
 

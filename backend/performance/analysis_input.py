@@ -34,6 +34,7 @@ _STREAM_KEYS: tuple[tuple[StreamChannel, str], ...] = (
     (StreamChannel.ALTITUDE_M, "altitude"),
     (StreamChannel.GRADE_PCT, "grade_smooth"),
     (StreamChannel.MOVING, "moving"),
+    (StreamChannel.CADENCE_RPM, "cadence"),
 )
 
 
@@ -84,6 +85,10 @@ def analysis_input(
         "streams": stream_fields,
         "laps": lap_fields,
     }
+    if laps is not None and lap_fields:
+        detail = laps.chosen.stored.detail
+        if isinstance(detail, ActivityLapSet):
+            activity["lap_source"] = detail.lap_source.value
     return AnalysisInput(
         activity=activity,
         source_label=" / ".join(labels) if labels else _label(record.provenance),
@@ -91,18 +96,22 @@ def analysis_input(
     )
 
 
+_TRAIL_PROVIDERS = frozenset({ProviderId.INTERVALS, ProviderId.GARMIN})
+
+
 def analysis_sport(record: ActivityRecord) -> dict[str, Any]:
     """Return the canonical sport, environment and trail-run flag of a record.
 
-    Intervals.icu names its outdoor trail runs "TrailRun"; only those are
-    ``trail``, other sources' outdoor runs are not.
+    Intervals.icu ("TrailRun") and Garmin ("trail_running") map only trail
+    runs to an outdoor run, so those are ``trail``; Wahoo maps every outdoor
+    run as outdoor, so its runs are not.
     """
     return {
         "sport": record.sport.value,
         "environment": record.environment.value,
         "trail": record.sport is Sport.RUN
         and record.environment is Environment.OUTDOOR
-        and record.provenance.provider is ProviderId.INTERVALS,
+        and record.provenance.provider in _TRAIL_PROVIDERS,
     }
 
 
@@ -136,7 +145,7 @@ def _moving(value: float | None) -> bool | float | None:
 
 def _laps(
     laps: SetChoice | None, streams: MergedStreams | None
-) -> list[dict[str, float]]:
+) -> list[dict[str, Any]]:
     """Lap windows on the clock of the primary streams, or none when unalignable."""
     if laps is None:
         return []
@@ -150,6 +159,8 @@ def _laps(
         {
             "start_time": lap.start_offset_s + offset,
             "end_time": lap.end_offset_s + offset,
+            "kind": lap.kind.value,
+            "distance_m": lap.distance_m,
         }
         for lap in detail.laps
     ]

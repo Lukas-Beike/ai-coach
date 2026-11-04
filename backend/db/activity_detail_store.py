@@ -267,6 +267,29 @@ def full_stream_keys(
     count as its own. Sessions without such a set are absent. No sensor data is
     decoded, so a caller can tell whether a computed curve is still current.
     """
+    return _set_keys(
+        db,
+        activity_ids,
+        "d.detail_kind = ? AND d.resolution = ?",
+        (ActivityDetailKind.STREAMS.value, StreamResolution.FULL.value),
+    )
+
+
+def lap_set_keys(
+    db: Any, activity_ids: Iterable[str]
+) -> dict[str, tuple[FullStreamKey, ...]]:
+    """Return the keys of each session's lap sets, as ``full_stream_keys`` does."""
+    return _set_keys(
+        db, activity_ids, "d.detail_kind = ?", (ActivityDetailKind.LAPS.value,)
+    )
+
+
+def _set_keys(
+    db: Any,
+    activity_ids: Iterable[str],
+    kind_clause: str,
+    kind_values: tuple[str, ...],
+) -> dict[str, tuple[FullStreamKey, ...]]:
     ids = list(
         dict.fromkeys(activity_id for activity_id in activity_ids if activity_id)
     )
@@ -281,15 +304,14 @@ def full_stream_keys(
             "JOIN activity_records AS r ON r.provider = d.provider "
             "AND r.provider_activity_id = d.provider_activity_id "
             "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
-            "WHERE r.state = ? AND s.state <> ? AND d.detail_kind = ? "
-            f"AND d.resolution = ? AND (s.activity_id IN ({marks}) "
+            f"WHERE r.state = ? AND s.state <> ? AND {kind_clause} "
+            f"AND (s.activity_id IN ({marks}) "
             f"OR (s.state = ? AND s.merged_into IN ({marks})))",
             (
                 ActivitySessionState.DUPLICATE.value,
                 ActivityRecordState.ACTIVE.value,
                 ActivitySessionState.DELETED.value,
-                ActivityDetailKind.STREAMS.value,
-                StreamResolution.FULL.value,
+                *kind_values,
                 *chunk,
                 ActivitySessionState.DUPLICATE.value,
                 *chunk,
@@ -322,6 +344,25 @@ def full_stream_sets_for_session(db: Any, activity_id: str) -> list[StoredDetail
         (
             ActivityDetailKind.STREAMS.value,
             StreamResolution.FULL.value,
+            activity_id,
+            ActivitySessionState.DUPLICATE.value,
+            activity_id,
+            activity_id,
+            ActivitySessionState.DELETED.value,
+        ),
+    )
+
+
+def lap_sets_for_session(db: Any, activity_id: str) -> list[StoredDetailSet]:
+    """Return only the lap sets of ``detail_sets_for_session``."""
+    return _read_sets(
+        db,
+        "d.detail_kind = ? "
+        "AND (s.activity_id = ? OR (s.state = ? AND s.merged_into = ?)) "
+        "AND NOT EXISTS (SELECT 1 FROM activity_sessions AS owner "
+        "WHERE owner.activity_id = ? AND owner.state = ?)",
+        (
+            ActivityDetailKind.LAPS.value,
             activity_id,
             ActivitySessionState.DUPLICATE.value,
             activity_id,

@@ -320,6 +320,7 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "status",
         "provenance",
         "extraction_confidence",
+        "favorite",
         "created_at",
         "updated_at",
     },
@@ -654,7 +655,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 19
+CURRENT_SCHEMA_VERSION = 20
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -1185,6 +1186,13 @@ FEEDBACK_RATING_TIME_DDL = """
 """
 
 
+# Schema version 20: the athlete's favorite products, listed first. Existing
+# products stay no favorite (0).
+PRODUCT_FAVORITE_DDL = """
+    ALTER TABLE nutrition_products ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0 CHECK (favorite IN (0, 1))
+"""
+
+
 def execute_ddl(db: Any, ddl: str) -> None:
     """Run DDL statement by statement inside the caller's transaction.
 
@@ -1525,6 +1533,7 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, CANONICAL_EXTENSIONS_DDL)
     execute_ddl(db, POWER_CURVE_DDL)
     execute_ddl(db, FEEDBACK_RATING_TIME_DDL)
+    execute_ddl(db, PRODUCT_FAVORITE_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

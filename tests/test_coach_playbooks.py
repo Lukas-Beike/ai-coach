@@ -12,6 +12,7 @@ from unittest.mock import Mock
 from backend.coach import playbooks
 from backend.coach.context_selection import (
     REQUEST_KIND_SELECTIONS,
+    free_text_review_kind,
     select_coach_context,
 )
 from backend.coach.job_submission import CoachJobSubmissionService
@@ -46,6 +47,11 @@ BLOCK_WORD_BUDGETS = {
     "_PLAN_CHECK": 80,
     "_ADAPTIVE": 140,
     "_SESSION_CHECKS": 110,
+    # The execution and planned-target fields the session analysis reads.
+    "_SESSION_NUMBERS": 110,
+    # Test planning from planning_brief.last_tests (plan kinds only).
+    "_TESTS": 125,
+    "_ANSWER": 55,
     "_NUTRITION": 520,
 }
 TASK_WORD_BUDGET = 190
@@ -151,6 +157,81 @@ class PlaybookInjectionTests(unittest.TestCase):
         self.assertIn("season_phase", playbook_for("adjust_week"))
         self.assertIn("week-by-week rationale", playbook_for("plan_block"))
         self.assertNotIn("week-by-week rationale", playbook_for("plan_week"))
+
+    def test_review_kinds_share_the_answer_format_and_plain_language(self) -> None:
+        self.assertIn("explain a term like CTL, TSB or eFTP", COACH_PROMPT)
+        for kind in ("session_analysis", "progress_review", "block_review"):
+            with self.subTest(kind=kind):
+                self.assertIn(playbooks._ANSWER, playbook_for(kind))
+        for kind in ("plan_week", "plan_block", "adjust_week"):
+            self.assertNotIn(playbooks._ANSWER, playbook_for(kind))
+
+    def test_session_analysis_names_what_to_look_at_per_session_type(self) -> None:
+        text = playbook_for("session_analysis")
+        for marker in (
+            "by default the last one",
+            "warm-up and cool-down",
+            "decoupling at the same pace",
+            "strides or a progression are intended",
+            "reps holding or fading",
+            "heart-rate drop",
+            "Under about 2 minutes",
+            "load and intensity",
+            "sensor errors",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+
+    def test_session_analysis_reads_execution_and_planned_targets(self) -> None:
+        text = playbook_for("session_analysis")
+        for marker in (
+            "analysis.execution",
+            "planned_targets",
+            "erg_like",
+            "lap_pace",
+            "comparable_sessions",
+        ):
+            self.assertIn(marker, text)
+        self.assertNotIn(playbooks._SESSION_NUMBERS, playbook_for("progress_review"))
+
+    def test_progress_and_block_review_are_one_fitness_review(self) -> None:
+        review = playbook_for("progress_review")
+        self.assertEqual(review, playbook_for("block_review"))
+        for marker in (
+            "getting fitter",
+            "sections [block_review]",
+            "56 for 8",
+            "since_last_test true",
+            "equal_effort",
+            "only when they may explain missing progress",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, review)
+        self.assertNotIn("Pace at heart rate is not covered", review)
+
+    def test_plans_schedule_tests_and_analyses_judge_them(self) -> None:
+        for kind in ("plan_week", "plan_block"):
+            text = playbook_for(kind)
+            with self.subTest(kind=kind):
+                for marker in (
+                    "critical-speed test",
+                    "Zwift FTP ramp test",
+                    "6 to 8 weeks",
+                    "last 2 weeks before an A race",
+                    "control run",
+                    "30-min time trial",
+                ):
+                    self.assertIn(marker, text)
+        self.assertIn("planning_brief.last_tests", playbook_for("plan_week"))
+        self.assertIn("session_focus easy", playbook_for("plan_week"))
+        # A test's evaluation comes with its own session result, not every analysis.
+        self.assertNotIn(playbooks._TESTS, playbook_for("session_analysis"))
+        self.assertNotIn("about 75 %", playbook_for("session_analysis"))
+        # A ramp test reads power even when erg_like; its evaluation decides.
+        self.assertIn(
+            "unless focus.test_evaluation says otherwise",
+            playbook_for("session_analysis"),
+        )
 
     def test_adjust_week_playbook_guards_hard_days_and_writes(self) -> None:
         text = playbook_for("adjust_week")
@@ -266,6 +347,73 @@ class PlaybookInjectionTests(unittest.TestCase):
         self.assertEqual(selection.name, "plan_week")
 
 
+class FreeTextReviewKindTests(unittest.TestCase):
+    def test_typed_reviews_get_their_kind_and_playbook(self) -> None:
+        cases = {
+            "Analysiere meine letzte Einheit": "session_analysis",
+            "Wie lief mein Intervalltraining gestern?": "session_analysis",
+            "Wie war mein Tempolauf?": "session_analysis",
+            "Analysiere meinen Lauf vom 2.11.": "session_analysis",
+            "How was my ride?": "session_analysis",
+            "Analysiere die letzte Einheit des Blocks": "session_analysis",
+            "Analysiere meinen Lauf von letzter Woche Dienstag": "session_analysis",
+            "Zeig mir meinen Fortschritt": "progress_review",
+            "Analyze my last run against my plan": "session_analysis",
+            "Wie lief meine letzte Einheit im Vergleich zum Plan?": "session_analysis",
+            "Wie ist mein Fortschritt?": "progress_review",
+            "Werde ich fitter?": "progress_review",
+            "Bewerte meinen letzten Block": "block_review",
+        }
+        for message, kind in cases.items():
+            with self.subTest(message=message):
+                self.assertEqual(free_text_review_kind(message), kind)
+                self.assertEqual(select_coach_context(message, {}).kind, kind)
+
+    def test_other_messages_keep_their_selection(self) -> None:
+        for message in (
+            "Analysiere den Verlauf meiner HRV",
+            "Analysiere meine Läufe der letzten Woche",
+            "Wie war meine Woche?",
+            "Wie ist die Entwicklung meines Gewichts?",
+            "Analysiere meine letzte Einheit und plane darauf basierend morgen",
+            "Soll ich einen Progressionslauf machen?",
+            "Was ist ein Progressionslauf?",
+            "Wie werde ich fitter?",
+            "Wie ist die Entwicklung meiner HRV?",
+            "Wie war mein Schlaf nach der Einheit?",
+            "Wie war meine Erholung nach dem Intervalltraining?",
+            "Wie geht es meiner Erholung?",
+            "Ich habe 60g Whey getrunken",
+        ):
+            with self.subTest(message=message):
+                self.assertNotIn(
+                    select_coach_context(message, {}).kind,
+                    {"session_analysis", "progress_review", "block_review"},
+                )
+        self.assertEqual(
+            select_coach_context("Plane die nächste Woche", {}).kind, "plan_week"
+        )
+
+    def test_typed_review_keeps_what_the_message_asked_for(self) -> None:
+        weather = select_coach_context(
+            "How did my interval session go and what is the weather tomorrow?", {}
+        )
+        self.assertEqual(weather.kind, "session_analysis")
+        self.assertIn("weather", weather.sections)
+        saturday = select_coach_context(
+            "How did my interval session go and what's the weather on Saturday?", {}
+        )
+        self.assertEqual(saturday.kind, "session_analysis")
+        self.assertGreaterEqual(saturday.horizon_days or 0, 7)
+        self.assertIn("daily_planning_context", saturday.sections)
+        self.assertIsNone(
+            free_text_review_kind("Analysiere die Einheit und passe die Woche an")
+        )
+        dated = select_coach_context("Analysiere meinen Lauf vom 2.11.", {})
+        self.assertEqual(dated.kind, "session_analysis")
+        self.assertNotIn("planning_brief", dated.sections)
+
+
 class RequestKindSelectionTests(unittest.TestCase):
     def test_plan_kinds_load_plan_calendar_recovery_and_weather(self) -> None:
         for kind in ("plan_week", "plan_block"):
@@ -289,8 +437,9 @@ class RequestKindSelectionTests(unittest.TestCase):
     def test_review_and_analysis_kinds_load_what_they_need(self) -> None:
         progress = select_coach_context("x", {}, request_kind="progress_review")
         self.assertLessEqual({"planning", "recovery", "activities"}, progress.sections)
-        for dropped in ("training_plans", "daily_planning_context"):
-            self.assertNotIn(dropped, progress.sections)
+        # The one review dates a named plan or the last test from training_plans.
+        self.assertIn("training_plans", progress.sections)
+        self.assertNotIn("daily_planning_context", progress.sections)
         self.assertEqual(progress.horizon_days, 0)
         analysis = select_coach_context("x", {}, request_kind="session_analysis")
         self.assertEqual(analysis.name, "session_analysis")

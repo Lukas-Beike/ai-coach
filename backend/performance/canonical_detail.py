@@ -46,6 +46,7 @@ from backend.db.activity_detail_store import StoredDetailSet
 from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
+from backend.performance.session_execution import session_execution
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
@@ -216,6 +217,12 @@ class CanonicalDetailReader:
                 targets if isinstance(targets, dict) else None,
                 source_label=adapted.label_for(
                     "watts", "heartrate", "velocity_smooth", "laps"
+                ),
+            ),
+            "execution": session_execution(
+                adapted.activity,
+                source_label=adapted.label_for(
+                    "watts", "heartrate", "velocity_smooth", "cadence", "laps"
                 ),
             ),
             "aerobic": aerobic_analysis(

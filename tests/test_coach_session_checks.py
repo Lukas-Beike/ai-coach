@@ -66,6 +66,19 @@ class FocusTests(unittest.TestCase):
             focus,
         )
 
+    def test_a_test_unit_brings_its_evaluation(self):
+        units = [_unit("2026-11-03", "run", session_focus="test")]
+        focus = _result(_service("run", units))["focus"]
+        self.assertEqual("test", focus["session_focus"])
+        for marker in (
+            "previous test of the same protocol",
+            "about 75 %",
+            "never write them",
+        ):
+            self.assertIn(marker, focus["test_evaluation"])
+        easy = [_unit("2026-11-03", "run", session_focus="easy")]
+        self.assertNotIn("test_evaluation", _result(_service("run", easy))["focus"])
+
     def test_focus_is_unknown_without_a_matching_unit(self):
         for units in (None, [], [_unit("2026-11-03", "ride", session_focus="easy")]):
             with self.subTest(units=units):
@@ -146,6 +159,61 @@ class StrengthAndPaceTests(unittest.TestCase):
         service = _service("run", [], [summary], [], started="2026-09-17T08:00:00")
         _result(service)
         service._report_services.profiles.curve_records.assert_called_once()
+
+
+def _easy(day, activity_id, output):
+    return {
+        "fingerprint": f"curve-{activity_id}",
+        "activity_id": activity_id,
+        "date": day,
+        "sport": "ride",
+        "environment": "outdoor",
+        "execution_summary": {
+            "structure": "continuous",
+            "output_unit": "W",
+            "data_quality_ok": True,
+            "main_part_s": 3000,
+            "output": output,
+            "heart_rate_avg": 140,
+        },
+    }
+
+
+class ComparableSessionsCheckTests(unittest.TestCase):
+    def test_rides_compare_with_their_peers_from_the_curves_read_once(self):
+        summary = {"id": "act_1", "record_ids": {"intervals": "i1"}}
+        records = [
+            _easy("2026-11-03", "i1", 210),
+            _easy("2026-10-27", "i2", 200),
+            _easy("2026-10-20", "i3", 198),
+            _easy("2026-10-13", "i4", 202),
+        ]
+        service = _service("ride", [], [summary], records)
+        result = _result(service)["comparable_sessions"]
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(10, result["difference"]["output"])
+        self.assertFalse(result["window_truncated"])
+        service._report_services.profiles.curve_records.assert_called_once()
+
+    def test_an_older_session_names_its_cut_window(self):
+        summary = {"id": "act_1", "record_ids": {"intervals": "i1"}}
+        records = [_easy("2026-09-17", "i1", 210)]
+        service = _service(
+            "ride", [], [summary], records, started="2026-09-17T08:00:00"
+        )
+        result = _result(service)["comparable_sessions"]
+        self.assertEqual("not_covered", result["status"])
+        self.assertTrue(result["window_truncated"])
+        self.assertLess(result["window_days"], 84)
+
+    def test_unknown_session_or_old_session_say_why(self):
+        missing = _result(_service("ride", [], [], []))["comparable_sessions"]
+        self.assertIn("nicht verfügbar", missing["reason"])
+        summary = {"id": "act_1", "record_ids": {"intervals": "i1"}}
+        old = _result(
+            _service("ride", [], [summary], [], started="2026-07-01T08:00:00")
+        )["comparable_sessions"]
+        self.assertIn("außerhalb", old["reason"])
 
 
 if __name__ == "__main__":

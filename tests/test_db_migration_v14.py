@@ -64,7 +64,7 @@ class YazioSourceMigrationTests(unittest.TestCase):
             db.execute(PRODUCT, ("p3", None, "Skyr", "yazio", STAMP, STAMP))
 
     def test_every_supported_schema_upgrades_keeping_rows_and_accepting_yazio(self):
-        for version in (16, 17, 18):
+        for version in (16, 17, 18, 19):
             with self.subTest(version=version):
                 db = self.connect(version)
                 products = self.rows(db, "nutrition_products")
@@ -76,7 +76,11 @@ class YazioSourceMigrationTests(unittest.TestCase):
                     db.execute("PRAGMA user_version").fetchone()[0],
                     CURRENT_SCHEMA_VERSION,
                 )
-                self.assertEqual(self.rows(db, "nutrition_products"), products)
+                # The upgrade appends the favorite flag, 0 for every product.
+                self.assertEqual(
+                    self.rows(db, "nutrition_products"),
+                    [(*row, 0) for row in products],
+                )
                 if version >= 11:
                     self.assertEqual(self.rows(db, "food_database_entries"), mirror)
                 self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])

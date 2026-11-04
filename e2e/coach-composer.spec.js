@@ -96,7 +96,7 @@ test("analysis and plan menu sends the chosen period with its request kind @resp
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("menuitem", { name: "Einheit analysieren" })).toBeFocused();
   await page.keyboard.press("ArrowDown");
-  await expect(page.getByRole("menuitem", { name: "Fortschritt 2 Wochen" })).toBeFocused();
+  await expect(page.getByRole("menuitem", { name: "Fortschritt 4 Wochen" })).toBeFocused();
   const target = await page.getByRole("menuitem", { name: "Plan 3 Wochen" }).boundingBox();
   expect(target.width).toBeGreaterThanOrEqual(44);
   expect(target.height).toBeGreaterThanOrEqual(44);

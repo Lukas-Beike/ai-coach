@@ -10,6 +10,9 @@ full run, for example inside the image used by run_sqlcipher_tests.ps1.
 
 ``--suite container`` runs only the container-sensitive modules named in
 CONTAINER_SUITE_PATTERNS. The default ``--suite all`` runs everything.
+``--changed`` keeps only the modules changed_tests.py finds affected by the
+diff against ``--base``; it falls back to the whole suite where that selector
+says so, and CI never uses it.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import json
 import os
 import platform
 import statistics
+import subprocess
 import sys
 import time
 import unittest
@@ -27,6 +31,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import changed_tests
 
 DURATIONS_FILE = Path(__file__).resolve().parent / "test_durations.json"
 
@@ -78,6 +84,19 @@ def discover_tests(directory: Path | None = None):
     if loader.errors:
         raise RuntimeError(
             "Test discovery failed:\n" + "\n".join(map(str, loader.errors))
+        )
+    return sorted(iter_tests(loaded), key=lambda test: test.id())
+
+
+def load_modules(names) -> list:
+    """Load only the named test modules, failing like discovery on import errors."""
+    loader = unittest.TestLoader()
+    loaded = unittest.TestSuite(
+        loader.loadTestsFromName(name) for name in sorted(names)
+    )
+    if loader.errors:
+        raise RuntimeError(
+            "Test loading failed:\n" + "\n".join(map(str, loader.errors))
         )
     return sorted(iter_tests(loaded), key=lambda test: test.id())
 
@@ -188,6 +207,16 @@ def parse_args() -> argparse.Namespace:
         help="'container' runs only the container-sensitive test modules",
     )
     parser.add_argument(
+        "--changed",
+        action="store_true",
+        help="run only modules affected by the diff against --base (local use)",
+    )
+    parser.add_argument(
+        "--base",
+        default="origin/develop",
+        help="ref whose merge base --changed compares against",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="list selected test IDs without executing them",
@@ -203,7 +232,9 @@ def parse_args() -> argparse.Namespace:
         parser.error(
             "--shard must be between 1 and --total, and --total must be positive"
         )
-    if args.record_durations and (args.total != 1 or args.suite != "all" or args.list):
+    if args.record_durations and (
+        args.total != 1 or args.suite != "all" or args.list or args.changed
+    ):
         parser.error("--record-durations needs the full suite in a single shard")
     return args
 
@@ -224,13 +255,38 @@ def main() -> int:
             write_result(args.result_json, evidence)
 
     save()
+    modules = None
+    if args.changed:
+        try:
+            paths = changed_tests.changed_paths(args.base)
+        except (OSError, subprocess.CalledProcessError) as error:
+            evidence["status"] = "selection_failed"
+            save()
+            raise SystemExit(f"--changed cannot diff against {args.base}: {error}")
+        modules, reason = changed_tests.select_modules(paths)
+        evidence.update(changed_paths=paths, changed_selection=reason)
+        print(f"Changed-test selection against {args.base}: {reason}", flush=True)
+        for module, why in sorted((modules or {}).items()):
+            print(f"  {module}: {why}", flush=True)
+        if modules == {}:
+            evidence["status"] = "empty"
+            save()
+            print("No Python tests are affected.")
+            return 0
     try:
-        discovered = discover_tests()
+        discovered = discover_tests() if modules is None else load_modules(modules)
     except Exception:
         evidence["status"] = "discovery_failed"
         save()
         raise
     tests = select_suite(discovered, args.suite)
+    if args.changed and not tests:
+        evidence.update(
+            status="empty", discovered_ids=[test.id() for test in discovered]
+        )
+        save()
+        print(f"No affected tests in suite {args.suite}.")
+        return 0
     selected = select_shard(tests, args.shard, args.total)
     evidence.update(
         discovered_ids=[test.id() for test in discovered],
