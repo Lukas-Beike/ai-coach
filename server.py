@@ -1501,6 +1501,11 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
             workout_library_service=PLANNING_DATA.workout_library,
             planned_unit_service=PLANNING_DATA.planned_unit,
+            unit_thresholds=lambda: PlannedUnitEstimator(
+                database_manager=database_manager,
+                observation_reader=lambda: CANONICAL_READ,
+                zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+            ),
             change_history_service=HISTORY.change_history_service,
             competition_service=PLANNING_DATA.competition,
             training_plan_service=PLANNING_DATA.training_plan,
