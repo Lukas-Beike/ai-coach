@@ -21,6 +21,7 @@ from backend.performance.morning_battery_service import MorningBatteryStore
 from backend.providers.garmin import merge_weight_snapshots
 from backend.sync.canonical_ingest import CanonicalIngestCounters
 from backend.sync.garmin_snapshot_writer import (
+    ANALYSIS_SOURCES,
     NUTRITION_SOURCES,
     GarminSnapshotWriter,
 )
@@ -129,6 +130,62 @@ class WriteTests(WriterFixture):
         self.writer.write(self.db, payload(activities=[]))
         state = self.db.execute("SELECT state FROM activity_records").fetchone()[0]
         self.assertEqual(state, "active")
+
+
+def garmin_activity(identifier: int) -> dict[str, Any]:
+    return {**payload()["activities"][0], "activityId": identifier}
+
+
+def activity_states(db: sqlite3.Connection) -> dict[str, str]:
+    return {
+        row["provider_activity_id"]: row["state"]
+        for row in db.execute(
+            "SELECT provider_activity_id, state FROM activity_records"
+        )
+    }
+
+
+class ActivityWindowTests(WriterFixture):
+    def refresh(self, ids: list[int], windows: dict[str, Any]) -> None:
+        self.writer.write_refresh(
+            self.db,
+            fetched_at=NOW,
+            sections={"activities": [garmin_activity(item) for item in ids]},
+            view={},
+            windows=windows,
+            allowed=ANALYSIS_SOURCES,
+        )
+
+    def test_a_complete_refresh_tombstones_the_activity_garmin_no_longer_returns(
+        self,
+    ) -> None:
+        window = {"activities": (date(2026, 10, 1), date(2026, 10, 10))}
+        self.refresh([1, 2], window)
+        self.refresh([1], window)
+        self.assertEqual(activity_states(self.db), {"1": "active", "2": "deleted"})
+
+    def test_an_incomplete_refresh_deletes_no_activity(self) -> None:
+        self.refresh([1, 2], {})
+        self.refresh([1], {})
+        self.assertEqual(activity_states(self.db), {"1": "active", "2": "active"})
+
+    def test_a_complete_sync_tombstones_the_activity_garmin_no_longer_returns(
+        self,
+    ) -> None:
+        sync = {
+            "errors": [],
+            "provider_sync": {
+                "read_window": {"start": "2026-10-01", "end": "2026-10-10"},
+                "pagination": {"activities": {"complete": True}},
+            },
+        }
+        both = [garmin_activity(1), garmin_activity(2)]
+        self.writer.write(self.db, payload(activities=both, **sync))
+        counters = self.writer.write(
+            self.db, payload(activities=[garmin_activity(1)], **sync)
+        )
+        self.assertEqual(counters.deleted, 1)
+        self.assertEqual(activity_states(self.db), {"1": "active", "2": "deleted"})
 
 
 class WeightWindowTests(WriterFixture):

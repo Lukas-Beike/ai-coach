@@ -4,10 +4,12 @@ The functions run inside the caller's unit of work, so the rows written here and
 the legacy snapshot write commit or roll back together. They return counters
 only and never commit or log provider content.
 
-Deletion rule: only a full, non-incremental Intervals.icu window marks missing
-activities deleted, and only inside that window. Partial or incremental fetches
-and historical fetches never delete. Garmin payloads are merged rather than
-replaced, so Garmin never deletes.
+Deletion rule: only a completely read activity list marks missing activities
+deleted, and only inside its window shrunk by one edge day: a full,
+non-incremental Intervals.icu window, a Garmin activity range read without
+failure or pause, or a fully paged Wahoo listing. Partial, failed, paused,
+truncated or incremental fetches and historical Intervals.icu fetches never
+delete.
 """
 
 from __future__ import annotations
@@ -25,11 +27,13 @@ from backend.db.canonical_store import ObservationScope, WriteOutcome
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
+    GARMIN_ACTIVITIES_SECTION,
     GARMIN_TRAINING_LOAD_SECTION,
     INTERVALS_POWER_CURVE_KEY,
     IngestPlan,
     garmin_ingest_plan,
     garmin_payload_retrieved_at,
+    garmin_section_retrieved_at,
     intervals_ingest_plan,
 )
 from backend.providers.snapshot_projection import stored_retrieved_at
@@ -103,6 +107,57 @@ def intervals_deletion_window(
     return DeletionWindow(
         start=start + DELETION_EDGE_MARGIN, end=today - DELETION_EDGE_MARGIN
     )
+
+
+def fetch_deletion_window(start: date, end: date) -> DeletionWindow | None:
+    """Return the inner days of a completely read provider date range.
+
+    The provider filters on its own local dates while stored rows carry the
+    athlete-local date, so the first and last day are excluded as in
+    ``intervals_deletion_window``. A range of two days or less returns None.
+    """
+    window = DeletionWindow(
+        start=start + DELETION_EDGE_MARGIN, end=end - DELETION_EDGE_MARGIN
+    )
+    return window if window.start <= window.end else None
+
+
+def garmin_activity_deletion_window(
+    payload: Mapping[str, Any],
+) -> DeletionWindow | None:
+    """Return the deletion window of a Garmin sync payload, or None.
+
+    Only a run whose activity list came back for every date range, without an
+    error, a capability pause or a cancel, vouches for its own ``read_window``.
+    """
+    if not isinstance(payload.get(GARMIN_ACTIVITIES_SECTION), list):
+        return None
+    provider_sync = payload.get("provider_sync")
+    if not isinstance(provider_sync, Mapping):
+        return None
+    pagination = provider_sync.get("pagination")
+    stats = (
+        pagination.get(GARMIN_ACTIVITIES_SECTION)
+        if isinstance(pagination, Mapping)
+        else None
+    )
+    if not isinstance(stats, Mapping) or stats.get("complete") is not True:
+        return None
+    errors = payload.get("errors")
+    if isinstance(errors, list) and any(
+        isinstance(error, Mapping) and error.get("source") == GARMIN_ACTIVITIES_SECTION
+        for error in errors
+    ):
+        return None
+    read_window = provider_sync.get("read_window")
+    if not isinstance(read_window, Mapping):
+        return None
+    try:
+        start = date.fromisoformat(str(read_window["start"])[:10])
+        end = date.fromisoformat(str(read_window["end"])[:10])
+    except KeyError, ValueError:
+        return None
+    return fetch_deletion_window(start, end)
 
 
 def _has_activity_list(raw: object) -> bool:
@@ -179,21 +234,34 @@ def ingest_intervals_partial_snapshot(
 
 
 def ingest_garmin_payload(
-    db: Any, payload: Mapping[str, Any], *, zone: tzinfo
+    db: Any,
+    payload: Mapping[str, Any],
+    *,
+    zone: tzinfo,
+    deletion_window: DeletionWindow | None = None,
 ) -> CanonicalIngestCounters:
-    """Write one stored Garmin payload. Garmin never deletes, so no window is passed.
+    """Write one stored Garmin payload.
 
     Rows keep the fetch time of their own section; the latest fetch time of the
     payload is the write time. A payload without any fetch time writes nothing.
+    ``deletion_window`` comes from a completely read activity list; it is
+    dropped unless the payload's activity section is planned, so a payload
+    without activities never deletes.
     """
     retrieved_at = garmin_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None:
         return CanonicalIngestCounters()
+    if (
+        not isinstance(payload.get(GARMIN_ACTIVITIES_SECTION), list)
+        or garmin_section_retrieved_at(payload, GARMIN_ACTIVITIES_SECTION, zone=zone)
+        is None
+    ):
+        deletion_window = None
     plan = garmin_ingest_plan(
         payload, zone=zone, training_loads=stored_training_loads(db)
     )
     return ingest_plan(
-        db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=zone
+        db, plan, retrieved_at=retrieved_at, deletion_window=deletion_window, zone=zone
     )
 
 

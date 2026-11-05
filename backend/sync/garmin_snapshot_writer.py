@@ -30,6 +30,8 @@ from backend.sync.canonical_coverage_store import (
 )
 from backend.sync.canonical_ingest import (
     CanonicalIngestCounters,
+    fetch_deletion_window,
+    garmin_activity_deletion_window,
     ingest_garmin_payload,
 )
 
@@ -71,7 +73,12 @@ class GarminSnapshotWriter:
     def write(self, db: Any, payload: Mapping[str, Any]) -> CanonicalIngestCounters:
         """Write the delta a sync collected: element rows, state and coverage."""
         zone = self._zone_provider() or UTC
-        counters = ingest_garmin_payload(db, payload, zone=zone)
+        counters = ingest_garmin_payload(
+            db,
+            payload,
+            zone=zone,
+            deletion_window=garmin_activity_deletion_window(payload),
+        )
         if garmin_payload_retrieved_at(payload, zone=zone) is not None:
             for section in REPLACE_SECTIONS:
                 self._replace(db, section, payload.get(section))
@@ -95,14 +102,21 @@ class GarminSnapshotWriter:
 
         ``sections`` holds the merged value of each refreshed section; ``windows``
         names the sections whose stored elements inside the day range are replaced
-        by it (a complete read), so an element the provider no longer returns goes.
+        by it (a complete read), so an element the provider no longer returns goes;
+        for the activities that is a tombstone inside the range's inner days.
         The state keys of ``view`` are patched into the stored state.
         """
         if not set(sections).issubset(allowed):
             raise ValueError("Unsupported Garmin refresh source")
         zone = self._zone_provider() or UTC
+        activity_window = windows.get(ACTIVITIES_SECTION)
         counters = ingest_garmin_payload(
-            db, {"synced_at": fetched_at, **sections}, zone=zone
+            db,
+            {"synced_at": fetched_at, **sections},
+            zone=zone,
+            deletion_window=fetch_deletion_window(*activity_window)
+            if activity_window is not None
+            else None,
         )
         for section, value in sections.items():
             window = windows.get(section)

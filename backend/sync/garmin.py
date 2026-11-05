@@ -709,7 +709,7 @@ class GarminSyncStateService:
         complete = collection_complete(payload)
         # Canonical rows and the Garmin state commit together; cursors come later.
         with self._database_manager.unit_of_work() as db:
-            self._snapshot_writer.write(db, payload)
+            counters = self._snapshot_writer.write(db, payload)
         if self._sync_equipment is not None and source != "fixture":
             # Equipment reads the canonical gear just written; the payload gives
             # only the gear's sync freshness.
@@ -746,6 +746,8 @@ class GarminSyncStateService:
                 for source in GARMIN_COLLECTION_SOURCES
             ),
             "pagination": pagination,
+            # Counts only, such as the activities Garmin no longer returns.
+            "canonical": counters.as_dict(),
         }
         if source is not None:
             result["source"] = source

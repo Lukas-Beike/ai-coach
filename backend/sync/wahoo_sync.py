@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any, Final, Protocol
 
+from backend.canonical.local_time import local_date
 from backend.config import Config
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import KeyValueRepository
@@ -43,7 +44,7 @@ from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
     wahoo_payload_coverage,
 )
-from backend.sync.canonical_ingest import ingest_plan
+from backend.sync.canonical_ingest import fetch_deletion_window, ingest_plan
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.gates import ProviderResyncGate
 from backend.sync.observation import SyncOperationObserver
@@ -204,9 +205,8 @@ class WahooSyncService:
         zone = self._clock.zone() or UTC
         synced_at = self._clock.now()
         source = self._source()
-        fetch = source.list_workouts(
-            since=synced_at - timedelta(days=days), until=synced_at
-        )
+        since = synced_at - timedelta(days=days)
+        fetch = source.list_workouts(since=since, until=synced_at)
         threshold, skipped_sources = self._threshold_fetch(source)
         payload = {
             WAHOO_SYNCED_AT_KEY: synced_at.isoformat(),
@@ -216,7 +216,17 @@ class WahooSyncService:
         plan = wahoo_ingest_plan(payload, zone=zone)
         with self._database_lock, self._database_manager().unit_of_work() as db:
             counters = ingest_plan(
-                db, plan, retrieved_at=synced_at, deletion_window=None, zone=zone
+                db,
+                plan,
+                retrieved_at=synced_at,
+                # Only a fully paged listing without unreadable rows vouches
+                # that a stored workout it lacks was deleted in Wahoo.
+                deletion_window=None
+                if fetch.truncated or fetch.skipped
+                else fetch_deletion_window(
+                    local_date(since, zone), local_date(synced_at, zone)
+                ),
+                zone=zone,
             )
             self._coverage.persist(
                 db, wahoo_payload_coverage(payload, zone=zone), zone=zone
