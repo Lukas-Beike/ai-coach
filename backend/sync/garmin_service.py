@@ -522,7 +522,9 @@ class GarminNutritionRefreshService:
                 if not _record_date_in_range(row, start, end)
             ]
         if source == "weight":
-            snapshot[source] = garmin_adapter.merge_weight_snapshots(records, existing)
+            snapshot[source] = garmin_adapter.merge_weight_snapshots(
+                records, existing, window=(start, end) if complete else None
+            )
         else:
             snapshot[source] = garmin_morning.merge_garmin_records(records, existing)
         self._mark_nutrition_freshness(
@@ -539,9 +541,7 @@ class GarminNutritionRefreshService:
                 fetched_at=fetched_at,
                 sections={source: snapshot[source]},
                 view=snapshot,
-                windows={source: (start, end)}
-                if complete and source == "daily_stats"
-                else {},
+                windows={source: (start, end)} if complete else {},
                 allowed=NUTRITION_SOURCES,
             )
 
@@ -718,7 +718,7 @@ class GarminAnalysisRefreshService:
             previous = old if isinstance(old, list) else []
             if source == "weight":
                 snapshot[source] = garmin_adapter.merge_weight_snapshots(
-                    incoming, previous
+                    incoming, previous, window=(start, end) if is_complete else None
                 )
                 return
             retained = (

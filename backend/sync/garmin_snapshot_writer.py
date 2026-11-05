@@ -23,6 +23,7 @@ from backend.canonical.section_items import record_id, split_section
 from backend.db import garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.providers.canonical_plans import garmin_payload_retrieved_at
+from backend.providers.garmin_weight_walk import WEIGHT_SECTIONS
 from backend.sync.canonical_coverage_store import (
     CanonicalCoverageStore,
     garmin_ingest_coverage,
@@ -131,6 +132,7 @@ class GarminSnapshotWriter:
                 _identifiers(section, value),
                 start=window[0].isoformat(),
                 end=window[1].isoformat(),
+                undated=section in WEIGHT_SECTIONS,
             )
 
     @staticmethod

@@ -114,11 +114,13 @@ def prune_section(
     *,
     start: str | None = None,
     end: str | None = None,
+    undated: bool = False,
 ) -> int:
     """Delete the stored elements of a section whose record id is not in ``keep``.
 
     With ``start`` and ``end`` (inclusive ISO days) only elements of that window go;
-    an element without a day is then kept. The canonical domain rows (sleep periods,
+    an element without a day is then kept, unless ``undated`` says it holds the
+    whole section (the weight envelope) and the kept elements replace it. The canonical domain rows (sleep periods,
     statuses, zones, gear) projected from a deleted element are retired with it.
     Only a windowed prune, which a complete read of that window asserts, also
     retires the observations the element owns on the window's days. An unwindowed
@@ -140,6 +142,7 @@ def prune_section(
         if row["source_record_id"] not in keep
         and (
             not windowed
+            or (row["observed_on"] is None and undated)
             or (
                 row["observed_on"] is not None
                 and str(start) <= row["observed_on"] <= str(end)
