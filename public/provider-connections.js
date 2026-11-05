@@ -181,10 +181,8 @@ function metricExportFieldsView(enabled, fields) {
 
 // Pure: the receipt of a consent change, one entry per changed field.
 function metricExportReceipt(receipt) {
-  const changes = receipt?.changes || [];
-  return changes.length
-    ? `Garmin → Intervals.icu: ${changes.map((item) => `${item.label} ${item.enabled ? "an" : "aus"}`).join(", ")}`
-    : "Garmin → Intervals.icu: keine Änderung";
+  const changes = (receipt?.changes || []).map((item) => item.label + (item.enabled ? " an" : " aus"));
+  return "Garmin → Intervals.icu: " + (changes.length ? changes.join(", ") : "keine Änderung");
 }
 
 // Rebuilds the checkboxes only when the field list changes; otherwise it updates
@@ -230,9 +228,11 @@ async function changeMetricExportField(item, input) {
   const enabled = input.checked;
   const remaining = (state.data?.garmin?.metric_export_fields || [])
     .filter((field) => field.enabled && field.key !== item.key).length;
-  const message = enabled
-    ? `${item.label} künftig automatisch von Garmin an Intervals.icu senden?`
-    : `${item.label} nicht mehr automatisch von Garmin an Intervals.icu senden?${remaining ? "" : " Damit endet der automatische Abgleich."}`;
+  let message = `${item.label} künftig automatisch von Garmin an Intervals.icu senden?`;
+  if (!enabled) {
+    message = `${item.label} nicht mehr automatisch von Garmin an Intervals.icu senden?`;
+    if (!remaining) message += " Damit endet der automatische Abgleich.";
+  }
   setMetricExportFieldsBusy(true);
   try {
     if (!await requestConfirmation(message, { title: "Garmin → Intervals.icu" })) {
