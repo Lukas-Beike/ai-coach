@@ -1148,6 +1148,9 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .credential-step label { color: var(--subtle); font-size: .73rem; font-weight: 500; }
 .credential-step input { width: 100%; padding: 9px 10px; font-size: .8rem; }
 .credential-actions { display: grid; gap: 8px; }
+.garmin-metric-export-fields { display: grid; gap: 4px; min-width: 0; margin: 8px 0; border: 0; padding: 0; }
+.garmin-metric-export-field { display: flex; min-height: 44px; align-items: center; gap: 10px; }
+.garmin-metric-export-field input { width: 22px; min-height: 22px; margin: 0; }
 .garmin-credential-form > .credential-row-head { align-items: center; }
 .garmin-credential-form > .credential-row-head h4 { margin: 0; }
 .credential-form .secondary-button:disabled { cursor: wait; }

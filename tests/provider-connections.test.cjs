@@ -22,7 +22,7 @@ function loadProviderConnections() {
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) {
-      elements.set(id, { id, value: "", textContent: "", className: "", hidden: false, disabled: false, addEventListener() {} });
+      elements.set(id, { id, value: "", textContent: "", className: "", hidden: false, disabled: false, addEventListener() {}, replaceChildren() {} });
     }
     return elements.get(id);
   };
