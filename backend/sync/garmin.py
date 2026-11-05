@@ -140,6 +140,13 @@ def activity_deletion_window(payload: dict[str, Any]) -> DeletionWindow | None:
     return fetch_deletion_window(start, end)
 
 
+def _source_deletion_window(
+    payload: dict[str, Any], source: str | None
+) -> DeletionWindow | None:
+    """A fixture is no provider read and never vouches for deletions."""
+    return None if source == "fixture" else activity_deletion_window(payload)
+
+
 def merge_sources(
     payload: dict[str, Any], previous: dict[str, Any], stored: frozenset[str]
 ) -> None:
@@ -732,10 +739,7 @@ class GarminSyncStateService:
             counters = self._snapshot_writer.write(
                 db,
                 payload,
-                # A fixture is no provider read and never vouches for deletions.
-                deletion_window=None
-                if source == "fixture"
-                else activity_deletion_window(payload),
+                deletion_window=_source_deletion_window(payload, source),
             )
         if self._sync_equipment is not None and source != "fixture":
             # Equipment reads the canonical gear just written; the payload gives
