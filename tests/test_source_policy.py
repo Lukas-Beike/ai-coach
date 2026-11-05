@@ -78,6 +78,7 @@ CURRENT_KINDS = frozenset(
         MetricKind.VO2MAX,
         MetricKind.CTL,
         MetricKind.ATL,
+        MetricKind.EFTP,
     }
 )
 DAILY_KINDS = frozenset(
@@ -144,9 +145,13 @@ class WahooLowestPriorityTests(unittest.TestCase):
     """Wahoo FTP and weight only ever fill in after Garmin and Intervals."""
 
     def test_ftp_and_weight_orders_put_wahoo_last(self) -> None:
-        expected = (GARMIN, INTERVALS, ProviderId.WAHOO)
-        self.assertEqual(expected, CURRENT_RULES[MetricKind.FTP].order)
-        self.assertEqual(expected, CURRENT_RULES[MetricKind.WEIGHT].order)
+        self.assertEqual(
+            (INTERVALS, GARMIN, ProviderId.WAHOO), CURRENT_RULES[MetricKind.FTP].order
+        )
+        self.assertEqual(
+            (GARMIN, INTERVALS, ProviderId.WAHOO),
+            CURRENT_RULES[MetricKind.WEIGHT].order,
+        )
 
     def test_wahoo_ftp_is_used_only_when_intervals_has_none(self) -> None:
         only_wahoo = [_wahoo_ftp(250)]
@@ -318,7 +323,7 @@ class WahooAgeLimitTests(unittest.TestCase):
             select_current([old_garmin_weight], MetricKind.WEIGHT, as_of=self.AS_OF),
         )
 
-    def test_only_the_wahoo_rules_carry_an_age_limit(self) -> None:
+    def test_age_limits_cover_wahoo_and_the_thresholds(self) -> None:
         limited = {
             kind: [(limit.provider, limit.days) for limit in rule.max_age]
             for kind, rule in CURRENT_RULES.items()
@@ -327,8 +332,20 @@ class WahooAgeLimitTests(unittest.TestCase):
         self.assertEqual(
             limited,
             {
-                MetricKind.FTP: [(ProviderId.WAHOO, 90)],
+                MetricKind.FTP: [
+                    (INTERVALS, 30),
+                    (GARMIN, 180),
+                    (ProviderId.WAHOO, 90),
+                ],
                 MetricKind.WEIGHT: [(ProviderId.WAHOO, 90)],
+                **{
+                    kind: [(INTERVALS, 30), (GARMIN, 180)]
+                    for kind in (
+                        MetricKind.THRESHOLD_HR,
+                        MetricKind.THRESHOLD_PACE,
+                        MetricKind.MAX_HR,
+                    )
+                },
             },
         )
 
@@ -532,7 +549,7 @@ class CurrentSelectionTests(unittest.TestCase):
         )
         self.assertIs(select_current([garmin_new], MetricKind.READINESS), garmin_new)
 
-    def test_sport_specific_thresholds_prefer_garmin_per_sport(self) -> None:
+    def test_sport_specific_ftp_prefers_the_intervals_setting_per_sport(self) -> None:
         garmin_ride = _obs(MetricKind.FTP, 302.0, TODAY, GARMIN, sport=Sport.RIDE)
         intervals_ride = _obs(MetricKind.FTP, 250.0, TODAY, sport=Sport.RIDE)
         intervals_run = _obs(MetricKind.FTP, 280.0, TODAY, sport=Sport.RUN)
@@ -540,6 +557,10 @@ class CurrentSelectionTests(unittest.TestCase):
 
         self.assertIs(
             select_current(observations, MetricKind.FTP, sport=Sport.RIDE),
+            intervals_ride,
+        )
+        self.assertIs(
+            select_current([garmin_ride], MetricKind.FTP, sport=Sport.RIDE),
             garmin_ride,
         )
         self.assertIs(
@@ -911,12 +932,13 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
             self.pick(MetricKind.BODY_FAT), self.legacy["body_fat_pct"]["value"]
         )
 
-    def test_cycling_ftp_is_garmin_then_matches_the_sport_setting(self) -> None:
-        self.assertEqual(self.legacy["cycling_ftp_watts"]["value"], 302)
+    def test_cycling_ftp_is_the_sport_setting_before_garmin(self) -> None:
+        # Garmin's 302 W stays an alternative; the athlete-maintained setting wins.
+        self.assertEqual(self.legacy["cycling_ftp_watts"]["value"], 250)
         self.assertEqual(
-            self.pick(MetricKind.FTP, Sport.RIDE),
-            self.legacy["cycling_ftp_watts"]["value"],
+            self.legacy["cycling_ftp_watts"]["alternatives"][0]["value"], 302
         )
+        self.assertEqual(self.pick(MetricKind.FTP, Sport.RIDE), 250)
 
         without_garmin = _mapped(WELLNESS_ROWS, ATHLETE, {})
         legacy_without = current_performance_metrics(

@@ -67,8 +67,9 @@ def resolve_thresholds(
 ) -> AthleteThresholds:
     """Thresholds and zone limits of a sport, locally confirmed values first.
 
-    Same precedence as the Coach context: an effective zone configuration (local
-    before provider) wins, the Intervals.icu sync values fill what it leaves out.
+    Same precedence as the Coach context: a local zone configuration in effect on
+    ``day`` wins, then the source-policy provider winners (``sport_thresholds``),
+    then a provider zone configuration; zone limits come from the effective one.
     """
     pace = effective_zone_configuration(
         zone_configurations, ZoneConfigurationMetric.PACE, sport, day=day
@@ -116,8 +117,10 @@ class PlannedUnitEstimator:
         database_manager: Callable[[], Any],
         observation_reader: Callable[[], Any],
         zone_configurations: Callable[[], Sequence[ZoneConfiguration]],
+        today: Callable[[], date] = date.today,
     ) -> None:
         self._database_manager = database_manager
+        self._today = today
         self._observation_reader = observation_reader
         self._read_configurations = zone_configurations
         self._inputs: (
@@ -129,7 +132,7 @@ class PlannedUnitEstimator:
     ) -> tuple[Sequence[Observation], Sequence[ZoneConfiguration]]:
         with self._database_manager().reader() as db:
             thresholds = read_zone_thresholds(
-                resolve_reader(self._observation_reader(), db), db
+                resolve_reader(self._observation_reader(), db), db, as_of=self._today()
             )
         return thresholds, self._read_configurations()
 

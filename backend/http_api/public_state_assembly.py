@@ -218,7 +218,9 @@ class PublicStateAssembly:
         """The plan-zone thresholds inside the plan's read; none without a reader."""
         if self._observation_reader is None:
             return ()
-        return read_zone_thresholds(resolve_reader(self._observation_reader(), db), db)
+        return read_zone_thresholds(
+            resolve_reader(self._observation_reader(), db), db, as_of=self._local_date()
+        )
 
     def season_source(self) -> SeasonSource:
         if self._observation_reader is None or self._activity_summary_reader is None:

@@ -1509,6 +1509,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
                 database_manager=database_manager,
                 observation_reader=lambda: CANONICAL_READ,
                 zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+                today=lambda: ATHLETE_CLOCK.now().date(),
             ),
             change_history_service=HISTORY.change_history_service,
             competition_service=PLANNING_DATA.competition,
@@ -1725,6 +1726,7 @@ def _plan_guard_service() -> PlanGuardService:
             database_manager=database_manager,
             observation_reader=lambda: CANONICAL_READ,
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+            today=lambda: ATHLETE_CLOCK.now().date(),
         ),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
         completed_activities=lambda: read_completed(

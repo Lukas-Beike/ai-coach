@@ -621,8 +621,10 @@ class GarminCanonicalReaderUnitTests(unittest.TestCase):
             {},
             metrics,
         )
+        # The Intervals ride FTP precedes Garmin's (#1668); pace and HR stay Garmin.
+        self.assertEqual(current["cycling_ftp_watts"]["value"], 400)
+        self.assertEqual(current["cycling_ftp_watts"]["alternatives"][0]["value"], 306)
         for key, expected in (
-            ("cycling_ftp_watts", 306),
             ("run_threshold_pace_seconds_per_km", 279),
             ("run_threshold_hr_bpm", 161),
         ):

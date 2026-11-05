@@ -50,6 +50,7 @@ _TESTS = """Tests (session_focus test):
 - When planning_brief.last_tests is 6 to 8 weeks old or null for a sport, plan its test, run and ride in different weeks, after a lighter week or at a block start: a run critical-speed test (3600, 2400, 1200 m on a track or measured flat route, about 30 min easy between; Galbraith 2014), without either a 30-min time trial (McGehee 2005); a Zwift FTP ramp test. None in the last 2 weeks before an A race or with illness or poor recovery; a race counts as a test.
 - Every 2 to 4 weeks an easy run may be a control run at a fixed heart rate on one route (Buchheit 2014): session_focus easy, named in the description."""
 
+_THRESHOLDS = "- Watt, pace and heart-rate targets use current_performance.thresholds, the values plans use. If ftp_conflict, name the ftp_alternatives value once."
 _PRECEDENCE = "- Precedence: illness, competitions, calendar markers; weekly_plan (fixed sessions); science defaults; fallback windows (8b). Justify deviations."
 
 _CALENDAR = "- If an event makes training materially uncertain, ask via clarify_coach_request (grouped) whether to train and reduce intensity before writing that plan; follow the answer, never infer cancellation or reduction from an ordinary event."
@@ -115,6 +116,7 @@ _PLAN = (
     _STRENGTH_LEGS,
     _TESTS,
     _SEASON_PHASE,
+    _THRESHOLDS,
     _PRECEDENCE,
     _CALENDAR,
     _PLAN_CHECK,

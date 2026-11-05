@@ -124,8 +124,21 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             garmin,
         )
         self.assertEqual(result["weight_kg"], garmin["weight_kg"])
-        self.assertEqual(result["cycling_ftp_watts"], garmin["cycling_ftp_watts"])
-        self.assertEqual(result["cycling_max_hr_bpm"], garmin["cycling_max_hr_bpm"])
+        # The athlete-maintained Intervals FTP precedes Garmin's (#1668); Garmin's
+        # max HR precedes the Intervals setting, which stays as an alternative.
+        self.assertEqual(result["cycling_ftp_watts"]["value"], 250)
+        self.assertEqual(
+            result["cycling_ftp_watts"]["alternatives"][0]["value"],
+            garmin["cycling_ftp_watts"]["value"],
+        )
+        self.assertEqual(
+            {
+                key: result["cycling_max_hr_bpm"][key]
+                for key in garmin["cycling_max_hr_bpm"]
+            },
+            garmin["cycling_max_hr_bpm"],
+        )
+        self.assertEqual(result["cycling_max_hr_bpm"]["alternatives"][0]["value"], 180)
         self.assertEqual(
             result["cycling_vo2max_ml_kg_min"], garmin["cycling_vo2max_ml_kg_min"]
         )
@@ -399,7 +412,7 @@ class WahooFallbackPrecedenceTests(unittest.TestCase):
         self.assertEqual(240, result["cycling_ftp_watts"]["value"])
         self.assertEqual(PROVIDER_INTERVALS_NAME, result["cycling_ftp_watts"]["source"])
 
-    def test_garmin_ftp_beats_intervals_and_wahoo_ftp(self):
+    def test_intervals_ftp_beats_garmin_and_wahoo_ftp(self):
         garmin = empty_garmin(
             cycling_ftp_watts={
                 "value": 302,
@@ -414,6 +427,10 @@ class WahooFallbackPrecedenceTests(unittest.TestCase):
             snapshot, {}, garmin, canonical=wahoo_canonical(ftp=300)
         )
 
+        self.assertEqual(240, result["cycling_ftp_watts"]["value"])
+        result = snapshot_metrics(
+            snapshot_with(), {}, garmin, canonical=wahoo_canonical(ftp=300)
+        )
         self.assertEqual(302, result["cycling_ftp_watts"]["value"])
 
     def test_manual_profile_weight_beats_wahoo_weight(self):

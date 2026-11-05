@@ -15,7 +15,11 @@ from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.sync_time import activities_synced_at, intervals_synced_at
-from backend.canonical.domain_records import EMPTY_POWER_CURVE, PowerCurve
+from backend.canonical.domain_records import (
+    EMPTY_POWER_CURVE,
+    PowerCurve,
+    ZoneConfiguration,
+)
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance import wellness_days
@@ -33,6 +37,7 @@ from backend.performance.canonical_recovery import (
     CanonicalRecoveryInputs,
     read_recovery_inputs,
 )
+from backend.performance.current_thresholds import ZoneConfigurationSource
 from backend.performance.daily_health import read_daily_health_by_date
 from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
@@ -355,6 +360,12 @@ class ReadOnceObservationReader:
         if not isinstance(self._reader, ActivityMaxHrReader):
             return ()
         return self._reader.activity_max_hr(db, provider, low=low, high=high)
+
+    def zone_configurations(self, db: Any) -> tuple[ZoneConfiguration, ...]:
+        """Forward the zone configuration read; none for a source without it."""
+        if not isinstance(self._reader, ZoneConfigurationSource):
+            return ()
+        return self._reader.zone_configurations(db)
 
     def power_curve(self, db: Any) -> PowerCurve:
         """Forward the power curve read; none for a source without it."""
