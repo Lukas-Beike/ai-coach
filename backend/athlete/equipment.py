@@ -323,7 +323,13 @@ class EquipmentService:
         }:
             raise AppError(400, "Aktivität und Ausrüstung sind erforderlich.")
         requested = str(payload["activity_id"])
-        references = {requested, str(self._resolve_activity(payload["activity_id"]))}
+        with self._manager.reader() as db:
+            session = canonical_store.live_session_id(db, requested)
+        references = {
+            requested,
+            str(self._resolve_activity(payload["activity_id"])),
+            *(() if session is None else (session,)),
+        }
         row = next(
             (
                 row
@@ -981,7 +987,11 @@ def _row_sport(row: dict[str, Any]) -> StoredSport | None:
 
 
 def _gear_sessions(db: Any, listed: GearActivities) -> dict[str, str]:
-    """Return the canonical session of each listed Garmin activity."""
+    """Return the canonical session of each listed Garmin activity.
+
+    Through its Garmin record, else through a record whose ``external_ref``
+    names the Garmin activity.
+    """
     garmin_ids = [
         str(activity_id)
         for activity_ids in listed.values()
@@ -989,9 +999,16 @@ def _gear_sessions(db: Any, listed: GearActivities) -> dict[str, str]:
     ]
     if not garmin_ids:
         return {}
-    return canonical_store.provider_activity_sessions(
-        db, ProviderId.GARMIN.value, garmin_ids
-    )
+    # An older Garmin activity may exist only as an Intervals.icu copy that
+    # names it as its upstream; the Garmin record itself wins when present.
+    return {
+        **canonical_store.external_ref_sessions(
+            db, ProviderId.GARMIN.value, garmin_ids
+        ),
+        **canonical_store.provider_activity_sessions(
+            db, ProviderId.GARMIN.value, garmin_ids
+        ),
+    }
 
 
 def _garmin_links(

@@ -27,6 +27,7 @@ from backend.activities.detail_merge import (
     MergedStreams,
     merge_details,
 )
+from backend.activities.detail_store import summary_fingerprint
 from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.canonical.activity_detail import (
     ActivityDetailSet,
@@ -169,7 +170,7 @@ class CanonicalDetailReader:
                 candidates, activity_id, analysis_record, summary
             )
         merged = merge_details(candidates)
-        status = self._status(db, sets, intervals_id)
+        status = self._status(db, sets, intervals_id, summary)
         stale = any(state.stale for state in status.values())
         analysis = (
             None if stale else self._analysis(db, activity_id, analysis_record, merged)
@@ -262,31 +263,37 @@ class CanonicalDetailReader:
         db: Any,
         sets: Sequence[StoredDetailSet],
         intervals_id: str | None,
+        summary: Mapping[str, Any] | None,
     ) -> dict[ProviderId, ProviderStatus]:
-        """Compare each provider's stored sets with its current summary version."""
-        keys = [(item.provider, item.provider_activity_id) for item in sets]
-        if intervals_id is not None:
-            keys.append((ProviderId.INTERVALS.value, intervals_id))
+        """Compare each provider's stored sets with its current summary version.
+
+        The loaded Intervals.icu summary row belongs to one record only, so only
+        that record's sets are compared for Intervals.icu; other providers'
+        fingerprints come from the port.
+        """
+        fingerprint = None if summary is None else summary_fingerprint(dict(summary))
+        others = [
+            (item.provider, item.provider_activity_id)
+            for item in sets
+            if item.provider != ProviderId.INTERVALS.value
+        ]
         current = (
             {}
-            if self._fingerprints is None
-            else self._fingerprints.summary_fingerprints(db, keys)
+            if self._fingerprints is None or not others
+            else self._fingerprints.summary_fingerprints(db, others)
         )
         status: dict[ProviderId, ProviderStatus] = {}
         for item in sets:
-            fingerprint = current.get((item.provider, item.provider_activity_id))
-            if (
-                item.summary_sha256
-                and fingerprint
-                and item.summary_sha256 != fingerprint
-            ):
-                status[ProviderId(item.provider)] = ProviderStatus(stale=True)
-        load_error = self._load_error(
-            intervals_id,
-            None
-            if intervals_id is None
-            else current.get((ProviderId.INTERVALS.value, intervals_id)),
-        )
+            provider = ProviderId(item.provider)
+            if provider is ProviderId.INTERVALS:
+                latest = (
+                    fingerprint if item.provider_activity_id == intervals_id else None
+                )
+            else:
+                latest = current.get((item.provider, item.provider_activity_id))
+            if item.summary_sha256 and latest and item.summary_sha256 != latest:
+                status[provider] = ProviderStatus(stale=True)
+        load_error = self._load_error(intervals_id, fingerprint)
         if load_error is not None:
             status[ProviderId.INTERVALS] = ProviderStatus(
                 stale=status.get(ProviderId.INTERVALS, ProviderStatus()).stale,

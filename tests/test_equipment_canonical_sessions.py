@@ -508,6 +508,64 @@ class SessionOnlyEquipmentTests(unittest.TestCase):
         self.assertEqual(usage["assigned_sessions"], 2)
         self.assertEqual(usage["hours"], 1.5)
 
+    def test_garmin_gear_links_an_intervals_copy_named_by_its_external_id(
+        self,
+    ) -> None:
+        """An older Garmin ride outside the Garmin window exists only in Intervals.icu."""
+        with self.manager.unit_of_work() as db:
+            canonical_ingest.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": SYNCED,
+                    "raw_provider_data": {
+                        "activities": [
+                            {
+                                **intervals_row("i-old"),
+                                "start_date_local": "2026-06-01T07:00:00",
+                                "source": "GARMIN_CONNECT",
+                                "external_id": "700",
+                            }
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+            GarminSnapshotWriter(
+                KeyValueRepository(lambda: SYNCED), lambda: ZONE
+            ).write(
+                db,
+                {
+                    "synced_at": SYNCED,
+                    "activities": [garmin_activity(910)],
+                    "source_freshness": {"gear": {"freshness": "current"}},
+                    "gear": [
+                        {
+                            "gearUUID": "g1",
+                            "gearName": "Road bike",
+                            "gearTypeName": "Bike",
+                            "stats": {"totalDistance": 50000},
+                            "activity_ids": ["910", "700"],
+                        }
+                    ],
+                },
+            )
+        with self.manager.reader() as db:
+            from backend.db import garmin_store
+
+            self.service.sync_garmin_snapshot(garmin_store.read_state(db))
+        links = {row["activity_id"] for row in self.service.read()["assignments"]}
+        self.assertIn("i-old", links)
+
+    def test_a_second_bundled_intervals_id_names_the_session_for_assign(self) -> None:
+        with self.manager.reader() as db:
+            from backend.db import canonical_store
+
+            session = canonical_store.live_session_id(db, "910")
+        self.assertIsNotNone(session)
+        bike = self.local_bike()
+        saved = self.service.assign({"activity_id": "910", "equipment_id": bike["id"]})
+        self.assertEqual(saved["assignment"]["activity_id"], "i1")
+
     def test_wahoo_only_session_counts_in_usage_hours_distance_and_maintenance(
         self,
     ) -> None:

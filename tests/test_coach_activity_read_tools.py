@@ -153,6 +153,35 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         service.execute("list_recent_activities", {"days": 9999, "limit": 0})
         activity_read.recent.assert_called_once_with(3660, 1, today=today)
 
+    def test_recent_activities_keep_scalars_and_drop_per_field_detail(self):
+        summary = {
+            "id": "act_g",
+            "record_ids": {"garmin": "910"},
+            "source": "Garmin Connect",
+            "training_load": 40.0,
+            "sources": {"training_load": "Garmin Connect"},
+            "power_zone_times": [{"id": "Z1", "secs": 60.0}],
+            "heart_rate_zone_times": [],
+            "pace_zone_times": [],
+        }
+        activity_read = Mock()
+        activity_read.recent.return_value = {"activities": [summary]}
+        service = CoachActivityReadToolService(
+            activity_read, Mock(), Mock(), lambda: date(2026, 9, 23)
+        )
+
+        (listed,) = service.execute("list_recent_activities", {})["activities"]
+
+        self.assertEqual(
+            {
+                "id": "act_g",
+                "record_ids": {"garmin": "910"},
+                "source": "Garmin Connect",
+                "training_load": 40.0,
+            },
+            listed,
+        )
+
     def test_recent_activities_invalid_values_preserve_app_error_contract(self):
         service = CoachActivityReadToolService(Mock(), Mock(), Mock(), date.today)
 
