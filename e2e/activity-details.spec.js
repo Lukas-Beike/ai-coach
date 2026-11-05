@@ -283,3 +283,32 @@ test("@responsive feedback save and undo show the returned load without a detail
   expect(await page.evaluate(() => syntheticCalls.filter((url) => url === "/api/activities/load-1").length)).toBe(1);
   await page.evaluate(() => ActivityDetails.close(false));
 });
+
+test("@responsive provider copies split with a receipt whose undo restores the bundle", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(async () => {
+    const member = (session_id, provider, label) => ({ session_id, provider, label, recorded_by: "garmin", sport: "ride", started_at: "2026-09-10T05:00:00+00:00", duration_s: 3600 });
+    const bundled = { activity_id: "act_a", link_kind: "heuristic", athlete_confirmed: false, members: [member("act_a", "intervals", "Intervals.icu"), member("act_b", "garmin", "Garmin")], merge_candidates: [] };
+    const split = { ...bundled, link_kind: "single", athlete_confirmed: true, members: [bundled.members[0]], merge_candidates: [member("act_b", "garmin", "Garmin")] };
+    let bundle = bundled;
+    globalThis.sessionBodies = [];
+    const fakeApi = async (url, options) => {
+      if (url === "/api/activities/act_a/session") { sessionBodies.push(JSON.parse(options.body)); bundle = split; return { status: "split", activity_id: "act_a", change: { id: "c2", after_hash: "h2" } }; }
+      if (url === "/api/change-history/undo") { sessionBodies.push(JSON.parse(options.body)); bundle = bundled; return { status: "undone" }; }
+      return { session: { activity_id: "act_a", name: "Synthetic bundle ride", sport: "ride" }, streams: { time_s: [0, 1, 2], channels: {} }, detail_data: { providers: [] }, activity_feedback: null, equipment: [], session_rpe_load: null, session_bundle: bundle };
+    };
+    await ActivityDetails.open({ id: "act_a" }, { api: fakeApi, showDialog: (dialog) => dialog.showModal() });
+  });
+  const dialog = page.getByRole("dialog", { name: "Synthetic bundle ride" });
+  const section = dialog.locator(".activity-bundle");
+  await expect(section.getByRole("button", { name: "Trennen" })).toHaveCount(2);
+  await section.getByRole("listitem").filter({ hasText: /^Garmin/ }).getByRole("button", { name: "Trennen" }).click();
+  await expect(section.getByRole("status")).toContainText("Aufzeichnung getrennt.");
+  await expect(section.getByRole("button", { name: "Zusammenführen" })).toHaveCount(1);
+  await section.getByRole("button", { name: "Rückgängig" }).click();
+  await expect(section.getByRole("status")).toContainText("Zurückgenommen.");
+  await expect(section.getByRole("button", { name: "Trennen" })).toHaveCount(2);
+  expect(await page.evaluate(() => sessionBodies)).toEqual([{ action: "split", member_id: "act_b" }, { change_id: "c2", expected_current_hash: "h2" }]);
+  await page.evaluate(() => ActivityDetails.close(false));
+});
