@@ -60,6 +60,7 @@ from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, tzinfo
+from math import inf
 from typing import Final
 
 from backend.canonical.records import ActivityRecord
@@ -352,6 +353,9 @@ def _candidate_groups(edges: dict[int, dict[int, float]]) -> list[list[int]]:
     return [groups[root] for root in sorted(groups)]
 
 
+_Node = tuple[str, int]
+
+
 def _min_cost_matching(
     sources: list[int], edges: dict[int, dict[int, float]]
 ) -> dict[int, int]:
@@ -363,56 +367,69 @@ def _min_cost_matching(
     """
     match_of: dict[int, int] = {}
     source_of: dict[int, int] = {}
-    primaries = sorted({primary for source in sources for primary in edges[source]})
     while True:
-        distance: dict[tuple[str, int], float] = {
-            ("s", source): 0.0 for source in sources if source not in match_of
-        }
-        previous: dict[tuple[str, int], tuple[str, int]] = {}
-        for _ in range(len(sources) + len(primaries)):
-            changed = False
-            for source in sources:
-                start = distance.get(("s", source))
-                if start is None:
-                    continue
-                for primary in sorted(edges[source]):
-                    if match_of.get(source) == primary:
-                        continue
-                    candidate = start + edges[source][primary]
-                    node = ("p", primary)
-                    if candidate < distance.get(node, float("inf")):
-                        distance[node] = candidate
-                        previous[node] = ("s", source)
-                        changed = True
-            for primary in primaries:
-                matched = source_of.get(primary)
-                reached = distance.get(("p", primary))
-                if matched is None or reached is None:
-                    continue
-                candidate = reached - edges[matched][primary]
-                node = ("s", matched)
-                if candidate < distance.get(node, float("inf")):
-                    distance[node] = candidate
-                    previous[node] = ("p", primary)
-                    changed = True
-            if not changed:
-                break
-        free = [
-            (distance[("p", primary)], primary)
-            for primary in primaries
-            if primary not in source_of and ("p", primary) in distance
-        ]
+        distance, previous = _cheapest_paths(
+            _residual_arcs(sources, edges, match_of),
+            {("s", source): 0.0 for source in sources if source not in match_of},
+        )
+        free = sorted(
+            (cost, node[1])
+            for node, cost in distance.items()
+            if node[0] == "p" and node[1] not in source_of
+        )
         if not free:
             return match_of
-        node = ("p", min(free)[1])
-        while node in previous:
-            source_node = previous[node]
-            source, primary = source_node[1], node[1]
-            match_of[source] = primary
-            source_of[primary] = source
-            if source_node not in previous:
-                break
-            node = previous[source_node]
+        _augment(("p", free[0][1]), previous, match_of, source_of)
+
+
+def _residual_arcs(
+    sources: list[int], edges: dict[int, dict[int, float]], match_of: dict[int, int]
+) -> list[tuple[_Node, _Node, float]]:
+    """Return unmatched pairs forward and matched pairs backward at negated cost."""
+    arcs: list[tuple[_Node, _Node, float]] = []
+    for source in sources:
+        for primary in sorted(edges[source]):
+            pair_cost = edges[source][primary]
+            if match_of.get(source) == primary:
+                arcs.append((("p", primary), ("s", source), -pair_cost))
+            else:
+                arcs.append((("s", source), ("p", primary), pair_cost))
+    return arcs
+
+
+def _cheapest_paths(
+    arcs: list[tuple[_Node, _Node, float]], distance: dict[_Node, float]
+) -> tuple[dict[_Node, float], dict[_Node, _Node]]:
+    """Relax ``arcs`` Bellman-Ford style from the start nodes in ``distance``."""
+    previous: dict[_Node, _Node] = {}
+    for _ in range(len(arcs) + 1):
+        changed = False
+        for start, end, pair_cost in arcs:
+            reached = distance.get(start)
+            if reached is None or reached + pair_cost >= distance.get(end, inf):
+                continue
+            distance[end] = reached + pair_cost
+            previous[end] = start
+            changed = True
+        if not changed:
+            break
+    return distance, previous
+
+
+def _augment(
+    node: _Node,
+    previous: dict[_Node, _Node],
+    match_of: dict[int, int],
+    source_of: dict[int, int],
+) -> None:
+    """Flip the pairs along the path that ends at the free session ``node``."""
+    while node in previous:
+        source_node = previous[node]
+        match_of[source_node[1]] = node[1]
+        source_of[node[1]] = source_node[1]
+        if source_node not in previous:
+            return
+        node = previous[source_node]
 
 
 def _sessions(
