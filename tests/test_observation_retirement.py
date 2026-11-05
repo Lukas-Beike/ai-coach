@@ -190,6 +190,21 @@ class ObservationRetirementTests(unittest.TestCase):
         self.assertEqual(self.served("resting_hr"), [(OTHER_DAY, 50.0)])
         self.assertEqual(self.states("resting_hr")[DAY], "retired")
 
+    def test_a_replace_prune_keeps_the_history_of_a_rolling_section(self) -> None:
+        self.ingest_garmin(
+            garmin(
+                resting_hr=[
+                    {"calendarDate": OTHER_DAY, "restingHeartRate": 50},
+                    {"calendarDate": DAY, "restingHeartRate": 49},
+                ]
+            )
+        )
+        # A rolling read without a window no longer lists the older day.
+        garmin_store.prune_section(self.db, "resting_hr", {f"resting_hr/{DAY}"})
+        self.assertEqual(
+            self.states("resting_hr"), {OTHER_DAY: "active", DAY: "active"}
+        )
+
     def test_a_row_of_another_owner_is_untouched(self) -> None:
         self.ingest_intervals(intervals([{"id": DAY, "restingHR": 50}]))
         self.db.execute(

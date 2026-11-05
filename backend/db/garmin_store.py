@@ -119,9 +119,11 @@ def prune_section(
 
     With ``start`` and ``end`` (inclusive ISO days) only elements of that window go;
     an element without a day is then kept. The canonical domain rows (sleep periods,
-    statuses, zones, gear) projected from a deleted element are retired with it, and
-    so are the observations it owns on its own day; an element without a day keeps
-    its observations, which are the history of the days they were fetched on.
+    statuses, zones, gear) projected from a deleted element are retired with it.
+    Only a windowed prune, which a complete read of that window asserts, also
+    retires the observations the element owns on the window's days. An unwindowed
+    replace keeps them: a rolling read (max metrics, readiness) drops older days
+    that are history, not deletions.
     Returns how many rows were deleted.
     """
     prefix = f"{section}/"
@@ -153,21 +155,34 @@ def prune_section(
                 source_record_id=str(row["source_record_id"]),
                 now=now,
             )
-            if row["observed_on"] is not None:
-                canonical_store.retire_unemitted_observations(
-                    db,
-                    provider=GARMIN_PROVIDER,
-                    scopes={
-                        str(row["source_record_id"]): canonical_store.ObservationScope(
-                            days=frozenset({str(row["observed_on"])}),
-                            emitted=frozenset(),
-                        )
-                    },
-                    now=now,
+            if windowed:
+                _retire_window_observations(
+                    db, str(row["source_record_id"]), str(start), str(end), now
                 )
     for row_id in stale:
         db.execute("DELETE FROM provider_records WHERE id = ?", (row_id,))
     return len(stale)
+
+
+def _retire_window_observations(
+    db: Any, owner: str, start: str, end: str, now: str
+) -> None:
+    """Retire every observation ``owner`` holds on a day of the window it left."""
+    days = frozenset(
+        str(row["observed_on"])
+        for row in db.execute(
+            "SELECT DISTINCT observed_on FROM observations WHERE provider = ? "
+            "AND owner_record_id = ? AND observed_on BETWEEN ? AND ?",
+            (GARMIN_PROVIDER, owner, start, end),
+        )
+    )
+    if days:
+        canonical_store.retire_unemitted_observations(
+            db,
+            provider=GARMIN_PROVIDER,
+            scopes={owner: canonical_store.ObservationScope(days, frozenset())},
+            now=now,
+        )
 
 
 def read_activities(
