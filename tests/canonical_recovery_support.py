@@ -285,6 +285,12 @@ class NoActivityRows:
     def intervals_activity_payloads(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
         return ()
 
+    def summary_fingerprints(self, db: Any, keys: Any) -> dict[Any, str]:
+        return {}
+
+    def intervals_summary_row(self, db: Any, provider_activity_id: str) -> None:
+        return None
+
 
 class FilteringReader:
     """Serves observations by kind, inclusive observed_on window and sport."""
