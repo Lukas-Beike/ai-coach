@@ -25,7 +25,9 @@ class ActivitySummary(TypedDict, total=False):
 
     ``id`` is the local session id; ``record_ids`` maps each provider of the
     session to its provider activity id. ``started_at`` is the exact start and
-    ``started_at_local`` the athlete's wall time. Zone times are lists of
+    ``started_at_local`` the wall time where the activity was recorded:
+    ``local_offset_minutes`` is its UTC offset when a provider reports one, else
+    the athlete zone applies. Zone times are lists of
     ``{"id": "Z1", "secs": 600.0}`` items. ``rpe_conflict`` is True when the
     session's records report different provider RPE values.
     """
@@ -33,6 +35,7 @@ class ActivitySummary(TypedDict, total=False):
     id: str
     started_at: str
     started_at_local: str
+    local_offset_minutes: int
     name: str
     sport: str
     environment: str
@@ -76,11 +79,12 @@ class ActivitySummary(TypedDict, total=False):
 def summary_local_date(summary: Mapping[str, Any], timezone: str | None = None) -> str:
     """Return the ISO start date of a summary, or "" without a start.
 
-    Without ``timezone`` this is the athlete-local date the reader assigned. With
-    an IANA ``timezone`` the exact start is converted to that zone first; an
-    unknown zone falls back to the athlete-local date.
+    Without ``timezone`` this is the local date the reader assigned. With an IANA
+    ``timezone`` the exact start is converted to that zone first, unless the
+    summary carries its own UTC offset: such an activity stays on the day it was
+    lived. An unknown zone falls back to the assigned local date.
     """
-    if timezone:
+    if timezone and summary.get("local_offset_minutes") is None:
         try:
             zone = ZoneInfo(timezone)
             started = datetime.fromisoformat(str(summary.get("started_at") or ""))

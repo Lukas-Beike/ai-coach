@@ -7,15 +7,20 @@ end field, the same instants counted once. A Garmin daily sleep record, or its
 whatever the clock time; every other interval is UNKNOWN. Periods are never
 classified by hour or length, and naps are not mapped.
 
-Each period is dated by the local date of its end in the ingest zone. Its
-reported duration is the provider's sleep time from the same object, when that
+Each period is dated by the provider's own day: Garmin's ``calendarDate`` of the
+daily sleep record (the element or its ``dailySleepDTO``), or the Intervals.icu
+wellness day, so sleep lands on the
+same day as that day's wellness values and the activities recorded there. A
+period keeps the ingest zone as its timezone only when the zone gives the same
+wake date. Without a usable provider day within a day of the end's UTC date, the
+local date of its end in the ingest zone applies. Its reported duration is the provider's sleep time from the same object, when that
 is a plausible number of seconds.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, tzinfo
+from datetime import date, datetime, tzinfo
 from typing import Any, Final
 from zoneinfo import ZoneInfo
 
@@ -33,6 +38,8 @@ from backend.canonical.vocabulary import (
 from backend.providers.garmin_fields import GARMIN_SLEEP_DURATION_ALIASES
 
 GARMIN_MAIN_SLEEP_KEY: Final = "dailySleepDTO"
+GARMIN_CALENDAR_DATE_KEY: Final = "calendarDate"
+_DAY_LENGTH: Final = 10  # "YYYY-MM-DD"
 INTERVALS_SLEEP_DURATION_ALIASES: Final = ("sleepSecs",)
 _LABELS: Final = {
     ProviderId.GARMIN: "Garmin Connect",
@@ -58,6 +65,37 @@ def _reported_seconds(
             return seconds
         return None
     return None
+
+
+def _provider_day(
+    payload: object, main: object, provider: ProviderId, source_record_id: str
+) -> date | None:
+    """Return the day the provider files the sleep under, or None."""
+    text: object = source_record_id
+    if provider is ProviderId.GARMIN:
+        # The daily sleep record is the element itself or its ``dailySleepDTO``.
+        text = next(
+            (
+                record[GARMIN_CALENDAR_DATE_KEY]
+                for record in (main, payload)
+                if isinstance(record, Mapping) and record.get(GARMIN_CALENDAR_DATE_KEY)
+            ),
+            None,
+        )
+    if not isinstance(text, str) or len(text) != _DAY_LENGTH:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _wake_date(end: datetime, zone: tzinfo, provider_day: date | None) -> date:
+    # Every UTC offset is under a day, so a lived wake day is within a day of the
+    # UTC date; a provider day further away is not this period's.
+    if provider_day is not None and abs((provider_day - end.date()).days) <= 1:
+        return provider_day
+    return local_date(end, zone)
 
 
 def _distinct(intervals: list[SleepInterval]) -> list[SleepInterval]:
@@ -100,12 +138,14 @@ def map_sleep_periods(
         retrieved_at=retrieved_at,
         label=_LABELS[provider],
     )
-    timezone = _zone_name(zone)
+    zone_name = _zone_name(zone)
+    provider_day = _provider_day(payload, main, provider, source_record_id)
     periods: list[SleepPeriod] = []
     for interval in _distinct(list(sleep_intervals(payload))):
         is_main = garmin and (interval.depth == 0 or interval.record is main)
         try:
-            wake_date = local_date(interval.end, zone)
+            wake_date = _wake_date(interval.end, zone, provider_day)
+            in_zone = wake_date == local_date(interval.end, zone)
         except OverflowError:
             continue
         periods.append(
@@ -114,7 +154,7 @@ def map_sleep_periods(
                 end=interval.end,
                 wake_date=wake_date,
                 kind=SleepKind.NIGHT if is_main else SleepKind.UNKNOWN,
-                timezone=timezone,
+                timezone=zone_name if in_zone else None,
                 reported_duration_s=_reported_seconds(interval.record, durations),
                 bounds_method=bounds_method(interval.start_field, interval.end_field),
                 provenance=provenance,
