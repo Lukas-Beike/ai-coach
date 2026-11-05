@@ -15,6 +15,9 @@ produces an issue, and the next alias is tried:
   wall time. ``start_date_local`` is athlete wall time, localised by
   ``parse_provider_datetime``. Other readers prefer ``start_date_local``; this
   mapper prefers the exact instant when one is sent.
+* local offset: with an exact ``start_date``, the UTC offset of the activity's
+  IANA ``timezone`` at that instant, else the difference to ``start_date_local``
+  -> ``local_offset_minutes``. Without an exact start it stays unknown.
 * duration: ``moving_time`` before ``elapsed_time``, as activity_validation does.
   A zero duration is out of range (the legacy minimum is one second), so
   ``elapsed_time`` is then consulted. ``elapsed_time`` is also kept on its own as
@@ -62,10 +65,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from datetime import datetime, tzinfo
+from datetime import UTC, datetime, tzinfo
 from typing import Final
 
-from backend.canonical.local_time import parse_provider_datetime
+from backend.canonical.local_time import (
+    names_utc_offset,
+    parse_provider_datetime,
+    wall_clock_offset_minutes,
+    zone_offset_minutes,
+)
 from backend.canonical.mapping import (
     IssueReason,
     MappingIssue,
@@ -76,6 +84,7 @@ from backend.canonical.records import (
     MAX_ZONE_COUNT,
     MAX_ZONE_ID_LENGTH,
     ActivityRecord,
+    ExternalRef,
     Provenance,
 )
 from backend.canonical.sports import classify_environment_text, classify_sport_text
@@ -99,13 +108,16 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
+# Version 7: maps the upstream Garmin or Wahoo activity of a synchronized copy
+# (``source`` and ``external_id``) as the record's external reference.
 # Version 6: maps moving time, elevation gain, normalized power, cadence and the
 # summary values (intensity, RPE, feel, speeds, pace, FTP, eFTP, VO2max,
 # temperature, zone times, the paired calendar event and the device name).
 # Version 5: maps the maximum speed, maximum power and recording device type.
 # Version 4: a source of exactly "manual" is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 6
+# Version 8: the activity's own time zone dates it where it was recorded.
+MAPPER_VERSION: Final = 8
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
 MAX_NAME_LENGTH: Final = 200
@@ -151,6 +163,11 @@ _IDENTITY_KEYS: Final = (
     "name",
 )
 _PROVENANCE_KEYS: Final = ("source", "device_name", "external_id")
+# Intervals.icu ``source`` values whose ``external_id`` is the upstream activity id.
+_UPSTREAM_SOURCES: Final = {
+    "garmin_connect": ProviderId.GARMIN,
+    "wahoo": ProviderId.WAHOO,
+}
 _WORD_BREAK: Final = re.compile(r"[^a-z0-9]+")
 # Same minimum as activity_validation: a zero duration is not a usable value.
 _MIN_DURATION_S: Final = 1.0
@@ -158,7 +175,6 @@ _MIN_DURATION_S: Final = 1.0
 # digit limit, so wider integers are rejected before str() is called.
 _MAX_ID_INT_BITS: Final = 4 * MAX_ACTIVITY_ID_LENGTH
 # Offset of the time part in "YYYY-MM-DDTHH:MM..." text.
-_TIME_PART_START: Final = 11
 
 
 def _entries(
@@ -347,7 +363,9 @@ class _ActivityRow:
             parsed = parse_provider_datetime(value, zone)
             # A naive start_date would be localised to the athlete zone, which is
             # the wrong reading for a field that names an exact instant.
-            if parsed is not None and (key == "start_date_local" or _has_offset(value)):
+            if parsed is not None and (
+                key == "start_date_local" or names_utc_offset(value)
+            ):
                 return parsed
             # Text that is not an ISO datetime, any other type, or a naive
             # start_date is INVALID_TYPE.
@@ -382,17 +400,6 @@ class _ActivityRow:
     def name(self) -> str | None:
         value = self.text("name")
         return None if value is None else value[:MAX_NAME_LENGTH]
-
-
-def _has_offset(value: object) -> bool:
-    """Return True when ISO text carries its own offset (``Z``, ``+hh:mm``, ``-hh:mm``).
-
-    Called only on text that ``parse_provider_datetime`` already accepted, so the
-    time part starts at a fixed position. Any other value returns False.
-    """
-    text = value.strip() if isinstance(value, str) else ""
-    time_part = text[_TIME_PART_START:]
-    return time_part.endswith(("Z", "z")) or "+" in time_part or "-" in time_part
 
 
 def _identity_text(row: Mapping[str, object]) -> str:
@@ -443,6 +450,15 @@ def _recording_origin(source: str | None, provenance_text: str) -> RecordingOrig
     if "file" in _WORD_BREAK.split(folded):
         return RecordingOrigin.UPLOAD
     return RecordingOrigin.UNKNOWN
+
+
+def _external_ref(source: str | None, external_id: str | None) -> ExternalRef | None:
+    upstream = None if source is None else _UPSTREAM_SOURCES.get(source.casefold())
+    if upstream is None or not external_id:
+        return None
+    if len(external_id) > MAX_ACTIVITY_ID_LENGTH:
+        return None
+    return ExternalRef(upstream, external_id)
 
 
 def _device_type(device_name: str | None) -> DeviceType | None:
@@ -549,6 +565,7 @@ def _map_row(
         max_speed_mps=reader.number(_MAX_SPEED_KEYS, 0.0, MAX_ACTIVITY_SPEED_MPS),
         max_power_w=reader.number(_MAX_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
         device_type=_device_type(provenance["device_name"]),
+        external_ref=_external_ref(provenance["source"], provenance["external_id"]),
         moving_duration_s=moving_time,
         elevation_gain_m=reader.number(
             _ELEVATION_GAIN_KEYS, 0.0, MAX_ACTIVITY_ELEVATION_M
@@ -578,7 +595,19 @@ def _map_row(
             if provenance["device_name"] is None
             else provenance["device_name"][:MAX_NAME_LENGTH] or None
         ),
+        local_offset_minutes=_local_offset(row, started_at),
     )
+
+
+def _local_offset(row: Mapping[str, object], started_at: datetime) -> int | None:
+    """Return the activity's own UTC offset, known only with an exact start."""
+    start = row.get("start_date")
+    if not names_utc_offset(start) or parse_provider_datetime(start, UTC) != started_at:
+        return None
+    offset = zone_offset_minutes(row.get("timezone"), started_at)
+    if offset is not None:
+        return offset
+    return wall_clock_offset_minutes(row.get("start_date_local"), started_at)
 
 
 def map_intervals_activities(

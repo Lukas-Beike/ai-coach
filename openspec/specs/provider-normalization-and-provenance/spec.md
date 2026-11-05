@@ -22,7 +22,7 @@ Detailed contract: Unknown provider fields SHALL not automatically enter public 
 Evidence: `backend/canonical/records.py:Provenance`, `backend/canonical/records.py:Observation`, `backend/canonical/mapping.py:MappingIssue`, `backend/providers/wahoo_activity_mapping.py:map_wahoo_activities`; `tests/test_garmin_health_mapping.py:test_issues_never_echo_raw_values`, `tests/test_intervals_activity_mapping.py:test_private_free_text_is_not_carried_into_records`.
 
 ### Requirement: Provider-aware time and sport normalization
-The system SHALL preserve explicit instants and derive athlete-local days using the active timezone, normalize supported sports and indoor/outdoor/virtual environments, and apply the implemented wall-time DST rules to local timestamps. Intervals SHALL prefer an aware `start_date` over local wall time, while a naive absolute start alone is insufficient.
+The system SHALL preserve explicit instants, date each activity on the day it was lived using the UTC offset the provider reports for it and otherwise the active athlete timezone, normalize supported sports and indoor/outdoor/virtual environments, and apply the implemented wall-time DST rules to local timestamps. Intervals SHALL prefer an aware `start_date` over local wall time, while a naive absolute start alone is insufficient.
 
 #### Scenario: DST overlap or gap
 - **WHEN** provider local wall time lies in a DST overlap or spring gap
@@ -36,9 +36,21 @@ The system SHALL preserve explicit instants and derive athlete-local days using 
 - **WHEN** a Garmin activity has type `trail_running` or `obstacle_run`, or an Intervals.icu activity has type `TrailRun`
 - **THEN** it maps to an outdoor run, the only outdoor run of those two providers, so the session analyses (decoupling, pace at heart rate) leave it out as a trail run; Wahoo outdoor runs stay ordinary runs, and treadmill and virtual runs count as flat for pace at heart rate (method `pace-at-heart-rate-v2`), never grade-adjusted by a course altitude.
 
-Detailed contract: Wahoo's naive `starts` SHALL be interpreted as UTC, and workout-local timezone metadata SHALL not replace the athlete timezone used for local dates.
+#### Scenario: Activity recorded abroad
+- **WHEN** an athlete with profile zone Europe/Berlin records a run at 06:30 in Tokyo, reported by Garmin (`startTimeLocal` nine hours after `startTimeGMT`), by Intervals.icu (`timezone` Asia/Tokyo with an exact `start_date`) or by Wahoo (`time_zone` Asia/Tokyo)
+- **THEN** the activity, its session, `started_at_local` and every week or plan read are dated on the Tokyo day at 06:30, not on the previous Berlin day.
 
-Evidence: `backend/canonical/local_time.py:localize_wall_time`, `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`, `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_TYPES`, `backend/performance/analysis_input.py:analysis_sport`, `backend/performance/pace_at_hr.py:pace_at_heart_rate`; `tests/test_garmin_activity_mapping.py:test_only_off_road_runs_are_outdoor_runs`, `tests/test_pace_at_hr.py:test_indoor_and_virtual_runs_ignore_course_altitude`, `tests/test_analysis_input.py:test_garmin_outdoor_runs_are_trail_runs`, `tests/test_pace_at_hr.py:test_outdoor_run_without_terrain_is_unknown_but_indoor_is_flat`, `tests/test_intervals_activity_mapping.py:test_aware_start_date_wins_over_local_wall_time`, `tests/test_intervals_activity_mapping.py:test_naive_start_date_alone_drops_the_record`, `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`, `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`.
+#### Scenario: Profile zone change
+- **WHEN** the athlete changes the profile zone and stored records are reprojected
+- **THEN** activities with their own offset keep their date and wall time, and only activities without one follow the new zone.
+
+#### Scenario: No provider offset
+- **WHEN** a provider reports no usable offset (no exact start, a non-IANA zone name, or an offset beyond +-14 hours or off the quarter hour)
+- **THEN** the activity is dated in the athlete zone as before.
+
+Detailed contract: Wahoo's naive `starts` SHALL be interpreted as UTC. The offset is stored as `local_offset_minutes` in the activity record's details; a session uses its primary record's offset, else that of the first record reporting one. A summary carrying an offset keeps its own `started_at_local` date even when a reader converts to the athlete zone.
+
+Evidence: `backend/canonical/local_time.py:localize_wall_time`, `backend/canonical/local_time.py:wall_time`, `backend/canonical/local_time.py:wall_clock_offset_minutes`, `backend/canonical/local_time.py:zone_offset_minutes`, `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`, `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_TYPES`, `backend/activities/detail_contract.py:session_local_start`, `backend/canonical/activity_summary.py:summary_local_date`, `backend/performance/analysis_input.py:analysis_sport`, `backend/performance/pace_at_hr.py:pace_at_heart_rate`; `tests/test_activity_local_offset.py`, `tests/test_garmin_activity_mapping.py:test_only_off_road_runs_are_outdoor_runs`, `tests/test_pace_at_hr.py:test_indoor_and_virtual_runs_ignore_course_altitude`, `tests/test_analysis_input.py:test_garmin_outdoor_runs_are_trail_runs`, `tests/test_pace_at_hr.py:test_outdoor_run_without_terrain_is_unknown_but_indoor_is_flat`, `tests/test_intervals_activity_mapping.py:test_aware_start_date_wins_over_local_wall_time`, `tests/test_intervals_activity_mapping.py:test_naive_start_date_alone_drops_the_record`, `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`, `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`, `tests/test_wahoo_activity_mapping.py:test_the_workouts_own_time_zone_dates_it_where_it_was_recorded`.
 
 ### Requirement: Activity field and load semantics
 The system SHALL retain distinct moving and elapsed durations from every provider, distance in metres, power in watts, heart rate in bpm, ascent in metres, speed in metres per second, cadence in rpm, energy in kJ where mapped, and provider-specific load models. Intervals SHALL prefer moving time and average-watts aliases; Wahoo SHALL use summary active duration before total duration and never use planned workout minutes as completed duration.
@@ -106,19 +118,27 @@ Detailed contract: Wahoo SHALL map the newest power-zone set per cycling/running
 Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_ftp_history_reads_biometric_range_records`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
 
 ### Requirement: Metric-specific source priority and local authority
-The system SHALL apply per-metric source rules rather than a universal provider order. Current weight, FTP, thresholds, and VO2max prefer supported Garmin values before Intervals, with Wahoo a last fallback for current cycling FTP and weight. Manual profile weight precedes Wahoo fallback.
+The system SHALL apply per-metric source rules rather than a universal provider order. A locally confirmed zone configuration precedes every provider for thresholds. Current ride FTP prefers the athlete-maintained Intervals.icu setting before Garmin, with Wahoo last; threshold and maximum heart rate, threshold pace and run power prefer Garmin before Intervals.icu. VO2max prefers Garmin. Weight and body fat take the most recent measurement.
 
 #### Scenario: Three FTP sources
-- **WHEN** eligible Garmin, Intervals, and Wahoo cycling FTP values coexist
-- **THEN** current metric composition selects Garmin, labels its provider, and retains the other provider observations for their supported reads.
+- **WHEN** eligible Intervals, Garmin, and Wahoo cycling FTP values coexist and no local zone configuration applies
+- **THEN** current metric composition selects the Intervals.icu setting, labels its provider, lists the Garmin and Wahoo values as alternatives with a conflict flag above 3 %, and retains the other provider observations for their supported reads.
 
 #### Scenario: Old Wahoo fallback
 - **WHEN** Wahoo is the only eligible source but its dated value is older than the current-value age limit
 - **THEN** the current selector returns no Wahoo value while historical storage remains intact.
 
-Detailed contract: Body-fat current composition uses Intervals and manual profile paths; readiness prefers Intervals over Garmin; sleep, RMSSD, and resting HR prefer eligible Garmin readings; CTL/ATL remain Intervals-owned. Wahoo current FTP/weight older than 90 days SHALL be excluded when an as-of local day is supplied, without deleting history. Local profile and competition records SHALL retain their domain authority rather than being overwritten by provider read sync.
+#### Scenario: Stale threshold sources
+- **WHEN** the Intervals.icu sync is older than 30 days or a Garmin threshold was observed more than 180 days before the local day
+- **THEN** that value is not current and the next source in the rule's order supplies the threshold.
 
-Evidence: `backend/performance/source_policy.py:CURRENT_RULES`, `backend/performance/source_policy.py:DAILY_RULES`, `backend/performance/current_metrics.py:current_performance_metrics`, `backend/sync/authority.py:PlanningAuthorityService`; `tests/test_performance_current_metrics.py:test_garmin_ftp_beats_intervals_and_wahoo_ftp`, `tests/test_performance_current_metrics.py:test_manual_profile_weight_beats_wahoo_weight`, `tests/test_sync_authority.py:test_revision_failure_rolls_back_planning_update_atomically`.
+#### Scenario: A newer scale reading via Intervals.icu
+- **WHEN** Intervals.icu wellness holds today's weight and Garmin's newest weight is three days old
+- **THEN** the current weight is the Intervals.icu value, Garmin's stays an alternative, and a difference above 1.5 kg sets the conflict flag; were Garmin's measurement from yesterday, the Garmin device measurement would win.
+
+Detailed contract: Within one day of the newest weight or body fat, a device measurement precedes a provider report, which precedes a local entry; the undated Intervals.icu athlete record, the manual profile value and Wahoo's profile weight are fallbacks in that order. Body fat follows the weight rule with a 2-percentage-point conflict tolerance; readiness prefers Intervals over Garmin; sleep, RMSSD, and resting HR follow their method family (performance-and-readiness); CTL/ATL remain Intervals-owned. Wahoo current FTP/weight older than 90 days SHALL be excluded when an as-of local day is supplied, without deleting history. The PWA display preference of weight, body fat, sleep, HRV, resting HR, threshold pace, VO2max and eFTP is the first provider of that metric's rule; FTP and W/kg charts keep Garmin, whose FTP history they draw. Local profile and competition records SHALL retain their domain authority rather than being overwritten by provider read sync.
+
+Evidence: `backend/performance/source_policy.py:CURRENT_RULES`, `backend/performance/source_policy.py:resolve_candidates`, `backend/performance/current_thresholds.py:resolve_current_thresholds`, `backend/performance/display_sources.py:PREFERRED_PROVIDER`, `backend/performance/current_metrics.py:current_performance_metrics`, `backend/sync/authority.py:PlanningAuthorityService`; `tests/test_current_thresholds.py`, `tests/test_source_policy.py:RecencyResolutionTests`, `tests/test_performance_current_metrics.py:test_intervals_ftp_beats_garmin_and_wahoo_ftp`, `tests/test_performance_current_metrics.py:test_manual_profile_weight_beats_wahoo_weight`, `tests/test_performance_display_sources.py`, `tests/test_sync_authority.py:test_revision_failure_rolls_back_planning_update_atomically`.
 
 ### Requirement: Correction and reprojection continuity
 The system SHALL preserve provider raw-record identity and mapper version, ingest canonical data with the owning provider transaction, and reproject stored records on mapper/timezone changes. Before the first successful canonical backfill, canonical reads SHALL return no values and consumers SHALL report a pending state; after first completion, reads SHALL continue from tables during later reprojection/failure rather than disappearing or becoming pending again.
@@ -209,7 +229,7 @@ Canonical observations SHALL round-trip optional method, aggregation, method ver
 - **THEN** provider-fixed HRV method and aggregation metadata are populated without refetching or changing displayed measurements and labels; obsolete projections do not appear current.
 
 ### Requirement: Canonical sleep periods
-Canonical sleep periods SHALL retain aware UTC start/end, the timezone used, local wake date, night/unknown kind, reported duration and provenance. Invalid or reversed periods SHALL be rejected. Periods from different providers SHALL remain separate.
+Canonical sleep periods SHALL retain aware UTC start/end, local wake date, night/unknown kind, reported duration and provenance, and the ingest timezone only when it gives that wake date. The wake date SHALL be the provider's own day (Garmin `calendarDate`, the Intervals.icu wellness day) when it lies within a day of the end's UTC date, else the end's date in the ingest zone. Invalid or reversed periods SHALL be rejected. Periods from different providers SHALL remain separate.
 
 #### Scenario: Midnight and DST
 - **WHEN** a valid period crosses midnight or a DST transition
@@ -222,6 +242,12 @@ Canonical sleep periods SHALL retain aware UTC start/end, the timezone used, loc
 #### Scenario: Garmin main sleep during daytime
 - **WHEN** Garmin identifies a period as its main daily sleep episode, including daytime sleep for a shift worker
 - **THEN** its canonical kind is NIGHT, meaning main sleep rather than a clock-night classification; arbitrary periods are not classified by hour or duration.
+
+#### Scenario: Travel night
+- **WHEN** the athlete wakes at 06:00 in Tokyo with profile zone Europe/Berlin and Garmin files the night under that Tokyo day
+- **THEN** the period's wake date is the Tokyo day, the same day as the morning run recorded there, and it keeps no timezone because Berlin names another day.
+
+Evidence: `backend/providers/sleep_period_mapping.py:map_sleep_periods`, `backend/canonical/domain_records.py:SleepPeriod`; `tests/test_sleep_period_mapping.py`, `tests/test_activity_local_offset.py:TravelDaySleepTests`.
 
 ### Requirement: Explicit measurement context and continuity
 Observations and activities SHALL preserve supported device model, firmware, algorithm, sensor, measurement window and protocol, explicitly representing unavailable context as unknown. Canonical readers SHALL expose a deterministic context identity so downstream consumers can identify changes. Context SHALL not infer device or protocol from the provider brand or expose device serials.
@@ -320,3 +346,20 @@ Consumer packages (performance, Coach, HTTP API, planning, activities, athlete, 
 Detailed contract: rules `snapshot_key`, `legacy_read`, `source_label` and `field_module_import` in `tests/provider_coupling.py:OWNER_READ_ALLOWLIST`. No value read remains in the consumer packages (#1416): plan zones read canonical thresholds, equipment reads canonical gear items and links (a gear-listed Garmin activity links the rows of its canonical session, every Intervals.icu row whose canonical record the pairwise Garmin duplicate rule pairs with it, also when bundling kept them apart, and a row whose `external_id` is the Garmin id; the sync no longer computes or reads `activity_matches`), and the energy views take a day's presence after a targeted refresh from its canonical Garmin totals; the stored snapshot is read there only for sync status (`provider_sync`, Garmin state).
 
 Evidence: `tests/provider_coupling.py:scan_owner_reads`, `backend/sync/garmin_payload_metrics.py:garmin_payload_performance_metrics`, `backend/sync/garmin_performance_history.py:append_garmin_performance_history`, `backend/sync/intervals_compaction.py:compact_snapshot`; `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_read_raw_provider_views`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_allowlisted_raw_view_owner_passes_and_a_stale_entry_fails`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_source_tree_reads_only_through_allowlisted_owners`.
+
+### Requirement: Athlete-preferred source per metric group
+The system SHALL let the athlete choose a preferred source (Garmin or Intervals.icu, or the default) per metric group (thresholds, weight and body fat, HRV, resting HR, sleep) as a local profile setting with receipt and undo (also through the Coach's profile update), and every consumer SHALL apply it in the same read: the preferred provider leads the group's order, behind a locally confirmed zone configuration.
+
+#### Scenario: Preferred threshold source
+- **WHEN** the athlete prefers Garmin for thresholds and Garmin and Intervals.icu report different current FTPs
+- **THEN** the Coach context, current metrics and plan thresholds all use Garmin's FTP, and the Intervals.icu value stays an alternative with its conflict flag.
+
+#### Scenario: Preferred recovery method
+- **WHEN** the athlete prefers Intervals.icu for HRV
+- **THEN** the current HRV, its averages and the planning days use only Intervals.icu values, while resting HR and sleep keep their own preferences; preferring Garmin never falls back to Intervals.icu except as a detected relay.
+
+#### Scenario: Preferred body source
+- **WHEN** the athlete prefers Intervals.icu for weight and body fat and Garmin has a newer measurement
+- **THEN** the Intervals.icu value is current and Garmin's stays an alternative.
+
+Evidence: `backend/performance/source_policy.py:preferences_from_profile`, `backend/performance/source_policy.py:source_order`, `backend/performance/source_policy.py:family_providers`, `backend/athlete/profile.py:normalize_profile`, `backend/performance/canonical_inputs.py:CanonicalPerformanceSource`; `tests/test_source_policy.py:PreferredSourceTests`, `tests/test_current_thresholds.py:PreferredSourceTests`, `tests/test_performance_display_sources.py:PreferredDisplayTests`, `tests/test_athlete_profile.py:test_preferred_sources_accept_known_providers_only`, `tests/test_change_history.py:test_preferred_sources_are_audited_and_older_rows_stay_matchable`, `tests/test_performance_recovery_context.py:test_an_intervals_preference_uses_only_its_values`.

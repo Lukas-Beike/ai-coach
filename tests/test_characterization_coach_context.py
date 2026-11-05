@@ -345,7 +345,15 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         self.assertEqual(result["as_of"], "2026-05-04T05:00:00+00:00")
         self.assertEqual(
             set(result["thresholds"]),
-            {"ftp_w", "w_prime_j", "max_hr", "lthr", "weight"},
+            {
+                "ftp_w",
+                "ftp_source",
+                "w_prime_j",
+                "max_hr",
+                "lthr",
+                "run_lthr",
+                "weight",
+            },
         )
 
     def test_athlete_icu_ftp_is_the_labelled_intervals_fallback(self) -> None:
@@ -366,18 +374,25 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
         )
         self.assertEqual(result["metrics"]["weight_kg"]["source"], INTERVALS_SOURCE)
 
-    def test_garmin_cycling_ftp_wins_and_thresholds_drop_the_source_label(
+    def test_intervals_cycling_ftp_wins_and_garmin_stays_an_alternative(
         self,
     ) -> None:
         result = _context(_intervals_snapshot(), _garmin_payload(), {}, TODAY)
 
+        # Canonical (#1668): the athlete-maintained Intervals FTP precedes Garmin.
         ftp = result["metrics"]["cycling_ftp_watts"]
-        self.assertEqual(ftp["value"], 265)
-        self.assertEqual(ftp["source"], GARMIN_SOURCE)
-        self.assertEqual(ftp["freshness"], "partial")
-        self.assertEqual(ftp["measurement_age_days"], 3)
-        # Quirk: thresholds carry bare values; provenance lives in metrics only.
-        self.assertEqual(result["thresholds"]["ftp_w"], 265)
+        self.assertEqual(ftp["value"], 250)
+        self.assertEqual(ftp["source"], INTERVALS_SOURCE)
+        self.assertEqual(ftp["alternatives"][0]["value"], 265)
+        self.assertEqual(ftp["alternatives"][0]["source"], GARMIN_SOURCE)
+        self.assertTrue(ftp["conflict"])
+        self.assertEqual(result["thresholds"]["ftp_w"], 250)
+        self.assertEqual(result["thresholds"]["ftp_source"], INTERVALS_SOURCE)
+        self.assertEqual(
+            result["thresholds"]["ftp_alternatives"],
+            [{"source": GARMIN_SOURCE, "value": 265}],
+        )
+        self.assertTrue(result["thresholds"]["ftp_conflict"])
         self.assertNotIsInstance(result["thresholds"]["ftp_w"], dict)
 
     def test_recovery_id_follows_sleep_then_resting_hr_then_hrv_then_wellness(
@@ -475,7 +490,11 @@ class CoachPerformanceReaderProvenanceTests(unittest.TestCase):
         result = reader.current_performance(_recovery(garmin, snapshot))
 
         self.assertEqual(
-            result["metrics"]["cycling_ftp_watts"]["source"], GARMIN_SOURCE
+            result["metrics"]["cycling_ftp_watts"]["source"], INTERVALS_SOURCE
+        )
+        self.assertEqual(
+            result["metrics"]["cycling_ftp_watts"]["alternatives"][0]["source"],
+            GARMIN_SOURCE,
         )
         self.assertEqual(result["metrics"]["weight_kg"]["source"], INTERVALS_SOURCE)
         self.assertEqual(

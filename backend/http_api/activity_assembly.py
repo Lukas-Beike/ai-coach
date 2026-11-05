@@ -7,9 +7,9 @@ from typing import Any
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.vocabulary import ProviderId
-from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.source_policy import SourcePreferences
 from backend.runtime.ports import (
     ActivityRowAndSummaryReader,
     CanonicalReadStatus,
@@ -33,6 +33,8 @@ class ActivityReadSources:
     observation_reader: Callable[[], ObservationReader]
     coverage: Callable[[], ProviderCoverageReader]
     serving: Callable[[], CanonicalReadStatus] | None = None
+    # The athlete's preferred sources, read in the caller's unit of work.
+    source_preferences: Callable[[Any], SourcePreferences] | None = None
 
 
 class ActivityReadAssembly:
@@ -51,6 +53,7 @@ class ActivityReadAssembly:
         self._observation_reader = sources.observation_reader
         self._coverage = sources.coverage
         self._serving = sources.serving
+        self._source_preferences = sources.source_preferences
         self._feedback_service = feedback_service
         self._read_equipment = read_equipment
         self._refreshable_providers = refreshable_providers
@@ -59,13 +62,12 @@ class ActivityReadAssembly:
         manager = self._database_manager()
         return ActivityAnalysisReadService(
             manager,
-            CompactActivityRows(self._row_reader()),
+            self._row_reader(),
             self._feedback_service(),
             ActivityDetailStore(manager),
             read_equipment=self._read_equipment,
             references=ActivityReferences(manager),
             canonical=self._canonical_source(),
-            summary_rows=self._row_reader(),
             session_records=CanonicalTableReader().session_activities,
             refreshable=self._refreshable,
         )
@@ -84,4 +86,5 @@ class ActivityReadAssembly:
             serving=self._serving,
             activity_summaries=self._row_reader,
             coverage=self._coverage,
+            source_preferences=self._source_preferences,
         )

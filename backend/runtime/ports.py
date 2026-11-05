@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
 from datetime import date
 from typing import Any, Protocol, runtime_checkable
@@ -94,6 +94,9 @@ class ActivitySummaryReader(Protocol):
 class ActivityRowReader(Protocol):
     """Reads the raw Intervals.icu activity payloads behind the canonical records.
 
+    Sync owner only (detail fetch, snapshot restore); a guard rejects calls
+    outside ``backend/sync/``. Consumers read session summaries instead.
+
     Rows are provider dictionaries (device source, ``icu_*`` fields, laps, gear),
     untrusted data, before any de-duplication. ``start`` and ``end`` are inclusive
     bounds on the athlete-local date of each activity, as in ``ActivityReader``.
@@ -103,7 +106,7 @@ class ActivityRowReader(Protocol):
     source applies it before reading the payloads.
     """
 
-    def activity_rows(
+    def intervals_activity_payloads(
         self,
         db: Any,
         *,
@@ -113,7 +116,45 @@ class ActivityRowReader(Protocol):
     ) -> tuple[dict[str, Any], ...]: ...
 
 
-class ActivityRowAndSummaryReader(ActivityRowReader, ActivitySummaryReader, Protocol):
+# One provider activity: its provider id value and its provider activity id.
+type ProviderActivityKey = tuple[str, str]
+
+
+class ActivityFingerprintReader(Protocol):
+    """Reads the current summary fingerprint of provider activities.
+
+    Stored detail sets, analyses, workout profiles and curves record the
+    fingerprint they were built from; a different current one makes them stale.
+    For Intervals.icu it is ``summary_fingerprint`` of the stored payload, for
+    other providers the payload hash of the active raw record. Keys without an
+    active raw record are absent. Only the requested payloads are read.
+    """
+
+    def summary_fingerprints(
+        self, db: Any, keys: Iterable[ProviderActivityKey]
+    ) -> dict[ProviderActivityKey, str]: ...
+
+
+class IntervalsSummaryRowReader(Protocol):
+    """Reads the stored Intervals.icu summary payload of one activity.
+
+    Untrusted provider data, already ingest-sanitized; the activity detail
+    document reads its summary metrics and live zone times from it. None when
+    the activity has no active raw record.
+    """
+
+    def intervals_summary_row(
+        self, db: Any, provider_activity_id: str
+    ) -> dict[str, Any] | None: ...
+
+
+class ActivityRowAndSummaryReader(
+    ActivityRowReader,
+    ActivitySummaryReader,
+    ActivityFingerprintReader,
+    IntervalsSummaryRowReader,
+    Protocol,
+):
     """Raw activity rows for provider-side reads and summaries for consumers."""
 
 
@@ -195,8 +236,10 @@ class ActivityMaxHrReader(Protocol):
 
 class CanonicalReader(
     ActivityReader,
+    ActivityFingerprintReader,
     ActivityMaxHrReader,
     ActivityRowReader,
+    IntervalsSummaryRowReader,
     ActivitySessionReader,
     ObservationReader,
     Protocol,

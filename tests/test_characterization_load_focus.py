@@ -26,7 +26,6 @@ from backend.performance.load_context import (
 )
 from backend.performance.training_focus import training_focus
 from backend.performance.wellness_days import series
-from backend.sync.garmin_activity_duplicates import deduplicated_rows
 
 TODAY = date(2026, 5, 4)
 RETENTION = math.exp(-1.0 / 7.0)
@@ -474,7 +473,7 @@ class CharacterizationLoadContextTests(unittest.TestCase):
 
     def test_context_rollups_count_garmin_and_wahoo_copies_twice(self) -> None:
         # Quirk: the production caller passes raw recent_activities, so the load
-        # context does not apply deduplicated_rows and both copies of one ride count.
+        # context does not drop duplicates and both copies of one ride count.
         activities = [
             _ride(
                 "w",
@@ -883,172 +882,6 @@ class CharacterizationTrainingFocusTests(unittest.TestCase):
         )
         self.assertEqual(result["coverage"]["known_sessions"], 1002)
         self.assertEqual(result["categories"]["high_aerobic"]["sessions"], 1002)
-
-
-class CharacterizationCanonicalRowsTests(unittest.TestCase):
-    def test_wahoo_provenance_is_read_from_each_source_field_alone(self) -> None:
-        # Each provenance field marks the ride as Wahoo on its own, so the Garmin
-        # copy is removed when only that single field is present.
-        for field, value in (
-            ("source", "WAHOO ELEMNT"),
-            ("device_name", "ELEMNT BOLT"),
-            ("external_id", "wahoo-123"),
-        ):
-            with self.subTest(field=field):
-                rows, duplicates = deduplicated_rows(
-                    [
-                        _raw_ride("w", **{field: value}),
-                        _raw_ride("g", source="garmin"),
-                    ]
-                )
-                self.assertEqual(_ids(rows), ["w"])
-                self.assertEqual(duplicates, 1)
-
-    def test_garmin_ride_is_removed_at_exactly_thirty_minutes_not_thirty_one(
-        self,
-    ) -> None:
-        wahoo = _raw_ride("w", source="wahoo")
-        at_limit = deduplicated_rows(
-            [
-                wahoo,
-                _raw_ride("g", start="2026-05-04T08:30:00", source="garmin"),
-            ]
-        )
-        past_limit = deduplicated_rows(
-            [
-                wahoo,
-                _raw_ride("g", start="2026-05-04T08:31:00", source="garmin"),
-            ]
-        )
-        self.assertEqual(_ids(at_limit[0]), ["w"])
-        self.assertEqual(_ids(past_limit[0]), ["w", "g"])
-
-    def test_duration_and_distance_tolerances_use_the_larger_of_floor_and_ten_percent(
-        self,
-    ) -> None:
-        # Duration passes within max(120 s, 10% of the longer ride); distance passes
-        # within max(500 m, 10% of the longer ride). Both boundaries are inclusive.
-        cases: list[tuple[dict[str, Any], dict[str, Any], bool]] = [
-            ({"moving_time": 600}, {"moving_time": 720}, True),
-            ({"moving_time": 600}, {"moving_time": 721}, False),
-            ({"moving_time": 7200}, {"moving_time": 7000}, True),
-            ({"moving_time": 7200}, {"moving_time": 6400}, False),
-            ({"distance": 2000}, {"distance": 2500}, True),
-            ({"distance": 2000}, {"distance": 2501}, False),
-            ({"distance": 30000}, {"distance": 33000}, True),
-            ({"distance": 30000}, {"distance": 33500}, False),
-        ]
-        for wahoo_fields, garmin_fields, matches in cases:
-            with self.subTest(wahoo=wahoo_fields, garmin=garmin_fields):
-                rows, duplicates = deduplicated_rows(
-                    [
-                        _raw_ride("w", source="wahoo", **wahoo_fields),
-                        _raw_ride("g", source="garmin", **garmin_fields),
-                    ]
-                )
-                self.assertEqual(_ids(rows), ["w"] if matches else ["w", "g"])
-                self.assertEqual(duplicates, 1 if matches else 0)
-
-    def test_garmin_run_is_kept_and_untyped_garmin_ride_is_matched_by_name(
-        self,
-    ) -> None:
-        # Quirk: a Garmin row without a type is treated as cycling from its name
-        # ("Morning Ride") and removed; a Garmin Run copy is not matched at all.
-        wahoo = _raw_ride("w", source="wahoo")
-        run_copy = deduplicated_rows(
-            [
-                wahoo,
-                _raw_ride("g", source="garmin", type="Run"),
-            ]
-        )
-        name_only = deduplicated_rows(
-            [
-                wahoo,
-                {
-                    "id": "g",
-                    "name": "Morning Ride",
-                    "source": "garmin",
-                    "start_date_local": "2026-05-04T08:00:00",
-                    "moving_time": 3600,
-                    "distance": 30000,
-                },
-            ]
-        )
-        self.assertEqual(_ids(run_copy[0]), ["w", "g"])
-        self.assertEqual(_ids(name_only[0]), ["w"])
-
-    def test_missing_or_zero_wahoo_distance_keeps_the_garmin_copy(self) -> None:
-        for distance in (None, 0):
-            with self.subTest(distance=distance):
-                rows, duplicates = deduplicated_rows(
-                    [
-                        _raw_ride("w", source="wahoo", distance=distance),
-                        _raw_ride("g", source="garmin"),
-                    ]
-                )
-                self.assertEqual(_ids(rows), ["w", "g"])
-                self.assertEqual(duplicates, 0)
-
-    def test_string_garmin_distance_still_matches_for_removal(self) -> None:
-        # Quirk: the duplicate matcher parses decimal strings, unlike training totals.
-        rows, duplicates = deduplicated_rows(
-            [
-                _raw_ride("w", source="wahoo"),
-                _raw_ride("g", source="garmin", distance="30000"),
-            ]
-        )
-        self.assertEqual(_ids(rows), ["w"])
-        self.assertEqual(duplicates, 1)
-
-    def test_garmin_only_and_wahoo_only_pairs_are_not_collapsed(self) -> None:
-        garmin_pair = deduplicated_rows(
-            [
-                _raw_ride("g1", source="garmin"),
-                _raw_ride("g2", source="garmin"),
-            ]
-        )
-        wahoo_pair = deduplicated_rows(
-            [
-                _raw_ride("w1", source="wahoo"),
-                _raw_ride("w2", source="wahoo"),
-            ]
-        )
-        self.assertEqual((_ids(garmin_pair[0]), garmin_pair[1]), (["g1", "g2"], 0))
-        self.assertEqual((_ids(wahoo_pair[0]), wahoo_pair[1]), (["w1", "w2"], 0))
-
-    def test_identical_id_duplicates_are_dropped_but_not_counted(self) -> None:
-        # Quirk: excluded_duplicates only counts Wahoo/Garmin removals, because the
-        # identical-id duplicates are dropped before the count is taken.
-        wahoo = _raw_ride("w", source="wahoo")
-        rows, duplicates = deduplicated_rows([wahoo, dict(wahoo)])
-        self.assertEqual(_ids(rows), ["w"])
-        self.assertEqual(duplicates, 0)
-
-    def test_numeric_and_string_ids_are_the_same_identity(self) -> None:
-        rows, duplicates = deduplicated_rows(
-            [_raw_ride(5), _raw_ride("5")]  # type: ignore[arg-type]
-        )
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(duplicates, 0)
-
-    def test_non_dict_records_are_dropped_and_not_counted(self) -> None:
-        rows, duplicates = deduplicated_rows(["junk", None, _raw_ride("a")])
-        self.assertEqual(_ids(rows), ["a"])
-        self.assertEqual(duplicates, 0)
-
-    def test_missing_recent_activities_yield_no_rows(self) -> None:
-        self.assertEqual(deduplicated_rows([]), ([], 0))
-
-    def test_output_keeps_input_order_and_first_occurrence(self) -> None:
-        rows, _ = deduplicated_rows(
-            [
-                _raw_ride("b"),
-                _raw_ride("a", moving_time=1),
-                _raw_ride("a", moving_time=2),
-            ]
-        )
-        self.assertEqual(_ids(rows), ["b", "a"])
-        self.assertEqual(rows[1]["moving_time"], 1)
 
 
 if __name__ == "__main__":

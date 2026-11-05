@@ -11,6 +11,7 @@ from backend.activities.activity_reference import ActivityReferences
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
+from backend.activities.session_corrections import SessionCorrectionService
 from backend.activities.session_linking import garmin_activity_matches
 from backend.athlete.checkins import CheckinService
 from backend.athlete.clock import AthleteLocalClock
@@ -18,9 +19,9 @@ from backend.athlete.context import AthleteContextService
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.profile import ProfileService
 from backend.athlete.zones import ZoneConfigurationService
-from backend.runtime.ports import ActivityRowReader, CanonicalTableServing
+from backend.canonical.activity_summary import ActivitySummary
+from backend.runtime.ports import ActivityRowAndSummaryReader, CanonicalTableServing
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.garmin_activity_duplicates import deduplicated_rows
 from backend.weather.cache import invalidate_for_location_change
 
 
@@ -30,7 +31,7 @@ class AthleteRepositories:
     checkin: Any
     profile: Any
     key_values: Any
-    activity_rows: Callable[[], ActivityRowReader]
+    activity_rows: Callable[[], ActivityRowAndSummaryReader]
     table_serving: Callable[[], CanonicalTableServing]
     competition: Any
 
@@ -80,17 +81,16 @@ class AthleteDataAssembly:
         self._uuid_factory = runtime.uuid_factory
         self._read_planned_units = runtime.read_planned_units
 
-    def activity_rows(self) -> tuple[dict[str, Any], ...]:
+    def activity_summaries(self) -> tuple[ActivitySummary, ...]:
         with self._database_manager().unit_of_work() as db:
-            return self._activity_rows().activity_rows(db)
+            return self._activity_rows().activity_summaries(db)
 
     def equipment(self) -> EquipmentService:
         return EquipmentService(
             self._database_manager(),
-            self.activity_rows,
+            self.activity_summaries,
             self._local_date,
             self._utc_now,
-            deduplicated_rows,
             resolve_activity=ActivityReferences(self._database_manager()).resolve,
             gear_reader=CanonicalTableReader(),
             match_activities=self._garmin_activity_matches,
@@ -113,7 +113,6 @@ class AthleteDataAssembly:
         return ActivityFeedbackService(
             self._database_manager(),
             self._activity_feedback_repository,
-            self._activity_rows(),
             references=ActivityReferences(self._database_manager()),
         )
 
@@ -129,6 +128,11 @@ class AthleteDataAssembly:
             CanonicalTableReader(),
             self._athlete_zone,
             self._table_serving(),
+        )
+
+    def session_corrections(self) -> SessionCorrectionService:
+        return SessionCorrectionService(
+            self._database_manager(), self._utc_now, self._event_buffer
         )
 
     def duplicate_activity(self) -> DuplicateActivityService:

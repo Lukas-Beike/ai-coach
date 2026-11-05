@@ -38,7 +38,6 @@ from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.schema import configure_cipher, database_schema_is_current
 from backend.history.service import ChangeHistoryService
 from backend.history.undo_service import HistoryUndoService
-from backend.sync.canonical_table_reader import CanonicalTableReader
 
 # Quotes and line breaks double in JSON, so the recorded row is far above 4000.
 LONG_NOTES = ('"' + "\n") * 2000
@@ -143,7 +142,6 @@ class FeedbackHistoryTests(FeedbackSessionFixture):
         self.service = ActivityFeedbackService(
             self.manager,
             self.repository,
-            CanonicalTableReader(),
             references=ActivityReferences(self.manager),
         )
 

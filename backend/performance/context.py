@@ -210,6 +210,9 @@ def current_performance_context(
         canonical=current,
         activities=activities,
         latest_wellness=latest_wellness,
+        garmin_thresholds=_garmin_canonical(canonical).thresholds,
+        garmin_body=_garmin_canonical(canonical).body,
+        as_of=today,
     )
     load_context = performance_load_context.performance_load_context(
         activities, days, today, canonical=canonical
@@ -267,8 +270,7 @@ def current_performance_context(
         **_refresh_status(canonical),
         "metrics": metrics,
         "thresholds": {
-            "ftp_w": metrics["cycling_ftp_watts"]["value"],
-            **performance_current_metrics.athlete_thresholds(current),
+            **performance_current_metrics.coach_thresholds(metrics, current),
             "weight": metrics["weight_kg"]["value"],
         },
         "current_load": load,

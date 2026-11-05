@@ -224,7 +224,7 @@ class SurvivorDeletedAliasTests(DuplicateCase):
     def test_the_wahoo_ride_stays_served_after_its_survivor_is_deleted(self) -> None:
         with self.manager.reader() as db:
             served = {record.activity_id for record in self.reader.activities(db)}
-            rows = {row["id"] for row in self.reader.activity_rows(db)}
+            rows = {row["id"] for row in self.reader.intervals_activity_payloads(db)}
         self.assertEqual((served, rows), ({WAHOO_ID}, {WAHOO_ID}))
 
     def test_no_session_is_left_merged_into_a_deleted_session(self) -> None:

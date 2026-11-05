@@ -6,13 +6,27 @@ canonical activity rows. No snapshot section is read.
 """
 
 import math
-from typing import Any
+from collections.abc import Callable, Iterable, Mapping
+from datetime import date
+from typing import Any, Final
 
 from backend.activities.identity import activity_kind
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
 from backend.performance.canonical_current import CanonicalCurrentInputs
+from backend.performance.current_thresholds import (
+    ThresholdKey,
+    resolve_current_thresholds,
+)
+from backend.performance.source_policy import (
+    NO_PREFERENCES,
+    Candidate,
+    Resolved,
+    SourcePreferences,
+    resolve_candidates,
+    source_order,
+)
 from backend.performance.wellness_days import WellnessDay
 from backend.providers.source_labels import (
     SourceView,
@@ -32,15 +46,38 @@ _ACTIVITY_LABEL_PROVIDERS = {
     for provider in ProviderId
 }
 VO2MAX_UNIT = "ml/kg/min"
+# The label of a locally confirmed zone configuration's value.
+LOCAL_SOURCE_LABEL = "Lokal"
+# The label of a profile value.
+PROFILE_SOURCE_LABEL = "Manuell"
 
 
-def athlete_thresholds(canonical: CanonicalCurrentInputs) -> dict[str, Any]:
-    """Return the athlete record's W′, max heart rate and LTHR for threshold context."""
-    return {
+def coach_thresholds(
+    metrics: Mapping[str, Mapping[str, Any]], canonical: CanonicalCurrentInputs
+) -> dict[str, Any]:
+    """Return the thresholds plans use, with the FTP's source and alternatives.
+
+    FTP, LTHR and max heart rate are the source-policy current values, the same
+    ones plans read; W′ is the athlete record's. A different current FTP of another
+    source is listed under ``ftp_alternatives``, and ``ftp_conflict`` marks a
+    material difference.
+    """
+    ftp = metrics["cycling_ftp_watts"]
+    result: dict[str, Any] = {
+        "ftp_w": ftp["value"],
+        "ftp_source": ftp["source"],
         "w_prime_j": _observation_number(canonical.athlete_value(MetricKind.W_PRIME)),
-        "max_hr": _observation_number(canonical.athlete_value(MetricKind.MAX_HR)),
-        "lthr": _observation_number(canonical.athlete_threshold_hr),
+        "max_hr": metrics["max_hr_bpm"]["value"],
+        "lthr": metrics["bike_threshold_hr_bpm"]["value"],
+        "run_lthr": metrics["run_threshold_hr_bpm"]["value"],
     }
+    if ftp.get("alternatives"):
+        result["ftp_alternatives"] = [
+            {"source": item["source"], "value": item["value"]}
+            for item in ftp["alternatives"]
+        ]
+        result["ftp_conflict"] = ftp["conflict"]
+    return result
 
 
 def _observation_number(observation: Observation | None) -> float | int | None:
@@ -110,13 +147,6 @@ def _first(candidates: tuple[Observation, ...]) -> Observation | None:
     return next(iter(candidates), None)
 
 
-def _threshold_hr_metric(
-    canonical_sport: tuple[Observation, ...], canonical_athlete: Observation | None
-) -> dict[str, Any]:
-    """Sport threshold HR, then the athlete-wide value."""
-    return _observation_metric(_first(canonical_sport) or canonical_athlete, "bpm")
-
-
 def _canonical_eftp_value(canonical: CanonicalCurrentInputs) -> float | None:
     """Return the athlete-record ride eFTP, else the latest wellness day's."""
     for observation in (canonical.athlete_eftp, canonical.wellness_eftp):
@@ -137,39 +167,73 @@ def _activity_max_hr(activity: Any) -> tuple[float, ProviderId] | None:
     return float(value), provider
 
 
-def _intervals_max_hr_metric(
+def _overall_max_hr(
+    sports: tuple[dict[str, Any], ...],
+    preferences: SourcePreferences = NO_PREFERENCES,
+) -> dict[str, Any]:
+    """The highest sport max HR among those of the best-ranked source.
+
+    Sources rank as the max HR rule orders them (local, Garmin, Intervals), and
+    activity maxima last, so a Garmin value wins before sports are compared.
+    """
+    order = [
+        None if source is None else source.value
+        for source in source_order(MetricKind.MAX_HR, None, preferences)
+    ]
+
+    def rank(item: dict[str, Any]) -> int:
+        if item.get("source") == LOCAL_SOURCE_LABEL:
+            return order.index(None)
+        provider = item.get("source_provider")
+        return order.index(provider) if provider in order else len(order)
+
+    present = [item for item in sports if item["value"] is not None]
+    if not present:
+        return metric(None, "bpm", None)
+    best = min(rank(item) for item in present)
+    return max(
+        (item for item in present if rank(item) == best), key=lambda item: item["value"]
+    )
+
+
+def _max_hr_metric(
     category: str,
     sport: Sport,
     activities: list[Any],
-    canonical: CanonicalCurrentInputs,
+    thresholds: Mapping[ThresholdKey, Resolved],
+    garmin_metrics: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Return sport max HR: setting, then activities, then the athlete record.
+    """Return sport max HR: the source-policy winner, else the activity maximum.
 
-    An activity value keeps the provider its summary names for ``max_hr``.
+    The winner is the local zone configuration, Garmin's profile value, then the
+    Intervals setting or athlete record. Without any, the Garmin activity maximum,
+    else the highest activity value, which keeps the provider its summary names.
     """
+    key = f"{category}_max_hr_bpm"
+    resolved = thresholds.get((MetricKind.MAX_HR, sport))
+    if resolved is not None:
+        return _resolved_metric(garmin_metrics, key, resolved)
+    garmin = garmin_metrics[key]
+    # Only Garmin's activity maximum (it carries ``observed_at``) is a fallback;
+    # its profile max HR is a threshold the resolver has already aged.
+    if garmin["value"] is not None and garmin.get("observed_at"):
+        return garmin
     activity_values = [
         found
         for activity in activities
         if activity_kind(activity) == category
         and (found := _activity_max_hr(activity)) is not None
     ]
-    setting = _observation_number(canonical.athlete_value(MetricKind.MAX_HR, sport))
-    athlete = _observation_number(canonical.athlete_value(MetricKind.MAX_HR))
     best = max(activity_values, default=None, key=lambda item: item[0])
-    candidates = (
-        (setting, ProviderId.INTERVALS),
-        best if best is not None else (None, ProviderId.INTERVALS),
-        (athlete, ProviderId.INTERVALS),
+    if best is None:
+        return metric(None, "bpm", None)
+    number, provider = best
+    return metric(
+        number,
+        "bpm",
+        provider_label(provider, SourceView.CURRENT_METRIC),
+        provider=provider,
     )
-    for number, provider in candidates:
-        if number is not None and 80 <= float(number) <= 260:
-            return metric(
-                number,
-                "bpm",
-                provider_label(provider, SourceView.CURRENT_METRIC),
-                provider=provider,
-            )
-    return metric(None, "bpm", None)
 
 
 def _pace_seconds(observation: Observation | None) -> float | int | None:
@@ -229,18 +293,50 @@ def _observation_source(
     )
 
 
-def _wellness_source(
-    observation: Observation | None,
-    latest_wellness: WellnessDay | None,
-    kind: MetricKind,
-) -> tuple[Any, str | None, ProviderId | None]:
-    """Return this sync's wellness-row value, else the latest wellness day's."""
-    if observation is not None:
-        return _observation_source(observation)
+def _dated(observation: Observation | None) -> tuple[Candidate, ...]:
+    if observation is None or observation.provenance.provider is None:
+        return ()
+    value = float(observation.value.value)
     return (
-        None if latest_wellness is None else latest_wellness.value(kind),
-        PROVIDER_INTERVALS_WELLNESS_NAME,
-        ProviderId.INTERVALS,
+        Candidate(
+            observation.provenance.provider, value, observation.observed_on, observation
+        ),
+    )
+
+
+def _undated(observation: Observation | None) -> tuple[Candidate, ...]:
+    """A value that is no dated measurement: only a fallback for the recency rule."""
+    if observation is None or observation.provenance.provider is None:
+        return ()
+    value = float(observation.value.value)
+    return (Candidate(observation.provenance.provider, value, None, observation),)
+
+
+def _profile_candidate(value: Any) -> tuple[Candidate, ...]:
+    number = as_number(value)
+    return () if number is None else (Candidate(None, float(number)),)
+
+
+def _body_candidates(
+    kind: MetricKind,
+    garmin_body: Iterable[Observation],
+    wellness: Observation | None,
+    athlete: Observation | None,
+    profile_value: Any,
+    wahoo: Observation | None = None,
+) -> tuple[Candidate, ...]:
+    """Weight or body fat of each source, in source order.
+
+    Garmin's latest measurement and the Intervals wellness value are dated; the
+    Intervals athlete record, the profile and Wahoo's profile weight are not.
+    """
+    garmin = next((item for item in garmin_body if item.kind is kind), None)
+    return (
+        *_dated(garmin),
+        *_dated(wellness),
+        *_undated(athlete),
+        *_profile_candidate(profile_value),
+        *_undated(wahoo),
     )
 
 
@@ -249,45 +345,58 @@ def _performance_body_metrics(
     profile: dict[str, Any],
     garmin_metrics: dict[str, dict[str, Any]],
     canonical: CanonicalCurrentInputs,
+    garmin_body: tuple[Observation, ...],
+    as_of: date | None,
 ) -> dict[str, dict[str, Any]]:
-    weight_value, weight_source, weight_provider = _first_performance_source(
-        (
-            (
-                garmin_metrics["weight_kg"]["value"],
-                GARMIN_PERFORMANCE_SOURCE,
-                ProviderId.GARMIN,
-            ),
-            _wellness_source(
-                canonical.wellness_weight, latest_wellness, MetricKind.WEIGHT
-            ),
-            _observation_source(canonical.athlete_weight),
-            (profile.get("weight_kg"), "Manuell", None),
-            _observation_source(canonical.wahoo_weight),
+    """Weight and body fat by recency across sources (``source_policy``)."""
+
+    def wellness(kind: MetricKind) -> Observation | None:
+        return (
+            None if latest_wellness is None else latest_wellness.observations.get(kind)
         )
+
+    weight = resolve_candidates(
+        MetricKind.WEIGHT,
+        _body_candidates(
+            MetricKind.WEIGHT,
+            garmin_body,
+            canonical.wellness_weight or wellness(MetricKind.WEIGHT),
+            canonical.athlete_weight,
+            profile.get("weight_kg"),
+            canonical.wahoo_weight,
+        ),
+        as_of=as_of,
+        preferences=canonical.preferences,
     )
-    body_fat_value, body_fat_source, body_fat_provider = _first_performance_source(
-        (
-            _wellness_source(None, latest_wellness, MetricKind.BODY_FAT),
-            _observation_source(canonical.athlete_value(MetricKind.BODY_FAT)),
-            (profile.get("body_fat_pct"), "Manuell", None),
-        )
+    body_fat = resolve_candidates(
+        MetricKind.BODY_FAT,
+        _body_candidates(
+            MetricKind.BODY_FAT,
+            garmin_body,
+            wellness(MetricKind.BODY_FAT),
+            canonical.athlete_value(MetricKind.BODY_FAT),
+            profile.get("body_fat_pct"),
+        ),
+        as_of=as_of,
+        preferences=canonical.preferences,
     )
     height_value, height_source, height_provider = _first_performance_source(
         (
             _observation_source(canonical.athlete_value(MetricKind.HEIGHT)),
             # The canonical height is in cm; only the profile may hold metres.
-            (_height_in_cm(profile.get("height_cm")), "Manuell", None),
+            (_height_in_cm(profile.get("height_cm")), PROFILE_SOURCE_LABEL, None),
         )
     )
-    weight_metric = (
-        garmin_metrics["weight_kg"]
-        if weight_source == GARMIN_PERFORMANCE_SOURCE
-        else metric(weight_value, "kg", weight_source, provider=weight_provider)
-    )
     return {
-        "weight_kg": weight_metric,
-        "body_fat_pct": metric(
-            body_fat_value, "%", body_fat_source, provider=body_fat_provider
+        "weight_kg": _resolved_entry(
+            weight,
+            "kg",
+            as_number,
+            garmin_metrics.get("weight_kg"),
+            PROFILE_SOURCE_LABEL,
+        ),
+        "body_fat_pct": _resolved_entry(
+            body_fat, "%", as_number, None, PROFILE_SOURCE_LABEL
         ),
         "height_cm": metric(
             height_value,
@@ -301,6 +410,7 @@ def _performance_body_metrics(
 def _preferred_performance_metric(
     garmin_metrics: dict[str, dict[str, Any]], key: str, fallback: dict[str, Any]
 ) -> dict[str, Any]:
+    """VO2max and race predictions: Garmin, the originator, before Intervals."""
     current = garmin_metrics[key]
     return current if current["value"] is not None else fallback
 
@@ -309,49 +419,105 @@ def _intervals_metric(value: Any, unit: str) -> dict[str, Any]:
     return metric(value, unit, PROVIDER_INTERVALS_NAME, provider=ProviderId.INTERVALS)
 
 
+def _speed_to_pace(value: float) -> float | int | None:
+    return round(1000 / value) if value > 0 else None
+
+
+# Display key -> (threshold key, unit, display conversion of the canonical value).
+_THRESHOLD_METRICS: Final[
+    Mapping[str, tuple[ThresholdKey, str, Callable[[float], float | int | None]]]
+] = {
+    "cycling_ftp_watts": ((MetricKind.FTP, Sport.RIDE), "W", as_number),
+    "run_threshold_watts": ((MetricKind.FTP, Sport.RUN), "W", as_number),
+    "run_threshold_pace_seconds_per_km": (
+        (MetricKind.THRESHOLD_PACE, Sport.RUN),
+        "s/km",
+        _speed_to_pace,
+    ),
+    "bike_threshold_hr_bpm": ((MetricKind.THRESHOLD_HR, Sport.RIDE), "bpm", as_number),
+    "run_threshold_hr_bpm": ((MetricKind.THRESHOLD_HR, Sport.RUN), "bpm", as_number),
+    "cycling_max_hr_bpm": ((MetricKind.MAX_HR, Sport.RIDE), "bpm", as_number),
+    "running_max_hr_bpm": ((MetricKind.MAX_HR, Sport.RUN), "bpm", as_number),
+}
+
+
+def _candidate_label(
+    candidate: Candidate, local_label: str = LOCAL_SOURCE_LABEL
+) -> str:
+    if candidate.source is None:
+        return local_label
+    if candidate.observation is not None:
+        label = observation_source_label(
+            candidate.observation, SourceView.CURRENT_METRIC
+        )
+        if label:
+            return label
+    return provider_label(candidate.source, SourceView.CURRENT_METRIC)
+
+
+def _resolved_metric(
+    garmin_metrics: dict[str, dict[str, Any]],
+    key: str,
+    resolved: Resolved | None,
+) -> dict[str, Any]:
+    """A threshold's source-policy winner as a metric (``_resolved_entry``)."""
+    _, unit, convert = _THRESHOLD_METRICS[key]
+    return _resolved_entry(resolved, unit, convert, garmin_metrics.get(key))
+
+
+def _resolved_entry(
+    resolved: Resolved | None,
+    unit: str,
+    convert: Callable[[float], float | int | None],
+    garmin: Mapping[str, Any] | None,
+    local_label: str = LOCAL_SOURCE_LABEL,
+) -> dict[str, Any]:
+    """The source-policy winner as a metric, with the other sources' values.
+
+    A Garmin winner keeps the ``garmin`` metric (label, note and freshness). Other
+    sources' current values are listed as ``alternatives``; ``conflict`` marks a
+    material difference (``source_policy`` conflict tolerances).
+    """
+    if resolved is None:
+        return metric(None, unit, None)
+    winner = resolved.winner
+    if winner.source is ProviderId.GARMIN and garmin and garmin["value"] is not None:
+        entry = dict(garmin)
+    else:
+        entry = metric(
+            convert(winner.value),
+            unit,
+            _candidate_label(winner, local_label),
+            provider=winner.source,
+        )
+    if resolved.alternatives:
+        entry["alternatives"] = [
+            {
+                "value": convert(item.value),
+                "source": _candidate_label(item, local_label),
+                "source_provider": None if item.source is None else item.source.value,
+            }
+            for item in resolved.alternatives
+        ]
+        entry["conflict"] = resolved.conflict
+    return entry
+
+
 def _performance_threshold_metrics(
-    garmin_metrics: dict[str, dict[str, Any]], canonical: CanonicalCurrentInputs
+    garmin_metrics: dict[str, dict[str, Any]],
+    canonical: CanonicalCurrentInputs,
+    thresholds: Mapping[ThresholdKey, Resolved],
 ) -> dict[str, dict[str, Any]]:
-    run_pace = canonical.athlete_value(MetricKind.THRESHOLD_PACE, Sport.RUN)
     run_zone2_pace = canonical.athlete_value(MetricKind.ZONE2_PACE, Sport.RUN)
+    resolved = {
+        key: _resolved_metric(garmin_metrics, key, thresholds.get(threshold))
+        for key, (threshold, _, _) in _THRESHOLD_METRICS.items()
+        if "max_hr" not in key
+    }
     return {
-        "cycling_ftp_watts": _preferred_performance_metric(
-            garmin_metrics,
-            "cycling_ftp_watts",
-            _observation_metric(
-                canonical.athlete_value(MetricKind.FTP, Sport.RIDE)
-                or canonical.wahoo_ftp,
-                "W",
-            ),
-        ),
-        "run_threshold_watts": _preferred_performance_metric(
-            garmin_metrics,
-            "run_threshold_watts",
-            _observation_metric(
-                canonical.athlete_value(MetricKind.FTP, Sport.RUN), "W"
-            ),
-        ),
-        "run_threshold_pace_seconds_per_km": _preferred_performance_metric(
-            garmin_metrics,
-            "run_threshold_pace_seconds_per_km",
-            _intervals_metric(_pace_seconds(run_pace), "s/km"),
-        ),
+        **resolved,
         "run_zone2_pace_seconds_per_km": _intervals_metric(
             _zone2_pace_seconds(run_zone2_pace), "s/km"
-        ),
-        "bike_threshold_hr_bpm": _preferred_performance_metric(
-            garmin_metrics,
-            "bike_threshold_hr_bpm",
-            _threshold_hr_metric(
-                canonical.bike_threshold_hr, canonical.athlete_threshold_hr
-            ),
-        ),
-        "run_threshold_hr_bpm": _preferred_performance_metric(
-            garmin_metrics,
-            "run_threshold_hr_bpm",
-            _threshold_hr_metric(
-                canonical.run_threshold_hr, canonical.athlete_threshold_hr
-            ),
         ),
     }
 
@@ -401,40 +567,42 @@ def current_performance_metrics(
     canonical: CanonicalCurrentInputs,
     activities: list[Any],
     latest_wellness: WellnessDay | None = None,
+    garmin_thresholds: Iterable[Observation] = (),
+    garmin_body: Iterable[Observation] = (),
+    as_of: date | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Compose current metrics from canonical inputs, Garmin metrics and the profile."""
+    """Compose current metrics from canonical inputs, Garmin metrics and the profile.
+
+    Thresholds are resolved by the source policy from the current inputs'
+    candidates and local values and the ``garmin_thresholds`` of the same read,
+    current on ``as_of`` (None applies no age limit). Weight and body fat are
+    resolved by recency with Garmin's latest ``garmin_body`` measurements.
+    """
     latest_ride_eftp = _latest_ride_eftp(activities)
     current_ride_eftp = _canonical_eftp_value(canonical)
-    cycling_max_hr = _intervals_max_hr_metric(
-        "cycling", Sport.RIDE, activities, canonical
+    thresholds = resolve_current_thresholds(
+        (*canonical.threshold_candidates, *garmin_thresholds),
+        canonical.local_thresholds,
+        as_of=as_of,
+        preferences=canonical.preferences,
     )
-    running_max_hr = _intervals_max_hr_metric(
-        "running", Sport.RUN, activities, canonical
+    cycling_max_hr = _max_hr_metric(
+        "cycling", Sport.RIDE, activities, thresholds, garmin_metrics
     )
-    if garmin_metrics["cycling_max_hr_bpm"]["value"] is not None:
-        cycling_max_hr = garmin_metrics["cycling_max_hr_bpm"]
-    if garmin_metrics["running_max_hr_bpm"]["value"] is not None:
-        running_max_hr = garmin_metrics["running_max_hr_bpm"]
-    garmin_max_hr = [
-        garmin_metrics[key]
-        for key in ("cycling_max_hr_bpm", "running_max_hr_bpm")
-        if garmin_metrics[key]["value"] is not None
-    ]
-    max_hr = max(
-        garmin_max_hr
-        or [
-            item
-            for item in (cycling_max_hr, running_max_hr)
-            if item["value"] is not None
-        ],
-        key=lambda item: item["value"],
-        default=metric(None, "bpm", None),
+    running_max_hr = _max_hr_metric(
+        "running", Sport.RUN, activities, thresholds, garmin_metrics
     )
+    max_hr = _overall_max_hr((cycling_max_hr, running_max_hr), canonical.preferences)
     return {
         **_performance_body_metrics(
-            latest_wellness, profile, garmin_metrics, canonical
+            latest_wellness,
+            profile,
+            garmin_metrics,
+            canonical,
+            tuple(garmin_body),
+            as_of,
         ),
-        **_performance_threshold_metrics(garmin_metrics, canonical),
+        **_performance_threshold_metrics(garmin_metrics, canonical, thresholds),
         "cycling_eftp_watts": _intervals_metric(
             current_ride_eftp or latest_ride_eftp, "W"
         ),

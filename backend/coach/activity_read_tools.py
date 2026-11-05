@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.athlete.local_date import iso_date_prefix
@@ -26,6 +26,12 @@ from backend.planning import leg_strength
 from backend.planning.sport import planned_sport_environment
 from backend.sync.garmin import GarminPayloadService
 
+# Per-field source labels and zone-time arrays stay in get_activity_details;
+# the list keeps each session's scalar values and its primary source label.
+_LIST_OMITTED_KEYS: Final = frozenset(
+    {"sources", "power_zone_times", "heart_rate_zone_times", "pace_zone_times"}
+)
+
 
 class CoachActivityReadToolService:
     """Own Coach-specific validation and projections for activity read tools."""
@@ -39,6 +45,7 @@ class CoachActivityReadToolService:
         report_services: Any = None,
         planned_units: Any = None,
         unit_thresholds: Any = None,
+        session_corrections: Any = None,
     ) -> None:
         self._activity_read = activity_read
         self._garmin_payload = garmin_payload
@@ -47,6 +54,7 @@ class CoachActivityReadToolService:
         self._report_services = report_services
         self._planned_units = planned_units
         self._unit_thresholds = unit_thresholds
+        self._session_corrections = session_corrections
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
         if name == "read_training_records":
@@ -115,9 +123,18 @@ class CoachActivityReadToolService:
                 500,
                 "Aktivitätszeitraum oder Limit ist ungültig.",
             )
+            recent = self._activity_read.recent(days, limit, today=self._today())
             return {
                 "ok": True,
-                **self._activity_read.recent(days, limit, today=self._today()),
+                **recent,
+                "activities": [
+                    {
+                        key: value
+                        for key, value in activity.items()
+                        if key not in _LIST_OMITTED_KEYS
+                    }
+                    for activity in recent["activities"]
+                ],
             }
         if name == "get_activity_details":
             detail = self._activity_read.detail(
@@ -126,7 +143,14 @@ class CoachActivityReadToolService:
                 profile=self._profile.get(),
                 today=self._today(),
             )
-            return self._with_session_context(detail)
+            result = self._with_session_context(detail)
+            session = detail.get("session")
+            if self._session_corrections is not None and isinstance(session, dict):
+                # Local session IDs and merge candidates for the session tools.
+                result["session_bundle"] = self._session_corrections.bundle(
+                    session.get("activity_id")
+                )
+            return result
         return None
 
     def _session_day(self, detail: dict[str, Any]) -> date | None:

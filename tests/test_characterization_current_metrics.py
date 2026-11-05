@@ -13,7 +13,13 @@ from typing import Any
 
 from performance_day_support import latest_day, snapshot_metrics
 
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.records import MetricValue, Observation, Provenance
+from backend.canonical.vocabulary import (
+    MetricKind,
+    ProviderId,
+    RecordingOrigin,
+    SourceKind,
+)
 from backend.performance.canonical_current import CanonicalCurrentInputs
 from backend.providers.intervals_wellness_mapping import (
     map_intervals_athlete_thresholds,
@@ -130,6 +136,66 @@ def _garmin_weight(day: str, grams: int) -> dict[str, Any]:
     }
 
 
+def _garmin_body(kind: MetricKind, value: float, day: str) -> Observation:
+    """A Garmin device measurement as the canonical Garmin read returns it."""
+    return Observation(
+        kind=kind,
+        value=MetricValue(value, kind.unit),
+        observed_on=date.fromisoformat(day),
+        observed_at=None,
+        provenance=Provenance(
+            provider=ProviderId.GARMIN,
+            source_kind=SourceKind.DEVICE_MEASURED,
+            source_record_id=f"weight[0]:{day}",
+            recorded_by=RecordingOrigin.GARMIN,
+            retrieved_at=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+            label=None,
+        ),
+    )
+
+
+class BodyRecencyTests(unittest.TestCase):
+    """Weight and body fat take the most recent measurement (#1668)."""
+
+    def _body(self, garmin_body: tuple[Observation, ...]) -> dict[str, Any]:
+        snapshot = _snapshot(
+            wellness=[_wellness("2026-05-03", weight=70.0, bodyFat=15.0)]
+        )
+        return snapshot_metrics(
+            snapshot,
+            {},
+            _garmin(),
+            latest_wellness=latest_day(snapshot["recent_wellness"]),
+            garmin_body=garmin_body,
+        )
+
+    def test_a_newer_intervals_measurement_beats_an_older_garmin_one(self) -> None:
+        result = self._body((_garmin_body(MetricKind.WEIGHT, 72.0, "2026-04-30"),))
+
+        weight = result["weight_kg"]
+        self.assertEqual(
+            (weight["value"], weight["source_provider"]), (70, "intervals")
+        )
+        self.assertEqual(weight["alternatives"][0]["value"], 72)
+        self.assertEqual(weight["alternatives"][0]["source_provider"], "garmin")
+        self.assertTrue(weight["conflict"])
+
+    def test_a_garmin_device_measurement_wins_within_one_day(self) -> None:
+        result = self._body(
+            (
+                _garmin_body(MetricKind.WEIGHT, 70.5, "2026-05-02"),
+                _garmin_body(MetricKind.BODY_FAT, 16.0, "2026-05-03"),
+            )
+        )
+
+        self.assertEqual(result["weight_kg"]["value"], 70.5)
+        self.assertEqual(result["weight_kg"]["source_provider"], "garmin")
+        self.assertFalse(result["weight_kg"]["conflict"])
+        self.assertEqual(result["body_fat_pct"]["value"], 16)
+        self.assertEqual(result["body_fat_pct"]["source_provider"], "garmin")
+        self.assertEqual(result["body_fat_pct"]["alternatives"][0]["value"], 15)
+
+
 class CurrentWeightChainTests(unittest.TestCase):
     def test_garmin_weight_wins_over_intervals_and_profile(self) -> None:
         garmin = _garmin({"weight": _garmin_weight("2026-05-03", 72800)})
@@ -141,9 +207,13 @@ class CurrentWeightChainTests(unittest.TestCase):
             {"weight_kg": 81},
             garmin,
         )
-        self.assertEqual(result["weight_kg"], garmin["weight_kg"])
+        weight = dict(result["weight_kg"])
+        alternatives = weight.pop("alternatives")
+        self.assertTrue(weight.pop("conflict"))
+        self.assertEqual(weight, garmin["weight_kg"])
         self.assertEqual(_pair(result["weight_kg"]), (72.8, GARMIN))
         self.assertEqual(result["weight_kg"]["unit"], "kg")
+        self.assertEqual([item["value"] for item in alternatives], [79, 81])
 
     def test_garmin_latest_dated_weight_is_used_regardless_of_list_order(
         self,
@@ -325,13 +395,23 @@ class CurrentBodyMetricTests(unittest.TestCase):
 
 
 class CurrentThresholdTests(unittest.TestCase):
-    def test_cycling_ftp_garmin_then_ride_then_wellness_then_athlete(self) -> None:
+    def test_cycling_ftp_ride_setting_then_garmin(self) -> None:
+        # Canonical (#1668): the athlete-maintained Intervals FTP precedes Garmin's
+        # auto-detected FTP, which stays visible as a conflicting alternative.
         garmin = _garmin({"cycling_ftp": {"functionalThresholdPower": 302}})
         result = _current(
             _snapshot(athlete={"sport_settings": [_setting("Ride", ftp=250)]}),
             garmin=garmin,
         )
-        self.assertEqual(_pair(result["cycling_ftp_watts"]), (302, GARMIN))
+        self.assertEqual(_pair(result["cycling_ftp_watts"]), (250, INTERVALS))
+        self.assertEqual(
+            result["cycling_ftp_watts"]["alternatives"],
+            [{"value": 302, "source": GARMIN, "source_provider": "garmin"}],
+        )
+        self.assertTrue(result["cycling_ftp_watts"]["conflict"])
+        self.assertEqual(
+            _pair(_current(garmin=garmin)["cycling_ftp_watts"]), (302, GARMIN)
+        )
 
         for invalid in (49, 701):
             with self.subTest(invalid=invalid):
@@ -629,9 +709,13 @@ class CurrentMaxHrTests(unittest.TestCase):
                 "maxHR": 210,
             },
         ]
+        # Canonical (#1668): the athlete record's max HR is a configured value and
+        # precedes the activity maximum, which is only the last resort.
         result = _current(
             _snapshot(athlete={"max_hr": 200}, activities=activities),
         )
+        self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (200, INTERVALS))
+        result = _current(_snapshot(activities=activities))
         self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (195, INTERVALS))
         self.assertEqual(_pair(result["running_max_hr_bpm"]), (210, INTERVALS))
 

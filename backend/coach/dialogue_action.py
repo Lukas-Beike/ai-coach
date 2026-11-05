@@ -43,6 +43,7 @@ LOCAL_BROAD_SCOPES = frozenset(
         "local_nutrition",
         "local_nutrition_product",
         "local_equipment",
+        "local_activity_session",
     }
 )
 

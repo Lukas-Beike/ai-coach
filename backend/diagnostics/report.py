@@ -28,6 +28,7 @@ from backend.diagnostics.canonical_read import (
 from backend.diagnostics.history import CoachDiagnosticHistoryService
 from backend.diagnostics.logs import RecentLogEntriesService
 from backend.diagnostics.plan_sync import summarize_plan_sync
+from backend.diagnostics.session_conflicts import summarize_session_conflicts
 from backend.observability import DiagnosticCapture, Redactor
 from backend.provider_credentials import garmin_tokens_connected
 from backend.providers.garmin import GarminClientFactory
@@ -219,6 +220,7 @@ class DiagnosticReportService:
                     deps.canonical_backfill, db
                 ),
                 "canonical_read": summarize_canonical_read(deps.canonical_read, db),
+                "canonical_session_conflicts": summarize_session_conflicts(db),
                 "logs": deps.recent_logs.list(),
                 "debug_capture": {
                     **diagnostic_capture_status,

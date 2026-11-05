@@ -28,11 +28,19 @@ from typing import Any, Final
 from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance.source_policy import select_current, within_current_bounds
+from backend.performance.source_policy import (
+    FAMILY_LOOKBACK_DAYS,
+    NO_PREFERENCES,
+    SourcePreferences,
+    family_providers,
+    intervals_relays_garmin,
+    select_current,
+    within_current_bounds,
+)
 from backend.runtime.ports import ObservationReader, SleepPeriodReader
 
 # The personal baselines keep 84 days of history; the current context needs 7.
-RECOVERY_HISTORY_DAYS: Final = 84
+RECOVERY_HISTORY_DAYS: Final = FAMILY_LOOKBACK_DAYS
 
 RECOVERY_KINDS: Final = (
     MetricKind.SLEEP_DURATION,
@@ -55,6 +63,7 @@ class CanonicalRecoveryInputs:
     observations: Mapping[MetricKind, tuple[Observation, ...]]
     latest_wellness_day: date | None
     sleep_periods: tuple[SleepPeriod, ...] | None = None
+    preferences: SourcePreferences = NO_PREFERENCES
 
     def of(self, kind: MetricKind) -> tuple[Observation, ...]:
         """Return the observations of ``kind``; empty when it was not read."""
@@ -63,8 +72,17 @@ class CanonicalRecoveryInputs:
     def current(self, kind: MetricKind) -> Observation | None:
         """Return the current observation of ``kind`` under its source rule."""
         return select_current(
-            self.of(kind), kind, latest_wellness_day=self.latest_wellness_day
+            self.of(kind),
+            kind,
+            latest_wellness_day=self.latest_wellness_day,
+            preferences=self.preferences,
         )
+
+    def relays(self, kind: MetricKind) -> bool:
+        """Return True when Intervals values of ``kind`` count as Garmin's relay."""
+        return ProviderId.GARMIN in family_providers(
+            self.of(kind), kind, self.preferences
+        ) and intervals_relays_garmin(self.of(kind), kind)
 
     def daily(
         self, kind: MetricKind, provider: ProviderId, *, bounded: bool = False
@@ -99,6 +117,7 @@ def read_recovery_inputs(
     *,
     as_of: date,
     latest_wellness_day: date | None,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> CanonicalRecoveryInputs:
     """Read every recovery kind once; ``reader`` must already be resolved."""
     start = as_of - timedelta(days=RECOVERY_HISTORY_DAYS - 1)
@@ -108,6 +127,7 @@ def read_recovery_inputs(
             for kind in RECOVERY_KINDS
         },
         latest_wellness_day=latest_wellness_day,
+        preferences=preferences,
         sleep_periods=(
             reader.sleep_periods(db, start=start - timedelta(days=1))
             if isinstance(reader, SleepPeriodReader)

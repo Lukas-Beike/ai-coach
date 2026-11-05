@@ -30,7 +30,6 @@ class DuplicateFeedbackTests(DuplicateCase):
         self.feedback = ActivityFeedbackService(
             self.manager,
             ActivityFeedbackRepository(lambda: next(self.clock)),
-            self.reader,
             references=ActivityReferences(self.manager),
         )
         self.service = DuplicateActivityService(

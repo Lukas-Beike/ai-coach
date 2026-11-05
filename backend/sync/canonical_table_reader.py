@@ -34,10 +34,11 @@ coverage from the summaries persisted at ingest.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any, Final
 
+from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.coverage import MetricWindow
 from backend.canonical.domain_records import (
     CategoricalObservation,
@@ -87,6 +88,7 @@ from backend.runtime.ports import (
     ActivitySessionReader,
     ObservationReader,
     PowerCurveReader,
+    ProviderActivityKey,
     SessionRecords,
 )
 
@@ -162,11 +164,11 @@ class CanonicalTableReader(
         Records are in ``activity_order``; sessions in order of first record.
         Records of a provider that is not a known ``ProviderId`` are skipped.
         ``newest`` bounds the read to the days of at least the newest that many
-        sessions (a day earlier, so their merged copies stay); the caller still
+        sessions up to ``end`` (a day earlier, so their merged copies stay); the caller still
         keeps only as many as it needs.
         """
         if newest is not None:
-            bound = canonical_store.newest_sessions_start(db, newest)
+            bound = canonical_store.newest_sessions_start(db, newest, end=_iso(end))
             if bound is not None:
                 earliest = date.fromisoformat(bound) - timedelta(days=1)
                 bounded = self._sessions(
@@ -193,7 +195,7 @@ class CanonicalTableReader(
             for session_id, records in grouped.items()
         )
 
-    def activity_rows(
+    def intervals_activity_payloads(
         self,
         db: Any,
         *,
@@ -220,6 +222,44 @@ class CanonicalTableReader(
         )
         parsed = (_payload_object(text) for text in texts)
         return tuple(row for row in parsed if row is not None)
+
+    def intervals_summary_row(
+        self, db: Any, provider_activity_id: str
+    ) -> dict[str, Any] | None:
+        """Return the stored payload of one active Intervals.icu activity record."""
+        text = canonical_store.active_provider_records(
+            db,
+            ProviderId.INTERVALS.value,
+            ACTIVITY_RECORD_KIND,
+            [provider_activity_id],
+            payloads=True,
+        ).get(provider_activity_id)
+        return None if text is None else _payload_object(text)
+
+    def summary_fingerprints(
+        self, db: Any, keys: Iterable[ProviderActivityKey]
+    ) -> dict[ProviderActivityKey, str]:
+        """Return the current summary fingerprint of each requested activity.
+
+        Intervals.icu: ``summary_fingerprint`` of the stored payload, the value
+        stored detail sets and analyses were built with. Other providers: the
+        payload hash of the active raw record.
+        """
+        requested: dict[str, list[str]] = {}
+        for provider, activity_id in keys:
+            requested.setdefault(provider, []).append(activity_id)
+        fingerprints: dict[ProviderActivityKey, str] = {}
+        for provider, ids in requested.items():
+            intervals = provider == ProviderId.INTERVALS.value
+            stored = canonical_store.active_provider_records(
+                db, provider, ACTIVITY_RECORD_KIND, ids, payloads=intervals
+            )
+            for activity_id, value in stored.items():
+                if not intervals:
+                    fingerprints[(provider, activity_id)] = value
+                elif (row := _payload_object(value)) is not None:
+                    fingerprints[(provider, activity_id)] = summary_fingerprint(row)
+        return fingerprints
 
     def observations(
         self,
@@ -364,6 +404,7 @@ def _activity(row: Mapping[str, Any]) -> ActivityRecord:
         elevation_low_m=canonical_store.activity_elevation_low(row["details"]),
         steps=canonical_store.activity_steps(row["details"]),
         device_type=canonical_store.activity_device_type(row["details"]),
+        external_ref=canonical_store.activity_external_ref(row["details"]),
         **canonical_store.activity_summary_values(row["details"]),
     )
 

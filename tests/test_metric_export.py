@@ -34,6 +34,7 @@ from backend.http_api import server as http_server_module
 from backend.providers.intervals_client import IntervalsClient
 from backend.sync.intervals_metric_export import IntervalsMetricExport
 from backend.sync.metric_export import MetricExportService
+from backend.sync.metric_export_consent import DEFAULT_FIELDS, LEGACY_FLAG_KEY
 from backend.sync.metric_export_port import (
     MetricExportField,
     MetricExportPort,
@@ -262,13 +263,10 @@ class MetricExportServiceTests(unittest.TestCase):
             utc_now=lambda: NOW,
         )
 
-        self.service.configure_automatic(
-            {
-                "enabled": True,
-                "confirmed": True,
-                "source": "garmin",
-                "provider": "intervals",
-            }
+        # The earlier single consent flag: all fields, as before (#1668).
+        self.database.db.execute(
+            "INSERT INTO kv(key, value, updated_at) VALUES (?, 'true', ?)",
+            (LEGACY_FLAG_KEY, NOW.isoformat()),
         )
 
     def add(self, *items: Observation) -> None:
@@ -330,6 +328,88 @@ class MetricExportServiceTests(unittest.TestCase):
             with self.assertRaises(AppError):
                 self.service.configure_automatic(payload)
         self.assertIsNone(self.service.sync_garmin())
+
+    def configure(self, **payload):
+        return self.service.configure_automatic(
+            {"confirmed": True, "source": "garmin", "provider": "intervals", **payload}
+        )
+
+    def test_legacy_consent_keeps_all_fields_until_saved_per_field(self):
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+
+        receipt = self.configure(enabled=True, fields=["weight", "resting_hr"])
+
+        self.assertTrue(receipt["enabled"])
+        changed = {item["key"]: item["enabled"] for item in receipt["changes"]}
+        self.assertFalse(changed["ftp"])
+        self.assertNotIn("weight", changed)
+        self.add(obs(MetricKind.FTP, 255, TODAY, ProviderId.GARMIN))
+        self.add(obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.GARMIN))
+        self.assertEqual(self.service.sync_garmin()["exported"], 1)
+        self.assertEqual(self.client.update_wellness.call_count, 1)
+
+    def test_new_consent_starts_without_ftp(self):
+        self.configure(enabled=False)
+        receipt = self.configure(enabled=True)
+
+        enabled = {item["key"] for item in receipt["fields"] if item["enabled"]}
+        self.assertEqual(enabled, set(DEFAULT_FIELDS))
+        self.assertNotIn("ftp", enabled)
+        self.add(obs(MetricKind.FTP, 250, TODAY, ProviderId.GARMIN))
+        self.assertEqual(self.service.sync_garmin()["exported"], 0)
+        self.client_factory.return_value.update_sport_settings.assert_not_called()
+
+    def test_revoking_keeps_the_legacy_flag_in_step(self):
+        self.configure(enabled=False)
+
+        row = self.database.db.execute(
+            "SELECT value FROM kv WHERE key=?", (LEGACY_FLAG_KEY,)
+        ).fetchone()
+        self.assertEqual(row[0], "false")
+        self.assertIsNone(self.service.sync_garmin())
+
+    def test_a_single_field_change_applies_to_the_stored_consent(self):
+        self.configure(enabled=True, fields=["weight", "resting_hr"])
+
+        receipt = self.configure(enabled=True, field="ftp", field_enabled=True)
+
+        enabled = {item["key"] for item in receipt["fields"] if item["enabled"]}
+        self.assertEqual(enabled, {"weight", "resting_hr", "ftp"})
+        self.assertEqual([item["key"] for item in receipt["changes"]], ["ftp"])
+        receipt = self.configure(enabled=True, field="weight", field_enabled=False)
+        self.assertEqual(
+            {item["key"] for item in receipt["fields"] if item["enabled"]},
+            {"resting_hr", "ftp"},
+        )
+
+    def test_unreadable_or_revoked_consent_sends_nothing(self):
+        self.add(obs(MetricKind.WEIGHT, 70, TODAY, ProviderId.GARMIN))
+        for key, value in (
+            ("garmin_metric_export_fields", '[["weight"]]'),
+            ("garmin_metric_export_fields", '{"weight": true}'),
+            ("garmin_metric_export_fields", "not json"),
+            (LEGACY_FLAG_KEY, "false"),
+        ):
+            with self.subTest(key=key, value=value):
+                self.configure(enabled=True, fields=["weight"])
+                self.database.db.execute(
+                    "UPDATE kv SET value=? WHERE key=?", (value, key)
+                )
+                self.assertIsNone(self.service.sync_garmin())
+        self.client.update_wellness.assert_not_called()
+
+    def test_unknown_or_empty_fields_are_rejected(self):
+        for fields in ([], ["ctl"], "weight"):
+            with self.subTest(fields=fields), self.assertRaises(AppError):
+                self.configure(enabled=True, fields=fields)
+        for change in (
+            {"field": "ctl", "field_enabled": True},
+            {"field": "weight", "field_enabled": "yes"},
+            {"field": "weight", "field_enabled": True, "fields": ["weight"]},
+        ):
+            with self.subTest(change=change), self.assertRaises(AppError):
+                self.configure(enabled=True, **change)
 
     def test_new_wellness_day_preserves_existing_target_value(self):
         self.add(obs(MetricKind.WEIGHT, 70, date(2026, 10, 10), ProviderId.GARMIN))
@@ -907,7 +987,7 @@ class MetricExportHttpTests(ServerTestCase):
                 },
             )
             self.assertEqual(response.status, 200)
-            self.assertEqual(json.loads(data), {"enabled": enabled})
+            self.assertEqual(json.loads(data)["enabled"], enabled)
         self.transport.assert_not_called()
 
     def test_preview_and_unconfirmed_execute(self):

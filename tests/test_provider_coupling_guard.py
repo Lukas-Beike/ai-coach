@@ -763,5 +763,39 @@ class OwnerReadGuardTests(unittest.TestCase):
         self.assertEqual([], load_baseline())
 
 
+RAW_PAYLOAD_READ = ".intervals_activity_payloads("
+
+
+def raw_payload_readers(root: Path) -> list[str]:
+    """Source files outside ``backend/sync/`` that read raw Intervals.icu payloads."""
+    files = [root / "server.py", *sorted((root / "backend").rglob("*.py"))]
+    return [
+        path.relative_to(root).as_posix()
+        for path in files
+        if path.is_file()
+        and not path.relative_to(root).as_posix().startswith("backend/sync/")
+        and RAW_PAYLOAD_READ in path.read_text(encoding="utf-8")
+    ]
+
+
+class RawPayloadReadGuardTests(unittest.TestCase):
+    def test_only_the_sync_owner_reads_raw_intervals_payloads(self) -> None:
+        self.assertEqual([], raw_payload_readers(SOURCE_ROOT))
+
+    def test_guard_finds_a_consumer_outside_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, text in {
+                "server.py": "",
+                "backend/sync/details.py": f"rows.{RAW_PAYLOAD_READ[1:]}db)",
+                "backend/athlete/equipment.py": f"rows.{RAW_PAYLOAD_READ[1:]}db)",
+            }.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text(text, encoding="utf-8")
+            self.assertEqual(
+                ["backend/athlete/equipment.py"], raw_payload_readers(root)
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

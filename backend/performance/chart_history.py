@@ -219,13 +219,14 @@ def analysis_history(
                 "cycling_ftp_watts", {}
             ),
             eftp_by_day=eftp_by_day,
+            preferences=canonical.preferences,
         ),
         "cycling_power_profile": _power_curve(canonical.power_curve, start, today),
         "provider_metrics": _canonical_provider_metrics(
             garmin, start, today, garmin_canonical
         ),
         "metrics": series,
-        "preferred_providers": preferred_providers(),
+        "preferred_providers": preferred_providers(canonical.preferences),
     }
 
 

@@ -20,7 +20,11 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime, tzinfo
 from typing import Any, Final
 
-from backend.activities.detail_contract import derived_order, measured_order
+from backend.activities.detail_contract import (
+    derived_order,
+    measured_order,
+    session_local_start,
+)
 from backend.canonical.activity_summary import (
     TSS_LIKE_LOAD_MODELS,
     ActivitySummary,
@@ -77,7 +81,7 @@ def activity_summary(
     measured = _session_order(measured_order(records))
     derived = derived_order(records)
     primary = measured[0]
-    local_start = primary.started_at.astimezone(zone).replace(tzinfo=None)
+    local_start, offset = session_local_start(measured, zone)
     summary: dict[str, Any] = {
         "id": session_id,
         "started_at": primary.started_at.isoformat(),
@@ -91,6 +95,8 @@ def activity_summary(
         summary["name"] = name[1]
     if primary.device_type is not None:
         summary["device_type"] = primary.device_type.value
+    if offset is not None:
+        summary["local_offset_minutes"] = offset
     sources = _values(summary, measured, _MEASURED) | _values(
         summary, derived, _DERIVED
     )

@@ -12,7 +12,7 @@
   <script src="/appearance.js?v=218"></script>
   <link rel="icon" href="/icon.svg?v=217" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" sizes="180x180">
-  <link rel="stylesheet" href="/styles.css?v=356">
+  <link rel="stylesheet" href="/styles.css?v=359">
   <title>Intervals Coach</title>
 </head>
 <body>
@@ -248,6 +248,13 @@
               <label>Mobility<textarea name="training_preferences_mobility" rows="2" placeholder="Yoga, Dehnen, Faszienrolle, Dauer, Tageszeit…"></textarea></label>
               <label>Trainingsmodell<select name="training_model"><option value="pyramidal">Pyramidal</option><option value="polarized">Polarisiert</option><option value="threshold">Schwellenbetont</option><option value="sweet_spot">Sweet Spot</option></select></label>
             </fieldset>
+            <fieldset class="profile-subsection"><legend>Bevorzugte Quelle</legend>
+              <label>Schwellen<select name="preferred_source_thresholds"><option value="">Standard</option><option value="garmin">Garmin Connect</option><option value="intervals">Intervals.icu</option></select></label>
+              <label>Gewicht und Körperfett<select name="preferred_source_body"><option value="">Standard</option><option value="garmin">Garmin Connect</option><option value="intervals">Intervals.icu</option></select></label>
+              <label>HRV<select name="preferred_source_hrv"><option value="">Standard</option><option value="garmin">Garmin Connect</option><option value="intervals">Intervals.icu</option></select></label>
+              <label>Ruhepuls<select name="preferred_source_resting_hr"><option value="">Standard</option><option value="garmin">Garmin Connect</option><option value="intervals">Intervals.icu</option></select></label>
+              <label>Schlaf<select name="preferred_source_sleep"><option value="">Standard</option><option value="garmin">Garmin Connect</option><option value="intervals">Intervals.icu</option></select></label>
+            </fieldset>
             <label>Manuelle Leistungsnotizen<textarea name="performance_notes" rows="3" placeholder="Nur Fakten, die nicht in Intervals.icu stehen…"></textarea></label>
             <label>Persönliches Schlafziel (Stunden)<input name="sleep_target_hours" type="number" min="4" max="12" step="0.25" placeholder="Optional, zum Beispiel 8"></label>
             <div class="form-grid">
@@ -420,6 +427,7 @@
               </div>
               <div id="garmin-metric-export" class="garmin-metric-export" hidden>
                 <p id="garmin-metric-export-text" class="fine-print settings-message"></p>
+                <fieldset id="garmin-metric-export-fields" class="garmin-metric-export-fields" aria-label="Automatisch gesendete Garmin-Werte" hidden></fieldset>
                 <button id="garmin-metric-export-toggle" class="secondary-button" type="button">Garmin → Intervals.icu automatisch abgleichen</button>
                 <p id="garmin-metric-export-status" class="fine-print settings-message" hidden></p>
               </div>
@@ -610,14 +618,14 @@
   <script src="/notifications.js?v=5" defer></script>
   <script src="/nutrition.js?v=48" defer></script>
   <script src="/analysis.js?v=147" defer></script>
-  <script src="/activity-details.js?v=24" defer></script>
-  <script src="/activity-analysis.js?v=6" defer></script>
-  <script src="/performance-view.js?v=29" defer></script>
+  <script src="/activity-details.js?v=27" defer></script>
+  <script src="/activity-analysis.js?v=7" defer></script>
+  <script src="/performance-view.js?v=30" defer></script>
   <script src="/diagnostics.js?v=4" defer></script>
   <script src="/state-loader.js?v=24" defer></script>
   <script src="/sync-actions.js?v=5" defer></script>
   <script src="/wahoo-connection.js?v=5" defer></script>
-  <script src="/provider-connections.js?v=7" defer></script>
+  <script src="/provider-connections.js?v=9" defer></script>
   <script src="/provider-checks.js?v=4" defer></script>
   <script src="/weekly-plan.js?v=4" defer></script>
   <script src="/settings.js?v=17" defer></script>

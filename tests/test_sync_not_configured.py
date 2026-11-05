@@ -60,7 +60,7 @@ def _activity_details_not_configured() -> None:
         api_client=Mock(),
         database_manager=MagicMock(),
         row_reader=Mock(
-            activity_rows=Mock(return_value=({"id": "a1"},)),
+            intervals_activity_payloads=Mock(return_value=({"id": "a1"},)),
             activity_summaries=Mock(return_value=()),
         ),
         store=Mock(),

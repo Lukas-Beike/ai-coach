@@ -10,6 +10,7 @@ storage is temporary and providers are mocked.
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from datetime import date
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
@@ -62,6 +63,10 @@ class SettingVariantParityTests(unittest.TestCase):
                         )
 
 
+# The fixture's Garmin lactate-threshold heart rates per sport.
+GARMIN_LTHR = {Sport.RIDE: 160.0, Sport.RUN: 168.0}
+
+
 class PlanZoneParityTests(CanonicalReadFixture):
     def _thresholds(self) -> tuple:
         """The thresholds the state prelude's canonical current inputs carry."""
@@ -69,7 +74,9 @@ class PlanZoneParityTests(CanonicalReadFixture):
         source = CanonicalPerformanceSource(lambda: self.manager, lambda: selector)
         with self.manager.reader() as db:
             inputs = inputs_for_snapshot(source, db, as_of=date(2026, 10, 11))
-            direct = read_zone_thresholds(resolve_reader(selector, db), db)
+            direct = read_zone_thresholds(
+                resolve_reader(selector, db), db, as_of=date(2026, 10, 11)
+            )
         thresholds = () if inputs is None else inputs.current.zone_thresholds
         # The plan read takes the same thresholds without the other inputs.
         self.assertEqual(direct, thresholds)
@@ -83,6 +90,9 @@ class PlanZoneParityTests(CanonicalReadFixture):
         self.assertTrue(thresholds)
         for sport in SPORTS:
             for environment in Environment:
+                legacy = legacy_zone_settings(
+                    settings, configurations, sport, environment
+                )
                 with self.subTest(sport=sport, environment=environment):
                     self.assertEqual(
                         ZoneSettings.from_configurations(
@@ -93,12 +103,11 @@ class PlanZoneParityTests(CanonicalReadFixture):
                                 thresholds, sport, environment
                             ),
                         ),
-                        legacy_zone_settings(
-                            settings, configurations, sport, environment
-                        ),
+                        # Garmin's auto-detected LTHR precedes the Intervals setting.
+                        replace(legacy, lthr=GARMIN_LTHR.get(sport, legacy.lthr)),
                     )
         ride = ZoneSettings.from_thresholds(thresholds, Sport.RIDE)
-        self.assertEqual((ride.ftp, ride.lthr, ride.max_hr), (260, 168, 190))
+        self.assertEqual((ride.ftp, ride.lthr, ride.max_hr), (260, 160, 190))
 
     def test_the_calendar_colors_plan_steps_from_canonical_thresholds(self) -> None:
         populate(self)

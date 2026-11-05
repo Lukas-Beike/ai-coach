@@ -20,6 +20,7 @@ from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.schema import initialize_schema
+from backend.diagnostics.session_conflicts import summarize_session_conflicts
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
     ActivityItem,
@@ -221,6 +222,49 @@ class PersistedLinkTests(LinkingCase):
         self.assertEqual(sessions[GARMIN_ID]["merged_into"], survivor)
         self.assertEqual(sessions[INTERVALS_ID]["merged_into"], survivor)
 
+    def test_a_relink_never_merges_two_records_of_one_origin(self) -> None:
+        # Two walks 25 minutes apart. G2 arrives first and joins I1, its only
+        # candidate. Once I2 and G1 arrive, bundling pairs G1 with I1 and G2 with
+        # I2; following those pairs through the persisted merge would join all
+        # four records in one session.
+        def walk(identifier: str, start: str, seconds: int) -> dict[str, Any]:
+            return intervals_ride(
+                identifier,
+                type="Walk",
+                device_name="Garmin Forerunner",
+                start_date_local=f"2026-09-10T{start}:00",
+                moving_time=seconds,
+                distance=None,
+            )
+
+        def garmin_walk(identifier: str, start: str, seconds: float) -> dict[str, Any]:
+            return garmin_ride(
+                identifier,
+                activityType={"typeKey": "walking"},
+                startTimeLocal=f"2026-09-10 {start}:00",
+                duration=seconds,
+                distance=None,
+            )
+
+        first = walk("i-1", "07:00", 2400)
+        self._ingest_intervals([first], FIRST)
+        self._ingest_garmin([garmin_walk("9002", "07:25", 2280.0)], SECOND)
+        self._ingest_intervals([first, walk("i-2", "07:25", 2280)], THIRD)
+        self._ingest_garmin(
+            [
+                garmin_walk("9001", "07:00", 2400.0),
+                garmin_walk("9002", "07:25", 2280.0),
+            ],
+            LATER,
+        )
+
+        sessions = self._sessions()
+        self.assertEqual(
+            sessions["9002"]["merged_into"], sessions["i-1"]["activity_id"]
+        )
+        for provider_activity_id in ("i-1", "i-2", "9001"):
+            self.assertEqual(sessions[provider_activity_id]["state"], "active")
+
     def test_unrelated_activities_stay_single(self) -> None:
         self._ingest_intervals([intervals_ride()], FIRST)
         counters = (
@@ -394,10 +438,19 @@ class ProtectedSessionTests(LinkingCase):
         self.assertEqual(self._sessions()[INTERVALS_ID]["state"], "deleted")
         self.assertEqual(self._sessions()[WAHOO_ID]["state"], "active")
 
-    def test_an_existing_alias_is_never_unmerged(self) -> None:
+    def test_an_alias_that_no_longer_matches_is_split_off(self) -> None:
         self._ingest_all_three()
         survivor = self._sessions()[INTERVALS_ID]["activity_id"]
         # The Wahoo workout later drifts out of the matching window.
+        self._ingest_wahoo([wahoo_workout(starts="2026-09-10T12:00:00.000Z")], LATER)
+        alias = self._sessions()[WAHOO_ID]
+        self.assertEqual((alias["state"], alias["merged_into"]), ("active", None))
+        self.assertEqual(self._sessions()[INTERVALS_ID]["activity_id"], survivor)
+
+    def test_a_confirmed_session_is_never_split(self) -> None:
+        self._ingest_all_three()
+        survivor = self._sessions()[INTERVALS_ID]["activity_id"]
+        self._set_session(INTERVALS_ID, athlete_confirmed=1)
         self._ingest_wahoo([wahoo_workout(starts="2026-09-10T12:00:00.000Z")], LATER)
         alias = self._sessions()[WAHOO_ID]
         self.assertEqual(
@@ -410,6 +463,88 @@ class ProtectedSessionTests(LinkingCase):
         self._ingest_wahoo([wahoo_workout()], SECOND)
         self.assertEqual(self._sessions()[INTERVALS_ID]["link_kind"], "confirmed")
         self.assertEqual(self._sessions()[WAHOO_ID]["state"], "duplicate")
+
+
+class ExactLinkTests(LinkingCase):
+    def _garmin_copy(self, external_id: str, **fields: Any) -> dict[str, Any]:
+        return intervals_ride(
+            device_name="Garmin Edge 840",
+            source="GARMIN_CONNECT",
+            external_id=external_id,
+            **fields,
+        )
+
+    def _mismatches(self) -> dict[str, Any]:
+        with self.manager.read_snapshot() as db:
+            summary = summarize_session_conflicts(db)
+        return summary["exact_link_mismatches"]
+
+    def test_a_trimmed_copy_links_exactly_to_its_garmin_activity(self) -> None:
+        self._ingest_garmin([garmin_ride()], FIRST)
+        counters = self._ingest_intervals(
+            [self._garmin_copy(GARMIN_ID, distance=21000.0)], SECOND
+        )
+        self.assertEqual(counters.linked, 1)
+        sessions = self._sessions()
+        self.assertEqual(sessions[GARMIN_ID]["link_kind"], "exact")
+        self.assertEqual(
+            sessions[INTERVALS_ID]["merged_into"], sessions[GARMIN_ID]["activity_id"]
+        )
+
+    def test_an_exact_reference_upgrades_a_heuristic_merge(self) -> None:
+        self._ingest_intervals([intervals_ride(device_name="Garmin Edge")], FIRST)
+        self._ingest_garmin([garmin_ride()], SECOND)
+        self.assertEqual(self._sessions()[INTERVALS_ID]["link_kind"], "heuristic")
+
+        self._ingest_intervals([self._garmin_copy(GARMIN_ID)], THIRD)
+
+        sessions = self._sessions()
+        self.assertEqual(sessions[INTERVALS_ID]["link_kind"], "exact")
+        self.assertEqual(
+            sessions[GARMIN_ID]["merged_into"], sessions[INTERVALS_ID]["activity_id"]
+        )
+        self.assertEqual(self._mismatches(), {"total": 0, "sessions": []})
+
+    def test_a_hidden_upstream_keeps_its_copy_from_the_heuristics(self) -> None:
+        self._ingest_garmin([garmin_ride()], FIRST)
+        self._set_session(GARMIN_ID, state="hidden")
+        # A second Garmin recording of the ride, within every tolerance.
+        self._ingest_garmin([garmin_ride("9002")], SECOND)
+        self._ingest_intervals([self._garmin_copy(GARMIN_ID)], THIRD)
+
+        sessions = self._sessions()
+        self.assertEqual(sessions["9002"]["state"], "active")
+        self.assertEqual(sessions[INTERVALS_ID]["state"], "active")
+        self.assertEqual(sessions[GARMIN_ID]["state"], "hidden")
+
+    def test_a_contradicted_heuristic_merge_is_reported_not_changed(self) -> None:
+        self._ingest_intervals([intervals_ride(device_name="Garmin Edge")], FIRST)
+        self._ingest_garmin(
+            [garmin_ride(), garmin_ride("9002", startTimeLocal="2026-09-10 12:00:00")],
+            SECOND,
+        )
+        before = self._sessions()
+
+        self._ingest_intervals([self._garmin_copy("9002")], THIRD)
+
+        after = self._sessions()
+        for provider_activity_id in (INTERVALS_ID, GARMIN_ID, "9002"):
+            self.assertEqual(
+                (
+                    after[provider_activity_id]["state"],
+                    after[provider_activity_id]["merged_into"],
+                ),
+                (
+                    before[provider_activity_id]["state"],
+                    before[provider_activity_id]["merged_into"],
+                ),
+            )
+        mismatches = self._mismatches()
+        self.assertEqual(mismatches["total"], 1)
+        self.assertEqual(
+            mismatches["sessions"][0]["upstream_session_id"],
+            after["9002"]["activity_id"],
+        )
 
 
 class AliasResolutionTests(LinkingCase):

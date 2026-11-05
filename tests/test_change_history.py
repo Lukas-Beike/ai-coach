@@ -281,6 +281,17 @@ class ChangeHistoryTests(unittest.TestCase):
             },
         )
 
+    def test_preferred_sources_are_audited_and_older_rows_stay_matchable(self):
+        value = {"name": "Ada", "preferred_source_body": "intervals"}
+
+        projection = change_history.audit_projection("profile", value)
+        assert projection is not None
+        self.assertEqual(projection["preferred_source_body"], "intervals")
+        self.assertIn(
+            change_history.audit_hash({"name": "Ada"}),
+            change_history.accepted_audit_hashes("profile", value),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

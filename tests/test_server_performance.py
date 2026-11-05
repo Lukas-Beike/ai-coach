@@ -432,8 +432,10 @@ class ServerPerformanceTests(ServerTestCase):
             # The setting's eFTP is a canonical observation (#1412).
             canonical=recovery_only_inputs(snapshot=snapshot).current,
         )
-        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 302)
-        self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Garmin Connect")
+        # The Intervals ride setting precedes Garmin's FTP (#1668).
+        self.assertEqual(metrics["cycling_ftp_watts"]["value"], 250)
+        self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Intervals.icu")
+        self.assertEqual(metrics["cycling_ftp_watts"]["alternatives"][0]["value"], 302)
         self.assertEqual(metrics["cycling_eftp_watts"]["value"], 260)
         self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
         self.assertEqual(metrics["run_threshold_watts"]["value"], 328)

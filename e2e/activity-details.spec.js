@@ -176,8 +176,8 @@ test("@responsive running cadence shows step frequency of both legs", async ({ p
 
 test("@responsive analysis shows running step frequency and cycling cadence", async ({ page }) => {
   const summaries = [
-    { id: "synthetic-run", name: "Synthetic run", type: "Run", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3 },
-    { id: "synthetic-ride", name: "Synthetic ride cadence", type: "Ride", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 3 },
+    { id: "synthetic-run", name: "Synthetic run", sport: "run", environment: "outdoor", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3 },
+    { id: "synthetic-ride", name: "Synthetic ride cadence", sport: "ride", environment: "outdoor", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 3 },
   ];
   await page.route(/\/api\/activities(\?|\/)/, (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[3];
@@ -206,7 +206,7 @@ test("@responsive analysis shows running step frequency and cycling cadence", as
 test("@responsive analysis lists sessions whose details failed to load", async ({ page }) => {
   const message = "Intervals.icu hat für diese Einheit keine Detaildaten geliefert.";
   const summaries = [
-    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", type: "Ride", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3, detail_error: message },
+    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", sport: "ride", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3, detail_error: message },
   ];
   await page.route(/\/api\/activities(\?|\/)/, (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[3];
@@ -225,6 +225,29 @@ test("@responsive analysis lists sessions whose details failed to load", async (
   await expect(item.locator(".activity-analysis-panel .activity-analysis-error")).toContainText(message);
   expect(await item.locator("img").count()).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
+test("@responsive analysis lists a Garmin-only indoor session and loads more", async ({ page }) => {
+  const first = { id: "act_garmin_only", sport: "ride", environment: "virtual", record_ids: { garmin: "910002" }, started_at: "2026-10-17T08:00:00+02:00", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3600, distance_m: 30000 };
+  const second = { id: "act_older", name: "Synthetic older run", sport: "run", environment: "outdoor", record_ids: { intervals: "i-1" }, started_at: "2026-10-16T08:00:00+02:00", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 1800 };
+  await page.route(/\/api\/activities(\?|\/)/, (route) => {
+    const url = new URL(route.request().url());
+    const id = url.pathname.split("/")[3];
+    const body = id
+      ? { session: { activity_id: id, sport: "ride", environment: "virtual" }, metrics: {}, detail_data: { providers: [] } }
+      : url.searchParams.get("cursor")
+        ? { activities: [second], snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null }
+        : { activities: [first], snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: "page-2" };
+    return route.fulfill({ json: body });
+  });
+  await page.goto("/#analysis/sessions");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const garmin = page.locator(".activity-analysis-item").first();
+  await expect(garmin).toContainText("Rad indoor");
+  await garmin.locator("summary").click();
+  await expect(garmin.locator(".activity-analysis-panel")).toBeVisible();
+  await page.getByRole("button", { name: "Weitere Einheiten laden" }).click();
+  await expect(page.locator(".activity-analysis-item").filter({ hasText: "Synthetic older run" })).toContainText("Laufen");
 });
 
 test("@responsive analysis sessions list expands Garmin-style charts", async ({ page, request }) => {
@@ -281,5 +304,56 @@ test("@responsive feedback save and undo show the returned load without a detail
   await expect(dialog.locator("[data-session-rpe-load]")).toBeHidden();
   expect(await page.evaluate(() => undoBody.activity_id)).toBe("load-1");
   expect(await page.evaluate(() => syntheticCalls.filter((url) => url === "/api/activities/load-1").length)).toBe(1);
+  await page.evaluate(() => ActivityDetails.close(false));
+});
+
+test("@responsive provider copies split with a receipt whose undo restores the bundle", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(async () => {
+    const member = (session_id, provider, label) => ({ session_id, provider, label, recorded_by: "garmin", sport: "ride", started_at: "2026-09-10T05:00:00+00:00", duration_s: 3600 });
+    const bundled = { activity_id: "act_a", link_kind: "heuristic", athlete_confirmed: false, members: [member("act_a", "intervals", "Intervals.icu (Garmin)"), member("act_b", "garmin", "Garmin")], merge_candidates: [] };
+    const split = { ...bundled, link_kind: "single", athlete_confirmed: true, members: [bundled.members[0]], merge_candidates: [member("act_b", "garmin", "Garmin")] };
+    let bundle = bundled;
+    globalThis.sessionBodies = [];
+    const fakeApi = async (url, options) => {
+      if (url === "/api/activities/act_a/session") { sessionBodies.push(JSON.parse(options.body)); bundle = split; return { status: "split", activity_id: "act_a", change: { id: "c2", after_hash: "h2" } }; }
+      if (url === "/api/change-history/undo") { sessionBodies.push(JSON.parse(options.body)); bundle = bundled; return { status: "undone" }; }
+      return { session: { activity_id: "act_a", name: "Synthetic bundle ride", sport: "ride" }, streams: { time_s: [0, 1, 2], channels: {} }, detail_data: { providers: [] }, activity_feedback: null, equipment: [], session_rpe_load: null, session_bundle: bundle };
+    };
+    await ActivityDetails.open({ id: "act_a" }, { api: fakeApi, showDialog: (dialog) => dialog.showModal() });
+  });
+  const dialog = page.getByRole("dialog", { name: "Synthetic bundle ride" });
+  const section = dialog.locator(".activity-bundle");
+  await expect(section.getByRole("button", { name: "Trennen" })).toHaveCount(2);
+  await section.getByRole("listitem").filter({ hasText: /^Garmin/ }).getByRole("button", { name: "Trennen" }).click();
+  await expect(section.getByRole("status")).toContainText("Aufzeichnung getrennt.");
+  await expect(section.getByRole("button", { name: "Zusammenführen" })).toHaveCount(1);
+  await section.getByRole("button", { name: "Rückgängig" }).click();
+  await expect(section.getByRole("status")).toContainText("Zurückgenommen.");
+  await expect(section.getByRole("button", { name: "Trennen" })).toHaveCount(2);
+  expect(await page.evaluate(() => sessionBodies)).toEqual([{ action: "split", member_id: "act_b" }, { change_id: "c2", expected_current_hash: "h2" }]);
+  await page.evaluate(() => ActivityDetails.close(false));
+});
+
+test("@responsive deleting an activity locally asks first and can be undone", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(async () => {
+    const bundle = { activity_id: "act_d", link_kind: "single", athlete_confirmed: false, members: [{ session_id: "act_d", provider: "garmin", label: "Garmin", recorded_by: "garmin", sport: "ride", started_at: "2026-09-10T05:00:00+00:00", duration_s: 3600 }], merge_candidates: [] };
+    globalThis.deleteBodies = [];
+    const fakeApi = async (url, options) => {
+      if (url === "/api/activities/act_d/session" || url === "/api/change-history/undo") { deleteBodies.push(JSON.parse(options.body)); return url.endsWith("/session") ? { status: "deleted", activity_id: null, change: { id: "c3", after_hash: "h3" } } : { status: "undone" }; }
+      return { session: { activity_id: "act_d", name: "Synthetic delete ride", sport: "ride" }, streams: { time_s: [0, 1, 2], channels: {} }, detail_data: { providers: [] }, activity_feedback: null, equipment: [], session_rpe_load: null, session_bundle: bundle };
+    };
+    await ActivityDetails.open({ id: "act_d" }, { api: fakeApi, showDialog: (dialog) => dialog.showModal() });
+  });
+  const dialog = page.getByRole("dialog", { name: "Synthetic delete ride" });
+  await dialog.getByRole("button", { name: "Aktivität löschen" }).click();
+  await page.getByRole("dialog", { name: "Aktivität löschen?" }).getByRole("button", { name: "Löschen" }).click();
+  await expect(dialog.getByRole("status").filter({ hasText: "Aktivität gelöscht." })).toBeVisible();
+  await dialog.getByRole("button", { name: "Rückgängig" }).click();
+  await expect(dialog.locator(".activity-bundle").getByRole("status")).toContainText("Zurückgenommen.");
+  expect(await page.evaluate(() => deleteBodies)).toEqual([{ action: "delete", confirmed: true }, { change_id: "c3", expected_current_hash: "h3" }]);
   await page.evaluate(() => ActivityDetails.close(false));
 });

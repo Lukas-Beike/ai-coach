@@ -158,7 +158,7 @@ function renderGarminCard(data) {
 function metricExportView(enabled, status) {
   return {
     text: enabled
-      ? "Neue Garmin-Messwerte werden automatisch an Intervals.icu gesendet. Herzfrequenzzonen bleiben unverändert. Bestehende abweichende Werte ohne bestätigten Vergleichsstand und spätere Änderungen bei Intervals.icu werden geschützt."
+      ? "Die ausgewählten neuen Garmin-Messwerte werden automatisch an Intervals.icu gesendet. Herzfrequenzzonen bleiben unverändert. Bestehende abweichende Werte ohne bestätigten Vergleichsstand und spätere Änderungen bei Intervals.icu werden geschützt."
       : "Einmal aktivieren: Neue Garmin-Messwerte nach erfolgreichem Sync automatisch an Intervals.icu senden. Herzfrequenzzonen und bestehende abweichende Zielwerte bleiben geschützt.",
     button: enabled ? "Automatischen Abgleich deaktivieren" : "Garmin → Intervals.icu automatisch abgleichen",
     status: status || "",
@@ -171,6 +171,81 @@ function renderMetricExport(garmin) {
   setCredentialText("garmin-metric-export-toggle", view.button);
   setCredentialText("garmin-metric-export-status", view.status);
   setCredentialHidden("garmin-metric-export-status", !view.status);
+  renderMetricExportFields(garmin);
+}
+
+// Pure: one checkbox per exportable field, shown only while the export is enabled.
+function metricExportFieldsView(enabled, fields) {
+  return enabled ? (fields || []).map((item) => ({ key: item.key, label: item.label, checked: Boolean(item.enabled) })) : [];
+}
+
+// Pure: the receipt of a consent change, one entry per changed field.
+function metricExportReceipt(receipt) {
+  const changes = (receipt?.changes || []).map((item) => item.label + (item.enabled ? " an" : " aus"));
+  return "Garmin → Intervals.icu: " + (changes.length ? changes.join(", ") : "keine Änderung");
+}
+
+// Rebuilds the checkboxes only when the field list changes; otherwise it updates
+// them in place, so polling and saved changes keep keyboard focus.
+let metricExportFieldsKeys = "";
+const metricExportInputs = new Map();
+let metricExportFieldsBusy = false;
+function renderMetricExportFields(garmin) {
+  const node = $("#garmin-metric-export-fields");
+  if (!node) return;
+  const items = metricExportFieldsView(Boolean(garmin?.metric_export_enabled), garmin?.metric_export_fields);
+  node.hidden = !items.length;
+  const keys = items.map((item) => `${item.key}:${item.label}`).join("|");
+  if (metricExportFieldsKeys !== keys) {
+    metricExportFieldsKeys = keys;
+    metricExportInputs.clear();
+    node.replaceChildren(...items.map((item) => {
+      const label = document.createElement("label");
+      label.className = "garmin-metric-export-field";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.addEventListener("change", () => void changeMetricExportField(item, input));
+      metricExportInputs.set(item.key, input);
+      label.append(input, document.createTextNode(item.label));
+      return label;
+    }));
+  }
+  if (metricExportFieldsBusy) return;
+  for (const item of items) {
+    const input = metricExportInputs.get(item.key);
+    if (input) input.checked = item.checked;
+  }
+}
+
+function setMetricExportFieldsBusy(busy) {
+  metricExportFieldsBusy = busy;
+  for (const input of metricExportInputs.values()) input.disabled = busy;
+}
+
+// Each field change names the field, the source and the target, and is confirmed first.
+// The server applies the one change to the stored consent; all boxes wait for the reload.
+async function changeMetricExportField(item, input) {
+  const enabled = input.checked;
+  const remaining = (state.data?.garmin?.metric_export_fields || [])
+    .filter((field) => field.enabled && field.key !== item.key).length;
+  let message = `${item.label} künftig automatisch von Garmin an Intervals.icu senden?`;
+  if (!enabled) {
+    message = `${item.label} nicht mehr automatisch von Garmin an Intervals.icu senden?`;
+    if (!remaining) message += " Damit endet der automatische Abgleich.";
+  }
+  setMetricExportFieldsBusy(true);
+  try {
+    if (!await requestConfirmation(message, { title: "Garmin → Intervals.icu" })) {
+      input.checked = !enabled;
+      return;
+    }
+    const body = { enabled: true, field: item.key, field_enabled: enabled, confirmed: true, source: providerIds().garmin, provider: providerIds().intervals };
+    toast(metricExportReceipt(await api("/api/metric-export/automatic", { method: "POST", body: JSON.stringify(body) })));
+    await load();
+  } catch (error) {
+    input.checked = !enabled;
+    toast(error.message, true);
+  } finally { setMetricExportFieldsBusy(false); }
 }
 
 // The toggle reads the last loaded state; the confirmation and the POST live in configureAutomaticMetricExport.
@@ -180,12 +255,13 @@ function toggleMetricExport(button) {
 
 async function configureAutomaticMetricExport(enabled, button) {
   const message = enabled
-    ? "Garmin-Messwerte künftig nach erfolgreichen Garmin-Syncs automatisch an Intervals.icu senden? Herzfrequenzzonen bleiben unverändert; abweichende Zielwerte ohne Vergleichsstand werden nicht überschrieben."
+    ? "Garmin-Messwerte (ohne Rad-FTP) künftig nach erfolgreichen Garmin-Syncs automatisch an Intervals.icu senden? Herzfrequenzzonen bleiben unverändert; abweichende Zielwerte ohne Vergleichsstand werden nicht überschrieben."
     : "Den automatischen Garmin-Abgleich mit Intervals.icu deaktivieren?";
   if (!await requestConfirmation(message, { title: enabled ? "Automatischen Abgleich aktivieren?" : "Automatischen Abgleich deaktivieren?" })) return;
   button.disabled = true;
   try {
-    await api("/api/metric-export/automatic", { method: "POST", body: JSON.stringify({ enabled, confirmed: true, source: providerIds().garmin, provider: providerIds().intervals }) });
+    const receipt = await api("/api/metric-export/automatic", { method: "POST", body: JSON.stringify({ enabled, confirmed: true, source: providerIds().garmin, provider: providerIds().intervals }) });
+    toast(metricExportReceipt(receipt));
     await load();
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; }

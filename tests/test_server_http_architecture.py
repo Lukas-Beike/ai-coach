@@ -296,6 +296,7 @@ class ServerHttpArchitectureTests(unittest.TestCase):
                 "ACTIVITY_READS.activity_read",
                 "lambda: ATHLETE_CLOCK.now().date()",
                 "ALL_SYNC_DAYS",
+                "ATHLETE_DATA.session_corrections",
             ],
         )
         self.assertNotIn(

@@ -146,7 +146,7 @@ class ActivityDetailRefreshService:
             ).activity_id
         )
         with self._database_manager.unit_of_work() as db:
-            rows = self._row_reader.activity_rows(db)
+            rows = self._row_reader.intervals_activity_payloads(db)
             summary = next(
                 (row for row in rows if str(row.get("id")) == activity_id),
                 None,
@@ -268,7 +268,7 @@ class ActivityDetailRefreshService:
         if not self._configured:
             return {"fetched": 0, "failed": 0}
         with self._database_manager.unit_of_work() as db:
-            rows = self._row_reader.activity_rows(db)
+            rows = self._row_reader.intervals_activity_payloads(db)
         newest = sorted(
             (row for row in rows if row.get("id")),
             key=lambda row: str(row.get("start_date_local") or ""),

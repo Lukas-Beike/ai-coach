@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
 
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.measurements import number
@@ -19,7 +19,6 @@ from backend.planning.assembly import (
     PlanningRuntime,
 )
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.garmin_activity_duplicates import deduplicated_rows
 from backend.weather.cache import invalidate_for_location_change
 
 
@@ -67,26 +66,27 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         self.assertIs(checkin._today, today)
         self.assertIs(profile._manager, manager)
         self.assertIs(profile._on_location_changed, invalidate_for_location_change)
-        self.assertIs(assembly.equipment()._deduplicate, deduplicated_rows)
         self.assertIs(duplicate._database_manager, manager)
         self.assertIs(duplicate._event_buffer, event_buffer)
-        self.assertIs(feedback._row_reader, row_reader)
         self.assertFalse(hasattr(assembly, "activity_read"))
         self.assertIsInstance(duplicate._inspector._activities, CanonicalTableReader)
         self.assertIs(duplicate._inspector._serving, serving)
 
 
 class EquipmentDependencyTests(unittest.TestCase):
-    def test_assignment_uses_injected_canonical_activity_rows(self) -> None:
-        activity_rows = [{"id": "synthetic"}]
-        deduplicate = Mock(return_value=([], 0))
-        service = EquipmentService(
-            Mock(), lambda: activity_rows, Mock(), Mock(), deduplicate
-        )
-        with self.assertRaises(AppError) as raised:
+    def test_assignment_uses_injected_session_summaries(self) -> None:
+        read_summaries = Mock(return_value=())
+        service = EquipmentService(MagicMock(), read_summaries, Mock(), Mock())
+        with (
+            patch(
+                "backend.athlete.equipment.canonical_store.live_session_id",
+                return_value=None,
+            ),
+            self.assertRaises(AppError) as raised,
+        ):
             service.assign({"activity_id": "synthetic", "equipment_id": None})
         self.assertEqual(raised.exception.status, 404)
-        deduplicate.assert_called_once_with(activity_rows)
+        read_summaries.assert_called_once_with()
 
     def test_usage_numbers_reject_invalid_values_and_preserve_zero(self) -> None:
         for value in (True, False, "12", None, -1, float("inf"), float("nan")):

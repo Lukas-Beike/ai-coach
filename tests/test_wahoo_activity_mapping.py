@@ -266,12 +266,23 @@ class IngestPlanTests(unittest.TestCase):
         self.assertEqual(date(2026, 10, 11), utc.local_date)
         self.assertEqual(date(2026, 10, 11), los_angeles.local_date)
 
-    def test_the_workouts_own_time_zone_field_is_ignored(self) -> None:
+    def test_the_workouts_own_time_zone_dates_it_where_it_was_recorded(self) -> None:
         shifted = row(starts="2026-10-11T22:30:00.000Z", time_zone="Asia/Tokyo")
 
         plan = wahoo_ingest_plan(self.payload(shifted), zone=UTC)
 
-        self.assertEqual(date(2026, 10, 11), plan.activities[0].local_date)
+        self.assertEqual(540, plan.activities[0].record.local_offset_minutes)
+        self.assertEqual(date(2026, 10, 12), plan.activities[0].local_date)
+
+    def test_a_time_zone_that_is_no_iana_name_leaves_the_athlete_zone(self) -> None:
+        for value in ("+09:00", "JST-9", 9, ""):
+            with self.subTest(value=value):
+                shifted = row(starts="2026-10-11T22:30:00.000Z", time_zone=value)
+
+                plan = wahoo_ingest_plan(self.payload(shifted), zone=UTC)
+
+                self.assertIsNone(plan.activities[0].record.local_offset_minutes)
+                self.assertEqual(date(2026, 10, 11), plan.activities[0].local_date)
 
     def test_plan_carries_provider_raw_records_and_mapper_version(self) -> None:
         plan = wahoo_ingest_plan(self.payload(row(id=1), row(id=2)), zone=UTC)
@@ -530,11 +541,11 @@ class StoredRawRecordTests(unittest.TestCase):
 
 
 class ReprojectionTests(unittest.TestCase):
-    def test_mapper_version_is_three_and_newer_than_the_stored_version_one(
+    def test_mapper_version_is_four_and_newer_than_the_stored_version_one(
         self,
     ) -> None:
-        self.assertEqual(3, MAPPER_VERSION)
-        self.assertEqual(3, reprojection_mapper_version("wahoo", "activity"))
+        self.assertEqual(4, MAPPER_VERSION)
+        self.assertEqual(4, reprojection_mapper_version("wahoo", "activity"))
 
     def test_a_stored_version_one_row_reprojects_the_new_metrics(self) -> None:
         stored = {

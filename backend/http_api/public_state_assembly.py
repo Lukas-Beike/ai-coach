@@ -30,10 +30,14 @@ from backend.performance.canonical_inputs import (
     resolve_reader,
 )
 from backend.performance.season_inputs import SeasonSource
+from backend.performance.source_policy import (
+    SourcePreferences,
+    preferences_from_profile,
+)
 from backend.planning.compact_activities import ActivitySummarySource
 from backend.runtime.ports import (
+    ActivityFingerprintReader,
     ActivityRowAndSummaryReader,
-    ActivityRowReader,
     CanonicalReadStatus,
     ObservationReader,
     ProviderCoverageReader,
@@ -212,13 +216,22 @@ class PublicStateAssembly:
             serving=self._canonical_serving,
             activity_summaries=self._activity_summary_reader,
             coverage=self._coverage,
+            source_preferences=self._source_preferences,
         )
+
+    def _source_preferences(self, db: Any) -> SourcePreferences:
+        return preferences_from_profile(self._athlete_data().profile().get_from_db(db))
 
     def _plan_zone_thresholds(self, db: Any) -> tuple[Observation, ...]:
         """The plan-zone thresholds inside the plan's read; none without a reader."""
         if self._observation_reader is None:
             return ()
-        return read_zone_thresholds(resolve_reader(self._observation_reader(), db), db)
+        return read_zone_thresholds(
+            resolve_reader(self._observation_reader(), db),
+            db,
+            as_of=self._local_date(),
+            preferences=self._source_preferences(db),
+        )
 
     def season_source(self) -> SeasonSource:
         if self._observation_reader is None or self._activity_summary_reader is None:
@@ -231,8 +244,8 @@ class PublicStateAssembly:
             self._activity_summary_reader,
         )
 
-    def _activity_row_reader(self) -> ActivityRowReader:
-        """The canonical read selector, which serves summaries and raw rows alike."""
+    def _fingerprint_reader(self) -> ActivityFingerprintReader:
+        """The canonical read selector, which also serves summary fingerprints."""
         if self._activity_summary_reader is None:
             raise RuntimeError("The plan state needs an activity summary reader.")
         return self._activity_summary_reader()
@@ -367,7 +380,7 @@ class PublicStateAssembly:
                 external_calendar_window_days=self._external_calendar_window_days(),
                 default_workout_name=self._planned_workout_label(),
                 activity_rows=self.activity_summary_source(),
-                activity_row_reader=self._activity_row_reader,
+                fingerprint_reader=self._fingerprint_reader,
                 zone_configurations=athlete.zones().configurations,
                 sport_thresholds=self._plan_zone_thresholds,
             )

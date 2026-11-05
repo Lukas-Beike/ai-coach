@@ -72,18 +72,6 @@ EFFORT_S = (180, 420, 720)
 RECOVERY_S = 1800
 
 
-class _NoActivityRows:
-    def activity_rows(
-        self,
-        db: Any,
-        *,
-        start: date | None = None,
-        end: date | None = None,
-        limit: int | None = None,
-    ) -> tuple[dict[str, Any], ...]:
-        return ()
-
-
 class M1SessionRpeInputs(linking.LinkingCase):
     """Elapsed duration and local session RPE for one canonical session."""
 
@@ -100,7 +88,6 @@ class M1SessionRpeInputs(linking.LinkingCase):
         return ActivityFeedbackService(
             self.manager,
             ActivityFeedbackRepository(lambda: linking.SECOND.isoformat()),
-            _NoActivityRows(),
             references=ActivityReferences(self.manager),
         )
 

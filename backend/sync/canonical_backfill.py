@@ -49,9 +49,10 @@ projection no longer emits becomes ``invalid`` in the same transaction that adva
 makes it ``active`` with the same ``activity_id``. An unusable stored payload emits
 nothing, so the activity it owns is marked ``invalid`` as well, and a later mapper fix
 restores it. In the same transaction, the sessions near the re-projected activities
-are linked to duplicates from other providers (``link_activity_sessions``), so a
-mapper fix that lets two copies match merges stored history without a new provider
-refresh. The first ingest links the same way when each source finishes, so copies
+are re-checked (``split_unmatched_sessions``) and linked to duplicates from other
+providers (``link_activity_sessions``), so a mapper fix that lets two copies match
+merges stored history, and one that makes them stop matching splits it, without a
+new provider refresh. The first ingest links the same way when each source finishes, so copies
 stored by Garmin and Intervals.icu snapshots form one session. Each re-projected
 observation records the raw row as its owner; on completion, the active observations
 that row owns and the new projection no longer emits are retired (counted as
@@ -103,7 +104,10 @@ from enum import StrEnum
 from functools import partial
 from typing import Any, Final
 
-from backend.activities.session_linking import link_activity_sessions
+from backend.activities.session_linking import (
+    link_activity_sessions,
+    split_unmatched_sessions,
+)
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_domain_store, canonical_store
 from backend.db.repositories import KeyValueRepository
@@ -656,17 +660,18 @@ def _complete_reprojection(
 
 
 def _link_work_sessions(db: Any, work: _Work, *, zone: tzinfo, now: str) -> None:
-    """Link the sessions near the activities of ``work`` to other providers' copies."""
-    link_activity_sessions(
-        db,
-        touched_dates={
-            item.value.local_date
-            for item in work.items
-            if isinstance(item.value, ActivityItem)
-        },
-        zone=zone,
-        now=now,
-    )
+    """Re-check and link the sessions near the activities of ``work``.
+
+    Copies a new projection no longer matches are split off first, then the
+    sessions are linked to other providers' copies.
+    """
+    touched = {
+        item.value.local_date
+        for item in work.items
+        if isinstance(item.value, ActivityItem)
+    }
+    split_unmatched_sessions(db, touched_dates=touched, zone=zone, now=now)
+    link_activity_sessions(db, touched_dates=touched, zone=zone, now=now)
 
 
 def _retire_unemitted(db: Any, row: Mapping[str, Any], work: _Work, *, now: str) -> int:

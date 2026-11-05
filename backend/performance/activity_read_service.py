@@ -9,7 +9,7 @@ from backend.activities.activity_reference import ActivityReferenceResolver
 from backend.activities.activity_summary import ActivitySummary
 from backend.activities.detail_contract import measured_order
 from backend.activities.detail_store import ActivityDetailStore
-from backend.activities.read_service import ActivityReadService
+from backend.activities.read_service import ActivityReadService, ActivitySummarySource
 from backend.athlete.profile import timezone_name
 from backend.canonical.records import ActivityRecord
 from backend.errors import AppError
@@ -31,32 +31,29 @@ from backend.performance.detail_envelope import (
     feedback_session_load,
 )
 from backend.performance.freshness import GarminSyncStatus
-from backend.runtime.ports import ActivityRowReader
 
 
 class ActivityAnalysisReadService(ActivityReadService):
     def __init__(
         self,
         database_manager: Any,
-        row_reader: ActivityRowReader,
+        summaries: ActivitySummarySource,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
         read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
         canonical: CanonicalPerformanceSource,
-        summary_rows: ActivityRowReader | None = None,
         session_records: SessionRecordReader | None = None,
         refreshable: RefreshableProviders = frozenset,
     ) -> None:
         super().__init__(
             database_manager,
-            row_reader,
+            summaries,
             feedback_service,
             detail_store,
             read_equipment=read_equipment,
             references=references,
-            summary_rows=summary_rows,
             coverage=canonical.coverage,
         )
         self._canonical = canonical
@@ -85,6 +82,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                     db,
                     activity_reader=reader,
                     as_of=as_of,
+                    preferences=source.preferences_in(db),
                 ),
             )
             summaries = None if canonical is None else canonical.activities
@@ -145,11 +143,13 @@ class ActivityAnalysisReadService(ActivityReadService):
             inputs.update(canonical=canonical)
             return summaries
 
+        summary_reader = self._canonical.activity_summary_reader()
+
         def summary_row(db: Any, provider_activity_id: str) -> dict | None:
-            # The stored Intervals.icu row the detail document fingerprints.
-            if self._summary_rows is None:
+            # The stored Intervals.icu row behind the detail's summary metrics.
+            if summary_reader is None:
                 return None
-            return _find_row(self._summary_rows.activity_rows(db), provider_activity_id)
+            return summary_reader.intervals_summary_row(db, provider_activity_id)
 
         def requested_summary() -> ActivitySummary | None:
             return _find_summary(load_inputs(normalized_id), normalized_id)
@@ -169,6 +169,7 @@ class ActivityAnalysisReadService(ActivityReadService):
             self._session_records,
             refreshable=self._refreshable,
             summary_row=summary_row,
+            fingerprints=summary_reader,
             failures=None
             if self._detail_store is None
             else self._detail_store.failures,
@@ -191,20 +192,6 @@ class ActivityAnalysisReadService(ActivityReadService):
                 )
             records = self._session_records(db, document["session"]["activity_id"])
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
-
-
-def _find_row(raw_rows: Any, provider_activity_id: str) -> dict | None:
-    if not isinstance(raw_rows, list | tuple):
-        return None
-    return next(
-        (
-            item
-            for item in raw_rows
-            if isinstance(item, dict)
-            and str(item.get("id") or "") == provider_activity_id
-        ),
-        None,
-    )
 
 
 def _find_summary(

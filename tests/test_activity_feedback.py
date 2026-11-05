@@ -6,18 +6,19 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
-from activity_row_support import SnapshotActivityRows
+from canonical_detail_support import add_session_record, seed_intervals_activity
 
+from backend.activities.activity_reference import ActivityReferences
 from backend.activities.feedback import (
     ACTIVITY_FEEDBACK_TEXT_LIMITS,
     ActivityFeedbackService,
     normalize_activity_feedback,
 )
+from backend.canonical.vocabulary import ProviderId
 from backend.db.manager import DatabaseManager
-from backend.db.repositories import ActivityFeedbackRepository, SnapshotRepository
+from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.sync.snapshot_reader import SnapshotRepositoryReader
 
 
 class ActivityFeedbackNormalizationTests(unittest.TestCase):
@@ -165,19 +166,10 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.feedback_repository = ActivityFeedbackRepository(
             lambda: "2026-09-20T12:00:00+00:00"
         )
-        self.snapshot_repository = SnapshotRepository()
-        self.rows = SnapshotActivityRows(
-            SnapshotRepositoryReader(self.snapshot_repository)
-        )
         self.service = ActivityFeedbackService(
             self.manager,
             self.feedback_repository,
-            self.rows,
         )
-
-    def save_snapshot(self, payload: dict) -> None:
-        with self.manager.unit_of_work() as db:
-            self.snapshot_repository.save(db, payload, "2026-09-20T12:00:00+00:00")
 
     def insert_feedback_rows(self, rows: list[tuple[str, str]]) -> None:
         with self.manager.unit_of_work() as db:
@@ -219,41 +211,45 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(result["change"]["action"], "delete")
         self.assertEqual(self.service.list(), [])
 
-    def test_coach_save_requires_known_snapshot_activity_and_accepts_aliases(
-        self,
-    ) -> None:
-        self.save_snapshot(
-            {
-                "recent_activities": [
-                    {"activityId": "activity-alias"},
-                    {"external_id": "activity-external"},
-                    {"id": "activity-id"},
-                ]
-            }
+    def test_coach_save_requires_a_live_canonical_session(self) -> None:
+        seed_intervals_activity(self.manager, "i-1")
+        add_session_record(self.manager, ProviderId.GARMIN, "g-only", "act_garmin")
+        references = ActivityReferences(self.manager)
+        service = ActivityFeedbackService(
+            self.manager, self.feedback_repository, references=references
         )
+        intervals_session = references.local_ids(["i-1"])["i-1"]
 
-        for activity_id in ("activity-alias", "activity-external", "activity-id"):
+        # Intervals id, its local id, a Garmin-only local id and provider id.
+        for activity_id, stored in (
+            ("i-1", "i-1"),
+            (intervals_session, "i-1"),
+            ("act_garmin", "act_garmin"),
+            # The provider id joins its session's feedback group.
+            ("g-only", "act_garmin"),
+        ):
             self.assertEqual(
-                self.service.save_coach(activity_id, {"notes": "athlete note"})[
+                service.save_coach(activity_id, {"notes": "athlete note"})[
                     "activity_feedback"
                 ]["activity_id"],
-                activity_id,
+                stored,
             )
         with self.assertRaises(AppError) as empty:
-            self.service.save_coach("activity-id", {"notes": "  "})
+            service.save_coach("i-1", {"notes": "  "})
         self.assertEqual(
             (empty.exception.status, empty.exception.message),
             (400, "Die Rückmeldung darf nicht leer sein."),
         )
-        with self.assertRaises(AppError) as unknown:
-            self.service.save_coach("unknown", {"notes": "not allowed"})
-        self.assertEqual(
-            (unknown.exception.status, unknown.exception.message),
-            (
-                404,
-                "Die Aktivität ist im aktuellen lokalen Trainingssnapshot nicht vorhanden.",
-            ),
-        )
+        for unknown_id in ("unknown", "act_unknown"):
+            with self.assertRaises(AppError) as unknown:
+                service.save_coach(unknown_id, {"notes": "not allowed"})
+            self.assertEqual(
+                (unknown.exception.status, unknown.exception.message),
+                (
+                    404,
+                    "Die Aktivität ist im aktuellen lokalen Trainingssnapshot nicht vorhanden.",
+                ),
+            )
 
     def test_context_keeps_recent_and_scope(self) -> None:
         self.service.save("activity-1", {"notes": "note"})
@@ -350,7 +346,7 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
                 return super().all(db)
 
         repository = FailingListRepository()
-        service = ActivityFeedbackService(self.manager, repository, self.rows)
+        service = ActivityFeedbackService(self.manager, repository)
         with self.assertRaisesRegex(RuntimeError, "read failure"):
             service.save("activity-1", {"notes": "must persist"})
         repository.fail = False
@@ -365,7 +361,6 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         service = ActivityFeedbackService(
             self.manager,
             FailingUpsertRepository(lambda: "2026-09-20T12:00:00+00:00"),
-            self.rows,
         )
         with self.assertRaisesRegex(RuntimeError, "write failure"):
             service.save("activity-1", {"notes": "must roll back"})

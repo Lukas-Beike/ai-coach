@@ -240,6 +240,7 @@ from backend.performance.morning_battery_service import (
     MorningBatteryStore,
     MorningBodyBatteryService,
 )
+from backend.performance.source_policy import preferences_from_profile
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
 from backend.planning import library as planning_library
@@ -478,7 +479,7 @@ JSON_MEDIA_TYPE = "application/json"
 OPENAI_RESPONSES_PATH = "/responses"
 PLANNED_WORKOUT_LABEL = "Geplante Einheit"
 APP_NAME = "Intervals Coach"
-APP_VERSION = "1.13.41"
+APP_VERSION = "1.13.42"
 MAX_BODY_BYTES = 1_000_000
 MAX_AUDIO_BODY_BYTES = 8_000_000
 MAX_BACKUP_BYTES = 1_000_000_000
@@ -721,6 +722,9 @@ ACTIVITY_READS = ActivityReadAssembly(
         observation_reader=lambda: CANONICAL_READ,
         coverage=lambda: CANONICAL_READ,
         serving=lambda: CANONICAL_READ,
+        source_preferences=lambda db: preferences_from_profile(
+            ATHLETE_DATA.profile().get_from_db(db)
+        ),
     ),
     ATHLETE_DATA.activity_feedback,
     lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
@@ -783,6 +787,9 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
             calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
             checkin_text_limit=CHECKIN_TEXT_LIMITS["illness"],
             observation_reader=lambda: CANONICAL_READ,
+            source_preferences=lambda db: preferences_from_profile(
+                ATHLETE_DATA.profile().get_from_db(db)
+            ),
         ),
         runtime=PlanningRuntime(
             sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
@@ -810,6 +817,7 @@ HISTORY = HistoryAssembly(
             competition_service=PLANNING_DATA.competition,
             zone_service=ATHLETE_DATA.zones,
             feedback_service=ATHLETE_DATA.activity_feedback,
+            session_corrections=ATHLETE_DATA.session_corrections,
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,
@@ -1449,6 +1457,9 @@ COACH_CONTEXT = CoachContextAssembly(
                 serving=lambda: CANONICAL_READ,
                 activity_summaries=lambda: CANONICAL_READ,
                 coverage=lambda: CANONICAL_READ,
+                source_preferences=lambda db: preferences_from_profile(
+                    ATHLETE_DATA.profile().get_from_db(db)
+                ),
             ),
             activity_rows=ActivitySummarySource(
                 database_manager=lambda: database_manager(),
@@ -1498,6 +1509,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             profile_service=ATHLETE_DATA.profile,
             today=lambda: ATHLETE_CLOCK.now().date(),
             report_services=lambda: HTTP_API.training_reports(),
+            session_corrections=ATHLETE_DATA.session_corrections,
         ),
         planning=CoachPlanningReadSources(
             structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
@@ -1507,6 +1519,10 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
                 database_manager=database_manager,
                 observation_reader=lambda: CANONICAL_READ,
                 zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+                today=lambda: ATHLETE_CLOCK.now().date(),
+                source_preferences=lambda db: preferences_from_profile(
+                    ATHLETE_DATA.profile().get_from_db(db)
+                ),
             ),
             change_history_service=HISTORY.change_history_service,
             competition_service=PLANNING_DATA.competition,
@@ -1723,6 +1739,10 @@ def _plan_guard_service() -> PlanGuardService:
             database_manager=database_manager,
             observation_reader=lambda: CANONICAL_READ,
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
+            today=lambda: ATHLETE_CLOCK.now().date(),
+            source_preferences=lambda db: preferences_from_profile(
+                ATHLETE_DATA.profile().get_from_db(db)
+            ),
         ),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
         completed_activities=lambda: read_completed(
@@ -1745,6 +1765,7 @@ def _plan_guard_service() -> PlanGuardService:
             CANONICAL_READ,
             ATHLETE_CLOCK.now().date(),
             ATHLETE_DATA.zones().configurations(),
+            lambda db: preferences_from_profile(ATHLETE_DATA.profile().get_from_db(db)),
         ),
         expects_strength=lambda: strength_expected(
             str(
@@ -1824,6 +1845,7 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
         nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         equipment_service=ATHLETE_DATA.equipment,
+        session_corrections_service=ATHLETE_DATA.session_corrections,
     ),
     profile_tools=CoachProfileToolDependencies(
         profile_service=lambda: ATHLETE_DATA.profile(),
@@ -2223,6 +2245,7 @@ HTTP_API = HttpApiAssembly(
                 activity_read=ACTIVITY_READS.activity_read,
                 equipment=ATHLETE_DATA.equipment,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
+                session_corrections=ATHLETE_DATA.session_corrections,
                 zones=ATHLETE_DATA.zones,
                 body_export=lambda profile, revision, deadline: (
                     GARMIN_ASSEMBLY.body_export(ATHLETE_DATA.profile()).export(

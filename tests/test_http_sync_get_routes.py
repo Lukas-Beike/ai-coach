@@ -152,17 +152,17 @@ class SyncGetRoutesTests(unittest.TestCase):
             [(200, {"activity_id": "CaseSensitive-1"})], self.handler.responses
         )
 
-    def test_activity_page_uses_neutral_names_and_detail_is_passed_through(
+    def test_activity_page_and_detail_are_passed_through(
         self,
     ) -> None:
         self.activities.page.return_value = {
             "activities": [
                 {
-                    "id": "a1",
-                    "start_date_local": "2026-10-11T07:00:00",
-                    "moving_time": 3600,
-                    "icu_training_load": 40,
-                    "icu_rpe": 4,
+                    "id": "act_a1",
+                    "started_at_local": "2026-10-11T07:00:00",
+                    "moving_duration_s": 3600,
+                    "training_load": 40,
+                    "rpe": 4,
                 }
             ]
         }
@@ -184,7 +184,7 @@ class SyncGetRoutesTests(unittest.TestCase):
                     {
                         "activities": [
                             {
-                                "id": "a1",
+                                "id": "act_a1",
                                 "started_at_local": "2026-10-11T07:00:00",
                                 "moving_duration_s": 3600,
                                 "training_load": 40,

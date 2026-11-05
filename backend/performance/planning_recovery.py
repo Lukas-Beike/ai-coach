@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance.source_policy import select_daily
+from backend.performance.source_policy import (
+    FAMILY_LOOKBACK_DAYS,
+    METHOD_FAMILY_KINDS,
+    NO_PREFERENCES,
+    SourcePreferences,
+    family_providers,
+    intervals_relays_garmin,
+    select_daily,
+)
 from backend.runtime.ports import ObservationReader
 
 GARMIN_SOURCE = "Garmin Connect"
 INTERVALS_WELLNESS_SOURCE = "Intervals.icu Wellness"
+# An Intervals.icu value that relays Garmin's (``intervals_relays_garmin``).
+INTERVALS_GARMIN_RELAY_SOURCE = "Intervals.icu Wellness (Garmin)"
 UTC_OFFSET_SUFFIX = "+00:00"
 _SOURCE_BY_PROVIDER: dict[ProviderId | None, str] = {
     ProviderId.GARMIN: GARMIN_SOURCE,
@@ -111,22 +121,44 @@ def first_intervals_by_day(
 
 
 def canonical_planning_recovery(
-    reader: ObservationReader, db: Any, *, start: date, end: date
+    reader: ObservationReader,
+    db: Any,
+    *,
+    start: date,
+    end: date,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> dict[str, dict[str, Any]]:
     """Build the date-indexed recovery view from canonical observations.
 
     ``reader`` must already be the source chosen for the unit of work. Each value
-    is the observation the daily source rule selects for its day: Garmin before
-    Intervals.icu for sleep, HRV and resting HR, the reverse for readiness. CTL,
-    ATL and form (TSB) come from Intervals.icu only. Every value carries the source
-    label of the provider that supplied it.
+    is the observation the daily source rule selects for its day: Garmin's method
+    family for sleep, HRV and resting HR (Intervals.icu only as its relay, or
+    without any Garmin value), Intervals.icu before Garmin for readiness. CTL, ATL
+    and form (TSB) come from Intervals.icu only. Every value carries the source
+    label of the provider that supplied it; a relay value is labelled as Garmin's.
+    The method family is decided over ``FAMILY_LOOKBACK_DAYS`` ending on ``end``
+    (or from ``start``, if earlier), the window the current recovery values use.
     """
     recovery_by_date: dict[str, dict[str, Any]] = {}
+    family_start = min(start, end - timedelta(days=FAMILY_LOOKBACK_DAYS - 1))
     for field, kind in _DAILY_FIELDS:
-        selected = select_daily(
-            reader.observations(db, kind, start=start, end=end), kind
+        read_start = family_start if kind in METHOD_FAMILY_KINDS else start
+        observations = tuple(reader.observations(db, kind, start=read_start, end=end))
+        selected = {
+            day: observation
+            for day, observation in select_daily(
+                observations, kind, preferences
+            ).items()
+            if day >= start
+        }
+        _add_observations(
+            recovery_by_date,
+            field,
+            kind,
+            selected,
+            relay=ProviderId.GARMIN in family_providers(observations, kind, preferences)
+            and intervals_relays_garmin(observations, kind),
         )
-        _add_observations(recovery_by_date, field, kind, selected)
     for field, kind in _LOAD_FIELDS:
         loaded = first_intervals_by_day(
             reader.observations(db, kind, start=start, end=end)
@@ -140,9 +172,16 @@ def _add_observations(
     field: str,
     kind: MetricKind,
     observations: Mapping[date, Observation],
+    *,
+    relay: bool = False,
 ) -> None:
     for day, observation in observations.items():
-        source = _SOURCE_BY_PROVIDER.get(observation.provenance.provider)
+        provider = observation.provenance.provider
+        source = (
+            INTERVALS_GARMIN_RELAY_SOURCE
+            if relay and provider is ProviderId.INTERVALS
+            else _SOURCE_BY_PROVIDER.get(provider)
+        )
         if source is None:
             continue
         _add_planning_recovery_value(
@@ -161,12 +200,15 @@ def planning_recovery_view(
     end: date,
     morning_battery_history: Any,
     morning_body_battery: Any,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> dict[str, dict[str, Any]]:
     """Combine canonical recovery with the body battery, which has no metric kind.
 
     Body battery comes from the morning history and the current morning reading.
     """
-    recovery_by_date = canonical_planning_recovery(reader, db, start=start, end=end)
+    recovery_by_date = canonical_planning_recovery(
+        reader, db, start=start, end=end, preferences=preferences
+    )
     _add_morning_battery_recovery(
         recovery_by_date, morning_battery_history, morning_body_battery
     )

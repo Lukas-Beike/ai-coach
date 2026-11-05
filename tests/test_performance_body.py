@@ -12,6 +12,7 @@ from performance_day_support import (
 from backend.performance.body import body_history as _body_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.freshness import GarminSyncStatus
+from backend.performance.source_policy import preferences_from_profile
 from backend.sync.garmin_weight import garmin_weight_daily_records
 
 TODAY = date(2026, 10, 6)
@@ -213,6 +214,41 @@ class BodyHistoryTests(unittest.TestCase):
             ]
         }
         self.assertEqual(garmin_weight_daily_records(snapshot), [("2026-10-01", 69.99)])
+
+    def test_a_preferred_body_source_supplies_the_w_per_kg_weight(self):
+        snapshot = {
+            "synced_at": "intervals-sync",
+            "recent_wellness": [{"id": "2026-10-04", "weight": 72}],
+        }
+        garmin = {
+            "weight": [{"date": "2026-10-06", "weightKg": 70}],
+            "performance_history": [
+                {"date": "2026-10-06", "metrics": {"cycling_ftp_watts": 288}},
+            ],
+        }
+
+        default = _series(
+            body_history(snapshot, garmin, TODAY),
+            "12w",
+            "cycling_w_per_kg",
+            "Garmin Connect",
+        )["points"]
+        preferred = _series(
+            body_history(
+                snapshot,
+                garmin,
+                TODAY,
+                preferences=preferences_from_profile(
+                    {"preferred_source_body": "intervals"}
+                ),
+            ),
+            "12w",
+            "cycling_w_per_kg",
+            "Garmin Connect",
+        )["points"]
+
+        self.assertAlmostEqual(default[-1]["value"], 288 / 70, places=3)
+        self.assertAlmostEqual(preferred[-1]["value"], 288 / 72, places=3)
 
     def test_weekly_quotient_median_counts_dates_and_chart_history_integration(self):
         from backend.performance.chart_history import analysis_history

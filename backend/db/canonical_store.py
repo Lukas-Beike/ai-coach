@@ -11,17 +11,19 @@ import hashlib
 import json
 import math
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Final, NamedTuple
 
+from backend.canonical.local_time import valid_offset_minutes
 from backend.canonical.records import (
     MAX_TRAINING_EFFECT_LABEL_LENGTH,
     MAX_ZONE_COUNT,
     MAX_ZONE_ID_LENGTH,
     UNKNOWN_CONTEXT,
     ActivityRecord,
+    ExternalRef,
     MeasurementContext,
     Observation,
     ObservationPeriod,
@@ -60,6 +62,8 @@ _DEVICE_TYPE_KEY: Final = "device_type"
 _PLANNED_EVENT_KEY: Final = "planned_event_id"
 _DEVICE_NAME_KEY: Final = "device_name"
 _TRAINING_EFFECT_LABEL_KEY: Final = "training_effect_label"
+_EXTERNAL_REF_KEY: Final = "external_ref"
+_LOCAL_OFFSET_KEY: Final = "local_offset_minutes"
 # ActivityRecord summary fields stored in the details under their own names.
 ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "intensity",
@@ -289,11 +293,13 @@ def upsert_activity_record(
     )
     db.execute(
         # A revived session is active again, so it no longer keeps the survivor
-        # of a merge that its deletion cleared.
+        # of a merge that its deletion cleared. A session the athlete deleted
+        # stays deleted.
         "UPDATE activity_sessions SET started_at = ?, local_date = ?, "
-        "state = CASE WHEN state = ? THEN ? ELSE state END, "
-        "merged_into_retained = CASE WHEN state = ? THEN NULL "
-        "ELSE merged_into_retained END, updated_at = ? "
+        f"state = CASE WHEN state = ? AND NOT {ATHLETE_DELETED} THEN ? "
+        "ELSE state END, "
+        f"merged_into_retained = CASE WHEN state = ? AND NOT {ATHLETE_DELETED} "
+        "THEN NULL ELSE merged_into_retained END, updated_at = ? "
         "WHERE activity_id = ?",
         (
             started_at,
@@ -614,21 +620,24 @@ def active_session_activity_rows(
     return grouped
 
 
-def newest_sessions_start(db: Any, count: int) -> str | None:
+def newest_sessions_start(db: Any, count: int, *, end: str | None = None) -> str | None:
     """Return the local date of the ``count``-th newest live session, or None.
 
     Live sessions are active or hidden and own an active record; merged aliases
-    and deleted sessions do not count. None means there are at most ``count``.
+    and deleted sessions do not count. ``end`` counts only sessions up to that
+    local date. None means there are at most ``count``.
     """
+    end_clause = "" if end is None else "AND s.local_date <= ? "
     rows = _fetch_all(
         db,
         "SELECT s.local_date FROM activity_sessions AS s WHERE s.state IN (?, ?) "
-        "AND s.local_date IS NOT NULL AND EXISTS (SELECT 1 FROM activity_records "
-        "AS r WHERE r.activity_id = s.activity_id AND r.state = ?) "
+        f"AND s.local_date IS NOT NULL {end_clause}AND EXISTS (SELECT 1 FROM "
+        "activity_records AS r WHERE r.activity_id = s.activity_id AND r.state = ?) "
         "ORDER BY s.started_at DESC LIMIT 1 OFFSET ?",
         (
             ActivitySessionState.ACTIVE.value,
             ActivitySessionState.HIDDEN.value,
+            *(() if end is None else (end,)),
             ActivityRecordState.ACTIVE.value,
             max(count - 1, 0),
         ),
@@ -1208,18 +1217,22 @@ def _delete_activity(
     # A deleted merged alias also leaves its merge: the schema allows merged_into
     # only on duplicate sessions. merged_into_retained keeps the survivor, so
     # feedback written for the alias still resolves (effective_session_ids).
+    # A session the athlete already deleted is left as it is and hands over no
+    # aliases.
     cursor = db.execute(
         "UPDATE activity_sessions SET state = ?, "
         "merged_into_retained = COALESCE(merged_into, merged_into_retained), "
         "merged_into = NULL, updated_at = ? "
         "WHERE activity_id = ? AND primary_provider = ? "
-        "AND primary_provider_activity_id = ?",
+        "AND primary_provider_activity_id = ? "
+        f"AND NOT (state = ? AND {ATHLETE_DELETED})",
         (
             ActivitySessionState.DELETED.value,
             now,
             activity_id,
             provider,
             provider_activity_id,
+            ActivitySessionState.DELETED.value,
         ),
     )
     if cursor.rowcount == 1:
@@ -1243,10 +1256,14 @@ def _repoint_aliases(db: Any, deleted_id: str, *, now: str) -> None:
     if not aliases:
         return
     survivor, *others = (str(row["activity_id"]) for row in aliases)
+    # The new survivor carries on the deleted one's confirmation, so an athlete's
+    # merge stays confirmed when the provider deletes its primary copy.
     db.execute(
-        "UPDATE activity_sessions SET state = ?, merged_into = NULL, updated_at = ? "
-        "WHERE activity_id = ?",
-        (ActivitySessionState.ACTIVE.value, now, survivor),
+        "UPDATE activity_sessions SET state = ?, merged_into = NULL, "
+        "athlete_confirmed = MAX(athlete_confirmed, (SELECT deleted.athlete_confirmed "
+        "FROM activity_sessions AS deleted WHERE deleted.activity_id = ?)), "
+        "updated_at = ? WHERE activity_id = ?",
+        (ActivitySessionState.ACTIVE.value, deleted_id, now, survivor),
     )
     for activity_id in others:
         db.execute(
@@ -1468,7 +1485,17 @@ def _activity_details(record: ActivityRecord) -> str:
             (_PLANNED_EVENT_KEY, record.planned_event_id),
             (_DEVICE_NAME_KEY, record.device_name),
             (_TRAINING_EFFECT_LABEL_KEY, record.training_effect_label),
+            (
+                _EXTERNAL_REF_KEY,
+                None
+                if record.external_ref is None
+                else [
+                    record.external_ref.upstream.value,
+                    record.external_ref.upstream_id,
+                ],
+            ),
             (_CONTEXT_KEY, record.provenance.context.as_details() or None),
+            (_LOCAL_OFFSET_KEY, record.local_offset_minutes),
             *(
                 (field, getattr(record, field))
                 for field in ACTIVITY_SUMMARY_DETAIL_FIELDS
@@ -1516,6 +1543,8 @@ def activity_summary_values(details: object) -> dict[str, Any]:
         and len(label) <= MAX_TRAINING_EFFECT_LABEL_LENGTH
     ):
         values[_TRAINING_EFFECT_LABEL_KEY] = label
+    if valid_offset_minutes(offset := loaded.get(_LOCAL_OFFSET_KEY)):
+        values[_LOCAL_OFFSET_KEY] = offset
     return values
 
 
@@ -1539,6 +1568,17 @@ def _stored_zones(value: object) -> tuple[tuple[str, float], ...] | None:
             return None
         zones.append((zone_id, float(seconds)))
     return tuple(zones)
+
+
+def activity_external_ref(details: object) -> ExternalRef | None:
+    """Return the upstream activity stored in an activity's details, if valid."""
+    value = _activity_details_object(details).get(_EXTERNAL_REF_KEY)
+    if not (isinstance(value, list) and len(value) == 2):
+        return None
+    try:
+        return ExternalRef(ProviderId(value[0]), value[1])
+    except TypeError, ValueError:
+        return None
 
 
 def activity_elapsed_duration(details: object) -> float | None:
@@ -1831,7 +1871,7 @@ def activity_session_link_rows(
         for row in _fetch_all(
             db,
             "SELECT activity_id, link_kind, athlete_confirmed, state, merged_into, "
-            "created_at FROM activity_sessions "
+            "merged_into_retained, created_at FROM activity_sessions "
             f"WHERE activity_id IN ({_placeholders(chunk)})",
             tuple(chunk),
         ):
@@ -1895,6 +1935,59 @@ def provider_activity_sessions(
     }
 
 
+def live_session_id(db: Any, any_id: str) -> str | None:
+    """Return the live session a local or provider activity id leads to, or None.
+
+    A local ``act_`` id follows its merges; any other id must be the provider
+    activity id of an active record of any provider. The session must hold an
+    active record and must not be deleted.
+    """
+    if any_id.startswith(ACTIVITY_ID_PREFIX):
+        candidates = [effective_session_ids(db, [any_id]).get(any_id, any_id)]
+    else:
+        candidates = [
+            session
+            for provider in ProviderId
+            if (
+                session := provider_activity_sessions(db, provider.value, [any_id]).get(
+                    any_id
+                )
+            )
+        ]
+    return next(
+        (session for session in candidates if session_activity_rows(db, session)),
+        None,
+    )
+
+
+def external_ref_sessions(
+    db: Any, upstream: str, upstream_ids: Sequence[str]
+) -> dict[str, str]:
+    """Map upstream activity ids to the session of an active record that names them.
+
+    A record names an upstream activity through its stored ``external_ref``, as an
+    Intervals.icu copy of a Garmin activity does. Merges are followed; unknown
+    ids are absent.
+    """
+    reference = (
+        "json_extract(CASE WHEN json_valid(details) THEN details END, "
+        f"'$.{_EXTERNAL_REF_KEY}[{{}}]')"
+    )
+    sessions: dict[str, str] = {}
+    for chunk in _chunked(list(dict.fromkeys(upstream_ids))):
+        for row in _fetch_all(
+            db,
+            f"SELECT {reference.format(1)} AS upstream_id, activity_id "
+            f"FROM activity_records WHERE state = ? AND {reference.format(0)} = ? "
+            f"AND CAST({reference.format(1)} AS TEXT) IN ({_placeholders(chunk)}) "
+            "ORDER BY provider, provider_activity_id",
+            (ActivityRecordState.ACTIVE.value, upstream, *chunk),
+        ):
+            sessions.setdefault(str(row["upstream_id"]), str(row["activity_id"]))
+    effective = effective_session_ids(db, list(sessions.values()))
+    return {key: effective.get(value, value) for key, value in sessions.items()}
+
+
 def effective_session_ids(db: Any, activity_ids: Sequence[str]) -> dict[str, str]:
     """Map stored session ids to the session their merges lead to; unknown ids are absent.
 
@@ -1955,6 +2048,228 @@ def set_activity_session_link_kind(
         "UPDATE activity_sessions SET link_kind = ?, updated_at = ? "
         "WHERE activity_id = ? AND state = ?",
         (link_kind, now, activity_id, ActivitySessionState.ACTIVE.value),
+    )
+
+
+# A session the athlete deleted retains itself; its merged copies retain it.
+# Provider deletes never produce a self-retaining session.
+ATHLETE_DELETED: Final = (
+    "(merged_into_retained IS NOT NULL AND (merged_into_retained = activity_id "
+    "OR merged_into_retained IN (SELECT own.activity_id FROM activity_sessions "
+    "AS own WHERE own.merged_into_retained = own.activity_id)))"
+)
+
+SESSION_CORRECTION_COLUMNS: Final = (
+    "activity_id",
+    "state",
+    "merged_into",
+    "merged_into_retained",
+    "link_kind",
+    "athlete_confirmed",
+)
+
+
+def session_bundle_ids(db: Any, activity_id: str) -> list[str]:
+    """Return a session, its merge aliases and the deleted sessions retaining it."""
+    return [
+        str(row["activity_id"])
+        for row in _fetch_all(
+            db,
+            "SELECT activity_id FROM activity_sessions WHERE activity_id = ? "
+            "OR merged_into = ? OR merged_into_retained = ? ORDER BY activity_id",
+            (activity_id, activity_id, activity_id),
+        )
+    ]
+
+
+def session_correction_rows(
+    db: Any, activity_ids: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Return the bundling columns of the given sessions, ordered by id."""
+    rows: list[dict[str, Any]] = []
+    for chunk in _chunked(activity_ids):
+        rows.extend(
+            _fetch_all(
+                db,
+                f"SELECT {', '.join(SESSION_CORRECTION_COLUMNS)}, created_at, local_date "
+                f"FROM activity_sessions WHERE activity_id IN ({_placeholders(chunk)})",
+                tuple(chunk),
+            )
+        )
+    return sorted(rows, key=lambda row: str(row["activity_id"]))
+
+
+def write_session_correction_rows(
+    db: Any, rows: Sequence[Mapping[str, Any]], *, now: str
+) -> None:
+    """Store the bundling columns of existing sessions as given."""
+    for row in rows:
+        db.execute(
+            "UPDATE activity_sessions SET state = ?, merged_into = ?, "
+            "merged_into_retained = ?, link_kind = ?, athlete_confirmed = ?, "
+            "updated_at = ? WHERE activity_id = ?",
+            (
+                row["state"],
+                row["merged_into"],
+                row["merged_into_retained"],
+                row["link_kind"],
+                1 if row["athlete_confirmed"] else 0,
+                now,
+                row["activity_id"],
+            ),
+        )
+
+
+def sessions_with_active_records(db: Any, activity_ids: Sequence[str]) -> set[str]:
+    """Return the given sessions that own an active activity record."""
+    found: set[str] = set()
+    for chunk in _chunked(activity_ids):
+        found.update(
+            str(row["activity_id"])
+            for row in _fetch_all(
+                db,
+                "SELECT DISTINCT activity_id FROM activity_records "
+                f"WHERE state = ? AND activity_id IN ({_placeholders(chunk)})",
+                (ActivityRecordState.ACTIVE.value, *chunk),
+            )
+        )
+    return found
+
+
+def athlete_deleted_session(db: Any, activity_id: str) -> bool:
+    """Whether the athlete deleted the session, directly or with its survivor."""
+    return (
+        _fetch_row(
+            db,
+            "SELECT 1 AS present FROM activity_sessions "
+            f"WHERE activity_id = ? AND state = ? AND {ATHLETE_DELETED}",
+            (activity_id, ActivitySessionState.DELETED.value),
+        )
+        is not None
+    )
+
+
+def delete_with_athlete_deleted(
+    db: Any, *, activity_id: str, deleted: str, now: str
+) -> bool:
+    """Delete an unconfirmed session without aliases as a copy of an athlete delete."""
+    cursor = db.execute(
+        "UPDATE activity_sessions SET state = ?, merged_into_retained = ?, "
+        "updated_at = ? WHERE activity_id = ? AND state = ? AND athlete_confirmed = 0 "
+        "AND NOT EXISTS (SELECT 1 FROM activity_sessions AS alias "
+        "WHERE alias.merged_into = activity_sessions.activity_id)",
+        (
+            ActivitySessionState.DELETED.value,
+            deleted,
+            now,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+        ),
+    )
+    return cursor.rowcount == 1
+
+
+def revive_deleted_copies(
+    db: Any, survivor: str, *, exclude: Collection[str], now: str
+) -> int:
+    """Merge deleted sessions that retain ``survivor`` and own an active record into it.
+
+    Linking deletes a provider copy that arrives for an athlete-deleted activity;
+    when that delete is undone, the copy joins the restored session again.
+    """
+    rows = _fetch_all(
+        db,
+        "SELECT s.activity_id FROM activity_sessions AS s WHERE s.state = ? "
+        "AND s.merged_into_retained = ? AND s.activity_id != ? "
+        "AND EXISTS (SELECT 1 FROM activity_records AS r "
+        "WHERE r.activity_id = s.activity_id AND r.state = ?)",
+        (
+            ActivitySessionState.DELETED.value,
+            survivor,
+            survivor,
+            ActivityRecordState.ACTIVE.value,
+        ),
+    )
+    revived = 0
+    for row in rows:
+        if row["activity_id"] in exclude:
+            continue
+        db.execute(
+            "UPDATE activity_sessions SET state = ?, merged_into = ?, "
+            "merged_into_retained = NULL, updated_at = ? WHERE activity_id = ?",
+            (ActivitySessionState.DUPLICATE.value, survivor, now, row["activity_id"]),
+        )
+        revived += 1
+    return revived
+
+
+def detach_activity_session(db: Any, *, activity_id: str, now: str) -> bool:
+    """Make a merge alias its own active single session; return whether it changed."""
+    cursor = db.execute(
+        "UPDATE activity_sessions SET state = ?, merged_into = NULL, link_kind = ?, "
+        "updated_at = ? WHERE activity_id = ? AND state = ?",
+        (
+            ActivitySessionState.ACTIVE.value,
+            ActivityLinkKind.SINGLE.value,
+            now,
+            activity_id,
+            ActivitySessionState.DUPLICATE.value,
+        ),
+    )
+    return cursor.rowcount == 1
+
+
+def session_member_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
+    """Return the active records of a live session and its aliases, with their session.
+
+    ``session_id`` is the session each record was created with; a hidden or
+    deleted session returns nothing.
+    """
+    return _fetch_all(
+        db,
+        "SELECT r.activity_id AS session_id, r.provider, r.recorded_by, r.sport, "
+        "r.started_at, r.duration_s, r.distance_m, r.name FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.state = ? AND ((s.activity_id = ? AND s.state = ?) "
+        "OR (s.state = ? AND s.merged_into = ?)) "
+        "AND EXISTS (SELECT 1 FROM activity_sessions AS owner "
+        "WHERE owner.activity_id = ? AND owner.state = ?) "
+        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        (
+            ActivityRecordState.ACTIVE.value,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.DUPLICATE.value,
+            activity_id,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+        ),
+    )
+
+
+def merge_candidate_rows(
+    db: Any, local_date: str, exclude: str
+) -> list[dict[str, Any]]:
+    """Return the active records of other live sessions on one athlete-local date.
+
+    ``session_id`` is the live session; records of its aliases are listed under it.
+    """
+    return _fetch_all(
+        db,
+        "SELECT s.activity_id AS session_id, r.provider, r.recorded_by, r.sport, "
+        "r.started_at, r.duration_s, r.distance_m, r.name FROM activity_sessions AS s "
+        "JOIN activity_sessions AS m ON m.activity_id = s.activity_id "
+        "OR (m.state = ? AND m.merged_into = s.activity_id) "
+        "JOIN activity_records AS r ON r.activity_id = m.activity_id "
+        "WHERE s.state = ? AND s.local_date = ? AND s.activity_id != ? AND r.state = ? "
+        "ORDER BY s.activity_id, r.started_at, r.provider, r.provider_activity_id",
+        (
+            ActivitySessionState.DUPLICATE.value,
+            ActivitySessionState.ACTIVE.value,
+            local_date,
+            exclude,
+            ActivityRecordState.ACTIVE.value,
+        ),
     )
 
 
@@ -2041,6 +2356,33 @@ def active_provider_record_hash(
         (provider, record_kind, source_record_id, ProviderRecordState.ACTIVE.value),
     )
     return None if row is None else str(row["payload_hash"])
+
+
+def active_provider_records(
+    db: Any,
+    provider: str,
+    record_kind: str,
+    source_record_ids: Sequence[str],
+    *,
+    payloads: bool = False,
+) -> dict[str, str]:
+    """Map source record ids to the payload hash of their active raw record.
+
+    With ``payloads`` the stored payload text is returned instead of its hash.
+    Ids without an active raw record are absent.
+    """
+    column = "payload" if payloads else "payload_hash"
+    found: dict[str, str] = {}
+    for chunk in _chunked(list(dict.fromkeys(source_record_ids))):
+        for row in _fetch_all(
+            db,
+            f"SELECT source_record_id, {column} AS value FROM provider_records "
+            "WHERE provider = ? AND record_kind = ? AND state = ? "
+            f"AND source_record_id IN ({_placeholders(chunk)})",
+            (provider, record_kind, ProviderRecordState.ACTIVE.value, *chunk),
+        ):
+            found[str(row["source_record_id"])] = str(row["value"])
+    return found
 
 
 def activity_record_for_session(

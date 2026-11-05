@@ -17,6 +17,8 @@ the same moment.
   A naive ``startTimeGMT`` is read as UTC. A naive ``startTimeLocal`` is wall
   time in the athlete zone and follows ``localize_wall_time``. Aware text keeps
   the offset it was sent with; use ``local_date`` to read the athlete's date.
+  When ``started_at`` comes from ``startTimeGMT``, the difference to
+  ``startTimeLocal`` is the device's UTC offset -> ``local_offset_minutes``.
 * ``activityType``: the dictionary form ``{"typeKey": ...}`` or, in the legacy
   form, the key as plain text.
 * ``duration``, then ``movingTime`` (seconds). ``movingTime`` is the fallback that
@@ -59,7 +61,10 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, tzinfo
 from typing import Final
 
-from backend.canonical.local_time import parse_provider_datetime
+from backend.canonical.local_time import (
+    parse_provider_datetime,
+    wall_clock_offset_minutes,
+)
 from backend.canonical.mapping import (
     MAX_ISSUE_TEXT_LENGTH,
     IssueReason,
@@ -101,7 +106,8 @@ from backend.canonical.vocabulary import (
 # Version 8: maps the training-effect label (#1416).
 # Version 10: trail and obstacle runs are outdoor, so analyses leave them out like
 # Intervals.icu trail runs.
-MAPPER_VERSION: Final = 10
+# Version 11: the device's UTC offset dates the activity where it was recorded.
+MAPPER_VERSION: Final = 11
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -278,6 +284,7 @@ def _map_row(
         normalized_power=normalized_power,
         vo2max=vo2max,
         training_effect_label=training_effect_label,
+        local_offset_minutes=_local_offset(row, started_at),
     )
 
 
@@ -394,6 +401,13 @@ def _start_time(
         # IssueReason has no datetime member, so malformed text is INVALID_TYPE.
         issues.append(MappingIssue(ref, field, IssueReason.INVALID_TYPE))
     return None
+
+
+def _local_offset(row: dict[str, object], started_at: datetime) -> int | None:
+    """Return the device's UTC offset, known only when GMT gave the start."""
+    if parse_provider_datetime(row.get("startTimeGMT"), UTC) != started_at:
+        return None
+    return wall_clock_offset_minutes(row.get("startTimeLocal"), started_at)
 
 
 def _representable_in(value: datetime, zone: tzinfo) -> bool:

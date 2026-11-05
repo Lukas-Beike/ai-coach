@@ -310,7 +310,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "list_recent_activities",
-            "Read completed activities from the latest local snapshot without refreshing a provider.",
+            "Read completed local sessions from every connected provider, newest first, without refreshing a provider. Each entry is one session summary: id is the local session ID (act_...) and record_ids maps each provider to its activity ID; values use neutral names and units (moving_duration_s, distance_m, training_load).",
             {
                 "days": {"type": "integer", "minimum": 1, "maximum": 3660},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500},
@@ -1152,6 +1152,30 @@ def build_structured_tool_schemas(
                 "equipment_id": {"type": ["string", "null"]},
             },
             ["activity_id", "equipment_id"],
+        ),
+        (
+            "confirm_activity_session",
+            "Local only: confirm how provider recordings are bundled into one activity session, so it is never re-bundled automatically. activity_id is the local session ID (act_...) from get_activity_details session_bundle.",
+            {"activity_id": {"type": "string", "minLength": 1}},
+            ["activity_id"],
+        ),
+        (
+            "split_activity_session",
+            "Local only: detach one provider recording from an activity session into its own session. Only on the athlete's explicit request. activity_id and member_id are local session IDs (act_...); member_id is a session_id from session_bundle.members of get_activity_details.",
+            {
+                "activity_id": {"type": "string", "minLength": 1},
+                "member_id": {"type": "string", "minLength": 1},
+            },
+            ["activity_id", "member_id"],
+        ),
+        (
+            "merge_activity_sessions",
+            "Local only: merge two activity sessions that are the same workout recorded by different sources. Only on the athlete's explicit request. activity_id and other_id are local session IDs (act_...); other_id comes from session_bundle.merge_candidates of get_activity_details.",
+            {
+                "activity_id": {"type": "string", "minLength": 1},
+                "other_id": {"type": "string", "minLength": 1},
+            },
+            ["activity_id", "other_id"],
         ),
         (
             "log_equipment_maintenance",

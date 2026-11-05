@@ -30,7 +30,12 @@ Within a provider, ``select_current`` ranks as the legacy readers do:
 For ``select_daily``, each calendar day independently takes the first provider in
 the rule's order that has an observation that day. Within a provider the first
 input record wins and timestamps are ignored, matching the planning overwrite.
-Daily rules have no bounds.
+Daily rules apply the current rules' bounds.
+
+Sleep, HRV and resting HR are one method family in both selections
+(``family_providers``): Garmin's night values, with Intervals only when it relays
+Garmin's values (``intervals_relays_garmin``), so a different method never fills
+in silently. Weight and body fat are resolved by recency (``RECENCY_ORDERS``).
 
 Wahoo is the lowest-priority provider for current FTP and weight: it follows
 Garmin and Intervals, and it ranks after them in both rules. Its FTP is the newest
@@ -50,6 +55,13 @@ legacy current FTP reads only the cycling FTP section. Garmin sleep score 0 and
 Garmin heart-rate-zone max HR, athlete-level weight, athlete-wide threshold HR and
 max HR, and sport-setting VO2max are mapped and covered by parity tests.
 
+Thresholds (FTP, threshold and maximum heart rate, threshold pace) are resolved
+with ``resolve_candidates`` from each source's own current value: a locally
+confirmed zone configuration first, then the providers in rule order
+(``SPORT_ORDERS`` overrides it per sport), within each provider's bounds and age
+limits. The result keeps the other sources as alternatives with a conflict flag,
+so the Coach context, current metrics and plans read one value.
+
 This module is stdlib-only except for ``backend.canonical`` and must not import
 ``server.py``, providers or other domain packages.
 """
@@ -60,10 +72,10 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from types import MappingProxyType
-from typing import Final
+from typing import Any, Final
 
 from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.canonical.vocabulary import MetricKind, ProviderId, SourceKind, Sport
 
 _GARMIN: Final = ProviderId.GARMIN
 _INTERVALS: Final = ProviderId.INTERVALS
@@ -72,6 +84,10 @@ _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
 _NO_DATE: Final = date.min
 # A Wahoo FTP or weight observed longer ago than this is history, not the current value.
 WAHOO_CURRENT_MAX_AGE_DAYS: Final = 90
+# An Intervals threshold counts only from a sync at most this many days old.
+INTERVALS_THRESHOLD_MAX_AGE_DAYS: Final = 30
+# A Garmin threshold observed longer ago than this is history, not current.
+GARMIN_THRESHOLD_MAX_AGE_DAYS: Final = 180
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +118,11 @@ class SourceRule:
     max_age: tuple[ProviderMaxAge, ...] = ()
 
 
+_THRESHOLD_MAX_AGE: Final = (
+    ProviderMaxAge(_INTERVALS, INTERVALS_THRESHOLD_MAX_AGE_DAYS),
+    ProviderMaxAge(_GARMIN, GARMIN_THRESHOLD_MAX_AGE_DAYS),
+)
+
 # Rules for select_current. A provider absent from ``order`` never supplies the kind.
 CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
     {
@@ -116,7 +137,9 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
                 latest_intervals_row=True,
                 max_age=(ProviderMaxAge(_WAHOO, WAHOO_CURRENT_MAX_AGE_DAYS),),
             ),
-            SourceRule(MetricKind.BODY_FAT, (_INTERVALS,), latest_intervals_row=True),
+            SourceRule(
+                MetricKind.BODY_FAT, (_GARMIN, _INTERVALS), latest_intervals_row=True
+            ),
             # recovery_context: newest in-bounds Garmin value, else Intervals latest.
             SourceRule(
                 MetricKind.RESTING_HR,
@@ -153,24 +176,45 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
                 (_INTERVALS, _GARMIN),
                 latest_intervals_row=True,
             ),
-            # current_metrics: Garmin before Intervals sportSettings, per sport. Wahoo
-            # power zones are the last resort, with the same plausibility band.
+            # Thresholds (athlete decision 2026-11-04): the athlete-maintained
+            # Intervals FTP before Garmin's auto-detected FTP, Wahoo power zones last.
+            # Garmin's auto-detected heart-rate and pace thresholds before the
+            # manually kept Intervals values. A locally confirmed zone configuration
+            # precedes every provider (``resolve_candidates``). Intervals values age
+            # with their sync, Garmin and Wahoo values with their observed day.
             SourceRule(
                 MetricKind.FTP,
-                (_GARMIN, _INTERVALS, _WAHOO),
+                (_INTERVALS, _GARMIN, _WAHOO),
                 (
                     ProviderBounds(_GARMIN, 50.0, 700.0),
                     ProviderBounds(_WAHOO, 50.0, 700.0),
                 ),
-                max_age=(ProviderMaxAge(_WAHOO, WAHOO_CURRENT_MAX_AGE_DAYS),),
+                max_age=(
+                    ProviderMaxAge(_INTERVALS, INTERVALS_THRESHOLD_MAX_AGE_DAYS),
+                    ProviderMaxAge(_GARMIN, GARMIN_THRESHOLD_MAX_AGE_DAYS),
+                    ProviderMaxAge(_WAHOO, WAHOO_CURRENT_MAX_AGE_DAYS),
+                ),
             ),
             SourceRule(
                 MetricKind.THRESHOLD_HR,
                 (_GARMIN, _INTERVALS),
                 (ProviderBounds(_GARMIN, 80.0, 230.0),),
+                max_age=_THRESHOLD_MAX_AGE,
             ),
-            SourceRule(MetricKind.THRESHOLD_PACE, (_GARMIN, _INTERVALS)),
-            SourceRule(MetricKind.MAX_HR, (_GARMIN, _INTERVALS)),
+            SourceRule(
+                MetricKind.THRESHOLD_PACE,
+                (_GARMIN, _INTERVALS),
+                max_age=_THRESHOLD_MAX_AGE,
+            ),
+            SourceRule(
+                MetricKind.MAX_HR,
+                (_GARMIN, _INTERVALS),
+                (
+                    ProviderBounds(_GARMIN, 80.0, 260.0),
+                    ProviderBounds(_INTERVALS, 80.0, 260.0),
+                ),
+                max_age=_THRESHOLD_MAX_AGE,
+            ),
             SourceRule(
                 MetricKind.VO2MAX,
                 (_GARMIN, _INTERVALS),
@@ -179,23 +223,134 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
             # load_context: Intervals only, latest row.
             SourceRule(MetricKind.CTL, (_INTERVALS,), latest_intervals_row=True),
             SourceRule(MetricKind.ATL, (_INTERVALS,), latest_intervals_row=True),
+            # Intervals' estimated FTP: a separate, labelled value, never the FTP.
+            SourceRule(MetricKind.EFTP, (_INTERVALS,)),
         )
     }
 )
 
-# Rules for select_daily. Garmin overwrites Intervals per day for sleep, HRV and
-# resting HR without a bounds check. Readiness comes from Intervals, and Garmin
-# only fills the days that Intervals leaves empty.
+# Rules for select_daily: the current rules' order and bounds. Sleep, HRV and
+# resting HR keep their method family per day (``family_providers``). Readiness
+# comes from Intervals, and Garmin only fills the days that Intervals leaves empty.
 DAILY_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
     {
-        rule.kind: rule
-        for rule in (
-            SourceRule(MetricKind.SLEEP_DURATION, (_GARMIN, _INTERVALS)),
-            SourceRule(MetricKind.SLEEP_SCORE, (_GARMIN, _INTERVALS)),
-            SourceRule(MetricKind.HRV_RMSSD, (_GARMIN, _INTERVALS)),
-            SourceRule(MetricKind.RESTING_HR, (_GARMIN, _INTERVALS)),
-            SourceRule(MetricKind.READINESS, (_INTERVALS, _GARMIN)),
+        kind: SourceRule(kind, CURRENT_RULES[kind].order, CURRENT_RULES[kind].bounds)
+        for kind in (
+            MetricKind.SLEEP_DURATION,
+            MetricKind.SLEEP_SCORE,
+            MetricKind.HRV_RMSSD,
+            MetricKind.RESTING_HR,
+            MetricKind.READINESS,
         )
+    }
+)
+
+# HRV, resting HR and sleep (athlete decision 2026-11-04): one method family,
+# Garmin's night values by default, never a silent fallback to another method.
+# Intervals wellness rows do not say where a value came from, so Intervals counts
+# as Garmin's family only as a relay: its value equals Garmin's (within the kind's
+# rounding) on at least ``RELAY_SHARE`` of at least ``RELAY_MIN_OVERLAP_DAYS``
+# days with both. Without any Garmin value, Intervals is the only family present.
+METHOD_FAMILY_KINDS: Final[frozenset[MetricKind]] = frozenset(
+    {
+        MetricKind.SLEEP_DURATION,
+        MetricKind.SLEEP_SCORE,
+        MetricKind.RESTING_HR,
+        MetricKind.HRV_RMSSD,
+    }
+)
+RELAY_SHARE: Final = 0.9
+# The athlete's preferred source per metric group (#1668), a local profile setting.
+# Each group lists its kinds and the providers the athlete may prefer for it.
+PREFERENCE_GROUPS: Final[
+    Mapping[str, tuple[frozenset[MetricKind], tuple[ProviderId, ...]]]
+] = MappingProxyType(
+    {
+        "thresholds": (
+            frozenset(
+                {
+                    MetricKind.FTP,
+                    MetricKind.THRESHOLD_HR,
+                    MetricKind.THRESHOLD_PACE,
+                    MetricKind.MAX_HR,
+                }
+            ),
+            (_GARMIN, _INTERVALS),
+        ),
+        "body": (
+            frozenset({MetricKind.WEIGHT, MetricKind.BODY_FAT}),
+            (_GARMIN, _INTERVALS),
+        ),
+        "hrv": (frozenset({MetricKind.HRV_RMSSD}), (_GARMIN, _INTERVALS)),
+        "resting_hr": (frozenset({MetricKind.RESTING_HR}), (_GARMIN, _INTERVALS)),
+        "sleep": (
+            frozenset({MetricKind.SLEEP_DURATION, MetricKind.SLEEP_SCORE}),
+            (_GARMIN, _INTERVALS),
+        ),
+    }
+)
+# Profile field of each group's preference; an empty value keeps the default order.
+PREFERENCE_PROFILE_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
+    {group: f"preferred_source_{group}" for group in PREFERENCE_GROUPS}
+)
+type SourcePreferences = Mapping[str, ProviderId]
+NO_PREFERENCES: Final[SourcePreferences] = MappingProxyType({})
+
+
+def preferences_from_profile(profile: Mapping[str, Any]) -> SourcePreferences:
+    """Return the valid preferred sources of a profile; others are ignored."""
+    result: dict[str, ProviderId] = {}
+    for group, field_name in PREFERENCE_PROFILE_FIELDS.items():
+        raw = profile.get(field_name)
+        allowed = {provider.value: provider for provider in PREFERENCE_GROUPS[group][1]}
+        if isinstance(raw, str) and raw in allowed:
+            result[group] = allowed[raw]
+    return MappingProxyType(result)
+
+
+def preferred_source(
+    kind: MetricKind, preferences: SourcePreferences
+) -> ProviderId | None:
+    """Return the athlete's preferred provider for ``kind``'s group, if any."""
+    for group, (kinds, _) in PREFERENCE_GROUPS.items():
+        if kind in kinds:
+            return preferences.get(group)
+    return None
+
+
+def _preferred_first(
+    order: tuple[Source, ...], kind: MetricKind, preferences: SourcePreferences
+) -> tuple[Source, ...]:
+    """Move the preferred provider to the front, behind a leading local value.
+
+    A local value elsewhere in the order (the undated profile weight) keeps its
+    place among the rest.
+    """
+    preferred = preferred_source(kind, preferences)
+    if preferred is None or preferred not in order:
+        return order
+    lead: tuple[Source, ...] = (None,) if order and order[0] is None else ()
+    rest = tuple(item for item in order[len(lead) :] if item is not preferred)
+    return (*lead, preferred, *rest)
+
+
+def _preferred_providers(
+    order: tuple[ProviderId, ...], kind: MetricKind, preferences: SourcePreferences
+) -> tuple[ProviderId, ...]:
+    return tuple(
+        item for item in _preferred_first(order, kind, preferences) if item is not None
+    )
+
+
+# Days, ending on the latest day read, over which every reader decides the family.
+FAMILY_LOOKBACK_DAYS: Final = 84
+RELAY_MIN_OVERLAP_DAYS: Final = 5
+_RELAY_TOLERANCE: Final[Mapping[MetricKind, float]] = MappingProxyType(
+    {
+        MetricKind.SLEEP_DURATION: 60.0,
+        MetricKind.SLEEP_SCORE: 1.0,
+        MetricKind.RESTING_HR: 1.0,
+        MetricKind.HRV_RMSSD: 1.0,
     }
 )
 
@@ -309,6 +464,20 @@ def _eligible(
     ]
 
 
+def _provider_best(
+    candidates: Iterable[tuple[int, Observation]],
+    provider: ProviderId,
+    kind: MetricKind,
+) -> Observation | None:
+    """Return ``provider``'s highest-ranked candidate, or None."""
+    ranked = [
+        (_current_rank(index, observation, kind), observation)
+        for index, observation in candidates
+        if observation.provenance.provider is provider
+    ]
+    return max(ranked, key=lambda item: item[0], default=(None, None))[1]
+
+
 def select_current(
     observations: Iterable[Observation],
     kind: MetricKind,
@@ -316,8 +485,11 @@ def select_current(
     sport: Sport | None = None,
     latest_wellness_day: date | None = None,
     as_of: date | None = None,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> Observation | None:
     """Return the current observation for ``kind`` under its source rule.
+
+    ``preferences`` is the athlete's preferred source per metric group.
 
     ``sport`` restricts the candidates to observations for that sport. Sport-scoped
     kinds require a sport, because legacy readers always select per sport; passing
@@ -339,48 +511,323 @@ def select_current(
         return None
     if sport is None and kind in _SPORT_SCOPED:
         raise ValueError(f"{kind.value} is sport-scoped and needs a sport")
+    observations = tuple(observations)
+    providers = _preferred_providers(
+        family_providers(observations, kind, preferences), kind, preferences
+    )
     candidates = _eligible(observations, kind, rule, sport, latest_wellness_day, as_of)
-    for provider in rule.order:
-        best: tuple[_Rank, Observation] | None = None
-        for index, observation in candidates:
-            if observation.provenance.provider is not provider:
-                continue
-            rank = _current_rank(index, observation, kind)
-            if best is None or rank > best[0]:
-                best = (rank, observation)
-        if best is not None:
-            return best[1]
-    return None
+    bests = [
+        best
+        for provider in providers
+        if (best := _provider_best(candidates, provider, kind)) is not None
+    ]
+    if kind in METHOD_FAMILY_KINDS:
+        # A relay is the same measurement: its newer day wins, a tie keeps Garmin.
+        return max(bests, key=lambda item: item.observed_on, default=None)
+    return bests[0] if bests else None
 
 
 def select_daily(
-    observations: Iterable[Observation], kind: MetricKind
+    observations: Iterable[Observation],
+    kind: MetricKind,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> Mapping[date, Observation]:
     """Return the per-day observation for ``kind`` under its daily rule.
 
     Within a day and provider, the first input record wins, as the planning
-    overwrite does. Days without any eligible observation are absent. Unknown
-    kinds return an empty mapping.
+    overwrite does. Values outside the rule's bounds and providers outside the
+    kind's method family (``family_providers``) are skipped. Days without any
+    eligible observation are absent. Unknown kinds return an empty mapping.
     """
     rule = DAILY_RULES.get(kind)
     if rule is None:
         return {}
+    observations = tuple(observations)
+    providers = _preferred_providers(
+        family_providers(observations, kind, preferences), kind, preferences
+    )
     first_by_day: dict[tuple[date, ProviderId], Observation] = {}
     for observation in observations:
         provider = observation.provenance.provider
         if (
             observation.kind is not kind
             or provider is None
-            or provider not in rule.order
+            or provider not in providers
+            or not _within_bounds(observation, rule)
         ):
             continue
         first_by_day.setdefault((observation.observed_on, provider), observation)
-    # Visit days in order and, within a day, providers in rule order; the first
-    # observation seen for a day is the one from the highest-priority provider.
-    priority = {provider: position for position, provider in enumerate(rule.order)}
+    # Visit days in order and, within a day, providers in precedence order; the
+    # first observation seen for a day is the one from the highest-priority one.
+    priority = {provider: position for position, provider in enumerate(providers)}
     result: dict[date, Observation] = {}
     for (day, provider), observation in sorted(
         first_by_day.items(), key=lambda item: (item[0][0], priority[item[0][1]])
     ):
         result.setdefault(day, observation)
     return result
+
+
+def _first_daily_values(
+    observations: Iterable[Observation], kind: MetricKind, provider: ProviderId
+) -> dict[date, float]:
+    days: dict[date, float] = {}
+    for observation in observations:
+        if (
+            observation.kind is kind
+            and observation.provenance.provider is provider
+            and within_current_bounds(observation)
+        ):
+            days.setdefault(observation.observed_on, float(observation.value.value))
+    return days
+
+
+def intervals_relays_garmin(
+    observations: Iterable[Observation], kind: MetricKind
+) -> bool:
+    """Return True when the Intervals values of ``kind`` relay Garmin's values.
+
+    Each provider's first in-bounds value per day is compared on the days both
+    have; at least ``RELAY_MIN_OVERLAP_DAYS`` such days are needed, and at least
+    ``RELAY_SHARE`` of them must agree within the kind's rounding tolerance.
+    """
+    tolerance = _RELAY_TOLERANCE.get(kind)
+    if tolerance is None:
+        return False
+    observations = tuple(observations)
+    garmin = _first_daily_values(observations, kind, _GARMIN)
+    intervals = _first_daily_values(observations, kind, _INTERVALS)
+    days = garmin.keys() & intervals.keys()
+    if len(days) < RELAY_MIN_OVERLAP_DAYS:
+        return False
+    agreeing = sum(abs(garmin[day] - intervals[day]) <= tolerance for day in days)
+    return agreeing >= RELAY_SHARE * len(days)
+
+
+def family_providers(
+    observations: Iterable[Observation],
+    kind: MetricKind,
+    preferences: SourcePreferences = NO_PREFERENCES,
+) -> tuple[ProviderId, ...]:
+    """Return the providers that may supply ``kind``, in precedence order.
+
+    Kinds outside ``METHOD_FAMILY_KINDS`` use their current rule's order. Method
+    family kinds use Garmin's values when there is any in-bounds Garmin value,
+    together with Intervals only when Intervals relays Garmin; otherwise the
+    Intervals values are the only family present. An athlete who prefers
+    Intervals for the kind's group gets only Intervals values (another method,
+    such as a morning reading); preferring Garmin never falls back to Intervals
+    except as a relay.
+    """
+    rule = CURRENT_RULES.get(kind)
+    if rule is None:
+        return ()
+    if kind not in METHOD_FAMILY_KINDS:
+        return rule.order
+    preferred = preferred_source(kind, preferences)
+    if preferred is _INTERVALS:
+        return (_INTERVALS,)
+    observations = tuple(observations)
+    if preferred is None and not _first_daily_values(observations, kind, _GARMIN):
+        return (_INTERVALS,)
+    if intervals_relays_garmin(observations, kind):
+        return (_GARMIN, _INTERVALS)
+    return (_GARMIN,)
+
+
+# Kinds whose locally confirmed value (a zone configuration) precedes every provider.
+LOCAL_FIRST_KINDS: Final[frozenset[MetricKind]] = frozenset(
+    {
+        MetricKind.FTP,
+        MetricKind.THRESHOLD_HR,
+        MetricKind.THRESHOLD_PACE,
+        MetricKind.MAX_HR,
+    }
+)
+# Sport-specific provider orders. The Intervals-first FTP order is the ride FTP;
+# run threshold power is auto-detected by Garmin like the other run thresholds.
+SPORT_ORDERS: Final[Mapping[tuple[MetricKind, Sport], tuple[ProviderId, ...]]] = (
+    MappingProxyType({(MetricKind.FTP, Sport.RUN): (_GARMIN, _INTERVALS)})
+)
+# Weight and body fat (athlete decision 2026-11-04): the most recent measurement
+# across sources wins; within ``RECENCY_TIE_DAYS`` of the newest one, a device
+# measurement precedes a provider report, which precedes an athlete entry. Undated
+# values (Intervals athlete record, the local profile, Wahoo's profile weight) are
+# only fallbacks, in this order. None stands for the local profile value.
+RECENCY_ORDERS: Final[Mapping[MetricKind, tuple[ProviderId | None, ...]]] = (
+    MappingProxyType(
+        {
+            MetricKind.WEIGHT: (_GARMIN, _INTERVALS, None, _WAHOO),
+            MetricKind.BODY_FAT: (_GARMIN, _INTERVALS, None),
+        }
+    )
+)
+RECENCY_TIE_DAYS: Final = 1
+_MEASUREMENT_RANK: Final[Mapping[SourceKind, int]] = MappingProxyType(
+    {SourceKind.DEVICE_MEASURED: 0, SourceKind.PROVIDER_REPORTED: 1}
+)
+# Relative difference above which two sources' current values are a conflict.
+CONFLICT_TOLERANCE: Final[Mapping[MetricKind, float]] = MappingProxyType(
+    dict.fromkeys(LOCAL_FIRST_KINDS, 0.03)
+)
+# Absolute difference above which two current values are a conflict.
+ABSOLUTE_CONFLICT_TOLERANCE: Final[Mapping[MetricKind, float]] = MappingProxyType(
+    {MetricKind.WEIGHT: 1.5, MetricKind.BODY_FAT: 2.0}
+)
+
+# None stands for the athlete's own, locally confirmed value.
+type Source = ProviderId | None
+
+
+@dataclass(frozen=True, slots=True)
+class Candidate:
+    """One source's current value of a metric, as the caller has selected it.
+
+    ``observed_on`` is the day the value was observed or synced; None skips the
+    age limit. ``observation`` is the canonical record behind it, if any.
+    """
+
+    source: Source
+    value: float
+    observed_on: date | None = None
+    observation: Observation | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Resolved:
+    """The winning value, the other sources' current values and a conflict flag."""
+
+    winner: Candidate
+    alternatives: tuple[Candidate, ...]
+    conflict: bool
+
+
+def source_order(
+    kind: MetricKind,
+    sport: Sport | None = None,
+    preferences: SourcePreferences = NO_PREFERENCES,
+) -> tuple[Source, ...]:
+    """Return the sources of ``kind`` in precedence order; empty without a rule.
+
+    The athlete's preferred provider of the kind's group comes first, behind a
+    locally confirmed value.
+    """
+    rule = CURRENT_RULES.get(kind)
+    if rule is None:
+        return ()
+    if kind in RECENCY_ORDERS:
+        return _preferred_first(RECENCY_ORDERS[kind], kind, preferences)
+    order = SPORT_ORDERS.get((kind, sport), rule.order) if sport else rule.order
+    full = (None, *order) if kind in LOCAL_FIRST_KINDS else order
+    return _preferred_first(full, kind, preferences)
+
+
+def preferred_provider(
+    kind: MetricKind, preferences: SourcePreferences = NO_PREFERENCES
+) -> ProviderId | None:
+    """Return the provider displays prefer: the athlete's, else the rule's first."""
+    rule = CURRENT_RULES.get(kind)
+    if rule is None:
+        return None
+    return preferred_source(kind, preferences) or rule.order[0]
+
+
+def _candidate_current(
+    candidate: Candidate, rule: SourceRule, as_of: date | None
+) -> bool:
+    provider = candidate.source
+    if provider is None:
+        return True
+    within = all(
+        bound.lower <= candidate.value <= bound.upper
+        for bound in rule.bounds
+        if bound.provider is provider
+    )
+    if not within or as_of is None or candidate.observed_on is None:
+        return within
+    age_days = (as_of - candidate.observed_on).days
+    return all(
+        age_days <= limit.days for limit in rule.max_age if limit.provider is provider
+    )
+
+
+def resolve_candidates(
+    kind: MetricKind,
+    candidates: Iterable[Candidate],
+    *,
+    as_of: date | None,
+    sport: Sport | None = None,
+    preferences: SourcePreferences = NO_PREFERENCES,
+) -> Resolved | None:
+    """Resolve one metric from each source's own current value under its rule.
+
+    ``preferences`` puts the athlete's preferred provider first (``source_order``);
+    for ``RECENCY_ORDERS`` kinds its value wins over a newer one of another source.
+
+    The first candidate of each source counts. Candidates outside their source's
+    bounds or age limit (on ``as_of``; None applies none) are dropped. The first
+    remaining source in ``source_order`` wins; the others stay as alternatives in
+    that order. ``RECENCY_ORDERS`` kinds rank by recency instead (``_by_recency``).
+    A conflict is an alternative that differs from the winner by more than the
+    kind's ``CONFLICT_TOLERANCE`` or ``ABSOLUTE_CONFLICT_TOLERANCE``. ``sport``
+    selects a ``SPORT_ORDERS`` entry. None without any current candidate.
+    """
+    rule = CURRENT_RULES.get(kind)
+    if rule is None:
+        return None
+    order = source_order(kind, sport, preferences)
+    first: dict[Source, Candidate] = {}
+    for candidate in candidates:
+        if candidate.source in order and _candidate_current(candidate, rule, as_of):
+            first.setdefault(candidate.source, candidate)
+    ranked = [first[source] for source in order if source in first]
+    if kind in RECENCY_ORDERS:
+        preferred = preferred_source(kind, preferences)
+        ranked = _by_recency(ranked)
+        ranked.sort(key=lambda item: item.source is not preferred or preferred is None)
+    if not ranked:
+        return None
+    winner, *alternatives = ranked
+    return Resolved(winner, tuple(alternatives), _conflict(kind, winner, alternatives))
+
+
+def _conflict(
+    kind: MetricKind, winner: Candidate, alternatives: Iterable[Candidate]
+) -> bool:
+    relative = CONFLICT_TOLERANCE.get(kind)
+    absolute = ABSOLUTE_CONFLICT_TOLERANCE.get(kind)
+    if relative is not None:
+        allowed = relative * abs(winner.value)
+    elif absolute is not None:
+        allowed = absolute
+    else:
+        return False
+    return any(abs(item.value - winner.value) > allowed for item in alternatives)
+
+
+def _measurement_rank(candidate: Candidate) -> int:
+    """Device measurement 0, provider report 1, athlete entry or local value 2."""
+    if candidate.source is None or candidate.observation is None:
+        return 2
+    return _MEASUREMENT_RANK.get(candidate.observation.provenance.source_kind, 2)
+
+
+def _by_recency(ranked: list[Candidate]) -> list[Candidate]:
+    """Order dated candidates by recency and measurement kind, undated ones last.
+
+    ``ranked`` is in source order, which breaks the remaining ties.
+    """
+    days = [item.observed_on for item in ranked if item.observed_on is not None]
+    if not days:
+        return ranked
+    newest = max(days)
+
+    def key(position: int) -> tuple[int, int, int, int]:
+        item = ranked[position]
+        if item.observed_on is None:
+            return (2, 0, 0, position)
+        recent = (newest - item.observed_on).days <= RECENCY_TIE_DAYS
+        rank = _measurement_rank(item) if recent else 0
+        return (0 if recent else 1, rank, -item.observed_on.toordinal(), position)
+
+    return [ranked[position] for position in sorted(range(len(ranked)), key=key)]

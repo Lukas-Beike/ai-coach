@@ -28,3 +28,10 @@ test("planned units keep their stored type", () => {
   assert.equal(label({ type: "VirtualRide" }), "Rad indoor");
   assert.equal(label({ type: "Run", sport: "run" }), "Laufen");
 });
+
+test("session summaries are labelled without an Intervals type", () => {
+  assert.equal(activitySportLabel({ sport: "ride", environment: "virtual" }), "Rad indoor");
+  assert.equal(activitySportLabel({ sport: "ride", environment: "outdoor" }), "Radfahren");
+  assert.equal(activitySportLabel({ sport: "run" }), "Laufen");
+  assert.equal(activitySportLabel({ sport: "yoga" }), "Andere");
+});

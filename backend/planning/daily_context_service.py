@@ -10,6 +10,7 @@ from backend.db import garmin_store
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import read_daily_health_by_date
 from backend.performance.planning_recovery import planning_recovery_view
+from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.context import build_daily_planning_context
 from backend.runtime.ports import ObservationReader
 from backend.weather.history import decode_history
@@ -35,6 +36,7 @@ class DailyPlanningContextService:
         today: Callable[[], date],
         calendar_window_days: int,
         observation_reader: Callable[[], ObservationReader],
+        source_preferences: Callable[[Any], SourcePreferences] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
@@ -45,6 +47,7 @@ class DailyPlanningContextService:
         self._today = today
         self._calendar_window_days = calendar_window_days
         self._observation_reader = observation_reader
+        self._source_preferences = source_preferences
 
     def _recovery_by_date(
         self,
@@ -68,6 +71,11 @@ class DailyPlanningContextService:
             end=today,
             morning_battery_history=history,
             morning_body_battery=self._morning_body_battery_service.current(garmin),
+            preferences=(
+                NO_PREFERENCES
+                if self._source_preferences is None
+                else self._source_preferences(db)
+            ),
         )
         return recovery, read_daily_health_by_date(reader, db, start=start, end=today)
 

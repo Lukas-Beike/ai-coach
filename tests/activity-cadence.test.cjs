@@ -16,10 +16,10 @@ function loadCadenceDisplay() {
 
 test("foot sports show step frequency of both legs, other sports per-leg cadence", () => {
   const cadenceDisplay = loadCadenceDisplay();
-  for (const type of ["Run", "TrailRun", "VirtualRun", "Walk", "Hike"]) {
-    assert.deepEqual({ ...cadenceDisplay({ type }) }, { label: "Schrittfrequenz", unit: "spm", factor: 2 }, type);
+  for (const sport of ["run", "walk", "hike"]) {
+    assert.deepEqual({ ...cadenceDisplay({ sport }) }, { label: "Schrittfrequenz", unit: "spm", factor: 2 }, sport);
   }
-  for (const type of ["Ride", "VirtualRide", "Swim", "", undefined]) {
-    assert.deepEqual({ ...cadenceDisplay({ type }) }, { label: "Kadenz", unit: "rpm", factor: 1 }, String(type));
+  for (const sport of ["ride", "swim", "", undefined]) {
+    assert.deepEqual({ ...cadenceDisplay({ sport }) }, { label: "Kadenz", unit: "rpm", factor: 1 }, String(sport));
   }
 });

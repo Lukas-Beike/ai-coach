@@ -22,7 +22,6 @@ from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.repositories import ActivityFeedbackRepository, KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.sync import canonical_ingest
-from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
 
 ZONE = ZoneInfo("Europe/Berlin")
@@ -100,7 +99,6 @@ class FeedbackSessionFixture(unittest.TestCase):
         self.service = ActivityFeedbackService(
             self.manager,
             self.repository,
-            CanonicalTableReader(),
             references=ActivityReferences(self.manager),
         )
 

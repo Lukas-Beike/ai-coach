@@ -28,9 +28,14 @@ from backend.db.garmin_store import put_section
 from backend.db.schema import initialize_schema
 from backend.performance.planning_recovery import (
     GARMIN_SOURCE,
+    INTERVALS_GARMIN_RELAY_SOURCE,
     INTERVALS_WELLNESS_SOURCE,
     canonical_planning_recovery,
     planning_recovery_view,
+)
+from backend.performance.source_policy import (
+    FAMILY_LOOKBACK_DAYS,
+    METHOD_FAMILY_KINDS,
 )
 from backend.planning.daily_context_service import (
     RECOVERY_WINDOW_DAYS,
@@ -55,28 +60,16 @@ def _day(values: dict[str, Any], garmin: tuple[str, ...] = ()) -> dict[str, Any]
     }
 
 
-# The populated fixture's window, as the deleted stored-snapshot reader also
-# served it before #1416 removed that reader.
+# The populated fixture's window. Garmin supplies sleep on 2026-10-09 and
+# 2026-10-10 and HRV and resting HR on 2026-10-10, and the fixture's Intervals.icu
+# values do not relay them, so Intervals.icu fills no gap of that family (#1668).
 EXPECTED_WINDOW = {
-    "2026-10-08": _day(
-        {
-            "sleep_hours": 7.3,
-            "sleep_score": 82,
-            "hrv": 64.0,
-            "readiness": 74,
-            "resting_hr": 49,
-            "ctl": 52.1,
-            "atl": 60.4,
-            "tsb": -8.3,
-        }
-    ),
+    "2026-10-08": _day({"readiness": 74, "ctl": 52.1, "atl": 60.4, "tsb": -8.3}),
     "2026-10-09": _day(
         {
             "sleep_hours": 7.0,
             "sleep_score": 78,
-            "hrv": 62.0,
             "readiness": 70,
-            "resting_hr": 50,
             "ctl": 52.8,
             "atl": 58.9,
             "tsb": -6.1,
@@ -251,6 +244,24 @@ class CanonicalPlanningRecoveryTests(unittest.TestCase):
         self.assertEqual(view[DAY]["readiness"], 74)
         self.assertEqual(view[DAY]["sources"]["readiness"], INTERVALS_WELLNESS_SOURCE)
 
+    def test_a_relay_fills_garmin_gaps_with_its_own_label(self) -> None:
+        days = [f"2026-09-{day:02d}" for day in range(20, 26)]
+        hrv = [
+            _observation(MetricKind.HRV_RMSSD, 60 + index, day, ProviderId.INTERVALS)
+            for index, day in enumerate(days)
+        ] + [
+            _observation(MetricKind.HRV_RMSSD, 60 + index, day)
+            for index, day in enumerate(days[:-1])
+        ]
+
+        view = self._view({MetricKind.HRV_RMSSD: hrv})
+
+        self.assertEqual(view[days[0]]["sources"]["hrv"], GARMIN_SOURCE)
+        self.assertEqual(view[days[-1]]["hrv"], 65)
+        self.assertEqual(
+            view[days[-1]]["sources"]["hrv"], INTERVALS_GARMIN_RELAY_SOURCE
+        )
+
     def test_sleep_duration_is_served_in_hours(self) -> None:
         view = self._view(
             {
@@ -279,10 +290,17 @@ class CanonicalPlanningRecoveryTests(unittest.TestCase):
     def test_each_kind_is_read_once_over_the_given_window(self) -> None:
         reader = RecordingReader({})
         canonical_planning_recovery(reader, "db", start=WINDOW[0], end=WINDOW[1])
+        # Method-family kinds are read over the family lookback ending on the
+        # window's end, so planning decides relays like the current values.
+        family_start = WINDOW[1] - timedelta(days=FAMILY_LOOKBACK_DAYS - 1)
         self.assertEqual(
             reader.calls,
             [
-                (kind, *WINDOW)
+                (
+                    kind,
+                    family_start if kind in METHOD_FAMILY_KINDS else WINDOW[0],
+                    WINDOW[1],
+                )
                 for kind in (
                     MetricKind.SLEEP_DURATION,
                     MetricKind.SLEEP_SCORE,
@@ -347,7 +365,10 @@ class DailyPlanningCanonicalWiringTests(unittest.TestCase):
         result = _build(service, {"recent_wellness": []})
         self.assertEqual(manager.units, 1)
         self.assertEqual(reader.selected, 1)
-        self.assertEqual({call[1:] for call in reader.calls}, {WINDOW})
+        family_start = WINDOW[1] - timedelta(days=FAMILY_LOOKBACK_DAYS - 1)
+        self.assertEqual(
+            {call[1:] for call in reader.calls}, {WINDOW, (family_start, WINDOW[1])}
+        )
         # Five recovery kinds, CTL, ATL and form, then the five daily totals.
         self.assertEqual(len(reader.calls), 13)
         by_date = {day["date"]: day for day in result}

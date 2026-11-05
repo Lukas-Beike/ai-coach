@@ -44,19 +44,70 @@ test("declining consent never saves an automatic export setting", async () => {
 
 test("confirmed automatic consent names Garmin and Intervals.icu and reloads state", async () => {
   const calls = [];
+  const toasts = [];
   let loads = 0;
   const context = loadFunctions({
     requestConfirmation: async () => true,
     providerIds: () => ({ garmin: "garmin", intervals: "intervals" }),
-    api: async (route, options) => calls.push({ route, body: JSON.parse(options.body) }),
+    api: async (route, options) => { calls.push({ route, body: JSON.parse(options.body) }); return { changes: [{ key: "weight", label: "Gewicht", enabled: true }] }; },
     load: async () => { loads++; },
-    toast: (message) => assert.fail(message),
-  }, ["configureAutomaticMetricExport"]);
+    toast: (message, error) => { assert.ok(!error, message); toasts.push(message); },
+  }, ["configureAutomaticMetricExport", "metricExportReceipt"]);
   const button = { disabled: false };
   await context.configureAutomaticMetricExport(true, button);
   assert.deepEqual(calls, [{ route: "/api/metric-export/automatic", body: { enabled: true, confirmed: true, source: "garmin", provider: "intervals" } }]);
   assert.equal(loads, 1);
   assert.equal(button.disabled, false);
+  assert.deepEqual(toasts, ["Garmin → Intervals.icu: Gewicht an"]);
+});
+
+test("the field checkboxes show only while the export is enabled", () => {
+  const { metricExportFieldsView } = loadFunctions({}, ["metricExportFieldsView"]);
+  const fields = [{ key: "weight", label: "Gewicht", enabled: true }, { key: "ftp", label: "Rad-FTP", enabled: false }];
+  assert.equal(metricExportFieldsView(false, fields).length, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(metricExportFieldsView(true, fields))), [
+    { key: "weight", label: "Gewicht", checked: true },
+    { key: "ftp", label: "Rad-FTP", checked: false },
+  ]);
+});
+
+test("the receipt names each changed field", () => {
+  const { metricExportReceipt } = loadFunctions({}, ["metricExportReceipt"]);
+  assert.equal(metricExportReceipt({ changes: [{ label: "Rad-FTP", enabled: true }, { label: "Gewicht", enabled: false }] }), "Garmin → Intervals.icu: Rad-FTP an, Gewicht aus");
+  assert.equal(metricExportReceipt({ changes: [] }), "Garmin → Intervals.icu: keine Änderung");
+});
+
+function fieldContext(confirmed, calls, toasts) {
+  return loadFunctions({
+    state: { data: { garmin: { metric_export_fields: [{ key: "weight", label: "Gewicht", enabled: true }, { key: "ftp", label: "Rad-FTP", enabled: false }] } } },
+    requestConfirmation: async (message) => { calls.push({ message }); return confirmed; },
+    providerIds: () => ({ garmin: "garmin", intervals: "intervals" }),
+    api: async (route, options) => { calls.push({ route, body: JSON.parse(options.body) }); return { changes: [{ label: "Rad-FTP", enabled: true }] }; },
+    load: async () => {},
+    toast: (message, error) => toasts.push({ message, error: Boolean(error) }),
+    metricExportInputs: new Map(),
+    metricExportFieldsBusy: false,
+  }, ["changeMetricExportField", "metricExportReceipt", "setMetricExportFieldsBusy"]);
+}
+
+test("a confirmed field change sends the full field list and shows the receipt", async () => {
+  const calls = [];
+  const toasts = [];
+  const input = { checked: true, disabled: false };
+  await fieldContext(true, calls, toasts).changeMetricExportField({ key: "ftp", label: "Rad-FTP" }, input);
+  assert.match(calls[0].message, /Rad-FTP künftig automatisch von Garmin an Intervals\.icu senden/);
+  assert.deepEqual(calls[1].body, { enabled: true, field: "ftp", field_enabled: true, confirmed: true, source: "garmin", provider: "intervals" });
+  assert.deepEqual(toasts, [{ message: "Garmin → Intervals.icu: Rad-FTP an", error: false }]);
+  assert.equal(input.checked, true);
+});
+
+test("a declined field change sends nothing and restores the checkbox", async () => {
+  const calls = [];
+  const input = { checked: false, disabled: false };
+  await fieldContext(false, calls, []).changeMetricExportField({ key: "weight", label: "Gewicht" }, input);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].message, /Damit endet der automatische Abgleich/);
+  assert.equal(input.checked, true);
 });
 
 test("the toggle sends the opposite of the last loaded state", async () => {
@@ -67,8 +118,8 @@ test("the toggle sends the opposite of the last loaded state", async () => {
     providerIds: () => ({ garmin: "garmin", intervals: "intervals" }),
     api: async (route, options) => calls.push(JSON.parse(options.body)),
     load: async () => {},
-    toast: (message) => assert.fail(message),
-  }, ["toggleMetricExport", "configureAutomaticMetricExport"]);
+    toast: (message, error) => assert.ok(!error, message),
+  }, ["toggleMetricExport", "configureAutomaticMetricExport", "metricExportReceipt"]);
   context.toggleMetricExport({ disabled: false });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls, [{ enabled: false, confirmed: true, source: "garmin", provider: "intervals" }]);
