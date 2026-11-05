@@ -9,7 +9,9 @@ Only the session rows change. Records keep their ``activity_id``, sessions keep
 their primary provider, and nothing is re-pointed, so provider deletes still find
 their own session. Sessions the athlete confirmed, hidden or deleted sessions and
 sessions that are already aliases are never merged or reopened, and a merge is never
-undone here. Two sessions never merge when together they would hold two active
+undone here. An exact link between records already in one session upgrades its
+link kind; a contradicting earlier merge is left for the diagnostics to report.
+Two sessions never merge when together they would hold two active
 records of one provider and recording origin: bundling assigns one to one, but a
 merge persisted earlier may pair a record differently from today's bundling. The function runs inside the caller's unit of work and is idempotent.
 """
@@ -182,6 +184,7 @@ def _record(row: dict[str, Any]) -> ActivityRecord:
         elevation_low_m=canonical_store.activity_elevation_low(row["details"]),
         steps=canonical_store.activity_steps(row["details"]),
         device_type=canonical_store.activity_device_type(row["details"]),
+        external_ref=canonical_store.activity_external_ref(row["details"]),
     )
 
 
@@ -203,10 +206,18 @@ class _Sessions:
     def merge(
         self, primary_id: str, duplicate_id: str, kind: ActivityLinkKind, now: str
     ) -> bool:
-        """Merge the younger of two sessions into the older one when both may merge."""
+        """Merge the younger of two sessions into the older one when both may merge.
+
+        Two records already in one session only strengthen its link kind, so an
+        exact link confirms an earlier heuristic merge.
+        """
         first = self._survivor(primary_id)
         second = self._survivor(duplicate_id)
-        if first is None or second is None or first is second:
+        if first is None or second is None:
+            return False
+        if first is second:
+            if _mergeable(first):
+                self._strengthen(first, kind.value, now)
             return False
         if not (_mergeable(first) and _mergeable(second)):
             return False
@@ -220,16 +231,20 @@ class _Sessions:
         self._origins_of(keep).update(self._origins_of(drop))
         drop["state"] = ActivitySessionState.DUPLICATE.value
         drop["merged_into"] = keep["activity_id"]
-        strongest = max(
-            (keep["link_kind"], drop["link_kind"], kind.value),
-            key=_LINK_STRENGTH.__getitem__,
+        self._strengthen(
+            keep,
+            max((drop["link_kind"], kind.value), key=_LINK_STRENGTH.__getitem__),
+            now,
         )
-        if strongest != keep["link_kind"]:
-            canonical_store.set_activity_session_link_kind(
-                self._db, activity_id=keep["activity_id"], link_kind=strongest, now=now
-            )
-            keep["link_kind"] = strongest
         return True
+
+    def _strengthen(self, row: dict[str, Any], link_kind: str, now: str) -> None:
+        if _LINK_STRENGTH[link_kind] <= _LINK_STRENGTH[row["link_kind"]]:
+            return
+        canonical_store.set_activity_session_link_kind(
+            self._db, activity_id=row["activity_id"], link_kind=link_kind, now=now
+        )
+        row["link_kind"] = link_kind
 
     def _origins_of(self, row: dict[str, Any]) -> set[tuple[str, str]]:
         """Return the (provider, recording origin) pairs of a survivor's active records."""

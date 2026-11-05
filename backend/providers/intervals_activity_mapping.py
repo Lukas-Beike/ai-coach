@@ -76,6 +76,7 @@ from backend.canonical.records import (
     MAX_ZONE_COUNT,
     MAX_ZONE_ID_LENGTH,
     ActivityRecord,
+    ExternalRef,
     Provenance,
 )
 from backend.canonical.sports import classify_environment_text, classify_sport_text
@@ -99,13 +100,15 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
+# Version 7: maps the upstream Garmin or Wahoo activity of a synchronized copy
+# (``source`` and ``external_id``) as the record's external reference.
 # Version 6: maps moving time, elevation gain, normalized power, cadence and the
 # summary values (intensity, RPE, feel, speeds, pace, FTP, eFTP, VO2max,
 # temperature, zone times, the paired calendar event and the device name).
 # Version 5: maps the maximum speed, maximum power and recording device type.
 # Version 4: a source of exactly "manual" is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
-MAPPER_VERSION: Final = 6
+MAPPER_VERSION: Final = 7
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
 MAX_NAME_LENGTH: Final = 200
@@ -151,6 +154,11 @@ _IDENTITY_KEYS: Final = (
     "name",
 )
 _PROVENANCE_KEYS: Final = ("source", "device_name", "external_id")
+# Intervals.icu ``source`` values whose ``external_id`` is the upstream activity id.
+_UPSTREAM_SOURCES: Final = {
+    "garmin_connect": ProviderId.GARMIN,
+    "wahoo": ProviderId.WAHOO,
+}
 _WORD_BREAK: Final = re.compile(r"[^a-z0-9]+")
 # Same minimum as activity_validation: a zero duration is not a usable value.
 _MIN_DURATION_S: Final = 1.0
@@ -445,6 +453,15 @@ def _recording_origin(source: str | None, provenance_text: str) -> RecordingOrig
     return RecordingOrigin.UNKNOWN
 
 
+def _external_ref(source: str | None, external_id: str | None) -> ExternalRef | None:
+    upstream = None if source is None else _UPSTREAM_SOURCES.get(source.casefold())
+    if upstream is None or not external_id:
+        return None
+    if len(external_id) > MAX_ACTIVITY_ID_LENGTH:
+        return None
+    return ExternalRef(upstream, external_id)
+
+
 def _device_type(device_name: str | None) -> DeviceType | None:
     if device_name is None:
         return None
@@ -549,6 +566,7 @@ def _map_row(
         max_speed_mps=reader.number(_MAX_SPEED_KEYS, 0.0, MAX_ACTIVITY_SPEED_MPS),
         max_power_w=reader.number(_MAX_POWER_KEYS, 0.0, MAX_ACTIVITY_POWER_W),
         device_type=_device_type(provenance["device_name"]),
+        external_ref=_external_ref(provenance["source"], provenance["external_id"]),
         moving_duration_s=moving_time,
         elevation_gain_m=reader.number(
             _ELEVATION_GAIN_KEYS, 0.0, MAX_ACTIVITY_ELEVATION_M

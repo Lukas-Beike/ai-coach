@@ -22,6 +22,7 @@ from backend.canonical.records import (
     MAX_ZONE_ID_LENGTH,
     UNKNOWN_CONTEXT,
     ActivityRecord,
+    ExternalRef,
     MeasurementContext,
     Observation,
     ObservationPeriod,
@@ -60,6 +61,7 @@ _DEVICE_TYPE_KEY: Final = "device_type"
 _PLANNED_EVENT_KEY: Final = "planned_event_id"
 _DEVICE_NAME_KEY: Final = "device_name"
 _TRAINING_EFFECT_LABEL_KEY: Final = "training_effect_label"
+_EXTERNAL_REF_KEY: Final = "external_ref"
 # ActivityRecord summary fields stored in the details under their own names.
 ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "intensity",
@@ -1468,6 +1470,15 @@ def _activity_details(record: ActivityRecord) -> str:
             (_PLANNED_EVENT_KEY, record.planned_event_id),
             (_DEVICE_NAME_KEY, record.device_name),
             (_TRAINING_EFFECT_LABEL_KEY, record.training_effect_label),
+            (
+                _EXTERNAL_REF_KEY,
+                None
+                if record.external_ref is None
+                else [
+                    record.external_ref.upstream.value,
+                    record.external_ref.upstream_id,
+                ],
+            ),
             (_CONTEXT_KEY, record.provenance.context.as_details() or None),
             *(
                 (field, getattr(record, field))
@@ -1539,6 +1550,17 @@ def _stored_zones(value: object) -> tuple[tuple[str, float], ...] | None:
             return None
         zones.append((zone_id, float(seconds)))
     return tuple(zones)
+
+
+def activity_external_ref(details: object) -> ExternalRef | None:
+    """Return the upstream activity stored in an activity's details, if valid."""
+    value = _activity_details_object(details).get(_EXTERNAL_REF_KEY)
+    if not (isinstance(value, list) and len(value) == 2):
+        return None
+    try:
+        return ExternalRef(ProviderId(value[0]), value[1])
+    except TypeError, ValueError:
+        return None
 
 
 def activity_elapsed_duration(details: object) -> float | None:

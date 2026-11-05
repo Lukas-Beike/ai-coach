@@ -20,6 +20,7 @@ from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.vocabulary import ProviderId
 from backend.db import DatabaseManager, canonical_store, row_factory
 from backend.db.schema import initialize_schema
+from backend.diagnostics.session_conflicts import summarize_session_conflicts
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
     ActivityItem,
@@ -453,6 +454,76 @@ class ProtectedSessionTests(LinkingCase):
         self._ingest_wahoo([wahoo_workout()], SECOND)
         self.assertEqual(self._sessions()[INTERVALS_ID]["link_kind"], "confirmed")
         self.assertEqual(self._sessions()[WAHOO_ID]["state"], "duplicate")
+
+
+class ExactLinkTests(LinkingCase):
+    def _garmin_copy(self, external_id: str, **fields: Any) -> dict[str, Any]:
+        return intervals_ride(
+            device_name="Garmin Edge 840",
+            source="GARMIN_CONNECT",
+            external_id=external_id,
+            **fields,
+        )
+
+    def _mismatches(self) -> dict[str, Any]:
+        with self.manager.read_snapshot() as db:
+            summary = summarize_session_conflicts(db)
+        return summary["exact_link_mismatches"]
+
+    def test_a_trimmed_copy_links_exactly_to_its_garmin_activity(self) -> None:
+        self._ingest_garmin([garmin_ride()], FIRST)
+        counters = self._ingest_intervals(
+            [self._garmin_copy(GARMIN_ID, distance=21000.0)], SECOND
+        )
+        self.assertEqual(counters.linked, 1)
+        sessions = self._sessions()
+        self.assertEqual(sessions[GARMIN_ID]["link_kind"], "exact")
+        self.assertEqual(
+            sessions[INTERVALS_ID]["merged_into"], sessions[GARMIN_ID]["activity_id"]
+        )
+
+    def test_an_exact_reference_upgrades_a_heuristic_merge(self) -> None:
+        self._ingest_intervals([intervals_ride(device_name="Garmin Edge")], FIRST)
+        self._ingest_garmin([garmin_ride()], SECOND)
+        self.assertEqual(self._sessions()[INTERVALS_ID]["link_kind"], "heuristic")
+
+        self._ingest_intervals([self._garmin_copy(GARMIN_ID)], THIRD)
+
+        sessions = self._sessions()
+        self.assertEqual(sessions[INTERVALS_ID]["link_kind"], "exact")
+        self.assertEqual(
+            sessions[GARMIN_ID]["merged_into"], sessions[INTERVALS_ID]["activity_id"]
+        )
+        self.assertEqual(self._mismatches(), {"total": 0, "sessions": []})
+
+    def test_a_contradicted_heuristic_merge_is_reported_not_changed(self) -> None:
+        self._ingest_intervals([intervals_ride(device_name="Garmin Edge")], FIRST)
+        self._ingest_garmin(
+            [garmin_ride(), garmin_ride("9002", startTimeLocal="2026-09-10 12:00:00")],
+            SECOND,
+        )
+        before = self._sessions()
+
+        self._ingest_intervals([self._garmin_copy("9002")], THIRD)
+
+        after = self._sessions()
+        for provider_activity_id in (INTERVALS_ID, GARMIN_ID, "9002"):
+            self.assertEqual(
+                (
+                    after[provider_activity_id]["state"],
+                    after[provider_activity_id]["merged_into"],
+                ),
+                (
+                    before[provider_activity_id]["state"],
+                    before[provider_activity_id]["merged_into"],
+                ),
+            )
+        mismatches = self._mismatches()
+        self.assertEqual(mismatches["total"], 1)
+        self.assertEqual(
+            mismatches["sessions"][0]["upstream_session_id"],
+            after["9002"]["activity_id"],
+        )
 
 
 class AliasResolutionTests(LinkingCase):

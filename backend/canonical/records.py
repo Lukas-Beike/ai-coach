@@ -340,6 +340,22 @@ def _zone_seconds(value: object, field: str) -> ZoneSeconds | None:
 
 
 @dataclass(frozen=True, slots=True)
+class ExternalRef:
+    """The upstream provider activity a record was copied from.
+
+    For an Intervals.icu activity synchronized from Garmin Connect this is the
+    Garmin activity id: the same value as that Garmin record's ``activity_id``.
+    """
+
+    upstream: ProviderId
+    upstream_id: str
+
+    def __post_init__(self) -> None:
+        require_instance(self.upstream, ProviderId, "upstream")
+        require_text(self.upstream_id, "upstream_id", max_length=200)
+
+
+@dataclass(frozen=True, slots=True)
 class ActivityRecord:
     activity_id: str
     provenance: Provenance
@@ -391,6 +407,8 @@ class ActivityRecord:
     # The provider's training-effect category of the session, for example
     # "AEROBIC_BASE", as an upper-case code.
     training_effect_label: str | None = None
+    # The upstream activity this record copies, when the provider names it.
+    external_ref: ExternalRef | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -551,3 +569,5 @@ class ActivityRecord:
             "training_effect_label",
             max_length=MAX_TRAINING_EFFECT_LABEL_LENGTH,
         )
+        if self.external_ref is not None:
+            require_instance(self.external_ref, ExternalRef, "external_ref")

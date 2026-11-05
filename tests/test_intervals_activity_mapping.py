@@ -76,10 +76,11 @@ def load_fixture_rows() -> list[dict[str, Any]]:
 
 
 class ModuleContractTests(unittest.TestCase):
-    def test_mapper_version_is_six(self) -> None:
+    def test_mapper_version_is_seven(self) -> None:
         # Version 2 keeps elapsed_time as elapsed_duration_s; version 3 max_hr;
-        # version 4 manual source origin; version 5 extremes and device type.
-        self.assertEqual(6, MAPPER_VERSION)
+        # version 4 manual source origin; version 5 extremes and device type;
+        # version 7 the upstream external reference.
+        self.assertEqual(7, MAPPER_VERSION)
 
     def test_retrieved_at_must_be_timezone_aware(self) -> None:
         with self.assertRaises(ValueError):
