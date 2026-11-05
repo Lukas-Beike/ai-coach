@@ -179,10 +179,7 @@ class SessionCorrectionTests(SessionCorrectionFixture):
         self.assertEqual(raised.exception.status, 409)
         bundle = self.corrections.bundle(self.intervals)
         assert bundle is not None
-        self.assertEqual(
-            [candidate["session_id"] for candidate in bundle["merge_candidates"]],
-            [other],
-        )
+        self.assertEqual(bundle["merge_candidates"], [])
 
     def test_merge_refuses_a_session_of_another_day(self) -> None:
         with self.manager.unit_of_work() as db:

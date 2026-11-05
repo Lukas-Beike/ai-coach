@@ -74,7 +74,9 @@ class SessionCorrectionService:
             "link_kind": survivor["link_kind"],
             "athlete_confirmed": bool(survivor["athlete_confirmed"]),
             "members": [_entry(row) for row in members],
-            "merge_candidates": [_entry(row) for row in candidates],
+            "merge_candidates": [
+                _entry(row) for row in _mergeable_candidates(members, candidates)
+            ],
         }
 
     def confirm(self, activity_id: str, *, source: str = "local") -> dict[str, Any]:
@@ -148,7 +150,7 @@ class SessionCorrectionService:
                 raise AppError(409, _OTHER_DAY)
             origins = [
                 {
-                    (str(row["provider"]), str(row["recorded_by"]))
+                    _origin(row)
                     for row in canonical_store.session_member_rows(
                         db, row["activity_id"]
                     )
@@ -269,6 +271,19 @@ def _survivor(db: Any, activity_id: str) -> dict[str, Any] | None:
     if not rows or rows[0]["state"] != _ACTIVE:
         return None
     return dict(rows[0])
+
+
+def _origin(row: dict[str, Any]) -> tuple[str, str]:
+    return str(row["provider"]), str(row["recorded_by"])
+
+
+def _mergeable_candidates(
+    members: Sequence[dict[str, Any]], candidates: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Drop candidate sessions a merge would refuse for sharing a recording origin."""
+    own = {_origin(row) for row in members}
+    refused = {row["session_id"] for row in candidates if _origin(row) in own}
+    return [row for row in candidates if row["session_id"] not in refused]
 
 
 def _repoint(rows: Iterable[dict[str, Any]], old: str, new: str) -> None:
