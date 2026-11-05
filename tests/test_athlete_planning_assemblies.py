@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
 
 from backend.athlete.equipment import EquipmentService
 from backend.athlete.measurements import number
@@ -76,8 +76,14 @@ class AthleteDataAssemblyTests(unittest.TestCase):
 class EquipmentDependencyTests(unittest.TestCase):
     def test_assignment_uses_injected_session_summaries(self) -> None:
         read_summaries = Mock(return_value=())
-        service = EquipmentService(Mock(), read_summaries, Mock(), Mock())
-        with self.assertRaises(AppError) as raised:
+        service = EquipmentService(MagicMock(), read_summaries, Mock(), Mock())
+        with (
+            patch(
+                "backend.athlete.equipment.canonical_store.live_session_id",
+                return_value=None,
+            ),
+            self.assertRaises(AppError) as raised,
+        ):
             service.assign({"activity_id": "synthetic", "equipment_id": None})
         self.assertEqual(raised.exception.status, 404)
         read_summaries.assert_called_once_with()
