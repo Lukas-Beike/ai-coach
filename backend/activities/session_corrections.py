@@ -29,6 +29,7 @@ ENTITY_TYPE: Final = "activity_session"
 MAX_CORRECTED_SESSIONS: Final = 16
 _ACTIVE = ActivitySessionState.ACTIVE.value
 _DUPLICATE = ActivitySessionState.DUPLICATE.value
+_DELETED = ActivitySessionState.DELETED.value
 _UNKNOWN = "Diese Aktivität ist nicht (mehr) vorhanden."
 _NOT_IN_BUNDLE = "Diese Aufzeichnung gehört nicht zu der Aktivität."
 _SINGLE = "Die Aktivität besteht nur aus einer Aufzeichnung."
@@ -134,6 +135,28 @@ class SessionCorrectionService:
             return touched
 
         return self._correct(activity_id, correct, "split", source)
+
+    def delete(self, activity_id: str, *, source: str = "local") -> dict[str, Any]:
+        """Delete the activity locally: the session and every provider copy in it.
+
+        The deleted sessions are athlete-confirmed, so neither a provider delete
+        of the primary copy nor a later delivery of a copy revives them. Nothing
+        is deleted at a provider.
+        """
+
+        def correct(db: Any, survivor: dict[str, Any]) -> list[str]:
+            survivor_id = survivor["activity_id"]
+            touched = canonical_store.session_bundle_ids(db, survivor_id)
+            rows = self._rows(db, touched)
+            for row in rows.values():
+                if row["merged_into"] == survivor_id:
+                    row.update(merged_into=None, merged_into_retained=survivor_id)
+                elif row["activity_id"] != survivor_id:
+                    continue
+                row.update(state=_DELETED, athlete_confirmed=1)
+            return touched
+
+        return self._correct(activity_id, correct, "deleted", source)
 
     def merge(
         self, activity_id: str, other_id: str, *, source: str = "local"

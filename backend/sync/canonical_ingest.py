@@ -19,7 +19,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
-from backend.activities.session_linking import link_activity_sessions
+from backend.activities.session_linking import (
+    link_activity_sessions,
+    split_unmatched_sessions,
+)
 from backend.canonical.local_time import local_date
 from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.canonical_domain_store import ReplaceResult
@@ -47,6 +50,7 @@ class CanonicalIngestCounters:
     skipped_invalid: int = 0
     deleted: int = 0
     linked: int = 0
+    split: int = 0
     retired: int = 0
 
     def count(self, outcome: WriteOutcome) -> None:
@@ -71,6 +75,7 @@ class CanonicalIngestCounters:
             "skipped_invalid": self.skipped_invalid,
             "deleted": self.deleted,
             "linked": self.linked,
+            "split": self.split,
             "retired": self.retired,
         }
 
@@ -337,12 +342,14 @@ def ingest_plan(
             now=stamp,
         )
     if plan.activities:
-        # After the deletions, so a tombstoned activity is never bundled.
+        touched = {activity.local_date for activity in plan.activities}
+        # After the deletions, so a tombstoned activity is never bundled. Copies
+        # that no longer match their session are split off before linking.
+        counters.split = split_unmatched_sessions(
+            db, touched_dates=touched, zone=zone, now=stamp
+        )
         counters.linked = link_activity_sessions(
-            db,
-            touched_dates={activity.local_date for activity in plan.activities},
-            zone=zone,
-            now=stamp,
+            db, touched_dates=touched, zone=zone, now=stamp
         )
     return counters
 

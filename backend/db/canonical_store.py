@@ -291,11 +291,13 @@ def upsert_activity_record(
     )
     db.execute(
         # A revived session is active again, so it no longer keeps the survivor
-        # of a merge that its deletion cleared.
+        # of a merge that its deletion cleared. A session the athlete deleted
+        # (deleted and athlete-confirmed) stays deleted.
         "UPDATE activity_sessions SET started_at = ?, local_date = ?, "
-        "state = CASE WHEN state = ? THEN ? ELSE state END, "
-        "merged_into_retained = CASE WHEN state = ? THEN NULL "
-        "ELSE merged_into_retained END, updated_at = ? "
+        "state = CASE WHEN state = ? AND athlete_confirmed = 0 THEN ? "
+        "ELSE state END, "
+        "merged_into_retained = CASE WHEN state = ? AND athlete_confirmed = 0 "
+        "THEN NULL ELSE merged_into_retained END, updated_at = ? "
         "WHERE activity_id = ?",
         (
             started_at,
@@ -1210,18 +1212,23 @@ def _delete_activity(
     # A deleted merged alias also leaves its merge: the schema allows merged_into
     # only on duplicate sessions. merged_into_retained keeps the survivor, so
     # feedback written for the alias still resolves (effective_session_ids).
+    # A provider delete is not the athlete's: it clears the confirmation, so the
+    # session revives when the provider delivers the activity again. A session
+    # the athlete already deleted is left as it is and hands over no aliases.
     cursor = db.execute(
-        "UPDATE activity_sessions SET state = ?, "
+        "UPDATE activity_sessions SET state = ?, athlete_confirmed = 0, "
         "merged_into_retained = COALESCE(merged_into, merged_into_retained), "
         "merged_into = NULL, updated_at = ? "
         "WHERE activity_id = ? AND primary_provider = ? "
-        "AND primary_provider_activity_id = ?",
+        "AND primary_provider_activity_id = ? "
+        "AND NOT (state = ? AND athlete_confirmed = 1)",
         (
             ActivitySessionState.DELETED.value,
             now,
             activity_id,
             provider,
             provider_activity_id,
+            ActivitySessionState.DELETED.value,
         ),
     )
     if cursor.rowcount == 1:
@@ -2039,6 +2046,22 @@ def write_session_correction_rows(
                 row["activity_id"],
             ),
         )
+
+
+def detach_activity_session(db: Any, *, activity_id: str, now: str) -> bool:
+    """Make a merge alias its own active single session; return whether it changed."""
+    cursor = db.execute(
+        "UPDATE activity_sessions SET state = ?, merged_into = NULL, link_kind = ?, "
+        "updated_at = ? WHERE activity_id = ? AND state = ?",
+        (
+            ActivitySessionState.ACTIVE.value,
+            ActivityLinkKind.SINGLE.value,
+            now,
+            activity_id,
+            ActivitySessionState.DUPLICATE.value,
+        ),
+    )
+    return cursor.rowcount == 1
 
 
 def session_member_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:

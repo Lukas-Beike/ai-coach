@@ -66,11 +66,15 @@ The system SHALL bundle supported provider copies into canonical sessions using 
 - **WHEN** candidates lack enough comparable data or conflict with matching tolerances
 - **THEN** they remain separate instead of being merged merely because their timestamps are close.
 
+#### Scenario: A copy no longer matches its session
+- **WHEN** a provider edit or a mapper change moves a copy of an unconfirmed session outside the matching rules
+- **THEN** the next ingest or reprojection of that date splits it off into its own active session, while a confirmed session keeps all its copies.
+
 #### Scenario: Two separate sessions close together
 - **WHEN** two recordings from each of two providers start within 30 minutes of each other and each could match either copy
 - **THEN** each pairing rule assigns one to one: a session takes at most one active record per provider and recording origin, each pass joins as many records as possible and, among those assignments, takes the lowest total pair cost (mean of the start gap and the measurement gaps, each relative to its tolerance), a merge that would put two records of one provider and origin in one persisted session is refused, and equal costs fall back to start, provider and activity id.
 
-Detailed contract: Garmin elapsed-time fallback SHALL avoid assigning multiple separate walks to one already claimed session. Existing persisted merges are never undone automatically; the diagnostics report lists sessions with several active records of one provider and recording origin as `canonical_session_conflicts`, together with exact references whose records stay in different sessions (`exact_link_mismatches`, never re-merged automatically) and the link-kind counts of active sessions. The external reference is stored in the record details, not in logs or Coach context. Local session references SHALL resolve to the appropriate provider identity at mutation/detail boundaries.
+Detailed contract: Garmin elapsed-time fallback SHALL avoid assigning multiple separate walks to one already claimed session. Before linking, the copies of each live, unconfirmed session near the ingested dates are bundled again on their own, and a copy the rules no longer bundle with the session's own record is split off into its own active session (counted as `split` in the ingest counters); confirmed sessions are never split. The diagnostics report lists sessions with several active records of one provider and recording origin as `canonical_session_conflicts`, together with exact references whose records stay in different sessions (`exact_link_mismatches`, never re-merged automatically) and the link-kind counts of active sessions. The external reference is stored in the record details, not in logs or Coach context. Local session references SHALL resolve to the appropriate provider identity at mutation/detail boundaries.
 
 Evidence: `backend/activities/canonical_sessions.py:bundle_sessions`, `backend/activities/session_linking.py:link_activity_sessions`, `backend/activities/activity_reference.py:ActivityReferences`; `tests/test_canonical_sessions.py:test_order_is_deterministic_regardless_of_input_order`, `tests/test_canonical_sessions.py:test_garmin_record_joins_the_wahoo_session_through_a_garmin_copy`, `tests/test_canonical_sessions.py:OneToOneAssignmentTests`, `tests/test_canonical_sessions.py:ExactLinkTests`, `tests/test_session_linking.py:ExactLinkTests`, `tests/test_diagnostic_session_conflicts.py`, `tests/test_garmin_activity_detail_job.py:test_session_alias_resolves_to_the_garmin_record`.
 
@@ -269,7 +273,7 @@ The system SHALL compute the Garmin status counts `activities` and `duplicate_ac
 Evidence: `backend/sync/garmin_projection_service.py:GarminProjectionService._canonical_read`, `backend/sync/garmin_projection_service.py:_garmin_sessions`; `tests/test_garmin_canonical_reads.py`, `tests/test_sync_garmin_projection_service.py:test_public_state_preserves_status_metrics_dedup_and_redacted_core_errors`, `tests/test_sync_garmin_projection_service.py:test_duplicates_are_counted_against_the_canonical_sessions_only`. Missing evidence (planned in this change): construction without canonical sources is rejected and no snapshot activity fallback remains.
 
 ### Requirement: Athlete session corrections
-The system SHALL let the athlete confirm a canonical session's bundle, split one provider copy into its own session, and merge two live sessions, from the activity detail view or through local Coach tools. Each correction SHALL mark the resulting sessions athlete-confirmed, record a change-history receipt whose undo restores the touched session rows, and change no provider record, provider data or feedback row.
+The system SHALL let the athlete confirm a canonical session's bundle, split one provider copy into its own session, merge two live sessions, and delete an activity locally, from the activity detail view or through local Coach tools. Each correction SHALL mark the resulting sessions athlete-confirmed, record a change-history receipt whose undo restores the touched session rows, and change no provider record, provider data or feedback row.
 
 #### Scenario: Confirm a bundle
 - **WHEN** the athlete confirms a session that bundles several provider copies
@@ -282,6 +286,10 @@ The system SHALL let the athlete confirm a canonical session's bundle, split one
 #### Scenario: Merge two sessions
 - **WHEN** the athlete merges two live sessions of the same local date that hold no two active records of one provider and recording origin
 - **THEN** the younger becomes an alias of the older one, which is athlete-confirmed with link kind `confirmed`; a merge across dates or one that would join two records of one provider and origin is refused with a conflict.
+
+#### Scenario: Delete an activity locally
+- **WHEN** the athlete deletes an activity in the app after confirming the prompt
+- **THEN** its session and every merged copy are deleted and athlete-confirmed, no copy revives when a provider later deletes the primary copy or delivers a copy again, nothing is deleted at a provider, and the receipt's undo restores the session.
 
 #### Scenario: Undo a correction
 - **WHEN** the athlete undoes a correction's receipt while the touched sessions are unchanged since

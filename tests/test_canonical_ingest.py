@@ -140,6 +140,7 @@ class CounterTests(unittest.TestCase):
                 "skipped_invalid": 0,
                 "deleted": 0,
                 "linked": 0,
+                "split": 0,
                 "retired": 0,
             },
         )

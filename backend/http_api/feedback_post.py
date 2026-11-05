@@ -73,6 +73,8 @@ class FeedbackPostRoutes:
             result = service.confirm(activity_id)
         elif action == "split":
             result = service.split(activity_id, str(payload.get("member_id") or ""))
+        elif action == "delete":
+            result = service.delete(activity_id)
         elif action == "merge":
             result = service.merge(activity_id, str(payload.get("other_id") or ""))
         else:

@@ -312,3 +312,25 @@ test("@responsive provider copies split with a receipt whose undo restores the b
   expect(await page.evaluate(() => sessionBodies)).toEqual([{ action: "split", member_id: "act_b" }, { change_id: "c2", expected_current_hash: "h2" }]);
   await page.evaluate(() => ActivityDetails.close(false));
 });
+
+test("@responsive deleting an activity locally asks first and can be undone", async ({ page }) => {
+  await page.goto("/#plan/overview");
+  await expect(page.locator("#appShell")).toBeVisible();
+  await page.evaluate(async () => {
+    const bundle = { activity_id: "act_d", link_kind: "single", athlete_confirmed: false, members: [{ session_id: "act_d", provider: "garmin", label: "Garmin", recorded_by: "garmin", sport: "ride", started_at: "2026-09-10T05:00:00+00:00", duration_s: 3600 }], merge_candidates: [] };
+    globalThis.deleteBodies = [];
+    const fakeApi = async (url, options) => {
+      if (url === "/api/activities/act_d/session" || url === "/api/change-history/undo") { deleteBodies.push(JSON.parse(options.body)); return url.endsWith("/session") ? { status: "deleted", activity_id: null, change: { id: "c3", after_hash: "h3" } } : { status: "undone" }; }
+      return { session: { activity_id: "act_d", name: "Synthetic delete ride", sport: "ride" }, streams: { time_s: [0, 1, 2], channels: {} }, detail_data: { providers: [] }, activity_feedback: null, equipment: [], session_rpe_load: null, session_bundle: bundle };
+    };
+    await ActivityDetails.open({ id: "act_d" }, { api: fakeApi, showDialog: (dialog) => dialog.showModal() });
+  });
+  const dialog = page.getByRole("dialog", { name: "Synthetic delete ride" });
+  await dialog.getByRole("button", { name: "Aktivität löschen" }).click();
+  await page.getByRole("dialog", { name: "Aktivität löschen?" }).getByRole("button", { name: "Löschen" }).click();
+  await expect(dialog.getByRole("status").filter({ hasText: "Aktivität gelöscht." })).toBeVisible();
+  await dialog.getByRole("button", { name: "Rückgängig" }).click();
+  await expect(dialog.locator(".activity-bundle").getByRole("status")).toContainText("Zurückgenommen.");
+  expect(await page.evaluate(() => deleteBodies)).toEqual([{ action: "delete" }, { change_id: "c3", expected_current_hash: "h3" }]);
+  await page.evaluate(() => ActivityDetails.close(false));
+});
