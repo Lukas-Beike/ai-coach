@@ -10,6 +10,7 @@ from typing import Any
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
+from backend.activities.session_corrections import SessionCorrectionService
 from backend.activities.feedback import ActivityFeedbackService
 from backend.activities.session_linking import garmin_activity_matches
 from backend.athlete.checkins import CheckinService
@@ -129,6 +130,11 @@ class AthleteDataAssembly:
             CanonicalTableReader(),
             self._athlete_zone,
             self._table_serving(),
+        )
+
+    def session_corrections(self) -> SessionCorrectionService:
+        return SessionCorrectionService(
+            self._database_manager(), self._utc_now, self._event_buffer
         )
 
     def duplicate_activity(self) -> DuplicateActivityService:

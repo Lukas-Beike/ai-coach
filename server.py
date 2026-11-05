@@ -810,6 +810,7 @@ HISTORY = HistoryAssembly(
             competition_service=PLANNING_DATA.competition,
             zone_service=ATHLETE_DATA.zones,
             feedback_service=ATHLETE_DATA.activity_feedback,
+            session_corrections=ATHLETE_DATA.session_corrections,
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,
@@ -2223,6 +2224,7 @@ HTTP_API = HttpApiAssembly(
                 activity_read=ACTIVITY_READS.activity_read,
                 equipment=ATHLETE_DATA.equipment,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
+                session_corrections=ATHLETE_DATA.session_corrections,
                 zones=ATHLETE_DATA.zones,
                 body_export=lambda profile, revision, deadline: (
                     GARMIN_ASSEMBLY.body_export(ATHLETE_DATA.profile()).export(

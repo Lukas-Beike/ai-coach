@@ -25,6 +25,7 @@ ENTITY_TYPES = {
     "training_plan",
     "zone_configuration",
     "activity_feedback",
+    "activity_session",
 }
 ACTIONS = {"create", "update", "delete", "undo"}
 # Fields a caller needs to undo a recorded change later.
@@ -148,7 +149,9 @@ ACTIVITY_FEEDBACK_FIELDS = ("rows",)
 # Feedback rows reach 4000-character notes, so their field bound is the bounded
 # group (MAX_FEEDBACK_GROUP_ROWS rows) instead of the general 4000 characters.
 MAX_FEEDBACK_GROUP_ROWS = 32
-_FIELD_LIMITS = {"activity_feedback": 400_000}
+# The bundling columns of the sessions one session correction touched.
+ACTIVITY_SESSION_FIELDS = ("sessions",)
+_FIELD_LIMITS = {"activity_feedback": 400_000, "activity_session": 20_000}
 _DEFAULT_FIELD_LIMIT = 4000
 # A local zone configuration; its entity id is the configuration key.
 ZONE_CONFIGURATION_FIELDS = (
@@ -172,6 +175,7 @@ def audit_projection_fields(entity_type: str) -> set[str]:
         "training_plan": PLAN_FIELDS,
         "zone_configuration": set(ZONE_CONFIGURATION_FIELDS),
         "activity_feedback": set(ACTIVITY_FEEDBACK_FIELDS),
+        "activity_session": set(ACTIVITY_SESSION_FIELDS),
     }
     try:
         return fields_by_entity[entity_type]

@@ -22,6 +22,7 @@ class HistoryAthleteServices:
     competition_service: Callable[[], Any]
     zone_service: Callable[[], Any] | None = None
     feedback_service: Callable[[], Any] | None = None
+    session_corrections: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class HistoryAssembly:
         self._competition_service = dependencies.athlete.competition_service
         self._zone_service = dependencies.athlete.zone_service
         self._feedback_service = dependencies.athlete.feedback_service
+        self._session_corrections = dependencies.athlete.session_corrections
         self._workout_library_service = dependencies.planning.workout_library_service
         self._planned_unit_service = dependencies.planning.planned_unit_service
         self._training_plan_service = dependencies.planning.training_plan_service
@@ -65,6 +67,12 @@ class HistoryAssembly:
             self._profile_repository,
             zone_service=self._zones(),
             feedback_service=self._feedback(),
+            session_corrections=self._corrections(),
+        )
+
+    def _corrections(self) -> Any | None:
+        return (
+            None if self._session_corrections is None else self._session_corrections()
         )
 
     def _feedback(self) -> Any | None:
@@ -85,5 +93,6 @@ class HistoryAssembly:
             self._planning_revision_service,
             zone_service=self._zones(),
             feedback_service=self._feedback(),
+            session_corrections=self._corrections(),
             profile_mutation_coordinator=self._profile_service().mutation_coordinator,
         )

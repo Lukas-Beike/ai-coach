@@ -30,6 +30,7 @@ class SyncGetRoutes:
         activity_read_service: Callable[[], ActivityAnalysisReadService],
         local_today: Callable[[], date],
         all_sync_days: int,
+        session_corrections: Callable[[], Any] | None = None,
     ) -> None:
         self._session_auth_service = session_auth_service
         self._sync_job_queue_service = sync_job_queue_service
@@ -37,6 +38,7 @@ class SyncGetRoutes:
         self._activity_read_service = activity_read_service
         self._local_today = local_today
         self._all_sync_days = all_sync_days
+        self._session_corrections = session_corrections
 
     def handle(self, handler: Any, path: str) -> bool:
         job_match = SYNC_JOB_RE.match(path)
@@ -58,6 +60,11 @@ class SyncGetRoutes:
             )
             # Performance validation belongs to the Coach's complete context.
             payload.pop("activity_validation", None)
+            session_id = (payload.get("session") or {}).get("activity_id")
+            if self._session_corrections is not None and session_id:
+                payload["session_bundle"] = self._session_corrections().bundle(
+                    str(session_id)
+                )
         elif job_match:
             payload = self._sync_job_queue_service().state(job_match.group(1))
         elif path == "/api/sync/status":
