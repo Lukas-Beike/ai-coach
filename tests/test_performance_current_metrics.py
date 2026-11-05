@@ -123,7 +123,13 @@ class CurrentPerformanceMetricsTests(unittest.TestCase):
             {"weight_kg": 80},
             garmin,
         )
-        self.assertEqual(result["weight_kg"], garmin["weight_kg"])
+        # Garmin's dated measurement wins the recency rule (#1668); the undated
+        # Intervals and profile weights stay alternatives.
+        weight = dict(result["weight_kg"])
+        alternatives = weight.pop("alternatives")
+        self.assertTrue(weight.pop("conflict"))
+        self.assertEqual(weight, garmin["weight_kg"])
+        self.assertEqual([item["value"] for item in alternatives], [75, 80])
         # The athlete-maintained Intervals FTP precedes Garmin's (#1668); Garmin's
         # max HR precedes the Intervals setting, which stays as an alternative.
         self.assertEqual(result["cycling_ftp_watts"]["value"], 250)

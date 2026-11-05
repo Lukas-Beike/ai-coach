@@ -137,6 +137,9 @@ class GarminCanonicalMetrics:
     # The latest Garmin FTP, threshold HR, threshold speed and profile max HR per
     # sport, dated for the source policy's age limits (``garmin_thresholds``).
     thresholds: tuple[Observation, ...] = ()
+    # The latest Garmin weight (within its bounds) and body fat, dated for the
+    # source policy's recency rule (``garmin_body``).
+    body: tuple[Observation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,6 +323,7 @@ _READ_KINDS = (
     MetricKind.RESTING_HR,
     MetricKind.READINESS,
     MetricKind.WEIGHT,
+    MetricKind.BODY_FAT,
     MetricKind.FTP,
     MetricKind.VO2MAX,
     MetricKind.THRESHOLD_HR,
@@ -363,6 +367,7 @@ def _metrics(
         bike_threshold_hr_bpm=_latest_value(threshold_hr, Sport.RIDE),
         profile_max_hr=_profile_max_hr(by_kind[MetricKind.MAX_HR]),
         thresholds=garmin_thresholds(by_kind),
+        body=garmin_body(by_kind),
         race_predictions={
             key: value
             for kind, key in RACE_PREDICTION_KEYS.items()
@@ -478,6 +483,30 @@ _THRESHOLD_SPORTS: Mapping[MetricKind, tuple[Sport, ...]] = {
     MetricKind.THRESHOLD_HR: (Sport.RIDE, Sport.RUN),
     MetricKind.THRESHOLD_PACE: (Sport.RUN,),
 }
+
+
+def garmin_body(
+    by_kind: Mapping[MetricKind, Iterable[Observation]],
+) -> tuple[Observation, ...]:
+    """Return the latest Garmin weight and body fat observation.
+
+    The weight is the current Garmin weight: a latest value outside the weight
+    bounds yields none rather than an older value.
+    """
+    result: list[Observation] = []
+    for kind in (MetricKind.WEIGHT, MetricKind.BODY_FAT):
+        latest = max(
+            (item for item in by_kind.get(kind, ()) if item.sport is None),
+            key=_order,
+            default=None,
+        )
+        if latest is None or (
+            kind is MetricKind.WEIGHT
+            and _bounded(latest.value.value, _WEIGHT_KG_RANGE) is None
+        ):
+            continue
+        result.append(latest)
+    return tuple(result)
 
 
 def garmin_thresholds(

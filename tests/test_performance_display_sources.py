@@ -35,17 +35,20 @@ class DisplaySourcesTests(unittest.TestCase):
         # The FTP history and the FTP-based W/kg series exist only for Garmin.
         self.assertEqual(payload["cycling_ftp_watts"], ProviderId.GARMIN.value)
         self.assertEqual(payload["cycling_w_per_kg"], ProviderId.GARMIN.value)
-        self.assertEqual(payload["weight_kg"], ProviderId.GARMIN.value)
-        self.assertEqual(payload["body_fat_pct"], ProviderId.GARMIN.value)
-        for key in ("sleep", "hrv", "resting_hr"):
-            self.assertEqual(payload[key], ProviderId.INTERVALS.value, key)
         self.assertFalse(set(_DISPLAY_ONLY) & set(_DISPLAY_KINDS))
+
+    def test_body_and_recovery_follow_the_policy(self) -> None:
+        payload = preferred_providers()
+
+        for key in ("weight_kg", "body_fat_pct", "sleep", "hrv", "resting_hr"):
+            self.assertIn(key, _DISPLAY_KINDS)
+            self.assertEqual(payload[key], ProviderId.GARMIN.value, key)
 
     def test_each_call_returns_a_fresh_mapping(self):
         first = preferred_providers()
         first["sleep"] = "changed"
 
-        self.assertEqual(preferred_providers()["sleep"], ProviderId.INTERVALS.value)
+        self.assertEqual(preferred_providers()["sleep"], ProviderId.GARMIN.value)
 
 
 if __name__ == "__main__":
