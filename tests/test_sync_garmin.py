@@ -539,6 +539,16 @@ class GarminSyncStateServiceTests(unittest.TestCase):
                 "activities": 1,
                 "window_records": 0,
                 "pagination": payload["provider_sync"]["pagination"],
+                # The row without an activity id is counted, never stored.
+                "canonical": {
+                    "written": 0,
+                    "updated": 0,
+                    "unchanged": 0,
+                    "skipped_invalid": 1,
+                    "deleted": 0,
+                    "linked": 0,
+                    "retired": 0,
+                },
                 "source": "fixture",
             },
         )
