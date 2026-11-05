@@ -249,7 +249,7 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         self.assertEqual(prior, prior_before)
         self.assertEqual(correction, correction_before)
 
-    def test_refresh_merges_legacy_dict_and_raw_window_with_day_85_to_90_samples(
+    def test_complete_refresh_keeps_legacy_metadata_and_replaces_window_samples(
         self,
     ) -> None:
         service, reader, _manager, writer, _coordination = self.make_service()
@@ -281,7 +281,50 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         self.assertEqual(len(persisted["weight"]), 1)
         self.assertTrue(persisted["weight"][0]["legacySnapshot"])
         self.assertEqual(persisted["weight"][0]["unit"], "kg")
-        self.assertEqual(len(persisted["weight"][0]["weight"]), 8)
+        self.assertEqual(persisted["weight"][0]["weight"], incoming["weighIns"][::-1])
+        self.assertEqual(
+            writer.write_refresh.call_args.kwargs["windows"],
+            {"weight": (start, date(2026, 9, 24))},
+        )
+
+    def test_partial_weight_refresh_keeps_every_stored_weigh_in(self) -> None:
+        service, reader, _manager, writer, _coordination = self.make_service()
+        deleted = {"date": "2026-09-20", "weight": 81.9}
+        service._payload_service.view.return_value = {"weight": [deleted]}
+        kept = {"date": "2026-09-21", "weight": 70.1}
+        reader.fetch_nutrition_data.return_value = ([kept], False)
+
+        result = service.refresh("weight", date(2026, 9, 1), date(2026, 9, 24))
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(writer.write_refresh.call_args.kwargs["windows"], {})
+        persisted = writer.write_refresh.call_args.kwargs["view"]
+        self.assertEqual(persisted["weight"], [{"weight": [kept, deleted]}])
+
+    def test_complete_weight_window_drops_a_weigh_in_deleted_in_garmin(self) -> None:
+        inside = {"samplePk": 1, "calendarDate": "2026-10-09", "weight": 81900}
+        outside = {"samplePk": 2, "calendarDate": "2026-09-30", "weight": 79000}
+        undated = {"samplePk": 3, "weight": 78000}
+        kept = {"samplePk": 4, "calendarDate": "2026-10-08", "weight": 80000}
+        summary = {"summaryDate": "2026-10-09", "latestWeight": inside}
+        old_summary = {"summaryDate": "2026-09-30", "latestWeight": outside}
+        previous = [
+            {
+                "weighIns": [inside, outside, undated, kept],
+                "dailyWeightSummaries": [summary, old_summary],
+            }
+        ]
+        incoming = [{"weighIns": [kept], "dailyWeightSummaries": []}]
+
+        merged = merge_weight_snapshots(
+            incoming, previous, window=(date(2026, 10, 1), date(2026, 10, 10))
+        )
+        unchanged = merge_weight_snapshots(incoming, previous)
+
+        self.assertEqual(merged[0]["weight"], [kept, outside, undated])
+        self.assertEqual(merged[0]["dailyWeightSummaries"], [old_summary])
+        self.assertIn(inside, unchanged[0]["weight"])
+        self.assertIn(summary, unchanged[0]["dailyWeightSummaries"])
 
     def test_remote_energy_without_range_api_is_unsupported_without_daily_loop(
         self,
