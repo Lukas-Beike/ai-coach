@@ -21,7 +21,11 @@ from backend.performance.canonical_body import (
 )
 from backend.performance.display_sources import preferred_providers
 from backend.performance.freshness import GarminSyncStatus
-from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
+from backend.performance.source_policy import (
+    NO_PREFERENCES,
+    SourcePreferences,
+    preferred_source,
+)
 from backend.performance.wellness_days import WellnessDay
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -187,7 +191,13 @@ def _quotient_series(
     weights: dict[ProviderId, dict[date, tuple[float, str, Any]]],
     start: date,
     end: date,
+    preferred: ProviderId | None = None,
 ) -> dict[str, Any]:
+    """FTP or eFTP per kg with a weight from the seven preceding days.
+
+    The newest weight wins (Garmin on a tie); with the athlete's preferred body
+    source (``preferred``), its newest weight in the window wins when it has one.
+    """
     all_weights = [
         (day, record, weight_provider)
         for weight_provider, records in weights.items()
@@ -205,6 +215,9 @@ def _quotient_series(
                 for item in all_weights
                 if day - timedelta(days=7) <= item[0] <= day
             ]
+            candidates = [
+                item for item in candidates if item[2] is preferred
+            ] or candidates
             weight_item = max(
                 candidates,
                 key=lambda item: (item[0], item[2] is ProviderId.GARMIN),
@@ -337,6 +350,7 @@ def body_history(
                         weights,
                         start,
                         today,
+                        preferred_source(MetricKind.WEIGHT, preferences),
                     )
                     for provider, values in ftp.items()
                 ],
