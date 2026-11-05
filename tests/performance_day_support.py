@@ -151,6 +151,31 @@ def garmin_threshold_observations(
     return tuple(result)
 
 
+def garmin_body_observations(
+    garmin: dict[str, dict[str, Any]],
+) -> tuple[Observation, ...]:
+    """The Garmin weight measurement behind a Garmin metrics dict, dated today."""
+    value = (garmin.get("weight_kg") or {}).get("value")
+    if value is None:
+        return ()
+    return (
+        Observation(
+            kind=MetricKind.WEIGHT,
+            value=MetricValue(float(value), MetricKind.WEIGHT.unit),
+            observed_on=SYNCED_AT.date(),
+            observed_at=None,
+            provenance=Provenance(
+                provider=ProviderId.GARMIN,
+                source_kind=SourceKind.DEVICE_MEASURED,
+                source_record_id="garmin-weight_kg",
+                recorded_by=RecordingOrigin.GARMIN,
+                retrieved_at=SYNCED_AT,
+                label=None,
+            ),
+        ),
+    )
+
+
 def snapshot_metrics(
     snapshot: dict[str, Any],
     profile: dict[str, Any],
@@ -160,6 +185,7 @@ def snapshot_metrics(
     latest_wellness: WellnessDay | None = None,
     extra: tuple[Observation, ...] = (),
     canonical: CanonicalCurrentInputs | None = None,
+    garmin_body: tuple[Observation, ...] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Current metrics of a synthetic snapshot: mapper, canonical read, composition.
 
@@ -191,6 +217,9 @@ def snapshot_metrics(
         activities=activities,
         latest_wellness=latest_wellness,
         garmin_thresholds=garmin_threshold_observations(garmin),
+        garmin_body=(
+            garmin_body_observations(garmin) if garmin_body is None else garmin_body
+        ),
         as_of=SYNCED_AT.date(),
     )
 

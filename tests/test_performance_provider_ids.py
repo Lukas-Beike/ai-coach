@@ -171,7 +171,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
         for baseline in result["baselines"]:
             self.assertEqual(baseline["source"], "Intervals.icu")
             self.assertEqual(baseline["source_provider"], "intervals")
-        self.assertEqual(result["preferred_providers"]["hrv"], "intervals")
+        self.assertEqual(result["preferred_providers"]["hrv"], "garmin")
         self.assertEqual(result["sleep_deficits"][0]["source"], "Intervals.icu")
 
     def test_coach_projection_keeps_recovery_contract_with_additive_provider_ids(self):

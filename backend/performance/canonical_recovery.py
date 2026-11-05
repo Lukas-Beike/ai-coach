@@ -28,11 +28,16 @@ from typing import Any, Final
 from backend.canonical.domain_records import SleepPeriod
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance.source_policy import select_current, within_current_bounds
+from backend.performance.source_policy import (
+    FAMILY_LOOKBACK_DAYS,
+    intervals_relays_garmin,
+    select_current,
+    within_current_bounds,
+)
 from backend.runtime.ports import ObservationReader, SleepPeriodReader
 
 # The personal baselines keep 84 days of history; the current context needs 7.
-RECOVERY_HISTORY_DAYS: Final = 84
+RECOVERY_HISTORY_DAYS: Final = FAMILY_LOOKBACK_DAYS
 
 RECOVERY_KINDS: Final = (
     MetricKind.SLEEP_DURATION,
@@ -65,6 +70,10 @@ class CanonicalRecoveryInputs:
         return select_current(
             self.of(kind), kind, latest_wellness_day=self.latest_wellness_day
         )
+
+    def relays(self, kind: MetricKind) -> bool:
+        """Return True when the Intervals values of ``kind`` relay Garmin's."""
+        return intervals_relays_garmin(self.of(kind), kind)
 
     def daily(
         self, kind: MetricKind, provider: ProviderId, *, bounded: bool = False

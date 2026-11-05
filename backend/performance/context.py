@@ -211,6 +211,7 @@ def current_performance_context(
         activities=activities,
         latest_wellness=latest_wellness,
         garmin_thresholds=_garmin_canonical(canonical).thresholds,
+        garmin_body=_garmin_canonical(canonical).body,
         as_of=today,
     )
     load_context = performance_load_context.performance_load_context(
