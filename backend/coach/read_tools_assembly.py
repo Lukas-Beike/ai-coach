@@ -18,6 +18,7 @@ class CoachActivityReadSources:
     profile_service: Callable[[], Any]
     today: Callable[[], date]
     report_services: Callable[[], Any] | None = None
+    session_corrections: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ class CoachReadToolsAssembly:
         self._profile_service = activity.profile_service
         self._today = activity.today
         self._report_services = activity.report_services
+        self._session_corrections = activity.session_corrections
         self._structured_training_state_service = (
             planning.structured_training_state_service
         )
@@ -85,6 +87,7 @@ class CoachReadToolsAssembly:
             self._report_services() if self._report_services else None,
             self._planned_unit_service(),
             self._unit_thresholds() if self._unit_thresholds else None,
+            self._session_corrections() if self._session_corrections else None,
         )
 
     def read_service(self) -> CoachReadToolService:

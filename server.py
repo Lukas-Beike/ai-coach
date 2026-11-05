@@ -1499,6 +1499,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             profile_service=ATHLETE_DATA.profile,
             today=lambda: ATHLETE_CLOCK.now().date(),
             report_services=lambda: HTTP_API.training_reports(),
+            session_corrections=ATHLETE_DATA.session_corrections,
         ),
         planning=CoachPlanningReadSources(
             structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
@@ -1825,6 +1826,7 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
         nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         equipment_service=ATHLETE_DATA.equipment,
+        session_corrections_service=ATHLETE_DATA.session_corrections,
     ),
     profile_tools=CoachProfileToolDependencies(
         profile_service=lambda: ATHLETE_DATA.profile(),

@@ -23,6 +23,9 @@ _FULLY_TRACKED_TOOLS = frozenset(
         "manage_training_templates",
         "save_activity_feedback",
         "delete_activity_feedback",
+        "confirm_activity_session",
+        "split_activity_session",
+        "merge_activity_sessions",
     }
 )
 

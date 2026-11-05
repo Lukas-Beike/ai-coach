@@ -38,6 +38,9 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `save_equipment` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
 | `assign_activity_equipment` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
 | `log_equipment_maintenance` | `success` | `test_training_records_and_equipment_tools_use_confirmed_local_state` |
+| `confirm_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
+| `split_activity_session` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
+| `merge_activity_sessions` | `success` | `test_session_tools_correct_the_bundle_and_leave_a_change_receipt` |
 | `inspect_activity_duplicates` | `success` | `test_duplicate_inspection_returns_preview_without_deleting_provider_data` |
 | `list_change_history` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
 | `list_competitions` | `success` | `test_read_tools_return_seeded_objects_without_mutating_them` |
