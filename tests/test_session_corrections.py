@@ -219,6 +219,156 @@ class SessionCorrectionTests(SessionCorrectionFixture):
         self.assertIsNone(self.corrections.bundle("act_missing"))
 
 
+class SessionDeleteTests(SessionCorrectionFixture):
+    def _live(self) -> list[str]:
+        with self.manager.reader() as db:
+            return [
+                session
+                for session, _ in canonical_store.active_session_activity_rows(db)
+            ]
+
+    def test_delete_removes_the_activity_and_every_copy(self) -> None:
+        self.corrections.delete(self.garmin)
+
+        self.assertEqual(self._live(), [])
+        rows = self._rows()
+        self.assertTrue(all(row["state"] == "deleted" for row in rows.values()))
+        self.assertIsNone(self.corrections.bundle(self.garmin))
+
+    def test_no_copy_comes_back_after_provider_deletes_or_edits(self) -> None:
+        self.corrections.delete(self.intervals)
+        with self.manager.unit_of_work() as db:
+            canonical_ingest.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": "2026-09-22T08:00:00+00:00",
+                    "raw_provider_data": {
+                        "activities": [intervals_row(INTERVALS_ID, distance=20100.0)]
+                    },
+                },
+                zone=ZONE,
+            )
+            canonical_store.mark_activity_deleted(
+                db,
+                "intervals",
+                record_kind="activity",
+                provider_activity_id=INTERVALS_ID,
+                now="2026-09-23T08:00:00+00:00",
+            )
+            record = canonical_store.provider_activity_record_rows(
+                db, "intervals", [INTERVALS_ID]
+            )
+
+        self.assertEqual(self._live(), [])
+        self.assertEqual(record, [])
+        self.assertTrue(all(row["state"] == "deleted" for row in self._rows().values()))
+
+    def test_undoing_a_delete_restores_the_activity(self) -> None:
+        before = self._rows()
+        result = self.corrections.delete(self.garmin)
+
+        self.undo(result["change"])
+
+        self.assertEqual(self._rows(), before)
+        self.assertEqual(len(set(self._live())), 1)
+
+
+class AthleteDeleteFollowUpTests(SessionCorrectionFixture):
+    def test_undo_is_refused_once_the_provider_deleted_the_primary(self) -> None:
+        survivor = self._effective()[self.intervals]
+        provider, record = (
+            ("intervals", INTERVALS_ID)
+            if survivor == self.intervals
+            else ("garmin", GARMIN_ID)
+        )
+        result = self.corrections.delete(self.intervals)
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                provider,
+                record_kind="activity",
+                provider_activity_id=record,
+                now="2026-09-23T08:00:00+00:00",
+            )
+
+        with self.assertRaises(AppError) as raised:
+            self.undo(result["change"])
+
+        self.assertEqual(raised.exception.status, 409)
+
+    def test_an_exact_copy_of_a_deleted_activity_stays_deleted(self) -> None:
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                "intervals",
+                record_kind="activity",
+                provider_activity_id=INTERVALS_ID,
+                now=SYNCED,
+            )
+        self.corrections.delete(self.garmin)
+        with self.manager.unit_of_work() as db:
+            canonical_ingest.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": "2026-09-22T08:00:00+00:00",
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row(
+                                "i7",
+                                source="GARMIN_CONNECT",
+                                device_name="Garmin Edge 840",
+                                external_id=GARMIN_ID,
+                                start_date_local="2026-09-10T09:30:00",
+                            )
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+            live = canonical_store.active_session_activity_rows(db)
+
+        self.assertEqual(live, [])
+
+    def test_undoing_the_delete_brings_a_later_exact_copy_back(self) -> None:
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                "intervals",
+                record_kind="activity",
+                provider_activity_id=INTERVALS_ID,
+                now=SYNCED,
+            )
+        result = self.corrections.delete(self.garmin)
+        with self.manager.unit_of_work() as db:
+            canonical_ingest.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": "2026-09-22T08:00:00+00:00",
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row(
+                                "i7",
+                                source="GARMIN_CONNECT",
+                                device_name="Garmin Edge 840",
+                                external_id=GARMIN_ID,
+                                start_date_local="2026-09-10T09:30:00",
+                            )
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+
+        self.undo(result["change"])
+
+        with self.manager.reader() as db:
+            live = canonical_store.active_session_activity_rows(db)
+        self.assertEqual(
+            sorted(row["provider_activity_id"] for _, row in live), ["910", "i7"]
+        )
+        self.assertEqual(len({session for session, _ in live}), 1)
+
+
 class FeedbackAnchorTests(FeedbackSessionFixture):
     """Feedback on a Garmin-only session resolves after the Intervals.icu copy arrives."""
 

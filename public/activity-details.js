@@ -177,7 +177,7 @@
   // The provider copies bundled into this session; confirm, split and merge each carry an undo.
   function renderBundle(bundle, api, content, reload, notice) {
     const members = bundle?.members || []; const candidates = bundle?.merge_candidates || [];
-    if (!reload || (members.length < 2 && !candidates.length && !notice)) return;
+    if (!reload || !bundle) return;
     const section = node("section", null, "activity-bundle"); section.append(node("h3", "Aufzeichnungen"));
     const status = node("p", notice?.text || "", "muted"); status.setAttribute("role", "status");
     const buttons = [];
@@ -205,18 +205,34 @@
     section.append(list(members, several ? "Trennen" : null, (entry) => ({ action: "split", member_id: entry.session_id }), "Aufzeichnung getrennt. "));
     if (several && !bundle.athlete_confirmed) section.append(action("Zuordnung bestätigen", { action: "confirm" }, "Zuordnung bestätigt. "));
     if (candidates.length) { section.append(node("h4", "Am selben Tag")); section.append(list(candidates, "Zusammenführen", (entry) => ({ action: "merge", other_id: entry.session_id }), "Aktivitäten zusammengeführt. ")); }
-    if (notice?.change?.id) {
-      const undo = node("button", "Rückgängig", "message-undo"); undo.type = "button";
-      undo.addEventListener("click", async () => {
-        undo.disabled = true;
-        try {
-          await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: notice.change.id, expected_current_hash: notice.change.after_hash }) });
-          await reload({ text: "Zurückgenommen." });
-        } catch (error) { undo.disabled = false; status.textContent = error.message; }
-      });
-      status.append(undo);
-    }
+    if (notice?.change?.id) status.append(undoButton(api, notice.change, status, reload));
+    const remove = node("button", "Aktivität löschen", "secondary-button"); remove.type = "button"; buttons.push(remove);
+    remove.addEventListener("click", async () => {
+      const confirmed = await requestConfirmation("Diese Aktivität mit allen Aufzeichnungen lokal löschen? Bei den Anbietern bleibt sie erhalten.", { title: "Aktivität löschen?", confirmLabel: "Löschen" });
+      if (!confirmed) return;
+      buttons.forEach((item) => { item.disabled = true; }); status.textContent = "Speichere …";
+      try {
+        const result = await api(`/api/activities/${encodeURIComponent(bundle.activity_id)}/session`, { method: "POST", body: JSON.stringify({ action: "delete", confirmed: true }) });
+        const deleted = node("p", "Aktivität gelöscht. ", "muted"); deleted.setAttribute("role", "status");
+        if (result.change?.id) deleted.append(undoButton(api, result.change, deleted, reload));
+        content.replaceChildren(deleted); reload.deleted?.();
+      } catch (error) { buttons.forEach((item) => { item.disabled = false; }); status.textContent = error.message; }
+    });
+    section.append(remove);
     section.append(status); content.append(section);
+  }
+
+  // Undo of a session correction restores the touched sessions, then the detail reloads.
+  function undoButton(api, change, status, reload) {
+    const undo = node("button", "Rückgängig", "message-undo"); undo.type = "button";
+    undo.addEventListener("click", async () => {
+      undo.disabled = true;
+      try {
+        await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: change.id, expected_current_hash: change.after_hash }) });
+        await reload({ text: "Zurückgenommen." });
+      } catch (error) { undo.disabled = false; status.textContent = error.message; }
+    });
+    return undo;
   }
 
   // Undo restores the feedback rows as they were before this save or removal.
@@ -428,6 +444,8 @@
         api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => load(), onSetup: () => close(false),
       }));
     }
+    // A deleted activity keeps only its receipt: its provider actions go away.
+    load.deleted = () => { actions.replaceChildren(); status.textContent = ""; };
     try { await load(); } catch (error) { if (isCurrent()) status.textContent = error.message; }
   }
 

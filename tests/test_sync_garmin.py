@@ -547,6 +547,7 @@ class GarminSyncStateServiceTests(unittest.TestCase):
                     "skipped_invalid": 1,
                     "deleted": 0,
                     "linked": 0,
+                    "split": 0,
                     "retired": 0,
                 },
                 "source": "fixture",

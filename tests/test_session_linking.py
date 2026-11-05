@@ -438,10 +438,19 @@ class ProtectedSessionTests(LinkingCase):
         self.assertEqual(self._sessions()[INTERVALS_ID]["state"], "deleted")
         self.assertEqual(self._sessions()[WAHOO_ID]["state"], "active")
 
-    def test_an_existing_alias_is_never_unmerged(self) -> None:
+    def test_an_alias_that_no_longer_matches_is_split_off(self) -> None:
         self._ingest_all_three()
         survivor = self._sessions()[INTERVALS_ID]["activity_id"]
         # The Wahoo workout later drifts out of the matching window.
+        self._ingest_wahoo([wahoo_workout(starts="2026-09-10T12:00:00.000Z")], LATER)
+        alias = self._sessions()[WAHOO_ID]
+        self.assertEqual((alias["state"], alias["merged_into"]), ("active", None))
+        self.assertEqual(self._sessions()[INTERVALS_ID]["activity_id"], survivor)
+
+    def test_a_confirmed_session_is_never_split(self) -> None:
+        self._ingest_all_three()
+        survivor = self._sessions()[INTERVALS_ID]["activity_id"]
+        self._set_session(INTERVALS_ID, athlete_confirmed=1)
         self._ingest_wahoo([wahoo_workout(starts="2026-09-10T12:00:00.000Z")], LATER)
         alias = self._sessions()[WAHOO_ID]
         self.assertEqual(

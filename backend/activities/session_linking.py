@@ -8,8 +8,9 @@ id stays valid and the other id keeps resolving through ``merged_into``.
 Only the session rows change. Records keep their ``activity_id``, sessions keep
 their primary provider, and nothing is re-pointed, so provider deletes still find
 their own session. Sessions the athlete confirmed, hidden or deleted sessions and
-sessions that are already aliases are never merged or reopened, and a merge is never
-undone here. An exact link between records already in one session upgrades its
+sessions that are already aliases are never merged or reopened by linking;
+``split_unmatched_sessions`` runs first and splits a copy off an unconfirmed session
+the rules no longer bundle it with. An exact link between records already in one session upgrades its
 link kind; a contradicting earlier merge is left for the diagnostics to report.
 Two sessions never merge when together they would hold two active
 records of one provider and recording origin: bundling assigns one to one, but a
@@ -41,7 +42,12 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import canonical_store
 
-__all__ = ["garmin_activity_matches", "link_activity_sessions", "session_age"]
+__all__ = [
+    "garmin_activity_matches",
+    "link_activity_sessions",
+    "session_age",
+    "split_unmatched_sessions",
+]
 
 LINK_MARGIN: Final = timedelta(days=1)
 _MATCH_SEARCH: Final = timedelta(days=1)
@@ -87,6 +93,90 @@ def link_activity_sessions(
             if sessions.merge(primary_id, duplicate_id, kind, now):
                 linked += 1
     return linked
+
+
+def split_unmatched_sessions(
+    db: Any, *, touched_dates: Collection[date], zone: tzinfo, now: str
+) -> int:
+    """Split copies off unconfirmed sessions they no longer match; return the splits.
+
+    The copies of each live, unconfirmed session near ``touched_dates`` are bundled
+    again on their own. A copy the rules no longer bundle with the session's own
+    record becomes its own active session, for example after a provider edit or a
+    mapper change. Confirmed sessions are never split, and a session whose own
+    record is outside the window or unreadable is left as it is.
+    """
+    if not touched_dates:
+        return 0
+    rows = canonical_store.linkable_activity_rows(
+        db,
+        start=(min(touched_dates) - LINK_MARGIN).isoformat(),
+        end=(max(touched_dates) + LINK_MARGIN).isoformat(),
+    )
+    sessions = _Sessions(db, {str(row["session_id"]) for row in rows})
+    bundles: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        survivor = sessions.survivor(str(row["session_id"]))
+        if survivor is not None and _mergeable(survivor):
+            bundles.setdefault(str(survivor["activity_id"]), []).append(row)
+    split = 0
+    for survivor_id, members in bundles.items():
+        detached = _unmatched(members, survivor_id, zone)
+        for session_id in sorted(detached):
+            split += canonical_store.detach_activity_session(
+                db, activity_id=session_id, now=now
+            )
+        if detached and not _still_bundled(db, survivor_id):
+            canonical_store.set_activity_session_link_kind(
+                db,
+                activity_id=survivor_id,
+                link_kind=ActivityLinkKind.SINGLE.value,
+                now=now,
+            )
+    return split
+
+
+def _unmatched(
+    members: Sequence[dict[str, Any]], survivor_id: str, zone: tzinfo
+) -> set[str]:
+    """Return the alias sessions the rules no longer bundle with the survivor."""
+    session_of = {
+        (str(row["provider"]), str(row["provider_activity_id"])): str(row["session_id"])
+        for row in members
+    }
+    if len(set(session_of.values())) < 2:
+        return set()
+    records = _linkable_records(members)
+    kept = next(
+        (
+            {
+                session_of[_key(record)]
+                for record in (bundle.primary, *bundle.duplicates)
+            }
+            for bundle in bundle_sessions(records, zone=zone)
+            if any(
+                session_of[_key(record)] == survivor_id
+                for record in (bundle.primary, *bundle.duplicates)
+            )
+        ),
+        None,
+    )
+    if kept is None:
+        return set()
+    return {session_of[_key(record)] for record in records} - kept
+
+
+def _still_bundled(db: Any, survivor_id: str) -> bool:
+    """Whether the survivor still bundles the record of another session."""
+    return (
+        len(
+            {
+                row["session_id"]
+                for row in canonical_store.session_member_rows(db, survivor_id)
+            }
+        )
+        > 1
+    )
 
 
 def garmin_activity_matches(
@@ -250,14 +340,15 @@ class _Sessions:
         Two records already in one session only strengthen its link kind, so an
         exact link confirms an earlier heuristic merge.
         """
-        first = self._survivor(primary_id)
-        second = self._survivor(duplicate_id)
+        first = self.survivor(primary_id)
+        second = self.survivor(duplicate_id)
         if first is None or second is None:
             return False
         if first is second:
             if _mergeable(first):
                 self._strengthen(first, kind.value, now)
             return False
+        self._follow_athlete_delete(first, second, now)
         if not (_mergeable(first) and _mergeable(second)):
             return False
         if self._origins_of(first) & self._origins_of(second):
@@ -276,6 +367,31 @@ class _Sessions:
             now,
         )
         return True
+
+    def _follow_athlete_delete(
+        self, first: dict[str, Any], second: dict[str, Any], now: str
+    ) -> None:
+        """Delete a new copy of an activity the athlete deleted, as that activity.
+
+        Only an exact link reaches a deleted session (``_upstream_rows``), so a
+        provider's copy of a deleted recording does not bring the activity back.
+        """
+        for gone, other in ((first, second), (second, first)):
+            if (
+                gone["state"] == ActivitySessionState.DELETED.value
+                and _mergeable(other)
+                and canonical_store.athlete_deleted_session(
+                    self._db, gone["activity_id"]
+                )
+                and canonical_store.delete_with_athlete_deleted(
+                    self._db,
+                    activity_id=other["activity_id"],
+                    deleted=str(gone["merged_into_retained"]),
+                    now=now,
+                )
+            ):
+                other["state"] = ActivitySessionState.DELETED.value
+                other["merged_into_retained"] = gone["merged_into_retained"]
 
     def _strengthen(self, row: dict[str, Any], link_kind: str, now: str) -> None:
         if _LINK_STRENGTH[link_kind] <= _LINK_STRENGTH[row["link_kind"]]:
@@ -297,7 +413,7 @@ class _Sessions:
             }
         return self._origins[session_id]
 
-    def _survivor(self, session_id: str) -> dict[str, Any] | None:
+    def survivor(self, session_id: str) -> dict[str, Any] | None:
         """Follow ``merged_into`` to the session that stands for ``session_id``."""
         seen: set[str] = set()
         current = session_id
