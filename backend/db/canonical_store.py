@@ -2072,15 +2072,21 @@ def session_member_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
 def merge_candidate_rows(
     db: Any, local_date: str, exclude: str
 ) -> list[dict[str, Any]]:
-    """Return the active records of other live sessions on one athlete-local date."""
+    """Return the active records of other live sessions on one athlete-local date.
+
+    ``session_id`` is the live session; records of its aliases are listed under it.
+    """
     return _fetch_all(
         db,
         "SELECT s.activity_id AS session_id, r.provider, r.recorded_by, r.sport, "
         "r.started_at, r.duration_s, r.distance_m, r.name FROM activity_sessions AS s "
-        "JOIN activity_records AS r ON r.activity_id = s.activity_id "
+        "JOIN activity_sessions AS m ON m.activity_id = s.activity_id "
+        "OR (m.state = ? AND m.merged_into = s.activity_id) "
+        "JOIN activity_records AS r ON r.activity_id = m.activity_id "
         "WHERE s.state = ? AND s.local_date = ? AND s.activity_id != ? AND r.state = ? "
-        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        "ORDER BY s.activity_id, r.started_at, r.provider, r.provider_activity_id",
         (
+            ActivitySessionState.DUPLICATE.value,
             ActivitySessionState.ACTIVE.value,
             local_date,
             exclude,

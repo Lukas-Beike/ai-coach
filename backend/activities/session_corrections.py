@@ -11,10 +11,10 @@ session it was written for and follows that session's merges.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
 from typing import Any, Final
 
 from backend import change_history
+from backend.activities.session_linking import session_age
 from backend.canonical.vocabulary import (
     ActivityLinkKind,
     ActivitySessionState,
@@ -37,6 +37,7 @@ _SAME_ORIGIN = (
     "Beide Aktivitäten enthalten eine Aufzeichnung derselben Quelle und können "
     "nicht zusammengeführt werden."
 )
+_OTHER_DAY = "Nur Aktivitäten desselben Tages können zusammengeführt werden."
 _TOO_LARGE = "Diese Aktivität ist zu groß für eine rücknehmbare Korrektur."
 
 
@@ -99,13 +100,27 @@ class SessionCorrectionService:
                 raise AppError(409, _NOT_IN_BUNDLE)
             if len(members) < 2:
                 raise AppError(409, _SINGLE)
-            rows = self._rows(db, members)
+            survivor_id = survivor["activity_id"]
+            touched = sorted(
+                {*members, *canonical_store.session_bundle_ids(db, survivor_id)}
+            )
+            rows = self._rows(db, touched)
             remaining = [rows[session] for session in members if session != member_id]
             detached = rows[member_id]
-            keep = min(remaining, key=_age)
-            for row in remaining:
-                if row is not keep:
-                    row.update(state=_DUPLICATE, merged_into=keep["activity_id"])
+            keep = (
+                min(remaining, key=session_age)
+                if member_id == survivor_id
+                else rows[survivor_id]
+            )
+            keep_id = keep["activity_id"]
+            if member_id == survivor_id:
+                # Every alias and retaining deletion of the detached survivor,
+                # with or without an active record, follows the kept bundle.
+                for row in rows.values():
+                    if row["merged_into"] == survivor_id:
+                        row["merged_into"] = keep_id
+                    if row["merged_into_retained"] == survivor_id:
+                        row["merged_into_retained"] = keep_id
             keep.update(
                 state=_ACTIVE,
                 merged_into=None,
@@ -118,7 +133,7 @@ class SessionCorrectionService:
                 athlete_confirmed=1,
                 link_kind=ActivityLinkKind.SINGLE.value,
             )
-            return members
+            return touched
 
         return self._correct(activity_id, correct, "split", source)
 
@@ -133,6 +148,8 @@ class SessionCorrectionService:
                 raise AppError(404, _UNKNOWN)
             if second["activity_id"] == first["activity_id"]:
                 raise AppError(409, _SAME)
+            if second["local_date"] != first["local_date"]:
+                raise AppError(409, _OTHER_DAY)
             origins = [
                 {
                     (str(row["provider"]), str(row["recorded_by"]))
@@ -144,7 +161,7 @@ class SessionCorrectionService:
             ]
             if origins[0] & origins[1]:
                 raise AppError(409, _SAME_ORIGIN)
-            keep, drop = sorted((first, second), key=_age)
+            keep, drop = sorted((first, second), key=session_age)
             touched = [
                 *canonical_store.session_bundle_ids(db, keep["activity_id"]),
                 *canonical_store.session_bundle_ids(db, drop["activity_id"]),
@@ -190,7 +207,6 @@ class SessionCorrectionService:
         } != set(entity_id.split(",")):
             raise AppError(409, "Die Änderungshistorie ist beschädigt.")
         canonical_store.write_session_correction_rows(db, rows, now=self._clock())
-        self._publish()
         return target
 
     def _correct(
@@ -292,14 +308,6 @@ def _kind(members: int) -> str:
         if members > 1
         else ActivityLinkKind.SINGLE.value
     )
-
-
-def _age(row: dict[str, Any]) -> tuple[datetime, str]:
-    """Order sessions by creation time, then id: the older one stays valid."""
-    created = datetime.fromisoformat(str(row["created_at"]))
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=UTC)
-    return created, str(row["activity_id"])
 
 
 def _label(value: Any) -> str | None:

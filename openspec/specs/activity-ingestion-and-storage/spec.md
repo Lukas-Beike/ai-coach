@@ -280,8 +280,8 @@ The system SHALL let the athlete confirm a canonical session's bundle, split one
 - **THEN** that copy becomes its own active, athlete-confirmed session, the remaining copies stay bundled under their oldest session, later syncs do not merge them again, and feedback stays with the session it was written for.
 
 #### Scenario: Merge two sessions
-- **WHEN** the athlete merges two live sessions that hold no two active records of one provider and recording origin
-- **THEN** the younger becomes an alias of the older one, which is athlete-confirmed with link kind `confirmed`; a merge that would join two records of one provider and origin is refused with a conflict.
+- **WHEN** the athlete merges two live sessions of the same local date that hold no two active records of one provider and recording origin
+- **THEN** the younger becomes an alias of the older one, which is athlete-confirmed with link kind `confirmed`; a merge across dates or one that would join two records of one provider and origin is refused with a conflict.
 
 #### Scenario: Undo a correction
 - **WHEN** the athlete undoes a correction's receipt while the touched sessions are unchanged since

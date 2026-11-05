@@ -184,6 +184,28 @@ class SessionCorrectionTests(SessionCorrectionFixture):
             [other],
         )
 
+    def test_merge_refuses_a_session_of_another_day(self) -> None:
+        with self.manager.unit_of_work() as db:
+            canonical_ingest.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": SYNCED,
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row("i3", start_date_local="2026-09-11T07:00:00")
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+            other = canonical_store.activity_local_ids(db, "intervals", ["i3"])["i3"]
+        self.corrections.split(self.intervals, self.garmin)
+
+        with self.assertRaises(AppError) as raised:
+            self.corrections.merge(self.garmin, other)
+
+        self.assertEqual(raised.exception.status, 409)
+
     def test_a_single_copy_cannot_be_split(self) -> None:
         self.corrections.split(self.intervals, self.garmin)
 
