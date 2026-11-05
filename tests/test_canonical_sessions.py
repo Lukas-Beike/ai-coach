@@ -950,6 +950,19 @@ class OneToOneAssignmentTests(unittest.TestCase):
             total = sum(edges[source][primary] for source, primary in matching.items())
             self.assertAlmostEqual(-best[1], total, places=9, msg=edges)
 
+    def test_matching_with_float_noise_ties_terminates_one_to_one(self) -> None:
+        # Equal costs in exact arithmetic that differ by float round-off.
+        cost = 0.1 + 0.2
+        edges = {
+            source: {
+                primary: cost + (source + primary) * 1e-17 for primary in (10, 11, 12)
+            }
+            for source in (0, 1, 2)
+        }
+        matching = canonical_sessions._min_cost_matching([0, 1, 2], edges)
+        self.assertEqual(3, len(matching))
+        self.assertEqual({10, 11, 12}, set(matching.values()))
+
     def test_generated_sessions_hold_one_record_per_provider_and_origin(
         self,
     ) -> None:

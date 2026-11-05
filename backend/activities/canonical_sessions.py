@@ -354,6 +354,9 @@ def _candidate_groups(edges: dict[int, dict[int, float]]) -> list[list[int]]:
 
 
 _Node = tuple[str, int]
+# Smaller cost gains are float noise: a zero-cost residual cycle must not
+# rewrite predecessors, or the path walk could circle.
+_COST_EPSILON: Final = 1e-9
 
 
 def _min_cost_matching(
@@ -406,7 +409,9 @@ def _cheapest_paths(
         changed = False
         for start, end, pair_cost in arcs:
             reached = distance.get(start)
-            if reached is None or reached + pair_cost >= distance.get(end, inf):
+            if reached is None or reached + pair_cost >= (
+                distance.get(end, inf) - _COST_EPSILON
+            ):
                 continue
             distance[end] = reached + pair_cost
             previous[end] = start
@@ -423,7 +428,9 @@ def _augment(
     source_of: dict[int, int],
 ) -> None:
     """Flip the pairs along the path that ends at the free session ``node``."""
-    while node in previous:
+    seen: set[_Node] = set()
+    while node in previous and node not in seen:
+        seen.add(node)
         source_node = previous[node]
         match_of[source_node[1]] = node[1]
         source_of[node[1]] = source_node[1]
