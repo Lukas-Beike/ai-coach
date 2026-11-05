@@ -46,7 +46,7 @@ def bounded(
 class _RowFingerprints:
     """Serve fingerprints and single rows from ``activity_rows``, as the tables do."""
 
-    def activity_rows(self, db: Any) -> tuple[dict[str, Any], ...]:
+    def intervals_activity_payloads(self, db: Any) -> tuple[dict[str, Any], ...]:
         raise NotImplementedError
 
     def intervals_summary_row(
@@ -55,7 +55,7 @@ class _RowFingerprints:
         return next(
             (
                 row
-                for row in self.activity_rows(db)
+                for row in self.intervals_activity_payloads(db)
                 if str(row.get("id")) == provider_activity_id
             ),
             None,
@@ -67,7 +67,7 @@ class _RowFingerprints:
         wanted = set(keys)
         return {
             key: summary_fingerprint(row)
-            for row in self.activity_rows(db)
+            for row in self.intervals_activity_payloads(db)
             if (key := (ProviderId.INTERVALS.value, str(row.get("id")))) in wanted
         }
 
@@ -78,7 +78,7 @@ class SnapshotActivityRows(_RowFingerprints):
     def __init__(self, snapshot_reader: Any) -> None:
         self._snapshot_reader = snapshot_reader
 
-    def activity_rows(
+    def intervals_activity_payloads(
         self,
         db: Any,
         *,
@@ -97,7 +97,7 @@ class SnapshotActivityRows(_RowFingerprints):
         end: date | None = None,
         limit: int | None = None,
     ) -> tuple[ActivitySummary, ...]:
-        return bounded(summaries_of_rows(self.activity_rows(db)), start, end, limit)
+        return bounded(summaries_of_rows(self.intervals_activity_payloads(db)), start, end, limit)
 
 
 class FixedActivityRows(_RowFingerprints):
@@ -106,7 +106,7 @@ class FixedActivityRows(_RowFingerprints):
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         self.rows = tuple(rows or ())
 
-    def activity_rows(
+    def intervals_activity_payloads(
         self,
         db: Any,
         *,

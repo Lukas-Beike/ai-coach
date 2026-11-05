@@ -282,7 +282,7 @@ class NoActivityRows:
     def activity_summaries(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
         return ()
 
-    def activity_rows(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
+    def intervals_activity_payloads(self, db: Any, **bounds: Any) -> tuple[Any, ...]:
         return ()
 
 

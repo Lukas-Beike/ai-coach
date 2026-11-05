@@ -190,8 +190,8 @@ class ActivityRowLimitTests(CanonicalContextReadCase):
     def _limited(self, selector: Any, _snapshot: dict[str, Any]) -> tuple[Any, Any]:
         with self.manager.reader() as db:
             return (
-                selector.activity_rows(db),
-                selector.activity_rows(db, limit=1),
+                selector.intervals_activity_payloads(db),
+                selector.intervals_activity_payloads(db, limit=1),
             )
 
     def test_limit_keeps_the_leading_rows_of_the_tables(self) -> None:

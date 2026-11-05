@@ -102,7 +102,7 @@ class SnapshotStorage:
                 "Die gespeicherten Aktivitäten sind noch nicht lesbar.",
                 reason="canonical_tables_unavailable",
             )
-        rows = self._rows.activity_rows(db)
+        rows = self._rows.intervals_activity_payloads(db)
         return restore_intervals_activity_sections(
             snapshot, raw_rows=rows, compact_rows=compact_activity_rows(rows)
         )

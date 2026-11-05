@@ -94,6 +94,9 @@ class ActivitySummaryReader(Protocol):
 class ActivityRowReader(Protocol):
     """Reads the raw Intervals.icu activity payloads behind the canonical records.
 
+    Sync owner only (detail fetch, snapshot restore); a guard rejects calls
+    outside ``backend/sync/``. Consumers read session summaries instead.
+
     Rows are provider dictionaries (device source, ``icu_*`` fields, laps, gear),
     untrusted data, before any de-duplication. ``start`` and ``end`` are inclusive
     bounds on the athlete-local date of each activity, as in ``ActivityReader``.
@@ -103,7 +106,7 @@ class ActivityRowReader(Protocol):
     source applies it before reading the payloads.
     """
 
-    def activity_rows(
+    def intervals_activity_payloads(
         self,
         db: Any,
         *,

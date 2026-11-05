@@ -195,7 +195,7 @@ class CanonicalTableReader(
             for session_id, records in grouped.items()
         )
 
-    def activity_rows(
+    def intervals_activity_payloads(
         self,
         db: Any,
         *,

@@ -11,7 +11,7 @@ selector serves the tables through a reader that returns each observation at the
 newest version stored for it, so nothing vanishes. Once the re-projection
 completes, only observations at the current mapper version are served.
 
-Raw activity rows (``activity_rows``) follow the same decision as ``activities``.
+Raw activity rows (``intervals_activity_payloads``) follow the same decision as ``activities``.
 A stored Intervals.icu snapshot that lists activities only in compact form (from a
 release before ``raw_provider_data``) cannot be backfilled; its activities stay
 missing from the tables until the full read-only Intervals.icu reload returns raw
@@ -92,7 +92,7 @@ class _PendingReader:
         del db, provider, low, high
         return ()
 
-    def activity_rows(
+    def intervals_activity_payloads(
         self,
         db: Any,
         *,
@@ -200,7 +200,7 @@ class CanonicalReadSelector(
     ) -> tuple[tuple[Sport, float, date], ...]:
         return self._source(db).activity_max_hr(db, provider, low=low, high=high)
 
-    def activity_rows(
+    def intervals_activity_payloads(
         self,
         db: Any,
         *,
@@ -209,7 +209,7 @@ class CanonicalReadSelector(
         limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
         """Return raw activity rows from the same source as ``activities``."""
-        return self._source(db).activity_rows(db, start=start, end=end, limit=limit)
+        return self._source(db).intervals_activity_payloads(db, start=start, end=end, limit=limit)
 
     def summary_fingerprints(
         self, db: Any, keys: Iterable[ProviderActivityKey]

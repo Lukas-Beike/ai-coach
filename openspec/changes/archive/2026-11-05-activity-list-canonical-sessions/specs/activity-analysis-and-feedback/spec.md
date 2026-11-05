@@ -26,6 +26,15 @@ Freshness checks outside the sync owner SHALL read current summary fingerprints 
 
 Evidence: `backend/sync/canonical_table_reader.py:CanonicalTableReader.summary_fingerprints`; `tests/test_activity_canonical_reads.py:test_fingerprints_keep_the_stored_values`, `tests/test_canonical_detail_reader.py:CanonicalDetailStatusTests`.
 
+### Requirement: Raw Intervals.icu payloads stay with the sync owner
+Only `backend/sync/` SHALL read stored raw Intervals.icu activity payloads (`intervals_activity_payloads`, for the detail fetch and snapshot restore); other consumers SHALL read session summaries, the `summary_fingerprints` port, or the single-record `intervals_summary_row` port that the activity detail document uses.
+
+#### Scenario: Consumer outside sync
+- **WHEN** a module outside `backend/sync/` calls `intervals_activity_payloads`
+- **THEN** the guard test fails.
+
+Evidence: `tests/test_provider_coupling_guard.py:RawPayloadReadGuardTests`.
+
 ## MODIFIED Requirements
 
 ### Requirement: Completed-activity summaries use provider-neutral keys over HTTP

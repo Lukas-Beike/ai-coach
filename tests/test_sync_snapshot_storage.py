@@ -254,7 +254,7 @@ class Environment:
 
     def table_activity_ids(self) -> list[str]:
         with self.manager.reader() as db:
-            rows = self.selector.activity_rows(db)
+            rows = self.selector.intervals_activity_payloads(db)
         return sorted(str(row["id"]) for row in rows)
 
     def canonical_dump(self) -> dict[str, list[str]]:

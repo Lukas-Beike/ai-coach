@@ -271,11 +271,11 @@ Merge, provider deletion, restart and backup/restore SHALL preserve athlete feed
 Evidence baseline: `backend/activities/feedback.py`, `backend/activities/activity_reference.py`, `backend/db/repositories.py:ActivityFeedbackRepository`; `tests/test_activity_feedback.py`, `tests/test_activity_reference.py`. Canonical session resolution and lifecycle evidence are new acceptance checks.
 
 ### Requirement: Completed-activity summaries use provider-neutral keys over HTTP
-Every completed-activity object that the HTTP API returns SHALL carry provider-neutral keys produced by one translation, and SHALL NOT carry the former Intervals.icu activity keys. Values SHALL be unchanged. Local planning records already carry the provider-neutral `starts_at_local` and `planned_duration_s` and receive only the metric renames.
+Every completed-activity object that the HTTP API returns SHALL carry provider-neutral keys, and SHALL NOT carry the former Intervals.icu activity keys. Values SHALL be unchanged. Local planning records already carry the provider-neutral `starts_at_local` and `planned_duration_s` and receive only the metric renames.
 
 #### Scenario: Activity list row
-- **WHEN** `/api/activities` or `/api/bootstrap` returns an activity with start, duration, distance, heart-rate, power, speed, load, threshold and VO2max values
-- **THEN** they appear as `started_at_local`, `moving_duration_s`, `elapsed_duration_s`, `distance_m`, `avg_hr`, `max_hr`, `avg_power`, `weighted_avg_power`, `normalized_power`, `avg_speed_mps`, `elevation_gain_m`, `training_load`, `intensity`, `rpe`, `ctl`, `atl`, `ftp_w`, `eftp_w` and `vo2max` with the stored values, and none of `start_date_local`, `moving_time`, `distance`, `average_heartrate`, `average_watts` or `icu_*` is present.
+- **WHEN** `/api/activities` returns a session
+- **THEN** it is the session summary with `id`, `started_at`, `started_at_local`, `sport`, `environment`, `record_ids` and the neutral metric names such as `moving_duration_s`, `distance_m` and `training_load`, and none of `start_date_local`, `moving_time`, `type`, `local_activity_id` or `icu_*` is present.
 
 #### Scenario: Calendar actual activity
 - **WHEN** `/api/bootstrap` or `/api/plan` returns, in `training_calendar`, `planned`, `calendar` or `planning_view.items`, a completed-activity calendar entry or a planned unit matched to an activity
@@ -286,12 +286,12 @@ Every completed-activity object that the HTTP API returns SHALL carry provider-n
 - **THEN** the neutral value wins and the provider key is dropped.
 
 #### Scenario: Browser shows unchanged values
-- **WHEN** the activity analysis list, the analysis row summary before the detail loads, and the calendar's completed and matched entries render the same synthetic data as before
-- **THEN** they show the same dates, durations, distances, heart rate, power and load.
+- **WHEN** the activity analysis list renders a session summary, including one with `sport` `ride` and `environment` `virtual`, and the calendar renders its completed and matched entries
+- **THEN** they show the same dates, durations, distances, heart rate, power and load as the summary, and the indoor ride is labelled "Rad indoor".
 
-Detailed contract: the key map is listed in `openspec/changes/archive/2026-10-30-neutral-activity-http-shape/design.md` (D1). A neutral key that is already present wins. `weighted_average_watts` stays separate from `normalized_power`. The activity detail document (`/api/activities/{id}`) is already neutral and stays unchanged. The provider-coupling ratchet records every module outside the provider, sync and canonical packages that imports a provider field-name module, and that record may only shrink.
+Detailed contract: the calendar key map is listed in `openspec/changes/archive/2026-10-30-neutral-activity-http-shape/design.md` (D1). A neutral key that is already present wins. `weighted_average_watts` stays separate from `normalized_power`. The activity detail document (`/api/activities/{id}`) is already neutral and stays unchanged. The provider-coupling ratchet records every module outside the provider, sync and canonical packages that imports a provider field-name module, and that record may only shrink.
 
-Evidence: `backend/canonical/public_metrics.py:neutral_activity`, `backend/canonical/public_metrics.py:neutral_calendar_state`, `backend/http_api/bootstrap_calendar.py`, `backend/http_api/public_plan.py:PublicPlanStateService.read_public`, `backend/http_api/bootstrap_state.py`, `public/activity-analysis.js`, `public/plan-views.js`; `tests/test_canonical_public_metrics.py:NeutralPublicMetricsTests`, `tests/test_http_sync_get_routes.py:test_activity_page_uses_neutral_names_and_detail_is_passed_through`, `tests/test_public_plan.py:test_internal_read_keeps_stored_metrics_and_public_read_translates`, `tests/plan-views-week-distance.test.cjs`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_import_provider_field_name_modules`; `e2e/contracts.spec.js`, `e2e/activity-details.spec.js`.
+Evidence: `backend/canonical/public_metrics.py:neutral_activity`, `backend/canonical/public_metrics.py:neutral_calendar_state`, `backend/activities/read_service.py:ActivityReadService.page`, `backend/http_api/public_plan.py:PublicPlanStateService.read_public`, `public/activity-analysis.js`, `public/performance-view.js`, `public/plan-views.js`; `tests/test_canonical_public_metrics.py:NeutralPublicMetricsTests`, `tests/test_activity_canonical_reads.py:test_list_rows_carry_neutral_names_only`, `tests/plan-views-sport-label.test.cjs`, `tests/test_provider_coupling_guard.py:OwnerReadGuardTests.test_consumers_cannot_import_provider_field_name_modules`; `e2e/contracts.spec.js`, `e2e/activity-details.spec.js`.
 
 ### Requirement: Session RPE rating time and session load in the detail
 The system SHALL store when the athlete last set a feedback row's session RPE, keep it while the RPE stays the same and clear it with the RPE; ratings stored before schema v18 SHALL keep an unknown rating time. The activity detail document SHALL carry the session's session-RPE load, and the PWA SHALL offer the RPE as a 0–10 half-point selection with the CR-10 anchors.
@@ -305,3 +305,38 @@ The system SHALL store when the athlete last set a feedback row's session RPE, k
 - **THEN** it shows `403 AU · RPE 6,5 (Athletenfeedback) × 62 min`; a session without a summary shows no load line.
 
 Evidence: `backend/db/repositories.py:ActivityFeedbackRepository.upsert`, `backend/performance/detail_envelope.py:DetailEnvelopeReader`, `public/activity-details.js:rpeSelect`; `tests/test_db_feedback_rating_time_migration.py::test_upgraded_feedback_records_its_rating_time_only_on_an_rpe_change`, `tests/test_detail_envelope.py`, `e2e/activity-details.spec.js`.
+
+### Requirement: One activity list entry per canonical session
+The activity list (`GET /api/activities`) and the Coach tool `list_recent_activities` SHALL list each live canonical session exactly once, from every provider, as its session summary keyed by the local session id, newest first. Paging SHALL use a version-3 keyset cursor; any other cursor SHALL restart at page one. `detail_error` SHALL name only an Intervals.icu failure note of the current summary fingerprint.
+
+#### Scenario: Sessions from several providers
+- **WHEN** the tables hold Intervals.icu-only sessions, a Garmin-only session, a bundled Intervals.icu and Garmin session, and an Intervals.icu duplicate pair bundled into one session
+- **THEN** the list and the Coach tool contain each session once under its `act_` id, the Garmin-only session included, and paging with limit 1 walks all of them in the same order.
+
+#### Scenario: Older cursor
+- **WHEN** a client sends a version-2 cursor
+- **THEN** the first page is returned.
+
+#### Scenario: Failure note of another summary version
+- **WHEN** a listed session's Intervals.icu record has a failure note whose fingerprint differs from the current one
+- **THEN** its `detail_error` is null.
+
+Evidence: `backend/activities/read_service.py:ActivityReadService.page`, `backend/activities/read_service.py:ActivityReadService.recent`; `tests/test_activity_canonical_reads.py:test_read_service_lists_nothing_until_the_tables_serve`, `tests/test_activity_canonical_reads.py:test_limit_one_pages_walk_every_session_and_old_cursors_restart`, `tests/test_activity_canonical_reads.py:test_garmin_only_session_is_listed_and_its_detail_loads`, `tests/test_activity_read_service.py:test_page_hides_a_failure_note_of_an_older_summary_version`; `e2e/activity-details.spec.js::@responsive analysis lists a Garmin-only indoor session and loads more`.
+
+### Requirement: Summary fingerprints from one sync-owned port
+Freshness checks outside the sync owner SHALL read current summary fingerprints only through the `summary_fingerprints` port, for the requested activities only. Intervals.icu fingerprints SHALL keep the value of `summary_fingerprint` of the stored payload; other providers SHALL use the payload hash of the active raw record.
+
+#### Scenario: Stored fingerprints stay valid
+- **WHEN** the port reads fingerprints for every stored Intervals.icu activity of a populated fixture and for a Garmin record
+- **THEN** each Intervals.icu value equals `summary_fingerprint` of its stored row and the Garmin value equals its record's payload hash, so no stored detail, analysis or profile becomes stale.
+
+Evidence: `backend/sync/canonical_table_reader.py:CanonicalTableReader.summary_fingerprints`; `tests/test_activity_canonical_reads.py:test_fingerprints_keep_the_stored_values`, `tests/test_canonical_detail_reader.py:CanonicalDetailStatusTests`.
+
+### Requirement: Raw Intervals.icu payloads stay with the sync owner
+Only `backend/sync/` SHALL read stored raw Intervals.icu activity payloads (`intervals_activity_payloads`, for the detail fetch and snapshot restore); other consumers SHALL read session summaries, the `summary_fingerprints` port, or the single-record `intervals_summary_row` port that the activity detail document uses.
+
+#### Scenario: Consumer outside sync
+- **WHEN** a module outside `backend/sync/` calls `intervals_activity_payloads`
+- **THEN** the guard test fails.
+
+Evidence: `tests/test_provider_coupling_guard.py:RawPayloadReadGuardTests`.

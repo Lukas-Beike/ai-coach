@@ -7,6 +7,8 @@ The Einheiten list, the Coach's `list_recent_activities` and the feedback existe
 - `/api/activities` and `list_recent_activities` list one provider-neutral session summary per live canonical session, keyed by the local session id; the page cursor moves to version 3 and older cursors restart at page one. `local_activity_id`, `type` and the compact Intervals.icu row shape are gone; the PWA labels sessions from `sport` and `environment`.
 - Coach and HTTP feedback saves accept any id that leads to a live canonical session; the stored key is unchanged.
 - One sync-owned port, `summary_fingerprints`, returns current summary fingerprints for requested activities only; stored fingerprint values are unchanged, so nothing becomes stale or is refetched.
+- Equipment usage, maintenance, assignment and Garmin gear links read session summaries; assignment keys are unchanged.
+- The raw-row read is renamed `intervals_activity_payloads` and a guard keeps it inside `backend/sync/`.
 - No schema or data migration.
 
 ## Impact

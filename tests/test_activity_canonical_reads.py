@@ -116,7 +116,7 @@ class DuplicateRemovalTests(_ActivityCase):
     def test_removal_is_recorded_in_the_tables_and_leaves_the_snapshot(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.assertIn(GARMIN_ID, self.ids(self.read(selector.activity_rows)))
+        self.assertIn(GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads)))
         snapshot = self.intervals["synced_at"]
 
         remote = Mock()
@@ -124,7 +124,7 @@ class DuplicateRemovalTests(_ActivityCase):
 
         remote.delete_activity.assert_called_once_with(GARMIN_ID)
         for source in (selector, self.table):
-            rows = self.read(source.activity_rows)
+            rows = self.read(source.intervals_activity_payloads)
             self.assertNotIn(GARMIN_ID, self.ids(rows))
             self.assertIn(WAHOO_ID, self.ids(rows))
         # The snapshot is an ingestion artefact and is not rewritten by a delete.
@@ -272,7 +272,7 @@ class SessionListFreshnessTests(_ActivityCase):
         populate(self)
         selector = make_selector(self)
         with self.manager.reader() as db:
-            rows = selector.activity_rows(db)
+            rows = selector.intervals_activity_payloads(db)
             keys = [("intervals", str(row["id"])) for row in rows]
             keys += [("garmin", "910002"), ("intervals", "missing")]
             current = selector.summary_fingerprints(db, keys)
@@ -353,7 +353,7 @@ class SnapshotWithoutCanonicalSectionsTests(_ActivityCase):
 
         service.delete(payload, Mock())
 
-        self.assertNotIn(GARMIN_ID, self.ids(self.read(selector.activity_rows)))
+        self.assertNotIn(GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads)))
 
     def _payload(self, selector: Any) -> dict[str, Any]:
         pair = self.inspector(selector).latest() or {}
