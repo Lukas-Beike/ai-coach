@@ -74,11 +74,13 @@ def _provider_day(
     text: object = source_record_id
     if provider is ProviderId.GARMIN:
         # The daily sleep record is the element itself or its ``dailySleepDTO``.
-        record = main if isinstance(main, Mapping) else payload
-        text = (
-            record.get(GARMIN_CALENDAR_DATE_KEY)
-            if isinstance(record, Mapping)
-            else None
+        text = next(
+            (
+                record[GARMIN_CALENDAR_DATE_KEY]
+                for record in (main, payload)
+                if isinstance(record, Mapping) and record.get(GARMIN_CALENDAR_DATE_KEY)
+            ),
+            None,
         )
     if not isinstance(text, str) or len(text) != _DAY_LENGTH:
         return None

@@ -178,8 +178,8 @@ def _session(
     session_id: str, measured: Sequence[ActivityRecord], zone: tzinfo
 ) -> dict[str, Any]:
     primary = measured[0]
-    local_start, _offset = session_local_start(measured, zone)
-    return {
+    local_start, offset = session_local_start(measured, zone)
+    session: dict[str, Any] = {
         "activity_id": session_id,
         "sport": primary.sport.value,
         "environment": primary.environment.value,
@@ -190,6 +190,9 @@ def _session(
         if primary.device_type is None
         else primary.device_type.value,
     }
+    if offset is not None:
+        session["local_offset_minutes"] = offset
+    return session
 
 
 def _metrics(

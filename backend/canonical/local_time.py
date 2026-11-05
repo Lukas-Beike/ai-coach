@@ -116,15 +116,36 @@ def wall_clock_offset_minutes(local_text: object, instant: datetime) -> int | No
     parsed = parse_provider_datetime(local_text, UTC)
     if parsed is None or instant.utcoffset() is None:
         return None
-    if isinstance(local_text, str) and _names_offset(local_text):
+    if names_utc_offset(local_text):
         offset = parsed.utcoffset()
-        return None if offset is None else _rounded_offset(offset.total_seconds())
-    utc_wall = instant.astimezone(UTC).replace(tzinfo=None)
-    return _rounded_offset((parsed.replace(tzinfo=None) - utc_wall).total_seconds())
+        seconds = None if offset is None else offset.total_seconds()
+    else:
+        utc_wall = instant.astimezone(UTC).replace(tzinfo=None)
+        seconds = (parsed.replace(tzinfo=None) - utc_wall).total_seconds()
+    minutes = None if seconds is None else _rounded_offset(seconds)
+    return minutes if _representable(instant, minutes) else None
 
 
-def _names_offset(text: str) -> bool:
-    time_part = text.strip()[_DATE_PART_LENGTH + 1 :]
+def _representable(instant: datetime, offset_minutes: int | None) -> bool:
+    """Return whether ``wall_time`` can read ``instant`` in the offset."""
+    if offset_minutes is None:
+        return True
+    try:
+        instant.astimezone(timezone(timedelta(minutes=offset_minutes)))
+    except OverflowError, ValueError:
+        return False
+    return True
+
+
+def names_utc_offset(value: object) -> bool:
+    """Return True when ISO text carries its own offset (``Z``, ``+hh:mm``, ``-hh:mm``).
+
+    Meant for text ``parse_provider_datetime`` accepted, so the time part starts
+    at a fixed position. Any other value returns False.
+    """
+    if not isinstance(value, str):
+        return False
+    time_part = value.strip()[_DATE_PART_LENGTH + 1 :]
     return time_part.endswith(("Z", "z")) or "+" in time_part or "-" in time_part
 
 
@@ -137,7 +158,8 @@ def zone_offset_minutes(name: object, instant: datetime) -> int | None:
         return None
     try:
         offset = instant.astimezone(ZoneInfo(name.strip())).utcoffset()
-    except ValueError, OverflowError, ZoneInfoNotFoundError:
+    except ValueError, OverflowError, OSError, ZoneInfoNotFoundError:
+        # ZoneInfoNotFoundError is a KeyError; an over-long name raises OSError.
         return None
     return None if offset is None else _rounded_offset(offset.total_seconds())
 

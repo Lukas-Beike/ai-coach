@@ -69,6 +69,7 @@ from datetime import UTC, datetime, tzinfo
 from typing import Final
 
 from backend.canonical.local_time import (
+    names_utc_offset,
     parse_provider_datetime,
     wall_clock_offset_minutes,
     zone_offset_minutes,
@@ -174,7 +175,6 @@ _MIN_DURATION_S: Final = 1.0
 # digit limit, so wider integers are rejected before str() is called.
 _MAX_ID_INT_BITS: Final = 4 * MAX_ACTIVITY_ID_LENGTH
 # Offset of the time part in "YYYY-MM-DDTHH:MM..." text.
-_TIME_PART_START: Final = 11
 
 
 def _entries(
@@ -363,7 +363,9 @@ class _ActivityRow:
             parsed = parse_provider_datetime(value, zone)
             # A naive start_date would be localised to the athlete zone, which is
             # the wrong reading for a field that names an exact instant.
-            if parsed is not None and (key == "start_date_local" or _has_offset(value)):
+            if parsed is not None and (
+                key == "start_date_local" or names_utc_offset(value)
+            ):
                 return parsed
             # Text that is not an ISO datetime, any other type, or a naive
             # start_date is INVALID_TYPE.
@@ -398,17 +400,6 @@ class _ActivityRow:
     def name(self) -> str | None:
         value = self.text("name")
         return None if value is None else value[:MAX_NAME_LENGTH]
-
-
-def _has_offset(value: object) -> bool:
-    """Return True when ISO text carries its own offset (``Z``, ``+hh:mm``, ``-hh:mm``).
-
-    Called only on text that ``parse_provider_datetime`` already accepted, so the
-    time part starts at a fixed position. Any other value returns False.
-    """
-    text = value.strip() if isinstance(value, str) else ""
-    time_part = text[_TIME_PART_START:]
-    return time_part.endswith(("Z", "z")) or "+" in time_part or "-" in time_part
 
 
 def _identity_text(row: Mapping[str, object]) -> str:
@@ -611,7 +602,7 @@ def _map_row(
 def _local_offset(row: Mapping[str, object], started_at: datetime) -> int | None:
     """Return the activity's own UTC offset, known only with an exact start."""
     start = row.get("start_date")
-    if not _has_offset(start) or parse_provider_datetime(start, UTC) != started_at:
+    if not names_utc_offset(start) or parse_provider_datetime(start, UTC) != started_at:
         return None
     offset = zone_offset_minutes(row.get("timezone"), started_at)
     if offset is not None:

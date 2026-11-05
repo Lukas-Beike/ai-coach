@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from backend.activities import detail_contract
 from backend.activities.activity_summary import activity_summary
 from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.local_time import (
@@ -113,7 +114,7 @@ class OffsetHelperTests(unittest.TestCase):
         winter = datetime(2026, 12, 1, 12, tzinfo=UTC)
         self.assertEqual(-240, zone_offset_minutes("America/New_York", summer))
         self.assertEqual(-300, zone_offset_minutes("America/New_York", winter))
-        for name in (None, "", "Not/AZone", "../etc", 9):
+        for name in (None, "", "Not/AZone", "../etc", 9, "x" * 300):
             with self.subTest(name=name):
                 self.assertIsNone(zone_offset_minutes(name, summer))
 
@@ -125,6 +126,19 @@ class OffsetHelperTests(unittest.TestCase):
         for bad in (7, 15 * 60, -15 * 60, True):
             with self.subTest(offset=bad), self.assertRaises(ValueError):
                 record(bad)
+
+    def test_an_offset_that_leaves_the_datetime_range_is_unknown(self) -> None:
+        edge = datetime(9999, 12, 31, 20, tzinfo=UTC)
+
+        self.assertIsNone(wall_clock_offset_minutes("9999-12-31 23:59:00", edge))
+        plan = canonical_plans.garmin_ingest_plan(
+            garmin_payload(
+                startTimeGMT="9999-12-31 20:00:00",
+                startTimeLocal="9999-12-31 23:59:00",
+            ),
+            zone=UTC,
+        )
+        self.assertIsNone(plan.activities[0].record.local_offset_minutes)
 
     def test_wall_time_without_offset_uses_the_zone(self) -> None:
         self.assertEqual(
@@ -245,6 +259,14 @@ class SummaryTests(unittest.TestCase):
 
         self.assertEqual("2026-10-12T06:30:00", summary["started_at_local"])
 
+    def test_detail_session_names_its_offset(self) -> None:
+        session = detail_contract._session("act_travel", [record(JST_MINUTES)], BERLIN)
+        home = detail_contract._session("act_home", [record(None)], BERLIN)
+
+        self.assertEqual("2026-10-12T06:30:00", session["started_at_local"])
+        self.assertEqual(JST_MINUTES, session["local_offset_minutes"])
+        self.assertNotIn("local_offset_minutes", home)
+
 
 class TravelDaySleepTests(unittest.TestCase):
     def test_garmin_sleep_and_morning_run_abroad_share_the_day(self) -> None:
@@ -275,6 +297,27 @@ class TravelDaySleepTests(unittest.TestCase):
         self.assertEqual(run.local_date, period.wake_date)
         # Berlin would name another day, so the period keeps no zone.
         self.assertIsNone(period.timezone)
+
+    def test_garmin_element_day_applies_when_the_main_record_has_none(self) -> None:
+        wake = datetime(2026, 10, 11, 21, 0, tzinfo=UTC)
+        element = {
+            "calendarDate": "2026-10-12",
+            "dailySleepDTO": {
+                "sleepStartTimestampGMT": int(
+                    (wake - timedelta(hours=8)).timestamp() * 1000
+                ),
+                "sleepEndTimestampGMT": int(wake.timestamp() * 1000),
+            },
+        }
+        periods = map_sleep_periods(
+            element,
+            provider=ProviderId.GARMIN,
+            source_record_id="sleep/2026-10-12",
+            retrieved_at=RETRIEVED_AT,
+            zone=BERLIN,
+        )
+
+        self.assertEqual([date(2026, 10, 12)], [p.wake_date for p in periods])
 
     def test_intervals_wellness_day_dates_its_sleep(self) -> None:
         (period,) = map_sleep_periods(
