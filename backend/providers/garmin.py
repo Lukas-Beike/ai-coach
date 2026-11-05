@@ -373,8 +373,12 @@ def _weight_row_in_window(row: Any, window: tuple[date, date]) -> bool:
         return False
     raw = next((row[key] for key in _WEIGHT_WINDOW_DATE_KEYS if row.get(key)), None)
     try:
-        day = date.fromisoformat(str(raw)[:10])
-    except ValueError:
+        if isinstance(raw, int | float) and not isinstance(raw, bool):
+            # Epoch milliseconds, read as a UTC day like the health mapper does.
+            day = datetime.fromtimestamp(float(raw) / 1000, UTC).date()
+        else:
+            day = date.fromisoformat(str(raw)[:10])
+    except OverflowError, OSError, ValueError:
         return False
     return window[0] <= day <= window[1]
 

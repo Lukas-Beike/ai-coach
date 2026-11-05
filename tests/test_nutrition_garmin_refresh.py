@@ -326,6 +326,20 @@ class GarminNutritionRefreshTests(unittest.TestCase):
         self.assertIn(inside, unchanged[0]["weight"])
         self.assertIn(summary, unchanged[0]["dailyWeightSummaries"])
 
+    def test_complete_weight_window_reads_epoch_only_weigh_ins_as_utc_days(
+        self,
+    ) -> None:
+        inside = {"samplePk": 5, "timestampGMT": 1_760_000_000_000, "weight": 81900}
+        outside = {"samplePk": 6, "timestampGMT": 1_750_000_000_000, "weight": 79000}
+
+        merged = merge_weight_snapshots(
+            [{"weighIns": []}],
+            [{"weighIns": [inside, outside]}],
+            window=(date(2025, 10, 9), date(2025, 10, 9)),
+        )
+
+        self.assertEqual(merged[0]["weight"], [outside])
+
     def test_remote_energy_without_range_api_is_unsupported_without_daily_loop(
         self,
     ) -> None:
