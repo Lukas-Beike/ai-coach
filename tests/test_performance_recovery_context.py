@@ -334,6 +334,18 @@ class MethodFamilyTests(unittest.TestCase):
         self.assertEqual(context["resting_hr_average"], 54.0)
         self.assertFalse(inputs.relays(MetricKind.RESTING_HR))
 
+    def test_an_intervals_hrv_preference_never_shows_the_garmin_weekly_value(self):
+        weekly = recovery_observation(MetricKind.HRV_WEEKLY_AVERAGE, 61, "2026-09-07")
+        inputs = replace(
+            recovery_inputs([weekly], latest_wellness_day=TODAY),
+            preferences=preferences_from_profile({"preferred_source_hrv": "intervals"}),
+        )
+
+        context = performance_recovery_context(inputs, TODAY)
+
+        self.assertIsNone(context["hrv"])
+        self.assertIsNone(context["hrv_source"])
+
 
 if __name__ == "__main__":
     unittest.main()

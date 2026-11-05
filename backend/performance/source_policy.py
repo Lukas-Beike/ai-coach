@@ -321,13 +321,17 @@ def preferred_source(
 def _preferred_first(
     order: tuple[Source, ...], kind: MetricKind, preferences: SourcePreferences
 ) -> tuple[Source, ...]:
-    """Move the preferred provider to the front, behind a local value if any."""
+    """Move the preferred provider to the front, behind a leading local value.
+
+    A local value elsewhere in the order (the undated profile weight) keeps its
+    place among the rest.
+    """
     preferred = preferred_source(kind, preferences)
     if preferred is None or preferred not in order:
         return order
-    rest = tuple(item for item in order if item is not preferred and item is not None)
-    local: tuple[Source, ...] = (None,) if None in order else ()
-    return (*local, preferred, *rest)
+    lead: tuple[Source, ...] = (None,) if order and order[0] is None else ()
+    rest = tuple(item for item in order[len(lead) :] if item is not preferred)
+    return (*lead, preferred, *rest)
 
 
 def _preferred_providers(

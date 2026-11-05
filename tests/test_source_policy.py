@@ -40,6 +40,7 @@ from backend.performance.source_policy import (
     resolve_candidates,
     select_current,
     select_daily,
+    source_order,
 )
 from backend.providers.garmin_health_mapping import map_garmin_health
 from backend.providers.intervals_wellness_mapping import (
@@ -916,6 +917,26 @@ class PreferredSourceTests(unittest.TestCase):
         self.assertIsNone(
             select_current([intervals], MetricKind.SLEEP_SCORE, preferences=preferences)
         )
+
+    def test_a_body_preference_keeps_the_profile_value_behind_intervals(self) -> None:
+        preferences = preferences_from_profile({"preferred_source_body": "garmin"})
+
+        self.assertEqual(
+            source_order(MetricKind.WEIGHT, preferences=preferences),
+            (GARMIN, INTERVALS, None, ProviderId.WAHOO),
+        )
+        preferences = preferences_from_profile({"preferred_source_body": "intervals"})
+        self.assertEqual(
+            source_order(MetricKind.WEIGHT, preferences=preferences),
+            (INTERVALS, GARMIN, None, ProviderId.WAHOO),
+        )
+        athlete = _weight(INTERVALS, 71.0, None)
+        profile = _weight(None, 73.0, None)
+        resolved = resolve_candidates(
+            MetricKind.WEIGHT, (profile, athlete), as_of=TODAY, preferences=preferences
+        )
+        assert resolved is not None
+        self.assertIs(resolved.winner, athlete)
 
     def test_a_preferred_body_source_wins_over_a_newer_measurement(self) -> None:
         preferences = preferences_from_profile({"preferred_source_body": "intervals"})
