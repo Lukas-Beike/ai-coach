@@ -9,11 +9,22 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend import change_history
 from backend.athlete import weekly_plan
+from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
 
 DEFAULT_TIMEZONE = "Europe/Berlin"
 # Intensity distribution the Coach plans with; pyramidal unless the athlete chooses.
 TRAINING_MODELS = ("pyramidal", "polarized", "threshold", "sweet_spot")
+# The athlete's preferred source per metric group (#1668); empty keeps the
+# default order. ``source_policy.PREFERENCE_PROFILE_FIELDS`` reads these fields.
+PREFERRED_SOURCE_FIELDS = (
+    "preferred_source_thresholds",
+    "preferred_source_body",
+    "preferred_source_hrv",
+    "preferred_source_resting_hr",
+    "preferred_source_sleep",
+)
+PREFERRED_SOURCES = ("", ProviderId.GARMIN.value, ProviderId.INTERVALS.value)
 
 DEFAULT_PROFILE = {
     "name": "",
@@ -41,6 +52,7 @@ DEFAULT_PROFILE = {
     "weather_location": "",
     "sleep_target_hours": "",
     "fueling_tolerance": "",
+    **dict.fromkeys(PREFERRED_SOURCE_FIELDS, ""),
 }
 
 
@@ -75,6 +87,16 @@ def normalize_profile(
                 "Unbekanntes Trainingsmodell; erlaubt: " + ", ".join(TRAINING_MODELS),
             )
         result["training_model"] = TRAINING_MODELS[0]
+    for field_name in PREFERRED_SOURCE_FIELDS:
+        if result[field_name] not in PREFERRED_SOURCES:
+            if validate_timezone:
+                raise AppError(
+                    400,
+                    "Unbekannte bevorzugte Quelle; erlaubt: "
+                    + ", ".join(PREFERRED_SOURCES[1:])
+                    + " oder leer.",
+                )
+            result[field_name] = ""
     if result["sleep_target_hours"]:
         try:
             target = float(result["sleep_target_hours"])

@@ -36,6 +36,7 @@ from backend.performance.source_policy import (
     Candidate,
     family_providers,
     intervals_relays_garmin,
+    preferences_from_profile,
     resolve_candidates,
     select_current,
     select_daily,
@@ -864,6 +865,70 @@ class RecencyResolutionTests(unittest.TestCase):
         resolved = resolve_candidates(MetricKind.WEIGHT, (dated, garmin), as_of=TODAY)
         assert resolved is not None
         self.assertIs(resolved.winner, garmin)
+
+
+class PreferredSourceTests(unittest.TestCase):
+    """The athlete's preferred source per metric group (#1668)."""
+
+    def test_only_known_groups_and_providers_are_read(self) -> None:
+        preferences = preferences_from_profile(
+            {
+                "preferred_source_hrv": "intervals",
+                "preferred_source_body": "wahoo",
+                "preferred_source_sleep": "",
+            }
+        )
+
+        self.assertEqual(dict(preferences), {"hrv": INTERVALS})
+
+    def test_preferring_intervals_hrv_uses_only_the_other_method(self) -> None:
+        preferences = preferences_from_profile({"preferred_source_hrv": "intervals"})
+        observations = _relay_days(MetricKind.HRV_RMSSD)
+
+        self.assertEqual(
+            family_providers(observations, MetricKind.HRV_RMSSD, preferences),
+            (INTERVALS,),
+        )
+        current = select_current(
+            observations,
+            MetricKind.HRV_RMSSD,
+            latest_wellness_day=TODAY,
+            preferences=preferences,
+        )
+        assert current is not None
+        self.assertIs(current.provenance.provider, INTERVALS)
+        daily = select_daily(observations, MetricKind.HRV_RMSSD, preferences)
+        self.assertEqual(
+            {item.provenance.provider for item in daily.values()}, {INTERVALS}
+        )
+        # Resting HR keeps its own default family.
+        self.assertEqual(
+            family_providers(
+                _relay_days(MetricKind.RESTING_HR), MetricKind.RESTING_HR, preferences
+            ),
+            (GARMIN, INTERVALS),
+        )
+
+    def test_preferring_garmin_never_falls_back_to_another_method(self) -> None:
+        preferences = preferences_from_profile({"preferred_source_sleep": "garmin"})
+        intervals = _obs(MetricKind.SLEEP_SCORE, 80.0, TODAY)
+
+        self.assertIsNone(
+            select_current([intervals], MetricKind.SLEEP_SCORE, preferences=preferences)
+        )
+
+    def test_a_preferred_body_source_wins_over_a_newer_measurement(self) -> None:
+        preferences = preferences_from_profile({"preferred_source_body": "intervals"})
+        garmin = _weight(GARMIN, 72.0, TODAY, SourceKind.DEVICE_MEASURED)
+        intervals = _weight(INTERVALS, 71.0, date(2026, 4, 28))
+
+        resolved = resolve_candidates(
+            MetricKind.WEIGHT, (garmin, intervals), as_of=TODAY, preferences=preferences
+        )
+
+        assert resolved is not None
+        self.assertIs(resolved.winner, intervals)
+        self.assertEqual(resolved.alternatives, (garmin,))
 
 
 class DailySelectionTests(unittest.TestCase):

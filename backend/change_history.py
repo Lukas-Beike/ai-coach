@@ -76,6 +76,11 @@ PROFILE_FIELDS = {
     "performance_notes",
     "sleep_target_hours",
     "fueling_tolerance",
+    "preferred_source_thresholds",
+    "preferred_source_body",
+    "preferred_source_hrv",
+    "preferred_source_resting_hr",
+    "preferred_source_sleep",
 }
 LIBRARY_FIELDS = {
     "id",
@@ -251,6 +256,13 @@ _FIELDS_ADDED_TO_AUDIT: dict[str, tuple[tuple[str, ...], ...]] = {
         ),
         ("training_model",),
         ("weekly_plan",),
+        (
+            "preferred_source_thresholds",
+            "preferred_source_body",
+            "preferred_source_hrv",
+            "preferred_source_resting_hr",
+            "preferred_source_sleep",
+        ),
     ),
     "planned_unit": (("starts_at_local",), FOCUS_KEYS),
     "workout_library": (FOCUS_KEYS,),

@@ -53,7 +53,11 @@ from backend.performance.current_thresholds import (
     provider_zone_thresholds,
 )
 from backend.performance.garmin_canonical import read_garmin_thresholds
-from backend.performance.source_policy import select_current
+from backend.performance.source_policy import (
+    NO_PREFERENCES,
+    SourcePreferences,
+    select_current,
+)
 from backend.runtime.ports import ObservationReader
 
 _SYNC_KINDS: Final = (MetricKind.THRESHOLD_HR, MetricKind.VO2MAX, MetricKind.WEIGHT)
@@ -119,6 +123,8 @@ class CanonicalCurrentInputs:
     # Current metrics resolve them with the Garmin thresholds of the same read.
     threshold_candidates: tuple[Observation, ...] = ()
     local_thresholds: tuple[Observation, ...] = ()
+    # The athlete's preferred sources, applied to the thresholds and body values.
+    preferences: SourcePreferences = NO_PREFERENCES
 
     def athlete_value(
         self, kind: MetricKind, sport: Sport | None = None
@@ -151,6 +157,7 @@ def read_current_inputs(
     *,
     latest_wellness_day: date | None = None,
     as_of: date,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> CanonicalCurrentInputs:
     """Read the latest sync's athlete settings and weights, and the Wahoo fallbacks.
 
@@ -181,9 +188,12 @@ def read_current_inputs(
         wellness_eftp=_wellness_eftp(reader, db, latest_wellness_day),
         athlete_record=intervals.athlete_record,
         synced_at=intervals.synced_at,
-        zone_thresholds=provider_zone_thresholds(providers, as_of=as_of),
+        zone_thresholds=provider_zone_thresholds(
+            providers, as_of=as_of, preferences=preferences
+        ),
         threshold_candidates=candidates,
         local_thresholds=local,
+        preferences=preferences,
     )
 
 
@@ -287,7 +297,11 @@ def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None
 
 
 def read_zone_thresholds(
-    reader: ObservationReader, db: Any, *, as_of: date
+    reader: ObservationReader,
+    db: Any,
+    *,
+    as_of: date,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> tuple[Observation, ...]:
     """Return the plan-zone thresholds (``zone_thresholds``) current on ``as_of``.
 
@@ -301,6 +315,7 @@ def read_zone_thresholds(
             *read_garmin_thresholds(reader, db),
         ),
         as_of=as_of,
+        preferences=preferences,
     )
 
 

@@ -79,7 +79,9 @@ def _average(
     if kind in METHOD_FAMILY_KINDS:
         daily = {
             day: float(observation.value.value)
-            for day, observation in select_daily(recovery.of(kind), kind).items()
+            for day, observation in select_daily(
+                recovery.of(kind), kind, recovery.preferences
+            ).items()
         }
     else:
         provider = (

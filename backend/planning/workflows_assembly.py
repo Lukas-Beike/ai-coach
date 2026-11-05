@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from backend.performance.source_policy import SourcePreferences
 from backend.planning import changes as planning_changes
 from backend.planning.adaptive_preview_service import AdaptiveReplanPreviewService
 from backend.planning.calendar_service import CalendarConflictService
@@ -48,6 +49,8 @@ class DailyPlanningSources:
     calendar_window_days: int
     checkin_text_limit: int
     observation_reader: Callable[[], ObservationReader]
+    # The athlete's preferred sources, read in the caller's unit of work.
+    source_preferences: Callable[[Any], SourcePreferences] | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,7 @@ class PlanningWorkflowAssembly:
         self._calendar_window_days = daily.calendar_window_days
         self._checkin_text_limit = daily.checkin_text_limit
         self._observation_reader = daily.observation_reader
+        self._source_preferences = daily.source_preferences
         self._sync_job_queue_service = runtime.sync_job_queue_service
         self._coach_artifact_refs = runtime.coach_artifact_refs
         self._utc_now = runtime.utc_now
@@ -151,6 +155,7 @@ class PlanningWorkflowAssembly:
             self._local_date,
             self._calendar_window_days,
             self._observation_reader,
+            self._source_preferences,
         )
 
     def structured_training_state_service(self) -> StructuredTrainingStateService:

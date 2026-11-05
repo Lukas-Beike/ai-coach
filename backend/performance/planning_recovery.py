@@ -13,6 +13,9 @@ from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.performance.source_policy import (
     FAMILY_LOOKBACK_DAYS,
     METHOD_FAMILY_KINDS,
+    NO_PREFERENCES,
+    SourcePreferences,
+    family_providers,
     intervals_relays_garmin,
     select_daily,
 )
@@ -118,7 +121,12 @@ def first_intervals_by_day(
 
 
 def canonical_planning_recovery(
-    reader: ObservationReader, db: Any, *, start: date, end: date
+    reader: ObservationReader,
+    db: Any,
+    *,
+    start: date,
+    end: date,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> dict[str, dict[str, Any]]:
     """Build the date-indexed recovery view from canonical observations.
 
@@ -138,7 +146,9 @@ def canonical_planning_recovery(
         observations = tuple(reader.observations(db, kind, start=read_start, end=end))
         selected = {
             day: observation
-            for day, observation in select_daily(observations, kind).items()
+            for day, observation in select_daily(
+                observations, kind, preferences
+            ).items()
             if day >= start
         }
         _add_observations(
@@ -146,7 +156,8 @@ def canonical_planning_recovery(
             field,
             kind,
             selected,
-            relay=intervals_relays_garmin(observations, kind),
+            relay=ProviderId.GARMIN in family_providers(observations, kind, preferences)
+            and intervals_relays_garmin(observations, kind),
         )
     for field, kind in _LOAD_FIELDS:
         loaded = first_intervals_by_day(
@@ -189,12 +200,15 @@ def planning_recovery_view(
     end: date,
     morning_battery_history: Any,
     morning_body_battery: Any,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> dict[str, dict[str, Any]]:
     """Combine canonical recovery with the body battery, which has no metric kind.
 
     Body battery comes from the morning history and the current morning reading.
     """
-    recovery_by_date = canonical_planning_recovery(reader, db, start=start, end=end)
+    recovery_by_date = canonical_planning_recovery(
+        reader, db, start=start, end=end, preferences=preferences
+    )
     _add_morning_battery_recovery(
         recovery_by_date, morning_battery_history, morning_body_battery
     )

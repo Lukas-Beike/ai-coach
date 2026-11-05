@@ -377,6 +377,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
                 "today",
                 "calendar_window_days",
                 "observation_reader",
+                "source_preferences",
             ],
         )
         self.assertFalse(

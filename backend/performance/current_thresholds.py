@@ -36,8 +36,10 @@ from backend.canonical.vocabulary import (
 from backend.performance.source_policy import (
     INTERVALS_THRESHOLD_MAX_AGE_DAYS,
     LOCAL_FIRST_KINDS,
+    NO_PREFERENCES,
     Candidate,
     Resolved,
+    SourcePreferences,
     resolve_candidates,
 )
 
@@ -133,6 +135,7 @@ def resolve_current_thresholds(
     local: Iterable[Observation] = (),
     *,
     as_of: date | None,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> Mapping[ThresholdKey, Resolved]:
     """Resolve each threshold key; keys without a current value are absent.
 
@@ -155,14 +158,19 @@ def resolve_current_thresholds(
             if item.kind is kind and item.sport is sport
         ]
         candidates += _provider_candidates(observations, kind, sport)
-        result = resolve_candidates(kind, candidates, as_of=as_of, sport=sport)
+        result = resolve_candidates(
+            kind, candidates, as_of=as_of, sport=sport, preferences=preferences
+        )
         if result is not None:
             resolved[(kind, sport)] = result
     return resolved
 
 
 def provider_zone_thresholds(
-    provider_observations: Iterable[Observation], *, as_of: date | None
+    provider_observations: Iterable[Observation],
+    *,
+    as_of: date | None,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> tuple[Observation, ...]:
     """Return the provider winners per threshold key, plus the Intervals indoor FTP.
 
@@ -174,7 +182,7 @@ def provider_zone_thresholds(
         # An athlete-wide Intervals value applies to the sport it stands in for.
         replace(winner, sport=sport) if winner.sport is not sport else winner
         for (_, sport), result in resolve_current_thresholds(
-            observations, as_of=as_of
+            observations, as_of=as_of, preferences=preferences
         ).items()
         if (winner := result.winner.observation) is not None
     )

@@ -78,6 +78,7 @@ class PublicPerformanceStateService:
                     activity_reader=source.activity_summary_reader(),
                     as_of=today,
                     include_power_curve=True,
+                    preferences=source.preferences_in(db),
                 ),
             )
             return self._project(garmin, canonical, today, observations=reader)

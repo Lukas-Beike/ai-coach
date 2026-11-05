@@ -20,8 +20,10 @@ from backend.performance.current_thresholds import (
     resolve_current_thresholds,
 )
 from backend.performance.source_policy import (
+    NO_PREFERENCES,
     Candidate,
     Resolved,
+    SourcePreferences,
     resolve_candidates,
     source_order,
 )
@@ -165,7 +167,10 @@ def _activity_max_hr(activity: Any) -> tuple[float, ProviderId] | None:
     return float(value), provider
 
 
-def _overall_max_hr(sports: tuple[dict[str, Any], ...]) -> dict[str, Any]:
+def _overall_max_hr(
+    sports: tuple[dict[str, Any], ...],
+    preferences: SourcePreferences = NO_PREFERENCES,
+) -> dict[str, Any]:
     """The highest sport max HR among those of the best-ranked source.
 
     Sources rank as the max HR rule orders them (local, Garmin, Intervals), and
@@ -173,7 +178,7 @@ def _overall_max_hr(sports: tuple[dict[str, Any], ...]) -> dict[str, Any]:
     """
     order = [
         None if source is None else source.value
-        for source in source_order(MetricKind.MAX_HR)
+        for source in source_order(MetricKind.MAX_HR, None, preferences)
     ]
 
     def rank(item: dict[str, Any]) -> int:
@@ -361,6 +366,7 @@ def _performance_body_metrics(
             canonical.wahoo_weight,
         ),
         as_of=as_of,
+        preferences=canonical.preferences,
     )
     body_fat = resolve_candidates(
         MetricKind.BODY_FAT,
@@ -372,6 +378,7 @@ def _performance_body_metrics(
             profile.get("body_fat_pct"),
         ),
         as_of=as_of,
+        preferences=canonical.preferences,
     )
     height_value, height_source, height_provider = _first_performance_source(
         (
@@ -577,6 +584,7 @@ def current_performance_metrics(
         (*canonical.threshold_candidates, *garmin_thresholds),
         canonical.local_thresholds,
         as_of=as_of,
+        preferences=canonical.preferences,
     )
     cycling_max_hr = _max_hr_metric(
         "cycling", Sport.RIDE, activities, thresholds, garmin_metrics
@@ -584,7 +592,7 @@ def current_performance_metrics(
     running_max_hr = _max_hr_metric(
         "running", Sport.RUN, activities, thresholds, garmin_metrics
     )
-    max_hr = _overall_max_hr((cycling_max_hr, running_max_hr))
+    max_hr = _overall_max_hr((cycling_max_hr, running_max_hr), canonical.preferences)
     return {
         **_performance_body_metrics(
             latest_wellness,

@@ -21,6 +21,7 @@ from backend.performance.canonical_body import (
 )
 from backend.performance.display_sources import preferred_providers
 from backend.performance.freshness import GarminSyncStatus
+from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.performance.wellness_days import WellnessDay
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -259,6 +260,7 @@ def body_history(
     activities: Sequence[Mapping[str, Any]],
     garmin_ftp: Mapping[date, float],
     eftp_by_day: Mapping[date, float] | None = None,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> dict[str, Any]:
     """Return API-ready 14d/12w charts under performance.history.body.
 
@@ -344,5 +346,5 @@ def body_history(
         "version": 1,
         "default_window": "12w",
         "windows": windows,
-        "preferred_providers": preferred_providers(),
+        "preferred_providers": preferred_providers(preferences),
     }
