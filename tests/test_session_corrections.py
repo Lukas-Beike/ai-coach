@@ -329,6 +329,45 @@ class AthleteDeleteFollowUpTests(SessionCorrectionFixture):
 
         self.assertEqual(live, [])
 
+    def test_undoing_the_delete_brings_a_later_exact_copy_back(self) -> None:
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                "intervals",
+                record_kind="activity",
+                provider_activity_id=INTERVALS_ID,
+                now=SYNCED,
+            )
+        result = self.corrections.delete(self.garmin)
+        with self.manager.unit_of_work() as db:
+            canonical_ingest.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": "2026-09-22T08:00:00+00:00",
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row(
+                                "i7",
+                                source="GARMIN_CONNECT",
+                                device_name="Garmin Edge 840",
+                                external_id=GARMIN_ID,
+                                start_date_local="2026-09-10T09:30:00",
+                            )
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+
+        self.undo(result["change"])
+
+        with self.manager.reader() as db:
+            live = canonical_store.active_session_activity_rows(db)
+        self.assertEqual(
+            sorted(row["provider_activity_id"] for _, row in live), ["910", "i7"]
+        )
+        self.assertEqual(len({session for session, _ in live}), 1)
+
 
 class FeedbackAnchorTests(FeedbackSessionFixture):
     """Feedback on a Garmin-only session resolves after the Intervals.icu copy arrives."""

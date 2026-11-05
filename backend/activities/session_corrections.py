@@ -234,7 +234,13 @@ class SessionCorrectionService:
         live = [str(row["activity_id"]) for row in rows if row.get("state") == _ACTIVE]
         if set(live) - canonical_store.sessions_with_active_records(db, live):
             raise AppError(409, _GONE)
-        canonical_store.write_session_correction_rows(db, rows, now=self._clock())
+        now = self._clock()
+        canonical_store.write_session_correction_rows(db, rows, now=now)
+        restored = set(entity_id.split(","))
+        for session_id in live:
+            canonical_store.revive_deleted_copies(
+                db, session_id, exclude=restored, now=now
+            )
         return target
 
     def _correct(

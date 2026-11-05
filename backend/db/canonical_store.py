@@ -11,7 +11,7 @@ import hashlib
 import json
 import math
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Final, NamedTuple
@@ -2106,6 +2106,40 @@ def delete_with_athlete_deleted(
         ),
     )
     return cursor.rowcount == 1
+
+
+def revive_deleted_copies(
+    db: Any, survivor: str, *, exclude: Collection[str], now: str
+) -> int:
+    """Merge deleted sessions that retain ``survivor`` and own an active record into it.
+
+    Linking deletes a provider copy that arrives for an athlete-deleted activity;
+    when that delete is undone, the copy joins the restored session again.
+    """
+    rows = _fetch_all(
+        db,
+        "SELECT s.activity_id FROM activity_sessions AS s WHERE s.state = ? "
+        "AND s.merged_into_retained = ? AND s.activity_id != ? "
+        "AND EXISTS (SELECT 1 FROM activity_records AS r "
+        "WHERE r.activity_id = s.activity_id AND r.state = ?)",
+        (
+            ActivitySessionState.DELETED.value,
+            survivor,
+            survivor,
+            ActivityRecordState.ACTIVE.value,
+        ),
+    )
+    revived = 0
+    for row in rows:
+        if row["activity_id"] in exclude:
+            continue
+        db.execute(
+            "UPDATE activity_sessions SET state = ?, merged_into = ?, "
+            "merged_into_retained = NULL, updated_at = ? WHERE activity_id = ?",
+            (ActivitySessionState.DUPLICATE.value, survivor, now, row["activity_id"]),
+        )
+        revived += 1
+    return revived
 
 
 def detach_activity_session(db: Any, *, activity_id: str, now: str) -> bool:
