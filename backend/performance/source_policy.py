@@ -382,6 +382,20 @@ def _eligible(
     ]
 
 
+def _provider_best(
+    candidates: Iterable[tuple[int, Observation]],
+    provider: ProviderId,
+    kind: MetricKind,
+) -> Observation | None:
+    """Return ``provider``'s highest-ranked candidate, or None."""
+    ranked = [
+        (_current_rank(index, observation, kind), observation)
+        for index, observation in candidates
+        if observation.provenance.provider is provider
+    ]
+    return max(ranked, key=lambda item: item[0], default=(None, None))[1]
+
+
 def select_current(
     observations: Iterable[Observation],
     kind: MetricKind,
@@ -415,17 +429,11 @@ def select_current(
     observations = tuple(observations)
     providers = family_providers(observations, kind)
     candidates = _eligible(observations, kind, rule, sport, latest_wellness_day, as_of)
-    bests: list[Observation] = []
-    for provider in providers:
-        best: tuple[_Rank, Observation] | None = None
-        for index, observation in candidates:
-            if observation.provenance.provider is not provider:
-                continue
-            rank = _current_rank(index, observation, kind)
-            if best is None or rank > best[0]:
-                best = (rank, observation)
-        if best is not None:
-            bests.append(best[1])
+    bests = [
+        best
+        for provider in providers
+        if (best := _provider_best(candidates, provider, kind)) is not None
+    ]
     if kind in METHOD_FAMILY_KINDS:
         # A relay is the same measurement: its newer day wins, a tie keeps Garmin.
         return max(bests, key=lambda item: item.observed_on, default=None)
