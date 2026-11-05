@@ -128,7 +128,8 @@ from backend.providers.intervals_zone_mapping import type_sports
 # INDOOR_FTP, so the plan zones of indoor workouts need no snapshot section.
 # Version 11: observations record their owning raw record, so re-projection
 # retires the values a stored row no longer carries (schema version 21).
-MAPPER_VERSION: Final = 11
+# Version 12: sleep periods are dated by the wellness day.
+MAPPER_VERSION: Final = 12
 
 _PROVIDER_LABEL: Final = "Intervals.icu"
 _DAY_PATTERN: Final = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)

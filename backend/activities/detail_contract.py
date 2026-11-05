@@ -29,6 +29,7 @@ from backend.canonical.activity_detail import (
     ActivityStreamSet,
     ZoneDistribution,
 )
+from backend.canonical.local_time import wall_time
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import ProviderId, StreamChannel, ZoneMetric
 from backend.db.activity_detail_store import StoredDetailSet
@@ -124,7 +125,8 @@ def activity_detail_contract(
     ``envelope`` adds the feedback, equipment, activity validation and
     session-RPE load blocks.
     ``summary_metrics`` fill metrics that no measured or derived value provides.
-    ``zone`` is the athlete's zone for ``session.started_at_local``.
+    ``zone`` is the athlete's zone for ``session.started_at_local`` of a session
+    without its own UTC offset.
     """
     if not records:
         raise ValueError("records must not be empty")
@@ -134,7 +136,7 @@ def activity_detail_contract(
         metrics.setdefault(key, dict(entry))
     document = {
         "contract": ACTIVITY_DETAIL_CONTRACT,
-        "session": _session(session_id, measured[0], zone),
+        "session": _session(session_id, measured, zone),
         "metrics": metrics,
         "streams": _streams(merged.streams),
         "laps": _laps(merged.laps, merged.streams),
@@ -150,8 +152,33 @@ def activity_detail_contract(
     return document
 
 
-def _session(session_id: str, primary: ActivityRecord, zone: tzinfo) -> dict[str, Any]:
-    local_start = primary.started_at.astimezone(zone).replace(tzinfo=None)
+def session_local_start(
+    measured: Sequence[ActivityRecord], zone: tzinfo
+) -> tuple[datetime, int | None]:
+    """Return the primary record's naive wall-clock start and the offset it used.
+
+    The session's own UTC offset is the primary record's, else that of the first
+    record reporting one, as all records name the same activity. Without any the
+    athlete zone ``zone`` applies and the offset is None.
+    """
+    primary = measured[0]
+    offset = next(
+        (
+            record.local_offset_minutes
+            for record in measured
+            if record.local_offset_minutes is not None
+        ),
+        None,
+    )
+    start = wall_time(primary.started_at, zone, offset)
+    return start.replace(tzinfo=None), offset
+
+
+def _session(
+    session_id: str, measured: Sequence[ActivityRecord], zone: tzinfo
+) -> dict[str, Any]:
+    primary = measured[0]
+    local_start, _offset = session_local_start(measured, zone)
     return {
         "activity_id": session_id,
         "sport": primary.sport.value,

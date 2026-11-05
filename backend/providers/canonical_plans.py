@@ -29,7 +29,11 @@ from backend.canonical.domain_records import (
     ZoneConfiguration,
 )
 from backend.canonical.garmin_payload import ITEM_SECTIONS as GARMIN_ITEM_SECTIONS
-from backend.canonical.local_time import local_date, parse_provider_datetime
+from backend.canonical.local_time import (
+    local_date,
+    parse_provider_datetime,
+    wall_time,
+)
 from backend.canonical.mapping import MappingResult
 from backend.canonical.records import ActivityRecord, Observation
 from backend.canonical.section_items import (
@@ -159,7 +163,7 @@ class RawRecord:
 
 @dataclass(frozen=True, slots=True)
 class ActivityItem:
-    """A mapped activity with its athlete-local date and mapper version."""
+    """A mapped activity with the local date it was lived on and its mapper version."""
 
     record: ActivityRecord
     local_date: date
@@ -1214,6 +1218,8 @@ def _activity_batch(
             continue
         record = mapped[0]
         present.add(source_id)
+        # The day the activity was lived: its own offset, else the athlete zone.
+        day = wall_time(record.started_at, zone, record.local_offset_minutes).date()
         raw_records.append(
             RawRecord(
                 ACTIVITY_RECORD_KIND,
@@ -1221,13 +1227,13 @@ def _activity_batch(
                 row if stored is None else stored(row),
                 mapper_version,
                 retrieved_at=retrieved_at,
-                observed_on=local_date(record.started_at, zone).isoformat(),
+                observed_on=day.isoformat(),
             )
         )
         items.append(
             ActivityItem(
                 record=record,
-                local_date=local_date(record.started_at, zone),
+                local_date=day,
                 mapper_version=mapper_version,
                 retrieved_at=retrieved_at,
             )

@@ -10,8 +10,10 @@ Field rules:
 
 * id: a positive integer (or its digit text) becomes the activity id.
 * start: ``starts`` is an ISO 8601 instant in UTC. Text without an offset is
-  read as UTC, as the Wahoo API documents. The athlete-local date is derived by
-  the plan from the athlete zone, not from the workout's own ``time_zone``.
+  read as UTC, as the Wahoo API documents. The workout's own ``time_zone``,
+  when it names an IANA zone, gives its UTC offset at that instant ->
+  ``local_offset_minutes``; any other value leaves the offset unknown, so the
+  plan dates the workout in the athlete zone.
 * duration: the summary's ``duration_active_accum`` before ``duration_total_accum``.
   The summary's ``duration_total_accum`` is also ``elapsed_duration_s``. The
   workout's own ``minutes`` is the PLANNED duration and is never used.
@@ -38,7 +40,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, tzinfo
 from typing import Final
 
-from backend.canonical.local_time import parse_provider_datetime
+from backend.canonical.local_time import parse_provider_datetime, zone_offset_minutes
 from backend.canonical.mapping import (
     IssueReason,
     MappingIssue,
@@ -65,7 +67,8 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 
-MAPPER_VERSION: Final = 3
+# Version 4: the workout's own IANA ``time_zone`` dates it where it was recorded.
+MAPPER_VERSION: Final = 4
 WAHOO_LABEL: Final = "Wahoo"
 MAX_NAME_LENGTH: Final = 200
 MAX_WORKOUT_ID: Final = 2**63 - 1
@@ -304,6 +307,7 @@ def _map_row(
             reader.number(_CADENCE_KEYS, 0.0, MAX_ACTIVITY_CADENCE_RPM)
         ),
         energy_kj=_positive(None if joules is None else joules / _JOULES_PER_KJ),
+        local_offset_minutes=zone_offset_minutes(row.get("time_zone"), started_at),
     )
 
 

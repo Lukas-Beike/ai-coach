@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Final
 
+from backend.canonical.local_time import valid_offset_minutes
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
     MAX_ACTIVITY_ALTITUDE_M,
@@ -409,6 +410,9 @@ class ActivityRecord:
     training_effect_label: str | None = None
     # The upstream activity this record copies, when the provider names it.
     external_ref: ExternalRef | None = None
+    # The UTC offset in minutes where and when the activity was recorded, when
+    # the provider reports it; it dates the activity on the day it was lived.
+    local_offset_minutes: int | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
@@ -571,3 +575,9 @@ class ActivityRecord:
         )
         if self.external_ref is not None:
             require_instance(self.external_ref, ExternalRef, "external_ref")
+        if self.local_offset_minutes is not None and not valid_offset_minutes(
+            self.local_offset_minutes
+        ):
+            raise ValueError(
+                "local_offset_minutes must be a quarter-hour offset within 14 hours"
+            )

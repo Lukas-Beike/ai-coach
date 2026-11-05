@@ -16,6 +16,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Any, Final, NamedTuple
 
+from backend.canonical.local_time import valid_offset_minutes
 from backend.canonical.records import (
     MAX_TRAINING_EFFECT_LABEL_LENGTH,
     MAX_ZONE_COUNT,
@@ -62,6 +63,7 @@ _PLANNED_EVENT_KEY: Final = "planned_event_id"
 _DEVICE_NAME_KEY: Final = "device_name"
 _TRAINING_EFFECT_LABEL_KEY: Final = "training_effect_label"
 _EXTERNAL_REF_KEY: Final = "external_ref"
+_LOCAL_OFFSET_KEY: Final = "local_offset_minutes"
 # ActivityRecord summary fields stored in the details under their own names.
 ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "intensity",
@@ -1493,6 +1495,7 @@ def _activity_details(record: ActivityRecord) -> str:
                 ],
             ),
             (_CONTEXT_KEY, record.provenance.context.as_details() or None),
+            (_LOCAL_OFFSET_KEY, record.local_offset_minutes),
             *(
                 (field, getattr(record, field))
                 for field in ACTIVITY_SUMMARY_DETAIL_FIELDS
@@ -1540,6 +1543,8 @@ def activity_summary_values(details: object) -> dict[str, Any]:
         and len(label) <= MAX_TRAINING_EFFECT_LABEL_LENGTH
     ):
         values[_TRAINING_EFFECT_LABEL_KEY] = label
+    if valid_offset_minutes(offset := loaded.get(_LOCAL_OFFSET_KEY)):
+        values[_LOCAL_OFFSET_KEY] = offset
     return values
 
 
