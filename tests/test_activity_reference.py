@@ -310,10 +310,9 @@ class ActivityCallerResolutionTests(_Fixture):
         resolver = Mock(return_value="ride-1")
         service = EquipmentService(
             self.manager,
-            read_activity_rows=tuple,
+            read_summaries=tuple,
             today=lambda: TODAY,
             utc_now=lambda: STAMP,
-            deduplicate=lambda _rows: ([], 0),
             resolve_activity=resolver,
         )
         with self.assertRaises(AppError):
@@ -323,10 +322,9 @@ class ActivityCallerResolutionTests(_Fixture):
     def test_equipment_without_resolver_keeps_the_reference_unchanged(self) -> None:
         service = EquipmentService(
             self.manager,
-            read_activity_rows=tuple,
+            read_summaries=tuple,
             today=lambda: TODAY,
             utc_now=lambda: STAMP,
-            deduplicate=lambda _rows: ([], 0),
         )
         with self.assertRaises(AppError):
             service.assign({"activity_id": "act_missing", "equipment_id": "bike-1"})

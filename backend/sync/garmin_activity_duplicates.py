@@ -6,25 +6,16 @@ providers before a Garmin activity is stored."""
 from __future__ import annotations
 
 import math
-from bisect import bisect_left, bisect_right
-from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from backend.activities.duplicates import deduplicate_api_records
 from backend.activities.identity import activity_datetime, activity_kind
 from backend.canonical.decimal_text import comma_decimal_float
-from backend.canonical.vocabulary import RecordingOrigin
 from backend.providers.garmin_gear_fields import activity_start_local
-from backend.providers.intervals_activity_fields import (
-    intervals_activity_device_source,
-    intervals_activity_recorded_by_wahoo,
-)
 
 _GARMIN_DUPLICATE_START_WINDOW = timedelta(minutes=30)
 
 __all__ = [
-    "deduplicated_rows",
     "garmin_activity_duplicates_intervals",
     "intervals_cycling_activities_match",
 ]
@@ -180,60 +171,3 @@ def intervals_cycling_activities_match(left: Any, right: Any) -> bool:
         and abs(float(left_distance) - float(right_distance))
         <= max(500, max(float(left_distance), float(right_distance)) * 0.10)
     )
-
-
-def deduplicated_rows(rows: Sequence[Any]) -> tuple[list[dict[str, Any]], int]:
-    """Drop duplicate raw Intervals.icu rows and Garmin copies of a Wahoo ride.
-
-    Raw-row readers that are not on activity summaries yet (equipment) use it;
-    summaries are already one per session.
-
-    Returns the kept rows and how many rows were dropped.
-    """
-    unique = [
-        row for row in deduplicate_api_records(list(rows)) if isinstance(row, dict)
-    ]
-    wahoo = [row for row in unique if intervals_activity_recorded_by_wahoo(row)]
-    indexed = sorted(
-        (started, index)
-        for index, row in enumerate(wahoo)
-        if (
-            started := activity_datetime(
-                row.get("start_date_local") or row.get("start_date")
-            )
-        )
-        is not None
-    )
-    starts = [started for started, _ in indexed]
-    window = timedelta(minutes=30)
-
-    def matches_wahoo(row: dict[str, Any]) -> bool:
-        started = activity_datetime(
-            row.get("start_date_local") or row.get("start_date")
-        )
-        if started is None:
-            return False
-        minimum = datetime.min.replace(tzinfo=started.tzinfo)
-        maximum = datetime.max.replace(tzinfo=started.tzinfo)
-        low = bisect_left(
-            starts,
-            started - window if started >= minimum + window else minimum,
-        )
-        high = bisect_right(
-            starts,
-            started + window if started <= maximum - window else maximum,
-        )
-        return any(
-            intervals_cycling_activities_match(wahoo[index], row)
-            for _, index in indexed[low:high]
-        )
-
-    kept = [
-        row
-        for row in unique
-        if not (
-            intervals_activity_device_source(row) == RecordingOrigin.GARMIN
-            and matches_wahoo(row)
-        )
-    ]
-    return kept, len(unique) - len(kept)
