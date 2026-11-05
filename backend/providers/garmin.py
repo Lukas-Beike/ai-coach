@@ -19,11 +19,11 @@ from typing import Any
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import (
     GARMIN_DATE_ALIASES,
-    GARMIN_EXTENDED_DATE_ALIASES,
     GARMIN_RESTING_KCAL_ALIASES,
     first_present,
     flatten_daily_summary,
 )
+from backend.providers.garmin_weight_walk import WALK_DATE_KEYS
 
 try:
     from garminconnect import Garmin as GarminClient
@@ -193,7 +193,6 @@ def preserve_weight_response(value: Any) -> list[dict[str, Any]]:
 
 _WEIGHT_SNAPSHOT_SECTIONS = ("weighIns", "weigh_ins", "weight")
 _WEIGHT_OPAQUE_SECTIONS_KEY = "_garmin_weight_opaque_sections"
-_WEIGHT_WINDOW_DATE_KEYS = (*GARMIN_EXTENDED_DATE_ALIASES, "timestampGMT")
 
 
 def _sort_weight_metadata_list(rows: list[Any]) -> None:
@@ -371,7 +370,7 @@ def _weight_reading_order(reading: dict[str, Any]) -> tuple[bool, float]:
 def _weight_row_in_window(row: Any, window: tuple[date, date]) -> bool:
     if not isinstance(row, dict):
         return False
-    raw = next((row[key] for key in _WEIGHT_WINDOW_DATE_KEYS if row.get(key)), None)
+    raw = next((row[key] for key in WALK_DATE_KEYS if row.get(key)), None)
     try:
         if isinstance(raw, int | float) and not isinstance(raw, bool):
             # Epoch milliseconds, read as a UTC day like the health mapper does.

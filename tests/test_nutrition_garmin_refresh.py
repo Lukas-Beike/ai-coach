@@ -340,6 +340,23 @@ class GarminNutritionRefreshTests(unittest.TestCase):
 
         self.assertEqual(merged[0]["weight"], [outside])
 
+    def test_weight_window_uses_the_mapper_date_order(self) -> None:
+        # timestampGMT outranks the local timestamp, as in the health mapper.
+        reading = {
+            "samplePk": 7,
+            "timestampGMT": "2025-10-08T23:30:00",
+            "timestamp": "2025-10-09T01:30:00",
+            "weight": 81900,
+        }
+
+        merged = merge_weight_snapshots(
+            [{"weighIns": []}],
+            [{"weighIns": [reading]}],
+            window=(date(2025, 10, 9), date(2025, 10, 9)),
+        )
+
+        self.assertEqual(merged[0]["weight"], [reading])
+
     def test_remote_energy_without_range_api_is_unsupported_without_daily_loop(
         self,
     ) -> None:
