@@ -24,6 +24,22 @@ class ActivityMaxHrSourceTests(unittest.TestCase):
 
         self.assertEqual((186, "Garmin Connect"), (result["value"], result["source"]))
 
+    def test_an_aged_out_garmin_profile_max_hr_is_not_a_fallback(self) -> None:
+        profile = {"value": 188, "unit": "bpm", "source": "Garmin Connect"}
+        result = _max_hr_metric(
+            "cycling",
+            Sport.RIDE,
+            [_summary(181, "Intervals.icu")],
+            {},
+            {"cycling_max_hr_bpm": {**profile, "observed_at": None}},
+        )
+        self.assertEqual((181, "Intervals.icu"), (result["value"], result["source"]))
+        activity = {**profile, "observed_at": "2026-10-01"}
+        result = _max_hr_metric(
+            "cycling", Sport.RIDE, [], {}, {"cycling_max_hr_bpm": activity}
+        )
+        self.assertEqual(188, result["value"])
+
     def test_an_unlabelled_value_is_not_counted(self) -> None:
         result = _max_hr_metric(
             "cycling",

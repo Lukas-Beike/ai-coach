@@ -202,7 +202,9 @@ def _max_hr_metric(
     if resolved is not None:
         return _resolved_metric(garmin_metrics, key, resolved)
     garmin = garmin_metrics[key]
-    if garmin["value"] is not None:
+    # Only Garmin's activity maximum (it carries ``observed_at``) is a fallback;
+    # its profile max HR is a threshold the resolver has already aged.
+    if garmin["value"] is not None and garmin.get("observed_at"):
         return garmin
     activity_values = [
         found

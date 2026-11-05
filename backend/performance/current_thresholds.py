@@ -141,14 +141,12 @@ def resolve_current_thresholds(
     """
     observations = tuple(provider_observations)
     local_values = tuple(local)
-    keys: dict[ThresholdKey, None] = dict.fromkeys(THRESHOLD_KEYS)
-    keys.update(
-        dict.fromkeys(
-            (item.kind, sport)
-            for item in (*observations, *local_values)
-            if item.kind in LOCAL_FIRST_KINDS and (sport := item.sport) is not None
-        )
+    other_sports = (
+        (item.kind, sport)
+        for item in (*observations, *local_values)
+        if item.kind in LOCAL_FIRST_KINDS and (sport := item.sport) is not None
     )
+    keys: list[ThresholdKey] = list(dict.fromkeys((*THRESHOLD_KEYS, *other_sports)))
     resolved: dict[ThresholdKey, Resolved] = {}
     for kind, sport in keys:
         candidates = [
