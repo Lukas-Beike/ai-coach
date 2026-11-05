@@ -221,6 +221,49 @@ class PersistedLinkTests(LinkingCase):
         self.assertEqual(sessions[GARMIN_ID]["merged_into"], survivor)
         self.assertEqual(sessions[INTERVALS_ID]["merged_into"], survivor)
 
+    def test_a_relink_never_merges_two_records_of_one_origin(self) -> None:
+        # Two walks 25 minutes apart. G2 arrives first and joins I1, its only
+        # candidate. Once I2 and G1 arrive, bundling pairs G1 with I1 and G2 with
+        # I2; following those pairs through the persisted merge would join all
+        # four records in one session.
+        def walk(identifier: str, start: str, seconds: int) -> dict[str, Any]:
+            return intervals_ride(
+                identifier,
+                type="Walk",
+                device_name="Garmin Forerunner",
+                start_date_local=f"2026-09-10T{start}:00",
+                moving_time=seconds,
+                distance=None,
+            )
+
+        def garmin_walk(identifier: str, start: str, seconds: float) -> dict[str, Any]:
+            return garmin_ride(
+                identifier,
+                activityType={"typeKey": "walking"},
+                startTimeLocal=f"2026-09-10 {start}:00",
+                duration=seconds,
+                distance=None,
+            )
+
+        first = walk("i-1", "07:00", 2400)
+        self._ingest_intervals([first], FIRST)
+        self._ingest_garmin([garmin_walk("9002", "07:25", 2280.0)], SECOND)
+        self._ingest_intervals([first, walk("i-2", "07:25", 2280)], THIRD)
+        self._ingest_garmin(
+            [
+                garmin_walk("9001", "07:00", 2400.0),
+                garmin_walk("9002", "07:25", 2280.0),
+            ],
+            LATER,
+        )
+
+        sessions = self._sessions()
+        self.assertEqual(
+            sessions["9002"]["merged_into"], sessions["i-1"]["activity_id"]
+        )
+        for provider_activity_id in ("i-1", "i-2", "9001"):
+            self.assertEqual(sessions[provider_activity_id]["state"], "active")
+
     def test_unrelated_activities_stay_single(self) -> None:
         self._ingest_intervals([intervals_ride()], FIRST)
         counters = (

@@ -9,7 +9,9 @@ Only the session rows change. Records keep their ``activity_id``, sessions keep
 their primary provider, and nothing is re-pointed, so provider deletes still find
 their own session. Sessions the athlete confirmed, hidden or deleted sessions and
 sessions that are already aliases are never merged or reopened, and a merge is never
-undone here. The function runs inside the caller's unit of work and is idempotent.
+undone here. Two sessions never merge when together they would hold two active
+records of one provider and recording origin: bundling assigns one to one, but a
+merge persisted earlier may pair a record differently from today's bundling. The function runs inside the caller's unit of work and is idempotent.
 """
 
 from __future__ import annotations
@@ -196,6 +198,7 @@ class _Sessions:
     def __init__(self, db: Any, session_ids: Collection[str]) -> None:
         self._db = db
         self._rows = canonical_store.activity_session_link_rows(db, sorted(session_ids))
+        self._origins: dict[str, set[tuple[str, str]]] = {}
 
     def merge(
         self, primary_id: str, duplicate_id: str, kind: ActivityLinkKind, now: str
@@ -207,11 +210,14 @@ class _Sessions:
             return False
         if not (_mergeable(first) and _mergeable(second)):
             return False
+        if self._origins_of(first) & self._origins_of(second):
+            return False
         keep, drop = sorted((first, second), key=_age)
         if not canonical_store.merge_activity_session(
             self._db, activity_id=drop["activity_id"], into=keep["activity_id"], now=now
         ):
             return False
+        self._origins_of(keep).update(self._origins_of(drop))
         drop["state"] = ActivitySessionState.DUPLICATE.value
         drop["merged_into"] = keep["activity_id"]
         strongest = max(
@@ -224,6 +230,18 @@ class _Sessions:
             )
             keep["link_kind"] = strongest
         return True
+
+    def _origins_of(self, row: dict[str, Any]) -> set[tuple[str, str]]:
+        """Return the (provider, recording origin) pairs of a survivor's active records."""
+        session_id = str(row["activity_id"])
+        if session_id not in self._origins:
+            self._origins[session_id] = {
+                (str(record["provider"]), str(record["recorded_by"]))
+                for record in canonical_store.session_activity_rows(
+                    self._db, session_id
+                )
+            }
+        return self._origins[session_id]
 
     def _survivor(self, session_id: str) -> dict[str, Any] | None:
         """Follow ``merged_into`` to the session that stands for ``session_id``."""

@@ -29,7 +29,10 @@ class _Database:
 
     def execute(self, query, parameters=()):
         self.queries.append((query, parameters))
-        if "sync_jobs" in query or "planned_units" in query:
+        if any(
+            table in query
+            for table in ("sync_jobs", "planned_units", "activity_records")
+        ):
             return SimpleNamespace(fetchall=list, fetchone=lambda: {"count": 0})
         table = query.rsplit("FROM ", 1)[1]
         count = (
@@ -179,6 +182,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "canonical_coverage",
                 "canonical_backfill",
                 "canonical_read",
+                "canonical_session_conflicts",
                 "logs",
                 "debug_capture",
                 "note",
@@ -189,6 +193,9 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         )
         self.assertEqual(report["canonical_backfill"], {"status": "unavailable"})
         self.assertEqual(report["canonical_read"], {"status": "unavailable"})
+        self.assertEqual(
+            report["canonical_session_conflicts"], {"total": 0, "sessions": []}
+        )
         self.assertEqual(
             report["sync"]["snapshot_counts"],
             {
@@ -242,9 +249,12 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         count_queries = [
             query
             for query, _parameters in self.db.queries
-            if "sync_jobs" not in query and "planned_units" not in query
+            if not any(
+                table in query
+                for table in ("sync_jobs", "planned_units", "activity_records")
+            )
         ]
-        self.assertEqual(len(self.db.queries), 10)
+        self.assertEqual(len(self.db.queries), 12)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
