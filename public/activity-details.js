@@ -167,11 +167,8 @@
     });
   }
 
-  const RECORDED_BY = { garmin: "Garmin", wahoo: "Wahoo" };
-
   function recordingText(entry) {
-    const origin = RECORDED_BY[entry.recorded_by];
-    const parts = [origin && origin !== entry.label ? `${entry.label} (${origin})` : entry.label];
+    const parts = [entry.label];
     if (entry.started_at) parts.push(formatTime(entry.started_at));
     if (Number.isFinite(entry.duration_s)) parts.push(`${Math.round(entry.duration_s / 60)} min`);
     return parts.join(" · ");

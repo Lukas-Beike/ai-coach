@@ -65,6 +65,8 @@ class FeedbackPostRoutes:
         """Confirm, split or merge one session; the response carries its new bundle."""
         if not isinstance(payload, dict):
             raise AppError(400, "Die Korrektur muss ein Objekt sein.")
+        if self._session_corrections is None:
+            raise AppError(404, "Nicht gefunden.")
         service = self._session_corrections()
         action = payload.get("action")
         if action == "confirm":

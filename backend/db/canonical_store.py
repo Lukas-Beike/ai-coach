@@ -2003,7 +2003,9 @@ def session_bundle_ids(db: Any, activity_id: str) -> list[str]:
     ]
 
 
-def session_correction_rows(db: Any, activity_ids: Sequence[str]) -> list[dict[str, Any]]:
+def session_correction_rows(
+    db: Any, activity_ids: Sequence[str]
+) -> list[dict[str, Any]]:
     """Return the bundling columns of the given sessions, ordered by id."""
     rows: list[dict[str, Any]] = []
     for chunk in _chunked(activity_ids):
@@ -2067,7 +2069,9 @@ def session_member_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
     )
 
 
-def merge_candidate_rows(db: Any, local_date: str, exclude: str) -> list[dict[str, Any]]:
+def merge_candidate_rows(
+    db: Any, local_date: str, exclude: str
+) -> list[dict[str, Any]]:
     """Return the active records of other live sessions on one athlete-local date."""
     return _fetch_all(
         db,

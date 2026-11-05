@@ -86,7 +86,7 @@ class SessionCorrectionService:
                 survivor["link_kind"] = ActivityLinkKind.CONFIRMED.value
             return [survivor["activity_id"]]
 
-        return self._correct(activity_id, None, correct, "confirmed", source)
+        return self._correct(activity_id, correct, "confirmed", source)
 
     def split(
         self, activity_id: str, member_id: str, *, source: str = "local"
@@ -120,7 +120,7 @@ class SessionCorrectionService:
             )
             return members
 
-        return self._correct(activity_id, None, correct, "split", source)
+        return self._correct(activity_id, correct, "split", source)
 
     def merge(
         self, activity_id: str, other_id: str, *, source: str = "local"
@@ -163,7 +163,7 @@ class SessionCorrectionService:
             )
             return touched
 
-        return self._correct(activity_id, other_id, correct, "merged", source)
+        return self._correct(activity_id, correct, "merged", source)
 
     # Change-history hooks: the entity id lists the touched sessions.
 
@@ -180,10 +180,10 @@ class SessionCorrectionService:
         self,
         db: Any,
         entity_id: str,
-        current: dict[str, Any] | None,
+        _current: dict[str, Any] | None,
         target: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
-        """Write the recorded session rows back."""
+        """Write the recorded session rows back; the current rows are not needed."""
         rows = (target or {}).get("sessions")
         if not isinstance(rows, list) or {
             str(row.get("activity_id")) for row in rows if isinstance(row, dict)
@@ -196,7 +196,6 @@ class SessionCorrectionService:
     def _correct(
         self,
         activity_id: str,
-        other_id: str | None,
         correct: Callable[[Any, dict[str, Any]], list[str]],
         status: str,
         source: str,
@@ -217,7 +216,13 @@ class SessionCorrectionService:
             )
             after = _value(canonical_store.session_correction_rows(db, touched))
             change = change_history.record_change(
-                db, ENTITY_TYPE, ",".join(touched), "update", before, after, source=source
+                db,
+                ENTITY_TYPE,
+                ",".join(touched),
+                "update",
+                before,
+                after,
+                source=source,
             )
         self._publish()
         return {
@@ -232,7 +237,9 @@ class SessionCorrectionService:
 
     def _rows(self, db: Any, session_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
         """The working copies of session rows; a correction edits them in place."""
-        missing = [session for session in session_ids if session not in self._rows_cache]
+        missing = [
+            session for session in session_ids if session not in self._rows_cache
+        ]
         for row in canonical_store.session_correction_rows(db, missing):
             self._rows_cache[str(row["activity_id"])] = dict(row)
         return {session: self._rows_cache[session] for session in session_ids}
@@ -281,7 +288,9 @@ def _value(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 def _kind(members: int) -> str:
     return (
-        ActivityLinkKind.CONFIRMED.value if members > 1 else ActivityLinkKind.SINGLE.value
+        ActivityLinkKind.CONFIRMED.value
+        if members > 1
+        else ActivityLinkKind.SINGLE.value
     )
 
 
@@ -293,11 +302,19 @@ def _age(row: dict[str, Any]) -> tuple[datetime, str]:
     return created, str(row["activity_id"])
 
 
-def _entry(row: dict[str, Any]) -> dict[str, Any]:
+def _label(value: Any) -> str | None:
     try:
-        label = provider_label(ProviderId(row["provider"]), SourceView.ACTIVITY_DETAIL)
+        return provider_label(ProviderId(value), SourceView.ACTIVITY_DETAIL)
     except ValueError:
-        label = str(row["provider"])
+        return None
+
+
+def _entry(row: dict[str, Any]) -> dict[str, Any]:
+    """One provider copy; its label names the recording device when it differs."""
+    label = _label(row["provider"]) or str(row["provider"])
+    origin = _label(row["recorded_by"])
+    if origin and origin != label:
+        label = f"{label} ({origin})"
     return {
         "session_id": row["session_id"],
         "provider": row["provider"],

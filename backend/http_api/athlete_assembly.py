@@ -10,8 +10,8 @@ from typing import Any
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
-from backend.activities.session_corrections import SessionCorrectionService
 from backend.activities.feedback import ActivityFeedbackService
+from backend.activities.session_corrections import SessionCorrectionService
 from backend.activities.session_linking import garmin_activity_matches
 from backend.athlete.checkins import CheckinService
 from backend.athlete.clock import AthleteLocalClock

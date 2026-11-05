@@ -120,7 +120,9 @@ class SessionCorrectionTests(SessionCorrectionFixture):
         self.resync()
 
         effective = self.effective()
-        self.assertEqual(effective, {self.intervals: self.intervals, self.garmin: self.garmin})
+        self.assertEqual(
+            effective, {self.intervals: self.intervals, self.garmin: self.garmin}
+        )
         rows = self.rows()
         self.assertTrue(all(row["athlete_confirmed"] for row in rows.values()))
         self.assertTrue(all(row["state"] == "active" for row in rows.values()))
@@ -163,9 +165,7 @@ class SessionCorrectionTests(SessionCorrectionFixture):
                     "synced_at": SYNCED,
                     "raw_provider_data": {
                         "activities": [
-                            intervals_row(
-                                "i2", start_date_local="2026-09-10T18:00:00"
-                            )
+                            intervals_row("i2", start_date_local="2026-09-10T18:00:00")
                         ]
                     },
                 },

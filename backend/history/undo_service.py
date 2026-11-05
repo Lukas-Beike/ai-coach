@@ -215,9 +215,7 @@ class HistoryUndoService:
             return self._feedback_service.restore_in_transaction(
                 db, entity_id, current, target
             )
-        if (
-            entity_type == "activity_session" and self._session_corrections is not None
-        ):
+        if entity_type == "activity_session" and self._session_corrections is not None:
             return self._session_corrections.restore_in_transaction(
                 db, entity_id, current, target
             )

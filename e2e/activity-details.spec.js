@@ -289,7 +289,7 @@ test("@responsive provider copies split with a receipt whose undo restores the b
   await expect(page.locator("#appShell")).toBeVisible();
   await page.evaluate(async () => {
     const member = (session_id, provider, label) => ({ session_id, provider, label, recorded_by: "garmin", sport: "ride", started_at: "2026-09-10T05:00:00+00:00", duration_s: 3600 });
-    const bundled = { activity_id: "act_a", link_kind: "heuristic", athlete_confirmed: false, members: [member("act_a", "intervals", "Intervals.icu"), member("act_b", "garmin", "Garmin")], merge_candidates: [] };
+    const bundled = { activity_id: "act_a", link_kind: "heuristic", athlete_confirmed: false, members: [member("act_a", "intervals", "Intervals.icu (Garmin)"), member("act_b", "garmin", "Garmin")], merge_candidates: [] };
     const split = { ...bundled, link_kind: "single", athlete_confirmed: true, members: [bundled.members[0]], merge_candidates: [member("act_b", "garmin", "Garmin")] };
     let bundle = bundled;
     globalThis.sessionBodies = [];
