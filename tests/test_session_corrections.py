@@ -39,13 +39,13 @@ class SessionCorrectionFixture(FeedbackSessionFixture):
         self.intervals = self.sessions["intervals"]
         self.garmin = self.sessions["garmin"]
 
-    def effective(self) -> dict[str, str]:
+    def _effective(self) -> dict[str, str]:
         with self.manager.reader() as db:
             return canonical_store.effective_session_ids(
                 db, [self.intervals, self.garmin]
             )
 
-    def rows(self) -> dict[str, dict[str, Any]]:
+    def _rows(self) -> dict[str, dict[str, Any]]:
         with self.manager.reader() as db:
             return {
                 row["activity_id"]: row
@@ -54,7 +54,7 @@ class SessionCorrectionFixture(FeedbackSessionFixture):
                 )
             }
 
-    def resync(self) -> None:
+    def _resync(self) -> None:
         with self.manager.unit_of_work() as db:
             canonical_ingest.ingest_intervals_partial_snapshot(
                 db,
@@ -92,7 +92,7 @@ class SessionCorrectionTests(SessionCorrectionFixture):
         bundle = self.corrections.bundle(self.garmin)
 
         assert bundle is not None
-        self.assertEqual(bundle["activity_id"], self.effective()[self.garmin])
+        self.assertEqual(bundle["activity_id"], self._effective()[self.garmin])
         self.assertEqual(
             sorted(member["provider"] for member in bundle["members"]),
             ["garmin", "intervals"],
@@ -101,29 +101,29 @@ class SessionCorrectionTests(SessionCorrectionFixture):
         self.assertEqual(bundle["merge_candidates"], [])
 
     def test_confirm_marks_the_bundle_and_undo_restores_it(self) -> None:
-        survivor = self.effective()[self.intervals]
-        before = self.rows()[survivor]
+        survivor = self._effective()[self.intervals]
+        before = self._rows()[survivor]
 
         result = self.corrections.confirm(self.garmin)
 
-        confirmed = self.rows()[survivor]
+        confirmed = self._rows()[survivor]
         self.assertEqual(
             (confirmed["athlete_confirmed"], confirmed["link_kind"]), (1, "confirmed")
         )
         self.undo(result["change"])
-        self.assertEqual(self.rows()[survivor], before)
+        self.assertEqual(self._rows()[survivor], before)
 
     def test_split_keeps_both_copies_apart_through_later_syncs(self) -> None:
         self.service.save(INTERVALS_ID, {"notes": "Heavy legs", "session_rpe": 6})
 
         result = self.corrections.split(self.intervals, self.garmin)
-        self.resync()
+        self._resync()
 
-        effective = self.effective()
+        effective = self._effective()
         self.assertEqual(
             effective, {self.intervals: self.intervals, self.garmin: self.garmin}
         )
-        rows = self.rows()
+        rows = self._rows()
         self.assertTrue(all(row["athlete_confirmed"] for row in rows.values()))
         self.assertTrue(all(row["state"] == "active" for row in rows.values()))
         by_id = {
@@ -135,27 +135,27 @@ class SessionCorrectionTests(SessionCorrectionFixture):
         self.assertIsNotNone(result["change"])
 
     def test_undoing_a_split_restores_the_bundle(self) -> None:
-        before = self.rows()
+        before = self._rows()
         result = self.corrections.split(self.garmin, self.garmin)
 
         self.undo(result["change"])
 
-        self.assertEqual(self.rows(), before)
-        self.assertEqual(len(set(self.effective().values())), 1)
+        self.assertEqual(self._rows(), before)
+        self.assertEqual(len(set(self._effective().values())), 1)
 
     def test_merge_bundles_split_sessions_and_undo_splits_them_again(self) -> None:
         self.corrections.split(self.intervals, self.garmin)
-        split = self.rows()
+        split = self._rows()
 
         result = self.corrections.merge(self.garmin, self.intervals)
 
-        self.assertEqual(len(set(self.effective().values())), 1)
-        survivor = self.rows()[result["activity_id"]]
+        self.assertEqual(len(set(self._effective().values())), 1)
+        survivor = self._rows()[result["activity_id"]]
         self.assertEqual(
             (survivor["link_kind"], survivor["athlete_confirmed"]), ("confirmed", 1)
         )
         self.undo(result["change"])
-        self.assertEqual(self.rows(), split)
+        self.assertEqual(self._rows(), split)
 
     def test_merge_refuses_two_copies_from_one_source(self) -> None:
         with self.manager.unit_of_work() as db:

@@ -10,7 +10,7 @@ session it was written for and follows that session's merges.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Final
 
 from backend import change_history
@@ -116,11 +116,7 @@ class SessionCorrectionService:
             if member_id == survivor_id:
                 # Every alias and retaining deletion of the detached survivor,
                 # with or without an active record, follows the kept bundle.
-                for row in rows.values():
-                    if row["merged_into"] == survivor_id:
-                        row["merged_into"] = keep_id
-                    if row["merged_into_retained"] == survivor_id:
-                        row["merged_into_retained"] = keep_id
+                _repoint(rows.values(), survivor_id, keep_id)
             keep.update(
                 state=_ACTIVE,
                 merged_into=None,
@@ -167,11 +163,7 @@ class SessionCorrectionService:
                 *canonical_store.session_bundle_ids(db, drop["activity_id"]),
             ]
             rows = self._rows(db, touched)
-            for row in rows.values():
-                if row["merged_into"] == drop["activity_id"]:
-                    row["merged_into"] = keep["activity_id"]
-                if row["merged_into_retained"] == drop["activity_id"]:
-                    row["merged_into_retained"] = keep["activity_id"]
+            _repoint(rows.values(), drop["activity_id"], keep["activity_id"])
             rows[drop["activity_id"]].update(
                 state=_DUPLICATE, merged_into=keep["activity_id"]
             )
@@ -277,6 +269,15 @@ def _survivor(db: Any, activity_id: str) -> dict[str, Any] | None:
     if not rows or rows[0]["state"] != _ACTIVE:
         return None
     return dict(rows[0])
+
+
+def _repoint(rows: Iterable[dict[str, Any]], old: str, new: str) -> None:
+    """Point the aliases and retaining deletions of ``old`` at ``new``."""
+    for row in rows:
+        if row["merged_into"] == old:
+            row["merged_into"] = new
+        if row["merged_into_retained"] == old:
+            row["merged_into_retained"] = new
 
 
 def _member_sessions(db: Any, survivor_id: str) -> list[str]:

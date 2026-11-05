@@ -194,7 +194,11 @@
     };
     const list = (entries, label, body, done) => {
       const items = node("ul", null, "activity-bundle-list");
-      for (const entry of entries) { const item = node("li", recordingText(entry)); if (label) item.append(" ", action(label, body(entry), done)); items.append(item); }
+      for (const entry of entries) {
+        const item = node("li", recordingText(entry));
+        if (label) { item.append(" ", action(label, body(entry), done)); }
+        items.append(item);
+      }
       return items;
     };
     const several = members.length > 1;
