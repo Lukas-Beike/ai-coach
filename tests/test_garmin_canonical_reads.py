@@ -32,7 +32,6 @@ from backend.canonical.vocabulary import (
     Sport,
 )
 from backend.coach.morning import GarminSleepObservations, ManualMorningCheckinService
-from backend.db.garmin_store import prune_section
 from backend.errors import AppError
 from backend.observability import Redactor
 from backend.performance import garmin_metrics, garmin_observations
@@ -164,8 +163,21 @@ class GarminReadFixture(CanonicalReadFixture):
             if key not in CANONICAL_SECTIONS
         }
         self.garmin = stripped
+        # Only the raw elements go: the tables keep their rows, as they do for a
+        # collection that no longer stores these sections. Pruning would retire
+        # the observations the elements own.
         for section in CANONICAL_SECTIONS:
-            self.write(lambda db, name=section: prune_section(db, name, set()))
+            self.write(lambda db, name=section: _drop_raw_section(db, name))
+
+
+def _drop_raw_section(db: Any, section: str) -> None:
+    prefix = f"{section}/"
+    db.execute(
+        "DELETE FROM provider_records WHERE provider = 'garmin' "
+        "AND record_kind = 'health' AND (source_record_id = ? "
+        "OR substr(source_record_id, 1, ?) = ?)",
+        (section, len(prefix), prefix),
+    )
 
 
 class GarminStateEqualityTests(GarminReadFixture):

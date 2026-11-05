@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from backend.db import canonical_store
+from backend.db import canonical_store, garmin_store
 from backend.db.schema import initialize_schema
 from backend.providers.canonical_plans import (
     current_observation_mapper_versions,
@@ -172,6 +172,38 @@ class ObservationRetirementTests(unittest.TestCase):
         # The fetch came back empty: an empty list carries no element.
         self.ingest_garmin(garmin(LATER, resting_hr=[]))
         self.assertEqual(self.states("resting_hr"), {DAY: "active"})
+
+    def test_a_garmin_element_pruned_from_a_complete_window_is_retired(self) -> None:
+        self.ingest_garmin(
+            garmin(
+                resting_hr=[
+                    {"calendarDate": DAY, "restingHeartRate": 49},
+                    {"calendarDate": OTHER_DAY, "restingHeartRate": 50},
+                ]
+            )
+        )
+        # A complete read of the window no longer returns the DAY element.
+        removed = garmin_store.prune_section(
+            self.db, "resting_hr", {f"resting_hr/{OTHER_DAY}"}, start=OTHER_DAY, end=DAY
+        )
+        self.assertEqual(removed, 1)
+        self.assertEqual(self.served("resting_hr"), [(OTHER_DAY, 50.0)])
+        self.assertEqual(self.states("resting_hr")[DAY], "retired")
+
+    def test_a_replace_prune_keeps_the_history_of_a_rolling_section(self) -> None:
+        self.ingest_garmin(
+            garmin(
+                resting_hr=[
+                    {"calendarDate": OTHER_DAY, "restingHeartRate": 50},
+                    {"calendarDate": DAY, "restingHeartRate": 49},
+                ]
+            )
+        )
+        # A rolling read without a window no longer lists the older day.
+        garmin_store.prune_section(self.db, "resting_hr", {f"resting_hr/{DAY}"})
+        self.assertEqual(
+            self.states("resting_hr"), {OTHER_DAY: "active", DAY: "active"}
+        )
 
     def test_a_row_of_another_owner_is_untouched(self) -> None:
         self.ingest_intervals(intervals([{"id": DAY, "restingHR": 50}]))
