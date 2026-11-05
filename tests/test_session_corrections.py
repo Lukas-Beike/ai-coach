@@ -273,6 +273,63 @@ class SessionDeleteTests(SessionCorrectionFixture):
         self.assertEqual(len(set(self._live())), 1)
 
 
+class AthleteDeleteFollowUpTests(SessionCorrectionFixture):
+    def test_undo_is_refused_once_the_provider_deleted_the_primary(self) -> None:
+        survivor = self._effective()[self.intervals]
+        provider, record = (
+            ("intervals", INTERVALS_ID)
+            if survivor == self.intervals
+            else ("garmin", GARMIN_ID)
+        )
+        result = self.corrections.delete(self.intervals)
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                provider,
+                record_kind="activity",
+                provider_activity_id=record,
+                now="2026-09-23T08:00:00+00:00",
+            )
+
+        with self.assertRaises(AppError) as raised:
+            self.undo(result["change"])
+
+        self.assertEqual(raised.exception.status, 409)
+
+    def test_an_exact_copy_of_a_deleted_activity_stays_deleted(self) -> None:
+        with self.manager.unit_of_work() as db:
+            canonical_store.mark_activity_deleted(
+                db,
+                "intervals",
+                record_kind="activity",
+                provider_activity_id=INTERVALS_ID,
+                now=SYNCED,
+            )
+        self.corrections.delete(self.garmin)
+        with self.manager.unit_of_work() as db:
+            canonical_ingest.ingest_intervals_partial_snapshot(
+                db,
+                {
+                    "synced_at": "2026-09-22T08:00:00+00:00",
+                    "raw_provider_data": {
+                        "activities": [
+                            intervals_row(
+                                "i7",
+                                source="GARMIN_CONNECT",
+                                device_name="Garmin Edge 840",
+                                external_id=GARMIN_ID,
+                                start_date_local="2026-09-10T09:30:00",
+                            )
+                        ]
+                    },
+                },
+                zone=ZONE,
+            )
+            live = canonical_store.active_session_activity_rows(db)
+
+        self.assertEqual(live, [])
+
+
 class FeedbackAnchorTests(FeedbackSessionFixture):
     """Feedback on a Garmin-only session resolves after the Intervals.icu copy arrives."""
 

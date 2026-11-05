@@ -126,7 +126,7 @@ def split_unmatched_sessions(
             split += canonical_store.detach_activity_session(
                 db, activity_id=session_id, now=now
             )
-        if detached and not _still_bundled(members, detached, survivor_id):
+        if detached and not _still_bundled(db, survivor_id):
             canonical_store.set_activity_session_link_kind(
                 db,
                 activity_id=survivor_id,
@@ -166,12 +166,16 @@ def _unmatched(
     return {session_of[_key(record)] for record in records} - kept
 
 
-def _still_bundled(
-    members: Sequence[dict[str, Any]], detached: set[str], survivor_id: str
-) -> bool:
-    """Whether the survivor still bundles another session after the splits."""
-    return any(
-        str(row["session_id"]) not in detached | {survivor_id} for row in members
+def _still_bundled(db: Any, survivor_id: str) -> bool:
+    """Whether the survivor still bundles the record of another session."""
+    return (
+        len(
+            {
+                row["session_id"]
+                for row in canonical_store.session_member_rows(db, survivor_id)
+            }
+        )
+        > 1
     )
 
 
@@ -344,6 +348,7 @@ class _Sessions:
             if _mergeable(first):
                 self._strengthen(first, kind.value, now)
             return False
+        self._follow_athlete_delete(first, second, now)
         if not (_mergeable(first) and _mergeable(second)):
             return False
         if self._origins_of(first) & self._origins_of(second):
@@ -362,6 +367,31 @@ class _Sessions:
             now,
         )
         return True
+
+    def _follow_athlete_delete(
+        self, first: dict[str, Any], second: dict[str, Any], now: str
+    ) -> None:
+        """Delete a new copy of an activity the athlete deleted, as that activity.
+
+        Only an exact link reaches a deleted session (``_upstream_rows``), so a
+        provider's copy of a deleted recording does not bring the activity back.
+        """
+        for gone, other in ((first, second), (second, first)):
+            if (
+                gone["state"] == ActivitySessionState.DELETED.value
+                and _mergeable(other)
+                and canonical_store.athlete_deleted_session(
+                    self._db, gone["activity_id"]
+                )
+                and canonical_store.delete_with_athlete_deleted(
+                    self._db,
+                    activity_id=other["activity_id"],
+                    deleted=str(gone["merged_into_retained"]),
+                    now=now,
+                )
+            ):
+                other["state"] = ActivitySessionState.DELETED.value
+                other["merged_into_retained"] = gone["merged_into_retained"]
 
     def _strengthen(self, row: dict[str, Any], link_kind: str, now: str) -> None:
         if _LINK_STRENGTH[link_kind] <= _LINK_STRENGTH[row["link_kind"]]:

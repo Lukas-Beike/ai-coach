@@ -74,6 +74,8 @@ class FeedbackPostRoutes:
         elif action == "split":
             result = service.split(activity_id, str(payload.get("member_id") or ""))
         elif action == "delete":
+            if payload.get("confirmed") is not True:
+                raise AppError(409, "Das Löschen muss bestätigt werden.")
             result = service.delete(activity_id)
         elif action == "merge":
             result = service.merge(activity_id, str(payload.get("other_id") or ""))

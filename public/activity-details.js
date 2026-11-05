@@ -212,10 +212,10 @@
       if (!confirmed) return;
       buttons.forEach((item) => { item.disabled = true; }); status.textContent = "Speichere …";
       try {
-        const result = await api(`/api/activities/${encodeURIComponent(bundle.activity_id)}/session`, { method: "POST", body: JSON.stringify({ action: "delete" }) });
+        const result = await api(`/api/activities/${encodeURIComponent(bundle.activity_id)}/session`, { method: "POST", body: JSON.stringify({ action: "delete", confirmed: true }) });
         const deleted = node("p", "Aktivität gelöscht. ", "muted"); deleted.setAttribute("role", "status");
         if (result.change?.id) deleted.append(undoButton(api, result.change, deleted, reload));
-        content.replaceChildren(deleted);
+        content.replaceChildren(deleted); reload.deleted?.();
       } catch (error) { buttons.forEach((item) => { item.disabled = false; }); status.textContent = error.message; }
     });
     section.append(remove);
@@ -444,6 +444,8 @@
         api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => load(), onSetup: () => close(false),
       }));
     }
+    // A deleted activity keeps only its receipt: its provider actions go away.
+    load.deleted = () => { actions.replaceChildren(); status.textContent = ""; };
     try { await load(); } catch (error) { if (isCurrent()) status.textContent = error.message; }
   }
 

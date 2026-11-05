@@ -331,6 +331,6 @@ test("@responsive deleting an activity locally asks first and can be undone", as
   await expect(dialog.getByRole("status").filter({ hasText: "Aktivität gelöscht." })).toBeVisible();
   await dialog.getByRole("button", { name: "Rückgängig" }).click();
   await expect(dialog.locator(".activity-bundle").getByRole("status")).toContainText("Zurückgenommen.");
-  expect(await page.evaluate(() => deleteBodies)).toEqual([{ action: "delete" }, { change_id: "c3", expected_current_hash: "h3" }]);
+  expect(await page.evaluate(() => deleteBodies)).toEqual([{ action: "delete", confirmed: true }, { change_id: "c3", expected_current_hash: "h3" }]);
   await page.evaluate(() => ActivityDetails.close(false));
 });

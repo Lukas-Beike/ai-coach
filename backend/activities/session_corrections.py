@@ -39,6 +39,9 @@ _SAME_ORIGIN = (
     "nicht zusammengeführt werden."
 )
 _OTHER_DAY = "Nur Aktivitäten desselben Tages können zusammengeführt werden."
+_GONE = (
+    "Eine Aufzeichnung wurde inzwischen beim Anbieter gelöscht; Undo wurde abgebrochen."
+)
 _TOO_LARGE = "Diese Aktivität ist zu groß für eine rücknehmbare Korrektur."
 
 
@@ -139,21 +142,26 @@ class SessionCorrectionService:
     def delete(self, activity_id: str, *, source: str = "local") -> dict[str, Any]:
         """Delete the activity locally: the session and every provider copy in it.
 
-        The deleted sessions are athlete-confirmed, so neither a provider delete
-        of the primary copy nor a later delivery of a copy revives them. Nothing
-        is deleted at a provider.
+        The survivor retains itself and its copies retain it, which marks an
+        athlete delete: neither a provider delete of the primary copy nor a later
+        delivery of a copy revives them. Nothing is deleted at a provider.
         """
 
         def correct(db: Any, survivor: dict[str, Any]) -> list[str]:
             survivor_id = survivor["activity_id"]
             touched = canonical_store.session_bundle_ids(db, survivor_id)
             rows = self._rows(db, touched)
+            # The survivor retains itself: the marker of an athlete delete.
             for row in rows.values():
-                if row["merged_into"] == survivor_id:
-                    row.update(merged_into=None, merged_into_retained=survivor_id)
-                elif row["activity_id"] != survivor_id:
-                    continue
-                row.update(state=_DELETED, athlete_confirmed=1)
+                if (
+                    row["merged_into"] == survivor_id
+                    or row["activity_id"] == survivor_id
+                ):
+                    row.update(
+                        state=_DELETED,
+                        merged_into=None,
+                        merged_into_retained=survivor_id,
+                    )
             return touched
 
         return self._correct(activity_id, correct, "deleted", source)
@@ -223,6 +231,9 @@ class SessionCorrectionService:
             str(row.get("activity_id")) for row in rows if isinstance(row, dict)
         } != set(entity_id.split(",")):
             raise AppError(409, "Die Änderungshistorie ist beschädigt.")
+        live = [str(row["activity_id"]) for row in rows if row.get("state") == _ACTIVE]
+        if set(live) - canonical_store.sessions_with_active_records(db, live):
+            raise AppError(409, _GONE)
         canonical_store.write_session_correction_rows(db, rows, now=self._clock())
         return target
 
