@@ -15,18 +15,10 @@ from backend.canonical.rating_scales import (
 )
 from backend.canonical.vocabulary import MetricKind, RecordingOrigin
 from backend.coach.context import COACH_ACTIVITY_FIELDS
-from backend.coach.subjective_scales import subjective_scales
+from backend.coach.prompt import COACH_PROMPT
 from backend.performance.context import SUBJECTIVE_RATINGS
 from backend.performance.session_rpe_load import session_load
 from backend.planning.context import CHECKIN_FIELDS
-
-RATING_SECTIONS = (
-    "current_performance",
-    "activities",
-    "local_feedback",
-    "activity_feedback",
-    "daily_planning_context",
-)
 
 
 class RatingScaleTests(unittest.TestCase):
@@ -70,52 +62,54 @@ class RatingScaleTests(unittest.TestCase):
         self.assertIsNone(INTERVALS_FEEL_SCALE.label(2.5))
 
 
-class CoachLegendTests(unittest.TestCase):
-    def test_every_subjective_coach_value_has_scale_direction_and_source(
-        self,
-    ) -> None:
-        legend = subjective_scales(RATING_SECTIONS)
-        expected = {
-            ("current_performance", "recovery"): {key for key, _ in SUBJECTIVE_RATINGS},
-            ("activities",): {"rpe", "feel"} & set(COACH_ACTIVITY_FIELDS),
-            ("local_feedback",): set(CHECKIN_SCORE_FIELDS),
-            ("activity_feedback",): {"session_rpe"},
-        }
-        for path, fields in expected.items():
-            node = legend
-            for part in path:
-                node = node[part]
-            self.assertEqual(fields | {"source"}, set(node), path)
-            self.assertIn("Athleteneingabe", node["source"], path)
-            for field in fields:
-                self.assertRegex(node[field], r"^\d+–\d+, höher = ", (path, field))
+def _range(scale: RatingScale) -> str:
+    return f"{scale.minimum}–{scale.maximum}"
+
+
+class CoachRuleTests(unittest.TestCase):
+    """Rule 8h states the canonical scales of every rating the Coach reads."""
+
+    RULE = COACH_PROMPT[COACH_PROMPT.index("8h. ") :].splitlines()[0]
+
+    def test_rule_names_the_intervals_scales_with_best_at_one(self) -> None:
+        wellness = [
+            INTERVALS_WELLNESS_SCALES[kind] for _key, kind in SUBJECTIVE_RATINGS
+        ]
         self.assertEqual(
-            set(CHECKIN_SCORE_FIELDS) & set(CHECKIN_FIELDS), set(CHECKIN_SCORE_FIELDS)
+            {("1–4", "worse")}, {(_range(s), s.higher_is) for s in wellness}
+        )
+        keys = "/".join(key for key, _kind in SUBJECTIVE_RATINGS)
+        self.assertIn(f"Intervals.icu recovery {keys} 1–4", self.RULE)
+        self.assertEqual("worse", INTERVALS_FEEL_SCALE.higher_is)
+        self.assertIn(f"activity feel {_range(INTERVALS_FEEL_SCALE)}", self.RULE)
+        self.assertIn("run from 1 = best", self.RULE)
+        self.assertIn(f"activity rpe {_range(INTERVALS_RPE_SCALE)}", self.RULE)
+
+    def test_rule_names_the_local_scales_and_directions(self) -> None:
+        soreness, stress = (
+            LOCAL_CHECKIN_SCALES["soreness"],
+            LOCAL_CHECKIN_SCALES["stress"],
+        )
+        motivation = LOCAL_CHECKIN_SCALES["motivation"]
+        self.assertEqual(
+            ("worse", "worse", "better"),
+            (soreness.higher_is, stress.higher_is, motivation.higher_is),
+        )
+        self.assertIn("check-in soreness/stress 0–10 higher = worse", self.RULE)
+        self.assertIn("motivation 0–10 higher = better", self.RULE)
+        self.assertIs(LOCAL_CHECKIN_SCALES["session_rpe"], LOCAL_SESSION_RPE_SCALE)
+        self.assertIn(
+            f"check-in and feedback session_rpe {_range(LOCAL_SESSION_RPE_SCALE)}",
+            self.RULE,
         )
 
-    def test_daily_view_brings_the_scales_it_refers_to(self) -> None:
-        legend = subjective_scales({"daily_planning_context"})
-        self.assertEqual(
-            {"daily_planning_context", "local_feedback", "activity_feedback"},
-            set(legend),
-        )
-
-    def test_same_named_soreness_names_two_scales_and_sources(self) -> None:
-        legend = subjective_scales(RATING_SECTIONS)
-        intervals = legend["current_performance"]["recovery"]
-        local = legend["local_feedback"]
-        self.assertEqual(
-            "1–4, höher = schlechter (1 niedrig … 4 extrem)", intervals["soreness"]
-        )
-        self.assertEqual("0–10, höher = schlechter", local["soreness"])
-        self.assertEqual(
-            "1–4, höher = schlechter (1 super … 4 mies)", intervals["mood"]
-        )
-        self.assertIn("Intervals.icu", intervals["source"])
-        self.assertNotEqual(intervals["source"], local["source"])
-
-    def test_sections_without_ratings_get_no_legend(self) -> None:
-        self.assertEqual({}, subjective_scales({"weather", "recovery"}))
+    def test_rule_covers_every_rating_field_and_forbids_comparing_scales(self) -> None:
+        self.assertTrue({"rpe", "feel"} <= set(COACH_ACTIVITY_FIELDS))
+        self.assertTrue(set(CHECKIN_SCORE_FIELDS) <= set(CHECKIN_FIELDS))
+        for field in set(CHECKIN_SCORE_FIELDS) | {"rpe", "feel"}:
+            self.assertIn(field, self.RULE)
+        self.assertIn("athlete-entered, not measured", self.RULE)
+        self.assertIn("Never compare ratings of different scales", self.RULE)
 
 
 class DetailMetricTests(unittest.TestCase):
@@ -130,10 +124,11 @@ class DetailMetricTests(unittest.TestCase):
         self.assertEqual(
             "1–5, höher = schlechter (1 stark … 5 schwach)", metrics["feel"]["scale"]
         )
-        self.assertEqual("stark", metrics["feel"]["label"])
+        self.assertEqual("stark", metrics["feel"]["rating_label"])
         self.assertEqual(0.0, metrics["feel"]["normalized_0_1"])
         self.assertIn("höher = härter", metrics["rpe"]["scale"])
         self.assertNotIn("scale", metrics["calories_kcal"])
+        self.assertNotIn("rating_label", metrics["rpe"])
 
     def test_off_scale_rating_keeps_value_and_scale_without_label(self) -> None:
         metrics = intervals_summary_metrics(

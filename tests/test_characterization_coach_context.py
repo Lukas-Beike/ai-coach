@@ -684,9 +684,7 @@ class CoachStructuredContextSwitchTests(unittest.TestCase):
         result = service.build(selection=selection)
 
         garmin_projection.coach_context.assert_not_called()
-        self.assertEqual(
-            set(result), {"activities", "current_performance", "subjective_scales"}
-        )
+        self.assertEqual(set(result), {"activities", "current_performance"})
         # Without a canonical source there are no canonical values.
         self.assertFalse(result["current_performance"]["available"])
 

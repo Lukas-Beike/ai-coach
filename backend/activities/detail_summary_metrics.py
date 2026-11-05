@@ -89,7 +89,10 @@ def intervals_summary_metrics(
 def _rating(scale: RatingScale, value: float) -> dict[str, Any]:
     """The scale, label and normalized value of one rating on ``scale``."""
     rating: dict[str, Any] = {"scale": scale.describe()}
-    if scale.minimum <= value <= scale.maximum:
-        rating["label"] = scale.label(value)
-        rating["normalized_0_1"] = round(scale.normalized(value), 3)
+    if not scale.minimum <= value <= scale.maximum:
+        return rating
+    text = scale.label(value)
+    if text is not None:
+        rating["rating_label"] = text
+    rating["normalized_0_1"] = round(scale.normalized(value), 3)
     return rating

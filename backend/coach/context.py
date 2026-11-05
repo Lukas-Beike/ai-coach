@@ -26,7 +26,6 @@ from backend.coach.context_selection import (
 )
 from backend.coach.conversation import CoachMessageService
 from backend.coach.prompt import COACH_PROMPT
-from backend.coach.subjective_scales import subjective_scales
 from backend.db import DatabaseManager
 from backend.db.repositories import KeyValueRepository
 from backend.performance import activity_validation
@@ -827,9 +826,6 @@ class CoachStructuredContextService:
         }
         _note_omitted_sections(context["source_policy"], selection)
         selected = {key: value for key, value in context.items() if key in included}
-        scales = subjective_scales(included)
-        if scales:
-            selected["subjective_scales"] = scales
         if performance_inputs and performance_inputs.pending:
             selected["canonical_data_status"] = {
                 "status": "failed" if performance_inputs.backfill_failed else "pending",

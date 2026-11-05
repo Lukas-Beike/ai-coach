@@ -271,38 +271,36 @@ PLAN = COMMON | {
     "training_plans",
     "weather",
 }
-# The scale legend of the subjective ratings (issue #1671) every case carries.
-SCALES = 1_500
+# The fixed Coach prompt's rule 8h on subjective rating scales (issue #1671).
+RATING_RULE = 500
 # Exact present sections and a character ceiling (whole prompt context) per case.
 EXPECTED: dict[str, tuple[set[str], int]] = {
-    "session_analysis": (COMMON | {"recovery"}, 26_000 + SCALES),
+    "session_analysis": (COMMON | {"recovery"}, 26_000 + RATING_RULE),
     # Progress and block review are one review with the same sections.
     "progress_review": (
         COMMON | {"planning", "recovery", "training_plans"},
-        31_000 + SCALES,
+        31_000 + RATING_RULE,
     ),
     "block_review": (
         COMMON | {"planning", "recovery", "training_plans"},
-        31_000 + SCALES,
+        31_000 + RATING_RULE,
     ),
-    "plan_week": (PLAN, 49_500 + SCALES),
-    "plan_block": (PLAN, 63_500 + SCALES),
-    "adjust_week": (PLAN, 45_500 + SCALES),
+    "plan_week": (PLAN, 49_500 + RATING_RULE),
+    "plan_block": (PLAN, 63_500 + RATING_RULE),
+    "adjust_week": (PLAN, 45_500 + RATING_RULE),
     "morning_checkin": (
         COMMON | {"daily_planning_context", "recovery"},
-        26_000 + SCALES,
+        26_000 + RATING_RULE,
     ),
-    "free_text_planning": (PLAN, 49_500 + SCALES),
-    "general_question": (COMMON | {"recovery"}, 25_000 + SCALES),
-    "nutrition_message": (COMMON | {"nutrition_products"}, 25_000 + SCALES),
+    "free_text_planning": (PLAN, 49_500 + RATING_RULE),
+    "general_question": (COMMON | {"recovery"}, 25_000 + RATING_RULE),
+    "nutrition_message": (COMMON | {"nutrition_products"}, 25_000 + RATING_RULE),
 }
 
 
 def present(row: dict[str, Any]) -> set[str]:
-    # The projection and the rating-scale legend describe sections; they are none.
     return {key for key, value in row["context"].items() if value is not None} - {
-        "projection",
-        "subjective_scales",
+        "projection"
     }
 
 
@@ -505,8 +503,7 @@ class CoachContextBudgetTests(unittest.TestCase):
                 self.assertEqual(selection.kind, fields["request_kind"])
                 sizes = fields["section_characters"]
                 self.assertEqual(
-                    present(self.measured[label]) | {"projection", "subjective_scales"},
-                    set(sizes),
+                    present(self.measured[label]) | {"projection"}, set(sizes)
                 )
                 self.assertTrue(all(size > 0 for size in sizes.values()))
 

@@ -16,7 +16,6 @@ from backend.activities.activity_reference import ActivityReferences
 from backend.canonical.vocabulary import MetricKind
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import coach_context_json_size
-from backend.coach.subjective_scales import activity_scales, feedback_scales
 from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
@@ -148,14 +147,7 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
 
         result = service.execute("list_recent_activities", {})
 
-        self.assertEqual(
-            result,
-            {
-                "ok": True,
-                "activities": [],
-                "subjective_scales": {**activity_scales(), **feedback_scales()},
-            },
-        )
+        self.assertEqual(result, {"ok": True, "activities": []})
         activity_read.recent.assert_called_once_with(30, 100, today=today)
         activity_read.reset_mock()
         service.execute("list_recent_activities", {"days": 9999, "limit": 0})

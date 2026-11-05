@@ -16,7 +16,6 @@ from backend.coach.context import (
     coach_sleep_timing_projection,
 )
 from backend.coach.session_checks import matched_focus
-from backend.coach.subjective_scales import activity_scales, feedback_scales
 from backend.errors import AppError
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.comparable_sessions import comparable_sessions
@@ -136,7 +135,6 @@ class CoachActivityReadToolService:
                     }
                     for activity in recent["activities"]
                 ],
-                "subjective_scales": {**activity_scales(), **feedback_scales()},
             }
         if name == "get_activity_details":
             detail = self._activity_read.detail(
@@ -145,10 +143,7 @@ class CoachActivityReadToolService:
                 profile=self._profile.get(),
                 today=self._today(),
             )
-            result = {
-                **self._with_session_context(detail),
-                "subjective_scales": feedback_scales(),
-            }
+            result = self._with_session_context(detail)
             session = detail.get("session")
             if self._session_corrections is not None and isinstance(session, dict):
                 # Local session IDs and merge candidates for the session tools.
