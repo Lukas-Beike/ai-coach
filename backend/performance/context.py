@@ -27,7 +27,9 @@ from backend.performance.personal_recovery import personal_recovery
 from backend.performance.training_focus import training_focus
 from backend.performance.wellness_days import WellnessDay, latest
 
-_SUBJECTIVE_RATINGS = (
+# Recovery keys of the Intervals.icu wellness ratings; their scales live in
+# backend.canonical.rating_scales.
+SUBJECTIVE_RATINGS = (
     ("fatigue", MetricKind.SUBJECTIVE_FATIGUE),
     ("soreness", MetricKind.SUBJECTIVE_SORENESS),
     ("stress", MetricKind.SUBJECTIVE_STRESS),
@@ -66,7 +68,7 @@ def _day_id(day: WellnessDay | None) -> str | None:
 def _subjective_ratings(day: WellnessDay | None) -> dict[str, float | None]:
     return {
         key: None if day is None else day.value(kind)
-        for key, kind in _SUBJECTIVE_RATINGS
+        for key, kind in SUBJECTIVE_RATINGS
     }
 
 

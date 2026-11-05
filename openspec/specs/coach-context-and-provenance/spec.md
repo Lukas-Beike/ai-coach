@@ -244,3 +244,18 @@ The system SHALL give the Coach context the same current FTP, threshold heart ra
 Detailed contract: the plan playbook tells the Coach to use these thresholds for targets and to name a flagged conflict once. Each current metric with other current sources carries `alternatives` (value, source label, provider id) and `conflict`.
 
 Evidence: `backend/performance/current_metrics.py:coach_thresholds`, `backend/performance/canonical_current.py:read_current_inputs`, `backend/planning/load_checks.py:load_thresholds`, `backend/coach/playbooks.py:_THRESHOLDS`; `tests/test_current_thresholds.py:CoachAndPlanParityTests`.
+
+### Requirement: Subjective ratings carry scale, direction and source
+The system SHALL give every subjective rating that reaches the Coach (Intervals.icu wellness fatigue, soreness, stress and mood, activity RPE and feel, check-in and activity feedback scores) with its scale, direction and athlete-entered source. Same-named ratings of different scales SHALL never be presented as comparable numbers.
+
+#### Scenario: Same-named soreness from two scales
+- **WHEN** the context carries Intervals.icu soreness 3 in `current_performance.recovery` and check-in soreness 3 in `local_feedback`
+- **THEN** Coach rule 8h names 1–4 (higher is worse, Intervals.icu, athlete-entered) for the first and 0–10 (higher is worse, local check-in) for the second and forbids comparing or averaging them.
+
+#### Scenario: Activity detail ratings
+- **WHEN** `get_activity_details` returns Intervals.icu RPE or feel
+- **THEN** the metric source kind is `athlete_entered`, not `measured`, and the metric carries its scale text, a named value's `rating_label` (feel 1 stark … 5 schwach) and `normalized_0_1` (0 best or lowest strain, 1 worst or highest).
+
+Detailed contract: ratings keep the entered number; each field's scale is fixed by where it was entered and resolved at read time from `backend/canonical/rating_scales.py`, so stored rows need no replay. The legend is constant, so it is rule 8h of the fixed Coach prompt instead of per-turn context; tests check the rule against those scales. Session-RPE load entries name their `rpe_scale` (local 0–10 or Intervals.icu 1–10) and keep their values.
+
+Evidence: `backend/canonical/rating_scales.py:RatingScale`, `backend/activities/detail_summary_metrics.py:intervals_summary_metrics`, `backend/performance/session_rpe_load.py:session_load`, `backend/coach/prompt.py:COACH_PROMPT`; `tests/test_subjective_rating_scales.py`.

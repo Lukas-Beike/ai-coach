@@ -193,6 +193,10 @@ The system SHALL map dated Intervals wellness body, HRV, sleep, readiness, VO2ma
 - **WHEN** RMSSD and SDNN are both present or an earlier alias is invalid while a later alias is numeric
 - **THEN** HRV methods remain separate observations, and the rejected first-present value is reported rather than replaced by the later alias. Supported wellness kinds include weight/body fat, resting HR, RMSSD/SDNN, sleep duration/score, readiness, VO2max, CTL/ATL/form, and sport-scoped eFTP.
 
+#### Scenario: Subjective wellness ratings
+- **WHEN** a wellness row carries fatigue, soreness, stress or mood
+- **THEN** each is stored as entered, provider-reported with `recorded_by` manual so the Intervals.icu provenance stays, on the Intervals.icu 1–4 scale where 1 is good and 4 bad (mood 1 super … 4 mies); the scale is resolved at read time, not stored.
+
 #### Scenario: Rejected reported form stays absent
 - **WHEN** a wellness row reports a form value that is not a valid number while CTL and ATL are valid
 - **THEN** the value is reported as a mapping issue and no form observation is stored for that day, so readers show no form instead of a consumer-side CTL minus ATL.

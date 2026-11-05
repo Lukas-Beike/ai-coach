@@ -271,19 +271,30 @@ PLAN = COMMON | {
     "training_plans",
     "weather",
 }
+# The fixed Coach prompt's rule 8h on subjective rating scales (issue #1671).
+RATING_RULE = 500
 # Exact present sections and a character ceiling (whole prompt context) per case.
 EXPECTED: dict[str, tuple[set[str], int]] = {
-    "session_analysis": (COMMON | {"recovery"}, 26_000),
+    "session_analysis": (COMMON | {"recovery"}, 26_000 + RATING_RULE),
     # Progress and block review are one review with the same sections.
-    "progress_review": (COMMON | {"planning", "recovery", "training_plans"}, 31_000),
-    "block_review": (COMMON | {"planning", "recovery", "training_plans"}, 31_000),
-    "plan_week": (PLAN, 49_500),
-    "plan_block": (PLAN, 63_500),
-    "adjust_week": (PLAN, 45_500),
-    "morning_checkin": (COMMON | {"daily_planning_context", "recovery"}, 26_000),
-    "free_text_planning": (PLAN, 49_500),
-    "general_question": (COMMON | {"recovery"}, 25_000),
-    "nutrition_message": (COMMON | {"nutrition_products"}, 25_000),
+    "progress_review": (
+        COMMON | {"planning", "recovery", "training_plans"},
+        31_000 + RATING_RULE,
+    ),
+    "block_review": (
+        COMMON | {"planning", "recovery", "training_plans"},
+        31_000 + RATING_RULE,
+    ),
+    "plan_week": (PLAN, 49_500 + RATING_RULE),
+    "plan_block": (PLAN, 63_500 + RATING_RULE),
+    "adjust_week": (PLAN, 45_500 + RATING_RULE),
+    "morning_checkin": (
+        COMMON | {"daily_planning_context", "recovery"},
+        26_000 + RATING_RULE,
+    ),
+    "free_text_planning": (PLAN, 49_500 + RATING_RULE),
+    "general_question": (COMMON | {"recovery"}, 25_000 + RATING_RULE),
+    "nutrition_message": (COMMON | {"nutrition_products"}, 25_000 + RATING_RULE),
 }
 
 

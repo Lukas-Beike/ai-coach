@@ -11,6 +11,11 @@ import math
 from collections.abc import Mapping
 from typing import Any, Final
 
+from backend.canonical.rating_scales import (
+    INTERVALS_FEEL_SCALE,
+    INTERVALS_RPE_SCALE,
+    RatingScale,
+)
 from backend.canonical.vocabulary import ProviderId, RecordingOrigin
 from backend.providers.intervals_activity_keys import (
     CONFIGURED_FTP,
@@ -33,8 +38,8 @@ _SUMMARY_METRICS: Final[tuple[tuple[str, str, str | None, str], ...]] = (
     ("max_cadence", "max_cadence", "rpm", "measured"),
     ("elevation_gain_m", "total_elevation_gain", "m", "measured"),
     ("elevation_loss_m", "total_elevation_loss", "m", "measured"),
-    ("rpe", RPE, None, "measured"),
-    ("feel", "feel", None, "measured"),
+    ("rpe", RPE, None, "athlete_entered"),
+    ("feel", "feel", None, "athlete_entered"),
     ("normalized_power", WEIGHTED_AVG_WATTS, "W", "derived"),
     ("intensity", INTENSITY, None, "derived"),
     ("ftp_w", CONFIGURED_FTP, "W", "derived"),
@@ -42,6 +47,11 @@ _SUMMARY_METRICS: Final[tuple[tuple[str, str, str | None, str], ...]] = (
     ("lthr_bpm", LACTATE_THRESHOLD_HR, "bpm", "derived"),
     ("decoupling_pct", "decoupling", "%", "derived"),
 )
+# The scales of the ratings the athlete entered in Intervals.icu.
+_RATING_SCALES: Final[Mapping[str, RatingScale]] = {
+    "rpe": INTERVALS_RPE_SCALE,
+    "feel": INTERVALS_FEEL_SCALE,
+}
 
 
 def intervals_summary_metrics(
@@ -70,4 +80,19 @@ def intervals_summary_metrics(
             },
             "alternatives": [],
         }
+        scale = _RATING_SCALES.get(key)
+        if scale is not None:
+            metrics[key].update(_rating(scale, value))
     return metrics
+
+
+def _rating(scale: RatingScale, value: float) -> dict[str, Any]:
+    """The scale, label and normalized value of one rating on ``scale``."""
+    rating: dict[str, Any] = {"scale": scale.describe()}
+    if not scale.minimum <= value <= scale.maximum:
+        return rating
+    text = scale.label(value)
+    if text is not None:
+        rating["rating_label"] = text
+    rating["normalized_0_1"] = round(scale.normalized(value), 3)
+    return rating

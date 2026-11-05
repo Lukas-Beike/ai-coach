@@ -76,6 +76,10 @@ The system SHALL store a check-in for an explicit nonfuture calendar date or ath
 - **WHEN** feedback context is requested
 - **THEN** it includes today's matching row or null and at most fourteen recent rows from the bounded local list, with an athlete-entered scope label.
 
+#### Scenario: Check-in score direction
+- **WHEN** check-in scores reach the Coach
+- **THEN** soreness and stress read 0–10 with higher worse, motivation 0–10 with higher better and session RPE 0–10 with higher harder, labelled as the local check-in and never as an Intervals.icu 1–4 rating.
+
 Evidence: `backend/athlete/checkins.py:normalize_checkin`, `backend/athlete/checkins.py:CheckinService.save`, `backend/athlete/checkins.py:CheckinService.context`; `tests/test_athlete_checkins.py:test_normalize_checkin_defaults_date_and_normalizes_values`, `tests/test_athlete_checkins.py:test_normalize_checkin_rejects_invalid_and_future_dates`, `tests/test_athlete_checkins.py:test_bounded_score_rejects_non_integer_and_out_of_range_values`, `tests/test_athlete_checkins.py:test_context_limits_recent_and_uses_today`.
 
 ### Requirement: AP5 Coach check-in merging and explicit clearing
