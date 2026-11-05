@@ -35,6 +35,7 @@ from backend.sync.garmin import (
     GarminSyncStateService,
 )
 from backend.sync.garmin_service import GarminSyncService
+from backend.sync.metric_export_consent import enabled_fields, fields_view
 
 # The recovery context shows the latest record; two weeks cover a missed sync.
 COACH_RECOVERY_DAYS = 14
@@ -133,9 +134,8 @@ class GarminProjectionService:
             metric_export_status = self._key_value_repository.get(
                 db, "last_garmin_metric_export_status"
             )
-            metric_export_enabled = (
-                self._key_value_repository.get(db, "garmin_metric_export_enabled")
-                == "true"
+            metric_export_fields = enabled_fields(
+                lambda key: self._key_value_repository.get(db, key)
             )
             tokens_connected = garmin_tokens_connected(
                 lambda key: self._key_value_repository.get(db, key),
@@ -157,7 +157,8 @@ class GarminProjectionService:
                 if metric_export_status
                 else {}
             ),
-            "metric_export_enabled": metric_export_enabled,
+            "metric_export_enabled": bool(metric_export_fields),
+            "metric_export_fields": fields_view(metric_export_fields),
             "last_error": parsed_error,
             "pagination": dict(status.pagination),
             "source_freshness": performance_freshness.garmin_source_freshness(

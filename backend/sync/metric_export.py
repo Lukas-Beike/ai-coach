@@ -41,6 +41,13 @@ from backend.errors import AppError, public_error_contract
 from backend.providers.descriptors import Capability
 from backend.providers.source_labels import SourceView, observation_source_label
 from backend.runtime.ports import ObservationReader
+from backend.sync.metric_export_consent import (
+    DEFAULT_FIELDS,
+    EXPORT_FIELDS,
+    enabled_fields,
+    fields_view,
+    store_fields,
+)
 from backend.sync.metric_export_port import (
     MetricExportField,
     MetricExportPort,
@@ -207,7 +214,14 @@ class MetricExportService:
         }
 
     def configure_automatic(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        """Persist explicit athlete consent for the named automatic export."""
+        """Persist explicit athlete consent for the named automatic export.
+
+        ``fields`` names the consented fields (``EXPORT_FIELDS`` keys); ``field``
+        with ``field_enabled`` changes one field against the stored consent, so a
+        stale page never reverts another change. Enabling without either keeps
+        the current fields, or starts with ``DEFAULT_FIELDS``; disabling revokes
+        every field. The receipt lists each changed field.
+        """
         if (
             not isinstance(payload, Mapping)
             or payload.get("confirmed") is not True
@@ -220,34 +234,94 @@ class MetricExportService:
                 "Der automatische Garmin-Abgleich mit Intervals.icu muss ausdrücklich bestätigt werden.",
                 reason="confirmation_required",
             )
+        requested = self._requested_fields(payload)
+        change = self._field_change(payload)
         with (
             self._export_lock,
             self._database_lock,
             self._database_manager().unit_of_work() as db,
         ):
-            self._key_values.set(
-                db,
-                "garmin_metric_export_enabled",
-                "true" if payload["enabled"] else "false",
+            before = enabled_fields(lambda key: self._key_values.get(db, key))
+            if not payload["enabled"]:
+                after: frozenset[str] = frozenset()
+            elif requested is not None:
+                after = requested
+            elif change is not None:
+                key, enabled = change
+                after = before | {key} if enabled else before - {key}
+            else:
+                after = before or DEFAULT_FIELDS
+            store_fields(lambda key, value: self._key_values.set(db, key, value), after)
+        return {
+            "enabled": bool(after),
+            "fields": fields_view(after),
+            "changes": [
+                item
+                for item in fields_view(after)
+                if (item["key"] in before) != item["enabled"]
+            ],
+        }
+
+    @staticmethod
+    def _field_change(payload: Mapping[str, Any]) -> tuple[str, bool] | None:
+        key = payload.get("field")
+        if key is None:
+            return None
+        enabled = payload.get("field_enabled")
+        if (
+            not isinstance(key, str)
+            or key not in EXPORT_FIELDS
+            or not isinstance(enabled, bool)
+            or "fields" in payload
+        ):
+            raise AppError(
+                400,
+                "Die Auswahl der Garmin-Werte ist ungültig.",
+                reason="invalid_metric_export",
             )
-        return {"enabled": payload["enabled"]}
+        return key, enabled
+
+    @staticmethod
+    def _requested_fields(payload: Mapping[str, Any]) -> frozenset[str] | None:
+        raw = payload.get("fields")
+        if raw is None:
+            return None
+        if (
+            not isinstance(raw, list)
+            or not raw
+            or any(
+                not isinstance(item, str) or item not in EXPORT_FIELDS for item in raw
+            )
+        ):
+            raise AppError(
+                400,
+                "Die Auswahl der Garmin-Werte ist ungültig.",
+                reason="invalid_metric_export",
+            )
+        return frozenset(raw)
 
     def sync_garmin(self) -> dict[str, Any] | None:
         """Apply Garmin measurements, preserving later changes at Intervals.icu.
 
-        This internal sync entry point never accepts HTTP/Coach payloads. The
-        first transfer protects unknown existing target values; later transfers compare
-        the live target against the last accepted value, including across restarts.
+        This internal sync entry point never accepts HTTP/Coach payloads. Only the
+        consented fields (``metric_export_consent``) are sent. The first transfer
+        protects unknown existing target values; later transfers compare the live
+        target against the last accepted value, including across restarts.
         """
         with self._export_lock:
             with self._database_manager().reader() as db:
-                if self._key_values.get(db, "garmin_metric_export_enabled") != "true":
-                    return None
+                consented = enabled_fields(lambda key: self._key_values.get(db, key))
+            if not consented:
+                return None
             target = ProviderId.INTERVALS
             port = self._port(target)
-            candidates = self._candidates(
-                target, port, source_provider=ProviderId.GARMIN
-            )
+            candidates = [
+                candidate
+                for candidate in self._candidates(
+                    target, port, source_provider=ProviderId.GARMIN
+                )
+                if candidate.field.kind.value in consented
+            ]
             groups: dict[str, list[_Candidate]] = {}
             conflicts = 0
             for candidate in candidates:
