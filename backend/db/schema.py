@@ -405,6 +405,8 @@ CURRENT_DATABASE_SCHEMA: dict[str, set[str]] = {
         "mapper_version",
         "created_at",
         "updated_at",
+        "state",
+        "owner_record_id",
     },
     "sessions": {"token_hash", "csrf_hash", "expires_at", "created_at", "last_seen"},
     "activity_detail_sets": {
@@ -638,6 +640,7 @@ CURRENT_DATABASE_INDEXES = {
     "idx_nutrition_products_name",
     "idx_nutrition_products_status",
     "idx_observations_metric_date",
+    "idx_observations_owner",
     "idx_planned_units_date",
     "idx_planned_units_external_id",
     "idx_planned_units_local_id",
@@ -655,7 +658,7 @@ CURRENT_DATABASE_INDEXES = {
 }
 
 
-CURRENT_SCHEMA_VERSION = 20
+CURRENT_SCHEMA_VERSION = 21
 
 # Provider-neutral canonical tables (schema version 6). Only closed lifecycle
 # enums are CHECKed here; they are generated from backend.canonical.vocabulary so
@@ -1193,6 +1196,16 @@ PRODUCT_FAVORITE_DDL = """
 """
 
 
+# Schema version 21: the lifecycle of an observation. A sync that maps its owning
+# raw record again (``owner_record_id``, the provider's source record id) and no
+# longer emits it retires the row instead of deleting it; readers serve active
+# rows only. Rows without an owner are never retired.
+OBSERVATION_LIFECYCLE_DDL = f"""
+    ALTER TABLE observations ADD COLUMN state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ({_PROJECTION_STATES}));
+    ALTER TABLE observations ADD COLUMN owner_record_id TEXT CHECK (owner_record_id IS NULL OR length(owner_record_id) BETWEEN 1 AND 256);
+    CREATE INDEX idx_observations_owner ON observations(provider, owner_record_id)"""
+
+
 def execute_ddl(db: Any, ddl: str) -> None:
     """Run DDL statement by statement inside the caller's transaction.
 
@@ -1534,6 +1547,7 @@ def _create_schema_statements(db: Any) -> None:
     execute_ddl(db, POWER_CURVE_DDL)
     execute_ddl(db, FEEDBACK_RATING_TIME_DDL)
     execute_ddl(db, PRODUCT_FAVORITE_DDL)
+    execute_ddl(db, OBSERVATION_LIFECYCLE_DDL)
     db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 

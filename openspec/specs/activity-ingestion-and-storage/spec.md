@@ -35,17 +35,21 @@ Detailed contract: Fresh payloads replace their owned corrected values while ret
 Evidence: `backend/sync/canonical_ingest.py:ingest_plan`, `backend/sync/garmin_snapshot_writer.py:GarminSnapshotWriter`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_wahoo_sync.py:test_resync_is_idempotent`, `tests/test_wahoo_sync.py:test_coverage_failure_rolls_the_whole_ingest_back`, `tests/test_canonical_ingest.py:test_a_partial_refresh_keeps_the_fetch_time_of_retained_sections`.
 
 ### Requirement: Conservative disappearance reconciliation
-The system SHALL infer missing-activity deletion only for eligible complete Intervals fetches and only inside the safe inner days of the covered window. Edge days, historical chunks, incremental reads, and absent activity collections SHALL not delete activities merely because a fetched response omits them. Garmin absence in a later payload SHALL not delete its earlier activities. Deletion SHALL retain provider tombstone/state evidence rather than erasing identity.
+The system SHALL infer missing-activity deletion only from a completely read Intervals, Garmin or Wahoo activity list and only inside the safe inner days of the covered window. Edge days, historical Intervals chunks, incremental, failed, paused or truncated reads, and absent activity collections SHALL not delete activities merely because a response omits them. Deletion SHALL keep provider tombstone/state evidence through the one canonical delete path.
 
 #### Scenario: Complete interior disappearance
-- **WHEN** a complete eligible Intervals collection omits an existing activity within the safe covered interior
+- **WHEN** a complete eligible Intervals, Garmin or Wahoo activity list omits an existing activity of that provider within the safe covered interior
 - **THEN** the activity can be marked deleted through canonical reconciliation.
 
+#### Scenario: Complete Garmin or Wahoo read
+- **WHEN** a Garmin activity range (sync, historical chunk or targeted refresh; never a fixture) returns for every date window without failure, rate limit, capability pause or cancel, or a Wahoo listing is fully paged, consistent with its reported total and without unreadable rows, and every listed row carries a usable id
+- **THEN** that read may delete, and the sync result reports the deleted count as a number only.
+
 #### Scenario: Incomplete evidence of absence
-- **WHEN** an activity is missing from an incremental or historical response, an edge day, or a Garmin refresh
+- **WHEN** an activity is missing from an incremental or historical response, an edge day, a failed, paused or rate-limited Garmin read, or a truncated Wahoo listing
 - **THEN** the system retains the stored activity rather than treating omission as deletion authorization.
 
-Evidence: `backend/sync/canonical_ingest.py:intervals_deletion_window`, `backend/sync/canonical_ingest.py:ingest_intervals_snapshot`, `backend/sync/canonical_ingest.py:ingest_garmin_payload`; `tests/test_canonical_ingest.py:test_full_fetch_never_deletes_on_the_edge_days_of_its_window`, `tests/test_canonical_ingest.py:test_historical_fetch_never_deletes`, `tests/test_canonical_ingest.py:test_garmin_never_deletes_an_activity_missing_from_a_later_payload`.
+Evidence: `backend/sync/canonical_ingest.py:intervals_deletion_window`, `backend/sync/canonical_ingest.py:ingest_intervals_snapshot`, `backend/sync/canonical_ingest.py:ingest_garmin_payload`, `backend/sync/garmin.py:activity_deletion_window`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_canonical_ingest.py:test_full_fetch_never_deletes_on_the_edge_days_of_its_window`, `tests/test_canonical_ingest.py:test_historical_fetch_never_deletes`, `tests/test_canonical_ingest.py:test_a_complete_activity_read_tombstones_a_deleted_activity`, `tests/test_canonical_ingest.py:test_a_failed_or_paused_activity_read_deletes_nothing`, `tests/test_canonical_ingest.py:test_a_row_without_an_activity_id_blocks_the_deletion`, `tests/test_garmin_snapshot_writer.py:ActivityWindowTests`, `tests/test_wahoo_sync.py:test_a_complete_listing_tombstones_a_workout_deleted_in_wahoo`, `tests/test_wahoo_sync.py:test_a_truncated_unreadable_or_unidentified_listing_deletes_nothing`.
 
 ### Requirement: Deterministic provider-copy session identity
 The system SHALL bundle supported provider copies into canonical sessions using deterministic start, sport-family, duration, distance, and recording-origin rules. The matching start window is 30 minutes, with duration tolerance at least 120 seconds or 10 percent and distance tolerance at least 500 metres or 10 percent under each implemented pairing rule. Intervals remains primary over direct Wahoo and Garmin; Wahoo-recorded rides can retain Garmin copies as alternatives.

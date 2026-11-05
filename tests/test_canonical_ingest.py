@@ -27,6 +27,7 @@ from backend.db.canonical_store import WriteOutcome
 from backend.db.schema import initialize_schema
 from backend.providers.canonical_plans import IngestPlan, ObservationItem
 from backend.sync import canonical_ingest as ingest
+from backend.sync.garmin import activity_deletion_window
 from backend.sync.snapshots import historical_chunk_snapshot, merge_historical_snapshot
 
 ZONE = ZoneInfo("Europe/Berlin")
@@ -52,12 +53,12 @@ def intervals_row(
     }
 
 
-def garmin_row(identifier: int = 910010) -> dict[str, Any]:
+def garmin_row(identifier: int = 910010, day: str = "2026-09-10") -> dict[str, Any]:
     return {
         "activityId": identifier,
         "activityName": "Synthetic ride",
         "activityType": {"typeKey": "cycling"},
-        "startTimeLocal": "2026-09-10 07:15:00",
+        "startTimeLocal": f"{day} 07:15:00",
         "distance": 20000.0,
         "duration": 3600.0,
         "averageHR": 140,
@@ -160,6 +161,15 @@ class DeletionWindowTests(unittest.TestCase):
         )
         self.assertEqual(window.start, date(2026, 9, 8))
         self.assertEqual(window.end, date(2026, 9, 19))
+
+    def test_a_provider_range_keeps_only_its_inner_days(self) -> None:
+        self.assertEqual(
+            ingest.fetch_deletion_window(date(2026, 9, 1), date(2026, 9, 20)),
+            ingest.DeletionWindow(date(2026, 9, 2), date(2026, 9, 19)),
+        )
+        self.assertIsNone(
+            ingest.fetch_deletion_window(date(2026, 9, 19), date(2026, 9, 20))
+        )
 
     def test_one_or_zero_days_leave_an_empty_window(self) -> None:
         for days in (0, 1, 2):
@@ -379,7 +389,7 @@ class GarminIngestTests(IngestFixture):
         self.assertEqual(counters, ingest.CanonicalIngestCounters())
         self.assertEqual(self.count("provider_records"), 0)
 
-    def test_garmin_never_deletes_an_activity_missing_from_a_later_payload(
+    def test_a_payload_without_a_complete_read_never_deletes(
         self,
     ) -> None:
         ingest.ingest_garmin_payload(
@@ -392,6 +402,89 @@ class GarminIngestTests(IngestFixture):
         )
         self.assertEqual(counters.deleted, 0)
         self.assertEqual(activity_states(self.db), {"1": "active", "2": "active"})
+
+    def garmin_sync(
+        self, rows: list[dict[str, Any]], **stats: Any
+    ) -> ingest.CanonicalIngestCounters:
+        """Ingest a sync payload the way the Garmin sync and its writer do."""
+        payload: dict[str, Any] = {
+            "synced_at": NOW,
+            "activities": rows,
+            "provider_sync": {
+                "read_window": {"start": "2026-09-01", "end": "2026-09-20"},
+                "pagination": {"activities": {"complete": True, **stats}},
+            },
+        }
+        return ingest.ingest_garmin_payload(
+            self.db,
+            payload,
+            zone=ZONE,
+            deletion_window=activity_deletion_window(payload),
+        )
+
+    def test_a_complete_activity_read_tombstones_a_deleted_activity(self) -> None:
+        ingest.ingest_garmin_payload(
+            self.db,
+            {"synced_at": NOW, "activities": [garmin_row(3, day="2026-08-20")]},
+            zone=ZONE,
+        )
+        self.garmin_sync([garmin_row(1), garmin_row(2)])
+        counters = self.garmin_sync([garmin_row(1)])
+        self.assertEqual(counters.deleted, 1)
+        self.assertEqual(
+            activity_states(self.db), {"1": "active", "2": "deleted", "3": "active"}
+        )
+
+    def test_a_failed_or_paused_activity_read_deletes_nothing(self) -> None:
+        self.garmin_sync([garmin_row(1), garmin_row(2)])
+        for stats in (
+            {"complete": False, "error": "synthetic failure"},
+            {"complete": False, "paused": True},
+        ):
+            with self.subTest(stats=stats):
+                counters = self.garmin_sync([garmin_row(1)], **stats)
+                self.assertEqual(counters.deleted, 0)
+                self.assertEqual(
+                    activity_states(self.db), {"1": "active", "2": "active"}
+                )
+
+    def test_a_complete_read_never_deletes_on_its_edge_days(self) -> None:
+        edges = [garmin_row(2, day="2026-09-01"), garmin_row(3, day="2026-09-20")]
+        self.garmin_sync([garmin_row(1), *edges])
+        counters = self.garmin_sync([garmin_row(1)])
+        self.assertEqual(counters.deleted, 0)
+        self.assertEqual(
+            activity_states(self.db), {"1": "active", "2": "active", "3": "active"}
+        )
+
+    def test_a_payload_without_an_activity_list_never_deletes(self) -> None:
+        self.garmin_sync([garmin_row(1)])
+        payload = {
+            "synced_at": NOW,
+            "provider_sync": {
+                "read_window": {"start": "2026-09-01", "end": "2026-09-20"},
+                "pagination": {"activities": {"complete": True}},
+            },
+        }
+        counters = ingest.ingest_garmin_payload(
+            self.db,
+            payload,
+            zone=ZONE,
+            deletion_window=ingest.DeletionWindow(date(2026, 9, 2), date(2026, 9, 19)),
+        )
+        self.assertEqual(counters.deleted, 0)
+        self.assertEqual(activity_states(self.db), {"1": "active"})
+
+    def test_a_row_without_an_activity_id_blocks_the_deletion(self) -> None:
+        self.garmin_sync([garmin_row(1), garmin_row(2)])
+        unidentified = {**garmin_row(2), "activityId": None}
+        for rows in ([garmin_row(1), unidentified], [garmin_row(1), None]):
+            with self.subTest(rows=rows):
+                counters = self.garmin_sync(rows)  # type: ignore[arg-type]
+                self.assertEqual(counters.deleted, 0)
+                self.assertEqual(
+                    activity_states(self.db), {"1": "active", "2": "active"}
+                )
 
     def test_secrets_are_removed_from_garmin_raw_records(self) -> None:
         payload = {

@@ -263,8 +263,8 @@ class PayloadMappingTests(unittest.TestCase):
         (record,) = result.records
         self.assertEqual(date(2026, 10, 13), record.observed_on)
 
-    def test_the_module_version_is_one(self) -> None:
-        self.assertEqual(1, MAPPER_VERSION)
+    def test_the_module_version_is_two(self) -> None:
+        self.assertEqual(2, MAPPER_VERSION)
 
 
 class IngestAndReprojectionTests(unittest.TestCase):
@@ -339,8 +339,8 @@ class IngestAndReprojectionTests(unittest.TestCase):
                     self.assertEqual(ingested[key], item.observation)
 
     def test_the_threshold_kinds_have_their_own_mapper_versions(self) -> None:
-        self.assertEqual(1, plans.reprojection_mapper_version("wahoo", "power_zones"))
-        self.assertEqual(1, plans.reprojection_mapper_version("wahoo", "user"))
+        self.assertEqual(2, plans.reprojection_mapper_version("wahoo", "power_zones"))
+        self.assertEqual(2, plans.reprojection_mapper_version("wahoo", "user"))
 
     def test_a_threshold_row_without_a_fetch_time_is_not_reprojected(self) -> None:
         stored = {

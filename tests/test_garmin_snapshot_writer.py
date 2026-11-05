@@ -18,8 +18,14 @@ from backend.db import garmin_store
 from backend.db.repositories import KeyValueRepository
 from backend.db.schema import initialize_schema
 from backend.performance.morning_battery_service import MorningBatteryStore
+from backend.providers.garmin import merge_weight_snapshots
 from backend.sync.canonical_ingest import CanonicalIngestCounters
-from backend.sync.garmin_snapshot_writer import GarminSnapshotWriter
+from backend.sync.garmin import activity_deletion_window
+from backend.sync.garmin_snapshot_writer import (
+    ANALYSIS_SOURCES,
+    NUTRITION_SOURCES,
+    GarminSnapshotWriter,
+)
 
 ZONE = ZoneInfo("Europe/Berlin")
 NOW = "2026-10-10T08:00:00+00:00"
@@ -125,6 +131,122 @@ class WriteTests(WriterFixture):
         self.writer.write(self.db, payload(activities=[]))
         state = self.db.execute("SELECT state FROM activity_records").fetchone()[0]
         self.assertEqual(state, "active")
+
+
+def garmin_activity(identifier: int) -> dict[str, Any]:
+    return {**payload()["activities"][0], "activityId": identifier}
+
+
+def activity_states(db: sqlite3.Connection) -> dict[str, str]:
+    return {
+        row["provider_activity_id"]: row["state"]
+        for row in db.execute(
+            "SELECT provider_activity_id, state FROM activity_records"
+        )
+    }
+
+
+class ActivityWindowTests(WriterFixture):
+    def refresh(self, ids: list[int], windows: dict[str, Any]) -> None:
+        self.writer.write_refresh(
+            self.db,
+            fetched_at=NOW,
+            sections={"activities": [garmin_activity(item) for item in ids]},
+            view={},
+            windows=windows,
+            allowed=ANALYSIS_SOURCES,
+        )
+
+    def test_a_complete_refresh_tombstones_the_activity_garmin_no_longer_returns(
+        self,
+    ) -> None:
+        window = {"activities": (date(2026, 10, 1), date(2026, 10, 10))}
+        self.refresh([1, 2], window)
+        self.refresh([1], window)
+        self.assertEqual(activity_states(self.db), {"1": "active", "2": "deleted"})
+
+    def test_an_incomplete_refresh_deletes_no_activity(self) -> None:
+        self.refresh([1, 2], {})
+        self.refresh([1], {})
+        self.assertEqual(activity_states(self.db), {"1": "active", "2": "active"})
+
+    def test_a_complete_sync_tombstones_the_activity_garmin_no_longer_returns(
+        self,
+    ) -> None:
+        sync = {
+            "errors": [],
+            "provider_sync": {
+                "read_window": {"start": "2026-10-01", "end": "2026-10-10"},
+                "pagination": {"activities": {"complete": True}},
+            },
+        }
+        for ids in ([1, 2], [1]):
+            value = payload(activities=[garmin_activity(item) for item in ids], **sync)
+            counters = self.writer.write(
+                self.db, value, deletion_window=activity_deletion_window(value)
+            )
+        self.assertEqual(counters.deleted, 1)
+        self.assertEqual(activity_states(self.db), {"1": "active", "2": "deleted"})
+
+
+class WeightWindowTests(WriterFixture):
+    WINDOW = (date(2026, 10, 8), date(2026, 10, 9))
+
+    def refresh(self, weighed: dict[str, int], window: Any) -> None:
+        envelope = merge_weight_snapshots(
+            [
+                {
+                    "dailyWeightSummaries": [
+                        {
+                            "summaryDate": day,
+                            "latestWeight": {"calendarDate": day, "weight": grams},
+                        }
+                        for day, grams in weighed.items()
+                    ]
+                }
+            ],
+            garmin_store.read_view(self.db, {"weight"}).get("weight", []),
+            window=window,
+        )
+        self.writer.write_refresh(
+            self.db,
+            fetched_at=NOW,
+            sections={"weight": envelope},
+            view={},
+            windows={} if window is None else {"weight": window},
+            allowed=NUTRITION_SOURCES,
+        )
+
+    def states(self) -> dict[str, str]:
+        return {
+            row["observed_on"]: row["state"]
+            for row in self.db.execute(
+                "SELECT observed_on, state FROM observations WHERE metric = 'weight'"
+            )
+        }
+
+    def test_a_complete_window_retires_the_deleted_weigh_in_only(self) -> None:
+        self.refresh(
+            {"2026-10-01": 79000, "2026-10-08": 80000, "2026-10-09": 81900}, None
+        )
+        self.refresh({"2026-10-08": 80000}, self.WINDOW)
+
+        self.assertEqual(
+            self.states(),
+            {"2026-10-01": "active", "2026-10-08": "active", "2026-10-09": "retired"},
+        )
+        rows = self.db.execute(
+            "SELECT COUNT(*) FROM provider_records WHERE source_record_id LIKE 'weight/%'"
+        ).fetchone()[0]
+        self.assertEqual(rows, 1)
+
+    def test_an_incomplete_refresh_retires_nothing(self) -> None:
+        self.refresh({"2026-10-08": 80000, "2026-10-09": 81900}, None)
+        self.refresh({"2026-10-08": 80000}, None)
+
+        self.assertEqual(
+            self.states(), {"2026-10-08": "active", "2026-10-09": "active"}
+        )
 
 
 class BodyBatteryPathTests(WriterFixture):

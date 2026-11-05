@@ -53,8 +53,9 @@ from backend.canonical.vocabulary import (
 )
 from backend.providers.wahoo_activity_mapping import WAHOO_LABEL
 
-# One version for both kinds: either mapping change re-projects both.
-MAPPER_VERSION: Final = 1
+# One version for both kinds: either mapping change re-projects both. Version 2:
+# observations record their owning raw record (schema version 21).
+MAPPER_VERSION: Final = 2
 # The profile has no record id of its own, so its observations use this one.
 USER_RECORD_ID: Final = "user"
 # Longest digit text that can be an id without overflowing the 64-bit id range.

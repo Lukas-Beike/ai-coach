@@ -1,6 +1,6 @@
 """SQLCipher upgrade, rollback, restart and backup/restore from every released schema.
 
-Each supported released schema (v16 to v19) is populated in an encrypted temporary database
+Each supported released schema (v16 to v20) is populated in an encrypted temporary database
 with the rows of the native migration tests. The upgrade keeps every original
 value, the file stays encrypted, a failing upgrade leaves the database exactly as
 it was, a restart with the same build changes nothing, a wrong key reads nothing,
@@ -39,7 +39,7 @@ from backend.db.schema import (
     configure_cipher,
     database_schema_is_current,
 )
-from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V18
+from backend.db.schema_history import SHAPE_CURRENT, SHAPE_SCHEMA_V20
 
 try:
     from sqlcipher3 import dbapi2 as cipher_backend
@@ -60,6 +60,9 @@ def builders() -> dict[int, Callable[[Any], None]]:
         ),
         19: lambda db: rating_time.populated_feedback_database(
             db, gate.FIXTURES / "schema_v19.sql.txt"
+        ),
+        20: lambda db: rating_time.populated_feedback_database(
+            db, gate.FIXTURES / "schema_v20.sql.txt"
         ),
     }
 
@@ -203,7 +206,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
 
     def test_a_failing_upgrade_leaves_every_released_schema_unchanged(self) -> None:
         def failing_last_step(connection: Any) -> None:
-            migrations._upgrade_v18_to_v20(connection)
+            migrations._upgrade_v20_to_v21(connection)
             raise RuntimeError("injected migration failure")
 
         for version in builders():
@@ -214,7 +217,7 @@ class EncryptedUpgradeMatrixTests(unittest.TestCase):
                     with (
                         mock.patch.dict(
                             migrations.UPGRADE_STEPS,
-                            {SHAPE_SCHEMA_V18: (SHAPE_CURRENT, failing_last_step)},
+                            {SHAPE_SCHEMA_V20: (SHAPE_CURRENT, failing_last_step)},
                         ),
                         self.assertRaisesRegex(RuntimeError, "injected"),
                     ):

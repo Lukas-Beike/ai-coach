@@ -307,6 +307,27 @@ class GarminAnalysisRefreshTests(unittest.TestCase):
         self.assertIs(service._payload_service, payloads)
         self.assertFalse(service._configured())
 
+    def test_weight_merge_replaces_window_days_only_after_a_complete_read(
+        self,
+    ) -> None:
+        deleted = {"samplePk": 1, "calendarDate": "2026-09-20", "weight": 81900}
+        kept = {"samplePk": 2, "calendarDate": "2026-09-21", "weight": 80000}
+        merged: dict[str, dict[str, Any]] = {}
+        for complete in (True, False):
+            snapshot: dict[str, Any] = {"weight": [{"weight": [deleted, kept]}]}
+            GarminAnalysisRefreshService._merge_analysis_source(
+                snapshot,
+                "weight",
+                [{"weighIns": [kept]}],
+                complete,
+                date(2026, 9, 1),
+                date(2026, 9, 24),
+            )
+            merged[str(complete)] = snapshot["weight"][0]
+
+        self.assertEqual(merged["True"]["weight"], [kept])
+        self.assertEqual(merged["False"]["weight"], [kept, deleted])
+
 
 if __name__ == "__main__":
     unittest.main()

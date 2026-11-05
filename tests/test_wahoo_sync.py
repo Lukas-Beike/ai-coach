@@ -178,6 +178,54 @@ class IngestTests(WahooSyncCase):
 
         self.assertEqual("partial", self.service.sync()["status"])
 
+    def states(self) -> dict[str, str]:
+        return {
+            row["provider_activity_id"]: row["state"] for row in self._activity_rows()
+        }
+
+    def test_a_complete_listing_tombstones_a_workout_deleted_in_wahoo(self) -> None:
+        self.source.fetch = WahooWorkoutFetch(
+            (workout(1, EARLIER_UTC), workout(2, EARLIER_UTC))
+        )
+        self.service.sync()
+        self.source.fetch = WahooWorkoutFetch((workout(1, EARLIER_UTC),))
+
+        result = self.service.sync()
+
+        self.assertEqual(1, result["canonical"]["deleted"])
+        self.assertEqual({"1": "active", "2": "deleted"}, self.states())
+
+    def test_a_truncated_unreadable_or_unidentified_listing_deletes_nothing(
+        self,
+    ) -> None:
+        self.source.fetch = WahooWorkoutFetch(
+            (workout(1, EARLIER_UTC), workout(2, EARLIER_UTC))
+        )
+        self.service.sync()
+        for fetch in (
+            WahooWorkoutFetch((workout(1, EARLIER_UTC),), truncated=True),
+            WahooWorkoutFetch((workout(1, EARLIER_UTC),), skipped=1),
+            WahooWorkoutFetch(
+                (workout(1, EARLIER_UTC), workout(3, EARLIER_UTC, id=None))
+            ),
+        ):
+            with self.subTest(fetch=fetch):
+                self.source.fetch = fetch
+                self.assertEqual(0, self.service.sync()["canonical"]["deleted"])
+                self.assertEqual({"1": "active", "2": "active"}, self.states())
+
+    def test_a_workout_on_the_edge_day_of_the_window_is_never_deleted(self) -> None:
+        self.source.fetch = WahooWorkoutFetch(
+            (workout(1, EARLIER_UTC), workout(2, LATE_EVENING_UTC))
+        )
+        self.service.sync()
+        self.source.fetch = WahooWorkoutFetch((workout(1, EARLIER_UTC),))
+
+        self.service.sync()
+
+        # Workout 2 lies on the athlete-local day of the sync, an edge day.
+        self.assertEqual({"1": "active", "2": "active"}, self.states())
+
     def test_window_is_clamped_and_defaulted(self) -> None:
         self.assertEqual(84, self.service.sync()["window_days"])
         self.assertEqual(84, self.service.sync(days=True)["window_days"])

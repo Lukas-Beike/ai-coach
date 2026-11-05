@@ -27,6 +27,9 @@
   public-calendar SSRF validation, redacted logs/diagnostics, bounded request
   bodies, backup validation/restore, local-only planned units, and explicit remote
   workout approval.
+- Take expected values from an independent source (a worked example, a known
+  literal, the spec), never recomputed the way the code computes them; such a
+  tautological test cannot fail. This matters most for training-science formulas.
 - When changing sync or context behavior, test source precedence and provenance
   for Intervals.icu, Garmin, local feedback, derived metrics, and AI estimates.
 - When changing the frontend, backend API contracts, PWA cache behavior, or

@@ -23,6 +23,7 @@ from backend.providers.garmin_fields import (
     first_present,
     flatten_daily_summary,
 )
+from backend.providers.garmin_weight_walk import WALK_DATE_KEYS
 
 try:
     from garminconnect import Garmin as GarminClient
@@ -366,8 +367,53 @@ def _weight_reading_order(reading: dict[str, Any]) -> tuple[bool, float]:
     return False, 0.0
 
 
-def merge_weight_snapshots(incoming: Any, previous: Any) -> list[Any]:
-    """Merge unique raw weigh-ins into one envelope, with newest readings first."""
+def _weight_row_in_window(row: Any, window: tuple[date, date]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    raw = next((row[key] for key in WALK_DATE_KEYS if row.get(key)), None)
+    try:
+        if isinstance(raw, int | float) and not isinstance(raw, bool):
+            # Epoch milliseconds, read as a UTC day like the health mapper does.
+            day = datetime.fromtimestamp(float(raw) / 1000, UTC).date()
+        else:
+            day = date.fromisoformat(str(raw)[:10])
+    except OverflowError, OSError, ValueError:
+        return False
+    return window[0] <= day <= window[1]
+
+
+def _without_window_rows(previous: Any, window: tuple[date, date]) -> list[Any]:
+    """Drop the earlier dated readings and dated summary rows of the window's days."""
+    kept: list[Any] = []
+    for document in _weight_snapshot_documents(previous):
+        if _is_flat_weight_reading(document):
+            if not _weight_row_in_window(document, window):
+                kept.append(document)
+            continue
+        kept.append(
+            {
+                key: (
+                    [row for row in value if not _weight_row_in_window(row, window)]
+                    if isinstance(value, list)
+                    else value
+                )
+                for key, value in document.items()
+            }
+        )
+    return kept
+
+
+def merge_weight_snapshots(
+    incoming: Any, previous: Any, *, window: tuple[date, date] | None = None
+) -> list[Any]:
+    """Merge unique raw weigh-ins into one envelope, with newest readings first.
+
+    ``window`` (inclusive days) marks a complete fetch: the earlier readings and
+    dated summary rows of those days are replaced by the incoming ones, so a
+    weigh-in deleted in Garmin goes. Undated rows and other days stay.
+    """
+    if window is not None:
+        previous = _without_window_rows(previous, window)
     metadata: dict[str, Any] = {}
     readings: list[dict[str, Any]] = []
     opaque_sections: dict[str, list[Any]] = {}

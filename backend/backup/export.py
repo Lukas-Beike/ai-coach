@@ -57,7 +57,9 @@ TimeoutErrorFactory = Callable[[], Exception]
 # Version 9 adds power_curve_points and power_curve_fetches, including retired
 # rows (schema v17).
 # Version 10 adds activity_feedback.session_rpe_rated_at (schema v18).
-PRIVACY_EXPORT_FORMAT_VERSION = 10
+# Version 11 adds observations.state and observations.owner_record_id; retired
+# observations are included (schema v21).
+PRIVACY_EXPORT_FORMAT_VERSION = 11
 PRIVACY_EXPORT_JSONL_FILES = {
     "provider_records.jsonl",
     "activity_sessions.jsonl",
@@ -446,7 +448,7 @@ class PrivacyArchiveExportService:
                         for row in db.execute(
                             "SELECT id, natural_key, metric, value, unit, method, aggregation, source_kind, "
                             "recorded_by, provider, source_record_id, sport, observed_on, observed_at, "
-                            "retrieved_at, label, details, mapper_version, created_at, updated_at "
+                            "retrieved_at, label, details, mapper_version, state, owner_record_id, created_at, updated_at "
                             "FROM observations ORDER BY observed_on, metric, id"
                         )
                     ),

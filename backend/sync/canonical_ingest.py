@@ -4,10 +4,12 @@ The functions run inside the caller's unit of work, so the rows written here and
 the legacy snapshot write commit or roll back together. They return counters
 only and never commit or log provider content.
 
-Deletion rule: only a full, non-incremental Intervals.icu window marks missing
-activities deleted, and only inside that window. Partial or incremental fetches
-and historical fetches never delete. Garmin payloads are merged rather than
-replaced, so Garmin never deletes.
+Deletion rule: only a completely read activity list marks missing activities
+deleted, and only inside its window shrunk by one edge day: a full,
+non-incremental Intervals.icu window, a Garmin activity range read without
+failure or pause, or a fully paged Wahoo listing. Partial, failed, paused,
+truncated or incremental fetches and historical Intervals.icu fetches never
+delete.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from backend.activities.session_linking import link_activity_sessions
 from backend.canonical.local_time import local_date
 from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.canonical_domain_store import ReplaceResult
-from backend.db.canonical_store import WriteOutcome
+from backend.db.canonical_store import ObservationScope, WriteOutcome
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
@@ -105,6 +107,19 @@ def intervals_deletion_window(
     )
 
 
+def fetch_deletion_window(start: date, end: date) -> DeletionWindow | None:
+    """Return the inner days of a completely read provider date range.
+
+    The provider filters on its own local dates while stored rows carry the
+    athlete-local date, so the first and last day are excluded as in
+    ``intervals_deletion_window``. A range of two days or less returns None.
+    """
+    window = DeletionWindow(
+        start=start + DELETION_EDGE_MARGIN, end=end - DELETION_EDGE_MARGIN
+    )
+    return window if window.start <= window.end else None
+
+
 def _has_activity_list(raw: object) -> bool:
     """A missing or non-list activity block must never be read as "nothing fetched"."""
     return isinstance(raw, Mapping) and isinstance(raw.get("activities"), list)
@@ -179,12 +194,17 @@ def ingest_intervals_partial_snapshot(
 
 
 def ingest_garmin_payload(
-    db: Any, payload: Mapping[str, Any], *, zone: tzinfo
+    db: Any,
+    payload: Mapping[str, Any],
+    *,
+    zone: tzinfo,
+    deletion_window: DeletionWindow | None = None,
 ) -> CanonicalIngestCounters:
-    """Write one stored Garmin payload. Garmin never deletes, so no window is passed.
+    """Write one stored Garmin payload.
 
     Rows keep the fetch time of their own section; the latest fetch time of the
     payload is the write time. A payload without any fetch time writes nothing.
+    ``deletion_window`` comes from a completely read activity list.
     """
     retrieved_at = garmin_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None:
@@ -193,7 +213,7 @@ def ingest_garmin_payload(
         payload, zone=zone, training_loads=stored_training_loads(db)
     )
     return ingest_plan(
-        db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=zone
+        db, plan, retrieved_at=retrieved_at, deletion_window=deletion_window, zone=zone
     )
 
 
@@ -215,8 +235,10 @@ def ingest_plan(
     """Write raw records, activities, observations and domain rows, then apply deletions.
 
     The domain rows of each raw record replace the rows that record projected
-    before. A raw record the plan does not carry keeps its rows, so a payload
-    without a section never retires that section's rows.
+    before. Likewise, an observation owned by one of the plan's
+    ``observation_owners`` that the plan no longer emits is retired. A raw record
+    the plan does not carry keeps its rows, so a payload without a section (a
+    failed or skipped fetch) never retires that section's rows.
 
     The written activities are then linked to duplicates from other providers on
     the athlete's wall clock ``zone`` (see ``link_activity_sessions``).
@@ -247,6 +269,15 @@ def ingest_plan(
                 now=stamp,
             )
         )
+    # First retire what an owner no longer emits, then write: a value that
+    # another record still emits (a fill-only history, a key collision) is then
+    # written again instead of staying behind as the cleared value.
+    counters.retired += canonical_store.retire_unemitted_observations(
+        db,
+        provider=provider,
+        scopes=observation_scopes(plan),
+        now=stamp,
+    )
     seen_keys: set[str] = set()
     for item in plan.observations:
         # Natural-key collisions inside one payload: the first wins, later ones are skipped.
@@ -262,6 +293,7 @@ def ingest_plan(
                 mapper_version=item.mapper_version,
                 now=stamp,
                 fill_only=item.fill_only,
+                owner=item.owner,
             )
         )
     raw_ids = {raw.source_record_id for raw in plan.raw_records}
@@ -292,7 +324,9 @@ def ingest_plan(
             provider_activity_id=provider_activity_id,
             now=stamp,
         )
-    if deletion_window is not None:
+    # A plan whose activity list is missing or holds a row without an id cannot
+    # tell which stored activities the provider dropped, so it never deletes.
+    if deletion_window is not None and plan.activity_ids_complete:
         counters.deleted += canonical_store.mark_missing_deleted(
             db,
             provider,
@@ -311,6 +345,31 @@ def ingest_plan(
             now=stamp,
         )
     return counters
+
+
+def observation_scopes(plan: IngestPlan) -> dict[str, ObservationScope]:
+    """Return what each owning raw record of the plan covers, for retirement.
+
+    Only raw records the plan carries count. An owner covers its own day and every
+    day it still emits, and keeps the natural keys it emits.
+    """
+    raw_ids = {raw.source_record_id for raw in plan.raw_records}
+    days: dict[str, set[str]] = {}
+    emitted: dict[str, set[str]] = {}
+    for owner, day in plan.observation_owners.items():
+        if owner in raw_ids:
+            days[owner] = {day}
+            emitted[owner] = set()
+    for item in plan.observations:
+        if item.owner in days:
+            days[item.owner].add(item.observation.observed_on.isoformat())
+            emitted[item.owner].add(
+                canonical_store.observation_natural_key(item.observation)
+            )
+    return {
+        owner: ObservationScope(frozenset(days[owner]), frozenset(emitted[owner]))
+        for owner in days
+    }
 
 
 def _fetched_at(row_time: datetime | None, stamp: str) -> str:
