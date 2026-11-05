@@ -242,6 +242,10 @@ class IngestPlan:
     skipped_invalid: int = 0
     domain_batches: tuple[DomainBatch, ...] = ()
     observation_owners: Mapping[str, str] = field(default_factory=dict)
+    # The plan read an activity list in which every row carried a usable id, so
+    # ``present_activity_ids`` names every activity the provider returned and a
+    # deletion window may be applied.
+    activity_ids_complete: bool = False
 
 
 def intervals_ingest_plan(
@@ -333,6 +337,9 @@ def intervals_ingest_plan(
         activities=tuple(activity_rows),
         observations=tuple(observations),
         present_activity_ids=frozenset(present),
+        activity_ids_complete=_ids_complete(
+            raw.get("activities"), INTERVALS_ACTIVITY_ID_KEY
+        ),
         skipped_invalid=skipped,
         domain_batches=(*batches, *curve.batches),
         observation_owners=owners,
@@ -616,6 +623,10 @@ def garmin_ingest_plan(
         activities=tuple(activity_rows),
         observations=tuple(observations),
         present_activity_ids=frozenset(present),
+        activity_ids_complete=activities_at is not None
+        and _ids_complete(
+            payload.get(GARMIN_ACTIVITIES_SECTION), GARMIN_ACTIVITY_ID_KEY
+        ),
         skipped_invalid=skipped,
         domain_batches=batches,
         observation_owners=owners,
@@ -771,6 +782,9 @@ def wahoo_ingest_plan(payload: object, *, zone: tzinfo) -> IngestPlan:
         activities=tuple(item for _raw, item in kept),
         observations=threshold_observations,
         present_activity_ids=frozenset(present),
+        activity_ids_complete=_ids_complete(
+            payload.get(WAHOO_WORKOUTS_KEY), WAHOO_ACTIVITY_ID_KEY
+        ),
         withdrawn_activity_ids=frozenset(withdrawn),
         skipped_invalid=skipped + threshold_skipped,
         observation_owners=dict.fromkeys(
@@ -1219,6 +1233,11 @@ def _activity_batch(
             )
         )
     return items, raw_records, skipped, present
+
+
+def _ids_complete(rows: object, key: str) -> bool:
+    """Return whether ``rows`` is a list in which every row has a usable id."""
+    return isinstance(rows, list) and all(_row_id(row, key) is not None for row in rows)
 
 
 def _row_id(row: object, key: str) -> str | None:

@@ -4,10 +4,12 @@ The functions run inside the caller's unit of work, so the rows written here and
 the legacy snapshot write commit or roll back together. They return counters
 only and never commit or log provider content.
 
-Deletion rule: only a full, non-incremental Intervals.icu window marks missing
-activities deleted, and only inside that window. Partial or incremental fetches
-and historical fetches never delete. Garmin payloads are merged rather than
-replaced, so Garmin never deletes.
+Deletion rule: only a completely read activity list marks missing activities
+deleted, and only inside its window shrunk by one edge day: a full,
+non-incremental Intervals.icu window, a Garmin activity range read without
+failure or pause, or a fully paged Wahoo listing. Partial, failed, paused,
+truncated or incremental fetches and historical Intervals.icu fetches never
+delete.
 """
 
 from __future__ import annotations
@@ -105,6 +107,19 @@ def intervals_deletion_window(
     )
 
 
+def fetch_deletion_window(start: date, end: date) -> DeletionWindow | None:
+    """Return the inner days of a completely read provider date range.
+
+    The provider filters on its own local dates while stored rows carry the
+    athlete-local date, so the first and last day are excluded as in
+    ``intervals_deletion_window``. A range of two days or less returns None.
+    """
+    window = DeletionWindow(
+        start=start + DELETION_EDGE_MARGIN, end=end - DELETION_EDGE_MARGIN
+    )
+    return window if window.start <= window.end else None
+
+
 def _has_activity_list(raw: object) -> bool:
     """A missing or non-list activity block must never be read as "nothing fetched"."""
     return isinstance(raw, Mapping) and isinstance(raw.get("activities"), list)
@@ -179,12 +194,17 @@ def ingest_intervals_partial_snapshot(
 
 
 def ingest_garmin_payload(
-    db: Any, payload: Mapping[str, Any], *, zone: tzinfo
+    db: Any,
+    payload: Mapping[str, Any],
+    *,
+    zone: tzinfo,
+    deletion_window: DeletionWindow | None = None,
 ) -> CanonicalIngestCounters:
-    """Write one stored Garmin payload. Garmin never deletes, so no window is passed.
+    """Write one stored Garmin payload.
 
     Rows keep the fetch time of their own section; the latest fetch time of the
     payload is the write time. A payload without any fetch time writes nothing.
+    ``deletion_window`` comes from a completely read activity list.
     """
     retrieved_at = garmin_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None:
@@ -193,7 +213,7 @@ def ingest_garmin_payload(
         payload, zone=zone, training_loads=stored_training_loads(db)
     )
     return ingest_plan(
-        db, plan, retrieved_at=retrieved_at, deletion_window=None, zone=zone
+        db, plan, retrieved_at=retrieved_at, deletion_window=deletion_window, zone=zone
     )
 
 
@@ -304,7 +324,9 @@ def ingest_plan(
             provider_activity_id=provider_activity_id,
             now=stamp,
         )
-    if deletion_window is not None:
+    # A plan whose activity list is missing or holds a row without an id cannot
+    # tell which stored activities the provider dropped, so it never deletes.
+    if deletion_window is not None and plan.activity_ids_complete:
         counters.deleted += canonical_store.mark_missing_deleted(
             db,
             provider,
