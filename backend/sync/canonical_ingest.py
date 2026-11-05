@@ -27,13 +27,11 @@ from backend.db.canonical_store import ObservationScope, WriteOutcome
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
-    GARMIN_ACTIVITIES_SECTION,
     GARMIN_TRAINING_LOAD_SECTION,
     INTERVALS_POWER_CURVE_KEY,
     IngestPlan,
     garmin_ingest_plan,
     garmin_payload_retrieved_at,
-    garmin_section_retrieved_at,
     intervals_ingest_plan,
 )
 from backend.providers.snapshot_projection import stored_retrieved_at
@@ -122,44 +120,6 @@ def fetch_deletion_window(start: date, end: date) -> DeletionWindow | None:
     return window if window.start <= window.end else None
 
 
-def garmin_activity_deletion_window(
-    payload: Mapping[str, Any],
-) -> DeletionWindow | None:
-    """Return the deletion window of a Garmin sync payload, or None.
-
-    Only a run whose activity list came back for every date range, without an
-    error, a capability pause or a cancel, vouches for its own ``read_window``.
-    """
-    if not isinstance(payload.get(GARMIN_ACTIVITIES_SECTION), list):
-        return None
-    provider_sync = payload.get("provider_sync")
-    if not isinstance(provider_sync, Mapping):
-        return None
-    pagination = provider_sync.get("pagination")
-    stats = (
-        pagination.get(GARMIN_ACTIVITIES_SECTION)
-        if isinstance(pagination, Mapping)
-        else None
-    )
-    if not isinstance(stats, Mapping) or stats.get("complete") is not True:
-        return None
-    errors = payload.get("errors")
-    if isinstance(errors, list) and any(
-        isinstance(error, Mapping) and error.get("source") == GARMIN_ACTIVITIES_SECTION
-        for error in errors
-    ):
-        return None
-    read_window = provider_sync.get("read_window")
-    if not isinstance(read_window, Mapping):
-        return None
-    try:
-        start = date.fromisoformat(str(read_window["start"])[:10])
-        end = date.fromisoformat(str(read_window["end"])[:10])
-    except KeyError, ValueError:
-        return None
-    return fetch_deletion_window(start, end)
-
-
 def _has_activity_list(raw: object) -> bool:
     """A missing or non-list activity block must never be read as "nothing fetched"."""
     return isinstance(raw, Mapping) and isinstance(raw.get("activities"), list)
@@ -244,19 +204,11 @@ def ingest_garmin_payload(
 
     Rows keep the fetch time of their own section; the latest fetch time of the
     payload is the write time. A payload without any fetch time writes nothing.
-    ``deletion_window`` comes from a completely read activity list; it is
-    dropped unless the payload's activity section is planned, so a payload
-    without activities never deletes.
+    ``deletion_window`` comes from a completely read activity list.
     """
     retrieved_at = garmin_payload_retrieved_at(payload, zone=zone)
     if retrieved_at is None:
         return CanonicalIngestCounters()
-    if (
-        not isinstance(payload.get(GARMIN_ACTIVITIES_SECTION), list)
-        or garmin_section_retrieved_at(payload, GARMIN_ACTIVITIES_SECTION, zone=zone)
-        is None
-    ):
-        deletion_window = None
     plan = garmin_ingest_plan(
         payload, zone=zone, training_loads=stored_training_loads(db)
     )
@@ -372,7 +324,9 @@ def ingest_plan(
             provider_activity_id=provider_activity_id,
             now=stamp,
         )
-    if deletion_window is not None:
+    # A plan whose activity list is missing or holds a row without an id cannot
+    # tell which stored activities the provider dropped, so it never deletes.
+    if deletion_window is not None and plan.activity_ids_complete:
         counters.deleted += canonical_store.mark_missing_deleted(
             db,
             provider,

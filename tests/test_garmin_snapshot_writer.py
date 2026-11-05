@@ -20,6 +20,7 @@ from backend.db.schema import initialize_schema
 from backend.performance.morning_battery_service import MorningBatteryStore
 from backend.providers.garmin import merge_weight_snapshots
 from backend.sync.canonical_ingest import CanonicalIngestCounters
+from backend.sync.garmin import activity_deletion_window
 from backend.sync.garmin_snapshot_writer import (
     ANALYSIS_SOURCES,
     NUTRITION_SOURCES,
@@ -179,11 +180,11 @@ class ActivityWindowTests(WriterFixture):
                 "pagination": {"activities": {"complete": True}},
             },
         }
-        both = [garmin_activity(1), garmin_activity(2)]
-        self.writer.write(self.db, payload(activities=both, **sync))
-        counters = self.writer.write(
-            self.db, payload(activities=[garmin_activity(1)], **sync)
-        )
+        for ids in ([1, 2], [1]):
+            value = payload(activities=[garmin_activity(item) for item in ids], **sync)
+            counters = self.writer.write(
+                self.db, value, deletion_window=activity_deletion_window(value)
+            )
         self.assertEqual(counters.deleted, 1)
         self.assertEqual(activity_states(self.db), {"1": "active", "2": "deleted"})
 

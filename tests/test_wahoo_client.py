@@ -90,6 +90,20 @@ class ListWorkoutsTests(ClientCase):
         self.assertEqual(32, len(fetch.workouts))
         self.assertEqual(2, self.request.call_count)
 
+    def test_a_short_page_below_the_reported_total_is_truncated(self) -> None:
+        # Wahoo applied 30 rows per page without saying so, but reports 32 in all.
+        self.request.side_effect = [{**page_of(30), "total": 32}]
+
+        fetch = self.client.list_workouts(since=SINCE)
+
+        self.assertTrue(fetch.truncated)
+        self.assertEqual(30, len(fetch.workouts))
+
+    def test_a_short_page_that_reaches_the_reported_total_is_complete(self) -> None:
+        self.request.side_effect = [{**page_of(2), "total": 2}]
+
+        self.assertFalse(self.client.list_workouts(since=SINCE).truncated)
+
     def test_stops_at_the_first_page_that_reaches_past_the_window(self) -> None:
         old = page_of(WORKOUTS_PER_PAGE, days=-3.0)
         self.request.side_effect = [old, page_of(1)]

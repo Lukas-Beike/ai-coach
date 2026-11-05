@@ -27,6 +27,7 @@ from backend.performance.max_hr import garmin_activity_max_hr, merge_garmin_max_
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import GARMIN_SLEEP_DATE_KEYS
 from backend.providers.garmin_gear_fields import garmin_gear_id
+from backend.sync.canonical_ingest import DeletionWindow, fetch_deletion_window
 from backend.sync.daily import DailySyncMarkerService
 from backend.sync.garmin_payload_metrics import garmin_source_observed_at
 from backend.sync.garmin_performance_history import append_garmin_performance_history
@@ -118,6 +119,25 @@ def _shift_fixture_sleep_dates(value: Any, shift: timedelta) -> Any:
             except ValueError:
                 pass
     return normalized
+
+
+def activity_deletion_window(payload: dict[str, Any]) -> DeletionWindow | None:
+    """Return the inner days of this run's activity read, or None if incomplete.
+
+    Only a run whose activity list came back for every date window, without an
+    error, rate limit, capability pause or cancel, vouches for its ``read_window``.
+    """
+    provider_sync = payload.get("provider_sync") or {}
+    stats = (provider_sync.get("pagination") or {}).get("activities") or {}
+    read_window = provider_sync.get("read_window") or {}
+    if stats.get("complete") is not True:
+        return None
+    try:
+        start = date.fromisoformat(iso_date_prefix(str(read_window["start"])))
+        end = date.fromisoformat(iso_date_prefix(str(read_window["end"])))
+    except KeyError, TypeError, ValueError:
+        return None
+    return fetch_deletion_window(start, end)
 
 
 def merge_sources(
@@ -709,7 +729,14 @@ class GarminSyncStateService:
         complete = collection_complete(payload)
         # Canonical rows and the Garmin state commit together; cursors come later.
         with self._database_manager.unit_of_work() as db:
-            counters = self._snapshot_writer.write(db, payload)
+            counters = self._snapshot_writer.write(
+                db,
+                payload,
+                # A fixture is no provider read and never vouches for deletions.
+                deletion_window=None
+                if source == "fixture"
+                else activity_deletion_window(payload),
+            )
         if self._sync_equipment is not None and source != "fixture":
             # Equipment reads the canonical gear just written; the payload gives
             # only the gear's sync freshness.

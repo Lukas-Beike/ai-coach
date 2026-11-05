@@ -195,7 +195,9 @@ class IngestTests(WahooSyncCase):
         self.assertEqual(1, result["canonical"]["deleted"])
         self.assertEqual({"1": "active", "2": "deleted"}, self.states())
 
-    def test_a_truncated_or_unreadable_listing_deletes_nothing(self) -> None:
+    def test_a_truncated_unreadable_or_unidentified_listing_deletes_nothing(
+        self,
+    ) -> None:
         self.source.fetch = WahooWorkoutFetch(
             (workout(1, EARLIER_UTC), workout(2, EARLIER_UTC))
         )
@@ -203,6 +205,9 @@ class IngestTests(WahooSyncCase):
         for fetch in (
             WahooWorkoutFetch((workout(1, EARLIER_UTC),), truncated=True),
             WahooWorkoutFetch((workout(1, EARLIER_UTC),), skipped=1),
+            WahooWorkoutFetch(
+                (workout(1, EARLIER_UTC), workout(3, EARLIER_UTC, id=None))
+            ),
         ):
             with self.subTest(fetch=fetch):
                 self.source.fetch = fetch

@@ -30,8 +30,8 @@ from backend.sync.canonical_coverage_store import (
 )
 from backend.sync.canonical_ingest import (
     CanonicalIngestCounters,
+    DeletionWindow,
     fetch_deletion_window,
-    garmin_activity_deletion_window,
     ingest_garmin_payload,
 )
 
@@ -70,14 +70,21 @@ class GarminSnapshotWriter:
         self._coverage = CanonicalCoverageStore(key_values)
         self._zone_provider = zone_provider
 
-    def write(self, db: Any, payload: Mapping[str, Any]) -> CanonicalIngestCounters:
-        """Write the delta a sync collected: element rows, state and coverage."""
+    def write(
+        self,
+        db: Any,
+        payload: Mapping[str, Any],
+        *,
+        deletion_window: DeletionWindow | None = None,
+    ) -> CanonicalIngestCounters:
+        """Write the delta a sync collected: element rows, state and coverage.
+
+        ``deletion_window`` holds the inner days of a complete activity read; a
+        stored activity on those days that the payload lacks is marked deleted.
+        """
         zone = self._zone_provider() or UTC
         counters = ingest_garmin_payload(
-            db,
-            payload,
-            zone=zone,
-            deletion_window=garmin_activity_deletion_window(payload),
+            db, payload, zone=zone, deletion_window=deletion_window
         )
         if garmin_payload_retrieved_at(payload, zone=zone) is not None:
             for section in REPLACE_SECTIONS:

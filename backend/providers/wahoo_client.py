@@ -162,6 +162,7 @@ class WahooClient:
             raise ValueError("since must be timezone-aware")
         workouts: list[Mapping[str, Any]] = []
         skipped = 0
+        listed = 0
         for page in range(1, MAX_WORKOUT_PAGES + 1):
             payload = self._get(
                 WORKOUTS_PATH, {"page": page, "per_page": WORKOUTS_PER_PAGE}
@@ -172,8 +173,14 @@ class WahooClient:
             page_rows = _window_rows(rows, since=since, until=until)
             workouts.extend(page_rows.workouts)
             skipped += page_rows.skipped
-            if page_rows.reached_window_start or len(rows) < _page_size(payload):
+            listed += len(rows)
+            if page_rows.reached_window_start:
                 return WahooWorkoutFetch(tuple(workouts), skipped)
+            if len(rows) < _page_size(payload):
+                # A short page ends the list unless Wahoo's total says more exist.
+                return WahooWorkoutFetch(
+                    tuple(workouts), skipped, truncated=listed < _total(payload)
+                )
         return WahooWorkoutFetch(tuple(workouts), skipped, truncated=True)
 
     def workout_summary(self, workout_id: int) -> Mapping[str, Any]:
@@ -334,6 +341,14 @@ def _page_size(payload: object) -> int:
     if isinstance(applied, int) and not isinstance(applied, bool):
         return min(max(applied, 1), WORKOUTS_PER_PAGE)
     return WORKOUTS_PER_PAGE
+
+
+def _total(payload: object) -> int:
+    """Return the workout count Wahoo reports, or 0 when it reports none."""
+    total = payload.get("total") if isinstance(payload, dict) else None
+    if isinstance(total, int) and not isinstance(total, bool):
+        return total
+    return 0
 
 
 def _remote_id(value: object) -> int:
