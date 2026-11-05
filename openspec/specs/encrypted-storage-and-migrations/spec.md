@@ -105,10 +105,10 @@ The database manager SHALL block new leases, wait for active operations and clos
 Evidence: `backend/db/manager.py::DatabaseManager.restore_drain`; `backend/db/manager.py::DatabaseManagerCache`. Tests: `tests/test_db_manager.py`; `tests/test_database_restore_service.py::test_restores_after_checkpoint_and_drain_then_resumes_both_job_owners`.
 
 ### Requirement: Canonical extension upgrade preservation
-The extended schema SHALL preserve all athlete records, feedback, snapshots, tombstones, plans, sessions, settings, conversations, usage and sync state. Supported populated upgrades, injected-failure rollback, same-build restart and encrypted backup/restore SHALL be verified from v16 and every later released schema.
+The extended schema SHALL preserve all athlete records, feedback, snapshots, tombstones, plans, sessions, settings, conversations, usage and sync state. Supported populated upgrades, injected-failure rollback, same-build restart and encrypted backup/restore SHALL be verified from v20 (release 1.13.40, the only production instance) and every later released schema for new schema changes; existing upgrade paths from v16 through v19 SHALL keep their existing tests passing.
 
 #### Scenario: Populated released schemas
-- **WHEN** each frozen released schema from v16 onward is upgraded
+- **WHEN** each frozen released schema covered by the requirement is upgraded
 - **THEN** existing identities, values, relationships and sync markers survive and new canonical structures satisfy their validation rules.
 
 #### Scenario: Upgrade fails partway
