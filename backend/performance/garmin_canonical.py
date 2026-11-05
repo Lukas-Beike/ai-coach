@@ -499,7 +499,7 @@ def garmin_thresholds(
                 key=_order,
                 default=None,
             )
-            if latest is not None:
+            if latest is not None and _plausible_threshold(latest):
                 result.append(latest)
     # Garmin's run threshold power is the run FTP candidate.
     run_power = max(
@@ -511,7 +511,9 @@ def garmin_thresholds(
         key=_order,
         default=None,
     )
-    if run_power is not None:
+    if run_power is not None and _bounded(
+        run_power.value.value, _RUN_THRESHOLD_POWER_RANGE
+    ):
         result.append(replace(run_power, kind=MetricKind.FTP))
     low, high = _MAX_HR_RANGE
     max_hr = [
@@ -529,6 +531,13 @@ def garmin_thresholds(
         if latest is not None:
             result.append(replace(latest, sport=sport))
     return tuple(result)
+
+
+def _plausible_threshold(item: Observation) -> bool:
+    """The Garmin metrics' bounds: a threshold speed must give a plausible pace."""
+    if item.kind is MetricKind.THRESHOLD_PACE:
+        return _pace_seconds_per_km(item.value.value) is not None
+    return True
 
 
 def profile_max_hr_for(profile: Mapping[str, float], category: str) -> float | None:

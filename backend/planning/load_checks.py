@@ -121,14 +121,15 @@ def load_thresholds(
     """
     synced = inputs.synced_at
     observed = tuple(inputs.zone_thresholds)
-    if synced is None or (today - synced.date()).days > THRESHOLD_MAX_AGE_DAYS:
+    stale = synced is not None and (today - synced.date()).days > THRESHOLD_MAX_AGE_DAYS
+    if synced is None or stale:
         # Provider configurations age with the sync; only athlete-confirmed ones remain.
         configurations = [
             item for item in configurations if item.provenance.provider is None
         ]
     if not observed and not _has_configuration(configurations, today):
         return LoadThresholds(
-            unavailable="missing_thresholds" if synced is None else "stale_thresholds"
+            unavailable="stale_thresholds" if stale else "missing_thresholds"
         )
 
     def resolve(

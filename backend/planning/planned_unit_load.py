@@ -74,7 +74,14 @@ def resolve_thresholds(
     pace = effective_zone_configuration(
         zone_configurations, ZoneConfigurationMetric.PACE, sport, day=day
     )
-    speed = pace.threshold if pace is not None else None
+    # A local pace configuration first, then the source-policy winner, then a
+    # provider configuration, as for the other thresholds.
+    local = (
+        pace.threshold
+        if pace is not None and pace.provenance.provider is None
+        else None
+    )
+    provider = pace.threshold if pace is not None and local is None else None
     return AthleteThresholds(
         zones=ZoneSettings.from_configurations(
             zone_configurations,
@@ -83,7 +90,9 @@ def resolve_thresholds(
             day,
             fallback=ZoneSettings.from_thresholds(sport_thresholds, sport, environment),
         ),
-        threshold_speed_mps=speed or sport_threshold_speed(sport_thresholds, sport),
+        threshold_speed_mps=local
+        or sport_threshold_speed(sport_thresholds, sport)
+        or provider,
     )
 
 

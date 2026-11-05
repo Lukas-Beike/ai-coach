@@ -202,7 +202,10 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
             SourceRule(
                 MetricKind.MAX_HR,
                 (_GARMIN, _INTERVALS),
-                (ProviderBounds(_GARMIN, 80.0, 260.0),),
+                (
+                    ProviderBounds(_GARMIN, 80.0, 260.0),
+                    ProviderBounds(_INTERVALS, 80.0, 260.0),
+                ),
                 max_age=_THRESHOLD_MAX_AGE,
             ),
             SourceRule(

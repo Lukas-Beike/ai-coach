@@ -294,7 +294,7 @@ def read_zone_thresholds(
     A reader that already holds ``CanonicalCurrentInputs`` takes them from there.
     """
     intervals = _intervals_current(reader, db) or _NO_SYNC
-    wahoo_ftp, _ = _wahoo_current(reader, db, as_of=as_of)
+    wahoo_ftp = _wahoo_ftp(reader, db, as_of=as_of)
     return provider_zone_thresholds(
         (
             *_threshold_candidates(intervals, wahoo_ftp),
@@ -346,6 +346,19 @@ def _wahoo_current(
     ranked by ``select_current`` over every stored Wahoo weight. Both must be within
     their age limit on ``as_of``.
     """
+    ftp = _wahoo_ftp(reader, db, as_of=as_of)
+    weights = [
+        observation
+        for observation in reader.observations(db, MetricKind.WEIGHT)
+        if observation.provenance.provider is ProviderId.WAHOO
+    ]
+    return ftp, select_current(weights, MetricKind.WEIGHT, as_of=as_of)
+
+
+def _wahoo_ftp(
+    reader: ObservationReader, db: Any, *, as_of: date
+) -> Observation | None:
+    """The newest stored Wahoo cycling FTP when it is current on ``as_of``."""
     ftps = [
         observation
         for observation in reader.observations(db, MetricKind.FTP)
@@ -353,17 +366,9 @@ def _wahoo_current(
         and observation.sport is Sport.RIDE
     ]
     newest = max(ftps, key=_newest_first, default=None)
-    ftp = (
-        None
-        if newest is None
-        else select_current([newest], MetricKind.FTP, sport=Sport.RIDE, as_of=as_of)
-    )
-    weights = [
-        observation
-        for observation in reader.observations(db, MetricKind.WEIGHT)
-        if observation.provenance.provider is ProviderId.WAHOO
-    ]
-    return ftp, select_current(weights, MetricKind.WEIGHT, as_of=as_of)
+    if newest is None:
+        return None
+    return select_current([newest], MetricKind.FTP, sport=Sport.RIDE, as_of=as_of)
 
 
 def _newest_first(observation: Observation) -> tuple[date, datetime]:

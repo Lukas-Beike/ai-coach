@@ -1,6 +1,7 @@
 """One source-precedence resolver for thresholds, shared by Coach and plan (#1668)."""
 
 import unittest
+from dataclasses import replace
 from datetime import date, timedelta
 
 from canonical_domain_support import provenance, zone_configuration
@@ -12,6 +13,7 @@ from performance_day_support import (
 
 from backend.canonical.records import MetricValue, Observation, Provenance
 from backend.canonical.vocabulary import (
+    Environment,
     MetricKind,
     ProviderId,
     RecordingOrigin,
@@ -36,6 +38,7 @@ from backend.performance.source_policy import (
     source_order,
 )
 from backend.planning.load_checks import load_thresholds
+from backend.planning.planned_unit_load import resolve_thresholds
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 AS_OF = SYNCED_AT.date()
@@ -258,6 +261,44 @@ class CoachAndPlanParityTests(unittest.TestCase):
         self.assertEqual(
             {item.sport for item in provider_zone_thresholds((wide,), as_of=AS_OF)},
             {Sport.RIDE, Sport.RUN},
+        )
+
+
+class ReviewGuardTests(unittest.TestCase):
+    def test_implausible_intervals_max_hr_is_not_current(self) -> None:
+        resolved = resolve_current_thresholds(
+            (_obs(MetricKind.MAX_HR, 50.0, INTERVALS, Sport.RIDE),), as_of=AS_OF
+        )
+        self.assertNotIn((MetricKind.MAX_HR, Sport.RIDE), resolved)
+
+    def test_implausible_garmin_threshold_speed_is_dropped(self) -> None:
+        slow = _obs(MetricKind.THRESHOLD_PACE, 0.4, GARMIN, Sport.RUN)
+        self.assertEqual(read_garmin_thresholds(StubReader((slow,)), None), ())
+
+    def test_plan_pace_prefers_the_winner_over_a_provider_configuration(self) -> None:
+        provider_pace = zone_configuration(
+            metric=ZoneConfigurationMetric.PACE,
+            sport=Sport.RUN,
+            threshold=4.0,
+            maximum=None,
+            resting=None,
+            limits=(2.0, 3.0, 4.0, 6.0),
+        )
+        winner = _obs(MetricKind.THRESHOLD_PACE, 4.2, GARMIN, Sport.RUN)
+        thresholds = resolve_thresholds(
+            (winner,), (provider_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
+        )
+        self.assertEqual(thresholds.threshold_speed_mps, 4.2)
+        thresholds = resolve_thresholds(
+            (), (provider_pace,), Sport.RUN, Environment.OUTDOOR, AS_OF
+        )
+        self.assertEqual(thresholds.threshold_speed_mps, 4.0)
+
+    def test_a_fresh_sync_without_values_is_missing_not_stale(self) -> None:
+        inputs = read_current_inputs(StubReader(()), None, as_of=AS_OF)
+        fresh = replace(inputs, synced_at=SYNCED_AT)
+        self.assertEqual(
+            load_thresholds(fresh, AS_OF).unavailable, "missing_thresholds"
         )
 
 

@@ -75,9 +75,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
         self.assertEqual(
             result["preferred_providers"]["cycling_eftp_watts"], "intervals"
         )
-        self.assertEqual(
-            result["preferred_providers"]["cycling_ftp_watts"], "intervals"
-        )
+        self.assertEqual(result["preferred_providers"]["cycling_ftp_watts"], "garmin")
 
     def test_body_history_series_and_policy_carry_provider_ids(self):
         snapshot = {
@@ -173,7 +171,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
         for baseline in result["baselines"]:
             self.assertEqual(baseline["source"], "Intervals.icu")
             self.assertEqual(baseline["source_provider"], "intervals")
-        self.assertEqual(result["preferred_providers"]["hrv"], "garmin")
+        self.assertEqual(result["preferred_providers"]["hrv"], "intervals")
         self.assertEqual(result["sleep_deficits"][0]["source"], "Intervals.icu")
 
     def test_coach_projection_keeps_recovery_contract_with_additive_provider_ids(self):
