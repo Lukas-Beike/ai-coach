@@ -7,6 +7,7 @@ the cases where canonical records cannot carry what the legacy rule read.
 
 from __future__ import annotations
 
+import itertools
 import json
 import random
 import unittest
@@ -837,6 +838,32 @@ class OneToOneAssignmentTests(unittest.TestCase):
             _members(sessions),
         )
 
+    def test_a_cheaper_pair_never_leaves_another_record_without_its_only_partner(
+        self,
+    ) -> None:
+        # G-a pairs slightly cheaper with I-1 (0.40) than with I-2 (0.42), but
+        # I-1 is G-b's only candidate: the maximal matching links both.
+        def ride(name: str, provider: ProviderId, hour: int, minute: int, s: float):
+            return _ride(
+                name,
+                provider=provider,
+                recorded_by=RecordingOrigin.GARMIN,
+                started_at=datetime(2026, 6, 1, hour, minute, tzinfo=BERLIN),
+                duration_s=s,
+                distance_m=None,
+            )
+
+        records = [
+            ride("i-1", ProviderId.INTERVALS, 7, 0, 2400.0),
+            ride("i-2", ProviderId.INTERVALS, 7, 25, 2592.0),
+            ride("g-a", ProviderId.GARMIN, 7, 0, 2592.0),
+            ride("g-b", ProviderId.GARMIN, 6, 30, 2400.0),
+        ]
+        self.assertEqual(
+            {frozenset({"i-1", "g-b"}), frozenset({"i-2", "g-a"})},
+            _members(_bundle(records)),
+        )
+
     def test_two_close_wahoo_rides_map_one_to_one_to_their_intervals_copies(
         self,
     ) -> None:
@@ -885,6 +912,43 @@ class OneToOneAssignmentTests(unittest.TestCase):
             {frozenset({"i-w", "w", "g-1"}), frozenset({"g-2"})},
             _members(_bundle([wahoo_copy, wahoo, *garmin])),
         )
+
+    def test_matching_is_maximal_and_cheapest_against_brute_force(self) -> None:
+        rng = random.Random(7)
+        for _ in range(300):
+            sources = list(range(rng.randint(1, 4)))
+            primaries = list(range(10, 10 + rng.randint(1, 4)))
+            edges = {
+                source: {
+                    primary: round(rng.random(), 2)
+                    for primary in primaries
+                    if rng.random() < 0.6
+                }
+                for source in sources
+            }
+            edges = {source: options for source, options in edges.items() if options}
+            if not edges:
+                continue
+            best = (0, 0.0)
+            for picks in itertools.product(
+                *[[None, *sorted(edges[source])] for source in sorted(edges)]
+            ):
+                chosen = [primary for primary in picks if primary is not None]
+                if len(chosen) != len(set(chosen)):
+                    continue
+                total = sum(
+                    edges[source][primary]
+                    for source, primary in zip(sorted(edges), picks, strict=True)
+                    if primary is not None
+                )
+                best = max(best, (len(chosen), -total))
+            matching: dict[int, int] = {}
+            for group in canonical_sessions._candidate_groups(edges):
+                matching.update(canonical_sessions._min_cost_matching(group, edges))
+            self.assertEqual(len(set(matching.values())), len(matching))
+            self.assertEqual(best[0], len(matching), edges)
+            total = sum(edges[source][primary] for source, primary in matching.items())
+            self.assertAlmostEqual(-best[1], total, places=9, msg=edges)
 
     def test_generated_sessions_hold_one_record_per_provider_and_origin(
         self,

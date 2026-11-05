@@ -26,7 +26,8 @@ rules.
 
 Every pass assigns one to one: a session takes at most one record of the joining
 provider and recording origin, so two separate sessions close together never
-merge. Candidate pairs are taken closest first, by the mean of the start gap as a
+merge. Each pass joins as many records as possible and, among those
+assignments, prefers the lowest total pair cost: the mean of the start gap as a
 share of the window and each compared measurement's gap as a share of its
 tolerance;
 equal costs fall back to the deterministic order (start instant, then provider,
@@ -305,26 +306,113 @@ def _assign_pairs(
     cost: Callable[[_Entry, _Entry], float | None],
     taken: set[int],
 ) -> None:
-    """Join each source to at most one target session, closest pair first.
+    """Join as many sources as possible to distinct target sessions, closest overall.
 
     ``cost`` returns None when the rule rejects the pair. A session in ``taken``
     already holds a record of the sources' kind and accepts no other; each join
-    adds its session. Pairs are taken greedily by cost, ties by source then target
-    order, which is start instant, provider and activity id. For the few records
-    in one start window, greedy equals the optimal assignment in practice.
+    adds its session. Among the assignments joining the most sources, the one
+    with the lowest total cost wins, so a close pair never leaves another source
+    without its only partner. Each group of connected candidates is matched on
+    its own; ties follow source then target order (start instant, provider and
+    activity id).
     """
-    pairs = sorted(
-        (pair_cost, source, target)
-        for source in sources
-        for target in targets.near(entries[source].wall)
-        if (pair_cost := cost(entries[source], entries[target])) is not None
-    )
-    for _, source, target in pairs:
-        primary = duplicate_of.get(target, target)
-        if source in duplicate_of or primary in taken:
+    edges: dict[int, dict[int, float]] = {}
+    for source in sources:
+        if source in duplicate_of:
             continue
-        duplicate_of[source] = primary
-        taken.add(primary)
+        for target in targets.near(entries[source].wall):
+            primary = duplicate_of.get(target, target)
+            if primary in taken:
+                continue
+            pair_cost = cost(entries[source], entries[target])
+            if pair_cost is None:
+                continue
+            options = edges.setdefault(source, {})
+            options[primary] = min(pair_cost, options.get(primary, pair_cost))
+    for group in _candidate_groups(edges):
+        for source, primary in _min_cost_matching(group, edges).items():
+            duplicate_of[source] = primary
+            taken.add(primary)
+
+
+def _candidate_groups(edges: dict[int, dict[int, float]]) -> list[list[int]]:
+    """Split the sources into groups that share no candidate session."""
+    owner: dict[int, int] = {}
+    groups: dict[int, list[int]] = {}
+    for source in sorted(edges):
+        roots = {owner[primary] for primary in edges[source] if primary in owner}
+        merged = [source]
+        for root in sorted(roots):
+            merged.extend(groups.pop(root))
+        root = min(merged)
+        groups[root] = sorted(merged)
+        for member in merged:
+            for primary in edges[member]:
+                owner[primary] = root
+    return [groups[root] for root in sorted(groups)]
+
+
+def _min_cost_matching(
+    sources: list[int], edges: dict[int, dict[int, float]]
+) -> dict[int, int]:
+    """Return a maximum one-to-one matching of minimum total cost.
+
+    Successive shortest augmenting paths (Bellman-Ford over the residual graph):
+    each round adds one pair along the cheapest path, so every intermediate
+    matching is the cheapest of its size, and the last is maximal.
+    """
+    match_of: dict[int, int] = {}
+    source_of: dict[int, int] = {}
+    primaries = sorted({primary for source in sources for primary in edges[source]})
+    while True:
+        distance: dict[tuple[str, int], float] = {
+            ("s", source): 0.0 for source in sources if source not in match_of
+        }
+        previous: dict[tuple[str, int], tuple[str, int]] = {}
+        for _ in range(len(sources) + len(primaries)):
+            changed = False
+            for source in sources:
+                start = distance.get(("s", source))
+                if start is None:
+                    continue
+                for primary in sorted(edges[source]):
+                    if match_of.get(source) == primary:
+                        continue
+                    candidate = start + edges[source][primary]
+                    node = ("p", primary)
+                    if candidate < distance.get(node, float("inf")):
+                        distance[node] = candidate
+                        previous[node] = ("s", source)
+                        changed = True
+            for primary in primaries:
+                matched = source_of.get(primary)
+                reached = distance.get(("p", primary))
+                if matched is None or reached is None:
+                    continue
+                candidate = reached - edges[matched][primary]
+                node = ("s", matched)
+                if candidate < distance.get(node, float("inf")):
+                    distance[node] = candidate
+                    previous[node] = ("p", primary)
+                    changed = True
+            if not changed:
+                break
+        free = [
+            (distance[("p", primary)], primary)
+            for primary in primaries
+            if primary not in source_of and ("p", primary) in distance
+        ]
+        if not free:
+            return match_of
+        node = ("p", min(free)[1])
+        while node in previous:
+            source_node = previous[node]
+            source, primary = source_node[1], node[1]
+            match_of[source] = primary
+            source_of[primary] = source
+            if source_node not in previous:
+                break
+            node = previous[source_node]
 
 
 def _sessions(

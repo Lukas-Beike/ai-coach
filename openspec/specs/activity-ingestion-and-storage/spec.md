@@ -64,7 +64,7 @@ The system SHALL bundle supported provider copies into canonical sessions using 
 
 #### Scenario: Two separate sessions close together
 - **WHEN** two recordings from each of two providers start within 30 minutes of each other and each could match either copy
-- **THEN** each pairing rule assigns one to one: a session takes at most one active record per provider and recording origin, the closest pair (mean of the start gap and the measurement gaps, each relative to its tolerance) wins, a merge that would put two records of one provider and origin in one persisted session is refused, and equal costs fall back to start, provider and activity id.
+- **THEN** each pairing rule assigns one to one: a session takes at most one active record per provider and recording origin, each pass joins as many records as possible and, among those assignments, takes the lowest total pair cost (mean of the start gap and the measurement gaps, each relative to its tolerance), a merge that would put two records of one provider and origin in one persisted session is refused, and equal costs fall back to start, provider and activity id.
 
 Detailed contract: Garmin elapsed-time fallback SHALL avoid assigning multiple separate walks to one already claimed session. Existing persisted merges are never undone automatically; the diagnostics report lists sessions with several active records of one provider and recording origin as `canonical_session_conflicts`. Local session references SHALL resolve to the appropriate provider identity at mutation/detail boundaries.
 
