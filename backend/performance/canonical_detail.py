@@ -27,7 +27,6 @@ from backend.activities.detail_merge import (
     MergedStreams,
     merge_details,
 )
-from backend.activities.detail_store import summary_fingerprint
 from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.canonical.activity_detail import (
     ActivityDetailSet,
@@ -47,11 +46,11 @@ from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.performance.session_execution import session_execution
-from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
     map_intervals_summary_zones,
 )
+from backend.runtime.ports import ActivityFingerprintReader
 
 _MAX_MERGE_DEPTH: Final = 64
 
@@ -126,6 +125,7 @@ class CanonicalDetailReader:
         *,
         refreshable: RefreshableProviders,
         summary_row: SummaryRowReader | None = None,
+        fingerprints: ActivityFingerprintReader | None = None,
         failures: FailureReader | None = None,
         envelope: EnvelopeReader | None = None,
         zone: tzinfo = UTC,
@@ -134,6 +134,8 @@ class CanonicalDetailReader:
         self._zone = zone
         self._refreshable = refreshable
         self._summary_row = summary_row
+        # Without it no stored set is reported stale.
+        self._fingerprints = fingerprints
         self._failures = failures
         self._envelope = envelope
 
@@ -167,7 +169,7 @@ class CanonicalDetailReader:
                 candidates, activity_id, analysis_record, summary
             )
         merged = merge_details(candidates)
-        status = self._status(db, sets, intervals_id, summary)
+        status = self._status(db, sets, intervals_id)
         stale = any(state.stale for state in status.values())
         analysis = (
             None if stale else self._analysis(db, activity_id, analysis_record, merged)
@@ -260,25 +262,31 @@ class CanonicalDetailReader:
         db: Any,
         sets: Sequence[StoredDetailSet],
         intervals_id: str | None,
-        summary: Mapping[str, Any] | None,
     ) -> dict[ProviderId, ProviderStatus]:
         """Compare each provider's stored sets with its current summary version."""
-        fingerprint = None if summary is None else summary_fingerprint(dict(summary))
+        keys = [(item.provider, item.provider_activity_id) for item in sets]
+        if intervals_id is not None:
+            keys.append((ProviderId.INTERVALS.value, intervals_id))
+        current = (
+            {}
+            if self._fingerprints is None
+            else self._fingerprints.summary_fingerprints(db, keys)
+        )
         status: dict[ProviderId, ProviderStatus] = {}
         for item in sets:
-            provider = ProviderId(item.provider)
-            if provider is ProviderId.INTERVALS:
-                # The summary row belongs to one Intervals.icu record only.
-                current = (
-                    fingerprint if item.provider_activity_id == intervals_id else None
-                )
-            else:
-                current = canonical_store.active_provider_record_hash(
-                    db, item.provider, ACTIVITY_RECORD_KIND, item.provider_activity_id
-                )
-            if item.summary_sha256 and current and item.summary_sha256 != current:
-                status[provider] = ProviderStatus(stale=True)
-        load_error = self._load_error(intervals_id, fingerprint)
+            fingerprint = current.get((item.provider, item.provider_activity_id))
+            if (
+                item.summary_sha256
+                and fingerprint
+                and item.summary_sha256 != fingerprint
+            ):
+                status[ProviderId(item.provider)] = ProviderStatus(stale=True)
+        load_error = self._load_error(
+            intervals_id,
+            None
+            if intervals_id is None
+            else current.get((ProviderId.INTERVALS.value, intervals_id)),
+        )
         if load_error is not None:
             status[ProviderId.INTERVALS] = ProviderStatus(
                 stale=status.get(ProviderId.INTERVALS, ProviderStatus()).stale,

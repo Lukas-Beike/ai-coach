@@ -70,7 +70,6 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         self.assertIs(assembly.equipment()._deduplicate, deduplicated_rows)
         self.assertIs(duplicate._database_manager, manager)
         self.assertIs(duplicate._event_buffer, event_buffer)
-        self.assertIs(feedback._row_reader, row_reader)
         self.assertFalse(hasattr(assembly, "activity_read"))
         self.assertIsInstance(duplicate._inspector._activities, CanonicalTableReader)
         self.assertIs(duplicate._inspector._serving, serving)

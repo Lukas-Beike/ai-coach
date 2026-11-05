@@ -30,18 +30,18 @@
     return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
   };
 
+  // List rows and the loaded document both carry the session's neutral sport.
   function sportKind(activity) {
-    const type = String(activity?.type || "").toLowerCase();
-    if (/swim/.test(type)) return "swim";
-    if (/run|walk|hike/.test(type)) return "run";
+    const sport = activity?.sport;
+    if (sport === "swim") return "swim";
+    if (["run", "walk", "hike"].includes(sport)) return "run";
     return "other";
   }
 
   // Walking and hiking use pace charts like running, so they need their own labels instead of "Andere".
   function sportLabel(activity) {
-    const type = String(activity?.type || "").toLowerCase();
-    if (/hike/.test(type)) return "Wandern";
-    if (/walk/.test(type)) return "Gehen";
+    if (activity?.sport === "hike") return "Wandern";
+    if (activity?.sport === "walk") return "Gehen";
     return activitySportLabel(activity);
   }
 
@@ -310,8 +310,9 @@
 
   function renderPanel(panel, summary, payload, epoch) {
     panel.replaceChildren();
-    // The document's sport wins; the list row's type stands in until it loads.
-    const activity = { type: payload?.session?.sport ?? summary.type };
+    // The document's session wins; the list row stands in until it loads.
+    const session = payload?.session || summary;
+    const activity = { sport: session.sport, environment: session.environment };
     const metrics = payload ? ActivityDetails.metricValues(payload) : rowMetrics(summary);
     const stats = overview(activity, metrics);
     if (stats) panel.append(stats);

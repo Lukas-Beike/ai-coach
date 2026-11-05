@@ -252,7 +252,7 @@
   function renderMetadata(session, metrics, content) {
     const duration = metrics.moving_duration_s ?? metrics.duration_s;
     const values = [
-      session.sport ? activitySportLabel({ type: session.sport }) : null,
+      session.sport ? activitySportLabel(session) : null,
       session.started_at ? formatTime(session.started_at) : null,
       duration != null ? `${Math.round(duration / 60)} min` : null,
       AppFormat.distance(metrics.distance_m),
@@ -315,13 +315,13 @@
 
   // Running cadence is stored per leg; foot sports show steps per minute of both legs.
   function cadenceDisplay(activity) {
-    if (/run|walk|hike/i.test(String(activity?.type || ""))) return { label: "Schrittfrequenz", unit: "spm", factor: 2 };
+    if (["run", "walk", "hike"].includes(activity?.sport)) return { label: "Schrittfrequenz", unit: "spm", factor: 2 };
     return { label: "Kadenz", unit: "rpm", factor: 1 };
   }
 
   function renderSeries(session, streams, content) {
     let charts = 0;
-    const cadence = cadenceDisplay({ type: session.sport });
+    const cadence = cadenceDisplay(session);
     const labels = { power_w: ["Leistung", "W"], heart_rate_bpm: ["Herzfrequenz", "bpm"], speed_mps: ["Geschwindigkeit", "m/s"], altitude_m: ["Höhe", "m"], distance_m: ["Distanz", "m"], grade_pct: ["Steigung", "%"], cadence_rpm: [cadence.label, cadence.unit], temperature_c: ["Temperatur", "°C"] };
     const channels = streams?.channels || {};
     for (const [key, [label, unit]] of Object.entries(labels)) {

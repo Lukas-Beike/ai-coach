@@ -15,14 +15,13 @@ from backend.activities.activity_summary import (
     summary_local_date,
 )
 from backend.activities.detail_analysis_reads import analysis_summaries
-from backend.activities.detail_store import summary_fingerprint
 from backend.canonical.stored_sports import resolve_workout_sport
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.errors import AppError
 from backend.performance import wellness_days
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
-    activity_summaries_and_rows,
+    activity_summaries_and_fingerprints,
     activity_summaries_for,
     activity_summaries_with_sync_time,
     inputs_for_snapshot,
@@ -110,11 +109,13 @@ class TrainingRecordsService:
         return recurring_training_comparisons(self.observations())
 
     def observations(self) -> list[dict[str, Any]]:
-        summaries, rows = activity_summaries_and_rows(self._canonical)
-        fingerprints = {str(row.get("id")): summary_fingerprint(row) for row in rows}
+        stored_analyses = analysis_summaries(self._database_manager)
+        summaries, fingerprints = activity_summaries_and_fingerprints(
+            self._canonical, [stored["activity_id"] for stored in stored_analyses]
+        )
         known = {stored_activity_key(summary): summary for summary in summaries}
         records = []
-        for stored in analysis_summaries(self._database_manager):
+        for stored in stored_analyses:
             summary = known.get(stored["activity_id"])
             if summary is None or stored["summary_sha256"] != fingerprints.get(
                 stored["activity_id"]
@@ -186,9 +187,18 @@ class TrainingProfileSelectionService:
                 <= summary_local_date(summary)
                 <= today.isoformat()
             ]
+            intervals_ids = [
+                str(record_ids[ProviderId.INTERVALS.value])
+                for summary in sessions
+                if ProviderId.INTERVALS.value
+                in (record_ids := summary.get("record_ids") or {})
+            ]
             fingerprints = {
-                str(row.get("id")): summary_fingerprint(row)
-                for row in reader.activity_rows(db, start=first, end=last)
+                activity_id: fingerprint
+                for (_, activity_id), fingerprint in reader.summary_fingerprints(
+                    db,
+                    [(ProviderId.INTERVALS.value, value) for value in intervals_ids],
+                ).items()
             }
             curves = self._curves.curves(
                 db, [str(summary.get("id") or "") for summary in sessions], fingerprints

@@ -8,7 +8,6 @@ from datetime import date
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from backend.canonical.public_metrics import neutral_activity_records
 from backend.http_api.auth import SessionAuthService
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
@@ -77,8 +76,6 @@ class SyncGetRoutes:
                 query.get("days", [self._all_sync_days])[0],
                 today=self._local_today(),
             )
-            if isinstance(payload.get("activities"), list):
-                payload["activities"] = neutral_activity_records(payload["activities"])
 
         handler.send_json(200, payload)
         return True

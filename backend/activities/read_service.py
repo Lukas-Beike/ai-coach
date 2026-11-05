@@ -1,48 +1,42 @@
-"""Completed-activity read use cases backed by the canonical activity rows."""
+"""Completed-activity read use cases backed by the canonical session summaries."""
 
 from __future__ import annotations
 
 import base64
 import json
-from collections.abc import Callable
-from datetime import date, timedelta
-from typing import Any
+from collections.abc import Callable, Sequence
+from datetime import date, datetime, timedelta
+from typing import Any, Protocol
 
 from backend.activities.activity_reference import (
     ActivityReferenceResolver,
     NoActivityReferences,
 )
-from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
-from backend.activities.matching import record_date
+from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.sync_time import activities_synced_at
+from backend.canonical.activity_summary import ActivitySummary
+from backend.canonical.vocabulary import ProviderId
 from backend.runtime.ports import (
-    ActivityRowReader,
+    ActivityFingerprintReader,
+    ActivitySummaryReader,
     ProviderCoverageReader,
 )
 
 ALL_DAYS = -1
 PAGE_DEFAULT = 100
 PAGE_MAX = 250
-PAGE_CURSOR_VERSION = 2
+# Version 3 pages by session start and local session id; older cursors restart.
+PAGE_CURSOR_VERSION = 3
+
+type PageKey = tuple[datetime, str]
 
 
-def _first_present(item: Any, keys: tuple[str, ...]) -> Any:
-    if not isinstance(item, dict):
-        return None
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
+class ActivitySummarySource(ActivitySummaryReader, ActivityFingerprintReader, Protocol):
+    """Session summaries and the fingerprints their stored details compare with."""
 
 
-def _page_key(activity: dict[str, Any]) -> tuple[str, str]:
-    return (
-        str(_first_present(activity, ("start_date_local", "start_date", "date")) or "")[
-            :40
-        ],
-        str(_first_present(activity, ("id", "activityId", "external_id")) or ""),
-    )
+def _page_key(summary: ActivitySummary) -> PageKey:
+    return (datetime.fromisoformat(summary["started_at"]), summary["id"])
 
 
 def _encode_cursor(value: Any) -> str:
@@ -60,22 +54,32 @@ def _decode_cursor(value: Any) -> Any | None:
         return None
 
 
-def _encode_page_cursor(key: tuple[str, str]) -> str:
-    return _encode_cursor({"v": PAGE_CURSOR_VERSION, "after": list(key)})
+def _encode_page_cursor(summary: ActivitySummary) -> str:
+    return _encode_cursor(
+        {
+            "v": PAGE_CURSOR_VERSION,
+            "after": [summary["started_at"], summary["id"]],
+            "day": str(summary.get("started_at_local") or "")[:10],
+        }
+    )
 
 
-def _decode_page_cursor(value: Any) -> tuple[str, str] | None:
-    """Accept the versioned cursor and the unversioned list cursor of older clients."""
+def _decode_page_cursor(value: Any) -> tuple[PageKey, date] | None:
+    """Return the last listed key and its local day; None restarts at page one."""
     decoded = _decode_cursor(value)
-    if isinstance(decoded, dict) and decoded.get("v") == PAGE_CURSOR_VERSION:
-        after = decoded.get("after")
-    elif isinstance(decoded, list):
-        after = decoded
-    else:
+    if not isinstance(decoded, dict) or decoded.get("v") != PAGE_CURSOR_VERSION:
         return None
-    if isinstance(after, list) and len(after) == 2:
-        return (str(after[0]), str(after[1]))
-    return None
+    after, day = decoded.get("after"), decoded.get("day")
+    if not (isinstance(after, list) and len(after) == 2 and isinstance(day, str)):
+        return None
+    try:
+        started = datetime.fromisoformat(str(after[0]))
+        local_day = date.fromisoformat(day)
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        return None
+    return (started, str(after[1])), local_day
 
 
 def _page_limit(raw: Any) -> int:
@@ -85,66 +89,90 @@ def _page_limit(raw: Any) -> int:
         return PAGE_DEFAULT
 
 
+def _intervals_id(summary: ActivitySummary) -> str | None:
+    return (summary.get("record_ids") or {}).get(ProviderId.INTERVALS.value)
+
+
 class ActivityReadService:
-    """Own activity listing without provider refreshes."""
+    """Own activity listing without provider refreshes: one entry per session."""
 
     def __init__(
         self,
         database_manager: Any,
-        row_reader: ActivityRowReader,
+        summaries: ActivitySummarySource,
         feedback_service: Any,
         detail_store: ActivityDetailStore | None = None,
         *,
         read_equipment: Callable[[str], dict[str, Any]] = lambda _: {},
         references: ActivityReferenceResolver | None = None,
-        summary_rows: ActivityRowReader | None = None,
         coverage: Callable[[], ProviderCoverageReader] | None = None,
     ):
         self._database_manager = database_manager
-        self._row_reader = row_reader
+        self._summaries = summaries
         self._feedback_service = feedback_service
         self._detail_store = detail_store
         self._read_equipment = read_equipment
         self._references = NoActivityReferences() if references is None else references
-        # Full rows, as fingerprinted by detail prefetch; the listed rows may be compact.
-        self._summary_rows = summary_rows
         # Where the activities' sync time comes from; without it the time is unknown.
         self._coverage = coverage
 
-    def _read(self) -> tuple[Any, list[dict[str, Any]]]:
-        """Read the sync time and the activity rows in one read snapshot."""
-        with self._database_manager.read_snapshot() as db:
-            rows = self._row_reader.activity_rows(db)
-            synced_at = activities_synced_at(
-                None if self._coverage is None else self._coverage(), db
+    def _synced_at(self, db: Any) -> Any:
+        return activities_synced_at(
+            None if self._coverage is None else self._coverage(), db
+        )
+
+    def _newest(
+        self,
+        db: Any,
+        count: int,
+        *,
+        start: date | None,
+        after: tuple[PageKey, date] | None,
+    ) -> list[ActivitySummary]:
+        """Return up to ``count`` newest summaries from ``start`` on, below ``after``.
+
+        The cursor's local day bounds the read (one spare day for zone edges);
+        the read grows until enough sessions lie below the cursor key.
+        """
+        end = None if after is None else after[1] + timedelta(days=1)
+        fetch = count
+        while True:
+            summaries = self._summaries.activity_summaries(
+                db, start=start, end=end, limit=fetch
             )
-        return synced_at, list(rows)
+            below = [
+                summary
+                for summary in summaries
+                if after is None or _page_key(summary) < after[0]
+            ]
+            if len(below) >= count or len(summaries) < fetch:
+                return below[:count]
+            fetch *= 2
 
-    def _with_local_ids(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        local_ids = self._references.local_ids(_page_key(item)[1] for item in items)
-        for item in items:
-            item["local_activity_id"] = local_ids.get(_page_key(item)[1])
-        return items
-
-    def _detail_errors(self, page: list[dict[str, Any]]) -> dict[str, str]:
-        """Name the detail failure recorded for each listed activity's summary."""
+    def _detail_errors(
+        self, db: Any, page: Sequence[ActivitySummary]
+    ) -> dict[str, str]:
+        """Name the detail failure recorded for each listed session's Intervals summary."""
         if self._detail_store is None:
             return {}
-        failures = self._detail_store.failures(_page_key(item)[1] for item in page)
-        if not failures or self._summary_rows is None:
-            return {key: failure["message"] for key, failure in failures.items()}
-        with self._database_manager.read_snapshot() as db:
-            rows = self._summary_rows.activity_rows(db)
-        fingerprints = {
-            str(row.get("id")): summary_fingerprint(row)
-            for row in rows
-            if str(row.get("id")) in failures
+        intervals_ids = {
+            summary["id"]: intervals_id
+            for summary in page
+            if (intervals_id := _intervals_id(summary))
         }
+        failures = self._detail_store.failures(intervals_ids.values())
+        if not failures:
+            return {}
+        fingerprints = self._summaries.summary_fingerprints(
+            db, [(ProviderId.INTERVALS.value, key) for key in failures]
+        )
         # A note left by another summary version no longer describes this one.
         return {
-            key: failure["message"]
-            for key, failure in failures.items()
-            if failure.get("summary_sha256") == fingerprints.get(key)
+            session_id: failures[intervals_id]["message"]
+            for session_id, intervals_id in intervals_ids.items()
+            if intervals_id in failures
+            and failures[intervals_id].get("summary_sha256")
+            == fingerprints.get((ProviderId.INTERVALS.value, intervals_id))
         }
 
     def page(
@@ -155,35 +183,33 @@ class ActivityReadService:
         *,
         today: date,
     ) -> dict[str, Any]:
-        synced_at, activities = self._read()
         try:
             days_value = int(days)
         except TypeError, ValueError:
             days_value = ALL_DAYS
-        if days_value != ALL_DAYS:
-            cutoff = today - timedelta(days=max(1, days_value) - 1)
-            activities = [
-                item
-                for item in activities
-                if record_date(_page_key(item)[0]) >= cutoff.isoformat()
-            ]
-        activities.sort(key=_page_key, reverse=True)
-        after = _decode_page_cursor(cursor)
-        if after is not None:
-            activities = [item for item in activities if _page_key(item) < after]
+        start = (
+            None
+            if days_value == ALL_DAYS
+            else today - timedelta(days=max(1, days_value) - 1)
+        )
         page_size = _page_limit(limit)
-        page = activities[:page_size]
-        failures = self._detail_errors(page)
-        attached = self._with_local_ids(
-            self._feedback_service.attach_to_activities(page)
+        with self._database_manager.read_snapshot() as db:
+            synced_at = self._synced_at(db)
+            listed = self._newest(
+                db, page_size + 1, start=start, after=_decode_page_cursor(cursor)
+            )
+            page = listed[:page_size]
+            failures = self._detail_errors(db, page)
+        attached = self._feedback_service.attach_to_activities(
+            [dict(summary) for summary in page]
         )
         for item in attached:
-            item["detail_error"] = failures.get(_page_key(item)[1])
+            item["detail_error"] = failures.get(item["id"])
         return {
             "snapshot_synced_at": synced_at,
             "activities": attached,
-            "next_cursor": _encode_page_cursor(_page_key(page[-1]))
-            if len(activities) > len(page) and page
+            "next_cursor": _encode_page_cursor(page[-1])
+            if len(listed) > len(page)
             else None,
             "limit": page_size,
             "days": days_value,
@@ -192,23 +218,17 @@ class ActivityReadService:
     def recent(
         self, days: int = ALL_DAYS, limit: int = 250, *, today: date
     ) -> dict[str, Any]:
-        synced_at, activities = self._read()
-        if days != ALL_DAYS:
-            cutoff = today - timedelta(days=days - 1)
-            activities = [
-                activity
-                for activity in activities
-                if record_date(
-                    _first_present(activity, ("start_date_local", "start_date", "date"))
-                )
-                >= cutoff.isoformat()
-            ]
+        """The newest session summaries of the last ``days`` days, for the Coach."""
+        start = None if days == ALL_DAYS else today - timedelta(days=days - 1)
+        with self._database_manager.read_snapshot() as db:
+            synced_at = self._synced_at(db)
+            summaries = self._summaries.activity_summaries(
+                db, start=start, limit=max(1, min(int(limit), 500))
+            )
         return {
             "snapshot_synced_at": synced_at,
-            "activities": self._with_local_ids(
-                self._feedback_service.attach_to_activities(
-                    activities[: max(1, min(int(limit), 500))]
-                )
+            "activities": self._feedback_service.attach_to_activities(
+                [dict(summary) for summary in summaries]
             ),
             "days": days,
         }

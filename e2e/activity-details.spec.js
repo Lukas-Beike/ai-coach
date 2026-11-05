@@ -176,8 +176,8 @@ test("@responsive running cadence shows step frequency of both legs", async ({ p
 
 test("@responsive analysis shows running step frequency and cycling cadence", async ({ page }) => {
   const summaries = [
-    { id: "synthetic-run", name: "Synthetic run", type: "Run", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3 },
-    { id: "synthetic-ride", name: "Synthetic ride cadence", type: "Ride", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 3 },
+    { id: "synthetic-run", name: "Synthetic run", sport: "run", environment: "outdoor", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3 },
+    { id: "synthetic-ride", name: "Synthetic ride cadence", sport: "ride", environment: "outdoor", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 3 },
   ];
   await page.route(/\/api\/activities(\?|\/)/, (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[3];
@@ -206,7 +206,7 @@ test("@responsive analysis shows running step frequency and cycling cadence", as
 test("@responsive analysis lists sessions whose details failed to load", async ({ page }) => {
   const message = "Intervals.icu hat für diese Einheit keine Detaildaten geliefert.";
   const summaries = [
-    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", type: "Ride", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3, detail_error: message },
+    { id: "synthetic-failed", name: "Synthetic failed <img src=x>", sport: "ride", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3, detail_error: message },
   ];
   await page.route(/\/api\/activities(\?|\/)/, (route) => {
     const id = new URL(route.request().url()).pathname.split("/")[3];
@@ -225,6 +225,29 @@ test("@responsive analysis lists sessions whose details failed to load", async (
   await expect(item.locator(".activity-analysis-panel .activity-analysis-error")).toContainText(message);
   expect(await item.locator("img").count()).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+
+test("@responsive analysis lists a Garmin-only indoor session and loads more", async ({ page }) => {
+  const first = { id: "act_garmin_only", sport: "ride", environment: "virtual", record_ids: { garmin: "910002" }, started_at: "2026-10-17T08:00:00+02:00", started_at_local: "2026-10-17T08:00:00", moving_duration_s: 3600, distance_m: 30000 };
+  const second = { id: "act_older", name: "Synthetic older run", sport: "run", environment: "outdoor", record_ids: { intervals: "i-1" }, started_at: "2026-10-16T08:00:00+02:00", started_at_local: "2026-10-16T08:00:00", moving_duration_s: 1800 };
+  await page.route(/\/api\/activities(\?|\/)/, (route) => {
+    const url = new URL(route.request().url());
+    const id = url.pathname.split("/")[3];
+    const body = id
+      ? { session: { activity_id: id, sport: "ride", environment: "virtual" }, metrics: {}, detail_data: { providers: [] } }
+      : url.searchParams.get("cursor")
+        ? { activities: [second], snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: null }
+        : { activities: [first], snapshot_synced_at: "2026-10-17T09:00:00Z", next_cursor: "page-2" };
+    return route.fulfill({ json: body });
+  });
+  await page.goto("/#analysis/sessions");
+  await expect(page.locator("#appShell")).toBeVisible();
+  const garmin = page.locator(".activity-analysis-item").first();
+  await expect(garmin).toContainText("Rad indoor");
+  await garmin.locator("summary").click();
+  await expect(garmin.locator(".activity-analysis-panel")).toBeVisible();
+  await page.getByRole("button", { name: "Weitere Einheiten laden" }).click();
+  await expect(page.locator(".activity-analysis-item").filter({ hasText: "Synthetic older run" })).toContainText("Laufen");
 });
 
 test("@responsive analysis sessions list expands Garmin-style charts", async ({ page, request }) => {

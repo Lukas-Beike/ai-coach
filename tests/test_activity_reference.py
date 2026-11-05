@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import (
     FixedActivityRows,
-    SnapshotActivityRows,
     canonical_source,
 )
 
@@ -30,7 +29,6 @@ from backend.activities.activity_reference import (
 from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.feedback import ActivityFeedbackService
-from backend.activities.read_service import ActivityReadService
 from backend.athlete.equipment import EquipmentService
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
@@ -46,7 +44,6 @@ from backend.db.activity_detail_store import detail_sets_for
 from backend.db.repositories import ActivityFeedbackRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
-from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.feedback_post import FeedbackPostRoutes
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.detail_envelope import DetailEnvelopeReader
@@ -230,92 +227,6 @@ class DuplicateIdResolutionTests(unittest.TestCase):
         references.resolve.assert_not_called()
 
 
-class ActivityReadReferenceTests(_Fixture):
-    def _service(self, activities: list[dict[str, object]]) -> ActivityReadService:
-        snapshot = {
-            "synced_at": STAMP,
-            "athlete": {},
-            "recent_wellness": [],
-            "recent_activities": activities,
-        }
-        feedback = Mock(
-            attach_to_activities=Mock(
-                side_effect=lambda rows: [
-                    dict(row) for row in rows if isinstance(row, dict)
-                ]
-            )
-        )
-        snapshot_reader = Mock(latest_snapshot=Mock(return_value=snapshot))
-        return ActivityReadService(
-            self.manager,
-            CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
-            feedback,
-            references=ActivityReferences(self.manager),
-        )
-
-    def test_page_items_carry_local_activity_id_or_null(self) -> None:
-        local = self.seed("ride-1")
-        service = self._service(
-            [
-                {
-                    "id": "ride-1",
-                    "start_date_local": "2026-06-01T07:00:00",
-                    "type": "Ride",
-                },
-                {
-                    "id": "ride-2",
-                    "start_date_local": "2026-05-01T07:00:00",
-                    "type": "Ride",
-                },
-            ]
-        )
-        result = service.page(today=TODAY)
-        by_id = {item["id"]: item["local_activity_id"] for item in result["activities"]}
-        self.assertEqual({"ride-1": local, "ride-2": None}, by_id)
-
-    def test_versioned_cursor_resumes_after_the_provider_key(self) -> None:
-        self.seed("ride-1")
-        service = self._service(
-            [
-                {
-                    "id": "ride-1",
-                    "start_date_local": "2026-06-01T07:00:00",
-                    "type": "Ride",
-                },
-                {
-                    "id": "ride-2",
-                    "start_date_local": "2026-05-01T07:00:00",
-                    "type": "Ride",
-                },
-            ]
-        )
-        first = service.page(today=TODAY, limit=1)
-        second = service.page(today=TODAY, limit=1, cursor=first["next_cursor"])
-        self.assertEqual(["ride-1"], [item["id"] for item in first["activities"]])
-        self.assertEqual(["ride-2"], [item["id"] for item in second["activities"]])
-        self.assertIsNone(second["next_cursor"])
-
-    def test_recent_items_carry_local_activity_id_or_null(self) -> None:
-        local = self.seed("ride-1")
-        service = self._service(
-            [
-                {
-                    "id": "ride-1",
-                    "start_date_local": "2026-06-01T07:00:00",
-                    "type": "Ride",
-                },
-                {
-                    "id": "ride-2",
-                    "start_date_local": "2026-05-01T07:00:00",
-                    "type": "Ride",
-                },
-            ]
-        )
-        result = service.recent(today=TODAY)
-        by_id = {item["id"]: item["local_activity_id"] for item in result["activities"]}
-        self.assertEqual({"ride-1": local, "ride-2": None}, by_id)
-
-
 class ActivityCallerResolutionTests(_Fixture):
     def test_detail_resolves_local_id_and_reports_it(self) -> None:
         local = self.seed("ride-1")
@@ -327,7 +238,7 @@ class ActivityCallerResolutionTests(_Fixture):
         }
         service = ActivityAnalysisReadService(
             self.manager,
-            CompactActivityRows(FixedActivityRows()),
+            FixedActivityRows(),
             Mock(
                 attach_to_activities=Mock(side_effect=lambda rows: list(rows)),
                 list=Mock(return_value=[]),
@@ -356,7 +267,6 @@ class ActivityCallerResolutionTests(_Fixture):
         service = ActivityFeedbackService(
             self.manager,
             repository,
-            FixedActivityRows(),
             references=ActivityReferences(self.manager),
         )
         service.save(local, {"session_rpe": 6})
@@ -365,13 +275,11 @@ class ActivityCallerResolutionTests(_Fixture):
 
     def test_coach_feedback_route_accepts_local_id(self) -> None:
         local = self.seed("ride-1")
-        rows = FixedActivityRows([{"id": "ride-1"}])
         repository = Mock()
         repository.all.return_value = []
         service = ActivityFeedbackService(
             self.manager,
             repository,
-            rows,
             references=ActivityReferences(self.manager),
         )
         routes = FeedbackPostRoutes(lambda: Mock(), lambda: service)
@@ -384,11 +292,9 @@ class ActivityCallerResolutionTests(_Fixture):
         self.assertEqual("ride-1", body["activity_feedback"]["activity_id"])
 
     def test_coach_feedback_route_keeps_not_found_for_unknown_local_id(self) -> None:
-        rows = FixedActivityRows([{"id": "ride-1"}])
         service = ActivityFeedbackService(
             self.manager,
             Mock(get=Mock(return_value=None)),
-            rows,
             references=ActivityReferences(self.manager),
         )
         routes = FeedbackPostRoutes(lambda: Mock(), lambda: service)
@@ -511,7 +417,6 @@ class ActivityFeedbackProviderColumnTests(_Fixture):
         return ActivityFeedbackService(
             self.manager,
             ActivityFeedbackRepository(lambda: STAMP),
-            FixedActivityRows(activities),
             references=ActivityReferences(self.manager),
         )
 
@@ -536,7 +441,6 @@ class ActivityFeedbackProviderColumnTests(_Fixture):
         service = ActivityFeedbackService(
             self.manager,
             ActivityFeedbackRepository(lambda: STAMP),
-            FixedActivityRows(),
             references=NoActivityReferences(),
         )
         service.save("ride-1", {"notes": "no resolver"})

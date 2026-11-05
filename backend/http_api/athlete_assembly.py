@@ -114,7 +114,6 @@ class AthleteDataAssembly:
         return ActivityFeedbackService(
             self._database_manager(),
             self._activity_feedback_repository,
-            self._activity_rows(),
             references=ActivityReferences(self._database_manager()),
         )
 

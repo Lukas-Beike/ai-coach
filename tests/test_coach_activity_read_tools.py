@@ -17,7 +17,6 @@ from backend.canonical.vocabulary import MetricKind
 from backend.coach.activity_read_tools import CoachActivityReadToolService
 from backend.coach.context import coach_context_json_size
 from backend.errors import AppError
-from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
@@ -412,7 +411,7 @@ def _detail_tool(manager, activities: list[dict], garmin, profile, planned=None)
     feedback.for_activity_ids.return_value = []
     activity_read = ActivityAnalysisReadService(
         manager,
-        CompactActivityRows(SnapshotActivityRows(snapshot_repository)),
+        SnapshotActivityRows(snapshot_repository),
         feedback,
         canonical=canonical_source(
             SnapshotActivityRows(snapshot_repository), lambda: manager
@@ -462,7 +461,7 @@ def _canonical_activity_tool(case: unittest.TestCase, snapshot: dict):
     manager = MagicMock()
     activity_read = ActivityAnalysisReadService(
         sessions,
-        CompactActivityRows(SnapshotActivityRows(snapshot_reader)),
+        SnapshotActivityRows(snapshot_reader),
         feedback,
         canonical=CanonicalPerformanceSource(
             database_manager=lambda: manager,

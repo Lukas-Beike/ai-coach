@@ -351,7 +351,18 @@ class CanonicalDetailStatusTests(CanonicalDetailReaderTests):
                 "activity_feedback": {"activity_id": provider_id},
                 "equipment": [],
             },
+            fingerprints=self,
         )
+
+    def summary_fingerprints(self, db, keys):
+        """Fingerprint ``self.summary`` for the Intervals record, else the tables."""
+        keys = list(keys)
+        current = CanonicalTableReader().summary_fingerprints(
+            db, [key for key in keys if key[0] != INTERVALS.value]
+        )
+        if (INTERVALS.value, "i-ride-99") in keys:
+            current[(INTERVALS.value, "i-ride-99")] = summary_fingerprint(self.summary)
+        return current
 
     def store(self, fingerprint: str | None, values=None) -> None:
         h = self

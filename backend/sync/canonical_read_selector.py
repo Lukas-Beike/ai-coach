@@ -37,7 +37,7 @@ written and stays in place.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import date, tzinfo
 from typing import Any, Final
 
@@ -57,6 +57,7 @@ from backend.runtime.ports import (
     ActivitySummaryReader,
     CanonicalReader,
     ObservationSourceSelector,
+    ProviderActivityKey,
     ProviderCoverageReader,
     SessionRecords,
 )
@@ -112,6 +113,18 @@ class _PendingReader:
     ) -> tuple[SessionRecords, ...]:
         del db, start, end, newest
         return ()
+
+    def summary_fingerprints(
+        self, db: Any, keys: Iterable[ProviderActivityKey]
+    ) -> dict[ProviderActivityKey, str]:
+        del db, keys
+        return {}
+
+    def intervals_summary_row(
+        self, db: Any, provider_activity_id: str
+    ) -> dict[str, Any] | None:
+        del db, provider_activity_id
+        return None
 
     def observations(
         self,
@@ -197,6 +210,18 @@ class CanonicalReadSelector(
     ) -> tuple[dict[str, Any], ...]:
         """Return raw activity rows from the same source as ``activities``."""
         return self._source(db).activity_rows(db, start=start, end=end, limit=limit)
+
+    def summary_fingerprints(
+        self, db: Any, keys: Iterable[ProviderActivityKey]
+    ) -> dict[ProviderActivityKey, str]:
+        """Return current summary fingerprints from the serving source."""
+        return self._source(db).summary_fingerprints(db, keys)
+
+    def intervals_summary_row(
+        self, db: Any, provider_activity_id: str
+    ) -> dict[str, Any] | None:
+        """Return one stored Intervals.icu payload from the serving source."""
+        return self._source(db).intervals_summary_row(db, provider_activity_id)
 
     def activities_need_refresh(self, db: Any) -> bool:
         """Return True while a stored compact activity row has no raw counterpart.

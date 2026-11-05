@@ -380,7 +380,7 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
             self.assertEqual(raised.exception.message, "Diese Aktion benötigt payload.")
 
         manager = Mock()
-        feedback = ActivityFeedbackService(manager, Mock(), Mock())
+        feedback = ActivityFeedbackService(manager, Mock())
         checkins = CheckinService(manager, Mock(), date.today)
         competitions = CompetitionService(
             manager, Mock(), lambda: "2026-09-23T00:00:00Z"

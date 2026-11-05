@@ -565,8 +565,12 @@ class TrainingReportTests(unittest.TestCase):
         garmin_only = _summary("act_3", "2026-09-30T10:00:00")
 
         class Reader(_Rows):
-            def activity_rows(self, db, *, start=None, end=None, limit=None):
-                return (raw, {"id": "i-2", "type": "Ride"})
+            def summary_fingerprints(self, db, keys):
+                rows = (raw, {"id": "i-2", "type": "Ride"})
+                current = {
+                    ("intervals", row["id"]): summary_fingerprint(row) for row in rows
+                }
+                return {key: current[key] for key in keys if key in current}
 
         stored = [
             {

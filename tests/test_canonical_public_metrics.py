@@ -5,7 +5,6 @@ import unittest
 from backend.canonical.public_metrics import (
     neutral_activity,
     neutral_activity_metrics,
-    neutral_activity_records,
     neutral_calendar_entries,
     neutral_calendar_entry,
     neutral_calendar_state,
@@ -163,7 +162,7 @@ class NeutralPublicMetricsTests(unittest.TestCase):
                 },
                 "not-a-mapping",
             ],
-            neutral_activity_records(rows),
+            [neutral_activity(row) if isinstance(row, dict) else row for row in rows],
         )
         self.assertEqual({"icu_intensity": 0.8}, lap)
 
@@ -204,7 +203,7 @@ class NeutralPublicMetricsTests(unittest.TestCase):
 
     def test_no_stored_activity_key_survives_the_translation(self) -> None:
         row = {key: index + 1 for index, key in enumerate(ACTIVITY_FIELDS)}
-        (translated,) = neutral_activity_records([row])
+        translated = neutral_activity(row)
         self.assertEqual(
             set(),
             (set(translated) & set(ACTIVITY_FIELDS)) - GENERIC_ACTIVITY_KEYS,
@@ -319,7 +318,6 @@ class ActivitySummaryTranslationTests(unittest.TestCase):
             "sources": {"training_load": "Intervals.icu"},
         }
         self.assertEqual(neutral_activity(summary), summary)
-        self.assertEqual(neutral_activity_records([summary]), [summary])
         entry = {"is_completed_activity": True, **summary}
         self.assertEqual(neutral_calendar_entry(entry), entry)
 

@@ -89,14 +89,6 @@ def neutral_activity(record: Mapping[str, Any]) -> dict[str, Any]:
     return _renamed(record, (*_NEUTRAL_METRIC_KEYS, *_NEUTRAL_ACTIVITY_KEYS))
 
 
-def neutral_activity_records(records: Iterable[Any]) -> list[Any]:
-    """Translate activity rows, leaving non-mapping items unchanged."""
-    return [
-        neutral_activity(record) if isinstance(record, Mapping) else record
-        for record in records
-    ]
-
-
 def neutral_calendar_entry(entry: Any) -> Any:
     """Translate one calendar entry and the activity matched to it.
 

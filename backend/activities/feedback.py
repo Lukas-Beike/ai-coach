@@ -24,7 +24,6 @@ from backend.activities.activity_reference import (
 from backend.activities.activity_summary import stored_activity_key
 from backend.db import canonical_store
 from backend.errors import AppError
-from backend.runtime.ports import ActivityRowReader
 
 ENTITY_TYPE: Final = "activity_feedback"
 # Every stored column, so an undo restores rows exactly.
@@ -219,13 +218,11 @@ class ActivityFeedbackService:
         self,
         database_manager: Any,
         feedback_repository: Any,
-        row_reader: ActivityRowReader,
         *,
         references: ActivityReferenceResolver | None = None,
     ):
         self._database_manager = database_manager
         self._feedback_repository = feedback_repository
-        self._row_reader = row_reader
         self._references = NoActivityReferences() if references is None else references
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -410,7 +407,11 @@ class ActivityFeedbackService:
         return (kind, value)
 
     def save_coach(self, activity_id: Any, value: Any) -> dict[str, Any]:
-        """Save feedback only for an activity the canonical activity reads serve."""
+        """Save feedback only for an id that leads to a live canonical session.
+
+        A local session id or the provider id of an active record of any
+        provider; the key the feedback is stored under is unchanged.
+        """
         reference = self._references.resolve_reference(activity_id)
         normalized = normalize_activity_feedback(reference.activity_id, value)
         if (
@@ -419,15 +420,9 @@ class ActivityFeedbackService:
             and not normalized.get("deviation_reason")
         ):
             raise AppError(400, "Die Rückmeldung darf nicht leer sein.")
-        with self._database_manager.unit_of_work() as db:
-            activities = self._row_reader.activity_rows(db)
-            known_ids = {
-                str(candidate_id)
-                for activity in activities
-                for candidate_id in (_activity_id(activity),)
-                if candidate_id not in (None, "")
-            }
-            if normalized["activity_id"] not in known_ids:
+        with self._database_manager.reader() as db:
+            live = canonical_store.live_session_id(db, str(normalized["activity_id"]))
+            if live is None:
                 raise AppError(
                     404,
                     "Die Aktivität ist im aktuellen lokalen Trainingssnapshot nicht vorhanden.",

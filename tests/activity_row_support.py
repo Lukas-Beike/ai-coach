@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
+from backend.activities.detail_store import summary_fingerprint
+from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
@@ -28,7 +30,49 @@ def summaries_of_rows(rows: Any) -> tuple[ActivitySummary, ...]:
     )
 
 
-class SnapshotActivityRows:
+def bounded(
+    summaries: Any, start: date | None, end: date | None, limit: int | None
+) -> tuple[ActivitySummary, ...]:
+    """Apply the summary reader's local-date bounds and newest limit."""
+    kept = tuple(
+        summary
+        for summary in summaries
+        if (start is None or summary_local_date(summary) >= start.isoformat())
+        and (end is None or summary_local_date(summary) <= end.isoformat())
+    )
+    return kept if limit is None else kept[:limit]
+
+
+class _RowFingerprints:
+    """Serve fingerprints and single rows from ``activity_rows``, as the tables do."""
+
+    def activity_rows(self, db: Any) -> tuple[dict[str, Any], ...]:
+        raise NotImplementedError
+
+    def intervals_summary_row(
+        self, db: Any, provider_activity_id: str
+    ) -> dict[str, Any] | None:
+        return next(
+            (
+                row
+                for row in self.activity_rows(db)
+                if str(row.get("id")) == provider_activity_id
+            ),
+            None,
+        )
+
+    def summary_fingerprints(
+        self, db: Any, keys: Iterable[tuple[str, str]]
+    ) -> dict[tuple[str, str], str]:
+        wanted = set(keys)
+        return {
+            key: summary_fingerprint(row)
+            for row in self.activity_rows(db)
+            if (key := (ProviderId.INTERVALS.value, str(row.get("id")))) in wanted
+        }
+
+
+class SnapshotActivityRows(_RowFingerprints):
     """Serve the raw rows of a stored snapshot, like the legacy selector source."""
 
     def __init__(self, snapshot_reader: Any) -> None:
@@ -53,11 +97,10 @@ class SnapshotActivityRows:
         end: date | None = None,
         limit: int | None = None,
     ) -> tuple[ActivitySummary, ...]:
-        summaries = summaries_of_rows(self.activity_rows(db))
-        return summaries if limit is None else summaries[:limit]
+        return bounded(summaries_of_rows(self.activity_rows(db)), start, end, limit)
 
 
-class FixedActivityRows:
+class FixedActivityRows(_RowFingerprints):
     """Serve a fixed list of raw rows."""
 
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
@@ -86,7 +129,7 @@ class FixedActivityRows:
             summaries: tuple[Any, ...] = self.rows
         else:
             summaries = summaries_of_rows(self.rows)
-        return summaries if limit is None else summaries[:limit]
+        return bounded(summaries, start, end, limit)
 
 
 class NoObservations:
