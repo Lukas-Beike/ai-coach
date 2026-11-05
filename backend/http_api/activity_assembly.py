@@ -9,6 +9,7 @@ from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.vocabulary import ProviderId
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.source_policy import SourcePreferences
 from backend.runtime.ports import (
     ActivityRowAndSummaryReader,
     CanonicalReadStatus,
@@ -32,6 +33,8 @@ class ActivityReadSources:
     observation_reader: Callable[[], ObservationReader]
     coverage: Callable[[], ProviderCoverageReader]
     serving: Callable[[], CanonicalReadStatus] | None = None
+    # The athlete's preferred sources, read in the caller's unit of work.
+    source_preferences: Callable[[Any], SourcePreferences] | None = None
 
 
 class ActivityReadAssembly:
@@ -50,6 +53,7 @@ class ActivityReadAssembly:
         self._observation_reader = sources.observation_reader
         self._coverage = sources.coverage
         self._serving = sources.serving
+        self._source_preferences = sources.source_preferences
         self._feedback_service = feedback_service
         self._read_equipment = read_equipment
         self._refreshable_providers = refreshable_providers
@@ -82,4 +86,5 @@ class ActivityReadAssembly:
             serving=self._serving,
             activity_summaries=self._row_reader,
             coverage=self._coverage,
+            source_preferences=self._source_preferences,
         )

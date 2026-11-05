@@ -82,6 +82,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                     db,
                     activity_reader=reader,
                     as_of=as_of,
+                    preferences=source.preferences_in(db),
                 ),
             )
             summaries = None if canonical is None else canonical.activities

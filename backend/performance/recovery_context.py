@@ -25,7 +25,11 @@ from backend.performance import garmin_metrics
 from backend.performance.canonical_recovery import CanonicalRecoveryInputs
 from backend.performance.planning_recovery import INTERVALS_GARMIN_RELAY_SOURCE
 from backend.performance.recovery import AVERAGE_DAYS, rounded_average
-from backend.performance.source_policy import METHOD_FAMILY_KINDS, select_daily
+from backend.performance.source_policy import (
+    METHOD_FAMILY_KINDS,
+    preferred_source,
+    select_daily,
+)
 
 INTERVALS_WELLNESS_SOURCE = "Intervals.icu Wellness"
 GARMIN_WEEKLY_HRV_SOURCE: Final = (
@@ -79,7 +83,9 @@ def _average(
     if kind in METHOD_FAMILY_KINDS:
         daily = {
             day: float(observation.value.value)
-            for day, observation in select_daily(recovery.of(kind), kind).items()
+            for day, observation in select_daily(
+                recovery.of(kind), kind, recovery.preferences
+            ).items()
         }
     else:
         provider = (
@@ -128,7 +134,9 @@ def _hrv(
 ) -> tuple[Any, str | None, float | None, str | None]:
     """Return last-night RMSSD, else Garmin's weekly average without an average."""
     rmssd = _metric(recovery, MetricKind.HRV_RMSSD, today)
-    if rmssd[0] is not None:
+    preferred = preferred_source(MetricKind.HRV_RMSSD, recovery.preferences)
+    # An athlete who prefers Intervals.icu HRV never gets Garmin's weekly value.
+    if rmssd[0] is not None or preferred is ProviderId.INTERVALS:
         return rmssd
     weekly = recovery.current(MetricKind.HRV_WEEKLY_AVERAGE)
     if weekly is None:

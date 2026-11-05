@@ -240,6 +240,7 @@ from backend.performance.morning_battery_service import (
     MorningBatteryStore,
     MorningBodyBatteryService,
 )
+from backend.performance.source_policy import preferences_from_profile
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import competitions as planning_competitions
 from backend.planning import library as planning_library
@@ -721,6 +722,9 @@ ACTIVITY_READS = ActivityReadAssembly(
         observation_reader=lambda: CANONICAL_READ,
         coverage=lambda: CANONICAL_READ,
         serving=lambda: CANONICAL_READ,
+        source_preferences=lambda db: preferences_from_profile(
+            ATHLETE_DATA.profile().get_from_db(db)
+        ),
     ),
     ATHLETE_DATA.activity_feedback,
     lambda activity_id: ATHLETE_DATA.equipment().read(activity_id=activity_id),
@@ -783,6 +787,9 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
             calendar_window_days=calendar_provider.EXTERNAL_CALENDAR_WINDOW_DAYS,
             checkin_text_limit=CHECKIN_TEXT_LIMITS["illness"],
             observation_reader=lambda: CANONICAL_READ,
+            source_preferences=lambda db: preferences_from_profile(
+                ATHLETE_DATA.profile().get_from_db(db)
+            ),
         ),
         runtime=PlanningRuntime(
             sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
@@ -1450,6 +1457,9 @@ COACH_CONTEXT = CoachContextAssembly(
                 serving=lambda: CANONICAL_READ,
                 activity_summaries=lambda: CANONICAL_READ,
                 coverage=lambda: CANONICAL_READ,
+                source_preferences=lambda db: preferences_from_profile(
+                    ATHLETE_DATA.profile().get_from_db(db)
+                ),
             ),
             activity_rows=ActivitySummarySource(
                 database_manager=lambda: database_manager(),
@@ -1510,6 +1520,9 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
                 observation_reader=lambda: CANONICAL_READ,
                 zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
                 today=lambda: ATHLETE_CLOCK.now().date(),
+                source_preferences=lambda db: preferences_from_profile(
+                    ATHLETE_DATA.profile().get_from_db(db)
+                ),
             ),
             change_history_service=HISTORY.change_history_service,
             competition_service=PLANNING_DATA.competition,
@@ -1727,6 +1740,9 @@ def _plan_guard_service() -> PlanGuardService:
             observation_reader=lambda: CANONICAL_READ,
             zone_configurations=lambda: ATHLETE_DATA.zones().configurations(),
             today=lambda: ATHLETE_CLOCK.now().date(),
+            source_preferences=lambda db: preferences_from_profile(
+                ATHLETE_DATA.profile().get_from_db(db)
+            ),
         ),
         planned_units=lambda: PLANNING_DATA.planned_unit().list(1000, future_only=True),
         completed_activities=lambda: read_completed(
@@ -1749,6 +1765,7 @@ def _plan_guard_service() -> PlanGuardService:
             CANONICAL_READ,
             ATHLETE_CLOCK.now().date(),
             ATHLETE_DATA.zones().configurations(),
+            lambda db: preferences_from_profile(ATHLETE_DATA.profile().get_from_db(db)),
         ),
         expects_strength=lambda: strength_expected(
             str(

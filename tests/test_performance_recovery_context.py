@@ -7,6 +7,7 @@ legacy one, the test says so.
 """
 
 import unittest
+from dataclasses import replace
 from datetime import date
 
 from canonical_recovery_support import (
@@ -21,6 +22,7 @@ from backend.performance.recovery_context import (
     GARMIN_WEEKLY_HRV_SOURCE,
     performance_recovery_context,
 )
+from backend.performance.source_policy import preferences_from_profile
 
 TODAY = date(2026, 9, 7)
 GARMIN = "Garmin Connect"
@@ -316,6 +318,33 @@ class MethodFamilyTests(unittest.TestCase):
         self.assertEqual(context["resting_hr"], 56)
         self.assertEqual(context["resting_hr_source"], GARMIN)
         self.assertEqual(context["resting_hr_average"], 53.5)
+
+    def test_an_intervals_preference_uses_only_its_values(self):
+        inputs = replace(
+            recovery_inputs(_resting_hr_days(0.0), latest_wellness_day=TODAY),
+            preferences=preferences_from_profile(
+                {"preferred_source_resting_hr": "intervals"}
+            ),
+        )
+
+        context = performance_recovery_context(inputs, TODAY)
+
+        self.assertEqual(context["resting_hr"], 57)
+        self.assertEqual(context["resting_hr_source"], INTERVALS)
+        self.assertEqual(context["resting_hr_average"], 54.0)
+        self.assertFalse(inputs.relays(MetricKind.RESTING_HR))
+
+    def test_an_intervals_hrv_preference_never_shows_the_garmin_weekly_value(self):
+        weekly = recovery_observation(MetricKind.HRV_WEEKLY_AVERAGE, 61, "2026-09-07")
+        inputs = replace(
+            recovery_inputs([weekly], latest_wellness_day=TODAY),
+            preferences=preferences_from_profile({"preferred_source_hrv": "intervals"}),
+        )
+
+        context = performance_recovery_context(inputs, TODAY)
+
+        self.assertIsNone(context["hrv"])
+        self.assertIsNone(context["hrv_source"])
 
 
 if __name__ == "__main__":

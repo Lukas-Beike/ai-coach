@@ -72,7 +72,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from types import MappingProxyType
-from typing import Final
+from typing import Any, Final
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, SourceKind, Sport
@@ -260,6 +260,88 @@ METHOD_FAMILY_KINDS: Final[frozenset[MetricKind]] = frozenset(
     }
 )
 RELAY_SHARE: Final = 0.9
+# The athlete's preferred source per metric group (#1668), a local profile setting.
+# Each group lists its kinds and the providers the athlete may prefer for it.
+PREFERENCE_GROUPS: Final[
+    Mapping[str, tuple[frozenset[MetricKind], tuple[ProviderId, ...]]]
+] = MappingProxyType(
+    {
+        "thresholds": (
+            frozenset(
+                {
+                    MetricKind.FTP,
+                    MetricKind.THRESHOLD_HR,
+                    MetricKind.THRESHOLD_PACE,
+                    MetricKind.MAX_HR,
+                }
+            ),
+            (_GARMIN, _INTERVALS),
+        ),
+        "body": (
+            frozenset({MetricKind.WEIGHT, MetricKind.BODY_FAT}),
+            (_GARMIN, _INTERVALS),
+        ),
+        "hrv": (frozenset({MetricKind.HRV_RMSSD}), (_GARMIN, _INTERVALS)),
+        "resting_hr": (frozenset({MetricKind.RESTING_HR}), (_GARMIN, _INTERVALS)),
+        "sleep": (
+            frozenset({MetricKind.SLEEP_DURATION, MetricKind.SLEEP_SCORE}),
+            (_GARMIN, _INTERVALS),
+        ),
+    }
+)
+# Profile field of each group's preference; an empty value keeps the default order.
+PREFERENCE_PROFILE_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
+    {group: f"preferred_source_{group}" for group in PREFERENCE_GROUPS}
+)
+type SourcePreferences = Mapping[str, ProviderId]
+NO_PREFERENCES: Final[SourcePreferences] = MappingProxyType({})
+
+
+def preferences_from_profile(profile: Mapping[str, Any]) -> SourcePreferences:
+    """Return the valid preferred sources of a profile; others are ignored."""
+    result: dict[str, ProviderId] = {}
+    for group, field_name in PREFERENCE_PROFILE_FIELDS.items():
+        raw = profile.get(field_name)
+        allowed = {provider.value: provider for provider in PREFERENCE_GROUPS[group][1]}
+        if isinstance(raw, str) and raw in allowed:
+            result[group] = allowed[raw]
+    return MappingProxyType(result)
+
+
+def preferred_source(
+    kind: MetricKind, preferences: SourcePreferences
+) -> ProviderId | None:
+    """Return the athlete's preferred provider for ``kind``'s group, if any."""
+    for group, (kinds, _) in PREFERENCE_GROUPS.items():
+        if kind in kinds:
+            return preferences.get(group)
+    return None
+
+
+def _preferred_first(
+    order: tuple[Source, ...], kind: MetricKind, preferences: SourcePreferences
+) -> tuple[Source, ...]:
+    """Move the preferred provider to the front, behind a leading local value.
+
+    A local value elsewhere in the order (the undated profile weight) keeps its
+    place among the rest.
+    """
+    preferred = preferred_source(kind, preferences)
+    if preferred is None or preferred not in order:
+        return order
+    lead: tuple[Source, ...] = (None,) if order and order[0] is None else ()
+    rest = tuple(item for item in order[len(lead) :] if item is not preferred)
+    return (*lead, preferred, *rest)
+
+
+def _preferred_providers(
+    order: tuple[ProviderId, ...], kind: MetricKind, preferences: SourcePreferences
+) -> tuple[ProviderId, ...]:
+    return tuple(
+        item for item in _preferred_first(order, kind, preferences) if item is not None
+    )
+
+
 # Days, ending on the latest day read, over which every reader decides the family.
 FAMILY_LOOKBACK_DAYS: Final = 84
 RELAY_MIN_OVERLAP_DAYS: Final = 5
@@ -403,8 +485,11 @@ def select_current(
     sport: Sport | None = None,
     latest_wellness_day: date | None = None,
     as_of: date | None = None,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> Observation | None:
     """Return the current observation for ``kind`` under its source rule.
+
+    ``preferences`` is the athlete's preferred source per metric group.
 
     ``sport`` restricts the candidates to observations for that sport. Sport-scoped
     kinds require a sport, because legacy readers always select per sport; passing
@@ -427,7 +512,9 @@ def select_current(
     if sport is None and kind in _SPORT_SCOPED:
         raise ValueError(f"{kind.value} is sport-scoped and needs a sport")
     observations = tuple(observations)
-    providers = family_providers(observations, kind)
+    providers = _preferred_providers(
+        family_providers(observations, kind, preferences), kind, preferences
+    )
     candidates = _eligible(observations, kind, rule, sport, latest_wellness_day, as_of)
     bests = [
         best
@@ -441,7 +528,9 @@ def select_current(
 
 
 def select_daily(
-    observations: Iterable[Observation], kind: MetricKind
+    observations: Iterable[Observation],
+    kind: MetricKind,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> Mapping[date, Observation]:
     """Return the per-day observation for ``kind`` under its daily rule.
 
@@ -454,7 +543,9 @@ def select_daily(
     if rule is None:
         return {}
     observations = tuple(observations)
-    providers = family_providers(observations, kind)
+    providers = _preferred_providers(
+        family_providers(observations, kind, preferences), kind, preferences
+    )
     first_by_day: dict[tuple[date, ProviderId], Observation] = {}
     for observation in observations:
         provider = observation.provenance.provider
@@ -466,9 +557,9 @@ def select_daily(
         ):
             continue
         first_by_day.setdefault((observation.observed_on, provider), observation)
-    # Visit days in order and, within a day, providers in rule order; the first
-    # observation seen for a day is the one from the highest-priority provider.
-    priority = {provider: position for position, provider in enumerate(rule.order)}
+    # Visit days in order and, within a day, providers in precedence order; the
+    # first observation seen for a day is the one from the highest-priority one.
+    priority = {provider: position for position, provider in enumerate(providers)}
     result: dict[date, Observation] = {}
     for (day, provider), observation in sorted(
         first_by_day.items(), key=lambda item: (item[0][0], priority[item[0][1]])
@@ -514,22 +605,30 @@ def intervals_relays_garmin(
 
 
 def family_providers(
-    observations: Iterable[Observation], kind: MetricKind
+    observations: Iterable[Observation],
+    kind: MetricKind,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> tuple[ProviderId, ...]:
     """Return the providers that may supply ``kind``, in precedence order.
 
     Kinds outside ``METHOD_FAMILY_KINDS`` use their current rule's order. Method
     family kinds use Garmin's values when there is any in-bounds Garmin value,
     together with Intervals only when Intervals relays Garmin; otherwise the
-    Intervals values are the only family present.
+    Intervals values are the only family present. An athlete who prefers
+    Intervals for the kind's group gets only Intervals values (another method,
+    such as a morning reading); preferring Garmin never falls back to Intervals
+    except as a relay.
     """
     rule = CURRENT_RULES.get(kind)
     if rule is None:
         return ()
     if kind not in METHOD_FAMILY_KINDS:
         return rule.order
+    preferred = preferred_source(kind, preferences)
+    if preferred is _INTERVALS:
+        return (_INTERVALS,)
     observations = tuple(observations)
-    if not _first_daily_values(observations, kind, _GARMIN):
+    if preferred is None and not _first_daily_values(observations, kind, _GARMIN):
         return (_INTERVALS,)
     if intervals_relays_garmin(observations, kind):
         return (_GARMIN, _INTERVALS)
@@ -603,21 +702,34 @@ class Resolved:
     conflict: bool
 
 
-def source_order(kind: MetricKind, sport: Sport | None = None) -> tuple[Source, ...]:
-    """Return the sources of ``kind`` in precedence order; empty without a rule."""
+def source_order(
+    kind: MetricKind,
+    sport: Sport | None = None,
+    preferences: SourcePreferences = NO_PREFERENCES,
+) -> tuple[Source, ...]:
+    """Return the sources of ``kind`` in precedence order; empty without a rule.
+
+    The athlete's preferred provider of the kind's group comes first, behind a
+    locally confirmed value.
+    """
     rule = CURRENT_RULES.get(kind)
     if rule is None:
         return ()
     if kind in RECENCY_ORDERS:
-        return RECENCY_ORDERS[kind]
+        return _preferred_first(RECENCY_ORDERS[kind], kind, preferences)
     order = SPORT_ORDERS.get((kind, sport), rule.order) if sport else rule.order
-    return (None, *order) if kind in LOCAL_FIRST_KINDS else order
+    full = (None, *order) if kind in LOCAL_FIRST_KINDS else order
+    return _preferred_first(full, kind, preferences)
 
 
-def preferred_provider(kind: MetricKind) -> ProviderId | None:
-    """Return the first provider of ``kind``'s rule, the one displays prefer."""
+def preferred_provider(
+    kind: MetricKind, preferences: SourcePreferences = NO_PREFERENCES
+) -> ProviderId | None:
+    """Return the provider displays prefer: the athlete's, else the rule's first."""
     rule = CURRENT_RULES.get(kind)
-    return None if rule is None else rule.order[0]
+    if rule is None:
+        return None
+    return preferred_source(kind, preferences) or rule.order[0]
 
 
 def _candidate_current(
@@ -645,8 +757,12 @@ def resolve_candidates(
     *,
     as_of: date | None,
     sport: Sport | None = None,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> Resolved | None:
     """Resolve one metric from each source's own current value under its rule.
+
+    ``preferences`` puts the athlete's preferred provider first (``source_order``);
+    for ``RECENCY_ORDERS`` kinds its value wins over a newer one of another source.
 
     The first candidate of each source counts. Candidates outside their source's
     bounds or age limit (on ``as_of``; None applies none) are dropped. The first
@@ -659,14 +775,16 @@ def resolve_candidates(
     rule = CURRENT_RULES.get(kind)
     if rule is None:
         return None
-    order = source_order(kind, sport)
+    order = source_order(kind, sport, preferences)
     first: dict[Source, Candidate] = {}
     for candidate in candidates:
         if candidate.source in order and _candidate_current(candidate, rule, as_of):
             first.setdefault(candidate.source, candidate)
     ranked = [first[source] for source in order if source in first]
     if kind in RECENCY_ORDERS:
+        preferred = preferred_source(kind, preferences)
         ranked = _by_recency(ranked)
+        ranked.sort(key=lambda item: item.source is not preferred or preferred is None)
     if not ranked:
         return None
     winner, *alternatives = ranked

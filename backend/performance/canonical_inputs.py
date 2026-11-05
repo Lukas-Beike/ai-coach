@@ -43,7 +43,11 @@ from backend.performance.garmin_canonical import (
     GarminCanonicalMetrics,
     read_garmin_state,
 )
-from backend.performance.source_policy import select_current
+from backend.performance.source_policy import (
+    NO_PREFERENCES,
+    SourcePreferences,
+    select_current,
+)
 from backend.performance.wellness_days import WellnessDay
 from backend.runtime.ports import (
     ActivityMaxHrReader,
@@ -117,6 +121,8 @@ class CanonicalPerformanceInputs:
     activities_need_refresh: bool = False
     intervals_synced_at: str | None = None
     activities_synced_at: str | None = None
+    # The athlete's preferred source per metric group, read with these inputs.
+    preferences: SourcePreferences = NO_PREFERENCES
 
 
 # The inputs of a consumer without a canonical source: every value is unknown.
@@ -146,6 +152,14 @@ class CanonicalPerformanceSource:
     serving: Callable[[], CanonicalReadStatus] | None = None
     activity_summaries: Callable[[], ActivityRowAndSummaryReader] | None = None
     coverage: Callable[[], ProviderCoverageReader] | None = None
+    # Reads the athlete's preferred sources inside the caller's unit of work.
+    source_preferences: Callable[[Any], SourcePreferences] | None = None
+
+    def preferences_in(self, db: Any) -> SourcePreferences:
+        """Return the athlete's preferred sources; none without an accessor."""
+        if self.source_preferences is None:
+            return NO_PREFERENCES
+        return self.source_preferences(db)
 
     def activity_summary_reader(self) -> ActivityRowAndSummaryReader | None:
         """Return the configured activity summary reader, if any."""
@@ -279,6 +293,7 @@ def inputs_for_snapshot(
             activity_reader=source.activity_summary_reader(),
             as_of=as_of,
             include_power_curve=include_power_curve,
+            preferences=source.preferences_in(db),
         ),
     )
 
@@ -437,6 +452,7 @@ class _CarriedRows:
         atl: float | None,
         current: CanonicalCurrentInputs,
         ramp_rate: float | None = None,
+        preferences: SourcePreferences = NO_PREFERENCES,
     ) -> CanonicalPerformanceInputs:
         return CanonicalPerformanceInputs(
             wellness_day=wellness_day,
@@ -455,6 +471,7 @@ class _CarriedRows:
             run_eftp_by_day=self.run_eftp_by_day,
             ramp_rate=ramp_rate,
             power_curve=self.power_curve,
+            preferences=preferences,
         )
 
 
@@ -465,8 +482,12 @@ def read_performance_inputs(
     activity_reader: ActivitySummaryReader | None = None,
     as_of: date,
     include_power_curve: bool = False,
+    preferences: SourcePreferences = NO_PREFERENCES,
 ) -> CanonicalPerformanceInputs | None:
     """Read canonical activity summaries and wellness days in one selected unit.
+
+    ``preferences`` (the athlete's preferred sources) is applied by every
+    selection over these inputs and carried with them.
 
     No snapshot section is read. None means no activity reader, no observed
     wellness day and no stored power curve. ``as_of`` is the athlete-local day.
@@ -498,7 +519,11 @@ def read_performance_inputs(
         ),
         body=read_body_inputs(reader, db, as_of),
         recovery=read_recovery_inputs(
-            reader, db, as_of=as_of, latest_wellness_day=latest_day
+            reader,
+            db,
+            as_of=as_of,
+            latest_wellness_day=latest_day,
+            preferences=preferences,
         ),
         form_by_day=wellness_days.series(history, MetricKind.FORM),
         eftp_by_day=wellness_days.wellness_day_values(
@@ -516,7 +541,10 @@ def read_performance_inputs(
             wellness_day=None,
             ctl=None,
             atl=None,
-            current=read_current_inputs(reader, db, as_of=as_of),
+            current=read_current_inputs(
+                reader, db, as_of=as_of, preferences=preferences
+            ),
+            preferences=preferences,
         )
     start = days[0].day
     loaded = _load_resolved(
@@ -527,12 +555,14 @@ def read_performance_inputs(
         ctl=loaded.ctl,
         atl=loaded.atl,
         current=read_current_inputs(
-            reader, db, latest_wellness_day=latest_day, as_of=as_of
+            reader,
+            db,
+            latest_wellness_day=latest_day,
+            as_of=as_of,
+            preferences=preferences,
         ),
-        ramp_rate=_ramp_rate(
-            wellness_days.series(days, MetricKind.CTL),
-            latest_day,
-        ),
+        ramp_rate=_ramp_rate(wellness_days.series(days, MetricKind.CTL), latest_day),
+        preferences=preferences,
     )
 
 

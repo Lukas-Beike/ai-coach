@@ -22,6 +22,7 @@ from backend.canonical.vocabulary import (
 )
 from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_inputs import resolve_reader
+from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.sport import planned_sport_environment
 
 
@@ -127,8 +128,10 @@ class PlannedUnitEstimator:
         observation_reader: Callable[[], Any],
         zone_configurations: Callable[[], Sequence[ZoneConfiguration]],
         today: Callable[[], date] = date.today,
+        source_preferences: Callable[[Any], SourcePreferences] | None = None,
     ) -> None:
         self._database_manager = database_manager
+        self._source_preferences = source_preferences
         self._today = today
         self._observation_reader = observation_reader
         self._read_configurations = zone_configurations
@@ -141,7 +144,14 @@ class PlannedUnitEstimator:
     ) -> tuple[Sequence[Observation], Sequence[ZoneConfiguration]]:
         with self._database_manager().reader() as db:
             thresholds = read_zone_thresholds(
-                resolve_reader(self._observation_reader(), db), db, as_of=self._today()
+                resolve_reader(self._observation_reader(), db),
+                db,
+                as_of=self._today(),
+                preferences=(
+                    NO_PREFERENCES
+                    if self._source_preferences is None
+                    else self._source_preferences(db)
+                ),
             )
         return thresholds, self._read_configurations()
 
