@@ -163,6 +163,7 @@ class WahooClient:
         workouts: list[Mapping[str, Any]] = []
         skipped = 0
         listed = 0
+        expected = 0
         for page in range(1, MAX_WORKOUT_PAGES + 1):
             payload = self._get(
                 WORKOUTS_PATH, {"page": page, "per_page": WORKOUTS_PER_PAGE}
@@ -174,13 +175,17 @@ class WahooClient:
             workouts.extend(page_rows.workouts)
             skipped += page_rows.skipped
             listed += len(rows)
+            expected = max(expected, _total(payload))
             if page_rows.reached_window_start:
                 return WahooWorkoutFetch(tuple(workouts), skipped)
-            if len(rows) < _page_size(payload):
-                # A short page ends the list unless Wahoo's total says more exist.
+            if not rows:
+                # Nothing more to read; short of a reported total, it is cut off.
                 return WahooWorkoutFetch(
-                    tuple(workouts), skipped, truncated=listed < _total(payload)
+                    tuple(workouts), skipped, truncated=listed < expected
                 )
+            if len(rows) < _page_size(payload) and listed >= expected:
+                # A short page ends the list unless Wahoo's total says more exist.
+                return WahooWorkoutFetch(tuple(workouts), skipped)
         return WahooWorkoutFetch(tuple(workouts), skipped, truncated=True)
 
     def workout_summary(self, workout_id: int) -> Mapping[str, Any]:
