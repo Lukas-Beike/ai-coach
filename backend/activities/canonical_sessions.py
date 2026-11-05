@@ -1,6 +1,8 @@
 """Bundle canonical activity records into sessions with the legacy duplicate rules.
 
-This reproduces ``backend.activities.duplicates`` over ``ActivityRecord`` values:
+The pairwise rules are those of ``backend.activities.duplicates`` over
+``ActivityRecord`` values; the one-to-one assignment below is canonical only (the
+raw-row helpers still accept any match):
 
 * a Garmin-provider record duplicates an Intervals.icu record when the starts are
   within 30 minutes, the sport families agree (or either is "other"), and every
@@ -24,8 +26,9 @@ rules.
 
 Every pass assigns one to one: a session takes at most one record of the joining
 provider and recording origin, so two separate sessions close together never
-merge. Candidate pairs are taken closest first, by the start gap as a share of
-the window plus each compared measurement's gap as a share of its tolerance;
+merge. Candidate pairs are taken closest first, by the mean of the start gap as a
+share of the window and each compared measurement's gap as a share of its
+tolerance;
 equal costs fall back to the deterministic order (start instant, then provider,
 then activity id). A record is a duplicate of at most one primary, and every
 input record appears in exactly one session. A Garmin-provider duplicate of a
@@ -118,7 +121,7 @@ def wahoo_garmin_copy_match(
     Applies the Wahoo/Garmin ride rule on the athlete's wall clock ``zone``; the
     caller decides which records are Wahoo- and Garmin-recorded Intervals.icu rides.
     """
-    return _wahoo_and_garmin_copy_match(_entry(wahoo, zone), _entry(copy, zone))
+    return _wahoo_copy_cost(_entry(wahoo, zone), _entry(copy, zone)) is not None
 
 
 def garmin_duplicates_intervals(
@@ -355,10 +358,8 @@ def _garmin_intervals_cost(
         intervals.family,
     ):
         return None
-    measured = _garmin_measurements_cost(
-        garmin.record, intervals.record, elapsed=elapsed
-    )
-    return None if measured is None else start + measured
+    gaps = _garmin_measurement_gaps(garmin.record, intervals.record, elapsed=elapsed)
+    return None if gaps is None else _mean((start, *gaps))
 
 
 def _wahoo_intervals_cost(wahoo: _Entry, intervals: _Entry) -> float | None:
@@ -368,10 +369,10 @@ def _wahoo_intervals_cost(wahoo: _Entry, intervals: _Entry) -> float | None:
     return _garmin_intervals_cost(wahoo, intervals)
 
 
-def _garmin_measurements_cost(
+def _garmin_measurement_gaps(
     garmin: ActivityRecord, intervals: ActivityRecord, *, elapsed: bool = False
-) -> float | None:
-    """Return the summed relative gaps, or None unless every comparison agrees."""
+) -> list[float] | None:
+    """Return the relative gap of each comparison, or None unless every one agrees."""
     gaps: list[float | None] = []
     # Garmin ``duration`` is elapsed time, while the Intervals.icu duration is
     # usually moving time (elapsed only when moving time is missing), so the
@@ -405,13 +406,10 @@ def _garmin_measurements_cost(
                 intervals.distance_m,
             )
         )
-    if not gaps or None in gaps:
+    agreed = [gap for gap in gaps if gap is not None]
+    if not gaps or len(agreed) < len(gaps):
         return None
-    return sum(gap for gap in gaps if gap is not None)
-
-
-def _wahoo_and_garmin_copy_match(wahoo: _Entry, copy: _Entry) -> bool:
-    return _wahoo_copy_cost(wahoo, copy) is not None
+    return agreed
 
 
 def _wahoo_copy_cost(wahoo: _Entry, copy: _Entry) -> float | None:
@@ -444,7 +442,12 @@ def _wahoo_copy_cost(wahoo: _Entry, copy: _Entry) -> float | None:
     )
     if duration is None or distance is None:
         return None
-    return start + duration + distance
+    return _mean((start, duration, distance))
+
+
+def _mean(gaps: Sequence[float]) -> float:
+    """Return the mean gap, so a pair is not cheaper for comparing fewer values."""
+    return sum(gaps) / len(gaps)
 
 
 def _start_cost(left: _Entry, right: _Entry) -> float | None:

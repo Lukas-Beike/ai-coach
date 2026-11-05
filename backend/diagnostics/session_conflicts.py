@@ -17,8 +17,10 @@ _CONFLICTS = """
     SELECT COALESCE(s.merged_into, s.activity_id) AS session_id,
            r.provider AS provider, r.recorded_by AS recorded_by,
            COUNT(*) AS records, MAX(r.local_date) AS local_date
-    FROM activity_records r JOIN activity_sessions s ON s.activity_id = r.activity_id
-    WHERE r.state = 'active' AND s.state <> 'deleted'
+    FROM activity_records r
+    JOIN activity_sessions s ON s.activity_id = r.activity_id
+    JOIN activity_sessions t ON t.activity_id = COALESCE(s.merged_into, s.activity_id)
+    WHERE r.state = 'active' AND s.state <> 'deleted' AND t.state <> 'deleted'
     GROUP BY session_id, r.provider, r.recorded_by
     HAVING COUNT(*) > 1
 """

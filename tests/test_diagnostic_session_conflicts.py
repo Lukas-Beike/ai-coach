@@ -59,6 +59,24 @@ class SessionConflictDiagnosticsTests(unittest.TestCase):
             self.summary(),
         )
 
+    def test_aliases_of_a_deleted_survivor_are_not_listed(self) -> None:
+        add_session_record(self.manager, ProviderId.INTERVALS, "i1", "act_i1")
+        for garmin_id in ("g1", "g2"):
+            add_session_record(
+                self.manager,
+                ProviderId.GARMIN,
+                garmin_id,
+                f"act_{garmin_id}",
+                merged_into="act_i1",
+            )
+        with self.manager.unit_of_work() as db:
+            db.execute(
+                "UPDATE activity_sessions SET state='deleted' "
+                "WHERE activity_id='act_i1'"
+            )
+
+        self.assertEqual({"total": 0, "sessions": []}, self.summary())
+
     def test_deleted_records_and_sessions_are_not_listed(self) -> None:
         add_session_record(self.manager, ProviderId.INTERVALS, "i1", "act_i1")
         add_session_record(
