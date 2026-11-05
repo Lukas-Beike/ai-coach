@@ -68,6 +68,21 @@ def timezone_name(value: Any, *, strict: bool = False) -> str:
     return candidate
 
 
+def _normalize_preferred_sources(result: dict[str, str], *, strict: bool) -> None:
+    """Reject (strict) or clear an unknown preferred source."""
+    for field_name in PREFERRED_SOURCE_FIELDS:
+        if result[field_name] in PREFERRED_SOURCES:
+            continue
+        if strict:
+            raise AppError(
+                400,
+                "Unbekannte bevorzugte Quelle; erlaubt: "
+                + ", ".join(PREFERRED_SOURCES[1:])
+                + " oder leer.",
+            )
+        result[field_name] = ""
+
+
 def normalize_profile(
     value: dict[str, Any], *, validate_timezone: bool = False
 ) -> dict[str, str]:
@@ -87,16 +102,7 @@ def normalize_profile(
                 "Unbekanntes Trainingsmodell; erlaubt: " + ", ".join(TRAINING_MODELS),
             )
         result["training_model"] = TRAINING_MODELS[0]
-    for field_name in PREFERRED_SOURCE_FIELDS:
-        if result[field_name] not in PREFERRED_SOURCES:
-            if validate_timezone:
-                raise AppError(
-                    400,
-                    "Unbekannte bevorzugte Quelle; erlaubt: "
-                    + ", ".join(PREFERRED_SOURCES[1:])
-                    + " oder leer.",
-                )
-            result[field_name] = ""
+    _normalize_preferred_sources(result, strict=validate_timezone)
     if result["sleep_target_hours"]:
         try:
             target = float(result["sleep_target_hours"])

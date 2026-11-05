@@ -452,6 +452,7 @@ class _CarriedRows:
         atl: float | None,
         current: CanonicalCurrentInputs,
         ramp_rate: float | None = None,
+        preferences: SourcePreferences = NO_PREFERENCES,
     ) -> CanonicalPerformanceInputs:
         return CanonicalPerformanceInputs(
             wellness_day=wellness_day,
@@ -470,6 +471,7 @@ class _CarriedRows:
             run_eftp_by_day=self.run_eftp_by_day,
             ramp_rate=ramp_rate,
             power_curve=self.power_curve,
+            preferences=preferences,
         )
 
 
@@ -535,14 +537,12 @@ def read_performance_inputs(
         power_curve=power_curve,
     )
     if latest_day is None:
-        return replace(
-            carried.inputs(
-                wellness_day=None,
-                ctl=None,
-                atl=None,
-                current=read_current_inputs(
-                    reader, db, as_of=as_of, preferences=preferences
-                ),
+        return carried.inputs(
+            wellness_day=None,
+            ctl=None,
+            atl=None,
+            current=read_current_inputs(
+                reader, db, as_of=as_of, preferences=preferences
             ),
             preferences=preferences,
         )
@@ -550,35 +550,19 @@ def read_performance_inputs(
     loaded = _load_resolved(
         reader, db, latest_wellness_day=latest_day, start=start, end=latest_day
     )
-    return replace(
-        _with_current(
-            carried,
-            loaded,
-            read_current_inputs(
-                reader,
-                db,
-                latest_wellness_day=latest_day,
-                as_of=as_of,
-                preferences=preferences,
-            ),
-            _ramp_rate(wellness_days.series(days, MetricKind.CTL), latest_day),
-        ),
-        preferences=preferences,
-    )
-
-
-def _with_current(
-    carried: _CarriedRows,
-    loaded: Any,
-    current: CanonicalCurrentInputs,
-    ramp_rate: float | None,
-) -> CanonicalPerformanceInputs:
     return carried.inputs(
         wellness_day=loaded.wellness_day,
         ctl=loaded.ctl,
         atl=loaded.atl,
-        current=current,
-        ramp_rate=ramp_rate,
+        current=read_current_inputs(
+            reader,
+            db,
+            latest_wellness_day=latest_day,
+            as_of=as_of,
+            preferences=preferences,
+        ),
+        ramp_rate=_ramp_rate(wellness_days.series(days, MetricKind.CTL), latest_day),
+        preferences=preferences,
     )
 
 
