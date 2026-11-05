@@ -62,9 +62,13 @@ The system SHALL bundle supported provider copies into canonical sessions using 
 - **WHEN** candidates lack enough comparable data or conflict with matching tolerances
 - **THEN** they remain separate instead of being merged merely because their timestamps are close.
 
-Detailed contract: Garmin elapsed-time fallback SHALL avoid assigning multiple separate walks to one already claimed session. Local session references SHALL resolve to the appropriate provider identity at mutation/detail boundaries.
+#### Scenario: Two separate sessions close together
+- **WHEN** two recordings from each of two providers start within 30 minutes of each other and each could match either copy
+- **THEN** each pairing rule assigns one to one: a session takes at most one active record per provider and recording origin, the closest pair (start gap plus measurement gaps, each relative to its tolerance) wins, and equal costs fall back to start, provider and activity id.
 
-Evidence: `backend/activities/canonical_sessions.py:bundle_sessions`, `backend/activities/session_linking.py:link_activity_sessions`, `backend/activities/activity_reference.py:ActivityReferences`; `tests/test_canonical_sessions.py:test_order_is_deterministic_regardless_of_input_order`, `tests/test_canonical_sessions.py:test_garmin_record_joins_the_wahoo_session_through_a_garmin_copy`, `tests/test_garmin_activity_detail_job.py:test_session_alias_resolves_to_the_garmin_record`.
+Detailed contract: Garmin elapsed-time fallback SHALL avoid assigning multiple separate walks to one already claimed session. Existing persisted merges are never undone automatically; the diagnostics report lists sessions with several active records of one provider and recording origin as `canonical_session_conflicts`. Local session references SHALL resolve to the appropriate provider identity at mutation/detail boundaries.
+
+Evidence: `backend/activities/canonical_sessions.py:bundle_sessions`, `backend/activities/session_linking.py:link_activity_sessions`, `backend/activities/activity_reference.py:ActivityReferences`; `tests/test_canonical_sessions.py:test_order_is_deterministic_regardless_of_input_order`, `tests/test_canonical_sessions.py:test_garmin_record_joins_the_wahoo_session_through_a_garmin_copy`, `tests/test_canonical_sessions.py:OneToOneAssignmentTests`, `tests/test_diagnostic_session_conflicts.py`, `tests/test_garmin_activity_detail_job.py:test_session_alias_resolves_to_the_garmin_record`.
 
 ### Requirement: Durable Intervals detail cache and prefetch
 The system SHALL fetch full-resolution Intervals detail only for a valid locally known activity, verify returned identity, normalize supported streams, laps, and zones, and store canonical detail sets and the canonical analysis payload atomically, without writing a kv detail document. Automatic prefetch SHALL initially establish its floor from the ten newest activities, thereafter load new activities at or above that fixed floor, and limit each pass to 25 provider loads.

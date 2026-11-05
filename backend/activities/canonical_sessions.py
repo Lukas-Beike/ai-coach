@@ -20,14 +20,16 @@ Garmin often sends no moving time (walks), so its elapsed duration cannot agree
 with the Intervals.icu moving time. A Garmin-provider record that matched no
 Intervals.icu record under the rule above may then duplicate one whose elapsed
 time agrees with the Garmin duration, with the same start, family and distance
-rules. That second pass only joins an Intervals.icu session that no Garmin
-record joined yet: two short walks of similar length within 30 minutes would
-otherwise each claim the earlier copy.
+rules.
 
-Assignment is first match wins in deterministic order (start instant, then
-provider, then activity id). A record is a duplicate of at most one primary, and
-every input record appears in exactly one session. A Garmin-provider duplicate
-of a Garmin-recorded Intervals copy joins that copy's Wahoo session.
+Every pass assigns one to one: a session takes at most one record of the joining
+provider and recording origin, so two separate sessions close together never
+merge. Candidate pairs are taken closest first, by the start gap as a share of
+the window plus each compared measurement's gap as a share of its tolerance;
+equal costs fall back to the deterministic order (start instant, then provider,
+then activity id). A record is a duplicate of at most one primary, and every
+input record appears in exactly one session. A Garmin-provider duplicate of a
+Garmin-recorded Intervals copy joins that copy's Wahoo session.
 
 Wahoo-provider records (direct Wahoo ingest) join the same bundling:
 
@@ -51,7 +53,7 @@ accepts, so the sessions are the ones the full comparison would produce.
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, tzinfo
 from typing import Final
@@ -127,9 +129,10 @@ def garmin_duplicates_intervals(
     This is the rule alone, with the elapsed-time alternative, as the sync's raw
     duplicate check applies it; it ignores which session either record joined.
     """
-    return _garmin_matches_intervals(
+    cost = _garmin_intervals_cost(
         _entry(garmin, zone), _entry(intervals, zone), elapsed=True
     )
+    return cost is not None
 
 
 def _entry(record: ActivityRecord, zone: tzinfo) -> _Entry:
@@ -205,8 +208,8 @@ class _WallWindow:
 def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
     """Map each duplicate's index to the index of its primary.
 
-    Each search takes the lowest-indexed matching candidate. That is the first match
-    in start order, which is what a scan over every candidate would have found.
+    Every pass is a one-to-one assignment: a session takes at most one record of
+    the joining kind, and the closest candidate pair wins (see ``_assign_pairs``).
     """
     duplicate_of: dict[int, int] = {}
     wahoo_rides = [
@@ -219,50 +222,40 @@ def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
         for index, entry in enumerate(entries)
         if _is_intervals_ride(entry.record, RecordingOrigin.GARMIN)
     ]
-    wahoo_window = _WallWindow(entries, wahoo_rides)
-    for copy_index in garmin_ride_copies:
-        copy = entries[copy_index]
-        matches = [
-            index
-            for index in wahoo_window.near(copy.wall)
-            if _wahoo_and_garmin_copy_match(entries[index], copy)
-        ]
-        if matches:
-            duplicate_of[copy_index] = min(matches)
+    _assign_pairs(
+        entries,
+        duplicate_of,
+        garmin_ride_copies,
+        _WallWindow(entries, wahoo_rides),
+        lambda copy, wahoo: _wahoo_copy_cost(wahoo, copy),
+        set(),
+    )
 
     intervals = [
         index for index, entry in enumerate(entries) if _is_intervals(entry.record)
     ]
     intervals_window = _WallWindow(entries, intervals)
+    garmin = [
+        index
+        for index, entry in enumerate(entries)
+        if entry.record.provenance.provider is ProviderId.GARMIN
+    ]
+    # Sessions that already hold a Garmin-provider record.
     joined: set[int] = set()
-    unmatched: list[int] = []
-    for index, entry in enumerate(entries):
-        if entry.record.provenance.provider is not ProviderId.GARMIN:
-            continue
-        matches = [
-            target_index
-            for target_index in intervals_window.near(entry.wall)
-            if _garmin_matches_intervals(entry, entries[target_index])
-        ]
-        if matches:
-            target_index = min(matches)
-            duplicate_of[index] = duplicate_of.get(target_index, target_index)
-            joined.add(duplicate_of[index])
-        else:
-            unmatched.append(index)
-    for index in unmatched:
-        entry = entries[index]
-        matches = [
-            target_index
-            for target_index in intervals_window.near(entry.wall)
-            if duplicate_of.get(target_index, target_index) not in joined
-            and _garmin_matches_intervals(entry, entries[target_index], elapsed=True)
-        ]
-        if matches:
-            target_index = min(matches)
-            duplicate_of[index] = duplicate_of.get(target_index, target_index)
-            joined.add(duplicate_of[index])
-    _assign_wahoo_provider_duplicates(entries, duplicate_of, intervals_window)
+    _assign_pairs(
+        entries, duplicate_of, garmin, intervals_window, _garmin_intervals_cost, joined
+    )
+    _assign_pairs(
+        entries,
+        duplicate_of,
+        [index for index in garmin if index not in duplicate_of],
+        intervals_window,
+        lambda garmin, intervals: _garmin_intervals_cost(
+            garmin, intervals, elapsed=True
+        ),
+        joined,
+    )
+    _assign_wahoo_provider_duplicates(entries, duplicate_of, intervals_window, joined)
     return duplicate_of
 
 
@@ -270,41 +263,65 @@ def _assign_wahoo_provider_duplicates(
     entries: tuple[_Entry, ...],
     duplicate_of: dict[int, int],
     intervals_window: _WallWindow,
+    garmin_joined: set[int],
 ) -> None:
     """Join Wahoo-provider records to Intervals.icu copies, then Garmin records to Wahoo."""
-    for index, entry in enumerate(entries):
-        if entry.record.provenance.provider is not ProviderId.WAHOO:
-            continue
-        matches = [
-            target_index
-            for target_index in intervals_window.near(entry.wall)
-            if _wahoo_matches_intervals(entry, entries[target_index])
-        ]
-        if matches:
-            target_index = min(matches)
-            duplicate_of[index] = duplicate_of.get(target_index, target_index)
-    wahoo_rides = [
+    wahoo = [
         index
         for index, entry in enumerate(entries)
         if entry.record.provenance.provider is ProviderId.WAHOO
-        and entry.record.sport is Sport.RIDE
     ]
-    wahoo_window = _WallWindow(entries, wahoo_rides)
-    for index, entry in enumerate(entries):
-        if (
-            entry.record.provenance.provider is not ProviderId.GARMIN
-            or entry.record.sport is not Sport.RIDE
-            or index in duplicate_of
-        ):
+    _assign_pairs(
+        entries, duplicate_of, wahoo, intervals_window, _wahoo_intervals_cost, set()
+    )
+    wahoo_rides = [
+        index for index in wahoo if entries[index].record.sport is Sport.RIDE
+    ]
+    garmin_rides = [
+        index
+        for index, entry in enumerate(entries)
+        if entry.record.provenance.provider is ProviderId.GARMIN
+        and entry.record.sport is Sport.RIDE
+        and index not in duplicate_of
+    ]
+    _assign_pairs(
+        entries,
+        duplicate_of,
+        garmin_rides,
+        _WallWindow(entries, wahoo_rides),
+        lambda garmin, wahoo_ride: _wahoo_copy_cost(wahoo_ride, garmin),
+        garmin_joined,
+    )
+
+
+def _assign_pairs(
+    entries: tuple[_Entry, ...],
+    duplicate_of: dict[int, int],
+    sources: Sequence[int],
+    targets: _WallWindow,
+    cost: Callable[[_Entry, _Entry], float | None],
+    taken: set[int],
+) -> None:
+    """Join each source to at most one target session, closest pair first.
+
+    ``cost`` returns None when the rule rejects the pair. A session in ``taken``
+    already holds a record of the sources' kind and accepts no other; each join
+    adds its session. Pairs are taken greedily by cost, ties by source then target
+    order, which is start instant, provider and activity id. For the few records
+    in one start window, greedy equals the optimal assignment in practice.
+    """
+    pairs = sorted(
+        (pair_cost, source, target)
+        for source in sources
+        for target in targets.near(entries[source].wall)
+        if (pair_cost := cost(entries[source], entries[target])) is not None
+    )
+    for _, source, target in pairs:
+        primary = duplicate_of.get(target, target)
+        if source in duplicate_of or primary in taken:
             continue
-        matches = [
-            target_index
-            for target_index in wahoo_window.near(entry.wall)
-            if _wahoo_and_garmin_copy_match(entries[target_index], entry)
-        ]
-        if matches:
-            target_index = min(matches)
-            duplicate_of[index] = duplicate_of.get(target_index, target_index)
+        duplicate_of[source] = primary
+        taken.add(primary)
 
 
 def _sessions(
@@ -327,33 +344,35 @@ def _sessions(
     )
 
 
-def _garmin_matches_intervals(
+def _garmin_intervals_cost(
     garmin: _Entry, intervals: _Entry, *, elapsed: bool = False
-) -> bool:
-    if abs(garmin.wall - intervals.wall) > START_WINDOW:
-        return False
+) -> float | None:
+    start = _start_cost(garmin, intervals)
+    if start is None:
+        return None
     if garmin.family != intervals.family and _OTHER_FAMILY not in (
         garmin.family,
         intervals.family,
     ):
-        return False
-    return _garmin_measurements_agree(garmin.record, intervals.record, elapsed=elapsed)
+        return None
+    measured = _garmin_measurements_cost(
+        garmin.record, intervals.record, elapsed=elapsed
+    )
+    return None if measured is None else start + measured
 
 
-def _wahoo_matches_intervals(wahoo: _Entry, intervals: _Entry) -> bool:
-    if not _is_intervals(intervals.record):
-        return False
+def _wahoo_intervals_cost(wahoo: _Entry, intervals: _Entry) -> float | None:
     if intervals.record.provenance.recorded_by is not RecordingOrigin.WAHOO:
-        return False
+        return None
     # Same start, family and tolerance rules as a Garmin record against Intervals.
-    return _garmin_matches_intervals(wahoo, intervals)
+    return _garmin_intervals_cost(wahoo, intervals)
 
 
-def _garmin_measurements_agree(
+def _garmin_measurements_cost(
     garmin: ActivityRecord, intervals: ActivityRecord, *, elapsed: bool = False
-) -> bool:
-    compared = 0
-    agreed = 0
+) -> float | None:
+    """Return the summed relative gaps, or None unless every comparison agrees."""
+    gaps: list[float | None] = []
     # Garmin ``duration`` is elapsed time, while the Intervals.icu duration is
     # usually moving time (elapsed only when moving time is missing), so the
     # Garmin moving duration is a second candidate. The elapsed pass also accepts
@@ -364,37 +383,41 @@ def _garmin_measurements_agree(
         if value is not None
     ]
     if garmin_durations and intervals.duration_s is not None:
-        compared += 1
-        if any(
-            _close(value, intervals.duration_s, DURATION_FLOOR_S, intervals.duration_s)
+        base = intervals.duration_s
+        candidates = [
+            _relative_gap(value, base, DURATION_FLOOR_S, base)
             for value in garmin_durations
-        ) or (elapsed and _elapsed_times_agree(garmin, intervals)):
-            agreed += 1
+        ]
+        elapsed_s = intervals.elapsed_duration_s
+        if elapsed and garmin.duration_s is not None and elapsed_s is not None:
+            candidates.append(
+                _relative_gap(garmin.duration_s, elapsed_s, DURATION_FLOOR_S, elapsed_s)
+            )
+        agreeing = [gap for gap in candidates if gap is not None]
+        gaps.append(min(agreeing) if agreeing else None)
     # Only the distance pair skips non-positive values, as the legacy rule does.
     if garmin.distance_m and intervals.distance_m:
-        compared += 1
-        if _close(
-            garmin.distance_m,
-            intervals.distance_m,
-            DISTANCE_FLOOR_M,
-            intervals.distance_m,
-        ):
-            agreed += 1
-    return compared > 0 and agreed == compared
-
-
-def _elapsed_times_agree(garmin: ActivityRecord, intervals: ActivityRecord) -> bool:
-    elapsed = intervals.elapsed_duration_s
-    return (
-        garmin.duration_s is not None
-        and elapsed is not None
-        and _close(garmin.duration_s, elapsed, DURATION_FLOOR_S, elapsed)
-    )
+        gaps.append(
+            _relative_gap(
+                garmin.distance_m,
+                intervals.distance_m,
+                DISTANCE_FLOOR_M,
+                intervals.distance_m,
+            )
+        )
+    if not gaps or None in gaps:
+        return None
+    return sum(gap for gap in gaps if gap is not None)
 
 
 def _wahoo_and_garmin_copy_match(wahoo: _Entry, copy: _Entry) -> bool:
-    if abs(wahoo.wall - copy.wall) > START_WINDOW:
-        return False
+    return _wahoo_copy_cost(wahoo, copy) is not None
+
+
+def _wahoo_copy_cost(wahoo: _Entry, copy: _Entry) -> float | None:
+    start = _start_cost(wahoo, copy)
+    if start is None:
+        return None
     left, right = wahoo.record, copy.record
     if (
         left.duration_s is None
@@ -402,23 +425,38 @@ def _wahoo_and_garmin_copy_match(wahoo: _Entry, copy: _Entry) -> bool:
         or left.distance_m is None
         or right.distance_m is None
     ):
-        return False
+        return None
     if min(left.duration_s, right.duration_s) <= 0:
-        return False
+        return None
     if min(left.distance_m, right.distance_m) <= 0:
-        return False
-    return _close(
+        return None
+    duration = _relative_gap(
         left.duration_s,
         right.duration_s,
         DURATION_FLOOR_S,
         max(left.duration_s, right.duration_s),
-    ) and _close(
+    )
+    distance = _relative_gap(
         left.distance_m,
         right.distance_m,
         DISTANCE_FLOOR_M,
         max(left.distance_m, right.distance_m),
     )
+    if duration is None or distance is None:
+        return None
+    return start + duration + distance
 
 
-def _close(value: float, other: float, floor: float, base: float) -> bool:
-    return abs(value - other) <= max(floor, base * RELATIVE_TOLERANCE)
+def _start_cost(left: _Entry, right: _Entry) -> float | None:
+    """Return the wall-clock start gap as a share of START_WINDOW, None outside it."""
+    gap = abs(left.wall - right.wall)
+    return None if gap > START_WINDOW else gap / START_WINDOW
+
+
+def _relative_gap(
+    value: float, other: float, floor: float, base: float
+) -> float | None:
+    """Return the gap as a share of its tolerance, None when the values disagree."""
+    gap = abs(value - other)
+    tolerance = max(floor, base * RELATIVE_TOLERANCE)
+    return gap / tolerance if gap <= tolerance else None
