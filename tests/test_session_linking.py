@@ -496,6 +496,18 @@ class ExactLinkTests(LinkingCase):
         )
         self.assertEqual(self._mismatches(), {"total": 0, "sessions": []})
 
+    def test_a_hidden_upstream_keeps_its_copy_from_the_heuristics(self) -> None:
+        self._ingest_garmin([garmin_ride()], FIRST)
+        self._set_session(GARMIN_ID, state="hidden")
+        # A second Garmin recording of the ride, within every tolerance.
+        self._ingest_garmin([garmin_ride("9002")], SECOND)
+        self._ingest_intervals([self._garmin_copy(GARMIN_ID)], THIRD)
+
+        sessions = self._sessions()
+        self.assertEqual(sessions["9002"]["state"], "active")
+        self.assertEqual(sessions[INTERVALS_ID]["state"], "active")
+        self.assertEqual(sessions[GARMIN_ID]["state"], "hidden")
+
     def test_a_contradicted_heuristic_merge_is_reported_not_changed(self) -> None:
         self._ingest_intervals([intervals_ride(device_name="Garmin Edge")], FIRST)
         self._ingest_garmin(

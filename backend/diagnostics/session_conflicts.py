@@ -7,7 +7,8 @@ automatically, so they are only listed here for the athlete to review.
 
 The same holds for exact links that are not applied: an Intervals.icu copy names
 its stored upstream record, but the two stay in different sessions, usually
-because an earlier heuristic merge joined the copy to another record. The link
+because an earlier heuristic merge joined the copy to another record. Pairs the
+athlete confirmed, hid or deleted are kept apart on purpose and not listed. The link
 kind counts of the surviving sessions show how their records were joined.
 """
 
@@ -44,9 +45,13 @@ _EXACT_MISMATCHES = """
       ON u.provider = json_extract(r.ref, '$.external_ref[0]')
      AND u.provider_activity_id = json_extract(r.ref, '$.external_ref[1]')
     JOIN activity_sessions us ON us.activity_id = u.activity_id
+    JOIN activity_sessions t ON t.activity_id = COALESCE(s.merged_into, s.activity_id)
+    JOIN activity_sessions ut
+      ON ut.activity_id = COALESCE(us.merged_into, us.activity_id)
     WHERE u.state = 'active' AND s.state <> 'deleted' AND us.state <> 'deleted'
-      AND COALESCE(s.merged_into, s.activity_id)
-          <> COALESCE(us.merged_into, us.activity_id)
+      AND t.state = 'active' AND ut.state = 'active'
+      AND t.athlete_confirmed = 0 AND ut.athlete_confirmed = 0
+      AND t.activity_id <> ut.activity_id
 """
 _LINK_KINDS = """
     SELECT link_kind, COUNT(*) AS count FROM activity_sessions

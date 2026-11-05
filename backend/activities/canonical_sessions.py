@@ -1,6 +1,8 @@
 """Bundle canonical activity records into sessions with the legacy duplicate rules.
 
-Exact links come first: an Intervals.icu record whose external reference names a
+Exact links come before every pass that joins a Garmin- or Wahoo-provider
+record (only the Intervals.icu-internal Wahoo/Garmin copy pass runs earlier): an
+Intervals.icu record whose external reference names a
 stored Garmin- or Wahoo-provider record (``source`` with ``external_id``) joins
 that record whatever the times and measurements say. The heuristic rules below
 decide only the records left without an exact link; an Intervals.icu record whose
@@ -250,7 +252,7 @@ def _assign_duplicates(entries: tuple[_Entry, ...]) -> tuple[dict[int, int], set
         for index, entry in enumerate(entries)
         if entry.record.provenance.provider is ProviderId.GARMIN
     ]
-    # Sessions that already hold a Garmin- or Wahoo-provider record.
+    # Sessions that already hold a Garmin-provider, or a Wahoo-provider, record.
     joined: set[int] = set()
     wahoo_joined: set[int] = set()
     exact = _assign_exact(

@@ -72,6 +72,9 @@ def link_activity_sessions(
     records = _linkable_records(rows)
     if not records:
         return 0
+    upstream_rows = _upstream_rows(db, records, rows)
+    rows = [*rows, *upstream_rows]
+    records.extend(_linkable_records(upstream_rows))
     session_of = {
         (str(row["provider"]), str(row["provider_activity_id"])): str(row["session_id"])
         for row in rows
@@ -125,12 +128,48 @@ def garmin_activity_matches(
     return matches
 
 
+def _upstream_rows(
+    db: Any, records: Sequence[ActivityRecord], rows: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return the stored upstream records the copies name but the window missed.
+
+    They join bundling whatever their date or session state, so a copy whose
+    upstream sits in a confirmed or hidden session is not left to the heuristics;
+    the merge itself still refuses protected sessions.
+    """
+    loaded = {(str(row["provider"]), str(row["provider_activity_id"])) for row in rows}
+    wanted: dict[str, list[str]] = {}
+    for record in records:
+        ref = record.external_ref
+        if ref is not None and (ref.upstream.value, ref.upstream_id) not in loaded:
+            wanted.setdefault(ref.upstream.value, []).append(ref.upstream_id)
+    return [
+        row
+        for provider, ids in sorted(wanted.items())
+        for row in canonical_store.provider_activity_record_rows(db, provider, ids)
+    ]
+
+
 def _pairs(
     bundle: ActivitySession, session_of: dict[tuple[str, str], str]
 ) -> Iterable[tuple[str, str, ActivityLinkKind]]:
+    """Yield (session, duplicate session, kind); an exact duplicate joins its copy."""
     primary_id = session_of[_key(bundle.primary)]
+    members = (bundle.primary, *bundle.duplicates)
     for duplicate, kind in zip(bundle.duplicates, bundle.link_kinds, strict=True):
-        yield primary_id, session_of[_key(duplicate)], kind
+        target = primary_id
+        if kind is ActivityLinkKind.EXACT:
+            target = next(
+                (
+                    session_of[_key(copy)]
+                    for copy in members
+                    if copy.external_ref is not None
+                    and copy.external_ref.upstream is duplicate.provenance.provider
+                    and copy.external_ref.upstream_id == duplicate.activity_id
+                ),
+                primary_id,
+            )
+        yield target, session_of[_key(duplicate)], kind
 
 
 def _linkable_records(rows: Iterable[dict[str, Any]]) -> list[ActivityRecord]:
