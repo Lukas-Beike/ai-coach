@@ -47,11 +47,11 @@ from backend.performance.analysis_input import analysis_input
 from backend.performance.power_profile import power_profile, running_profile
 from backend.performance.session_analysis import aerobic_analysis, interval_quality
 from backend.performance.session_execution import session_execution
-from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
 from backend.providers.intervals_activity_detail_mapping import (
     MAPPER_VERSION,
     map_intervals_summary_zones,
 )
+from backend.runtime.ports import ActivityFingerprintReader
 
 _MAX_MERGE_DEPTH: Final = 64
 
@@ -126,6 +126,7 @@ class CanonicalDetailReader:
         *,
         refreshable: RefreshableProviders,
         summary_row: SummaryRowReader | None = None,
+        fingerprints: ActivityFingerprintReader | None = None,
         failures: FailureReader | None = None,
         envelope: EnvelopeReader | None = None,
         zone: tzinfo = UTC,
@@ -134,6 +135,8 @@ class CanonicalDetailReader:
         self._zone = zone
         self._refreshable = refreshable
         self._summary_row = summary_row
+        # Without it no stored set is reported stale.
+        self._fingerprints = fingerprints
         self._failures = failures
         self._envelope = envelope
 
@@ -262,21 +265,33 @@ class CanonicalDetailReader:
         intervals_id: str | None,
         summary: Mapping[str, Any] | None,
     ) -> dict[ProviderId, ProviderStatus]:
-        """Compare each provider's stored sets with its current summary version."""
+        """Compare each provider's stored sets with its current summary version.
+
+        The loaded Intervals.icu summary row belongs to one record only, so only
+        that record's sets are compared for Intervals.icu; other providers'
+        fingerprints come from the port.
+        """
         fingerprint = None if summary is None else summary_fingerprint(dict(summary))
+        others = [
+            (item.provider, item.provider_activity_id)
+            for item in sets
+            if item.provider != ProviderId.INTERVALS.value
+        ]
+        current = (
+            {}
+            if self._fingerprints is None or not others
+            else self._fingerprints.summary_fingerprints(db, others)
+        )
         status: dict[ProviderId, ProviderStatus] = {}
         for item in sets:
             provider = ProviderId(item.provider)
             if provider is ProviderId.INTERVALS:
-                # The summary row belongs to one Intervals.icu record only.
-                current = (
+                latest = (
                     fingerprint if item.provider_activity_id == intervals_id else None
                 )
             else:
-                current = canonical_store.active_provider_record_hash(
-                    db, item.provider, ACTIVITY_RECORD_KIND, item.provider_activity_id
-                )
-            if item.summary_sha256 and current and item.summary_sha256 != current:
+                latest = current.get((item.provider, item.provider_activity_id))
+            if item.summary_sha256 and latest and item.summary_sha256 != latest:
                 status[provider] = ProviderStatus(stale=True)
         load_error = self._load_error(intervals_id, fingerprint)
         if load_error is not None:

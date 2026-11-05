@@ -8,7 +8,7 @@ cover the year before ``as_of``, extended to the current window's first day.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Any, Final, cast
@@ -223,19 +223,25 @@ def activity_summaries_with_sync_time(
         return reader.activity_summaries(db), activities_synced_at(coverage, db)
 
 
-def activity_summaries_and_rows(
-    source: CanonicalPerformanceSource,
-) -> tuple[tuple[ActivitySummary, ...], tuple[dict[str, Any], ...]]:
-    """Read the summaries and the raw Intervals.icu rows in one read snapshot.
+def activity_summaries_and_fingerprints(
+    source: CanonicalPerformanceSource, intervals_ids: Iterable[str]
+) -> tuple[tuple[ActivitySummary, ...], dict[str, str]]:
+    """Read the summaries and the given Intervals.icu fingerprints in one snapshot.
 
-    Stored analyses fingerprint the raw row they were computed from, so the rows
-    must belong to the same revision as the summaries.
+    Stored analyses fingerprint the summary they were computed from, so the
+    fingerprints must belong to the same revision as the summaries. The result
+    maps each Intervals.icu activity id to its current fingerprint.
     """
     reader = source.activity_summary_reader()
     if reader is None:
         raise RuntimeError("activity reads need the canonical activity summary reader")
+    keys = [(ProviderId.INTERVALS.value, activity_id) for activity_id in intervals_ids]
     with source.database_manager().read_snapshot() as db:
-        return reader.activity_summaries(db), reader.activity_rows(db)
+        fingerprints = reader.summary_fingerprints(db, keys)
+        return reader.activity_summaries(db), {
+            activity_id: fingerprint
+            for (_, activity_id), fingerprint in fingerprints.items()
+        }
 
 
 def activity_summaries_for(

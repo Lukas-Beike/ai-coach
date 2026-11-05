@@ -7,7 +7,6 @@ from typing import Any
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_store import ActivityDetailStore
 from backend.canonical.vocabulary import ProviderId
-from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.runtime.ports import (
@@ -59,13 +58,12 @@ class ActivityReadAssembly:
         manager = self._database_manager()
         return ActivityAnalysisReadService(
             manager,
-            CompactActivityRows(self._row_reader()),
+            self._row_reader(),
             self._feedback_service(),
             ActivityDetailStore(manager),
             read_equipment=self._read_equipment,
             references=ActivityReferences(manager),
             canonical=self._canonical_source(),
-            summary_rows=self._row_reader(),
             session_records=CanonicalTableReader().session_activities,
             refreshable=self._refreshable,
         )

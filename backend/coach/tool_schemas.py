@@ -310,7 +310,7 @@ def build_structured_tool_schemas(
         ),
         _canonical_coach_tool(
             "list_recent_activities",
-            "Read completed activities from the latest local snapshot without refreshing a provider.",
+            "Read completed local sessions from every connected provider, newest first, without refreshing a provider. Each entry is one session summary: id is the local session ID (act_...) and record_ids maps each provider to its activity ID; values use neutral names and units (moving_duration_s, distance_m, training_load).",
             {
                 "days": {"type": "integer", "minimum": 1, "maximum": 3660},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500},

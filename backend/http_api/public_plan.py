@@ -2,26 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
 from backend.activities.activity_summary import stored_activity_key
 from backend.activities.detail_analysis_reads import calendar_profiles
-from backend.activities.detail_store import summary_fingerprint
 from backend.calendar import canonical as calendar_canonical
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.public_metrics import neutral_calendar_state
 from backend.canonical.records import Observation
+from backend.canonical.vocabulary import ProviderId
 from backend.db.manager import DatabaseManager
 from backend.planning import calendar_read_model
 from backend.planning import season as planning_season
-from backend.planning.compact_activities import (
-    RECENT_ACTIVITY_LIMIT,
-    ActivitySummarySource,
-)
-from backend.runtime.ports import ActivityRowReader
+from backend.planning.compact_activities import ActivitySummarySource
+from backend.runtime.ports import ActivityFingerprintReader
 from backend.weather import cache as weather_cache
 from backend.weather import history as weather_history
 
@@ -49,8 +46,8 @@ class PublicPlanDependencies:
     default_workout_name: str
     # Recent activity summaries come from the canonical activity summary port.
     activity_rows: ActivitySummarySource | None = None
-    # The raw rows behind the summaries; their fingerprints guard stored workout profiles.
-    activity_row_reader: Callable[[], ActivityRowReader] | None = None
+    # Summary fingerprints guard stored workout profiles.
+    fingerprint_reader: Callable[[], ActivityFingerprintReader] | None = None
     # Canonical zone configurations and sport thresholds set the plan zones.
     zone_configurations: Callable[[], Sequence[ZoneConfiguration]] = tuple
     # (db) -> the plan-zone thresholds, read inside the plan's read snapshot.
@@ -81,7 +78,7 @@ class PublicPlanStateService:
         self._external_calendar_window_days = dependencies.external_calendar_window_days
         self._default_workout_name = dependencies.default_workout_name
         self._activity_rows = dependencies.activity_rows
-        self._activity_row_reader = dependencies.activity_row_reader
+        self._fingerprint_reader = dependencies.fingerprint_reader
         self._zone_configurations = dependencies.zone_configurations
         self._sport_thresholds = dependencies.sport_thresholds
 
@@ -110,17 +107,29 @@ class PublicPlanStateService:
         with manager.read_snapshot() as db:
             return self._read(weather, db)
 
-    def _history_and_profiles(self) -> tuple[Any, Any, dict[str, str]]:
+    def _history_and_profiles(
+        self, keys: Iterable[str]
+    ) -> tuple[Any, Any, dict[str, str]]:
+        """Read the weather history, workout profiles and the keys' fingerprints.
+
+        ``keys`` are stored activity keys; only Intervals.icu ids have a
+        fingerprint, so profiles of other sessions are never attached.
+        """
         manager = self._database_manager_factory()
         fingerprints: dict[str, str] = {}
         with manager.reader() as db:
             history = self._key_values.get(db, weather_cache.HISTORY_KEY)
-            if self._activity_row_reader is not None:
+            if self._fingerprint_reader is not None:
                 fingerprints = {
-                    str(row.get("id")): summary_fingerprint(row)
-                    for row in self._activity_row_reader().activity_rows(
-                        db, limit=RECENT_ACTIVITY_LIMIT
+                    activity_id: fingerprint
+                    for (
+                        _,
+                        activity_id,
+                    ), fingerprint in self._fingerprint_reader()
+                    .summary_fingerprints(
+                        db, ((ProviderId.INTERVALS.value, key) for key in keys)
                     )
+                    .items()
                 }
         return history, calendar_profiles(manager), fingerprints
 
@@ -147,7 +156,9 @@ class PublicPlanStateService:
         activities = self._activity_feedback.attach_to_activities(activities[:1000])
         if weather is None:
             weather = self._weather.state(canonical_planned, refresh=False)
-        history, profiles, fingerprints = self._history_and_profiles()
+        history, profiles, fingerprints = self._history_and_profiles(
+            stored_activity_key(row) for row in activities if isinstance(row, dict)
+        )
         activities = [
             self._with_profile(row, profiles, fingerprints) for row in activities
         ]

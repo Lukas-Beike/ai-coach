@@ -17,7 +17,7 @@ def _by_id(rows: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
 class ActivitySummarySourceTests(CanonicalReadFixture):
     def test_tables_return_the_raw_snapshot_rows(self) -> None:
         populate(self)
-        table = self.read(self.table.activity_rows)
+        table = self.read(self.table.intervals_activity_payloads)
 
         self.assertTrue(table)
         self.assertEqual(
@@ -27,7 +27,7 @@ class ActivitySummarySourceTests(CanonicalReadFixture):
 
     def test_tables_serve_newest_first(self) -> None:
         populate(self)
-        table_rows = self.read(self.table.activity_rows)
+        table_rows = self.read(self.table.intervals_activity_payloads)
         self.assertEqual(
             [row["id"] for row in table_rows],
             ["i-act-005", "i-act-004", "i-act-001", "i-act-003", "i-act-002"],
@@ -50,17 +50,19 @@ class ActivitySummarySourceTests(CanonicalReadFixture):
             (date(2999, 1, 1), None, []),
         ):
             with self.subTest(start=start, end=end):
-                table = self.read(self.table.activity_rows, start=start, end=end)
+                table = self.read(
+                    self.table.intervals_activity_payloads, start=start, end=end
+                )
                 self.assertEqual(sorted(row["id"] for row in table), expected)
 
     def test_deleted_and_invalid_records_are_not_served(self) -> None:
         populate(self)
-        before = len(self.read(self.table.activity_rows))
+        before = len(self.read(self.table.intervals_activity_payloads))
         self.execute(
             "UPDATE activity_records SET state = 'deleted' "
             "WHERE provider_activity_id = 'i-act-001'"
         )
-        after = self.read(self.table.activity_rows)
+        after = self.read(self.table.intervals_activity_payloads)
         self.assertEqual(len(after), before - 1)
         self.assertNotIn("i-act-001", [row["id"] for row in after])
 
@@ -69,13 +71,14 @@ class ActivitySummarySourceTests(CanonicalReadFixture):
             "WHERE source_record_id = 'i-act-002'"
         )
         self.assertNotIn(
-            "i-act-002", [r["id"] for r in self.read(self.table.activity_rows)]
+            "i-act-002",
+            [r["id"] for r in self.read(self.table.intervals_activity_payloads)],
         )
 
         self.execute(
             "UPDATE activity_sessions SET state = 'deleted', merged_into = NULL"
         )
-        self.assertEqual(self.read(self.table.activity_rows), ())
+        self.assertEqual(self.read(self.table.intervals_activity_payloads), ())
 
     def test_unparsable_and_non_object_payloads_are_skipped(self) -> None:
         texts = ["not json", "[1]", '{"id": "x"}', "null"]
@@ -84,14 +87,14 @@ class ActivitySummarySourceTests(CanonicalReadFixture):
             "active_activity_payload_texts",
             return_value=texts,
         ):
-            rows = self.read(self.table.activity_rows)
+            rows = self.read(self.table.intervals_activity_payloads)
         self.assertEqual(rows, ({"id": "x"},))
 
 
 class ActivityRowSelectorTests(CanonicalReadFixture):
     def test_pending_backfill_serves_no_rows(self) -> None:
         selector = make_selector(self)
-        self.assertEqual(self.read(selector.activity_rows), ())
+        self.assertEqual(self.read(selector.intervals_activity_payloads), ())
 
     def test_complete_backfill_serves_table_rows(self) -> None:
         populate(self)
@@ -99,8 +102,10 @@ class ActivityRowSelectorTests(CanonicalReadFixture):
         # Change the stored snapshot so it differs from the tables.
         self.intervals = copy.deepcopy(self.intervals)
         self.intervals["raw_provider_data"]["activities"].pop()
-        rows = self.read(selector.activity_rows)
-        self.assertEqual(list(rows), list(self.read(self.table.activity_rows)))
+        rows = self.read(selector.intervals_activity_payloads)
+        self.assertEqual(
+            list(rows), list(self.read(self.table.intervals_activity_payloads))
+        )
         self.assertEqual(
             len(rows), len(self.intervals["raw_provider_data"]["activities"]) + 1
         )
@@ -112,7 +117,7 @@ class ActivityRowSelectorTests(CanonicalReadFixture):
         selector = make_selector(self)
         self.intervals = copy.deepcopy(self.intervals)
         del self.intervals["raw_provider_data"]
-        rows = self.read(selector.activity_rows)
+        rows = self.read(selector.intervals_activity_payloads)
         self.assertEqual(
             [row["id"] for row in rows],
             ["i-act-005", "i-act-004", "i-act-001", "i-act-003", "i-act-002"],
@@ -125,8 +130,10 @@ class ActivityRowSelectorTests(CanonicalReadFixture):
         self.intervals = copy.deepcopy(self.intervals)
         del self.intervals["raw_provider_data"]
         del self.intervals["recent_activities"]
-        rows = self.read(selector.activity_rows)
-        self.assertEqual(list(rows), list(self.read(self.table.activity_rows)))
+        rows = self.read(selector.intervals_activity_payloads)
+        self.assertEqual(
+            list(rows), list(self.read(self.table.intervals_activity_payloads))
+        )
         self.assertTrue(rows)
 
     def test_selector_passes_bounds_to_the_active_source(self) -> None:
@@ -134,6 +141,11 @@ class ActivityRowSelectorTests(CanonicalReadFixture):
         selector = make_selector(self)
         day = date(2026, 10, 8)
         self.assertEqual(
-            [r["id"] for r in self.read(selector.activity_rows, start=day, end=day)],
+            [
+                r["id"]
+                for r in self.read(
+                    selector.intervals_activity_payloads, start=day, end=day
+                )
+            ],
             ["i-act-001"],
         )

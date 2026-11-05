@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from datetime import date
 
 from activity_row_support import (
+    FixedActivityRows,
     SnapshotActivityRows,
     canonical_source,
     summaries_of_rows,
@@ -13,9 +14,10 @@ from activity_row_support import (
 from canonical_detail_support import add_session_record, open_manager
 
 from backend.activities.activity_reference import ActivityReferences
+from backend.activities.detail_store import summary_fingerprint
+from backend.canonical.activity_summary import stored_activity_key
 from backend.canonical.vocabulary import ProviderId
 from backend.errors import AppError
-from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.canonical_inputs import CanonicalPerformanceSource
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
@@ -74,8 +76,8 @@ class _Feedback:
             {
                 **item,
                 **(
-                    {"activity_feedback": by_id[str(item["id"])]}
-                    if str(item.get("id")) in by_id
+                    {"activity_feedback": by_id[stored_activity_key(item)]}
+                    if stored_activity_key(item) in by_id
                     else {}
                 ),
             }
@@ -88,7 +90,7 @@ class _NoObservations:
         return ()
 
 
-class _DatedRows:
+class _DatedRows(FixedActivityRows):
     """Raw activity rows that honour the start bound and record each read."""
 
     def __init__(self, rows):
@@ -96,7 +98,7 @@ class _DatedRows:
         self.starts = []
         self.units = []
 
-    def activity_rows(self, db, *, start=None, end=None, limit=None):
+    def intervals_activity_payloads(self, db, *, start=None, end=None, limit=None):
         return tuple(self.rows)
 
     def activity_summaries(self, db, *, start=None, end=None, limit=None):
@@ -112,7 +114,13 @@ class _DatedRows:
 class _FailedDetails:
     def failures(self, activity_ids):
         ids = set(activity_ids)
-        return {"old": {"message": "Detaildaten fehlerhaft."}} if "old" in ids else {}
+        note = {
+            "message": "Detaildaten fehlerhaft.",
+            "summary_sha256": summary_fingerprint(
+                {"id": "old", "type": "Run", "start_date_local": "2026-09-18T08:00:00"}
+            ),
+        }
+        return {"old": note} if "old" in ids else {}
 
 
 class ActivityReadServiceTests(unittest.TestCase):
@@ -132,10 +140,9 @@ class ActivityReadServiceTests(unittest.TestCase):
         """Serve details from the canonical sessions stored in ``setUp``."""
         rows = SnapshotActivityRows(_Snapshots(snapshot))
         kwargs.setdefault("canonical", canonical_source(rows, lambda: self.manager))
-        kwargs.setdefault("summary_rows", rows)
         return ActivityAnalysisReadService(
             self.manager,
-            CompactActivityRows(rows),
+            rows,
             _Feedback(),
             references=ActivityReferences(self.manager),
             session_records=CanonicalTableReader().session_activities,
@@ -173,7 +180,7 @@ class ActivityReadServiceTests(unittest.TestCase):
         rows = SnapshotActivityRows(_Snapshots(snapshot))
         return ActivityAnalysisReadService(
             _Manager(),
-            CompactActivityRows(rows),
+            rows,
             _Feedback(),
             detail_store,
             canonical=canonical_source(rows, _Manager, fetched_at=fetched_at),
@@ -182,24 +189,36 @@ class ActivityReadServiceTests(unittest.TestCase):
     def test_page_keeps_activities_with_failed_details_and_names_the_error(self):
         page = self.service(_FailedDetails()).page(today=date(2026, 9, 20))
         self.assertEqual(
-            {"new": None, "old": "Detaildaten fehlerhaft."},
+            {"act_new": None, "act_old": "Detaildaten fehlerhaft."},
+            {item["id"]: item["detail_error"] for item in page["activities"]},
+        )
+
+    def test_page_hides_a_failure_note_of_an_older_summary_version(self):
+        class _OlderNote:
+            def failures(self, activity_ids):
+                note = {"message": "Detaildaten fehlerhaft.", "summary_sha256": "x"}
+                return {"old": note} if "old" in set(activity_ids) else {}
+
+        page = self.service(_OlderNote()).page(today=date(2026, 9, 20))
+        self.assertEqual(
+            {"act_new": None, "act_old": None},
             {item["id"]: item["detail_error"] for item in page["activities"]},
         )
 
     def test_page_filters_orders_attaches_feedback_and_uses_cursor(self):
         service = self.service()
         page = service.page(limit=1, days=3, today=date(2026, 9, 20))
-        self.assertEqual(["new"], [item["id"] for item in page["activities"]])
+        self.assertEqual(["act_new"], [item["id"] for item in page["activities"]])
         self.assertEqual("good", page["activities"][0]["activity_feedback"]["notes"])
         second = service.page(page["next_cursor"], 1, 3, today=date(2026, 9, 20))
-        self.assertEqual(["old"], [item["id"] for item in second["activities"]])
+        self.assertEqual(["act_old"], [item["id"] for item in second["activities"]])
         self.assertIsNone(second["next_cursor"])
 
     def test_recent_filters_by_explicit_today_without_mutating_snapshot(self):
         service = self.service()
         before = copy.deepcopy(self.snapshot)
         result = service.recent(days=1, today=date(2026, 9, 20))
-        self.assertEqual(["new"], [item["id"] for item in result["activities"]])
+        self.assertEqual(["act_new"], [item["id"] for item in result["activities"]])
         self.assertEqual(before, self.snapshot)
 
     def test_detail_is_bounded_and_includes_feedback(self):
@@ -253,7 +272,6 @@ class ActivityReadServiceTests(unittest.TestCase):
                 observation_reader=_NoObservations,
                 activity_summaries=lambda: rows,
             ),
-            summary_rows=rows,
         )
         today = date(2026, 9, 20)
         recent = service.detail(
@@ -335,7 +353,7 @@ class ActivityReadServiceTests(unittest.TestCase):
             ]
         )
         service = self.detail_service(
-            snapshot, canonical=canonical_source(rows, _Manager), summary_rows=rows
+            snapshot, canonical=canonical_source(rows, _Manager)
         )
 
         result = service.detail(
@@ -351,7 +369,7 @@ class ActivityReadServiceTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             ActivityAnalysisReadService(  # type: ignore[call-arg]
                 _Manager(),
-                CompactActivityRows(SnapshotActivityRows(_Snapshots({}))),
+                SnapshotActivityRows(_Snapshots({})),
                 _Feedback(),
             )
 

@@ -126,7 +126,7 @@ class SelectorTests(CanonicalReadFixture):
         self.assertFalse(self.read(selector.serves_tables))
         self.assertIs(self.read(selector.reader_for), PENDING_READER)
         self.assertEqual(self.read(selector.activities), ())
-        self.assertEqual(self.read(selector.activity_rows), ())
+        self.assertEqual(self.read(selector.intervals_activity_payloads), ())
         self.assertEqual(self.read(selector.activity_summaries), ())
         self.assertEqual(
             self.read(selector.activity_max_hr, ProviderId.INTERVALS, low=0, high=1000),
@@ -534,7 +534,7 @@ class SelectorTests(CanonicalReadFixture):
         self._assert_serves_tables(selector)
         self.assertTrue(self.read(selector.activities_need_refresh))
         # The compact rows cannot be backfilled: no Intervals.icu activity is served.
-        self.assertEqual(self.read(selector.activity_rows), ())
+        self.assertEqual(self.read(selector.intervals_activity_payloads), ())
         self.assertNotIn(
             ProviderId.INTERVALS.value,
             {provider for _id, provider in ids(self.read(selector.activities))},
@@ -549,7 +549,7 @@ class SelectorTests(CanonicalReadFixture):
         self.assertFalse(self.read(selector.activities_need_refresh))
         populate(self)
         self.assertFalse(self.read(selector.activities_need_refresh))
-        self.assertTrue(self.read(selector.activity_rows))
+        self.assertTrue(self.read(selector.intervals_activity_payloads))
 
     def test_metric_windows_are_empty_before_the_first_backfill(self) -> None:
         self.assertEqual(self.read(make_selector(self).metric_windows), ())

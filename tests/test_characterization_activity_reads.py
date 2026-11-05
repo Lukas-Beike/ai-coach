@@ -5,9 +5,7 @@ the provider-neutral refactor. Storage is a temporary SQLite database and
 providers are in-memory fakes; no server, network or real athlete data is used.
 """
 
-import base64
 import builtins
-import json
 import sqlite3
 import tempfile
 import unittest
@@ -28,11 +26,9 @@ from canonical_detail_support import NOW, seed_intervals_activity
 
 from backend.activities.activity_reference import ActivityReferences
 from backend.activities.detail_store import ActivityDetailStore, summary_fingerprint
-from backend.activities.read_service import PAGE_DEFAULT, PAGE_MAX, ActivityReadService
 from backend.activities.workout_profile import recorded_profile
 from backend.db.manager import DatabaseManager
 from backend.db.schema import initialize_schema
-from backend.http_api.compact_activity_rows import CompactActivityRows
 from backend.http_api.public_plan import PublicPlanDependencies, PublicPlanStateService
 from backend.performance.activity_read_service import ActivityAnalysisReadService
 from backend.performance.detail_envelope import activity_equipment
@@ -137,10 +133,9 @@ def _detail_service(
 ) -> ActivityAnalysisReadService:
     """Serve ``activity_detail.v1`` documents from the canonical tables."""
     rows = SnapshotActivityRows(snapshots)
-    kwargs.setdefault("summary_rows", rows)
     return ActivityAnalysisReadService(
         database,
-        CompactActivityRows(rows),
+        rows,
         _Feedback(),
         ActivityDetailStore(database),
         references=ActivityReferences(database),
@@ -176,281 +171,6 @@ def _snapshot(activities: Any, raw: Any = None) -> dict[str, Any]:
     if raw is not None:
         snapshot["raw_provider_data"] = {"activities": raw}
     return snapshot
-
-
-def _encode(value: Any) -> str:
-    raw = json.dumps(value, separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
-def _decode(cursor: str) -> Any:
-    padded = cursor + "=" * (-len(cursor) % 4)
-    return json.loads(base64.urlsafe_b64decode(padded))
-
-
-def _ids(rows: list[dict[str, Any]]) -> list[Any]:
-    return [row["id"] for row in rows]
-
-
-class ActivityPageCharacterizationTests(_StorageCase):
-    def _page(self, activities: Any, **kwargs: Any) -> dict[str, Any]:
-        snapshots = _Snapshots(_snapshot(activities))
-        service = ActivityReadService(
-            self.database,
-            CompactActivityRows(SnapshotActivityRows(snapshots)),
-            _Feedback(),
-        )
-        return service.page(today=TODAY, **kwargs)
-
-    def test_detail_errors_follow_the_full_row_summary_version(self) -> None:
-        # Calories are fingerprinted but dropped from the compact listed rows.
-        row = _activity("ride-1", DAY, calories=700)
-        snapshots = _Snapshots(_snapshot([row]))
-        full_rows = SnapshotActivityRows(snapshots)
-        store = ActivityDetailStore(self.database)
-        service = ActivityReadService(
-            self.database,
-            CompactActivityRows(full_rows),
-            _Feedback(),
-            store,
-            summary_rows=full_rows,
-        )
-        store.save_failure(
-            "ride-1", summary_fingerprint(row), "Detaildaten fehlerhaft.", "t"
-        )
-        page = service.page(today=TODAY)
-        self.assertEqual(
-            "Detaildaten fehlerhaft.", page["activities"][0]["detail_error"]
-        )
-        # A note recorded for another summary version is not shown.
-        store.save_failure("ride-1", "1" * 64, "Detaildaten fehlerhaft.", "t")
-        self.assertIsNone(service.page(today=TODAY)["activities"][0]["detail_error"])
-
-    def test_cursor_is_unpadded_urlsafe_versioned_json_of_last_page_key(self) -> None:
-        # The 44-byte payload needs one base64 padding character, so the unpadded
-        # form is pinned.
-        result = self._page(
-            [_activity("bc", DAY), _activity("a", PREVIOUS_DAY)], limit=1
-        )
-        self.assertEqual(["bc"], _ids(result["activities"]))
-        self.assertEqual(
-            "eyJ2IjoyLCJhZnRlciI6WyIyMDI2LTA1LTA0VDA4OjAwOjAwIiwiYmMiXX0",
-            result["next_cursor"],
-        )
-        self.assertEqual({"v": 2, "after": [DAY, "bc"]}, _decode(result["next_cursor"]))
-
-    def test_cursor_round_trips_non_ascii_ids(self) -> None:
-        result = self._page(
-            [_activity("Rad-Ä", DAY), _activity("a", PREVIOUS_DAY)], limit=1
-        )
-        self.assertEqual(
-            "eyJ2IjoyLCJhZnRlciI6WyIyMDI2LTA1LTA0VDA4OjAwOjAwIiwiUmFkLcOEIl19",
-            result["next_cursor"],
-        )
-        self.assertEqual(
-            {"v": 2, "after": [DAY, "Rad-Ä"]}, _decode(result["next_cursor"])
-        )
-
-    def test_legacy_unversioned_cursor_still_resumes_after_its_key(self) -> None:
-        rows = [_activity("b", DAY), _activity("a", PREVIOUS_DAY)]
-        result = self._page(rows, cursor=_encode([DAY, "b"]), limit=1)
-        self.assertEqual(["a"], _ids(result["activities"]))
-
-    def test_cursor_skips_rows_whose_sort_key_equals_the_cursor_key(self) -> None:
-        # Quirk pinned: resumption is strictly "less than" the cursor key, so a
-        # second row with the same date and id is never returned.
-        rows = [_activity("dup", DAY), _activity("dup", DAY)]
-        first = self._page(rows, limit=1)
-        second = self._page(rows, cursor=first["next_cursor"], limit=1)
-        self.assertEqual(1, len(first["activities"]))
-        self.assertEqual([], second["activities"])
-        self.assertIsNone(second["next_cursor"])
-
-    def test_last_page_has_no_cursor(self) -> None:
-        result = self._page([_activity("only", DAY)], limit=1)
-        self.assertIsNone(result["next_cursor"])
-        self.assertEqual(1, result["limit"])
-
-    def test_cursor_resumes_strictly_after_encoded_key(self) -> None:
-        rows = [
-            _activity("c", DAY),
-            _activity("b", DAY),
-            _activity("a", PREVIOUS_DAY),
-        ]
-        first = self._page(rows, limit=1)
-        second = self._page(rows, cursor=first["next_cursor"], limit=1)
-        third = self._page(rows, cursor=second["next_cursor"], limit=1)
-        self.assertEqual(["c"], _ids(first["activities"]))
-        self.assertEqual(["b"], _ids(second["activities"]))
-        self.assertEqual(["a"], _ids(third["activities"]))
-        self.assertIsNone(third["next_cursor"])
-
-    def test_ties_on_start_date_are_ordered_by_id_descending(self) -> None:
-        result = self._page(
-            [_activity("a", DAY), _activity("c", DAY), _activity("b", DAY)]
-        )
-        self.assertEqual(["c", "b", "a"], _ids(result["activities"]))
-
-    def test_numeric_ids_are_compared_as_strings(self) -> None:
-        # Quirk pinned: "9" sorts after "10" because keys are str(id).
-        result = self._page([_activity(10, DAY), _activity(9, DAY)])
-        self.assertEqual([9, 10], _ids(result["activities"]))
-
-    def test_sort_key_falls_back_through_date_and_id_fields(self) -> None:
-        # The compact row keeps only the planning fields, so the id falls back to
-        # external_id and an empty start sorts last.
-        rows = [
-            {"external_id": "ext-only", "start_date_local": PREVIOUS_DAY},
-            {"external_id": "from-ext", "start_date_local": "2026-05-04"},
-            {"id": "empty-local", "start_date_local": ""},
-        ]
-        result = self._page(rows)
-        expected = [
-            {**row, "local_activity_id": None, "detail_error": None}
-            for row in (rows[1], rows[0], rows[2])
-        ]
-        self.assertEqual(expected, result["activities"])
-
-    def test_sort_key_date_is_truncated_to_forty_characters(self) -> None:
-        # Quirk pinned: only the first 40 characters of the start string sort.
-        long_start = DAY + ".000000000000000000000000000000+00:00"
-        result = self._page(
-            [_activity("a", long_start), _activity("b", long_start)], limit=1
-        )
-        self.assertEqual(long_start[:40], _decode(result["next_cursor"])["after"][0])
-
-    def test_malformed_or_unexpected_cursors_restart_from_first_page(self) -> None:
-        rows = [_activity("b", DAY), _activity("a", PREVIOUS_DAY)]
-        for cursor in (
-            "not-a-cursor!!",
-            _encode({"key": 1}),
-            _encode([DAY]),
-            _encode([DAY, "b", "extra"]),
-            _encode({"v": 3, "after": [DAY, "b"]}),
-            _encode({"v": 2, "after": [DAY]}),
-            _encode({"v": 2, "after": [DAY, "b", "extra"]}),
-            _encode({"v": 2}),
-        ):
-            with self.subTest(cursor=cursor):
-                result = self._page(rows, cursor=cursor, limit=1)
-                self.assertEqual(["b"], _ids(result["activities"]))
-
-    def test_limit_is_clamped_and_reported(self) -> None:
-        rows = [_activity(f"a{index:03d}", DAY) for index in range(260)]
-        for raw, expected in (
-            (None, PAGE_DEFAULT),
-            ("abc", PAGE_DEFAULT),
-            (0, 1),
-            (-3, 1),
-            ("7", 7),
-            (2.9, 2),
-            (1000, PAGE_MAX),
-        ):
-            with self.subTest(limit=raw):
-                result = self._page(rows, limit=raw)
-                self.assertEqual(expected, result["limit"])
-                self.assertEqual(expected, len(result["activities"]))
-                self.assertIsNotNone(result["next_cursor"])
-
-    def test_days_filter_uses_inclusive_window_and_echoes_value(self) -> None:
-        rows = [
-            _activity("today", DAY),
-            _activity("yesterday", PREVIOUS_DAY),
-            _activity("two-days", "2026-05-02T08:00:00"),
-            _activity("undated", ""),
-        ]
-        cases = (
-            (None, ["today", "yesterday", "two-days", "undated"], -1),
-            ("abc", ["today", "yesterday", "two-days", "undated"], -1),
-            (-1, ["today", "yesterday", "two-days", "undated"], -1),
-            (0, ["today"], 0),
-            (1, ["today"], 1),
-            (2, ["today", "yesterday"], 2),
-            # Quirk pinned: any negative value other than -1 is clamped to one day.
-            (-5, ["today"], -5),
-        )
-        for days, expected_ids, echoed in cases:
-            with self.subTest(days=days):
-                result = self._page(rows, days=days)
-                self.assertEqual(expected_ids, _ids(result["activities"]))
-                self.assertEqual(echoed, result["days"])
-
-    def test_days_filter_compares_utc_date_of_offset_timestamps(self) -> None:
-        # Quirk pinned (suspected defect, reported in the PR): days cutoffs convert
-        # offset timestamps to UTC, so 00:30 at +02:00 falls on the previous day.
-        # training-records observations() date the same row by its local prefix.
-        rows = [_activity("late-local", "2026-05-04T00:30:00+02:00")]
-        self.assertEqual([], _ids(self._page(rows, days=1)["activities"]))
-        self.assertEqual(["late-local"], _ids(self._page(rows)["activities"]))
-
-    def test_non_dict_rows_are_skipped_before_paging(self) -> None:
-        result = self._page(["junk", None, _activity("only", DAY)], limit=5)
-        self.assertEqual(["only"], _ids(result["activities"]))
-        self.assertIsNone(result["next_cursor"])
-
-    def test_missing_snapshot_returns_empty_page(self) -> None:
-        snapshots = _Snapshots(None)
-        service = ActivityReadService(
-            self.database,
-            CompactActivityRows(SnapshotActivityRows(snapshots)),
-            _Feedback(),
-        )
-        result = service.page(today=TODAY)
-        self.assertEqual([], result["activities"])
-        self.assertIsNone(result["snapshot_synced_at"])
-        self.assertIsNone(result["next_cursor"])
-
-    def test_non_list_recent_activities_is_treated_as_empty(self) -> None:
-        result = self._page("not-a-list")
-        self.assertEqual([], result["activities"])
-        self.assertIsNone(result["next_cursor"])
-
-
-class ActivityRecentCharacterizationTests(_StorageCase):
-    def _recent(self, activities: Any, **kwargs: Any) -> dict[str, Any]:
-        snapshots = _Snapshots(_snapshot(activities))
-        service = ActivityReadService(
-            self.database,
-            CompactActivityRows(SnapshotActivityRows(snapshots)),
-            _Feedback(),
-        )
-        return service.recent(today=TODAY, **kwargs)
-
-    def test_recent_keeps_snapshot_order_without_sorting(self) -> None:
-        result = self._recent(
-            [_activity("older", PREVIOUS_DAY), _activity("newer", DAY)]
-        )
-        self.assertEqual(["older", "newer"], _ids(result["activities"]))
-
-    def test_recent_default_limit_is_250_and_maximum_is_500(self) -> None:
-        rows = [_activity(f"a{index:03d}", DAY) for index in range(600)]
-        self.assertEqual(250, len(self._recent(rows)["activities"]))
-        self.assertEqual(500, len(self._recent(rows, limit=600)["activities"]))
-        self.assertEqual(500, len(self._recent(rows, limit=10_000)["activities"]))
-
-    def test_recent_clamps_low_limits_to_one(self) -> None:
-        rows = [_activity("a", DAY), _activity("b", DAY)]
-        self.assertEqual(1, len(self._recent(rows, limit=0)["activities"]))
-        self.assertEqual(1, len(self._recent(rows, limit=-1)["activities"]))
-
-    def test_non_dict_rows_are_dropped_before_the_limit(self) -> None:
-        # The activity rows only contain mappings, so "junk" never uses up the budget.
-        rows = ["junk", _activity("a", DAY), _activity("b", DAY)]
-        self.assertEqual(["a"], _ids(self._recent(rows, limit=1)["activities"]))
-        self.assertEqual(["a", "b"], _ids(self._recent(rows, limit=2)["activities"]))
-
-    def test_days_filter_drops_non_dict_rows_before_limit(self) -> None:
-        rows = ["junk", _activity("today", DAY)]
-        result = self._recent(rows, days=1, limit=1)
-        self.assertEqual(["today"], _ids(result["activities"]))
-        self.assertEqual(1, result["days"])
-
-    def test_days_zero_returns_nothing_because_cutoff_is_tomorrow(self) -> None:
-        # Quirk pinned: recent() does not clamp days, unlike page(); days=0 gives
-        # a cutoff of tomorrow and therefore an empty list.
-        result = self._recent([_activity("today", DAY)], days=0)
-        self.assertEqual([], result["activities"])
-        self.assertEqual(0, result["days"])
 
 
 BASE_SUMMARY: dict[str, Any] = {
@@ -891,7 +611,7 @@ class PublicPlanCompactRowFingerprintCharacterizationTests(_StorageCase):
                     ActivitySummarySource,
                     Mock(compact=Mock(return_value=list(summaries_of_rows(compact)))),
                 ),
-                activity_row_reader=lambda: FixedActivityRows(raw),
+                fingerprint_reader=lambda: FixedActivityRows(raw),
             )
         )
 

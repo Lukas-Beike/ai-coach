@@ -4,6 +4,8 @@ import unittest
 from datetime import UTC, date, datetime
 from unittest.mock import patch
 
+from activity_row_support import summaries_of_rows as _summaries_of_rows
+
 from backend.athlete.checkins import CheckinService
 from backend.athlete.equipment import EquipmentService, _garmin_kind, _garmin_sport
 from backend.canonical.garmin_payload import ITEM_SECTIONS
@@ -17,9 +19,20 @@ from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.tag_impact import tag_impact
 from backend.providers.garmin_gear_mapping import map_garmin_gear
 from backend.sync.canonical_table_reader import CanonicalTableReader
-from backend.sync.garmin_activity_duplicates import deduplicated_rows
 
 GEAR_FETCHED = datetime(2026, 10, 2, tzinfo=UTC)
+
+
+def summaries_of_rows(rows):
+    """Summaries of raw test rows; a date-only start gets midnight."""
+    return _summaries_of_rows(
+        [
+            {**row, "start_date_local": row["start_date_local"] + "T00:00:00"}
+            if len(str(row.get("start_date_local") or "")) == 10
+            else row
+            for row in rows
+        ]
+    )
 
 
 def sync_garmin(manager, service, snapshot):
@@ -128,10 +141,9 @@ class TrainingRecordFeatureTests(unittest.TestCase):
     def test_garmin_usage_is_authoritative_and_missing_stats_are_not_zero(self):
         service = EquipmentService(
             self.manager,
-            lambda: [{"id": "one", "distance": 10000}],
+            lambda: summaries_of_rows([{"id": "one", "distance": 10000}]),
             lambda: date(2026, 10, 2),
             lambda: "2026-10-02T12:00:00Z",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         snapshot = {
@@ -166,7 +178,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             tuple,
             lambda: date(2026, 10, 2),
             lambda: "now",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         first = {
@@ -243,7 +254,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             tuple,
             lambda: date(2026, 10, 2),
             lambda: "now",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         sync_garmin(
@@ -275,7 +285,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             tuple,
             lambda: date(2026, 10, 2),
             lambda: "now",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         local = {
@@ -313,7 +322,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             tuple,
             lambda: date(2026, 10, 2),
             lambda: "now",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         existing = {
@@ -428,10 +436,9 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         }
         service = EquipmentService(
             self.manager,
-            lambda: snapshot["raw_provider_data"]["activities"],
+            lambda: summaries_of_rows(snapshot["raw_provider_data"]["activities"]),
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         equipment = service.save(
@@ -467,10 +474,9 @@ class TrainingRecordFeatureTests(unittest.TestCase):
     def _gear_service(self, rows):
         return EquipmentService(
             self.manager,
-            lambda: rows,
+            lambda: summaries_of_rows(rows),
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
             match_activities=self.manager.match_activities,
         )
@@ -529,28 +535,21 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         sync_garmin(self.manager, service, snapshot)
         return {item["garmin_uuid"]: item for item in service.read()["items"]}
 
-    def test_garmin_gear_activities_link_through_matches_and_external_id(self):
-        rows = [
-            self._ride("i1"),
-            self._ride("i2", external_id="222"),
-            self._ride("i3", external_id="999"),
-            self._ride("i4", day="2026-08-31", type="Walk", external_id="333"),
-            self._ride("i5", external_id=""),
-        ]
+    def test_garmin_gear_activities_link_through_matches(self):
+        rows = [self._ride("i1"), self._ride("i2"), self._ride("i3")]
         service = self._gear_service(rows)
         items = self._garmin_gear(
             service,
-            [self._gear_row("g1", activity_ids=["111", "222", "333"])],
+            [self._gear_row("g1", activity_ids=["111"])],
             [{"garmin_activity_id": "111", "intervals_activity_id": "i1"}],
         )
         item = items["g1"]
-        # i1 via the match, i2 and i4 via external_id (no sport check), not i3/i5,
-        # even though the import date (2026-09-01) is after every linked session.
-        self.assertEqual(item["usage"]["assigned_sessions"], 3)
-        self.assertEqual(item["usage"]["hours"], 1.5)
+        # Only i1 is matched, even though the import date (2026-09-01) is after it.
+        self.assertEqual(item["usage"]["assigned_sessions"], 1)
+        self.assertEqual(item["usage"]["hours"], 0.5)
         self.assertEqual(item["usage"]["distance_km"], 50)
         links = {row["activity_id"]: row for row in service.read()["assignments"]}
-        self.assertEqual(set(links), {"i1", "i2", "i4"})
+        self.assertEqual(set(links), {"i1"})
         self.assertEqual({row["source"] for row in links.values()}, {"garmin_gear"})
 
     def test_explicit_assignment_and_unassignment_beat_the_garmin_link(self):
@@ -631,7 +630,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(len(by_activity["i2"]), 2)
 
     def test_assignment_list_limit_keeps_activities_whole(self):
-        rows = [self._ride("i1"), self._ride("i2")]
+        rows = [self._ride("i1", day="2026-08-31"), self._ride("i2")]
         service = self._gear_service(rows)
         items = self._garmin_gear(
             service,
@@ -666,16 +665,15 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(items["g2"]["usage"]["assigned_sessions"], 0)
         self.assertEqual(service.read()["assignments"], [])
 
-    def test_duplicate_recordings_of_one_session_count_once(self):
-        base = {
-            "type": "Ride",
-            "start_date_local": "2026-08-30T08:00:00",
-            "distance": 20000,
-            "moving_time": 3600,
-        }
+    def test_a_session_matched_by_several_recordings_counts_once(self):
         rows = [
-            {**base, "id": "i1", "device_name": "Wahoo ELEMNT", "external_id": "w1"},
-            {**base, "id": "i2", "device_name": "Garmin Edge 840", "external_id": "a1"},
+            {
+                "id": "i1",
+                "type": "Ride",
+                "start_date_local": "2026-08-30T08:00:00",
+                "distance": 20000,
+                "moving_time": 3600,
+            }
         ]
         service = self._gear_service(rows)
         items = self._garmin_gear(
@@ -857,7 +855,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             raise AssertionError("activity rows read without gear activity lists")
 
         service = self._gear_service([])
-        service._read_activity_rows = unexpected_read
+        service._read_summaries = unexpected_read
         sync_garmin(self.manager, service, self._snapshot([self._gear_row("g1")]))
         sync_garmin(self.manager, service, self._snapshot([self._gear_row("g1")]))
         imported = self.manager.connection.execute(
@@ -949,7 +947,7 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         self.assertEqual(service.read()["items"][0]["sport"], "ride")
         # A sport that is already set is never replaced, even by a clear majority.
         runs = [self._ride(f"n{n}", type="Run") for n in range(4)]
-        service._read_activity_rows = lambda: runs
+        service._read_summaries = lambda: summaries_of_rows(runs)
         run_gear = [
             self._gear_row("g1", "Gadget", activity_ids=["a" + r["id"] for r in runs])
         ]
@@ -970,10 +968,9 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         ]
         service = EquipmentService(
             self.manager,
-            lambda: activities,
+            lambda: summaries_of_rows(activities),
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
 
@@ -1041,7 +1038,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             tuple,
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         payload = {
@@ -1087,7 +1083,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             tuple,
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         payload = {
@@ -1112,7 +1107,6 @@ class TrainingRecordFeatureTests(unittest.TestCase):
             tuple,
             lambda: date(2026, 10, 2),
             lambda: "now",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         sync_garmin(
@@ -1161,10 +1155,9 @@ class TrainingRecordFeatureTests(unittest.TestCase):
         }
         service = EquipmentService(
             self.manager,
-            lambda: [activity],
+            lambda: summaries_of_rows([activity]),
             lambda: date(2026, 9, 1),
             lambda: "2026-09-01T00:00:00Z",
-            deduplicated_rows,
             gear_reader=CanonicalTableReader(),
         )
         bike = service.save(

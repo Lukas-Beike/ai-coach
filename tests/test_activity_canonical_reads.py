@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from datetime import date
 from typing import Any
 from unittest.mock import Mock
@@ -13,16 +15,19 @@ from canonical_read_support import (
     populate,
 )
 
+from backend.activities.activity_reference import ActivityReferences
+from backend.activities.detail_store import summary_fingerprint
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicate_service import DuplicateActivityService
 from backend.activities.read_service import ActivityReadService
 from backend.canonical.vocabulary import ProviderId
 from backend.db import canonical_store
-from backend.http_api.compact_activity_rows import (
-    CompactActivityRows,
-    compact_activity_rows,
-)
+from backend.performance.activity_read_service import ActivityAnalysisReadService
+from backend.performance.canonical_inputs import CanonicalPerformanceSource
+from backend.performance.freshness import NO_GARMIN_SYNC_STATUS
 from backend.providers.canonical_plans import ACTIVITY_RECORD_KIND
+from backend.sync.canonical_table_reader import CanonicalTableReader
+from backend.sync.intervals_compaction import compact_activity_rows
 
 TODAY = date(2026, 10, 13)
 REMOVAL_AT = "2026-10-13T09:00:00+00:00"
@@ -62,6 +67,9 @@ class _Feedback:
     def attach_to_activities(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return items
 
+    def for_activity_ids(self, activity_ids: Any, **_options: Any) -> list[Any]:
+        return []
+
 
 class _ActivityCase(CanonicalReadFixture):
     def setUp(self) -> None:
@@ -78,7 +86,7 @@ class _ActivityCase(CanonicalReadFixture):
     def read_service(self, selector: Any) -> ActivityReadService:
         return ActivityReadService(
             self.manager,
-            CompactActivityRows(selector),
+            selector,
             _Feedback(),
         )
 
@@ -108,7 +116,7 @@ class DuplicateRemovalTests(_ActivityCase):
     def test_removal_is_recorded_in_the_tables_and_leaves_the_snapshot(self) -> None:
         populate(self)
         selector = make_selector(self)
-        self.assertIn(GARMIN_ID, self.ids(self.read(selector.activity_rows)))
+        self.assertIn(GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads)))
         snapshot = self.intervals["synced_at"]
 
         remote = Mock()
@@ -116,7 +124,7 @@ class DuplicateRemovalTests(_ActivityCase):
 
         remote.delete_activity.assert_called_once_with(GARMIN_ID)
         for source in (selector, self.table):
-            rows = self.read(source.activity_rows)
+            rows = self.read(source.intervals_activity_payloads)
             self.assertNotIn(GARMIN_ID, self.ids(rows))
             self.assertIn(WAHOO_ID, self.ids(rows))
         # The snapshot is an ingestion artefact and is not rewritten by a delete.
@@ -180,17 +188,28 @@ class PendingAndTableReadTests(_ActivityCase):
         populate(self)
         tables = self.read_service(make_selector(self))
 
-        expected = [
-            GARMIN_ID,
-            WAHOO_ID,
-            "i-act-005",
-            "i-act-004",
-            "i-act-001",
-            "i-act-003",
-            "i-act-002",
-        ]
+        with self.manager.reader() as db:
+            sessions = make_selector(self).activity_summaries(db)
+        expected = [summary["id"] for summary in sessions]
         page = tables.page(today=TODAY)
-        self.assertEqual([row["id"] for row in page["activities"]], expected)
+        listed = page["activities"]
+        self.assertEqual([row["id"] for row in listed], expected)
+        # Each session once: the Intervals duplicate pair is one entry and the
+        # Garmin-only session is listed.
+        intervals_ids = [
+            row["record_ids"].get("intervals")
+            for row in listed
+            if "intervals" in row["record_ids"]
+        ]
+        self.assertEqual(len(intervals_ids), len(set(intervals_ids)))
+        self.assertEqual(
+            1,
+            sum(
+                row["record_ids"].get("intervals") in (WAHOO_ID, GARMIN_ID)
+                for row in listed
+            ),
+        )
+        self.assertIn({"garmin": "910002"}, [row["record_ids"] for row in listed])
         self.assertEqual(
             {k: v for k, v in page.items() if k != "activities"},
             {"snapshot_synced_at": None, "next_cursor": None, "limit": 100, "days": -1},
@@ -202,6 +221,42 @@ class PendingAndTableReadTests(_ActivityCase):
             {"snapshot_synced_at": None, "days": -1},
         )
 
+    def test_limit_one_pages_walk_every_session_and_old_cursors_restart(self) -> None:
+        populate(self)
+        service = self.read_service(make_selector(self))
+        expected = [row["id"] for row in service.page(today=TODAY)["activities"]]
+        walked: list[str] = []
+        page = service.page(today=TODAY, limit=1)
+        while True:
+            walked.extend(row["id"] for row in page["activities"])
+            if page["next_cursor"] is None:
+                break
+            page = service.page(page["next_cursor"], 1, today=TODAY)
+        self.assertEqual(walked, expected)
+        version_2 = base64.urlsafe_b64encode(
+            json.dumps({"v": 2, "after": ["2026-10-26T07:00:00", "x"]}).encode()
+        ).decode()
+        restarted = service.page(version_2, 1, today=TODAY)
+        self.assertEqual([row["id"] for row in restarted["activities"]], expected[:1])
+
+    def test_list_rows_carry_neutral_names_only(self) -> None:
+        populate(self)
+        (row, *_rest) = self.read_service(make_selector(self)).page(today=TODAY)[
+            "activities"
+        ]
+        for key in ("id", "started_at", "started_at_local", "sport", "record_ids"):
+            self.assertIn(key, row)
+        self.assertIn("detail_error", row)
+        self.assertFalse(
+            [
+                key
+                for key in row
+                if key.startswith("icu_")
+                or key
+                in ("moving_time", "start_date_local", "type", "local_activity_id")
+            ]
+        )
+
     def test_duplicate_inspection_reads_only_the_tables(self) -> None:
         # Before the first backfill nothing is in the tables:
         # no pair is offered, so nothing can be deleted twice.
@@ -210,12 +265,54 @@ class PendingAndTableReadTests(_ActivityCase):
         pair = self.inspector(make_selector(self)).latest()
         self.assertEqual((pair or {}).get("duplicate_id"), GARMIN_ID)
 
-    def test_compact_rows_drop_empty_and_unlisted_fields(self) -> None:
-        raw = [{"id": "x", "type": "Ride", "name": None, "private_comment": "free"}]
-        (compact,) = compact_activity_rows(raw)
-        self.assertNotIn("name", compact)
-        self.assertNotIn("private_comment", compact)
-        self.assertEqual(compact["type"], "Ride")
+
+class SessionListFreshnessTests(_ActivityCase):
+    def test_fingerprints_keep_the_stored_values(self) -> None:
+        """Intervals keeps summary_fingerprint of its row, others the payload hash."""
+        populate(self)
+        selector = make_selector(self)
+        with self.manager.reader() as db:
+            rows = selector.intervals_activity_payloads(db)
+            keys = [("intervals", str(row["id"])) for row in rows]
+            keys += [("garmin", "910002"), ("intervals", "missing")]
+            current = selector.summary_fingerprints(db, keys)
+            garmin_hash = canonical_store.active_provider_record_hash(
+                db, "garmin", ACTIVITY_RECORD_KIND, "910002"
+            )
+        self.assertEqual(
+            {("intervals", str(row["id"])): summary_fingerprint(row) for row in rows}
+            | {("garmin", "910002"): garmin_hash},
+            current,
+        )
+        self.assertIsNotNone(garmin_hash)
+
+    def test_garmin_only_session_is_listed_and_its_detail_loads(self) -> None:
+        populate(self)
+        selector = make_selector(self)
+        service = ActivityAnalysisReadService(
+            self.manager,
+            selector,
+            _Feedback(),
+            references=ActivityReferences(self.manager),
+            canonical=CanonicalPerformanceSource(
+                lambda: self.manager,
+                lambda: selector,
+                activity_summaries=lambda: selector,
+            ),
+            session_records=CanonicalTableReader().session_activities,
+        )
+        (garmin_only,) = [
+            row
+            for row in service.recent(today=TODAY)["activities"]
+            if row["record_ids"] == {"garmin": "910002"}
+        ]
+        detail = service.detail(
+            garmin_only["id"],
+            garmin_status=NO_GARMIN_SYNC_STATUS,
+            profile={},
+            today=TODAY,
+        )
+        self.assertEqual(garmin_only["id"], detail["session"]["activity_id"])
 
 
 class SnapshotWithoutCanonicalSectionsTests(_ActivityCase):
@@ -256,7 +353,7 @@ class SnapshotWithoutCanonicalSectionsTests(_ActivityCase):
 
         service.delete(payload, Mock())
 
-        self.assertNotIn(GARMIN_ID, self.ids(self.read(selector.activity_rows)))
+        self.assertNotIn(GARMIN_ID, self.ids(self.read(selector.intervals_activity_payloads)))
 
     def _payload(self, selector: Any) -> dict[str, Any]:
         pair = self.inspector(selector).latest() or {}

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from activity_row_support import StoredCoverage
 
+from backend.activities.activity_summary import activity_summaries
 from backend.activities.read_service import ActivityReadService
 from backend.db.schema import initialize_schema
 from backend.sync.analysis_sessions import AnalysisSessionsRefreshService
@@ -212,15 +213,24 @@ class AnalysisSessionsRefreshTests(unittest.TestCase):
             def attach_to_activities(self, rows):
                 return rows
 
+        class Summaries(CanonicalTableReader):
+            def activity_summaries(self, db, *, start=None, end=None, limit=None):
+                return activity_summaries(
+                    self.activity_sessions(db, start=start, end=end, newest=limit),
+                    UTC,
+                    limit=limit,
+                )
+
         read_service = ActivityReadService(
             Database(),
-            CanonicalTableReader(),
+            Summaries(),
             Feedback(),
             coverage=lambda: StoredCoverage(saved["activities_synced_at"]),
         )
         listed = read_service.page(today=date(2026, 10, 20), days=42)
         self.assertEqual(
-            ["last-edge", "first-edge"], [row["id"] for row in listed["activities"]]
+            ["last-edge", "first-edge"],
+            [row["record_ids"]["intervals"] for row in listed["activities"]],
         )
         self.assertEqual("2026-10-18T12:00:00+00:00", listed["snapshot_synced_at"])
 

@@ -558,7 +558,9 @@ class ServerHttpTests(ServerTestCase):
         second = service.page(first["next_cursor"], 2, 1, today=today)
         third = service.page(second["next_cursor"], 2, 1, today=today)
         ids = [
-            item["id"] for page in (first, second, third) for item in page["activities"]
+            item["record_ids"]["intervals"]
+            for page in (first, second, third)
+            for item in page["activities"]
         ]
         self.assertEqual(
             ids, ["activity-4", "activity-3", "activity-2", "activity-1", "activity-0"]

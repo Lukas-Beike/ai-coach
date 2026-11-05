@@ -1,4 +1,11 @@
+const SESSION_SPORT_LABELS = { ride: "Radfahren", run: "Laufen", swim: "Schwimmen", strength: "Kraft" };
+
+// Takes a planned/provider `type` or a session's neutral `sport` and `environment`.
 function activitySportLabel(activity) {
+  if (!activity?.type && activity?.sport) {
+    if (activity.sport === "ride" && ["indoor", "virtual"].includes(activity.environment)) return "Rad indoor";
+    return SESSION_SPORT_LABELS[activity.sport] || "Andere";
+  }
   const value = String(activity?.type || "").toLowerCase();
   if (value === "virtualride") return "Rad indoor";
   if (/ride|bike|cycling|rad|velo|bicycle/.test(value)) return "Radfahren";

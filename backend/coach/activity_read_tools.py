@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Final
 
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.athlete.local_date import iso_date_prefix
@@ -25,6 +25,12 @@ from backend.performance.report_service import PROFILE_WINDOW_DAYS
 from backend.planning import leg_strength
 from backend.planning.sport import planned_sport_environment
 from backend.sync.garmin import GarminPayloadService
+
+# Per-field source labels and zone-time arrays stay in get_activity_details;
+# the list keeps each session's scalar values and its primary source label.
+_LIST_OMITTED_KEYS: Final = frozenset(
+    {"sources", "power_zone_times", "heart_rate_zone_times", "pace_zone_times"}
+)
 
 
 class CoachActivityReadToolService:
@@ -117,9 +123,18 @@ class CoachActivityReadToolService:
                 500,
                 "Aktivitätszeitraum oder Limit ist ungültig.",
             )
+            recent = self._activity_read.recent(days, limit, today=self._today())
             return {
                 "ok": True,
-                **self._activity_read.recent(days, limit, today=self._today()),
+                **recent,
+                "activities": [
+                    {
+                        key: value
+                        for key, value in activity.items()
+                        if key not in _LIST_OMITTED_KEYS
+                    }
+                    for activity in recent["activities"]
+                ],
             }
         if name == "get_activity_details":
             detail = self._activity_read.detail(
