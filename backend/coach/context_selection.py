@@ -292,7 +292,8 @@ class CoachContextSelection:
         result = {
             key: value
             for key, value in context.items()
-            if key in self.sections or key == "canonical_data_status"
+            if key in self.sections
+            or key in {"canonical_data_status", "subjective_scales"}
         }
         _dedupe_appointments(result, local_date)
         if self.horizon_days is None:

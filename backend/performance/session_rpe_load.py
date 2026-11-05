@@ -22,6 +22,7 @@ from backend.canonical.activity_summary import (
     stored_activity_key,
     summary_local_date,
 )
+from backend.canonical.rating_scales import INTERVALS_RPE_SCALE, LOCAL_SESSION_RPE_SCALE
 
 METRIC_ID: Final = "session_rpe_load"
 METHOD_ID: Final = "session-rpe-load"
@@ -58,6 +59,13 @@ def _finite(value: Any) -> float | None:
         return None
     number = float(value)
     return number if math.isfinite(number) else None
+
+
+# The scale of each RPE source; provider RPE is the Intervals.icu 1-10 rating.
+_RPE_SCALES: Final = {
+    SOURCE_ATHLETE: LOCAL_SESSION_RPE_SCALE.scale_id,
+    SOURCE_PROVIDER: INTERVALS_RPE_SCALE.scale_id,
+}
 
 
 def _rating(
@@ -128,6 +136,7 @@ def session_load(
         "rpe": rpe,
         "rpe_source": source,
         "rpe_source_label": label,
+        "rpe_scale": None if source is None else _RPE_SCALES[source],
         "duration_min": None if elapsed is None else round(elapsed / 60, 1),
         "rated_minutes_after_end": rated_after_end,
         "status": "descriptive" if value is not None else "insufficient_data",
