@@ -325,13 +325,23 @@ class CurrentBodyMetricTests(unittest.TestCase):
 
 
 class CurrentThresholdTests(unittest.TestCase):
-    def test_cycling_ftp_garmin_then_ride_then_wellness_then_athlete(self) -> None:
+    def test_cycling_ftp_ride_setting_then_garmin(self) -> None:
+        # Canonical (#1668): the athlete-maintained Intervals FTP precedes Garmin's
+        # auto-detected FTP, which stays visible as a conflicting alternative.
         garmin = _garmin({"cycling_ftp": {"functionalThresholdPower": 302}})
         result = _current(
             _snapshot(athlete={"sport_settings": [_setting("Ride", ftp=250)]}),
             garmin=garmin,
         )
-        self.assertEqual(_pair(result["cycling_ftp_watts"]), (302, GARMIN))
+        self.assertEqual(_pair(result["cycling_ftp_watts"]), (250, INTERVALS))
+        self.assertEqual(
+            result["cycling_ftp_watts"]["alternatives"],
+            [{"value": 302, "source": GARMIN, "source_provider": "garmin"}],
+        )
+        self.assertTrue(result["cycling_ftp_watts"]["conflict"])
+        self.assertEqual(
+            _pair(_current(garmin=garmin)["cycling_ftp_watts"]), (302, GARMIN)
+        )
 
         for invalid in (49, 701):
             with self.subTest(invalid=invalid):
@@ -629,9 +639,13 @@ class CurrentMaxHrTests(unittest.TestCase):
                 "maxHR": 210,
             },
         ]
+        # Canonical (#1668): the athlete record's max HR is a configured value and
+        # precedes the activity maximum, which is only the last resort.
         result = _current(
             _snapshot(athlete={"max_hr": 200}, activities=activities),
         )
+        self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (200, INTERVALS))
+        result = _current(_snapshot(activities=activities))
         self.assertEqual(_pair(result["cycling_max_hr_bpm"]), (195, INTERVALS))
         self.assertEqual(_pair(result["running_max_hr_bpm"]), (210, INTERVALS))
 

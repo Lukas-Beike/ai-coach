@@ -50,6 +50,13 @@ legacy current FTP reads only the cycling FTP section. Garmin sleep score 0 and
 Garmin heart-rate-zone max HR, athlete-level weight, athlete-wide threshold HR and
 max HR, and sport-setting VO2max are mapped and covered by parity tests.
 
+Thresholds (FTP, threshold and maximum heart rate, threshold pace) are resolved
+with ``resolve_candidates`` from each source's own current value: a locally
+confirmed zone configuration first, then the providers in rule order
+(``SPORT_ORDERS`` overrides it per sport), within each provider's bounds and age
+limits. The result keeps the other sources as alternatives with a conflict flag,
+so the Coach context, current metrics and plans read one value.
+
 This module is stdlib-only except for ``backend.canonical`` and must not import
 ``server.py``, providers or other domain packages.
 """
@@ -72,6 +79,10 @@ _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
 _NO_DATE: Final = date.min
 # A Wahoo FTP or weight observed longer ago than this is history, not the current value.
 WAHOO_CURRENT_MAX_AGE_DAYS: Final = 90
+# An Intervals threshold counts only from a sync at most this many days old.
+INTERVALS_THRESHOLD_MAX_AGE_DAYS: Final = 30
+# A Garmin threshold observed longer ago than this is history, not current.
+GARMIN_THRESHOLD_MAX_AGE_DAYS: Final = 180
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +112,11 @@ class SourceRule:
     latest_intervals_row: bool = False
     max_age: tuple[ProviderMaxAge, ...] = ()
 
+
+_THRESHOLD_MAX_AGE: Final = (
+    ProviderMaxAge(_INTERVALS, INTERVALS_THRESHOLD_MAX_AGE_DAYS),
+    ProviderMaxAge(_GARMIN, GARMIN_THRESHOLD_MAX_AGE_DAYS),
+)
 
 # Rules for select_current. A provider absent from ``order`` never supplies the kind.
 CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
@@ -153,24 +169,45 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
                 (_INTERVALS, _GARMIN),
                 latest_intervals_row=True,
             ),
-            # current_metrics: Garmin before Intervals sportSettings, per sport. Wahoo
-            # power zones are the last resort, with the same plausibility band.
+            # Thresholds (athlete decision 2026-11-04): the athlete-maintained
+            # Intervals FTP before Garmin's auto-detected FTP, Wahoo power zones last.
+            # Garmin's auto-detected heart-rate and pace thresholds before the
+            # manually kept Intervals values. A locally confirmed zone configuration
+            # precedes every provider (``resolve_candidates``). Intervals values age
+            # with their sync, Garmin and Wahoo values with their observed day.
             SourceRule(
                 MetricKind.FTP,
-                (_GARMIN, _INTERVALS, _WAHOO),
+                (_INTERVALS, _GARMIN, _WAHOO),
                 (
                     ProviderBounds(_GARMIN, 50.0, 700.0),
                     ProviderBounds(_WAHOO, 50.0, 700.0),
                 ),
-                max_age=(ProviderMaxAge(_WAHOO, WAHOO_CURRENT_MAX_AGE_DAYS),),
+                max_age=(
+                    ProviderMaxAge(_INTERVALS, INTERVALS_THRESHOLD_MAX_AGE_DAYS),
+                    ProviderMaxAge(_GARMIN, GARMIN_THRESHOLD_MAX_AGE_DAYS),
+                    ProviderMaxAge(_WAHOO, WAHOO_CURRENT_MAX_AGE_DAYS),
+                ),
             ),
             SourceRule(
                 MetricKind.THRESHOLD_HR,
                 (_GARMIN, _INTERVALS),
                 (ProviderBounds(_GARMIN, 80.0, 230.0),),
+                max_age=_THRESHOLD_MAX_AGE,
             ),
-            SourceRule(MetricKind.THRESHOLD_PACE, (_GARMIN, _INTERVALS)),
-            SourceRule(MetricKind.MAX_HR, (_GARMIN, _INTERVALS)),
+            SourceRule(
+                MetricKind.THRESHOLD_PACE,
+                (_GARMIN, _INTERVALS),
+                max_age=_THRESHOLD_MAX_AGE,
+            ),
+            SourceRule(
+                MetricKind.MAX_HR,
+                (_GARMIN, _INTERVALS),
+                (
+                    ProviderBounds(_GARMIN, 80.0, 260.0),
+                    ProviderBounds(_INTERVALS, 80.0, 260.0),
+                ),
+                max_age=_THRESHOLD_MAX_AGE,
+            ),
             SourceRule(
                 MetricKind.VO2MAX,
                 (_GARMIN, _INTERVALS),
@@ -179,6 +216,8 @@ CURRENT_RULES: Final[Mapping[MetricKind, SourceRule]] = MappingProxyType(
             # load_context: Intervals only, latest row.
             SourceRule(MetricKind.CTL, (_INTERVALS,), latest_intervals_row=True),
             SourceRule(MetricKind.ATL, (_INTERVALS,), latest_intervals_row=True),
+            # Intervals' estimated FTP: a separate, labelled value, never the FTP.
+            SourceRule(MetricKind.EFTP, (_INTERVALS,)),
         )
     }
 )
@@ -384,3 +423,119 @@ def select_daily(
     ):
         result.setdefault(day, observation)
     return result
+
+
+# Kinds whose locally confirmed value (a zone configuration) precedes every provider.
+LOCAL_FIRST_KINDS: Final[frozenset[MetricKind]] = frozenset(
+    {
+        MetricKind.FTP,
+        MetricKind.THRESHOLD_HR,
+        MetricKind.THRESHOLD_PACE,
+        MetricKind.MAX_HR,
+    }
+)
+# Sport-specific provider orders. The Intervals-first FTP order is the ride FTP;
+# run threshold power is auto-detected by Garmin like the other run thresholds.
+SPORT_ORDERS: Final[Mapping[tuple[MetricKind, Sport], tuple[ProviderId, ...]]] = (
+    MappingProxyType({(MetricKind.FTP, Sport.RUN): (_GARMIN, _INTERVALS)})
+)
+# Relative difference above which two sources' current values are a conflict.
+CONFLICT_TOLERANCE: Final[Mapping[MetricKind, float]] = MappingProxyType(
+    dict.fromkeys(LOCAL_FIRST_KINDS, 0.03)
+)
+
+# None stands for the athlete's own, locally confirmed value.
+type Source = ProviderId | None
+
+
+@dataclass(frozen=True, slots=True)
+class Candidate:
+    """One source's current value of a metric, as the caller has selected it.
+
+    ``observed_on`` is the day the value was observed or synced; None skips the
+    age limit. ``observation`` is the canonical record behind it, if any.
+    """
+
+    source: Source
+    value: float
+    observed_on: date | None = None
+    observation: Observation | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Resolved:
+    """The winning value, the other sources' current values and a conflict flag."""
+
+    winner: Candidate
+    alternatives: tuple[Candidate, ...]
+    conflict: bool
+
+
+def source_order(kind: MetricKind, sport: Sport | None = None) -> tuple[Source, ...]:
+    """Return the sources of ``kind`` in precedence order; empty without a rule."""
+    rule = CURRENT_RULES.get(kind)
+    if rule is None:
+        return ()
+    order = SPORT_ORDERS.get((kind, sport), rule.order) if sport else rule.order
+    return (None, *order) if kind in LOCAL_FIRST_KINDS else order
+
+
+def preferred_provider(kind: MetricKind) -> ProviderId | None:
+    """Return the first provider of ``kind``'s rule, the one displays prefer."""
+    rule = CURRENT_RULES.get(kind)
+    return None if rule is None else rule.order[0]
+
+
+def _candidate_current(
+    candidate: Candidate, rule: SourceRule, as_of: date | None
+) -> bool:
+    provider = candidate.source
+    if provider is None:
+        return True
+    within = all(
+        bound.lower <= candidate.value <= bound.upper
+        for bound in rule.bounds
+        if bound.provider is provider
+    )
+    if not within or as_of is None or candidate.observed_on is None:
+        return within
+    age_days = (as_of - candidate.observed_on).days
+    return all(
+        age_days <= limit.days for limit in rule.max_age if limit.provider is provider
+    )
+
+
+def resolve_candidates(
+    kind: MetricKind,
+    candidates: Iterable[Candidate],
+    *,
+    as_of: date | None,
+    sport: Sport | None = None,
+) -> Resolved | None:
+    """Resolve one metric from each source's own current value under its rule.
+
+    The first candidate of each source counts. Candidates outside their source's
+    bounds or age limit (on ``as_of``; None applies none) are dropped. The first
+    remaining source in ``source_order`` wins; the others stay as alternatives in
+    that order. A conflict is an alternative that differs from the winner by more
+    than the kind's ``CONFLICT_TOLERANCE``. ``sport`` selects a ``SPORT_ORDERS``
+    entry. None without any current candidate.
+    """
+    rule = CURRENT_RULES.get(kind)
+    if rule is None:
+        return None
+    order = source_order(kind, sport)
+    first: dict[Source, Candidate] = {}
+    for candidate in candidates:
+        if candidate.source in order and _candidate_current(candidate, rule, as_of):
+            first.setdefault(candidate.source, candidate)
+    ranked = [first[source] for source in order if source in first]
+    if not ranked:
+        return None
+    winner, *alternatives = ranked
+    tolerance = CONFLICT_TOLERANCE.get(kind)
+    conflict = tolerance is not None and any(
+        abs(item.value - winner.value) > tolerance * abs(winner.value)
+        for item in alternatives
+    )
+    return Resolved(winner, tuple(alternatives), conflict)

@@ -2505,7 +2505,8 @@ class ServerSyncTests(ServerTestCase):
     def test_current_performance_is_derived_from_intervals_snapshot(self):
         today = _local_datetime.now().astimezone().date().isoformat()
         snapshot = {
-            "synced_at": "2026-08-28T08:00:00+00:00",
+            # Intervals.icu thresholds count only from a sync at most 30 days old.
+            "synced_at": f"{today}T00:00:00+00:00",
             "athlete": {"icu_ftp": 300, "lthr": 171},
             "recent_wellness": [
                 {

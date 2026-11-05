@@ -47,7 +47,11 @@ def inputs(
         observations += (
             Obs(MetricKind.THRESHOLD_PACE, Sport.RUN, SimpleNamespace(value=4.0)),
         )
-    return SimpleNamespace(synced_at=synced, zone_thresholds=observations)
+    # Like the source policy, a stale or missing sync contributes no Intervals value.
+    current = synced is not None and (TODAY - synced.date()).days <= 30
+    return SimpleNamespace(
+        synced_at=synced, zone_thresholds=observations if current else ()
+    )
 
 
 def thresholds(*, pace: bool = True, ftp: bool = True) -> load_checks.LoadThresholds:
@@ -184,6 +188,17 @@ class ThresholdTests(unittest.TestCase):
         )
         self.assertEqual("stale_thresholds", stale.unavailable)
         self.assertEqual({}, dict(stale.by_sport))
+
+    def test_a_current_garmin_winner_replaces_a_stale_sync(self) -> None:
+        garmin = SimpleNamespace(
+            synced_at=datetime(2026, 9, 1, tzinfo=UTC),
+            zone_thresholds=(
+                Obs(MetricKind.THRESHOLD_HR, Sport.RUN, SimpleNamespace(value=172.0)),
+            ),
+        )
+        result = load_checks.load_thresholds(garmin, TODAY)
+        self.assertIsNone(result.unavailable)
+        self.assertEqual(172.0, result.for_sport(Sport.RUN).zones.lthr)
 
 
 class LocalThresholdPrecedenceTests(unittest.TestCase):

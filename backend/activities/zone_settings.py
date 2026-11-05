@@ -93,7 +93,9 @@ class ZoneSettings:
         Lists keep the open top entry, which the percent limits leave out, as the
         sport settings do. Each metric is decided on its own: one without an
         applicable configuration keeps the ``fallback`` value, or the default
-        limits and no threshold when there is none.
+        limits and no threshold when there is none. A local configuration's
+        threshold wins; a provider configuration only fills a threshold the
+        ``fallback`` (the source-policy winners) leaves empty, and gives its limits.
         """
         chosen = list(configurations)
         indoor = environment in {Environment.INDOOR, Environment.VIRTUAL}
@@ -108,9 +110,9 @@ class ZoneSettings:
             chosen, ZoneConfigurationMetric.PACE, sport, indoor=indoor, day=day
         )
         return cls(
-            ftp=base.ftp if power is None else power.threshold,
-            lthr=base.lthr if heart_rate is None else heart_rate.threshold,
-            max_hr=base.max_hr if heart_rate is None else heart_rate.maximum,
+            ftp=_threshold(power, base.ftp, "threshold"),
+            lthr=_threshold(heart_rate, base.lthr, "threshold"),
+            max_hr=_threshold(heart_rate, base.max_hr, "maximum"),
             power_limits=_percent_limits(power) or base.power_limits,
             hr_limits=_percent_limits(heart_rate) or base.hr_limits,
             pace_limits=_percent_limits(pace) or base.pace_limits,
@@ -139,6 +141,21 @@ class ZoneSettings:
         if unit == "bpm" and self.lthr:
             return self.hr_zone_of_lthr(value / self.lthr * 100)
         return None
+
+
+def _threshold(
+    configuration: ZoneConfiguration | None, fallback: float | None, field: str
+) -> float | None:
+    """A local configuration's value, else the fallback, else a provider's value."""
+    if configuration is None:
+        return fallback
+    value: float | None = getattr(configuration, field)
+    first, second = (
+        (value, fallback)
+        if configuration.provenance.provider is None
+        else (fallback, value)
+    )
+    return first if first is not None else second
 
 
 def _valid_on(configuration: ZoneConfiguration, day: date | None) -> bool:

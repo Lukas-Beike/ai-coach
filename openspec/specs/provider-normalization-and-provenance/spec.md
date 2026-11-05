@@ -106,19 +106,23 @@ Detailed contract: Wahoo SHALL map the newest power-zone set per cycling/running
 Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_ftp_history_reads_biometric_range_records`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
 
 ### Requirement: Metric-specific source priority and local authority
-The system SHALL apply per-metric source rules rather than a universal provider order. Current weight, FTP, thresholds, and VO2max prefer supported Garmin values before Intervals, with Wahoo a last fallback for current cycling FTP and weight. Manual profile weight precedes Wahoo fallback.
+The system SHALL apply per-metric source rules rather than a universal provider order. A locally confirmed zone configuration precedes every provider for thresholds. Current ride FTP prefers the athlete-maintained Intervals.icu setting before Garmin, with Wahoo last; threshold and maximum heart rate, threshold pace and run power prefer Garmin before Intervals.icu. Current weight and VO2max prefer Garmin; manual profile weight precedes Wahoo fallback.
 
 #### Scenario: Three FTP sources
-- **WHEN** eligible Garmin, Intervals, and Wahoo cycling FTP values coexist
-- **THEN** current metric composition selects Garmin, labels its provider, and retains the other provider observations for their supported reads.
+- **WHEN** eligible Intervals, Garmin, and Wahoo cycling FTP values coexist and no local zone configuration applies
+- **THEN** current metric composition selects the Intervals.icu setting, labels its provider, lists the Garmin and Wahoo values as alternatives with a conflict flag above 3 %, and retains the other provider observations for their supported reads.
 
 #### Scenario: Old Wahoo fallback
 - **WHEN** Wahoo is the only eligible source but its dated value is older than the current-value age limit
 - **THEN** the current selector returns no Wahoo value while historical storage remains intact.
 
-Detailed contract: Body-fat current composition uses Intervals and manual profile paths; readiness prefers Intervals over Garmin; sleep, RMSSD, and resting HR prefer eligible Garmin readings; CTL/ATL remain Intervals-owned. Wahoo current FTP/weight older than 90 days SHALL be excluded when an as-of local day is supplied, without deleting history. Local profile and competition records SHALL retain their domain authority rather than being overwritten by provider read sync.
+#### Scenario: Stale threshold sources
+- **WHEN** the Intervals.icu sync is older than 30 days or a Garmin threshold was observed more than 180 days before the local day
+- **THEN** that value is not current and the next source in the rule's order supplies the threshold.
 
-Evidence: `backend/performance/source_policy.py:CURRENT_RULES`, `backend/performance/source_policy.py:DAILY_RULES`, `backend/performance/current_metrics.py:current_performance_metrics`, `backend/sync/authority.py:PlanningAuthorityService`; `tests/test_performance_current_metrics.py:test_garmin_ftp_beats_intervals_and_wahoo_ftp`, `tests/test_performance_current_metrics.py:test_manual_profile_weight_beats_wahoo_weight`, `tests/test_sync_authority.py:test_revision_failure_rolls_back_planning_update_atomically`.
+Detailed contract: Body-fat current composition uses Intervals and manual profile paths; readiness prefers Intervals over Garmin; sleep, RMSSD, and resting HR prefer eligible Garmin readings; CTL/ATL remain Intervals-owned. Wahoo current FTP/weight older than 90 days SHALL be excluded when an as-of local day is supplied, without deleting history. The PWA display preference of threshold pace, VO2max and eFTP is the first provider of that metric's rule; FTP and W/kg charts keep Garmin, whose FTP history they draw, and body and recovery keep their display rules. Local profile and competition records SHALL retain their domain authority rather than being overwritten by provider read sync.
+
+Evidence: `backend/performance/source_policy.py:CURRENT_RULES`, `backend/performance/source_policy.py:resolve_candidates`, `backend/performance/current_thresholds.py:resolve_current_thresholds`, `backend/performance/display_sources.py:PREFERRED_PROVIDER`, `backend/performance/current_metrics.py:current_performance_metrics`, `backend/sync/authority.py:PlanningAuthorityService`; `tests/test_current_thresholds.py`, `tests/test_performance_current_metrics.py:test_intervals_ftp_beats_garmin_and_wahoo_ftp`, `tests/test_performance_current_metrics.py:test_manual_profile_weight_beats_wahoo_weight`, `tests/test_performance_display_sources.py`, `tests/test_sync_authority.py:test_revision_failure_rolls_back_planning_update_atomically`.
 
 ### Requirement: Correction and reprojection continuity
 The system SHALL preserve provider raw-record identity and mapper version, ingest canonical data with the owning provider transaction, and reproject stored records on mapper/timezone changes. Before the first successful canonical backfill, canonical reads SHALL return no values and consumers SHALL report a pending state; after first completion, reads SHALL continue from tables during later reprojection/failure rather than disappearing or becoming pending again.

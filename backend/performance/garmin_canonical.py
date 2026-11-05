@@ -134,6 +134,9 @@ class GarminCanonicalMetrics:
     daily_history: Mapping[MetricKind, Mapping[date, float]] = field(
         default_factory=dict
     )
+    # The latest Garmin FTP, threshold HR, threshold speed and profile max HR per
+    # sport, dated for the source policy's age limits (``garmin_thresholds``).
+    thresholds: tuple[Observation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +184,23 @@ def read_garmin_state(reader: ObservationReader, db: Any) -> GarminCanonicalStat
         has_resting_hr=bool(by_kind[MetricKind.RESTING_HR]),
         has_readiness=bool(by_kind[MetricKind.READINESS]),
         sleep_observed_on=max((item.observed_on for item in sleep), default=None),
+    )
+
+
+def read_garmin_thresholds(
+    reader: ObservationReader, db: Any
+) -> tuple[Observation, ...]:
+    """Read only the Garmin threshold observations, as ``garmin_thresholds``."""
+    reader = _resolved(reader, db)
+    return garmin_thresholds(
+        {
+            kind: _garmin_only(reader, db, kind)
+            for kind in (
+                *_THRESHOLD_SPORTS,
+                MetricKind.MAX_HR,
+                MetricKind.RUN_THRESHOLD_POWER,
+            )
+        }
     )
 
 
@@ -342,6 +362,7 @@ def _metrics(
         run_threshold_hr_bpm=_latest_value(threshold_hr, Sport.RUN),
         bike_threshold_hr_bpm=_latest_value(threshold_hr, Sport.RIDE),
         profile_max_hr=_profile_max_hr(by_kind[MetricKind.MAX_HR]),
+        thresholds=garmin_thresholds(by_kind),
         race_predictions={
             key: value
             for kind, key in RACE_PREDICTION_KEYS.items()
@@ -449,6 +470,74 @@ def _performance_history(
         for key, (observations, pick) in rules.items()
         if (values := _per_day(observations, pick))
     }
+
+
+# Sport-scoped threshold kinds read from Garmin, with the sports they apply to.
+_THRESHOLD_SPORTS: Mapping[MetricKind, tuple[Sport, ...]] = {
+    MetricKind.FTP: (Sport.RIDE,),
+    MetricKind.THRESHOLD_HR: (Sport.RIDE, Sport.RUN),
+    MetricKind.THRESHOLD_PACE: (Sport.RUN,),
+}
+
+
+def garmin_thresholds(
+    by_kind: Mapping[MetricKind, Iterable[Observation]],
+) -> tuple[Observation, ...]:
+    """Return the latest Garmin threshold observation of each kind and sport.
+
+    The values equal the current Garmin metrics: the latest FTP, threshold heart
+    rate and threshold speed per sport, the run threshold power as the run FTP,
+    and the profile max heart rate of each sport's latest day (its highest
+    value), else the generic one, given that sport.
+    """
+    result: list[Observation] = []
+    for kind, sports in _THRESHOLD_SPORTS.items():
+        items = tuple(by_kind.get(kind, ()))
+        for sport in sports:
+            latest = max(
+                (item for item in items if item.sport is sport),
+                key=_order,
+                default=None,
+            )
+            if latest is not None and _plausible_threshold(latest):
+                result.append(latest)
+    # Garmin's run threshold power is the run FTP candidate.
+    run_power = max(
+        (
+            item
+            for item in by_kind.get(MetricKind.RUN_THRESHOLD_POWER, ())
+            if item.sport is Sport.RUN
+        ),
+        key=_order,
+        default=None,
+    )
+    if run_power is not None and _bounded(
+        run_power.value.value, _RUN_THRESHOLD_POWER_RANGE
+    ):
+        result.append(replace(run_power, kind=MetricKind.FTP))
+    low, high = _MAX_HR_RANGE
+    max_hr = [
+        item
+        for item in by_kind.get(MetricKind.MAX_HR, ())
+        if low <= item.value.value <= high
+    ]
+    for sport in (Sport.RIDE, Sport.RUN):
+        own = [item for item in max_hr if item.sport is sport] or [
+            item for item in max_hr if item.sport is None
+        ]
+        latest = max(
+            own, key=lambda item: (item.observed_on, item.value.value), default=None
+        )
+        if latest is not None:
+            result.append(replace(latest, sport=sport))
+    return tuple(result)
+
+
+def _plausible_threshold(item: Observation) -> bool:
+    """The Garmin metrics' bounds: a threshold speed must give a plausible pace."""
+    if item.kind is MetricKind.THRESHOLD_PACE:
+        return _pace_seconds_per_km(item.value.value) is not None
+    return True
 
 
 def profile_max_hr_for(profile: Mapping[str, float], category: str) -> float | None:

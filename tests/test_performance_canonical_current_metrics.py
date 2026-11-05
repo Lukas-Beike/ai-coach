@@ -277,7 +277,15 @@ class CanonicalCurrentParityTests(unittest.TestCase):
             if observation.provenance.provider is ProviderId.GARMIN
         )
         inputs = _read(ObservationStub(garmin_only), case.intervals)
-        self.assertEqual(inputs, NO_CURRENT_INPUTS)
+        assert inputs is not None
+        # Garmin values reach only the plan zones' source-policy winners.
+        self.assertEqual(replace(inputs, zone_thresholds=()), NO_CURRENT_INPUTS)
+        self.assertTrue(
+            all(
+                item.provenance.provider is ProviderId.GARMIN
+                for item in inputs.zone_thresholds
+            )
+        )
 
 
 class CanonicalSportMatchTests(unittest.TestCase):
@@ -348,6 +356,17 @@ class CanonicalCurrentInputTests(unittest.TestCase):
                 (MetricKind.INDOOR_FTP, *window, None),
                 (MetricKind.FTP, None, None, None),
                 (MetricKind.WEIGHT, None, None, None),
+                # The Garmin thresholds of the plan zones, unwindowed.
+                *(
+                    (kind, None, None, None)
+                    for kind in (
+                        MetricKind.FTP,
+                        MetricKind.THRESHOLD_HR,
+                        MetricKind.THRESHOLD_PACE,
+                        MetricKind.MAX_HR,
+                        MetricKind.RUN_THRESHOLD_POWER,
+                    )
+                ),
                 (MetricKind.WEIGHT, latest, latest, None),
                 (MetricKind.EFTP, latest, latest, Sport.RIDE),
             ],

@@ -7,8 +7,14 @@ from zoneinfo import ZoneInfo
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.canonical.local_time import local_date
-from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.records import MetricValue, Observation, Provenance
+from backend.canonical.vocabulary import (
+    MetricKind,
+    ProviderId,
+    RecordingOrigin,
+    SourceKind,
+    Sport,
+)
 from backend.performance.canonical_body import read_body_inputs
 from backend.performance.canonical_current import (
     CanonicalCurrentInputs,
@@ -96,6 +102,55 @@ def current_from_snapshot(
     )
 
 
+# Garmin metric key -> (kind, sport) of its threshold observation.
+_GARMIN_THRESHOLD_KEYS = {
+    "cycling_ftp_watts": (MetricKind.FTP, Sport.RIDE),
+    "run_threshold_watts": (MetricKind.FTP, Sport.RUN),
+    "bike_threshold_hr_bpm": (MetricKind.THRESHOLD_HR, Sport.RIDE),
+    "run_threshold_hr_bpm": (MetricKind.THRESHOLD_HR, Sport.RUN),
+    "run_threshold_pace_seconds_per_km": (MetricKind.THRESHOLD_PACE, Sport.RUN),
+    "cycling_max_hr_bpm": (MetricKind.MAX_HR, Sport.RIDE),
+    "running_max_hr_bpm": (MetricKind.MAX_HR, Sport.RUN),
+}
+
+
+def garmin_threshold_observations(
+    garmin: dict[str, dict[str, Any]],
+) -> tuple[Observation, ...]:
+    """The Garmin threshold observations behind a Garmin metrics dict, dated today.
+
+    Production reads both from the same Garmin observations; a payload-built dict
+    needs them added. An activity-derived max heart rate (it carries an
+    ``observed_at``) is not a threshold.
+    """
+    result = []
+    for key, (kind, sport) in _GARMIN_THRESHOLD_KEYS.items():
+        entry = garmin.get(key) or {}
+        value = entry.get("value")
+        if value is None or (kind is MetricKind.MAX_HR and entry.get("observed_at")):
+            continue
+        if kind is MetricKind.THRESHOLD_PACE:
+            value = 1000 / value
+        result.append(
+            Observation(
+                kind=kind,
+                value=MetricValue(float(value), kind.unit),
+                observed_on=SYNCED_AT.date(),
+                observed_at=None,
+                provenance=Provenance(
+                    provider=ProviderId.GARMIN,
+                    source_kind=SourceKind.PROVIDER_REPORTED,
+                    source_record_id=f"garmin-{key}",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    retrieved_at=SYNCED_AT,
+                    label=None,
+                ),
+                sport=sport,
+            )
+        )
+    return tuple(result)
+
+
 def snapshot_metrics(
     snapshot: dict[str, Any],
     profile: dict[str, Any],
@@ -119,12 +174,24 @@ def snapshot_metrics(
         garmin,
         canonical=_overlaid(
             current_from_snapshot(
-                snapshot, latest_wellness=latest_wellness, extra=extra
+                snapshot,
+                latest_wellness=latest_wellness,
+                extra=(
+                    *extra,
+                    # A Wahoo FTP overlay is a stored observation the read resolves.
+                    *(
+                        ()
+                        if canonical is None or canonical.wahoo_ftp is None
+                        else (canonical.wahoo_ftp,)
+                    ),
+                ),
             ),
             canonical,
         ),
         activities=activities,
         latest_wellness=latest_wellness,
+        garmin_thresholds=garmin_threshold_observations(garmin),
+        as_of=SYNCED_AT.date(),
     )
 
 
@@ -136,7 +203,9 @@ def _overlaid(
     values = {
         item.name: getattr(overlay, item.name)
         for item in fields(overlay)
+        # An empty mapping (the default resolved thresholds) keeps the read's.
         if getattr(overlay, item.name) not in (None, ())
+        and getattr(overlay, item.name) != {}
     }
     return replace(read, **values)
 

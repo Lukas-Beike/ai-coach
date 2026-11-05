@@ -1,0 +1,191 @@
+"""Current sport thresholds under the source policy, shared by Coach and plan.
+
+The current FTP, threshold heart rate, threshold pace and maximum heart rate of
+each sport are resolved once, by ``source_policy.resolve_candidates``, from:
+
+* the athlete's locally confirmed zone configuration in effect on the day,
+* the Intervals.icu sport setting of the latest sync, else the athlete-wide
+  threshold or maximum heart rate of the same sync,
+* the latest Garmin value (``garmin_canonical.garmin_thresholds``),
+* the current Wahoo cycling FTP.
+
+The Coach context and the current metrics read the resolved values with their
+alternatives and conflict flags. Plans read ``provider_zone_thresholds``, the
+provider winners only: they apply local configurations per planned day
+themselves, ahead of these values, so both use the same threshold on a day.
+
+This module must not import ``server.py`` or providers.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import replace
+from datetime import date
+from typing import Any, Final, Protocol, runtime_checkable
+
+from backend.activities.zone_settings import effective_zone_configuration
+from backend.canonical.domain_records import ZoneConfiguration
+from backend.canonical.records import MetricValue, Observation
+from backend.canonical.vocabulary import (
+    MetricKind,
+    ProviderId,
+    Sport,
+    ZoneConfigurationMetric,
+)
+from backend.performance.source_policy import (
+    INTERVALS_THRESHOLD_MAX_AGE_DAYS,
+    LOCAL_FIRST_KINDS,
+    Candidate,
+    Resolved,
+    resolve_candidates,
+)
+
+type ThresholdKey = tuple[MetricKind, Sport]
+
+THRESHOLD_KEYS: Final[tuple[ThresholdKey, ...]] = (
+    (MetricKind.FTP, Sport.RIDE),
+    (MetricKind.FTP, Sport.RUN),
+    (MetricKind.THRESHOLD_HR, Sport.RIDE),
+    (MetricKind.THRESHOLD_HR, Sport.RUN),
+    (MetricKind.THRESHOLD_PACE, Sport.RUN),
+    (MetricKind.MAX_HR, Sport.RIDE),
+    (MetricKind.MAX_HR, Sport.RUN),
+)
+# Intervals athlete-wide values that stand in for a missing sport setting.
+_ATHLETE_WIDE: Final = frozenset({MetricKind.THRESHOLD_HR, MetricKind.MAX_HR})
+
+
+@runtime_checkable
+class ZoneConfigurationSource(Protocol):
+    """A canonical source that also serves the stored zone configurations."""
+
+    def zone_configurations(self, db: Any) -> tuple[ZoneConfiguration, ...]: ...
+
+
+def local_thresholds(
+    configurations: Iterable[ZoneConfiguration], day: date
+) -> tuple[Observation, ...]:
+    """Return the thresholds of the local configurations in effect on ``day``.
+
+    Only athlete-confirmed configurations (no provider) count. Values outside the
+    canonical bounds are skipped.
+    """
+    local = [item for item in configurations if item.provenance.provider is None]
+    result: list[Observation] = []
+    for kind, sport in THRESHOLD_KEYS:
+        metric = {
+            MetricKind.FTP: ZoneConfigurationMetric.POWER,
+            MetricKind.THRESHOLD_PACE: ZoneConfigurationMetric.PACE,
+        }.get(kind, ZoneConfigurationMetric.HEART_RATE)
+        chosen = effective_zone_configuration(local, metric, sport, day=day)
+        if chosen is None:
+            continue
+        value = chosen.maximum if kind is MetricKind.MAX_HR else chosen.threshold
+        if not value:
+            continue
+        try:
+            result.append(
+                Observation(
+                    kind=kind,
+                    value=MetricValue(float(value), kind.unit),
+                    observed_on=day,
+                    observed_at=None,
+                    provenance=chosen.provenance,
+                    sport=sport,
+                )
+            )
+        except ValueError:
+            continue
+    return tuple(result)
+
+
+def _provider_candidates(
+    observations: Sequence[Observation], kind: MetricKind, sport: Sport
+) -> list[Candidate]:
+    """Each provider's observations of ``kind`` for ``sport``, best first.
+
+    The caller gives one current observation per provider and sport. Intervals
+    athlete-wide heart-rate values follow its sport settings.
+    """
+    own = [item for item in observations if item.kind is kind and item.sport is sport]
+    wide = [
+        item
+        for item in observations
+        if kind in _ATHLETE_WIDE
+        and item.kind is kind
+        and item.sport is None
+        and item.provenance.provider is ProviderId.INTERVALS
+    ]
+    return [
+        Candidate(
+            item.provenance.provider,
+            float(item.value.value),
+            item.observed_on,
+            item,
+        )
+        for item in (*own, *wide)
+    ]
+
+
+def resolve_current_thresholds(
+    provider_observations: Iterable[Observation],
+    local: Iterable[Observation] = (),
+    *,
+    as_of: date | None,
+) -> Mapping[ThresholdKey, Resolved]:
+    """Resolve each threshold key; keys without a current value are absent.
+
+    Besides ``THRESHOLD_KEYS``, any other sport a provider gives a threshold for
+    (such as an Intervals swim setting) is resolved under the same rule.
+    """
+    observations = tuple(provider_observations)
+    local_values = tuple(local)
+    other_sports = (
+        (item.kind, sport)
+        for item in (*observations, *local_values)
+        if item.kind in LOCAL_FIRST_KINDS and (sport := item.sport) is not None
+    )
+    keys: list[ThresholdKey] = list(dict.fromkeys((*THRESHOLD_KEYS, *other_sports)))
+    resolved: dict[ThresholdKey, Resolved] = {}
+    for kind, sport in keys:
+        candidates = [
+            Candidate(None, float(item.value.value), item.observed_on, item)
+            for item in local_values
+            if item.kind is kind and item.sport is sport
+        ]
+        candidates += _provider_candidates(observations, kind, sport)
+        result = resolve_candidates(kind, candidates, as_of=as_of, sport=sport)
+        if result is not None:
+            resolved[(kind, sport)] = result
+    return resolved
+
+
+def provider_zone_thresholds(
+    provider_observations: Iterable[Observation], *, as_of: date | None
+) -> tuple[Observation, ...]:
+    """Return the provider winners per threshold key, plus the Intervals indoor FTP.
+
+    Plans put their local configurations ahead of these. The indoor FTP comes
+    only from a current Intervals sync.
+    """
+    observations = tuple(provider_observations)
+    winners = tuple(
+        # An athlete-wide Intervals value applies to the sport it stands in for.
+        replace(winner, sport=sport) if winner.sport is not sport else winner
+        for (_, sport), result in resolve_current_thresholds(
+            observations, as_of=as_of
+        ).items()
+        if (winner := result.winner.observation) is not None
+    )
+    indoor = tuple(
+        item
+        for item in observations
+        if item.kind is MetricKind.INDOOR_FTP
+        and item.provenance.provider is ProviderId.INTERVALS
+        and (
+            as_of is None
+            or (as_of - item.observed_on).days <= INTERVALS_THRESHOLD_MAX_AGE_DAYS
+        )
+    )
+    return (*winners, *indoor)

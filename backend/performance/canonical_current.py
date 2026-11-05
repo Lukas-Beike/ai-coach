@@ -47,6 +47,12 @@ from typing import Any, Final
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.performance.current_thresholds import (
+    ZoneConfigurationSource,
+    local_thresholds,
+    provider_zone_thresholds,
+)
+from backend.performance.garmin_canonical import read_garmin_thresholds
 from backend.performance.source_policy import select_current
 from backend.runtime.ports import ObservationReader
 
@@ -104,10 +110,15 @@ class CanonicalCurrentInputs:
     wellness_eftp: Observation | None = None
     athlete_record: tuple[Observation, ...] = ()
     synced_at: datetime | None = None
-    # This sync's sport-scoped FTP, indoor FTP, threshold and maximum heart rate:
-    # the thresholds of the plan zones and of planned-unit load (threshold pace).
-    # Current metrics never read it.
+    # The source-policy provider winners per sport (FTP, threshold and maximum
+    # heart rate, threshold pace) and the current Intervals indoor FTP: the
+    # thresholds of the plan zones and of planned-unit load.
     zone_thresholds: tuple[Observation, ...] = ()
+    # The Intervals and Wahoo threshold candidates of the current metrics, and
+    # the thresholds of the local zone configurations in effect on ``as_of``.
+    # Current metrics resolve them with the Garmin thresholds of the same read.
+    threshold_candidates: tuple[Observation, ...] = ()
+    local_thresholds: tuple[Observation, ...] = ()
 
     def athlete_value(
         self, kind: MetricKind, sport: Sport | None = None
@@ -149,6 +160,13 @@ def read_current_inputs(
     """
     intervals = _intervals_current(reader, db) or _NO_SYNC
     wahoo_ftp, wahoo_weight = _wahoo_current(reader, db, as_of=as_of)
+    candidates = _threshold_candidates(intervals, wahoo_ftp)
+    providers = (*candidates, *read_garmin_thresholds(reader, db))
+    local = (
+        local_thresholds(reader.zone_configurations(db), as_of)
+        if isinstance(reader, ZoneConfigurationSource)
+        else ()
+    )
     return CanonicalCurrentInputs(
         bike_threshold_hr=intervals.bike_threshold_hr,
         run_threshold_hr=intervals.run_threshold_hr,
@@ -163,7 +181,35 @@ def read_current_inputs(
         wellness_eftp=_wellness_eftp(reader, db, latest_wellness_day),
         athlete_record=intervals.athlete_record,
         synced_at=intervals.synced_at,
-        zone_thresholds=intervals.zone_thresholds,
+        zone_thresholds=provider_zone_thresholds(providers, as_of=as_of),
+        threshold_candidates=candidates,
+        local_thresholds=local,
+    )
+
+
+def _threshold_candidates(
+    intervals: _SyncValues, wahoo_ftp: Observation | None
+) -> tuple[Observation, ...]:
+    """The Intervals and Wahoo threshold candidates, Intervals sport settings first."""
+    athlete_wide = tuple(
+        observation
+        for observation in (
+            intervals.athlete_threshold_hr,
+            next(
+                (
+                    item
+                    for item in intervals.athlete_record
+                    if item.kind is MetricKind.MAX_HR and item.sport is None
+                ),
+                None,
+            ),
+        )
+        if observation is not None
+    )
+    return (
+        *intervals.zone_thresholds,
+        *athlete_wide,
+        *((wahoo_ftp,) if wahoo_ftp is not None else ()),
     )
 
 
@@ -240,12 +286,22 @@ def _intervals_current(reader: ObservationReader, db: Any) -> _SyncValues | None
     )
 
 
-def read_zone_thresholds(reader: ObservationReader, db: Any) -> tuple[Observation, ...]:
-    """Return the latest sync's plan-zone thresholds (``zone_thresholds``).
+def read_zone_thresholds(
+    reader: ObservationReader, db: Any, *, as_of: date
+) -> tuple[Observation, ...]:
+    """Return the plan-zone thresholds (``zone_thresholds``) current on ``as_of``.
 
     A reader that already holds ``CanonicalCurrentInputs`` takes them from there.
     """
-    return (_intervals_current(reader, db) or _NO_SYNC).zone_thresholds
+    intervals = _intervals_current(reader, db) or _NO_SYNC
+    wahoo_ftp = _wahoo_ftp(reader, db, as_of=as_of)
+    return provider_zone_thresholds(
+        (
+            *_threshold_candidates(intervals, wahoo_ftp),
+            *read_garmin_thresholds(reader, db),
+        ),
+        as_of=as_of,
+    )
 
 
 def _athlete_eftp(observations: tuple[Observation, ...]) -> Observation | None:
@@ -290,6 +346,19 @@ def _wahoo_current(
     ranked by ``select_current`` over every stored Wahoo weight. Both must be within
     their age limit on ``as_of``.
     """
+    ftp = _wahoo_ftp(reader, db, as_of=as_of)
+    weights = [
+        observation
+        for observation in reader.observations(db, MetricKind.WEIGHT)
+        if observation.provenance.provider is ProviderId.WAHOO
+    ]
+    return ftp, select_current(weights, MetricKind.WEIGHT, as_of=as_of)
+
+
+def _wahoo_ftp(
+    reader: ObservationReader, db: Any, *, as_of: date
+) -> Observation | None:
+    """The newest stored Wahoo cycling FTP when it is current on ``as_of``."""
     ftps = [
         observation
         for observation in reader.observations(db, MetricKind.FTP)
@@ -297,17 +366,9 @@ def _wahoo_current(
         and observation.sport is Sport.RIDE
     ]
     newest = max(ftps, key=_newest_first, default=None)
-    ftp = (
-        None
-        if newest is None
-        else select_current([newest], MetricKind.FTP, sport=Sport.RIDE, as_of=as_of)
-    )
-    weights = [
-        observation
-        for observation in reader.observations(db, MetricKind.WEIGHT)
-        if observation.provenance.provider is ProviderId.WAHOO
-    ]
-    return ftp, select_current(weights, MetricKind.WEIGHT, as_of=as_of)
+    if newest is None:
+        return None
+    return select_current([newest], MetricKind.FTP, sport=Sport.RIDE, as_of=as_of)
 
 
 def _newest_first(observation: Observation) -> tuple[date, datetime]:

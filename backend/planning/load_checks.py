@@ -7,8 +7,8 @@ Load = duration x intensity^2 (TSS principle), per sport:
   weighted (grade-adjusted) pace, else average pace, over threshold pace; without
   both, a heart-rate fallback over LTHR that is marked less precise.
 Thresholds follow the Coach precedence: locally confirmed zone configurations
-first, then the latest Intervals.icu sync, which counts only when it is at most
-``THRESHOLD_MAX_AGE_DAYS`` old. Anything missing or stale is unknown and
+first, then the source-policy provider winners (an Intervals.icu sync counts only
+when it is at most ``THRESHOLD_MAX_AGE_DAYS`` old). Anything missing or stale is unknown and
 named as such; no number is made up. Strength has no planned session-RPE in
 planned units, so it takes no part. The evidence is extrapolated from distance
 and volume studies, not directly validated, and every note is non-blocking.
@@ -31,11 +31,12 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.vocabulary import Environment, Sport, ZoneConfigurationMetric
+from backend.performance.source_policy import INTERVALS_THRESHOLD_MAX_AGE_DAYS
 from backend.planning.planned_unit_load import estimate_planned_unit, resolve_thresholds
 from backend.planning.sport import planned_sport_environment
 
 LOAD_EVIDENCE = "extrapolated from distance/volume studies, not directly validated"
-THRESHOLD_MAX_AGE_DAYS = 30
+THRESHOLD_MAX_AGE_DAYS = INTERVALS_THRESHOLD_MAX_AGE_DAYS
 SESSION_WINDOW_DAYS = 30
 SPIKE_FACTOR = 1.10
 SPIKE_WARNING_FACTOR = 1.30
@@ -110,26 +111,26 @@ def _has_configuration(
 def load_thresholds(
     inputs: Any, today: date, configurations: Sequence[ZoneConfiguration] = ()
 ) -> LoadThresholds:
-    """Thresholds with the Coach precedence: locally confirmed values, then Intervals.
+    """Thresholds with the Coach precedence: locally confirmed values, then providers.
 
-    Intervals.icu values count only when the latest sync is at most
-    ``THRESHOLD_MAX_AGE_DAYS`` old; local values do not age. Without either the
-    thresholds are unusable and named as missing or stale.
+    ``inputs.zone_thresholds`` are the source-policy provider winners: Intervals.icu
+    values count only from a sync at most ``THRESHOLD_MAX_AGE_DAYS`` old, Garmin
+    and Wahoo values within their own age limits; local values do not age.
+    Provider zone configurations age with the Intervals.icu sync. Without any
+    threshold the thresholds are unusable and named as missing or stale.
     """
     synced = inputs.synced_at
-    reason = None
-    if synced is None:
-        reason = "missing_thresholds"
-    elif (today - synced.date()).days > THRESHOLD_MAX_AGE_DAYS:
-        reason = "stale_thresholds"
-    if reason:
-        # Provider values age with the sync; only athlete-confirmed ones remain.
+    observed = tuple(inputs.zone_thresholds)
+    stale = synced is not None and (today - synced.date()).days > THRESHOLD_MAX_AGE_DAYS
+    if synced is None or stale:
+        # Provider configurations age with the sync; only athlete-confirmed ones remain.
         configurations = [
             item for item in configurations if item.provenance.provider is None
         ]
-        if not _has_configuration(configurations, today):
-            return LoadThresholds(unavailable=reason)
-    observed = () if reason else inputs.zone_thresholds
+    if not observed and not _has_configuration(configurations, today):
+        return LoadThresholds(
+            unavailable="stale_thresholds" if stale else "missing_thresholds"
+        )
 
     def resolve(
         sport: Sport, environment: Environment, day: date | None

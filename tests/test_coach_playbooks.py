@@ -43,6 +43,8 @@ BLOCK_WORD_BUDGETS = {
     "_STRENGTH_LEGS": 75,
     "_SEASON_PHASE": 75,
     "_PRECEDENCE": 30,
+    # Plan targets use the resolved thresholds; name a flagged FTP conflict.
+    "_THRESHOLDS": 30,
     "_CALENDAR": 45,
     "_PLAN_CHECK": 80,
     "_ADAPTIVE": 140,

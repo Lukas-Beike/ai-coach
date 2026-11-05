@@ -137,8 +137,12 @@ class ProviderIdPayloadTests(unittest.TestCase):
             _empty_garmin_metrics(cycling_ftp_watts=260),
         )
 
-        self.assertEqual(result["cycling_ftp_watts"]["source"], "Garmin Connect")
-        self.assertEqual(result["cycling_ftp_watts"]["source_provider"], "garmin")
+        # The Intervals ride setting precedes Garmin's FTP (#1668).
+        self.assertEqual(result["cycling_ftp_watts"]["source"], "Intervals.icu")
+        self.assertEqual(result["cycling_ftp_watts"]["source_provider"], "intervals")
+        self.assertEqual(
+            result["cycling_ftp_watts"]["alternatives"][0]["source_provider"], "garmin"
+        )
         self.assertEqual(result["cycling_eftp_watts"]["source_provider"], None)
         self.assertIsNone(result["run_threshold_watts"]["value"])
         self.assertIsNone(result["run_threshold_watts"]["source_provider"])
