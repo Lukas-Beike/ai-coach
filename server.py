@@ -810,6 +810,7 @@ HISTORY = HistoryAssembly(
             competition_service=PLANNING_DATA.competition,
             zone_service=ATHLETE_DATA.zones,
             feedback_service=ATHLETE_DATA.activity_feedback,
+            session_corrections=ATHLETE_DATA.session_corrections,
         ),
         planning=HistoryPlanningServices(
             workout_library_service=PLANNING_DATA.workout_library,
@@ -1498,6 +1499,7 @@ COACH_READ_TOOLS = CoachReadToolsAssembly(
             profile_service=ATHLETE_DATA.profile,
             today=lambda: ATHLETE_CLOCK.now().date(),
             report_services=lambda: HTTP_API.training_reports(),
+            session_corrections=ATHLETE_DATA.session_corrections,
         ),
         planning=CoachPlanningReadSources(
             structured_training_state_service=PLANNING_WORKFLOWS.structured_training_state_service,
@@ -1824,6 +1826,7 @@ COACH_COMMAND_TOOLS = CoachCommandToolsAssembly(
         nutrition_diary_service=NUTRITION_ASSEMBLY.diary_service,
         nutrition_meal_library_service=NUTRITION_ASSEMBLY.meal_library_service,
         equipment_service=ATHLETE_DATA.equipment,
+        session_corrections_service=ATHLETE_DATA.session_corrections,
     ),
     profile_tools=CoachProfileToolDependencies(
         profile_service=lambda: ATHLETE_DATA.profile(),
@@ -2223,6 +2226,7 @@ HTTP_API = HttpApiAssembly(
                 activity_read=ACTIVITY_READS.activity_read,
                 equipment=ATHLETE_DATA.equipment,
                 activity_feedback=ATHLETE_DATA.activity_feedback,
+                session_corrections=ATHLETE_DATA.session_corrections,
                 zones=ATHLETE_DATA.zones,
                 body_export=lambda profile, revision, deadline: (
                     GARMIN_ASSEMBLY.body_export(ATHLETE_DATA.profile()).export(

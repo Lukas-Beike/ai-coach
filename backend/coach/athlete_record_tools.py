@@ -16,6 +16,12 @@ from backend.nutrition.diary import NutritionDiaryService
 from backend.nutrition.meal_library import NutritionMealLibraryService
 from backend.planning.competition_service import CompetitionService
 
+_EQUIPMENT_TOOLS = frozenset(
+    {"save_equipment", "assign_activity_equipment", "log_equipment_maintenance"}
+)
+_SESSION_TOOLS = frozenset(
+    {"confirm_activity_session", "split_activity_session", "merge_activity_sessions"}
+)
 _NUTRITION_UNAVAILABLE = "NutritionService ist nicht verfügbar."
 
 
@@ -31,6 +37,7 @@ class CoachAthleteRecordToolService:
         nutrition_meal_library: NutritionMealLibraryService | None = None,
         *,
         equipment: Any = None,
+        session_corrections: Any = None,
     ) -> None:
         self._checkins = checkins
         self._activity_feedback = activity_feedback
@@ -38,27 +45,15 @@ class CoachAthleteRecordToolService:
         self._nutrition_diary = nutrition_diary
         self._nutrition_meal_library = nutrition_meal_library
         self._equipment = equipment
+        self._session_corrections = session_corrections
 
     def execute(
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
     ) -> dict[str, Any] | None:
-        if name in {
-            "save_equipment",
-            "assign_activity_equipment",
-            "log_equipment_maintenance",
-        }:
-            self._authorize(
-                intent, name, "Diese lokale Erfassung ist nicht autorisiert."
-            )
-            require_coach_scope(intent, "local_equipment")
-            if self._equipment is None:
-                raise AppError(503, "Ausrüstung ist nicht verfügbar.")
-            method = {
-                "save_equipment": self._equipment.save,
-                "assign_activity_equipment": self._equipment.assign,
-                "log_equipment_maintenance": self._equipment.maintain,
-            }[name]
-            return method(structured_action_payload(arguments))
+        if name in _EQUIPMENT_TOOLS:
+            return self._execute_equipment(name, arguments, intent)
+        if name in _SESSION_TOOLS:
+            return self._execute_session(name, arguments, intent)
         if name in {
             "save_nutrition_template",
             "save_nutrition_product",
@@ -147,6 +142,44 @@ class CoachAthleteRecordToolService:
             require_coach_scope(intent, f"competition:{competition_id}")
             return {"ok": True, **self._competitions.delete(competition_id)}
         return None
+
+    def _execute_equipment(
+        self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
+    ) -> Any:
+        """Save, assign or maintain equipment for the Coach."""
+        self._authorize(intent, name, "Diese lokale Erfassung ist nicht autorisiert.")
+        require_coach_scope(intent, "local_equipment")
+        if self._equipment is None:
+            raise AppError(503, "Ausrüstung ist nicht verfügbar.")
+        method = {
+            "save_equipment": self._equipment.save,
+            "assign_activity_equipment": self._equipment.assign,
+            "log_equipment_maintenance": self._equipment.maintain,
+        }[name]
+        return method(structured_action_payload(arguments))
+
+    def _execute_session(
+        self, name: str, arguments: dict[str, Any], intent: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Confirm, split or merge a canonical session for the Coach."""
+        self._authorize(intent, name, "Diese lokale Korrektur ist nicht autorisiert.")
+        require_coach_scope(intent, "local_activity_session")
+        if self._session_corrections is None:
+            raise AppError(503, "Aktivitätskorrekturen sind nicht verfügbar.")
+        payload = structured_action_payload(arguments)
+        service = self._session_corrections
+        activity_id = str(payload.get("activity_id") or "")
+        if name == "confirm_activity_session":
+            result = service.confirm(activity_id, source="coach")
+        elif name == "split_activity_session":
+            result = service.split(
+                activity_id, str(payload.get("member_id") or ""), source="coach"
+            )
+        else:
+            result = service.merge(
+                activity_id, str(payload.get("other_id") or ""), source="coach"
+            )
+        return {"ok": True, "stored_locally": True, **result}
 
     def _execute_nutrition(
         self, name: str, arguments: dict[str, Any], intent: dict[str, Any]

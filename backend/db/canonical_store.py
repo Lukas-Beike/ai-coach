@@ -1980,6 +1980,121 @@ def set_activity_session_link_kind(
     )
 
 
+SESSION_CORRECTION_COLUMNS: Final = (
+    "activity_id",
+    "state",
+    "merged_into",
+    "merged_into_retained",
+    "link_kind",
+    "athlete_confirmed",
+)
+
+
+def session_bundle_ids(db: Any, activity_id: str) -> list[str]:
+    """Return a session, its merge aliases and the deleted sessions retaining it."""
+    return [
+        str(row["activity_id"])
+        for row in _fetch_all(
+            db,
+            "SELECT activity_id FROM activity_sessions WHERE activity_id = ? "
+            "OR merged_into = ? OR merged_into_retained = ? ORDER BY activity_id",
+            (activity_id, activity_id, activity_id),
+        )
+    ]
+
+
+def session_correction_rows(
+    db: Any, activity_ids: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Return the bundling columns of the given sessions, ordered by id."""
+    rows: list[dict[str, Any]] = []
+    for chunk in _chunked(activity_ids):
+        rows.extend(
+            _fetch_all(
+                db,
+                f"SELECT {', '.join(SESSION_CORRECTION_COLUMNS)}, created_at, local_date "
+                f"FROM activity_sessions WHERE activity_id IN ({_placeholders(chunk)})",
+                tuple(chunk),
+            )
+        )
+    return sorted(rows, key=lambda row: str(row["activity_id"]))
+
+
+def write_session_correction_rows(
+    db: Any, rows: Sequence[Mapping[str, Any]], *, now: str
+) -> None:
+    """Store the bundling columns of existing sessions as given."""
+    for row in rows:
+        db.execute(
+            "UPDATE activity_sessions SET state = ?, merged_into = ?, "
+            "merged_into_retained = ?, link_kind = ?, athlete_confirmed = ?, "
+            "updated_at = ? WHERE activity_id = ?",
+            (
+                row["state"],
+                row["merged_into"],
+                row["merged_into_retained"],
+                row["link_kind"],
+                1 if row["athlete_confirmed"] else 0,
+                now,
+                row["activity_id"],
+            ),
+        )
+
+
+def session_member_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
+    """Return the active records of a live session and its aliases, with their session.
+
+    ``session_id`` is the session each record was created with; a hidden or
+    deleted session returns nothing.
+    """
+    return _fetch_all(
+        db,
+        "SELECT r.activity_id AS session_id, r.provider, r.recorded_by, r.sport, "
+        "r.started_at, r.duration_s, r.distance_m, r.name FROM activity_records AS r "
+        "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
+        "WHERE r.state = ? AND ((s.activity_id = ? AND s.state = ?) "
+        "OR (s.state = ? AND s.merged_into = ?)) "
+        "AND EXISTS (SELECT 1 FROM activity_sessions AS owner "
+        "WHERE owner.activity_id = ? AND owner.state = ?) "
+        "ORDER BY r.started_at, r.provider, r.provider_activity_id",
+        (
+            ActivityRecordState.ACTIVE.value,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.DUPLICATE.value,
+            activity_id,
+            activity_id,
+            ActivitySessionState.ACTIVE.value,
+        ),
+    )
+
+
+def merge_candidate_rows(
+    db: Any, local_date: str, exclude: str
+) -> list[dict[str, Any]]:
+    """Return the active records of other live sessions on one athlete-local date.
+
+    ``session_id`` is the live session; records of its aliases are listed under it.
+    """
+    return _fetch_all(
+        db,
+        "SELECT s.activity_id AS session_id, r.provider, r.recorded_by, r.sport, "
+        "r.started_at, r.duration_s, r.distance_m, r.name FROM activity_sessions AS s "
+        "JOIN activity_sessions AS m ON m.activity_id = s.activity_id "
+        "OR (m.state = ? AND m.merged_into = s.activity_id) "
+        "JOIN activity_records AS r ON r.activity_id = m.activity_id "
+        "WHERE s.state = ? AND s.local_date = ? AND s.activity_id != ? AND r.state = ? "
+        "ORDER BY s.activity_id, r.started_at, r.provider, r.provider_activity_id",
+        (
+            ActivitySessionState.DUPLICATE.value,
+            ActivitySessionState.ACTIVE.value,
+            local_date,
+            exclude,
+            ActivityRecordState.ACTIVE.value,
+        ),
+    )
+
+
 def feedback_origin_sessions(
     db: Any, references: Sequence[tuple[str, str | None]]
 ) -> dict[str, str]:

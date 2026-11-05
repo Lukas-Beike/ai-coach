@@ -207,6 +207,7 @@ class HttpAthleteServices:
     state_event_buffer: Any
     equipment: Callable[[], Any] | None = None
     activity_feedback: Callable[[], Any] | None = None
+    session_corrections: Callable[[], Any] | None = None
     zones: Callable[[], Any] | None = None
     body_export: Callable[[dict[str, str], str | None, float], str] | None = None
 
@@ -466,6 +467,7 @@ class HttpApiAssembly:
             activity_read_service,
             local_today,
             all_sync_days,
+            athlete.session_corrections,
         )
         self.history_get_routes = HistoryGetRoutes(
             session_auth_service, change_history_service
@@ -623,7 +625,10 @@ class HttpApiAssembly:
             coach_provision_service,
         )
         self.feedback_post_routes = FeedbackPostRoutes(
-            checkin_service, athlete.activity_feedback, session_rpe_load
+            checkin_service,
+            athlete.activity_feedback,
+            session_rpe_load,
+            athlete.session_corrections,
         )
         self.equipment_post_routes = (
             EquipmentPostRoutes(athlete.equipment) if athlete.equipment else None

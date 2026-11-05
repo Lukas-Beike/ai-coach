@@ -1154,6 +1154,30 @@ def build_structured_tool_schemas(
             ["activity_id", "equipment_id"],
         ),
         (
+            "confirm_activity_session",
+            "Local only: confirm how provider recordings are bundled into one activity session, so it is never re-bundled automatically. activity_id is the local session ID (act_...) from get_activity_details session_bundle.",
+            {"activity_id": {"type": "string", "minLength": 1}},
+            ["activity_id"],
+        ),
+        (
+            "split_activity_session",
+            "Local only: detach one provider recording from an activity session into its own session. Only on the athlete's explicit request. activity_id and member_id are local session IDs (act_...); member_id is a session_id from session_bundle.members of get_activity_details.",
+            {
+                "activity_id": {"type": "string", "minLength": 1},
+                "member_id": {"type": "string", "minLength": 1},
+            },
+            ["activity_id", "member_id"],
+        ),
+        (
+            "merge_activity_sessions",
+            "Local only: merge two activity sessions that are the same workout recorded by different sources. Only on the athlete's explicit request. activity_id and other_id are local session IDs (act_...); other_id comes from session_bundle.merge_candidates of get_activity_details.",
+            {
+                "activity_id": {"type": "string", "minLength": 1},
+                "other_id": {"type": "string", "minLength": 1},
+            },
+            ["activity_id", "other_id"],
+        ),
+        (
             "log_equipment_maintenance",
             "Record explicitly completed maintenance for one equipment item or component. Preserve lifetime usage and all maintenance records. Same-day activity ordering is unknown; no automatic replacement or material diagnosis.",
             {

@@ -117,6 +117,7 @@ class CoachCommandToolsAssemblyTests(unittest.TestCase):
             deps["nutrition_diary_service"].return_value,
             deps["nutrition_meal_library_service"].return_value,
             equipment=None,
+            session_corrections=None,
         )
         constructors["CoachProfileUpdateService"].assert_called_once_with(
             deps["profile_service"].return_value,

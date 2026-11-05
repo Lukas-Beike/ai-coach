@@ -67,7 +67,7 @@
     return values;
   }
 
-  function render(payload, content, api, activityId) {
+  function render(payload, content, api, activityId, reload, notice) {
     content.replaceChildren();
     const session = payload.session || {};
     renderMetadata(session, metricValues(payload), content);
@@ -78,6 +78,7 @@
     renderAerobic(payload, content);
     renderPower(payload, content);
     for (const item of payload.equipment || []) content.append(node("p", `Ausrüstung: ${item.name} · ${item.usage.distance_km} km${item.usage.maintenance_due ? " · persönliches Wartungsintervall erreicht" : ""}`));
+    renderBundle(payload.session_bundle, api, content, reload, notice);
     renderFeedback(payload.activity_feedback, session, api, activityId, content, payload.session_rpe_load);
   }
 
@@ -164,6 +165,58 @@
         void applyLoad(generation, result);
       } catch (error) { status.textContent = error.message; } finally { save.disabled = false; }
     });
+  }
+
+  function recordingText(entry) {
+    const parts = [entry.label];
+    if (entry.started_at) parts.push(formatTime(entry.started_at));
+    if (Number.isFinite(entry.duration_s)) parts.push(`${Math.round(entry.duration_s / 60)} min`);
+    return parts.join(" · ");
+  }
+
+  // The provider copies bundled into this session; confirm, split and merge each carry an undo.
+  function renderBundle(bundle, api, content, reload, notice) {
+    const members = bundle?.members || []; const candidates = bundle?.merge_candidates || [];
+    if (!reload || (members.length < 2 && !candidates.length && !notice)) return;
+    const section = node("section", null, "activity-bundle"); section.append(node("h3", "Aufzeichnungen"));
+    const status = node("p", notice?.text || "", "muted"); status.setAttribute("role", "status");
+    const buttons = [];
+    const action = (label, body, done) => {
+      const button = node("button", label, "secondary-button"); button.type = "button"; buttons.push(button);
+      button.addEventListener("click", async () => {
+        buttons.forEach((item) => { item.disabled = true; }); status.textContent = "Speichere …";
+        try {
+          const result = await api(`/api/activities/${encodeURIComponent(bundle.activity_id)}/session`, { method: "POST", body: JSON.stringify(body) });
+          await reload({ text: done, change: result.change });
+        } catch (error) { buttons.forEach((item) => { item.disabled = false; }); status.textContent = error.message; }
+      });
+      return button;
+    };
+    const list = (entries, label, body, done) => {
+      const items = node("ul", null, "activity-bundle-list");
+      for (const entry of entries) {
+        const item = node("li", recordingText(entry));
+        if (label) { item.append(" ", action(label, body(entry), done)); }
+        items.append(item);
+      }
+      return items;
+    };
+    const several = members.length > 1;
+    section.append(list(members, several ? "Trennen" : null, (entry) => ({ action: "split", member_id: entry.session_id }), "Aufzeichnung getrennt. "));
+    if (several && !bundle.athlete_confirmed) section.append(action("Zuordnung bestätigen", { action: "confirm" }, "Zuordnung bestätigt. "));
+    if (candidates.length) { section.append(node("h4", "Am selben Tag")); section.append(list(candidates, "Zusammenführen", (entry) => ({ action: "merge", other_id: entry.session_id }), "Aktivitäten zusammengeführt. ")); }
+    if (notice?.change?.id) {
+      const undo = node("button", "Rückgängig", "message-undo"); undo.type = "button";
+      undo.addEventListener("click", async () => {
+        undo.disabled = true;
+        try {
+          await api("/api/change-history/undo", { method: "POST", body: JSON.stringify({ change_id: notice.change.id, expected_current_hash: notice.change.after_hash }) });
+          await reload({ text: "Zurückgenommen." });
+        } catch (error) { undo.disabled = false; status.textContent = error.message; }
+      });
+      status.append(undo);
+    }
+    section.append(status); content.append(section);
   }
 
   // Undo restores the feedback rows as they were before this save or removal.
@@ -365,14 +418,14 @@
     }, { once: true });
     showDialog(currentDialog, back);
     const isCurrent = () => token === generation;
-    async function load() {
+    async function load(notice) {
       const payload = await api(`/api/activities/${encodeURIComponent(activityId)}`);
       if (!isCurrent()) return;
-      render(payload, content, api, activityId);
+      render(payload, content, api, activityId, load, notice);
       title.textContent = payload.session?.name || activity.name || "Aktivitätsdetails";
       status.textContent = "";
       actions.replaceChildren(refreshActions(payload, {
-        api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: load, onSetup: () => close(false),
+        api, isCurrent, onStatus: (text) => { status.textContent = text; }, onLoaded: () => load(), onSetup: () => close(false),
       }));
     }
     try { await load(); } catch (error) { if (isCurrent()) status.textContent = error.message; }

@@ -1131,6 +1131,53 @@ class CoachToolCoverageTests(DialogueHarness, unittest.TestCase):
         )
         self.assertEqual(server.SYNC_JOB_QUEUE.service().list(), [])
 
+    @covers(
+        "confirm_activity_session:success",
+        "split_activity_session:success",
+        "merge_activity_sessions:success",
+    )
+    def test_session_tools_correct_the_bundle_and_leave_a_change_receipt(self):
+        common = {
+            "type": "Ride",
+            "start_date_local": "2026-09-06T10:00:00",
+            "moving_time": 3600,
+            "distance": 30000,
+        }
+        self.seed_duplicate_pair(common)
+        sessions = server.ATHLETE_DATA.session_corrections()
+        with server.database_manager().read_snapshot() as db:
+            first = db.execute(
+                "SELECT activity_id FROM activity_sessions WHERE state='active'"
+            ).fetchone()["activity_id"]
+        bundle = sessions.bundle(first)
+        self.assertEqual(len(bundle["members"]), 2)
+        confirmed = self.run_tool(
+            "confirm_activity_session",
+            {"payload": {"activity_id": first}},
+            ["local_activity_session"],
+            message="Bestätige diese Aktivität.",
+        )
+        self.assertEqual(confirmed["status"], "confirmed")
+        member = next(
+            m["session_id"] for m in bundle["members"] if m["session_id"] != first
+        )
+        split = self.run_tool(
+            "split_activity_session",
+            {"payload": {"activity_id": first, "member_id": member}},
+            ["local_activity_session"],
+            message="Trenne diese Aufzeichnung ab.",
+        )
+        self.assertEqual(split["status"], "split")
+        self.assertIsNotNone(split["change"])
+        merged = self.run_tool(
+            "merge_activity_sessions",
+            {"payload": {"activity_id": first, "other_id": member}},
+            ["local_activity_session"],
+            message="Führe die beiden Aktivitäten zusammen.",
+        )
+        self.assertEqual(merged["status"], "merged")
+        self.assertEqual(len(sessions.bundle(first)["members"]), 2)
+
     @covers("delete_duplicate_intervals_activity:success")
     def test_delete_duplicate_intervals_activity(self):
         common = {

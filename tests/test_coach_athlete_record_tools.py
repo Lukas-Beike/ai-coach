@@ -99,6 +99,54 @@ class CoachAthleteRecordToolServiceTests(unittest.TestCase):
         )
         self.nutrition.delete_meal.assert_called_once_with("nut-1")
 
+    def test_session_tools_call_the_correction_service_with_coach_source(self):
+        sessions = Mock()
+        receipt = {"status": "ok", "change": {"id": "c1"}}
+        sessions.confirm.return_value = sessions.split.return_value = receipt
+        sessions.merge.return_value = receipt
+        service = CoachAthleteRecordToolService(
+            self.checkins,
+            self.feedback,
+            self.competitions,
+            session_corrections=sessions,
+        )
+        cases = (
+            (
+                "confirm_activity_session",
+                {"payload": {"activity_id": "act_1"}},
+                sessions.confirm,
+                ("act_1",),
+            ),
+            (
+                "split_activity_session",
+                {"payload": {"activity_id": "act_1", "member_id": "act_2"}},
+                sessions.split,
+                ("act_1", "act_2"),
+            ),
+            (
+                "merge_activity_sessions",
+                {"payload": {"activity_id": "act_1", "other_id": "act_3"}},
+                sessions.merge,
+                ("act_1", "act_3"),
+            ),
+        )
+        for name, arguments, method, expected in cases:
+            with self.subTest(name=name):
+                intent = {
+                    "operation": name,
+                    "authorization_scope": ["local_activity_session"],
+                }
+                result = service.execute(name, arguments, intent)
+                self.assertEqual(
+                    result, {"ok": True, "stored_locally": True, **receipt}
+                )
+                method.assert_called_once_with(*expected, source="coach")
+                with self.assertRaises(AppError) as raised:
+                    service.execute(
+                        name, arguments, {**intent, "authorization_scope": []}
+                    )
+                self.assertEqual(raised.exception.reason, "intent_scope_denied")
+
     def test_operation_and_scope_denials_block_each_tool(self):
         cases = (
             (

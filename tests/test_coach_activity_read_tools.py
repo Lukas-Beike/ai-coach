@@ -90,6 +90,22 @@ class CoachActivityReadToolServiceTests(unittest.TestCase):
         with self.assertRaises(AppError):
             service.execute("get_training_report", {"sections": ["unknown"]})
 
+    def test_activity_detail_exposes_the_session_bundle_for_corrections(self):
+        read = Mock()
+        read.detail.return_value = {"session": {"activity_id": "act_1"}}
+        corrections = Mock()
+        corrections.bundle.return_value = {"activity_id": "act_1", "members": []}
+        service = CoachActivityReadToolService(
+            read,
+            Mock(),
+            Mock(),
+            date.today,
+            session_corrections=corrections,
+        )
+        result = service.execute("get_activity_details", {"activity_id": "act_1"})
+        corrections.bundle.assert_called_once_with("act_1")
+        self.assertEqual(result["session_bundle"]["activity_id"], "act_1")
+
     def test_report_can_select_body_history_and_sleep_timing_variability(self):
         report = Mock()
         derived = SimpleNamespace(body_history=Mock(), sleep_timing_variability=Mock())

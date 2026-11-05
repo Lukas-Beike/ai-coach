@@ -41,7 +41,7 @@ from backend.canonical.vocabulary import (
 )
 from backend.db import canonical_store
 
-__all__ = ["garmin_activity_matches", "link_activity_sessions"]
+__all__ = ["garmin_activity_matches", "link_activity_sessions", "session_age"]
 
 LINK_MARGIN: Final = timedelta(days=1)
 _MATCH_SEARCH: Final = timedelta(days=1)
@@ -262,7 +262,7 @@ class _Sessions:
             return False
         if self._origins_of(first) & self._origins_of(second):
             return False
-        keep, drop = sorted((first, second), key=_age)
+        keep, drop = sorted((first, second), key=session_age)
         if not canonical_store.merge_activity_session(
             self._db, activity_id=drop["activity_id"], into=keep["activity_id"], now=now
         ):
@@ -327,7 +327,7 @@ def _mergeable(row: dict[str, Any]) -> bool:
     )
 
 
-def _age(row: dict[str, Any]) -> tuple[datetime, str]:
+def session_age(row: dict[str, Any]) -> tuple[datetime, str]:
     """Order sessions by creation time, then id: the older one stays valid."""
     created = datetime.fromisoformat(str(row["created_at"]))
     if created.tzinfo is None:
