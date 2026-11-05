@@ -364,6 +364,7 @@ def _activity(row: Mapping[str, Any]) -> ActivityRecord:
         elevation_low_m=canonical_store.activity_elevation_low(row["details"]),
         steps=canonical_store.activity_steps(row["details"]),
         device_type=canonical_store.activity_device_type(row["details"]),
+        external_ref=canonical_store.activity_external_ref(row["details"]),
         **canonical_store.activity_summary_values(row["details"]),
     )
 

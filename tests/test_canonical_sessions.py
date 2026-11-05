@@ -25,8 +25,9 @@ from backend.activities.canonical_sessions import (
     wahoo_garmin_copy_match,
 )
 from backend.activities.duplicate_inspection import latest_wahoo_garmin_duplicate
-from backend.canonical.records import ActivityRecord, Provenance
+from backend.canonical.records import ActivityRecord, ExternalRef, Provenance
 from backend.canonical.vocabulary import (
+    ActivityLinkKind,
     Environment,
     LoadModel,
     ProviderId,
@@ -503,6 +504,107 @@ class FixtureParityTests(unittest.TestCase):
         self.assertEqual(1, len(sessions))
         self.assertEqual("w-1", sessions[0].primary.activity_id)
         self.assertEqual(["g-1"], [d.activity_id for d in sessions[0].duplicates])
+
+
+def _intervals_copy_of(upstream: str, **fields: Any) -> dict[str, Any]:
+    return intervals_ride(
+        **{
+            "id": "copy-1",
+            "device_name": "Garmin Edge 840",
+            "source": "GARMIN_CONNECT",
+            "external_id": upstream,
+            **fields,
+        }
+    )
+
+
+def _session_of(
+    sessions: tuple[ActivitySession, ...], activity_id: str
+) -> ActivitySession:
+    return next(
+        session
+        for session in sessions
+        if activity_id
+        in {session.primary.activity_id, *(d.activity_id for d in session.duplicates)}
+    )
+
+
+class ExactLinkTests(unittest.TestCase):
+    def assert_exact_pair(
+        self, sessions: tuple[ActivitySession, ...], primary: str, duplicate: str
+    ) -> None:
+        session = _session_of(sessions, duplicate)
+        self.assertEqual(primary, session.primary.activity_id)
+        self.assertEqual(
+            [(duplicate, ActivityLinkKind.EXACT)],
+            [
+                (record.activity_id, kind)
+                for record, kind in zip(
+                    session.duplicates, session.link_kinds, strict=True
+                )
+            ],
+        )
+
+    def test_long_pause_copy_links_exactly_despite_moving_time(self) -> None:
+        garmin = garmin_ride(activityId=1, duration=16200.0)  # elapsed 4:30
+        copy = _intervals_copy_of("1", moving_time=13200)  # moving 3:40
+        self.assertFalse(
+            _canonical_garmin_duplicate(garmin, intervals_ride(moving_time=13200))
+        )
+        sessions = _bundle(_map_garmin([garmin]), _map_intervals([copy]))
+        self.assertEqual(1, len(sessions))
+        self.assert_exact_pair(sessions, "copy-1", "1")
+
+    def test_trimmed_and_shifted_copy_links_exactly(self) -> None:
+        garmin = garmin_ride(activityId=1)
+        copy = _intervals_copy_of(
+            "1", distance=21000.0, start_date_local="2026-06-01T08:10:00"
+        )
+        sessions = _bundle(_map_garmin([garmin]), _map_intervals([copy]))
+        self.assert_exact_pair(sessions, "copy-1", "1")
+
+    def test_exact_links_win_over_a_closer_heuristic_pair(self) -> None:
+        # Garmin 1 matches the copy perfectly; the copy names Garmin 2, which
+        # also lies within tolerance. The named upstream wins.
+        garmin = [
+            garmin_ride(activityId=1),
+            garmin_ride(activityId=2, startTimeLocal="2026-06-01 07:20:00"),
+        ]
+        sessions = _bundle(
+            _map_garmin(garmin), _map_intervals([_intervals_copy_of("2")])
+        )
+        self.assert_exact_pair(sessions, "copy-1", "2")
+        self.assertEqual((), _session_of(sessions, "1").duplicates)
+
+    def test_unknown_upstream_leaves_the_copy_to_the_heuristics(self) -> None:
+        garmin = [garmin_ride(activityId=1)]
+        intervals = [
+            _intervals_copy_of("999"),
+            intervals_ride(id="i-2", start_date_local="2026-06-02T07:00:00"),
+        ]
+        garmin.append(garmin_ride(activityId=3, startTimeLocal="2026-06-02 07:00:00"))
+        sessions = _bundle(_map_garmin(garmin), _map_intervals(intervals))
+        for primary, duplicate in (("copy-1", "1"), ("i-2", "3")):
+            session = _session_of(sessions, duplicate)
+            self.assertEqual(primary, session.primary.activity_id)
+            self.assertEqual((ActivityLinkKind.HEURISTIC,), session.link_kinds)
+
+    def test_wahoo_copy_links_exactly_to_the_wahoo_workout(self) -> None:
+        wahoo = _ride(
+            "w-1",
+            provider=ProviderId.WAHOO,
+            started_at=datetime(2026, 6, 1, 8, 0, tzinfo=BERLIN),
+            distance_m=20000.0,
+        )
+        copy = _wahoo(source="WAHOO", external_id="w-1")
+        sessions = _bundle([wahoo], _map_intervals([copy]))
+        self.assert_exact_pair(sessions, "wahoo-1", "w-1")
+
+    def test_a_copy_without_an_upstream_source_has_no_reference(self) -> None:
+        (record,) = _map_intervals([intervals_ride(source="UPLOAD", external_id="1")])
+        self.assertIsNone(record.external_ref)
+        (record,) = _map_intervals([_intervals_copy_of("1")])
+        self.assertEqual(ExternalRef(ProviderId.GARMIN, "1"), record.external_ref)
 
 
 class LatestWahooDifferenceTests(unittest.TestCase):

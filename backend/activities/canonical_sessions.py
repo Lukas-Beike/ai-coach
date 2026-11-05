@@ -1,5 +1,13 @@
 """Bundle canonical activity records into sessions with the legacy duplicate rules.
 
+Exact links come before every pass that joins a Garmin- or Wahoo-provider
+record (only the Intervals.icu-internal Wahoo/Garmin copy pass runs earlier): an
+Intervals.icu record whose external reference names a
+stored Garmin- or Wahoo-provider record (``source`` with ``external_id``) joins
+that record whatever the times and measurements say. The heuristic rules below
+decide only the records left without an exact link; an Intervals.icu record whose
+upstream record is not among the inputs stays open to them.
+
 The pairwise rules are those of ``backend.activities.duplicates`` over
 ``ActivityRecord`` values; the one-to-one assignment below is canonical only (the
 raw-row helpers still accept any match):
@@ -40,8 +48,7 @@ Wahoo-provider records (direct Wahoo ingest) join the same bundling:
 * a Wahoo-provider record duplicates an Intervals.icu record recorded by Wahoo when
   the starts are within 30 minutes, the sport families agree (or either is
   "other"), and every comparable measurement agrees (the Garmin-versus-Intervals
-  tolerances apply). Canonical records carry no provider file key, so this link is
-  always heuristic.
+  tolerances apply).
 * a Garmin-provider cycling ride that matched no Intervals.icu record duplicates a
   Wahoo-provider cycling ride under the Wahoo/Garmin-copy rule above. A Wahoo
   record that is itself a duplicate passes its own primary on to the Garmin record,
@@ -111,8 +118,8 @@ def bundle_sessions(
 ) -> tuple[ActivitySession, ...]:
     """Group records into sessions, with the primary first in each session."""
     entries = tuple(_entry(record, zone) for record in sorted(records, key=_order_key))
-    duplicate_of = _assign_duplicates(entries)
-    return _sessions(entries, duplicate_of)
+    duplicate_of, exact = _assign_duplicates(entries)
+    return _sessions(entries, duplicate_of, exact)
 
 
 def wahoo_garmin_copy_match(
@@ -210,8 +217,8 @@ class _WallWindow:
         ]
 
 
-def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
-    """Map each duplicate's index to the index of its primary.
+def _assign_duplicates(entries: tuple[_Entry, ...]) -> tuple[dict[int, int], set[int]]:
+    """Map each duplicate's index to the index of its primary; return the exact ones.
 
     Every pass is a one-to-one assignment: a session takes at most one record of
     the joining kind, and the closest candidate pair wins (see ``_assign_pairs``).
@@ -245,8 +252,14 @@ def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
         for index, entry in enumerate(entries)
         if entry.record.provenance.provider is ProviderId.GARMIN
     ]
-    # Sessions that already hold a Garmin-provider record.
+    # Sessions that already hold a Garmin-provider, or a Wahoo-provider, record.
     joined: set[int] = set()
+    wahoo_joined: set[int] = set()
+    exact = _assign_exact(
+        entries,
+        duplicate_of,
+        {ProviderId.GARMIN: joined, ProviderId.WAHOO: wahoo_joined},
+    )
     _assign_pairs(
         entries, duplicate_of, garmin, intervals_window, _garmin_intervals_cost, joined
     )
@@ -260,8 +273,43 @@ def _assign_duplicates(entries: tuple[_Entry, ...]) -> dict[int, int]:
         ),
         joined,
     )
-    _assign_wahoo_provider_duplicates(entries, duplicate_of, intervals_window, joined)
-    return duplicate_of
+    _assign_wahoo_provider_duplicates(
+        entries, duplicate_of, intervals_window, joined, wahoo_joined
+    )
+    return duplicate_of, exact
+
+
+def _assign_exact(
+    entries: tuple[_Entry, ...],
+    duplicate_of: dict[int, int],
+    taken: dict[ProviderId, set[int]],
+) -> set[int]:
+    """Join each upstream record to the Intervals.icu copy that names it.
+
+    ``taken`` holds, per upstream provider, the sessions that already have a
+    record of it. Copies are visited in record order; an upstream record named by
+    several copies joins the first, and a session takes one record per provider.
+    """
+    upstream_index = {
+        (entry.record.provenance.provider, entry.record.activity_id): index
+        for index, entry in enumerate(entries)
+        if entry.record.provenance.provider in taken
+    }
+    exact: set[int] = set()
+    for index, entry in enumerate(entries):
+        ref = entry.record.external_ref
+        if ref is None or not _is_intervals(entry.record):
+            continue
+        source = upstream_index.get((ref.upstream, ref.upstream_id))
+        if source is None or source in duplicate_of:
+            continue
+        primary = duplicate_of.get(index, index)
+        if primary in taken[ref.upstream]:
+            continue
+        duplicate_of[source] = primary
+        taken[ref.upstream].add(primary)
+        exact.add(source)
+    return exact
 
 
 def _assign_wahoo_provider_duplicates(
@@ -269,6 +317,7 @@ def _assign_wahoo_provider_duplicates(
     duplicate_of: dict[int, int],
     intervals_window: _WallWindow,
     garmin_joined: set[int],
+    wahoo_joined: set[int],
 ) -> None:
     """Join Wahoo-provider records to Intervals.icu copies, then Garmin records to Wahoo."""
     wahoo = [
@@ -277,7 +326,12 @@ def _assign_wahoo_provider_duplicates(
         if entry.record.provenance.provider is ProviderId.WAHOO
     ]
     _assign_pairs(
-        entries, duplicate_of, wahoo, intervals_window, _wahoo_intervals_cost, set()
+        entries,
+        duplicate_of,
+        wahoo,
+        intervals_window,
+        _wahoo_intervals_cost,
+        wahoo_joined,
     )
     wahoo_rides = [
         index for index in wahoo if entries[index].record.sport is Sport.RIDE
@@ -440,20 +494,22 @@ def _augment(
 
 
 def _sessions(
-    entries: tuple[_Entry, ...], duplicate_of: dict[int, int]
+    entries: tuple[_Entry, ...], duplicate_of: dict[int, int], exact: set[int]
 ) -> tuple[ActivitySession, ...]:
-    members: dict[int, list[ActivityRecord]] = {
+    members: dict[int, list[int]] = {
         index: [] for index in range(len(entries)) if index not in duplicate_of
     }
     for index in range(len(entries)):
         if index in duplicate_of:
-            members[duplicate_of[index]].append(entries[index].record)
-    # Every rule is a heuristic comparison: provider records carry no shared file key.
+            members[duplicate_of[index]].append(index)
     return tuple(
         ActivitySession(
             entries[primary].record,
-            tuple(duplicates),
-            (ActivityLinkKind.HEURISTIC,) * len(duplicates),
+            tuple(entries[index].record for index in duplicates),
+            tuple(
+                ActivityLinkKind.EXACT if index in exact else ActivityLinkKind.HEURISTIC
+                for index in duplicates
+            ),
         )
         for primary, duplicates in members.items()
     )
