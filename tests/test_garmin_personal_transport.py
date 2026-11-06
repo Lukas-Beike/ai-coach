@@ -128,6 +128,15 @@ class FakePersonalApi:
             return self.activities if start == 0 else []
         if path == "/download-service/files/activity/900001":
             return _ARCHIVE
+        if path == "/activity-service/activity/900001":
+            return {
+                "activityId": 900001,
+                "summaryDTO": {
+                    "directWorkoutRpe": 60,
+                    "directWorkoutFeel": 75,
+                    "minHR": 97,
+                },
+            }
         if path.startswith("/activity-service/activity/") and path.endswith("/details"):
             return {
                 "activityId": 900001,
@@ -362,6 +371,18 @@ class PersonalOnlyCollectionTests(unittest.TestCase):
 
         self.assertEqual(payload["errors"], [])
         self.assertEqual([row["activityId"] for row in payload["activities"]], [900001])
+        self.assertEqual(
+            payload["activity_ratings"],
+            [
+                {
+                    "activityId": "900001",
+                    "startTimeLocal": f"{DAY} 11:47:18",
+                    "directWorkoutRpe": 60,
+                    "directWorkoutFeel": 75,
+                    "minHR": 97,
+                }
+            ],
+        )
         self.assertEqual(
             payload["sleep"], [{"calendarDate": DAY, "dailySleepDTO": _flat_sleep()}]
         )

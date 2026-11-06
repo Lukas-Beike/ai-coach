@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Final, Literal
 
-from backend.canonical.vocabulary import MetricKind
+from backend.canonical.vocabulary import MetricKind, ProviderId
 
 HigherIs = Literal["better", "worse", "harder"]
 
@@ -99,6 +99,44 @@ INTERVALS_FEEL_SCALE: Final = RatingScale(
 INTERVALS_RPE_SCALE: Final = RatingScale(
     "intervals_rpe_1_10", 1, 10, "harder", {1: "sehr leicht", 10: "maximal"}
 )
+# Garmin rates RPE 10..100 and feel 0 (very weak) .. 100 (very strong) on the
+# watch; the mapper stores them as 1..10 and as the 1 strong .. 5 weak feel scale.
+GARMIN_RPE_SCALE: Final = RatingScale(
+    "garmin_rpe_1_10", 1, 10, "harder", {1: "sehr leicht", 10: "maximal"}
+)
+GARMIN_FEEL_SCALE: Final = RatingScale(
+    "garmin_feel_1_5",
+    1,
+    5,
+    "worse",
+    {1: "sehr stark", 2: "stark", 3: "normal", 4: "schwach", 5: "sehr schwach"},
+)
+# The scale of each provider's activity rating, keyed by summary field.
+ACTIVITY_RATING_SCALES: Final[Mapping[ProviderId, Mapping[str, RatingScale]]] = (
+    MappingProxyType(
+        {
+            ProviderId.GARMIN: {"rpe": GARMIN_RPE_SCALE, "feel": GARMIN_FEEL_SCALE},
+            ProviderId.INTERVALS: {
+                "rpe": INTERVALS_RPE_SCALE,
+                "feel": INTERVALS_FEEL_SCALE,
+            },
+        }
+    )
+)
+
+
+def rating_fields(scale: RatingScale, value: float) -> dict[str, object]:
+    """The scale text, label and normalized value of one rating on ``scale``."""
+    rating: dict[str, object] = {"scale": scale.describe()}
+    if not scale.minimum <= value <= scale.maximum:
+        return rating
+    text = scale.label(value)
+    if text is not None:
+        rating["rating_label"] = text
+    rating["normalized_0_1"] = round(scale.normalized(value), 3)
+    return rating
+
+
 # The app's daily check-in and activity feedback ratings run 0..10.
 LOCAL_SESSION_RPE_SCALE: Final = RatingScale(
     "local_rpe_0_10", 0, 10, "harder", {0: "Ruhe", 10: "maximal"}

@@ -186,6 +186,7 @@ class GarminRemoteReader:
         include_recovery: bool | None = None,
         include_daily_metrics: bool = True,
         known_activity_ids: frozenset[str] | None = None,
+        rated_activity_ids: frozenset[str] = frozenset(),
     ) -> tuple[dict[str, Any], list[tuple[date, date]]]:
         today = end_date or self._local_today()
         windows = split_date_windows(
@@ -223,6 +224,7 @@ class GarminRemoteReader:
                     ),
                     include_daily_metrics=include_daily_metrics,
                     known_activity_ids=known_activity_ids,
+                    rated_activity_ids=rated_activity_ids,
                 ),
             )
         finally:
@@ -942,6 +944,7 @@ class GarminSyncSource:
         include_recovery: bool | None = None,
         include_daily_metrics: bool = True,
         known_activity_ids: frozenset[str] | None = None,
+        rated_activity_ids: frozenset[str] = frozenset(),
     ) -> tuple[dict[str, Any], list[tuple[date, date]] | None, str | None, str]:
         if self.fixture_enabled():
             payload = self._fixture_loader.load(days)
@@ -954,6 +957,7 @@ class GarminSyncSource:
             include_recovery=include_recovery,
             include_daily_metrics=include_daily_metrics,
             known_activity_ids=known_activity_ids,
+            rated_activity_ids=rated_activity_ids,
         )
         return payload, windows, None, windows[0][0].isoformat()
 
@@ -1234,6 +1238,7 @@ class GarminSyncService:
                 if daily_metrics
                 else self._payload_service.known_activity_ids(days)
             ),
+            rated_activity_ids=self._payload_service.rated_activity_ids(days),
         )
         self._raise_if_cancelled(cancel_event)
         payload = (
