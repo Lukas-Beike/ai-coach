@@ -149,18 +149,20 @@ class StructureTests(unittest.TestCase):
         )
         self.assertEqual(stored, again)
 
-    def test_a_name_the_catalogue_dropped_keeps_its_stored_pair(self) -> None:
+    def test_a_request_pair_never_bypasses_the_catalogue(self) -> None:
         stored = {
             **SQUAT,
-            "garmin_exercise": "Retired Squat",
-            "garmin_pair": {"category": "SQUAT", "exercise": "RETIRED_SQUAT"},
+            "garmin_exercise": "Squat of Doom",
+            "garmin_pair": {"category": "FOO", "exercise": "BAR"},
         }
         kept = strength_structure.normalize_structure([stored])
         assert kept is not None
-        self.assertEqual(stored["garmin_pair"], kept[0]["garmin_pair"])
+        self.assertNotIn("garmin_exercise", kept[0])
+        self.assertNotIn("garmin_pair", kept[0])
+        # Export falls back to the exercise name's alias.
         found = mapping.resolve_exercise(kept[0])
         assert found is not None
-        self.assertEqual("RETIRED_SQUAT", found.exercise)
+        self.assertEqual("BARBELL_BACK_SQUAT", found.exercise)
 
     def test_unknown_garmin_exercise_is_rejected_with_suggestions(self) -> None:
         with self.assertRaises(AppError) as raised:
