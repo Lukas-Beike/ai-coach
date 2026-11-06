@@ -661,6 +661,12 @@ async function renderCyclingPowerProfile() {
     root.replaceChildren(reportNode("h4", "Leistungsprofil"));
     root.append(reportNode("p", "Beste gemessene Durchschnittsleistung · letzte 90 Tage · Rad und Indoor zusammen", "analysis-reference-note"));
     root.append(cyclingPowerProfileTable(result));
+    const coverage = result.windows?.["90"]?.cache_coverage;
+    if (coverage?.unknown_records > 0) {
+      const gap = reportNode("p", `Für ${coverage.unknown_records} von ${coverage.records} Einheiten fehlen vollständige Messreihen; die Bestwerte können höher liegen.`, "analysis-reference-note");
+      gap.dataset.powerProfileGap = "true";
+      root.append(gap);
+    }
     const criticalPower = criticalPowerLine(result);
     if (criticalPower) root.append(criticalPower);
   } catch {
