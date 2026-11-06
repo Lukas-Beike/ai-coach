@@ -542,10 +542,9 @@ def _garmin_measurement_gaps(
 ) -> list[float] | None:
     """Return the relative gap of each comparison, or None unless every one agrees."""
     gaps: list[float | None] = []
-    # Garmin ``duration`` is elapsed time, while the Intervals.icu duration is
-    # usually moving time (elapsed only when moving time is missing), so the
-    # Garmin moving duration is a second candidate. The elapsed pass also accepts
-    # the Garmin duration against the Intervals.icu elapsed time.
+    # Both durations follow the canonical rule (moving time first). Providers
+    # measure moving time differently, so the Garmin moving duration stays a
+    # second candidate, and the elapsed pass compares the two elapsed times.
     garmin_durations = [
         value
         for value in (garmin.duration_s, garmin.moving_duration_s)
@@ -558,9 +557,10 @@ def _garmin_measurement_gaps(
             for value in garmin_durations
         ]
         elapsed_s = intervals.elapsed_duration_s
-        if elapsed and garmin.duration_s is not None and elapsed_s is not None:
+        own_elapsed_s = garmin.elapsed_duration_s
+        if elapsed and own_elapsed_s is not None and elapsed_s is not None:
             candidates.append(
-                _relative_gap(garmin.duration_s, elapsed_s, DURATION_FLOOR_S, elapsed_s)
+                _relative_gap(own_elapsed_s, elapsed_s, DURATION_FLOOR_S, elapsed_s)
             )
         agreeing = [gap for gap in candidates if gap is not None]
         gaps.append(min(agreeing) if agreeing else None)

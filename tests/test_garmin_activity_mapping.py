@@ -81,8 +81,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_eleven(self) -> None:
-        self.assertEqual(11, MAPPER_VERSION)
+    def test_mapper_version_is_twelve(self) -> None:
+        self.assertEqual(12, MAPPER_VERSION)
 
     def test_strength_duration_is_the_whole_session_not_the_active_timer(
         self,
@@ -555,8 +555,9 @@ class DurationAndDistanceTests(unittest.TestCase):
         cases = (
             (
                 {"duration": 3600.0, "movingDuration": 3000.0},
-                3600.0,
+                3000.0,
             ),
+            ({"duration": 3600.0, "movingDuration": 0.0}, 3600.0),
             ({"duration": 3600.0, "movingTime": 3000.0}, 3600.0),
             ({"duration": None, "movingTime": 3200}, 3200.0),
             ({"duration": None, "movingTime": None}, None),
@@ -570,13 +571,14 @@ class DurationAndDistanceTests(unittest.TestCase):
 
     def test_moving_duration_comes_from_moving_duration_only(self) -> None:
         cases = (
-            ({"duration": 4500.0, "movingDuration": 3600.0}, 4500.0, 3600.0),
+            # #1672: duration_s is moving time first, like every provider.
+            ({"duration": 4500.0, "movingDuration": 3600.0}, 3600.0, 3600.0),
             (
                 {"duration": 4500.0, "movingDuration": 3600.0, "movingTime": 3000.0},
-                4500.0,
+                3600.0,
                 3600.0,
             ),
-            # movingTime feeds duration_s, never moving_duration_s.
+            # movingTime is timer time: it feeds duration_s, never moving_duration_s.
             ({"duration": 4500.0, "movingTime": 3000.0}, 4500.0, None),
             ({"duration": None, "movingTime": 3200}, 3200.0, None),
             ({"duration": 4500.0}, 4500.0, None),

@@ -356,8 +356,37 @@ class ExternalRef:
         require_text(self.upstream_id, "upstream_id", max_length=200)
 
 
+def activity_duration_s(
+    sport: Sport,
+    *,
+    moving: float | None,
+    timer: float | None,
+    elapsed: float | None,
+) -> float | None:
+    """The canonical ``ActivityRecord.duration_s``, the same rule for every provider.
+
+    Moving time, else timer time, else elapsed time. A zero moving time (nothing
+    moved, as in a gym session) falls through; a zero timer or elapsed time is a
+    measured zero. A strength session counts as a whole: rest between sets is
+    part of it, so its duration is the elapsed time when that is longer.
+    """
+    active = moving or (timer if timer is not None else elapsed)
+    if sport is Sport.STRENGTH and elapsed:
+        return max(active or 0.0, elapsed)
+    return active
+
+
 @dataclass(frozen=True, slots=True)
 class ActivityRecord:
+    """One provider's record of a completed activity.
+
+    ``duration_s`` follows ``activity_duration_s`` for every provider;
+    ``moving_duration_s`` and ``elapsed_duration_s`` keep the provider's own
+    moving and elapsed times. ``avg_cadence`` is in rpm and, for runs, counts one
+    leg (strides per minute, half the steps per minute), like FIT and
+    ``StreamChannel.CADENCE_RPM``.
+    """
+
     activity_id: str
     provenance: Provenance
     sport: Sport

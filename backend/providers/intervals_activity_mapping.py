@@ -18,7 +18,8 @@ produces an issue, and the next alias is tried:
 * local offset: with an exact ``start_date``, the UTC offset of the activity's
   IANA ``timezone`` at that instant, else the difference to ``start_date_local``
   -> ``local_offset_minutes``. Without an exact start it stays unknown.
-* duration: ``moving_time`` before ``elapsed_time``, as activity_validation does.
+* duration: ``activity_duration_s`` of ``moving_time`` and ``elapsed_time``:
+  moving time first, as activity_validation does; strength counts elapsed time.
   A zero duration is out of range (the legacy minimum is one second), so
   ``elapsed_time`` is then consulted. ``elapsed_time`` is also kept on its own as
   ``elapsed_duration_s``, so session bundling can compare it with a Garmin
@@ -86,6 +87,7 @@ from backend.canonical.records import (
     ActivityRecord,
     ExternalRef,
     Provenance,
+    activity_duration_s,
 )
 from backend.canonical.sports import classify_environment_text, classify_sport_text
 from backend.canonical.validation import (
@@ -117,7 +119,9 @@ from backend.canonical.vocabulary import (
 # Version 4: a source of exactly "manual" is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
 # Version 8: the activity's own time zone dates it where it was recorded.
-MAPPER_VERSION: Final = 8
+# Version 9: the duration follows the canonical rule (``activity_duration_s``),
+# so a strength session counts its elapsed time.
+MAPPER_VERSION: Final = 9
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
 MAX_NAME_LENGTH: Final = 200
@@ -551,7 +555,9 @@ def _map_row(
         sport=sport,
         environment=environment,
         started_at=started_at,
-        duration_s=moving_time if moving_time is not None else elapsed_time,
+        duration_s=activity_duration_s(
+            sport, moving=moving_time, timer=None, elapsed=elapsed_time
+        ),
         distance_m=reader.number(_DISTANCE_KEYS, 0.0, MAX_ACTIVITY_DISTANCE_M),
         load=load,
         load_model=(

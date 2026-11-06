@@ -13,6 +13,7 @@ from backend.canonical.records import (
     MetricValue,
     Observation,
     Provenance,
+    activity_duration_s,
 )
 from backend.canonical.validation import (
     METRIC_BOUNDS,
@@ -400,6 +401,36 @@ class ActivityRecordTests(unittest.TestCase):
     def test_rejects_overlong_name(self) -> None:
         with self.assertRaisesRegex(ValueError, "name must be at most 200"):
             activity(name="n" * 201)
+
+
+class ActivityDurationRuleTests(unittest.TestCase):
+    """#1672: one meaning of ``duration_s`` for every provider."""
+
+    def test_moving_then_timer_then_elapsed(self) -> None:
+        cases = (
+            ((3000.0, 3400.0, 3600.0), 3000.0),
+            ((None, 3400.0, 3600.0), 3400.0),
+            ((None, None, 3600.0), 3600.0),
+            ((0.0, 3400.0, 3600.0), 3400.0),
+            ((None, 0.0, 3600.0), 0.0),
+            ((None, None, None), None),
+        )
+        for (moving, timer, elapsed), expected in cases:
+            with self.subTest(moving=moving, timer=timer, elapsed=elapsed):
+                self.assertEqual(
+                    expected,
+                    activity_duration_s(
+                        Sport.RIDE, moving=moving, timer=timer, elapsed=elapsed
+                    ),
+                )
+
+    def test_strength_counts_the_whole_session(self) -> None:
+        self.assertEqual(
+            3600.0,
+            activity_duration_s(
+                Sport.STRENGTH, moving=1500.0, timer=1800.0, elapsed=3600.0
+            ),
+        )
 
 
 class ValidationHelperTests(unittest.TestCase):
