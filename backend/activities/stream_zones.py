@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import statistics
 from collections.abc import Callable, Mapping
-from dataclasses import replace
 from itertools import pairwise
 from types import MappingProxyType
 from typing import Final
@@ -83,7 +82,11 @@ def with_stream_zones(
             added[metric] = SetChoice(chosen=candidate, alternatives=())
     if not added:
         return merged
-    return replace(merged, zones=MappingProxyType({**merged.zones, **added}))
+    return MergedDetail(
+        streams=merged.streams,
+        laps=merged.laps,
+        zones=MappingProxyType({**merged.zones, **added}),
+    )
 
 
 def _limits(
@@ -153,8 +156,9 @@ def _derived(
         boundary_source=ZoneBoundarySource.PROFILE,
         buckets=buckets,
     )
-    return replace(
-        source,
+    return DetailCandidate(
+        started_at=source.started_at,
+        device_type=source.device_type,
         stored=StoredDetailSet(
             provider=source.stored.provider,
             provider_activity_id=source.stored.provider_activity_id,
