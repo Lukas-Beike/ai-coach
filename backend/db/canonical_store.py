@@ -1076,6 +1076,31 @@ def upsert_observation(
     return WriteOutcome.UPDATED
 
 
+def derived_daily_sums(db: Any, method: str, metric: str) -> dict[str, float]:
+    """Sum the active local derived ``metric`` values of ``method`` per observed day.
+
+    Only rows owned by a live (active or hidden) session count, so a session that
+    was deleted or merged drops out before the next stage pass retires its row.
+    """
+    rows = _fetch_all(
+        db,
+        "SELECT o.observed_on, SUM(o.value) AS total FROM observations AS o "
+        "WHERE o.provider IS NULL AND o.method = ? AND o.metric = ? "
+        "AND o.source_kind = ? AND o.state = ? AND EXISTS (SELECT 1 FROM "
+        "activity_sessions AS s WHERE s.activity_id = o.owner_record_id "
+        "AND s.state IN (?, ?)) GROUP BY o.observed_on",
+        (
+            method,
+            metric,
+            SourceKind.DERIVED.value,
+            ProjectionState.ACTIVE.value,
+            ActivitySessionState.ACTIVE.value,
+            ActivitySessionState.HIDDEN.value,
+        ),
+    )
+    return {str(row["observed_on"]): float(row["total"]) for row in rows}
+
+
 def derived_observation_rows(
     db: Any, method: str, *, owners: Sequence[str] | None = None
 ) -> list[dict[str, Any]]:

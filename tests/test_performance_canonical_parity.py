@@ -1003,6 +1003,7 @@ class CanonicalReadStatusEndToEndTests(CanonicalReadFixture):
                 ),
                 "session_rpe_load": None,
                 "smoothed_session_load": None,
+                "local_fitness_fatigue": None,
             },
         )
         self.assertNotEqual(

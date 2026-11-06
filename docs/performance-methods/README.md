@@ -13,9 +13,12 @@ a card by its `Card` ID.
 | [M4](m4-critical-power-speed.md) | Critical Power and Critical Speed | model estimate |
 | [M5](m5-smoothed-session-load.md) | Short- and long-term session-RPE load | model estimate |
 | [M6](m6-local-tss-load.md) | Local TSS-scale session load and intensity | model estimate |
+| [M7](m7-local-fitness-fatigue.md) | Local fitness, fatigue and form | model estimate |
 
 M5 covers the smoothed load curves (#1432). M6 (#1725) replaces provider TSS
-with a local load; Banister TRIMP appears only as its heart-rate branch.
+with a local load; Banister TRIMP appears only as its heart-rate branch. M7
+(#1726) smooths the M6 load into local fitness, fatigue and form in place of
+the Intervals.icu CTL, ATL and form.
 Passive CP/CS, other TRIMP uses, further
 threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based
 recommendations stay deferred without a card.

@@ -690,6 +690,7 @@ Detailed contract:
 | Critical Power and Critical Speed | `critical-power-speed` v1 | method `experimental`; per fit `ok`, `insufficient_data`, `withheld` | model estimate from the best 3/7/12-min efforts of 28 days; never FTP, threshold or zones | M4, released |
 | Short- and long-term session-RPE load (AU) | `smoothed-session-load` v1 | `estimate`, `insufficient_data` | smoothed subjective load; no fitness, form, ratio, risk or provider comparison | M5, released |
 | Session load and intensity factor (TSS scale) | `local-tss-load` v1 | stored per session with `load_branch` `power`, `pace` or `heart_rate`; none without inputs | branches are not equivalent; no fatigue, readiness or injury statement; IF = 1 is not a physiological threshold | M6, released |
+| Local fitness, fatigue and form (TSS/d) | `local-fitness-fatigue` v1 | `estimate`, `insufficient_data` | model estimate from the local load; never mixed with Intervals.icu CTL/ATL/form; no performance, risk or readiness prediction | M7, released |
 
 Passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
 
@@ -713,3 +714,22 @@ The system SHALL compute each canonical session's load with M6 `local-tss-load` 
 Detailed contract: thresholds follow `resolve_current_thresholds` per day with the policy's age limits, and an indoor or virtual ride uses a local indoor power zone of the day first; resting HR comes from the session day or up to 7 days earlier, Garmin first, else the earliest later value, flagged. Strength, yoga, alpine ski and walking get no value; an IF above 2.0 is rejected. The pass runs as the first canonical backfill follow-up, triggered by worker start, completed Intervals.icu, Garmin and Wahoo jobs, local zone changes, session corrections and their undo, and a changed preferred threshold source; one invalid session value never stops the pass. It keeps content-free counts that diagnostics and the log (`local_load_reconciled`) report.
 
 Evidence: `backend/performance/local_tss.py`, `backend/sync/local_load.py`, `backend/sync/canonical_backfill_assembly.py`, `backend/sync/executor.py:SyncJobExecutor.run`, `backend/athlete/zones.py:ZoneConfigurationService`; `tests/test_local_tss.py`, `tests/test_local_load_store.py`, `tests/test_sync_executor.py`, `tests/test_zone_configuration_canonical.py`, `docs/performance-methods/m6-local-tss-load.md`.
+
+### Requirement: Local fitness, fatigue and form are a labelled model estimate
+The system SHALL compute M7 `local-fitness-fatigue` v1 on read as the exponentially smoothed stored M6 load per local day with τ 42 days (fitness) and 7 days (fatigue), and form as fitness minus fatigue of the same day. The curves SHALL start at 0 before the first day with a stored local load of the whole history and SHALL NOT be stored, seeded, corrected or mixed with Intervals.icu CTL, ATL or form.
+
+#### Scenario: Reference values
+- **WHEN** 80 TSS fall on every second day for 120 days
+- **THEN** the last day shows the recursion values of both curves and their difference, rounded to 0.1.
+
+#### Scenario: Session without a local load
+- **WHEN** a day holds a strength session, or another session without a stored local load
+- **THEN** the session adds nothing, the day is `incomplete` with the number of such sessions and their rated session-RPE AU, and the curve values equal those without the session.
+
+#### Scenario: Warm-up and open days
+- **WHEN** the first load day is less than 84 days old, or a day from the last sync on has no session
+- **THEN** fatigue has no value before day 14, fitness and form none before day 84, and the open day has no value while the state is held.
+
+Detailed contract: each result names `metric_id` `local_fitness_fatigue`, `method_id`, `method_version`, unit `TSS/d`, status `estimate` or `insufficient_data` with reason `warmup` or `no_load`, period, parameters with the input load method, per-state day coverage (`loaded`, `incomplete`, `rest`, `open`, `no_history`), the count of sessions without a load, the latest valued day, per-day `state`, `load`, `fitness`, `fatigue` and `form`, method note, limits and the card `docs/performance-methods/m7-local-fitness-fatigue.md`. The loads come from `LocalLoadDayReader`, summed per stored local day. The Coach training report carries it for all-sport reports, the public performance history for the load tab's 84 days, where the PWA draws one chart of the three curves labelled as locally computed.
+
+Evidence: `backend/performance/fitness_fatigue.py`, `backend/sync/local_load.py:daily_local_loads`, `backend/performance/training_report.py:training_report`, `backend/http_api/public_performance.py:PublicPerformanceStateService`, `public/analysis.js:appendLocalFitnessChart`; `tests/test_fitness_fatigue.py`, `tests/test_local_load_store.py`, `tests/test_performance_coach_ui_parity.py`, `e2e/analysis-info.spec.js`, `docs/performance-methods/m7-local-fitness-fatigue.md`.

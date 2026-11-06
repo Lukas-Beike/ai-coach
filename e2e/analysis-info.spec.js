@@ -604,3 +604,21 @@ test("@responsive performance without any history renders no empty sport groups 
   await expect(page.locator("#currentPerformance")).toContainText("Noch keine aktuellen Leistungswerte.");
   await expect(page.locator("#currentPerformance")).not.toContainText("—");
 });
+
+test("@responsive load tab draws the local fitness, fatigue and form chart", async ({ page }) => {
+  await performanceFixture(page, (performance) => {
+    const end = performance.history.end;
+    const days = Array.from({ length: 28 }, (_, index) => {
+      const date = new Date(`${end}T12:00:00Z`);
+      date.setUTCDate(date.getUTCDate() - 27 + index);
+      return { date: date.toISOString().slice(0, 10), state: "loaded", load: 60, fitness: 50 + index / 10, fatigue: 55, form: index / 10 - 5 };
+    });
+    days[20] = { ...days[20], state: "incomplete", sessions_without_load: 1, session_rpe_au_without_load: 270 };
+    return { history: { ...performance.history, local_fitness_fatigue: { status: "estimate", days } } };
+  }, "load");
+  const chart = page.locator("#analysisLoadCharts .analysis-chart-card").filter({ has: page.getByRole("heading", { name: /^Fitness, Ermüdung, Form/ }) });
+  await expect(chart).toBeVisible();
+  await expect(chart).toContainText("1 Einheit ohne TSS");
+  await expect(chart).toContainText("Lokal berechnet");
+  await expect(chart).not.toContainText("Intervals");
+});

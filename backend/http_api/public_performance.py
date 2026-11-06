@@ -20,6 +20,7 @@ from backend.performance.canonical_inputs import (
     with_read_status,
 )
 from backend.performance.chart_history import analysis_history
+from backend.performance.fitness_fatigue import local_fitness_fatigue
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
 from backend.performance.session_rpe_load import (
     FeedbackLookup,
@@ -78,6 +79,7 @@ class PublicPerformanceStateService:
                     activity_reader=source.activity_summary_reader(),
                     as_of=today,
                     include_power_curve=True,
+                    include_local_load=True,
                     preferences=source.preferences_in(db),
                 ),
             )
@@ -128,7 +130,11 @@ class PublicPerformanceStateService:
             "history": {
                 **analysis_history(garmin, today, canonical=inputs),
                 **(
-                    {"session_rpe_load": None, "smoothed_session_load": None}
+                    {
+                        "session_rpe_load": None,
+                        "smoothed_session_load": None,
+                        "local_fitness_fatigue": None,
+                    }
                     if inputs.pending
                     else self._session_loads(inputs, today, timezone)
                 ),
@@ -159,7 +165,7 @@ class PublicPerformanceStateService:
     def _session_loads(
         self, inputs: CanonicalPerformanceInputs, today: date, timezone: str
     ) -> dict[str, dict[str, Any]]:
-        """Session-RPE load and its smoothed curves of the load tab's 12 weeks."""
+        """Session-RPE load, its smoothed curves and the local fitness of 12 weeks."""
         start = today - timedelta(days=_SESSION_RPE_LOAD_DAYS - 1)
         # One feedback read for both: the smoothed curves need the earlier weeks.
         summaries = [
@@ -172,6 +178,7 @@ class PublicPerformanceStateService:
         computed_at = (
             None if self._now is None else self._now().isoformat(timespec="seconds")
         )
+        open_from = complete_before(today, inputs.activities_synced_at, timezone)
         return {
             "session_rpe_load": session_rpe_load(
                 summaries,
@@ -188,9 +195,18 @@ class PublicPerformanceStateService:
                 start=start,
                 end=today,
                 today=today,
-                complete_before=complete_before(
-                    today, inputs.activities_synced_at, timezone
-                ),
+                complete_before=open_from,
+                timezone=timezone,
+                computed_at=computed_at,
+            ),
+            "local_fitness_fatigue": local_fitness_fatigue(
+                inputs.local_load_days or {},
+                summaries,
+                feedback,
+                start=start,
+                end=today,
+                today=today,
+                complete_before=open_from,
                 timezone=timezone,
                 computed_at=computed_at,
             ),

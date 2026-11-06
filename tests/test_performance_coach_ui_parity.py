@@ -81,6 +81,13 @@ def _summaries() -> list[dict[str, Any]]:
     ]
 
 
+# Stored local load per day (card M6): a long history, so both curves are warm.
+LOAD_DAYS = {
+    (TODAY - timedelta(days=offset)).isoformat(): 40.0 + offset % 5
+    for offset in range(1, 200, 2)
+}
+
+
 def _feedback(keys: list[str]) -> list[dict[str, Any]]:
     ratings = {"local": 5, "later": 4}
     return [
@@ -129,7 +136,9 @@ class CoachUiParityTests(unittest.TestCase):
     def setUp(self) -> None:
         summaries = _summaries()
         self.inputs = replace(
-            recovery_only_inputs(_garmin(), _wellness()), activities=tuple(summaries)
+            recovery_only_inputs(_garmin(), _wellness()),
+            activities=tuple(summaries),
+            local_load_days=LOAD_DAYS,
         )
         garmin_payload = Mock()
         garmin_payload.sync_status.return_value = GarminSyncStatus()
@@ -181,9 +190,15 @@ class CoachUiParityTests(unittest.TestCase):
         self.summaries = summaries
 
     def coach_report(self, *sections: str, **arguments: Any) -> dict[str, Any]:
-        with patch(
-            "backend.performance.report_service.activity_summaries_with_sync_time",
-            return_value=(self.summaries, None),
+        with (
+            patch(
+                "backend.performance.report_service.activity_summaries_with_sync_time",
+                return_value=(self.summaries, None),
+            ),
+            patch(
+                "backend.performance.report_service.activity_summaries_with_load_days",
+                return_value=(self.summaries, None, LOAD_DAYS),
+            ),
         ):
             result = self.tool.execute(
                 "get_training_report", {"sections": list(sections), **arguments}
@@ -243,6 +258,29 @@ class CoachUiParityTests(unittest.TestCase):
         self.assertTrue(coach["days"])
         for day in coach["days"]:
             self.assertEqual(day, ui_days[day["date"]])
+
+    def test_m7_local_fitness_matches_between_coach_and_load_tab(self):
+        coach = self.coach_report("report", start=MONDAY.isoformat(), days=7)["report"][
+            "local_fitness_fatigue"
+        ]
+        ui = self.ui["history"]["local_fitness_fatigue"]
+        for key in (
+            "metric_id",
+            "method_id",
+            "method_version",
+            "unit",
+            "evidence_card",
+            "limits",
+            "parameters",
+        ):
+            self.assertEqual(coach[key], ui[key], key)
+        self.assertEqual(coach["status"], "estimate")
+        ui_days = {item["date"]: item for item in ui["days"]}
+        self.assertTrue(coach["days"])
+        for day in coach["days"]:
+            self.assertEqual(day, ui_days[day["date"]])
+        # Unrated sessions without a local load mark their days on both paths.
+        self.assertTrue(any(day["state"] == "incomplete" for day in coach["days"]))
 
     def test_m2_baselines_keep_value_status_and_scope(self):
         ui = self.ui["personal_recovery"]
