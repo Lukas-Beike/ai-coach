@@ -178,6 +178,12 @@ def _no_history_days(
     ]
 
 
+def _reason(valued: Sequence[Any], first: date | None) -> str | None:
+    if valued:
+        return None
+    return "warmup" if first else "no_load"
+
+
 def local_fitness_fatigue(
     loads: Mapping[str, float],
     summaries: Sequence[ActivitySummary],
@@ -214,7 +220,7 @@ def local_fitness_fatigue(
         "method_version": METHOD_VERSION,
         "unit": UNIT,
         "status": "estimate" if valued else "insufficient_data",
-        "reason": None if valued else ("warmup" if first else "no_load"),
+        "reason": _reason(valued, first),
         "period": {
             "start": start.isoformat(),
             "end": end.isoformat(),
