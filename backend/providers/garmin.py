@@ -1372,12 +1372,19 @@ def collect_garmin_activity_detail(
             "get_activity_power_in_timezones",
             lambda method: method(activity_id),
         ),
+        # Personal API only: device laps and full record streams from the file.
+        (
+            "activity_fit",
+            "fit",
+            "download_activity_fit",
+            lambda method: method(activity_id),
+        ),
     )
     for capability, key, method_name, invoke in parts:
         method = getattr(client, method_name, None)
         if not callable(method):
-            # The Personal API serves no splits or zone times; without the SDK
-            # these parts do not exist and the detail is complete without them.
+            # The Personal API serves no splits or zone times and the SDK no FIT
+            # file; a part no transport serves is absent, not incomplete.
             continue
         fetch = partial(invoke, method)
         if capability_allowed is not None and not capability_allowed(capability):

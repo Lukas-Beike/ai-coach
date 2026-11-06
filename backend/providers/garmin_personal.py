@@ -6,6 +6,9 @@ families it serves under the SDK's method names, so the existing collectors and
 mappers read either transport, and routes every other method to the SDK when it
 is connected.
 
+The Personal API also serves the original FIT file of an activity
+(``download_activity_fit``), which the SDK families do not read.
+
 The Personal API key is exchanged for a 24-hour bearer token on demand; there is
 no refresh token. Neither the key nor the token is logged, returned or stored.
 """
@@ -13,9 +16,11 @@ no refresh token. Neither the key nor the token is logged, returned or stored.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import threading
 import time
+import zipfile
 from collections.abc import Callable, Iterator
 from datetime import date, timedelta
 from typing import Any, Final
@@ -33,6 +38,9 @@ TOKEN_LIFETIME_SECONDS: Final = 24 * 3600
 TOKEN_REFRESH_MARGIN_SECONDS: Final = 600
 REQUEST_TIMEOUT_SECONDS: Final = 45
 MAX_RESPONSE_BYTES: Final = 10_000_000
+# An activity archive and the FIT file in it; long rides stay far below this.
+MAX_ACTIVITY_FILE_BYTES: Final = 50_000_000
+_FIT_SIGNATURE: Final = b".FIT"
 ACTIVITY_PAGE_SIZE: Final = 20
 MAX_ACTIVITY_PAGES: Final = 500
 # Per-request day limits of the Personal API ranges (inclusive days).
@@ -55,6 +63,8 @@ PERSONAL_METHODS: Final = frozenset(
         "get_heart_rates",
         "get_body_battery",
         "get_weigh_ins",
+        # Not an SDK method: the original FIT file is read only through Personal.
+        "download_activity_fit",
     }
 )
 
@@ -109,6 +119,38 @@ def wrap_daily_sleep(value: Any) -> dict[str, Any] | None:
     return {"calendarDate": day[:10], "dailySleepDTO": value}
 
 
+def _is_fit(data: bytes) -> bool:
+    return len(data) >= 12 and data[8:12] == _FIT_SIGNATURE
+
+
+def fit_from_archive(data: bytes) -> bytes:
+    """Return the FIT file of a Garmin activity download.
+
+    Garmin answers with a zip archive that holds the original upload; a bare FIT
+    file is accepted as is. An archive without a FIT member, or one whose FIT
+    member exceeds the size limit, raises ``ProviderInvalidResponse``.
+    """
+    if _is_fit(data):
+        return data
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            for member in archive.infolist():
+                if member.is_dir() or not member.filename.lower().endswith(".fit"):
+                    continue
+                if member.file_size > MAX_ACTIVITY_FILE_BYTES:
+                    break
+                with archive.open(member) as handle:
+                    content = handle.read(MAX_ACTIVITY_FILE_BYTES + 1)
+                if len(content) <= MAX_ACTIVITY_FILE_BYTES and _is_fit(content):
+                    return content
+                break
+    except zipfile.BadZipFile, OSError, ValueError, EOFError:
+        pass
+    raise provider_http.ProviderInvalidResponse(
+        "Garmin activity download holds no FIT file"
+    )
+
+
 class GarminPersonalClient:
     """Read Garmin data through the official Personal API under SDK method names."""
 
@@ -137,7 +179,7 @@ class GarminPersonalClient:
 
     # -- transport -------------------------------------------------------------
 
-    def _open(self, request: Request) -> bytes:
+    def _open(self, request: Request, max_bytes: int = MAX_RESPONSE_BYTES) -> bytes:
         try:
             response = self._opener(request, REQUEST_TIMEOUT_SECONDS)
         except HTTPError as error:
@@ -147,7 +189,7 @@ class GarminPersonalClient:
                 int(error.code), GARMIN_ID
             ) from None
         try:
-            return provider_http.read_bounded_response(response, MAX_RESPONSE_BYTES)
+            return provider_http.read_bounded_response(response, max_bytes)
         finally:
             close = getattr(response, "close", None)
             if callable(close):
@@ -181,7 +223,14 @@ class GarminPersonalClient:
                 self._token_expires_at = _token_expiry(token, now)
             return self._token
 
-    def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    def _read(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        accept: str = "application/json",
+        max_bytes: int = MAX_RESPONSE_BYTES,
+    ) -> bytes:
         url = self._base_url + path
         if params:
             url += "?" + urlencode(params)
@@ -191,26 +240,29 @@ class GarminPersonalClient:
                 method="GET",
                 headers={
                     "Authorization": f"Bearer {self._bearer(renew=attempt == 1)}",
-                    "Accept": "application/json",
+                    "Accept": accept,
                     "User-Agent": self._user_agent,
                 },
             )
             try:
-                raw = self._open(request)
+                return self._open(request, max_bytes)
             except provider_http.ProviderHTTPError as error:
                 # One fresh exchange when a cached token was rejected early.
                 if error.status == 401 and attempt == 0:
                     continue
                 raise
-            if not raw.strip():
-                return None
-            try:
-                return json.loads(raw.decode("utf-8"))
-            except UnicodeDecodeError, json.JSONDecodeError:
-                raise provider_http.ProviderInvalidResponse(
-                    "Garmin Personal API response is not valid JSON"
-                ) from None
         raise AssertionError("unreachable")
+
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        raw = self._read(path, params)
+        if not raw.strip():
+            return None
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except UnicodeDecodeError, json.JSONDecodeError:
+            raise provider_http.ProviderInvalidResponse(
+                "Garmin Personal API response is not valid JSON"
+            ) from None
 
     # -- activities ------------------------------------------------------------
 
@@ -257,6 +309,15 @@ class GarminPersonalClient:
             f"/activity-service/activity/{quote(str(int(activity_id)))}/details",
             {"maxChartSize": int(maxchart), "maxPolylineSize": int(maxpoly)},
         )
+
+    def download_activity_fit(self, activity_id: str) -> bytes:
+        """Return the original FIT file of one activity (see ``fit_from_archive``)."""
+        raw = self._read(
+            f"/download-service/files/activity/{quote(str(int(activity_id)))}",
+            accept="*/*",
+            max_bytes=MAX_ACTIVITY_FILE_BYTES,
+        )
+        return fit_from_archive(raw)
 
     # -- wellness --------------------------------------------------------------
 

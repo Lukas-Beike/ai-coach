@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import unittest
+import zipfile
 from datetime import UTC, date, datetime
 from email.message import Message
 from typing import Any
@@ -32,8 +33,10 @@ from backend.providers.garmin_personal import (
     TOKEN_PATH,
     GarminPersonalClient,
     GarminTransportClient,
+    fit_from_archive,
     wrap_daily_sleep,
 )
+from tests.test_garmin_activity_detail_mapping import _synthetic_fit
 
 SYNTHETIC_KEY = "synthetic-personal-key"
 DAY = "2026-11-03"
@@ -73,6 +76,18 @@ def _flat_sleep(day: str = DAY, sleep_id: int = 1) -> dict[str, Any]:
     }
 
 
+def _zip(members: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+_FIT = _synthetic_fit()
+_ARCHIVE = _zip({"900001_ACTIVITY.fit": _FIT})
+
+
 class _Response(io.BytesIO):
     status = 200
 
@@ -102,12 +117,17 @@ class FakePersonalApi:
             raise HTTPError(
                 request.full_url, 401, "Unauthorized", Message(), io.BytesIO()
             )
-        return _Response(json.dumps(self.payload(parsed.path, query)).encode())
+        payload = self.payload(parsed.path, query)
+        if isinstance(payload, bytes):
+            return _Response(payload)
+        return _Response(json.dumps(payload).encode())
 
     def payload(self, path: str, query: dict[str, list[str]]) -> Any:
         if path == "/activitylist-service/activities/search/activities":
             start = int(query["start"][0])
             return self.activities if start == 0 else []
+        if path == "/download-service/files/activity/900001":
+            return _ARCHIVE
         if path.startswith("/activity-service/activity/") and path.endswith("/details"):
             return {
                 "activityId": 900001,
@@ -364,7 +384,32 @@ class PersonalOnlyCollectionTests(unittest.TestCase):
             client, "900001", external_call=_external_call, redact=str
         )
 
-        self.assertEqual(set(detail), {"activity_id", "details"})
+        self.assertEqual(set(detail), {"activity_id", "details", "fit"})
+        self.assertEqual(detail["fit"], _FIT)
+
+    def test_activity_detail_with_only_the_sdk_reads_no_fit(self) -> None:
+        sdk = FakeSdk()
+        client = GarminTransportClient(None, sdk)
+
+        self.assertIsNone(getattr(client, "download_activity_fit", None))
+
+
+class FitDownloadTests(unittest.TestCase):
+    def test_fit_is_extracted_from_the_activity_archive(self) -> None:
+        api = FakePersonalApi()
+
+        self.assertEqual(_client(api).download_activity_fit("900001"), _FIT)
+        download = [r for r in api.requests if r[1].startswith("/download-service/")]
+        self.assertEqual(download[0][3]["accept"], "*/*")
+
+    def test_bare_fit_is_accepted_and_other_archives_are_rejected(self) -> None:
+        self.assertEqual(fit_from_archive(_FIT), _FIT)
+        for data in (_zip({"notes.txt": b"x"}), _zip({"a.fit": b"not fit"}), b"junk"):
+            with (
+                self.subTest(data=data[:8]),
+                self.assertRaises(provider_http.ProviderInvalidResponse),
+            ):
+                fit_from_archive(data)
 
 
 class TransportParityTests(unittest.TestCase):

@@ -60,6 +60,7 @@ DETAIL_CAPABILITIES: Final = (
     "activity_splits",
     "activity_hr_zones",
     "activity_power_zones",
+    "activity_fit",
 )
 
 
