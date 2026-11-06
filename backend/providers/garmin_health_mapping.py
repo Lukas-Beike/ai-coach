@@ -853,12 +853,13 @@ def _measure(
 def _field_value(field: _Field, number: float | None) -> float | None:
     """Return a grouped field's value as stored, or None when it is unset.
 
-    Garmin's scaled threshold speed below 1 is multiplied by ten, whole fields
-    are rounded, and a 0 night value means "not measured".
+    Garmin's scaled threshold speed below 1 is multiplied by ten (0 and negative
+    speeds stay out of range), whole fields are rounded, and a 0 night value
+    means "not measured".
     """
     if number is None or (number == 0 and field.kind in _UNSET_WHEN_ZERO):
         return None
-    if field.kind == MetricKind.THRESHOLD_PACE and 0 < number < 1:
+    if field.kind == MetricKind.THRESHOLD_PACE and number < 1:
         number *= 10
     return float(round(number)) if field.whole else number
 

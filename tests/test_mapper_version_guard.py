@@ -71,7 +71,7 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     ),
     "garmin_health_mapping": (
         (18,),
-        "489b2d8e2087e369e878b0b27babb1382715649f12befb3eb6382c54bed7ff9c",
+        "82def055aaf35effcb453e42c26f943167b16d5ac2054c5e099651de819cc788",
     ),
     "garmin_status_mapping": (
         (18,),
