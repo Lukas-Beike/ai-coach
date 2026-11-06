@@ -759,6 +759,21 @@ function nutritionOthersGroup(expanded) {
   return group;
 }
 
+function nutritionProductCard(product, local) {
+  const card = document.createElement("article");
+  card.className = "nutrition-card nutrition-product-card";
+  const title = document.createElement("h3"); title.textContent = [product.brand, product.name].filter(Boolean).join(" · ") || "Unbenanntes Produkt";
+  const kcalLabel = product.kcal == null ? "kcal unbekannt" : `${product.kcal} kcal`;
+  const detail = document.createElement("p"); detail.textContent = `${kcalLabel} · KH ${product.carbs_g ?? "–"} g · Protein ${product.protein_g ?? "–"} g · Fett ${product.fat_g ?? "–"} g`;
+  const source = document.createElement("small"); source.textContent = nutritionProductSourceText(product);
+  const basis = document.createElement("small"); basis.textContent = product.basis_amount ? `Basis: ${product.basis_amount} ${product.basis_unit || "g"}` : "Bezugsmenge unbekannt";
+  const head = document.createElement("div"); head.className = "nutrition-product-head"; head.append(title);
+  if (local && product.id && product.local !== false) head.append(nutritionFavoriteButton(product));
+  card.append(head, detail, source, basis);
+  appendNutritionProductActions(card, product, local);
+  return card;
+}
+
 function renderNutritionProducts(products, { local = true, targetId = "#nutritionProducts", expandOthers = false } = {}) {
   const target = document.querySelector(targetId);
   if (!target) return;
@@ -768,21 +783,10 @@ function renderNutritionProducts(products, { local = true, targetId = "#nutritio
   let others = null;
   for (const rawProduct of products) {
     const product = normalizeNutritionProduct(rawProduct);
-    const card = document.createElement("article");
-    card.className = "nutrition-card nutrition-product-card";
-    const title = document.createElement("h3"); title.textContent = [product.brand, product.name].filter(Boolean).join(" · ") || "Unbenanntes Produkt";
-    const kcalLabel = product.kcal == null ? "kcal unbekannt" : `${product.kcal} kcal`;
-    const detail = document.createElement("p"); detail.textContent = `${kcalLabel} · KH ${product.carbs_g ?? "–"} g · Protein ${product.protein_g ?? "–"} g · Fett ${product.fat_g ?? "–"} g`;
-    const source = document.createElement("small"); source.textContent = nutritionProductSourceText(product);
-    const basis = document.createElement("small"); basis.textContent = product.basis_amount ? `Basis: ${product.basis_amount} ${product.basis_unit || "g"}` : "Bezugsmenge unbekannt";
-    const head = document.createElement("div"); head.className = "nutrition-product-head"; head.append(title);
-    if (local && product.id && product.local !== false) head.append(nutritionFavoriteButton(product));
-    card.append(head, detail, source, basis);
-    appendNutritionProductActions(card, product, local);
-    if (grouped && !product.favorite) {
-      others ||= nutritionOthersGroup(expandOthers);
-      others.lastElementChild.append(card);
-    } else target.append(card);
+    const card = nutritionProductCard(product, local);
+    if (!grouped || product.favorite) { target.append(card); continue; }
+    others ||= nutritionOthersGroup(expandOthers);
+    others.lastElementChild.append(card);
   }
   if (others) {
     others.querySelector("summary").textContent = `Weitere Produkte (${others.lastElementChild.childElementCount})`;
