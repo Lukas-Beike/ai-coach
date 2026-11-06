@@ -107,6 +107,19 @@ The system SHALL fill the activity duration by one rule for every provider: movi
 
 Evidence: `backend/canonical/records.py:activity_duration_s`, `backend/activities/canonical_sessions.py:_garmin_measurement_gaps`; `tests/test_canonical_records.py:ActivityDurationRuleTests`, `tests/test_intervals_activity_mapping.py:test_strength_duration_is_the_whole_session`, `tests/test_garmin_activity_mapping.py:test_moving_duration_comes_from_moving_duration_only`, `tests/test_canonical_sessions.py:test_a_wahoo_record_is_not_matched_by_the_intervals_elapsed_time`.
 
+### Requirement: Garmin activity summary values
+The system SHALL map the Garmin activity list's zone times, training-effect values, altitude extremes, elevation loss, temperature range, estimated sweat loss, lap count and average cadence onto the canonical activity record, so Garmin-only sessions carry them with the Garmin Connect source label.
+
+#### Scenario: Garmin run with zone times and extremes
+- **WHEN** a Garmin activity row carries `hrTimeInZone_1..5`, `aerobicTrainingEffect`, `minElevation`/`maxElevation`, `minTemperature`/`maxTemperature` and `averageRunningCadenceInStepsPerMinute`
+- **THEN** since Garmin activity mapper 14 the record carries heart-rate zones `Z1..Z5` by Garmin's own zones, the effect values on Garmin's 0.0-5.0 scale beside the effect label, both extremes, and the cadence halved to one-leg rpm; stored rows gain them by reprojection without a refetch.
+
+#### Scenario: Inconsistent Garmin extremes
+- **WHEN** a Garmin minimum altitude or temperature lies above its maximum, or one zone time is invalid
+- **THEN** that pair or zone distribution is dropped with one mapping issue, and the rest of the record is kept.
+
+Evidence: `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/activities/activity_summary.py:activity_summary`, `backend/activities/detail_contract.py:activity_detail_contract`; `tests/test_garmin_activity_mapping.py:ZoneEffectAndExtremeTests`, `tests/test_activity_summary.py:test_effect_values_and_garmin_extremes_reach_the_summary`, `tests/test_activity_detail_contract.py:test_garmin_summary_values_are_labelled_metrics`.
+
 ### Requirement: Health and body unit normalization
 The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.
 

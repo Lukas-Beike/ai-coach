@@ -496,6 +496,45 @@ class MetricTests(unittest.TestCase):
         self.assertEqual("W", normalized["unit"])
         self.assertEqual("derived", normalized["source"]["kind"])
 
+    def test_garmin_summary_values_are_labelled_metrics(self) -> None:
+        # #1724: Garmin's own estimates are derived; its extremes are measured.
+        doc = build(
+            [
+                record(
+                    GARMIN,
+                    "g-run-1",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    label="Garmin Connect",
+                    aerobic_training_effect=3.7,
+                    water_estimated_ml=826.0,
+                    elevation_loss_m=28.0,
+                    min_temp_c=15.0,
+                    max_temp_c=24.0,
+                    lap_count=13.0,
+                )
+            ]
+        )
+
+        metrics = doc["metrics"]
+        self.assertEqual(
+            "derived", metrics["aerobic_training_effect"]["source"]["kind"]
+        )
+        self.assertEqual(
+            ("ml", 826.0),
+            (
+                metrics["water_estimated_ml"]["unit"],
+                metrics["water_estimated_ml"]["value"],
+            ),
+        )
+        for key, unit in (
+            ("elevation_loss_m", "m"),
+            ("min_temp_c", "°C"),
+            ("max_temp_c", "°C"),
+            ("lap_count", "count"),
+        ):
+            self.assertEqual(unit, metrics[key]["unit"], key)
+            self.assertEqual("measured", metrics[key]["source"]["kind"], key)
+
     def test_load_is_omitted_without_a_value(self) -> None:
         self.assertNotIn("load", build([record(INTERVALS, "i-ride-99")])["metrics"])
 

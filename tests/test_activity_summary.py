@@ -197,6 +197,45 @@ class ActivitySummaryTests(unittest.TestCase):
         self.assertEqual("Garmin Connect", summary["sources"]["training_effect_label"])
         self.assertEqual(60.0, summary["training_load"])
 
+    def test_effect_values_and_garmin_extremes_reach_the_summary(self) -> None:
+        # #1724: Garmin-only sessions carry effect values, temperatures and descent.
+        summary = activity_summary(
+            "act_1",
+            [
+                record(
+                    ProviderId.GARMIN,
+                    "g1",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    load=120.0,
+                    load_model=LoadModel.GARMIN_TRAINING_LOAD,
+                    training_effect_label="VO2MAX",
+                    aerobic_training_effect=3.7,
+                    anaerobic_training_effect=0.0,
+                    elevation_loss_m=28.0,
+                    min_temp_c=15.0,
+                    max_temp_c=24.0,
+                    hr_zone_times_s=(("Z1", 42.0), ("Z2", 600.0)),
+                )
+            ],
+            BERLIN,
+        )
+
+        self.assertEqual(3.7, summary["aerobic_training_effect"])
+        self.assertEqual(0.0, summary["anaerobic_training_effect"])
+        self.assertEqual(
+            "Garmin Connect", summary["sources"]["aerobic_training_effect"]
+        )
+        self.assertEqual(120.0, summary["training_effect_load"])
+        self.assertEqual(
+            (28.0, 15.0, 24.0),
+            (summary["elevation_loss_m"], summary["min_temp_c"], summary["max_temp_c"]),
+        )
+        self.assertEqual(
+            [{"id": "Z1", "secs": 42.0}, {"id": "Z2", "secs": 600.0}],
+            summary["heart_rate_zone_times"],
+        )
+        self.assertEqual("Garmin Connect", summary["sources"]["heart_rate_zone_times"])
+
     def test_session_without_an_effect_label_has_no_effect_values(self) -> None:
         summary = activity_summary(
             "act_1",

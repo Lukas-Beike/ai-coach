@@ -81,8 +81,8 @@ def _fixture_rows() -> list[Any]:
 
 
 class VersionAndFixtureTests(unittest.TestCase):
-    def test_mapper_version_is_thirteen(self) -> None:
-        self.assertEqual(13, MAPPER_VERSION)
+    def test_mapper_version_is_fourteen(self) -> None:
+        self.assertEqual(14, MAPPER_VERSION)
 
     def test_strength_duration_is_the_whole_session_not_the_active_timer(
         self,
@@ -1010,3 +1010,139 @@ class SummaryValueTests(unittest.TestCase):
         self.assertEqual(310.0, record.elevation_gain_m)
         self.assertEqual(240.0, record.normalized_power)
         self.assertEqual(54.0, record.vo2max)
+
+
+class ZoneEffectAndExtremeTests(unittest.TestCase):
+    def test_fixture_run_carries_zones_effects_extremes_and_cadence(self) -> None:
+        _, run = _map(*_fixture_rows()).records
+
+        self.assertEqual(
+            (("Z1", 300.0), ("Z2", 1500.0), ("Z3", 500.0), ("Z4", 100.0), ("Z5", 0.0)),
+            run.hr_zone_times_s,
+        )
+        self.assertIsNone(run.power_zone_times_s)
+        self.assertEqual(2.4, run.aerobic_training_effect)
+        self.assertEqual(0.3, run.anaerobic_training_effect)
+        self.assertEqual((112.5, 131.0), (run.elevation_low_m, run.elevation_high_m))
+        self.assertEqual(41.0, run.elevation_loss_m)
+        self.assertEqual((9.0, 17.0), (run.min_temp_c, run.max_temp_c))
+        self.assertEqual(410.0, run.water_estimated_ml)
+        self.assertEqual(8.0, run.lap_count)
+        # Steps per minute become one-leg rpm.
+        self.assertEqual(83.0, run.avg_cadence)
+
+    def test_power_zones_and_bike_cadence_are_mapped(self) -> None:
+        record, issues = _one(
+            powerTimeInZone_1=60,
+            powerTimeInZone_2=120.5,
+            averageBikingCadenceInRevPerMinute=88,
+            averageRunningCadenceInStepsPerMinute=170,
+        )
+
+        self.assertEqual((), issues)
+        assert record is not None
+        self.assertEqual((("Z1", 60.0), ("Z2", 120.5)), record.power_zone_times_s)
+        self.assertEqual(88.0, record.avg_cadence)
+
+    def test_one_invalid_zone_drops_the_distribution_with_one_issue(self) -> None:
+        record, issues = _one(hrTimeInZone_1=60, hrTimeInZone_2="x")
+
+        assert record is not None
+        self.assertIsNone(record.hr_zone_times_s)
+        self.assertEqual(
+            (MappingIssue("910009", "hrTimeInZone_2", IssueReason.INVALID_NUMBER),),
+            issues,
+        )
+
+    def test_negative_zone_seconds_are_out_of_range(self) -> None:
+        record, issues = _one(powerTimeInZone_3=-1)
+
+        assert record is not None
+        self.assertIsNone(record.power_zone_times_s)
+        self.assertEqual(IssueReason.OUT_OF_RANGE, issues[0].reason)
+
+    def test_training_effect_boundaries_and_legacy_alias(self) -> None:
+        low, _ = _one(aerobicTrainingEffect=0.0, anaerobicTrainingEffect=5.0)
+        legacy, _ = _one(trainingEffect=3.1)
+        high, issues = _one(aerobicTrainingEffect=5.1)
+
+        assert low is not None and legacy is not None and high is not None
+        self.assertEqual(
+            (0.0, 5.0), (low.aerobic_training_effect, low.anaerobic_training_effect)
+        )
+        self.assertEqual(3.1, legacy.aerobic_training_effect)
+        self.assertIsNone(high.aerobic_training_effect)
+        self.assertEqual(
+            (
+                MappingIssue(
+                    "910009", "aerobicTrainingEffect", IssueReason.OUT_OF_RANGE
+                ),
+            ),
+            issues,
+        )
+
+    def test_reversed_extremes_drop_both_with_an_issue(self) -> None:
+        record, issues = _one(
+            minElevation=200, maxElevation=100, minTemperature=20, maxTemperature=10
+        )
+
+        assert record is not None
+        self.assertIsNone(record.elevation_low_m)
+        self.assertIsNone(record.elevation_high_m)
+        self.assertIsNone(record.min_temp_c)
+        self.assertIsNone(record.max_temp_c)
+        self.assertEqual(
+            {"minElevation", "minTemperature"}, {issue.field for issue in issues}
+        )
+
+    def test_wrong_types_and_ranges_become_none_with_issues(self) -> None:
+        record, issues = _one(
+            elevationLoss=-3, waterEstimated="lots", lapCount=True, maxTemperature=99
+        )
+
+        assert record is not None
+        self.assertIsNone(record.elevation_loss_m)
+        self.assertIsNone(record.water_estimated_ml)
+        self.assertIsNone(record.lap_count)
+        self.assertIsNone(record.max_temp_c)
+        self.assertEqual(
+            {"elevationLoss", "waterEstimated", "lapCount", "maxTemperature"},
+            {issue.field for issue in issues},
+        )
+
+    def test_absent_fields_stay_none_without_issues(self) -> None:
+        record, issues = _one()
+
+        self.assertEqual((), issues)
+        assert record is not None
+        for field in (
+            "hr_zone_times_s",
+            "power_zone_times_s",
+            "aerobic_training_effect",
+            "anaerobic_training_effect",
+            "elevation_loss_m",
+            "min_temp_c",
+            "max_temp_c",
+            "water_estimated_ml",
+            "lap_count",
+            "avg_cadence",
+        ):
+            self.assertIsNone(getattr(record, field), field)
+
+    def test_training_load_rows_bring_the_effect_values(self) -> None:
+        rows = merge_training_load_rows(
+            [_row()],
+            [
+                {
+                    "activityId": 910009,
+                    "aerobicTrainingEffect": 3.3,
+                    "anaerobicTrainingEffect": 1.1,
+                }
+            ],
+        )
+
+        record = _map(*untyped(rows)).records[0]
+        self.assertEqual(
+            (3.3, 1.1),
+            (record.aerobic_training_effect, record.anaerobic_training_effect),
+        )

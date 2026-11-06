@@ -87,6 +87,13 @@ ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "eftp_w",
     "vo2max",
     "avg_temp_c",
+    "min_temp_c",
+    "max_temp_c",
+    "elevation_loss_m",
+    "lap_count",
+    "aerobic_training_effect",
+    "anaerobic_training_effect",
+    "water_estimated_ml",
 )
 ACTIVITY_ZONE_DETAIL_FIELDS: Final = (
     "power_zone_times_s",

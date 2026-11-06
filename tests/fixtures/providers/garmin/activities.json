@@ -27,6 +27,21 @@
     "calories": 520,
     "trainingEffect": 2.4,
     "trainingEffectLabel": "RECOVERY",
-    "activityTrainingLoad": 38.0
+    "activityTrainingLoad": 38.0,
+    "aerobicTrainingEffect": 2.4,
+    "anaerobicTrainingEffect": 0.3,
+    "minElevation": 112.5,
+    "maxElevation": 131.0,
+    "elevationLoss": 41.0,
+    "minTemperature": 9.0,
+    "maxTemperature": 17.0,
+    "waterEstimated": 410.0,
+    "lapCount": 8,
+    "averageRunningCadenceInStepsPerMinute": 166.0,
+    "hrTimeInZone_1": 300.0,
+    "hrTimeInZone_2": 1500.0,
+    "hrTimeInZone_3": 500.0,
+    "hrTimeInZone_4": 100.0,
+    "hrTimeInZone_5": 0.0
   }
 ]
