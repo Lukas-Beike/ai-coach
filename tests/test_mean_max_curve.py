@@ -418,6 +418,47 @@ class ProfileSelectionTests(unittest.TestCase):
         )
         self.assertRegex(window["input_fingerprint"], r"^[0-9a-f]{64}$")
 
+    def test_e_bike_sessions_stay_out_of_the_bests_and_fits(self):
+        summaries = []
+        for activity_id, peak, assist in (
+            ("act_1", 300.0, None),
+            ("act_2", 900.0, "electric"),
+        ):
+            add_session(self.db, activity_id)
+            add_record(self.db, INTERVALS, f"i-{activity_id}", activity_id)
+            store_streams(
+                self.db,
+                INTERVALS,
+                f"i-{activity_id}",
+                ride_power(peak),
+                StreamResolution.FULL,
+            )
+            summary = {
+                "id": activity_id,
+                "sport": "ride",
+                "environment": "outdoor",
+                "started_at": "2026-10-10T08:00:00+00:00",
+                "started_at_local": "2026-10-10T10:00:00",
+                "record_ids": {"intervals": f"i-{activity_id}"},
+                "source": "Intervals.icu",
+            }
+            if assist:
+                summary["assist"] = assist
+            summaries.append(summary)
+
+        result = self.service(summaries).power_profiles()
+
+        self.assertEqual(
+            ["i-act_1"], [row["activity_id"] for row in result["activities"]]
+        )
+        bests = {
+            point["watts"]
+            for point in result["windows"]["90"]["power"]
+            if point["watts"] is not None
+        }
+        self.assertTrue(bests)
+        self.assertLessEqual(max(bests), 300.0)
+
     def test_overlapping_bests_of_one_effort_share_an_effort_group(self):
         def ride(activity_id, curve):
             return {

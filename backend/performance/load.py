@@ -4,7 +4,9 @@ Loads are summed on the TSS scale only (Intervals.icu training load or TSS). A
 session without such a load, such as a Garmin-only session whose Garmin load is
 EPOC-based, is left out of the sum and counted as ``load_missing_sessions``. Its
 session-RPE load, when rated, is reported beside the sum in AU
-(``load_missing_session_rpe_au``) and never added to it.
+(``load_missing_session_rpe_au``) and never added to it. Hours of e-bike
+sessions count in the time-based volume and are also reported on their own as
+``electric_assist_hours``.
 """
 
 import math
@@ -13,7 +15,10 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.activities.activity_summary import summary_local_date
-from backend.canonical.activity_summary import stored_activity_key
+from backend.canonical.activity_summary import (
+    stored_activity_key,
+    summary_is_electric,
+)
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.performance.session_rpe_load import session_load
 
@@ -93,11 +98,7 @@ def activity_rollup(
     the session-RPE load of sessions left out of the load sum.
     """
     window = _activities_in(activities, end_date - timedelta(days=days - 1), end_date)
-    moving_seconds = sum(
-        _activity_rollup_number(activity, "moving_duration_s")
-        or _activity_rollup_number(activity, "elapsed_duration_s")
-        for activity in window
-    )
+    moving_seconds = sum(_rollup_seconds(activity) for activity in window)
     training_load = sum(_tss_load(activity) or 0.0 for activity in window)
     rollup: dict[str, Any] = {
         "days": days,
@@ -105,7 +106,18 @@ def activity_rollup(
         "duration_hours": round(moving_seconds / 3600, 1),
         "training_load": round(training_load, 1),
     }
+    electric = [activity for activity in window if summary_is_electric(activity)]
+    if electric:
+        rollup["electric_assist_hours"] = round(
+            sum(_rollup_seconds(activity) for activity in electric) / 3600, 1
+        )
     return rollup | _missing_load(window, session_feedback or {})
+
+
+def _rollup_seconds(activity: dict[str, Any]) -> float:
+    return _activity_rollup_number(
+        activity, "moving_duration_s"
+    ) or _activity_rollup_number(activity, "elapsed_duration_s")
 
 
 def _activity_load_by_date(activities: list[Any], anchor: date) -> dict[date, float]:

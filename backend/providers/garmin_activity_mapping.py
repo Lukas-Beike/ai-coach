@@ -20,7 +20,9 @@ the same moment.
   When ``started_at`` comes from ``startTimeGMT``, the difference to
   ``startTimeLocal`` is the device's UTC offset -> ``local_offset_minutes``.
 * ``activityType``: the dictionary form ``{"typeKey": ...}`` or, in the legacy
-  form, the key as plain text.
+  form, the key as plain text. The key gives sport, environment, terrain and
+  motor assistance (``GARMIN_ACTIVITY_TYPES``, ``GARMIN_ACTIVITY_QUALIFIERS``)
+  and is kept as ``native_type``.
 * ``duration_s``: ``activity_duration_s`` of ``movingDuration``, the timer time
   (``duration``, then ``movingTime``) and the elapsed time below.
 * ``elapsedDuration``, then ``duration`` alone (seconds) -> ``elapsed_duration_s``;
@@ -71,6 +73,7 @@ from backend.canonical.mapping import (
     coerce_number,
 )
 from backend.canonical.records import (
+    MAX_NATIVE_TYPE_LENGTH,
     MAX_TRAINING_EFFECT_LABEL_LENGTH,
     ActivityRecord,
     Provenance,
@@ -89,12 +92,14 @@ from backend.canonical.validation import (
     require_aware_datetime,
 )
 from backend.canonical.vocabulary import (
+    Assist,
     Environment,
     LoadModel,
     ProviderId,
     RecordingOrigin,
     SourceKind,
     Sport,
+    Terrain,
 )
 
 # Version 5: maps the maximum speed, maximum power and step count.
@@ -108,7 +113,10 @@ from backend.canonical.vocabulary import (
 # Version 11: the device's UTC offset dates the activity where it was recorded.
 # Version 12: the duration follows the canonical rule (``activity_duration_s``):
 # moving time before the timer ``duration``.
-MAPPER_VERSION: Final = 12
+# Version 13: maps terrain, motor assistance and the native type key, and knows
+# the cyclocross, BMX, track cycling, e-MTB, skate and backcountry skiing,
+# indoor and treadmill walking, Pilates, HIIT and indoor cardio keys (#1670).
+MAPPER_VERSION: Final = 13
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -131,16 +139,21 @@ _TRAINING_LOAD_KEY: Final = "activityTrainingLoad"
 _TRAINING_LOAD_FIELDS: Final = (_TRAINING_LOAD_KEY, _TRAINING_EFFECT_LABEL_KEY)
 
 # Exact Garmin activityType.typeKey values. The environment is set only where the
-# key names it; otherwise UNKNOWN, which the activity name may still refine.
+# key names it;
+# otherwise UNKNOWN, which the activity name may still refine.
 # Lap swimming is not named as indoor and open water is named as outdoor.
 # The legacy text classifier does not recognise road_biking, mountain_biking or
 # hiking, so those keys must come from this table.
 GARMIN_ACTIVITY_TYPES: Final[Mapping[str, tuple[Sport, Environment]]] = {
     "cycling": (Sport.RIDE, Environment.UNKNOWN),
+    "bmx": (Sport.RIDE, Environment.UNKNOWN),
+    "cyclocross": (Sport.RIDE, Environment.OUTDOOR),
     "e_bike_fitness": (Sport.RIDE, Environment.UNKNOWN),
+    "e_bike_mountain": (Sport.RIDE, Environment.UNKNOWN),
     "gravel_cycling": (Sport.RIDE, Environment.UNKNOWN),
     "mountain_biking": (Sport.RIDE, Environment.UNKNOWN),
     "road_biking": (Sport.RIDE, Environment.UNKNOWN),
+    "track_cycling": (Sport.RIDE, Environment.UNKNOWN),
     "indoor_cycling": (Sport.RIDE, Environment.INDOOR),
     "virtual_ride": (Sport.RIDE, Environment.VIRTUAL),
     "running": (Sport.RUN, Environment.UNKNOWN),
@@ -155,13 +168,40 @@ GARMIN_ACTIVITY_TYPES: Final[Mapping[str, tuple[Sport, Environment]]] = {
     "lap_swimming": (Sport.SWIM, Environment.UNKNOWN),
     "open_water_swimming": (Sport.SWIM, Environment.OUTDOOR),
     "walking": (Sport.WALK, Environment.UNKNOWN),
+    "indoor_walking": (Sport.WALK, Environment.INDOOR),
+    "treadmill_walking": (Sport.WALK, Environment.INDOOR),
     "hiking": (Sport.HIKE, Environment.UNKNOWN),
     "strength_training": (Sport.STRENGTH, Environment.UNKNOWN),
     "rowing": (Sport.ROW, Environment.UNKNOWN),
     "indoor_rowing": (Sport.ROW, Environment.INDOOR),
     "cross_country_skiing_ws": (Sport.NORDIC_SKI, Environment.UNKNOWN),
+    "skate_skiing_ws": (Sport.NORDIC_SKI, Environment.UNKNOWN),
     "resort_skiing_snowboarding_ws": (Sport.ALPINE_SKI, Environment.UNKNOWN),
+    "backcountry_skiing_snowboarding_ws": (Sport.ALPINE_SKI, Environment.OUTDOOR),
+    "backcountry_skiing": (Sport.ALPINE_SKI, Environment.OUTDOOR),
     "yoga": (Sport.YOGA, Environment.UNKNOWN),
+    "pilates": (Sport.OTHER, Environment.UNKNOWN),
+    "hiit": (Sport.OTHER, Environment.UNKNOWN),
+    "indoor_cardio": (Sport.OTHER, Environment.INDOOR),
+}
+
+# Terrain and motor assistance of the type keys that name them. Every other key
+# of GARMIN_ACTIVITY_TYPES is (UNKNOWN, NONE); a key outside it is (UNKNOWN, UNKNOWN).
+GARMIN_ACTIVITY_QUALIFIERS: Final[Mapping[str, tuple[Terrain, Assist]]] = {
+    "road_biking": (Terrain.ROAD, Assist.NONE),
+    "gravel_cycling": (Terrain.GRAVEL, Assist.NONE),
+    "mountain_biking": (Terrain.MOUNTAIN, Assist.NONE),
+    "track_cycling": (Terrain.TRACK, Assist.NONE),
+    "e_bike_fitness": (Terrain.UNKNOWN, Assist.ELECTRIC),
+    "e_bike_mountain": (Terrain.MOUNTAIN, Assist.ELECTRIC),
+    "street_running": (Terrain.ROAD, Assist.NONE),
+    "trail_running": (Terrain.TRAIL, Assist.NONE),
+    "obstacle_run": (Terrain.TRAIL, Assist.NONE),
+    "track_running": (Terrain.TRACK, Assist.NONE),
+    "treadmill_running": (Terrain.TREADMILL, Assist.NONE),
+    "treadmill_walking": (Terrain.TREADMILL, Assist.NONE),
+    "lap_swimming": (Terrain.POOL, Assist.NONE),
+    "open_water_swimming": (Terrain.OPEN_WATER, Assist.NONE),
 }
 
 
@@ -206,6 +246,7 @@ def _map_row(
     name = _name(row, ref, issues)
     type_key = _type_key(row, ref, issues)
     sport, environment = _sport_and_environment(type_key, name)
+    terrain, assist = _qualifiers(type_key)
     timer = _optional_number(
         row, _DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
@@ -287,6 +328,9 @@ def _map_row(
         vo2max=vo2max,
         training_effect_label=training_effect_label,
         local_offset_minutes=_local_offset(row, started_at),
+        terrain=terrain,
+        assist=assist,
+        native_type=type_key[:MAX_NATIVE_TYPE_LENGTH] if type_key else None,
     )
 
 
@@ -464,6 +508,12 @@ def _sport_and_environment(
     if environment is Environment.UNKNOWN:
         environment = classify_environment_text(identity)
     return sport, environment
+
+
+def _qualifiers(type_key: str | None) -> tuple[Terrain, Assist]:
+    if type_key is None or type_key not in GARMIN_ACTIVITY_TYPES:
+        return Terrain.UNKNOWN, Assist.UNKNOWN
+    return GARMIN_ACTIVITY_QUALIFIERS.get(type_key, (Terrain.UNKNOWN, Assist.NONE))
 
 
 def _optional_number(

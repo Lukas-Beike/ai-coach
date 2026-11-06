@@ -206,6 +206,19 @@ class ComparableSessionsCheckTests(unittest.TestCase):
         self.assertTrue(result["window_truncated"])
         self.assertLess(result["window_days"], 84)
 
+    def test_an_e_bike_session_says_it_is_not_compared(self):
+        summary = {
+            "id": "act_1",
+            "record_ids": {"intervals": "i1"},
+            "assist": "electric",
+        }
+        records = [_easy("2026-10-27", "i2", 200), _easy("2026-10-20", "i3", 198)]
+        result = _result(_service("ride", [], [summary], records))[
+            "comparable_sessions"
+        ]
+        self.assertEqual("not_covered", result["status"])
+        self.assertIn("E-Bike", result["reason"])
+
     def test_unknown_session_or_old_session_say_why(self):
         missing = _result(_service("ride", [], [], []))["comparable_sessions"]
         self.assertIn("nicht verfügbar", missing["reason"])

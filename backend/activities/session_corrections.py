@@ -389,4 +389,7 @@ def _entry(row: dict[str, Any]) -> dict[str, Any]:
         "duration_s": row["duration_s"],
         "distance_m": row["distance_m"],
         "name": row["name"],
+        # The provider's own type and the qualifiers it maps to, so a wrong
+        # bundle or classification can be spotted.
+        **canonical_store.row_qualifiers(row),
     }

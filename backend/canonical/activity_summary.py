@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Final, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from backend.canonical.vocabulary import LoadModel, ProviderId
+from backend.canonical.vocabulary import Assist, LoadModel, ProviderId, Terrain
 
 # Load models on the TSS scale: one hour at threshold is about 100.
 TSS_LIKE_LOAD_MODELS: Final = frozenset(
@@ -27,7 +27,10 @@ class ActivitySummary(TypedDict, total=False):
     session to its provider activity id. ``started_at`` is the exact start and
     ``started_at_local`` the wall time where the activity was recorded:
     ``local_offset_minutes`` is its UTC offset when a provider reports one, else
-    the athlete zone applies. Zone times are lists of
+    the athlete zone applies. ``terrain`` follows ``session_terrain`` and
+    is left out when unknown; ``assist`` is present only as "electric"
+    (``session_assist``).
+    Zone times are lists of
     ``{"id": "Z1", "secs": 600.0}`` items. ``rpe_conflict`` is True when the
     session's records report different provider RPE values.
     """
@@ -39,6 +42,8 @@ class ActivitySummary(TypedDict, total=False):
     name: str
     sport: str
     environment: str
+    terrain: str
+    assist: str
     recorded_by: str
     device_type: str
     device_name: str
@@ -124,3 +129,15 @@ def summary_is_indoor(summary: Mapping[str, Any]) -> bool:
 
 
 _INDOOR_ENVIRONMENTS: Final = frozenset({"indoor", "virtual"})
+
+
+def summary_is_trail_run(summary: Mapping[str, Any]) -> bool:
+    """Return True for a trail run, whose pace is not comparable with road runs."""
+    return (
+        summary.get("sport") == "run" and summary.get("terrain") == Terrain.TRAIL.value
+    )
+
+
+def summary_is_electric(summary: Mapping[str, Any]) -> bool:
+    """Return True for a motor-assisted session, such as an e-bike ride."""
+    return summary.get("assist") == Assist.ELECTRIC.value

@@ -16,6 +16,8 @@ from datetime import date
 from statistics import linear_regression
 from typing import Any, Final
 
+from backend.canonical.activity_summary import summary_is_trail_run
+
 METHOD_ID: Final = "critical-power-speed"
 METHOD_VERSION: Final = 1
 WINDOW_DAYS: Final = 28
@@ -171,6 +173,15 @@ def _inverse_time_fit(
     return critical, w_prime
 
 
+def _fits(row: dict[str, Any], sport: str, environment: str) -> bool:
+    """Same sport and place; a trail run's speed is not comparable, so CS skips it."""
+    return (
+        row.get("sport") == sport
+        and row.get("environment") == environment
+        and not summary_is_trail_run(row)
+    )
+
+
 def _select_efforts(
     records: Sequence[dict[str, Any]], sport: str, environment: str, field: str
 ) -> list[dict[str, Any]]:
@@ -196,7 +207,7 @@ def _select_efforts(
                 "source": row.get("source"),
             }
             for row in records
-            if row.get("sport") == sport and row.get("environment") == environment
+            if _fits(row, sport, environment)
             for point in (row.get(profile_key) or {}).get(points_key, [])
             if point.get("duration_seconds") == duration
             and point.get(field) is not None

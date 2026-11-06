@@ -9,7 +9,10 @@ from typing import Any, Final
 from backend.activities.workout_text import WorkoutTextError, structured_steps
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.profile import ProfileService
-from backend.canonical.activity_summary import stored_activity_key
+from backend.canonical.activity_summary import (
+    stored_activity_key,
+    summary_is_electric,
+)
 from backend.coach.context import (
     bounded_coach_context_value,
     coach_context_json_size,
@@ -245,6 +248,12 @@ class CoachActivityReadToolService:
             checks["pace_at_heart_rate"] = self._pace_at_heart_rate(own, records, day)
         if own is None or (inside and records is None):
             checks["comparable_sessions"] = _unavailable()
+        elif summary_is_electric(own):
+            # Curve records leave e-bike sessions out; say why, not "no streams".
+            checks["comparable_sessions"] = {
+                "status": "not_covered",
+                "reason": "E-Bike-Einheiten werden nicht verglichen (Motorunterstützung).",
+            }
         elif records is None:
             checks["comparable_sessions"] = {
                 "status": "not_covered",

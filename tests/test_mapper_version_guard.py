@@ -59,8 +59,8 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "581b457314c458d0c4fd5378e5785a6494372d83d53eb01be5d7b5d549815e9c",
     ),
     "garmin_activity_mapping": (
-        (12,),
-        "c7fa79607045b150ad01121452c5545606f80b31fdfad1b4390df0c92cb5698b",
+        (13,),
+        "8f2d7fb44720f87c287a7e3edc0a4e60eecb5ac606ade7ac2a49e28c602e2950",
     ),
     "garmin_gear_mapping": (
         (17,),
@@ -83,8 +83,8 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "d1556e715a8c85384ac6da1444683f6093e8c61599a9c46c8b9d5a4eee483280",
     ),
     "intervals_activity_mapping": (
-        (9,),
-        "efc61c1fa002e69c70a9c49ca54ac10a81bf6547845a1e4211db5af1b24032f1",
+        (10,),
+        "814125637b58cd0ec59d6484a2db42c46b8f05fa0c279b00e84fa7877b2b005f",
     ),
     "intervals_power_curve_mapping": (
         (1,),
@@ -103,8 +103,8 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
         "77efab15de0cda5414ed02c0d5005a9fe6fb1a650ec103bdb40e01cef065cf0f",
     ),
     "wahoo_activity_mapping": (
-        (5,),
-        "77dde7d3e5c51abc25add8159c74daa640efa83e5a1abd0d00b38863b038c5a3",
+        (6,),
+        "bbd6940b2a3598b79fbdfbdc3797f97ba154b5d3670f0f6cfe5ae5e32e011537",
     ),
     "wahoo_threshold_mapping": (
         (2,),

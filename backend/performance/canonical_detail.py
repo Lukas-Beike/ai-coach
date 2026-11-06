@@ -173,7 +173,9 @@ class CanonicalDetailReader:
         status = self._status(db, sets, intervals_id, summary)
         stale = any(state.stale for state in status.values())
         analysis = (
-            None if stale else self._analysis(db, activity_id, analysis_record, merged)
+            None
+            if stale
+            else self._analysis(db, activity_id, analysis_record, merged, records)
         )
         envelope = (
             None
@@ -203,6 +205,7 @@ class CanonicalDetailReader:
         activity_id: str,
         analysis_record: ActivityRecord,
         merged: MergedDetail,
+        records: Sequence[ActivityRecord],
     ) -> dict[str, Any]:
         """Recompute the session analysis from the merged streams and laps."""
         payload = _stored_payload(db, activity_id, analysis_record)
@@ -211,6 +214,7 @@ class CanonicalDetailReader:
             merged.streams,
             merged.laps,
             decoupling=_decoupling(payload),
+            members=measured_order(records),
         )
         targets = payload.get("target_snapshot")
         # Each analysis credits only the providers of the channels it reads.

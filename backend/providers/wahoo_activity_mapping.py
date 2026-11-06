@@ -23,8 +23,11 @@ Field rules:
   A missing summary is not an error. A zero cadence, normalized power, energy or
   training stress score means "not measured" and becomes None; a zero ascent is
   a real flat course and stays 0.
-* sport and environment come from ``workout_type_id``. An id this table does
-  not know maps to ``Sport.OTHER`` with an unknown environment.
+* sport, environment, terrain and motor assistance come from
+  ``workout_type_id``, which is kept as ``native_type``. An id this table does
+  not know maps to ``Sport.OTHER`` with unknown environment, terrain and assist.
+  Running and cycling track (3, 16), mountain and road biking (13, 15) and lap
+  swimming (25) name no environment, like the same Garmin and Intervals.icu types.
 * load: ``power_bike_tss_last`` is a Training Stress Score, modelled as
   ``LoadModel.TSS`` so it is never mixed with another provider's load. Without a
   positive value the load stays unknown.
@@ -59,18 +62,23 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_POWER_W,
 )
 from backend.canonical.vocabulary import (
+    Assist,
     Environment,
     LoadModel,
     ProviderId,
     RecordingOrigin,
     SourceKind,
     Sport,
+    Terrain,
 )
 
 # Version 4: the workout's own IANA ``time_zone`` dates it where it was recorded.
 # Version 5: the duration follows the canonical rule (``activity_duration_s``),
 # so a strength workout counts its elapsed time.
-MAPPER_VERSION: Final = 5
+# Version 6: maps terrain, motor assistance and the native type id; track,
+# mountain and road biking and lap swimming name no environment, like the same
+# Garmin types (#1670).
+MAPPER_VERSION: Final = 6
 WAHOO_LABEL: Final = "Wahoo"
 MAX_NAME_LENGTH: Final = 200
 MAX_WORKOUT_ID: Final = 2**63 - 1
@@ -106,17 +114,18 @@ def _entries(
 # types (workout, fitness equipment, cardio class, unknown) are OTHER because
 # they name no sport. Motorised and sail/board types are OTHER as well.
 WAHOO_WORKOUT_TYPES: Final[Mapping[int, tuple[Sport, Environment]]] = {
-    **_entries(Sport.RIDE, _OUTDOOR, (0, 11, 13, 15, 16)),
+    **_entries(Sport.RIDE, _OUTDOOR, (0, 11)),
     **_entries(Sport.RIDE, _INDOOR, (12, 21, 49, 61)),
     **_entries(Sport.RIDE, _VIRTUAL, (68,)),
-    **_entries(Sport.RIDE, _UNKNOWN, (14, 64, 70)),
-    **_entries(Sport.RUN, _OUTDOOR, (1, 3, 4, 67)),
+    **_entries(Sport.RIDE, _UNKNOWN, (13, 14, 15, 16, 64, 70)),
+    **_entries(Sport.RUN, _OUTDOOR, (1, 4, 67)),
+    **_entries(Sport.RUN, _UNKNOWN, (3,)),
     **_entries(Sport.RUN, _INDOOR, (5,)),
     **_entries(Sport.RUN, _VIRTUAL, (71,)),
     **_entries(Sport.WALK, _OUTDOOR, (6, 7, 8)),
     **_entries(Sport.WALK, _INDOOR, (56,)),
     **_entries(Sport.HIKE, _OUTDOOR, (9, 10)),
-    **_entries(Sport.SWIM, _INDOOR, (25,)),
+    **_entries(Sport.SWIM, _UNKNOWN, (25,)),
     **_entries(Sport.SWIM, _OUTDOOR, (26,)),
     **_entries(Sport.ROW, _INDOOR, (22,)),
     **_entries(Sport.ROW, _UNKNOWN, (39,)),
@@ -130,6 +139,24 @@ WAHOO_WORKOUT_TYPES: Final[Mapping[int, tuple[Sport, Environment]]] = {
         (2, 17, 18, 27, 28, 31, 32, 33, 34, 35, 36, 37, 38, 40, 41)
         + (42, 43, 45, 46, 47, 62, 63, 65, 69, 255),
     ),
+}
+
+
+# Terrain and motor assistance of the ids that name them: 3 running track,
+# 4 trail, 5 treadmill, 13 mountain bike, 15 road bike, 16 track cycling,
+# 25 lap swimming, 26 open water, 56 treadmill walking, 64 e-bike. Every other
+# id of WAHOO_WORKOUT_TYPES is (UNKNOWN, NONE).
+WAHOO_WORKOUT_QUALIFIERS: Final[Mapping[int, tuple[Terrain, Assist]]] = {
+    3: (Terrain.TRACK, Assist.NONE),
+    4: (Terrain.TRAIL, Assist.NONE),
+    5: (Terrain.TREADMILL, Assist.NONE),
+    13: (Terrain.MOUNTAIN, Assist.NONE),
+    15: (Terrain.ROAD, Assist.NONE),
+    16: (Terrain.TRACK, Assist.NONE),
+    25: (Terrain.POOL, Assist.NONE),
+    26: (Terrain.OPEN_WATER, Assist.NONE),
+    56: (Terrain.TREADMILL, Assist.NONE),
+    64: (Terrain.UNKNOWN, Assist.ELECTRIC),
 }
 
 
@@ -228,21 +255,21 @@ class _WorkoutRow:
                 self._fail(key, IssueReason.OUT_OF_RANGE)
         return None
 
-    def sport_and_environment(self) -> tuple[Sport, Environment]:
+    def workout_type(self) -> int | None:
+        """Return the known ``workout_type_id``; anything else is None with an issue."""
         value = self._row.get("workout_type_id")
         if value is None:
             self._fail("workout_type_id", IssueReason.MISSING)
-            return Sport.OTHER, Environment.UNKNOWN
+            return None
         if isinstance(value, str) and value.isascii() and value.isdigit():
             value = int(value) if len(value) <= 6 else -1
         if isinstance(value, bool) or not isinstance(value, int):
             self._fail("workout_type_id", IssueReason.INVALID_TYPE)
-            return Sport.OTHER, Environment.UNKNOWN
-        entry = WAHOO_WORKOUT_TYPES.get(value)
-        if entry is None:
+            return None
+        if value not in WAHOO_WORKOUT_TYPES:
             self._fail("workout_type_id", IssueReason.UNKNOWN_VALUE)
-            return Sport.OTHER, Environment.UNKNOWN
-        return entry
+            return None
+        return value
 
     def name(self) -> str | None:
         value = self._row.get("name")
@@ -253,6 +280,15 @@ class _WorkoutRow:
             return None
         text = value.strip()
         return text[:MAX_NAME_LENGTH] if text else None
+
+
+def _classify(type_id: int | None) -> tuple[Sport, Environment, Terrain, Assist]:
+    if type_id is None:
+        return Sport.OTHER, Environment.UNKNOWN, Terrain.UNKNOWN, Assist.UNKNOWN
+    terrain, assist = WAHOO_WORKOUT_QUALIFIERS.get(
+        type_id, (Terrain.UNKNOWN, Assist.NONE)
+    )
+    return (*WAHOO_WORKOUT_TYPES[type_id], terrain, assist)
 
 
 def _map_row(
@@ -267,7 +303,8 @@ def _map_row(
     if workout_id is None or started_at is None:
         return None
     reader.read_summary()
-    sport, environment = reader.sport_and_environment()
+    type_id = reader.workout_type()
+    sport, environment, terrain, assist = _classify(type_id)
     moving_duration = reader.number(
         _MOVING_DURATION_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
     )
@@ -312,6 +349,9 @@ def _map_row(
         ),
         energy_kj=_positive(None if joules is None else joules / _JOULES_PER_KJ),
         local_offset_minutes=zone_offset_minutes(row.get("time_zone"), started_at),
+        terrain=terrain,
+        assist=assist,
+        native_type=None if type_id is None else str(type_id),
     )
 
 
