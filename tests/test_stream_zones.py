@@ -158,6 +158,28 @@ class StreamZoneTests(unittest.TestCase):
 
         self.assertIs(merged, with_stream_zones(merged, unexpected))
 
+    def test_stationary_samples_count_nothing_while_moving_zero_watts_count(
+        self,
+    ) -> None:
+        merged = with_stream_zones(
+            merge_details(
+                [
+                    _streams(
+                        (0.0, 1.0, 2.0, 3.0, 4.0),
+                        power_w=(0.0, 0.0, 200.0, 0.0, 0.0),
+                        moving=(1.0, 0.0, 1.0, 0.0, 1.0),
+                    )
+                ]
+            ),
+            _with(SETTINGS),
+        )
+
+        # Moving 0 W at 0 s counts in Z1, 200 W at 2 s in Z3; stopped samples do not.
+        self.assertEqual(
+            [1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            _seconds(_zones(merged, ZoneMetric.POWER)),
+        )
+
     def test_a_pause_counts_nothing(self) -> None:
         merged = with_stream_zones(
             merge_details(

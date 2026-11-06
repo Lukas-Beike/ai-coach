@@ -10,7 +10,8 @@ Nothing is stored: the result follows the current zone settings on every read.
 A sample counts the time until the next sample. A gap longer than
 ``max(MIN_GAP_S, GAP_FACTOR x median step)`` is a pause or a dropout and counts
 nothing, so downsampled charts and smart recording still count while pauses do
-not. Power 0 W (coasting) counts in the lowest zone; heart rate 0 is no reading.
+not. Where the streams carry ``moving``, only moving samples count, as for the
+stream averages (``stream_average``). Power 0 W (coasting) counts in the lowest zone; heart rate 0 is no reading.
 A metric without its threshold, or without any counted second, gets no
 distribution. A zone bound outside the canonical boundary range is left open.
 """
@@ -115,9 +116,13 @@ def _derived(
     ):
         return None
     threshold, limits = zone_limits
+    moving = streams.channels.get(StreamChannel.MOVING)
+    if moving is not None and len(moving.values) != len(streams.time_s):
+        return None
     seconds = _seconds(
         streams.time_s,
         choice.values,
+        None if moving is None else moving.values,
         lambda value: settings.absolute_zone(unit, value),
         len(limits) + 1,
         count_zero=metric is ZoneMetric.POWER,
@@ -174,6 +179,7 @@ def _derived(
 def _seconds(
     time_s: tuple[float, ...],
     values: tuple[float | None, ...],
+    moving: tuple[float | None, ...] | None,
     zone_of: Callable[[float], int | None],
     zones: int,
     *,
@@ -185,8 +191,13 @@ def _seconds(
     if not steps:
         return seconds
     max_step = max(MIN_GAP_S, GAP_FACTOR * statistics.median(steps))
-    for (start, end), value in zip(pairwise(time_s), values[:-1], strict=True):
+    flags = moving if moving is not None else (1.0,) * len(values)
+    for (start, end), value, flag in zip(
+        pairwise(time_s), values[:-1], flags[:-1], strict=True
+    ):
         step = end - start
+        if (flag or 0.0) < 1.0:
+            continue
         if value is None or value < 0 or (value == 0 and not count_zero):
             continue
         zone = zone_of(value)

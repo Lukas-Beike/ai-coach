@@ -76,7 +76,7 @@ The system SHALL read local details without implicit provider refresh and compar
 
 #### Scenario: Zone times from streams
 - **WHEN** a session has a heart-rate or power stream but no provider zone distribution for that metric (as with the Garmin Personal API)
-- **THEN** the document derives one on read from the merged stream with the zones in effect for the session's sport and day (local configuration, then provider configuration, then the threshold with default limits), labelled derived with profile boundaries; pauses count nothing, nothing is stored, and without the threshold no distribution is shown.
+- **THEN** the document derives one on read from the merged stream with the zones in effect for the session's sport and day (local configuration, then provider configuration, then the threshold with default limits), labelled derived with profile boundaries; pauses and samples marked not moving count nothing, nothing is stored, and without the threshold no distribution is shown.
 
 #### Scenario: Stored detail without fingerprint
 - **WHEN** a stored detail set has no summary fingerprint
