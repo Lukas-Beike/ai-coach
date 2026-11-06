@@ -246,7 +246,8 @@ class CollectorTests(unittest.TestCase):
 
         self.assertEqual(payload["skipped_sources"], ["hrv"])
         self.assertNotIn("hrv", payload)
-        self.assertEqual(failures, ["hrv"])
+        # A skipped source leaves the shared capability pause state alone.
+        self.assertEqual(failures, [])
         self.assertIn("resting_hr", payload)
 
     def test_a_retryable_failure_ends_the_read(self) -> None:
@@ -256,6 +257,25 @@ class CollectorTests(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             self.collect(client)
+
+    def test_a_retryable_source_failure_counts_toward_the_pause(self) -> None:
+        client = SdkClient()
+
+        def fail(*_: Any) -> Any:
+            raise RuntimeError("rate limited")
+
+        client.get_hrv_data_range = fail  # type: ignore[method-assign]
+        failures: list[str] = []
+
+        with self.assertRaises(RuntimeError):
+            self.collect(
+                client,
+                WellnessHistoryHooks(
+                    skippable=_skippable,
+                    capability_failure=lambda source, _error: failures.append(source),
+                ),
+            )
+        self.assertEqual(failures, ["hrv"])
 
     def test_a_paused_source_ends_the_read_before_any_call(self) -> None:
         client = SdkClient()

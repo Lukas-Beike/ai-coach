@@ -119,8 +119,10 @@ def collect_wellness_history(
         try:
             records = read()
         except Exception as exc:
-            hooks.capability_failure(source, exc)
             if not hooks.skippable(exc):
+                # Only real provider failures count toward the shared pause; a
+                # skipped history window must not pause the hourly sync.
+                hooks.capability_failure(source, exc)
                 raise
             payload["skipped_sources"].append(source)
             pagination[source] = {"records": 0}
