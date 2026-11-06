@@ -393,6 +393,8 @@ class StreamChannel(StrEnum):
     SPEED_MPS = "speed_mps"
     POWER_W = "power_w"
     HEART_RATE_BPM = "heart_rate_bpm"
+    # Revolutions per minute; for runs one leg (strides per minute, half the
+    # steps per minute), as FIT and every provider mapper report it.
     CADENCE_RPM = "cadence_rpm"
     TEMPERATURE_C = "temperature_c"
     # 1 while moving, 0 while paused.

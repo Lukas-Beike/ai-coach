@@ -69,7 +69,7 @@ The system SHALL retain distinct moving and elapsed durations from every provide
 
 #### Scenario: Garmin strength session duration
 - **WHEN** a Garmin strength activity has an active timer `duration` and a longer `elapsedDuration`
-- **THEN** `elapsedDuration` is stored as the elapsed duration, and as the activity duration, so rest between sets counts.
+- **THEN** `elapsedDuration` is stored as the elapsed duration, and as the activity duration, so rest between sets counts; Intervals.icu and Wahoo strength sessions follow the same rule.
 
 #### Scenario: Provider loads differ
 - **WHEN** Intervals training load and Wahoo TSS describe copies of a session
@@ -78,6 +78,19 @@ The system SHALL retain distinct moving and elapsed durations from every provide
 Detailed contract: Wahoo work in joules SHALL convert to kJ; zero ascent remains measured, while zero unsupported/unmeasured summary power, cadence, energy, and TSS remain absent under its mapper rules.
 
 Evidence: `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/providers/wahoo_activity_mapping.py:map_wahoo_activities`; `tests/test_intervals_activity_mapping.py:test_moving_time_precedes_elapsed_time`, `tests/test_intervals_activity_mapping.py:test_zero_load_is_kept_with_the_intervals_model`, `tests/test_wahoo_activity_mapping.py:test_summary_metrics_map_from_decimal_text`, `tests/test_wahoo_activity_mapping.py:test_planned_minutes_are_never_the_duration`, `tests/test_garmin_activity_mapping.py:test_strength_duration_is_the_whole_session_not_the_active_timer`, `backend/providers/canonical_plans.py:wahoo_ingest_plan`, `backend/sync/canonical_ingest.py:ingest_plan`, `tests/test_wahoo_activity_mapping.py:test_workouts_without_a_measured_value_are_withdrawn`, `tests/test_session_linking.py:test_a_stored_placeholder_is_withdrawn_and_revived_with_its_summary`, `tests/test_session_linking.py:test_a_stored_recording_listed_without_its_summary_is_kept`, `tests/test_wahoo_activity_mapping.py:test_a_workout_with_a_recording_file_is_never_withdrawn`.
+
+### Requirement: One activity duration and cadence meaning
+The system SHALL fill the activity duration by one rule for every provider: moving time, else timer time, else elapsed time, and the elapsed time when it is longer for strength. Cadence SHALL be rpm, counting one leg per minute for runs, never steps per minute.
+
+#### Scenario: Garmin moving time beside its timer time
+- **WHEN** a Garmin activity has `movingDuration` and a longer timer `duration`
+- **THEN** since Garmin activity mapper 12 the activity duration is the moving time, as for Intervals.icu and Wahoo, and session bundling compares the Garmin elapsed time with the Intervals.icu elapsed time in its elapsed pass.
+
+#### Scenario: Strength session from any provider
+- **WHEN** an Intervals.icu, Wahoo or Garmin strength session has a moving or timer time shorter than its elapsed time
+- **THEN** the activity duration is the elapsed time, so rest between sets counts.
+
+Evidence: `backend/canonical/records.py:activity_duration_s`, `backend/activities/canonical_sessions.py:_garmin_measurement_gaps`; `tests/test_canonical_records.py:ActivityDurationRuleTests`, `tests/test_intervals_activity_mapping.py:test_strength_duration_is_the_whole_session`, `tests/test_garmin_activity_mapping.py:test_moving_duration_comes_from_moving_duration_only`, `tests/test_canonical_sessions.py:test_a_wahoo_record_is_not_matched_by_the_intervals_elapsed_time`.
 
 ### Requirement: Health and body unit normalization
 The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.

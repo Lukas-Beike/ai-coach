@@ -21,16 +21,14 @@ the same moment.
   ``startTimeLocal`` is the device's UTC offset -> ``local_offset_minutes``.
 * ``activityType``: the dictionary form ``{"typeKey": ...}`` or, in the legacy
   form, the key as plain text.
-* ``duration``, then ``movingTime`` (seconds). ``movingTime`` is the fallback that
-  ``backend.activities.duplicates`` uses for ``duration``.
+* ``duration_s``: ``activity_duration_s`` of ``movingDuration``, the timer time
+  (``duration``, then ``movingTime``) and the elapsed time below.
 * ``elapsedDuration``, then ``duration`` alone (seconds) -> ``elapsed_duration_s``;
   the ``movingTime`` fallback is not elapsed time and stays out of it. For a
-  strength activity, ``duration`` is only the active timer time, so
-  ``duration_s`` becomes the longer ``elapsedDuration`` (the whole session).
+  strength activity, ``duration`` is only the active timer time, so the
+  canonical rule takes the longer elapsed time (the whole session).
 * ``movingDuration`` (seconds) -> ``moving_duration_s``, with no ``movingTime``
-  fallback because ``movingTime`` already feeds ``duration_s``. Garmin
-  ``duration`` is elapsed time, so duplicate detection also compares this moving
-  time against the Intervals.icu moving time.
+  fallback because ``movingTime`` is a timer-time alias.
 * ``distance`` (metres), ``activityTrainingLoad`` (Garmin training load),
   ``averageHR`` (bpm), ``avgPower``, then ``averagePower`` (watts).
 * ``maxHR``, then ``maxHeartRate`` (bpm) -> ``max_hr``, the aliases that
@@ -76,6 +74,7 @@ from backend.canonical.records import (
     MAX_TRAINING_EFFECT_LABEL_LENGTH,
     ActivityRecord,
     Provenance,
+    activity_duration_s,
 )
 from backend.canonical.sports import classify_environment_text, classify_sport_text
 from backend.canonical.validation import (
@@ -107,7 +106,9 @@ from backend.canonical.vocabulary import (
 # Version 10: trail and obstacle runs are outdoor, so analyses leave them out like
 # Intervals.icu trail runs.
 # Version 11: the device's UTC offset dates the activity where it was recorded.
-MAPPER_VERSION: Final = 11
+# Version 12: the duration follows the canonical rule (``activity_duration_s``):
+# moving time before the timer ``duration``.
+MAPPER_VERSION: Final = 12
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
 MAX_ACTIVITY_ID_LENGTH: Final = 64
@@ -205,7 +206,7 @@ def _map_row(
     name = _name(row, ref, issues)
     type_key = _type_key(row, ref, issues)
     sport, environment = _sport_and_environment(type_key, name)
-    duration = _optional_number(
+    timer = _optional_number(
         row, _DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
     )
     # Issues for ``duration`` are already reported above.
@@ -220,12 +221,13 @@ def _map_row(
             row, ("duration",), (0.0, MAX_ACTIVITY_DURATION_S), ref, []
         )
     )
-    if sport is Sport.STRENGTH and raw_elapsed is not None:
-        # Garmin ``duration`` of a strength activity is the active timer time
-        # without rest between sets; the whole session is ``elapsedDuration``.
-        duration = max(duration or 0.0, raw_elapsed)
     moving_duration = _optional_number(
         row, _MOVING_DURATION_KEYS, (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
+    )
+    # Garmin ``duration`` of a strength activity is the active timer time without
+    # rest between sets; the canonical rule takes the whole session instead.
+    duration = activity_duration_s(
+        sport, moving=moving_duration, timer=timer, elapsed=elapsed_duration
     )
     distance = _optional_number(
         row, ("distance",), (0.0, MAX_ACTIVITY_DISTANCE_M), ref, issues

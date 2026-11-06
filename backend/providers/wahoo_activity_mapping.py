@@ -47,7 +47,7 @@ from backend.canonical.mapping import (
     MappingResult,
     coerce_number,
 )
-from backend.canonical.records import ActivityRecord, Provenance
+from backend.canonical.records import ActivityRecord, Provenance, activity_duration_s
 from backend.canonical.validation import (
     HEART_RATE_BOUNDS,
     MAX_ACTIVITY_CADENCE_RPM,
@@ -68,7 +68,9 @@ from backend.canonical.vocabulary import (
 )
 
 # Version 4: the workout's own IANA ``time_zone`` dates it where it was recorded.
-MAPPER_VERSION: Final = 4
+# Version 5: the duration follows the canonical rule (``activity_duration_s``),
+# so a strength workout counts its elapsed time.
+MAPPER_VERSION: Final = 5
 WAHOO_LABEL: Final = "Wahoo"
 MAX_NAME_LENGTH: Final = 200
 MAX_WORKOUT_ID: Final = 2**63 - 1
@@ -272,7 +274,9 @@ def _map_row(
     elapsed_duration = reader.number(
         _TOTAL_DURATION_KEYS, _MIN_DURATION_S, MAX_ACTIVITY_DURATION_S
     )
-    duration = moving_duration if moving_duration is not None else elapsed_duration
+    duration = activity_duration_s(
+        sport, moving=moving_duration, timer=None, elapsed=elapsed_duration
+    )
     tss = _positive(reader.number(_TSS_KEYS, 0.0, MAX_ACTIVITY_LOAD))
     joules = reader.number(
         _WORK_JOULES_KEYS, 0.0, MAX_ACTIVITY_ENERGY_KJ * _JOULES_PER_KJ
