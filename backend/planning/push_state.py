@@ -75,10 +75,13 @@ def attach_push_state(
             ProviderId.INTERVALS.value: str(row["sync_state"] or "local")
             in _INTERVALS_PENDING
         }
+        # A unit in a sync conflict needs the athlete's decision first; no
+        # provider is offered, so the conflicted version never reaches the watch.
+        conflicted = str(row["sync_state"] or "") == "conflict"
         fingerprint = garmin_fingerprint(payload)
         if fingerprint is not None:
             pending[ProviderId.GARMIN.value] = (
-                baselines.get(str(row["local_id"])) != fingerprint
+                not conflicted and baselines.get(str(row["local_id"])) != fingerprint
             )
         payload["payload_hash"] = digest
         payload["push_pending"] = pending

@@ -119,6 +119,20 @@ class PushStateTests(unittest.TestCase):
                 )
                 self.assertTrue(projected[0]["push_pending"]["garmin"])
 
+    def test_a_conflicted_unit_offers_no_provider(self) -> None:
+        conflicted = self.project(
+            [
+                {
+                    "local_id": "s4",
+                    "payload": json.dumps(STRENGTH),
+                    "sync_state": "conflict",
+                }
+            ]
+        )
+        self.assertEqual(
+            {"intervals": False, "garmin": False}, conflicted[0]["push_pending"]
+        )
+
     def test_an_invalid_structure_offers_no_garmin_push(self) -> None:
         invalid = json.dumps({**STRENGTH, "strength_structure": [{"name": ""}]})
         projected = self.project(
