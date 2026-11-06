@@ -8,7 +8,8 @@ stored history; the recursion is
 day. The curves start at 0 on the day before the first day with a local load;
 a provider CTL, ATL or form never initialises or corrects them. A past day
 without any session is a rest day (load 0). A day with a session that has no
-local load (strength, yoga, alpine ski, walking, missing inputs) adds nothing
+local load (yoga, alpine ski, unrated or uncalibrated strength, missing
+inputs) adds nothing
 for that session and is marked incomplete with the session count and its
 session-RPE AU beside, never converted. Days from the last provider sync on
 without a session are open: no value, state unchanged. Values are withheld
@@ -50,7 +51,8 @@ LIMITS: Final = (
     "Model estimate from the local load, not measured fitness, fatigue or "
     "readiness and no performance, race-time or injury-risk prediction. Never "
     "seeded from or mixed with Intervals.icu CTL, ATL or form. Sessions without "
-    "a local load (strength, yoga, alpine ski, walking, missing inputs) add "
+    "a local load (yoga, alpine ski, unrated or uncalibrated strength, missing "
+    "inputs) add "
     "nothing; their days are marked incomplete."
 )
 

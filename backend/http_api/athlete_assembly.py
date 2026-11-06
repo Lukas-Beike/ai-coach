@@ -122,6 +122,7 @@ class AthleteDataAssembly:
             self._database_manager(),
             self._activity_feedback_repository,
             references=ActivityReferences(self._database_manager()),
+            on_change=self._load_inputs_changed,
         )
 
     def _athlete_zone(self) -> tzinfo:

@@ -39,8 +39,8 @@ Athlete decisions (2026-11-06, #1726):
 - A past day without any session is a rest day, `L_t = 0`. The day of the
   last provider sync and later days without a session are open: no value,
   state unchanged, since a session may not have synced yet.
-- A day with a session that has no local load (strength, yoga, alpine ski,
-  walking, or no complete branch inputs, card M6) adds nothing for that
+- A day with a session that has no local load (yoga, alpine ski, unrated or
+  uncalibrated strength, or no complete branch inputs, card M6) adds nothing for that
   session. The day is marked `incomplete` with the number of such sessions
   and their rated session-RPE AU (card M1) beside, never converted to TSS.
 - Values appear after a warm-up of 2τ days from the first load day (84 days

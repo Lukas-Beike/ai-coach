@@ -6,8 +6,13 @@ the thresholds in effect on its local day, with the first complete branch of:
 * power (ride, run): ``IF = NP / FTP``, ``TSS = hours × IF² × 100``;
 * pace (run without power): ``IF = v / v_threshold`` with the grade-adjusted
   speed, else the average speed, ``TSS = hours × IF² × 100``;
-* heart rate (other sports too, except strength, yoga, alpine ski and walking): Banister
-  TRIMP of the average HR, normalised so 60 minutes at the threshold HR is 100.
+* heart rate (other sports too, walking included; not strength, yoga or
+  alpine ski): Banister TRIMP of the average HR, normalised so 60 minutes at the
+  threshold HR is 100;
+* session RPE (strength only): the session-RPE load (card M1, elapsed minutes x
+  RPE) times the athlete's own TSS per AU, the median of ``TSS / AU`` over the
+  rated ride and run sessions with a local load of the 365 days up to the
+  session day, rated locally or on the Garmin device, at least 20 of them.
 
 Only the power branch gives an intensity factor (percent of FTP). A provider
 load or intensity is never an input. ``DatedThresholds`` resolves the thresholds
@@ -21,6 +26,7 @@ from __future__ import annotations
 
 import bisect
 import math
+import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -28,12 +34,15 @@ from typing import Any, Final
 
 from backend.activities.zone_settings import effective_zone_configuration
 from backend.canonical.activity_summary import (
+    stored_activity_key,
     summary_duration_s,
     summary_is_indoor,
     summary_local_date,
 )
 from backend.canonical.domain_records import ZoneConfiguration
+from backend.canonical.rating_scales import GARMIN_RPE_SCALE, LOCAL_SESSION_RPE_SCALE
 from backend.canonical.records import Observation, fingerprint_inputs
+from backend.canonical.validation import MAX_ACTIVITY_LOAD
 from backend.canonical.vocabulary import (
     Environment,
     MetricKind,
@@ -45,24 +54,33 @@ from backend.performance.current_thresholds import (
     local_thresholds,
     resolve_current_thresholds,
 )
+from backend.performance.session_rpe_load import session_load
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 
 METHOD_ID: Final = "local-tss-load"
-METHOD_VERSION: Final = 1
+METHOD_VERSION: Final = 2
 CARD: Final = "M6"
 
 POWER_BRANCH: Final = "power"
 PACE_BRANCH: Final = "pace"
 HEART_RATE_BRANCH: Final = "heart_rate"
+SESSION_RPE_BRANCH: Final = "session_rpe"
 
 TRIMP_PREFACTOR: Final = 0.64
 TRIMP_COEFFICIENT: Final = 1.92
 MAX_INTENSITY_FACTOR: Final = 2.0
 RESTING_HR_LOOKBACK_DAYS: Final = 7
-# Walking is everyday activity, not training load (athlete decision 2026-11-06).
-NO_TSS_SPORTS: Final = frozenset(
-    {Sport.STRENGTH, Sport.YOGA, Sport.ALPINE_SKI, Sport.WALK}
+# Yoga and alpine ski get no value; strength only the session-RPE branch and
+# walking the heart-rate branch (athlete decisions 2026-11-06, method v2).
+NO_TSS_SPORTS: Final = frozenset({Sport.YOGA, Sport.ALPINE_SKI})
+SESSION_RPE_SPORTS: Final = frozenset({Sport.STRENGTH})
+# The sessions that calibrate TSS per AU, their ratings, window and minimum.
+CALIBRATION_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
+CALIBRATION_RPE_SCALES: Final = frozenset(
+    {LOCAL_SESSION_RPE_SCALE.scale_id, GARMIN_RPE_SCALE.scale_id}
 )
+CALIBRATION_WINDOW_DAYS: Final = 365
+CALIBRATION_MIN_PAIRS: Final = 20
 _POWER_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
 _RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.INTERVALS, ProviderId.WAHOO)
 THRESHOLD_KINDS: Final = (
@@ -121,6 +139,57 @@ class LocalLoad:
     fingerprint: str
 
 
+@dataclass(frozen=True, slots=True)
+class RpeCalibration:
+    """The athlete's TSS per session-RPE AU on one day and the pairs behind it."""
+
+    factor: float
+    pairs: int
+    window_start: date
+    window_end: date
+
+    def fingerprint_part(self) -> dict[str, Any]:
+        return {
+            "tss_per_au": self.factor,
+            "pairs": self.pairs,
+            "window_start": self.window_start.isoformat(),
+            "window_end": self.window_end.isoformat(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SessionRating:
+    """A strength session's session-RPE load (card M1) as the branch reads it."""
+
+    au: float
+    rpe: float
+    rpe_scale: str | None
+
+
+class RpeCalibrations:
+    """TSS per AU by day from dated ``(day, TSS / AU)`` pairs (see the module doc)."""
+
+    def __init__(self, pairs: Iterable[tuple[date, float]]) -> None:
+        ordered = sorted(pairs)
+        self._days = [day for day, _ratio in ordered]
+        self._ratios = [ratio for _day, ratio in ordered]
+        self._by_day: dict[date, RpeCalibration | None] = {}
+
+    def on(self, day: date) -> RpeCalibration | None:
+        if day not in self._by_day:
+            self._by_day[day] = self._calibrate(day)
+        return self._by_day[day]
+
+    def _calibrate(self, day: date) -> RpeCalibration | None:
+        start = day - timedelta(days=CALIBRATION_WINDOW_DAYS - 1)
+        low = bisect.bisect_left(self._days, start)
+        high = bisect.bisect_right(self._days, day)
+        ratios = self._ratios[low:high]
+        if len(ratios) < CALIBRATION_MIN_PAIRS:
+            return None
+        return RpeCalibration(statistics.median(ratios), len(ratios), start, day)
+
+
 def _positive(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
@@ -146,6 +215,7 @@ def _result(
     intensity_factor: float | None,
     inputs: Mapping[str, Any],
     thresholds: Mapping[str, Threshold],
+    calibration: RpeCalibration | None = None,
 ) -> LocalLoad:
     used = {name: item.fingerprint_part() for name, item in thresholds.items()}
     details: dict[str, Any] = {
@@ -154,6 +224,8 @@ def _result(
         "inputs": dict(inputs),
         "thresholds": used,
     }
+    if calibration is not None:
+        details["calibration"] = calibration.fingerprint_part()
     if any(item.after_session for item in thresholds.values()):
         details["threshold_after_session"] = True
     fingerprint = fingerprint_inputs(
@@ -163,6 +235,7 @@ def _result(
             "branch": branch,
             "inputs": dict(inputs),
             "thresholds": used,
+            "calibration": details.get("calibration"),
         }
     )
     return LocalLoad(
@@ -271,18 +344,52 @@ def _heart_rate(
     )
 
 
+def _session_rpe(
+    sport: Sport,
+    rating: SessionRating | str | None,
+    calibration: RpeCalibration | None,
+) -> LocalLoad | str:
+    if rating is None:
+        return "no_rating"
+    if isinstance(rating, str):
+        return rating
+    if calibration is None:
+        return "not_calibrated"
+    return _result(
+        SESSION_RPE_BRANCH,
+        rating.au * calibration.factor,
+        None,
+        {
+            "sport": sport.value,
+            "session_rpe_au": rating.au,
+            "rpe": rating.rpe,
+            "rpe_scale": rating.rpe_scale,
+        },
+        {},
+        calibration,
+    )
+
+
 def session_local_load(
-    summary: Mapping[str, Any], thresholds: SessionThresholds
+    summary: Mapping[str, Any],
+    thresholds: SessionThresholds,
+    *,
+    rating: SessionRating | str | None = None,
+    calibration: RpeCalibration | None = None,
 ) -> LocalLoad | str:
     """Return the session's local load, or the reason it has none.
 
     The branches are tried in order; a branch without its session input is
     skipped, while a branch that has its input but no valid threshold falls
-    through to the next one and its reason is kept if none succeeds.
+    through to the next one and its reason is kept if none succeeds. A strength
+    session reads only the session-RPE branch with its ``rating`` and the
+    ``calibration`` of its day.
     """
     sport = _sport(summary)
     if sport is None or sport in NO_TSS_SPORTS:
         return "sport_without_load"
+    if sport in SESSION_RPE_SPORTS:
+        return _session_rpe(sport, rating, calibration)
     seconds = _positive(summary_duration_s(summary))
     if seconds is None:
         return "no_duration"
@@ -483,19 +590,86 @@ class DatedThresholds:
         )
 
 
+def _rating(
+    summary: Mapping[str, Any], feedback: Mapping[str, Any] | None
+) -> SessionRating | str:
+    """The session-RPE load (card M1), or its no-value reason (``no_rating`` etc.).
+
+    RPE 0 is a valid rating and gives 0 AU.
+    """
+    entry, au = session_load(summary, feedback)
+    if au is None or entry["rpe"] is None:
+        reason = str(entry.get("reason") or "no_rating")
+        return "no_rating" if reason == "no_rating" else reason
+    return SessionRating(au=au, rpe=float(entry["rpe"]), rpe_scale=entry["rpe_scale"])
+
+
+def _session_day(summary: Mapping[str, Any]) -> date | None:
+    try:
+        return date.fromisoformat(summary_local_date(summary))
+    except ValueError:
+        return None
+
+
+def rated_sessions(
+    summaries: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """The sessions whose feedback the strength branch reads; none without strength."""
+    if not any(_sport(summary) in SESSION_RPE_SPORTS for summary in summaries):
+        return []
+    sports = SESSION_RPE_SPORTS | CALIBRATION_SPORTS
+    return [summary for summary in summaries if _sport(summary) in sports]
+
+
+def calibration_pairs(
+    summaries: Sequence[Mapping[str, Any]],
+    loads: Mapping[str, LocalLoad | str],
+    feedback: Mapping[str, Mapping[str, Any]],
+) -> list[tuple[date, float]]:
+    """Dated ``TSS / AU`` of rated ride and run sessions with a local load.
+
+    Only a local or Garmin rating counts; a rating relayed by Intervals.icu does
+    not (athlete decision 2026-11-06).
+    """
+    pairs = []
+    for summary in summaries:
+        load = loads.get(str(summary.get("id")))
+        day = _session_day(summary)
+        if not isinstance(load, LocalLoad) or day is None:
+            continue
+        # A load the store rejects as outside the canonical bounds never
+        # calibrates (``invalid_value`` in the stage).
+        if _sport(summary) not in CALIBRATION_SPORTS or load.load > MAX_ACTIVITY_LOAD:
+            continue
+        rating = _rating(summary, feedback.get(stored_activity_key(summary)))
+        if (
+            isinstance(rating, str)
+            or rating.au <= 0
+            or rating.rpe_scale not in CALIBRATION_RPE_SCALES
+        ):
+            continue
+        pairs.append((day, load.load / rating.au))
+    return pairs
+
+
 def session_loads(
     summaries: Sequence[Mapping[str, Any]],
     thresholds: DatedThresholds,
+    feedback: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, LocalLoad | str]:
-    """Each summary's local load or no-load reason, by session id."""
+    """Each summary's local load or no-load reason, by session id.
+
+    ``feedback`` maps a summary's stored key to its session's effective local
+    feedback (``feedback_by_session``). Strength sessions come last, with the
+    calibration from the other sessions' loads.
+    """
+    ratings = feedback or {}
     result: dict[str, LocalLoad | str] = {}
+    strength: list[tuple[str, Mapping[str, Any], date]] = []
     for summary in summaries:
         session_id = summary.get("id")
         sport = _sport(summary)
-        try:
-            day = date.fromisoformat(summary_local_date(summary))
-        except ValueError:
-            day = None
+        day = _session_day(summary)
         if not isinstance(session_id, str):
             continue
         if day is None:
@@ -504,8 +678,19 @@ def session_loads(
         if sport is None:
             result[session_id] = "sport_without_load"
             continue
+        if sport in SESSION_RPE_SPORTS:
+            strength.append((session_id, summary, day))
+            continue
         result[session_id] = session_local_load(
             summary,
             thresholds.for_session(sport, day, indoor=summary_is_indoor(summary)),
+        )
+    calibrations = RpeCalibrations(calibration_pairs(summaries, result, ratings))
+    for session_id, summary, day in strength:
+        result[session_id] = session_local_load(
+            summary,
+            SessionThresholds(),
+            rating=_rating(summary, ratings.get(stored_activity_key(summary))),
+            calibration=calibrations.on(day),
         )
     return result

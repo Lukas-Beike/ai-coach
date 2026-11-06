@@ -2103,6 +2103,10 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     source_preferences=lambda db: preferences_from_profile(
         ATHLETE_DATA.profile().get_from_db(db)
     ),
+    # Strength sessions read their session RPE (card M6 v2).
+    session_feedback=lambda keys: ATHLETE_DATA.activity_feedback().for_activity_ids(
+        keys, sessions_only=True
+    ),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(
