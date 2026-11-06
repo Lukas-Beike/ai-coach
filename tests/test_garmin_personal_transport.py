@@ -402,6 +402,28 @@ class FitDownloadTests(unittest.TestCase):
         download = [r for r in api.requests if r[1].startswith("/download-service/")]
         self.assertEqual(download[0][3]["accept"], "*/*")
 
+    def test_activity_without_a_fit_file_has_no_fit_part(self) -> None:
+        api = FakePersonalApi()
+        client = _client(api)
+        # 404 (no file) and a GPX upload are not failures of the detail fetch.
+        self.assertIsNone(client.download_activity_fit("900002"))
+        original = api.payload
+
+        def gpx_upload(path: str, query: dict[str, list[str]]) -> Any:
+            if path.startswith("/download-service/"):
+                return _zip({"900001_ACTIVITY.gpx": b"<gpx/>"})
+            return original(path, query)
+
+        api.payload = gpx_upload  # type: ignore[method-assign]
+        detail = collect_garmin_activity_detail(
+            GarminTransportClient(client, None),
+            "900001",
+            external_call=_external_call,
+            redact=str,
+        )
+        self.assertNotIn("errors", detail)
+        self.assertIsNone(detail["fit"])
+
     def test_bare_fit_is_accepted_and_other_archives_are_rejected(self) -> None:
         self.assertEqual(fit_from_archive(_FIT), _FIT)
         for data in (_zip({"notes.txt": b"x"}), _zip({"a.fit": b"not fit"}), b"junk"):
@@ -543,3 +565,19 @@ class RemoteReaderTransportTests(unittest.TestCase):
         self.assertTrue(reader.configured())
         self.assertIsNone(client.sdk)
         factory.create.assert_not_called()
+
+
+class FitCapabilityTests(unittest.TestCase):
+    def test_a_paused_fit_part_does_not_gate_the_other_detail_parts(self) -> None:
+        from backend.sync.garmin_activity_details import DETAIL_CAPABILITIES
+
+        self.assertNotIn("activity_fit", DETAIL_CAPABILITIES)
+        detail = collect_garmin_activity_detail(
+            GarminTransportClient(_client(FakePersonalApi()), None),
+            "900001",
+            external_call=_external_call,
+            redact=str,
+            capability_allowed=lambda capability: capability != "activity_fit",
+        )
+        self.assertIn("details", detail)
+        self.assertEqual(detail["skipped"], ["activity_fit"])

@@ -310,14 +310,26 @@ class GarminPersonalClient:
             {"maxChartSize": int(maxchart), "maxPolylineSize": int(maxpoly)},
         )
 
-    def download_activity_fit(self, activity_id: str) -> bytes:
-        """Return the original FIT file of one activity (see ``fit_from_archive``)."""
-        raw = self._read(
-            f"/download-service/files/activity/{quote(str(int(activity_id)))}",
-            accept="*/*",
-            max_bytes=MAX_ACTIVITY_FILE_BYTES,
-        )
-        return fit_from_archive(raw)
+    def download_activity_fit(self, activity_id: str) -> bytes | None:
+        """Return the original FIT file of one activity, or None when it has none.
+
+        An activity without a file (404) or whose original upload is not FIT
+        (GPX, TCX) has no FIT part; that is not a failure of the download.
+        """
+        try:
+            raw = self._read(
+                f"/download-service/files/activity/{quote(str(int(activity_id)))}",
+                accept="*/*",
+                max_bytes=MAX_ACTIVITY_FILE_BYTES,
+            )
+        except provider_http.ProviderHTTPError as error:
+            if error.status == 404:
+                return None
+            raise
+        try:
+            return fit_from_archive(raw)
+        except provider_http.ProviderInvalidResponse:
+            return None
 
     # -- wellness --------------------------------------------------------------
 
