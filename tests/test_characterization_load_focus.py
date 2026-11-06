@@ -171,7 +171,14 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         )
         self.assertEqual(
             result,
-            {"days": 1, "sessions": 2, "duration_hours": 1.5, "training_load": 12.5},
+            {
+                "days": 1,
+                "sessions": 2,
+                "duration_hours": 1.5,
+                "training_load": 12.5,
+                # #1672: a structured load is no TSS-scale number.
+                "load_missing_sessions": 1,
+            },
         )
 
     def test_rollup_decimal_comma_load_is_zero_while_atl_accepts_it(self) -> None:

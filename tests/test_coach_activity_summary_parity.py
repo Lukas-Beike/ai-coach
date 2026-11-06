@@ -246,7 +246,14 @@ class CoachRawRowParityTests(unittest.TestCase):
         self.assertEqual(("act_g1", "Garmin Connect"), (run["id"], run["source"]))
         self.assertNotIn("training_load", run)
         self.assertEqual(
-            {"days": 7, "sessions": 1, "duration_hours": 0.7, "training_load": 0.0},
+            # #1672: the Garmin-only session is left out of the sum and counted.
+            {
+                "days": 7,
+                "sessions": 1,
+                "duration_hours": 0.7,
+                "training_load": 0.0,
+                "load_missing_sessions": 1,
+            },
             result["activity_rollups_by_sport"]["Laufen"]["last_7_days"],
         )
 
