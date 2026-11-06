@@ -334,8 +334,8 @@ def _garmin_parts(text: str, verbs: re.Pattern[str]) -> bool:
 
 
 def garmin_requested(text: str) -> bool:
-    """Whether the athlete's own text asks to send or remove workouts at Garmin."""
-    return _garmin_parts(text, _GARMIN_PUSH_VERBS) or garmin_removal_requested(text)
+    """Whether the athlete's own text asks to send workouts to Garmin."""
+    return _garmin_parts(text, _GARMIN_PUSH_VERBS)
 
 
 def garmin_removal_requested(text: str) -> bool:
@@ -367,7 +367,17 @@ def _garmin_offer(previous_assistant_text: str) -> bool:
 
 
 def _names_garmin_only(part: str) -> bool:
-    return bool(_GARMIN_TARGET.search(part)) and not _INTERVALS_NAME.search(part)
+    """Whether a part is a Garmin push or removal request, so not for Intervals.icu.
+
+    Other mentions of Garmin ("Lösch das Garmin-Duplikat") keep their meaning.
+    """
+    loose = _loose(part)
+    return (
+        bool(_GARMIN_TARGET.search(part))
+        and not _INTERVALS_NAME.search(part)
+        and bool(_GARMIN_OBJECT.search(loose))
+        and bool(_GARMIN_PUSH_VERBS.search(loose) or _GARMIN_REMOVE_VERBS.search(loose))
+    )
 
 
 def is_bare_affirmation(text: str) -> bool:
@@ -450,7 +460,8 @@ class TurnAuthority:
     remote_requested: bool
     # The pending request's original athlete text, for the classifier only.
     origin_text: str = ""
-    # The athlete's own text names a Garmin push; never granted by Intervals wording.
+    # The athlete's own text asks to send workouts to Garmin; never granted by
+    # Intervals.icu wording and never by a removal request.
     garmin_requested: bool = False
     # The athlete's own text asks to remove workouts from Garmin; a yes never does.
     garmin_removal_requested: bool = False
@@ -561,11 +572,12 @@ def _remote_effect(arguments: Mapping[str, Any] | None) -> bool:
     )
 
 
-def _removes_garmin(arguments: Mapping[str, Any] | None) -> bool:
+def _garmin_effects(arguments: Mapping[str, Any] | None) -> tuple[bool, bool]:
+    """Whether the call removes and whether it uploads Garmin workouts."""
     entries = arguments.get("entries") if isinstance(arguments, Mapping) else None
-    return isinstance(entries, list) and any(
-        isinstance(entry, Mapping) and entry.get("remove") is True for entry in entries
-    )
+    items = [entry for entry in entries or [] if isinstance(entry, Mapping)]
+    removes = any(entry.get("remove") is True for entry in items)
+    return removes, any(entry.get("remove") is not True for entry in items)
 
 
 def _items(arguments: Mapping[str, Any], key: str) -> list[Any]:
@@ -702,13 +714,21 @@ def _check_garmin_write(
     removal wording; the classifier is not asked, so no local delete is
     confirmed as a side effect.
     """
-    if not authority.garmin_requested:
+    removes, uploads = _garmin_effects(arguments)
+    if uploads and not authority.garmin_requested:
         return GateDecision(
             False, REMOTE_GARMIN, "remote_not_requested", state.classifier_used
         )
-    if _removes_garmin(arguments) and not authority.garmin_removal_requested:
+    if removes and not authority.garmin_removal_requested:
+        reason = (
+            "impact_not_confirmed"
+            if authority.garmin_requested
+            else "remote_not_requested"
+        )
+        return GateDecision(False, REMOTE_GARMIN, reason, state.classifier_used)
+    if not (removes or uploads):
         return GateDecision(
-            False, REMOTE_GARMIN, "impact_not_confirmed", state.classifier_used
+            False, REMOTE_GARMIN, "remote_not_requested", state.classifier_used
         )
     state.writes_count += 1
     state.records_count += record_count(tool_name, arguments)

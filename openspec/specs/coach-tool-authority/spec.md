@@ -91,7 +91,7 @@ The system SHALL require the athlete's named sync request for the step's own pro
 
 #### Scenario: Garmin strength push
 - **WHEN** the athlete's own message names Garmin or the watch with a transfer verb, or accepts the directly preceding Garmin offer
-- **THEN** `push_strength_to_garmin` may propose the selected strength units with target `garmin` and scope `garmin_sync`; the card binds each unit's stored payload hash, and only its approval queues the Garmin `plan_push` job. Intervals.icu wording never grants it, Garmin wording never grants an Intervals.icu write, and a removal also needs a confirmed planning delete.
+- **THEN** `push_strength_to_garmin` may propose the selected strength units with target `garmin` and scope `garmin_sync`; the card binds each unit's stored payload hash, and only its approval queues the Garmin `plan_push` job. Intervals.icu wording never grants it, a Garmin push or removal request never grants an Intervals.icu write, an upload entry needs the athlete's own push wording and a removal entry the athlete's own Garmin removal wording (no classifier is asked).
 
 #### Scenario: Duplicate activity removal
 - **WHEN** a supported duplicate inspection identifies a Garmin cycling copy and a canonical Wahoo recording

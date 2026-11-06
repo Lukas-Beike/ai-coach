@@ -1225,6 +1225,25 @@ class GarminTierTests(unittest.TestCase):
         # No classifier verdict is cached, so no local delete is confirmed.
         self.assertEqual([], classifier.calls)
 
+    def test_a_removal_request_never_grants_an_upload(self):
+        decision = _check(
+            "push_strength_to_garmin",
+            "Entferne die Krafteinheit von meiner Garmin-Uhr",
+            arguments=GARMIN_PUSH,
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual("remote_not_requested", decision.reason)
+
+    def test_garmin_duplicate_wording_still_grants_the_intervals_delete(self):
+        for text in (
+            "Lösch das Garmin-Duplikat",
+            "Lösche die doppelte Garmin-Aktivität",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(
+                    _check("delete_duplicate_intervals_activity", text).allowed
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
