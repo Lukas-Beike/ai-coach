@@ -30,7 +30,6 @@ from canonical_read_support import (
     populate,
     store_garmin,
 )
-from performance_day_support import current_days
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
