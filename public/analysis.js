@@ -857,11 +857,12 @@ function appendLocalFitnessChart(report, loadRoot, loadMissing, start, end) {
   const weekly = analysisHistoryPeriod === "twelveWeeks";
   const series = [["fitness", "Fitness", 0], ["fatigue", "Ermüdung", 1], ["form", "Form", 3]].map(([key, label, color]) => {
     const points = days.map((day) => ({ date: day.date, value: day[key] }));
-    return { label, legendLabel: label, source: "Lokal berechnet", unit: "", color, connected: true, cadenceDays: weekly ? 7 : 1,
+    return { label, legendLabel: label, source: "Lokal berechnet", unit: "TSS/Tag", color, connected: true, cadenceDays: weekly ? 7 : 1,
       points: weekly ? analysisWeeklyLastPoints(points, start, end) : points, currentPoint: points.findLast(analysisValidPoint) };
   });
   const unloaded = days.reduce((sum, day) => sum + (day.sessions_without_load || 0), 0);
-  const chart = collectAnalysisChart(loadMissing, title, series, "", start, end, unloaded ? `${unloaded} Einheiten ohne TSS` : "", { calendarWeeks: weekly });
+  const unloadedNote = unloaded === 1 ? "1 Einheit ohne TSS" : `${unloaded} Einheiten ohne TSS`;
+  const chart = collectAnalysisChart(loadMissing, title, series, "TSS/Tag", start, end, unloaded ? unloadedNote : "", { calendarWeeks: weekly });
   if (chart) loadRoot.append(chart);
 }
 

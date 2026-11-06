@@ -167,16 +167,13 @@ def _walk(
     return days
 
 
-def _no_history_days(start: date, last: date) -> list[dict[str, Any]]:
+def _no_history_days(
+    start: date, last: date, missing: Mapping[str, tuple[int, list[float]]]
+) -> list[dict[str, Any]]:
+    """Days before the first load day; sessions without a load still mark them."""
+    empty = {"fitness": None, "fatigue": None}
     return [
-        {
-            "date": day.isoformat(),
-            "state": STATE_NO_HISTORY,
-            "load": None,
-            "fitness": None,
-            "fatigue": None,
-            "form": None,
-        }
+        _row(day, STATE_NO_HISTORY, None, empty, missing.get(day.isoformat()))
         for day in (start + timedelta(days=i) for i in range((last - start).days + 1))
     ]
 
@@ -203,7 +200,9 @@ def local_fitness_fatigue(
     missing = _without_load(summaries, feedback, start, end, timezone)
     loaded_days = [day for day, value in loads.items() if day <= end.isoformat()]
     first = date.fromisoformat(min(loaded_days)) if loaded_days else None
-    days = _no_history_days(start, end if first is None else first - timedelta(days=1))
+    days = _no_history_days(
+        start, end if first is None else first - timedelta(days=1), missing
+    )
     if first is not None:
         days += _walk(loads, missing, first, start, end, complete_before or today)
     valued = [

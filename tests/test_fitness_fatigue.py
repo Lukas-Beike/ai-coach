@@ -106,6 +106,14 @@ class LocalFitnessFatigueTests(unittest.TestCase):
         self.assertEqual((last["state"], last["load"]), ("incomplete", 0.0))
         self.assertIsNone(last["session_rpe_au_without_load"])
 
+    def test_sessions_before_the_first_load_day_are_marked(self) -> None:
+        result = run({day(5): 80.0}, 6, [summary("gym", 40, day(2), sport="strength")])
+        row = result["days"][2]
+        self.assertEqual(
+            (row["state"], row["sessions_without_load"]), ("no_history", 1)
+        )
+        self.assertEqual(result["sessions_without_load"], 1)
+
     def test_loaded_sessions_are_not_marked(self) -> None:
         loads = {day(0): 100.0}
         ride = summary("ride", 60, day(0), training_load=100.0)

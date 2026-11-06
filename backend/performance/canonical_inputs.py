@@ -238,12 +238,8 @@ def activity_summaries_with_sync_time(
     The sync time is the canonical coverage fetch time of the Intervals.icu
     activities, None when none is stored. The read never waits for the writer.
     """
-    reader = source.activity_summary_reader()
-    if reader is None:
-        raise RuntimeError("activity reads need the canonical activity summary reader")
-    with source.database_manager().reader() as db:
-        coverage = None if source.coverage is None else source.coverage()
-        return reader.activity_summaries(db), activities_synced_at(coverage, db)
+    summaries, synced_at, _loads = _read_summaries(source, load_days=False)
+    return summaries, synced_at
 
 
 def activity_summaries_with_load_days(
@@ -253,13 +249,21 @@ def activity_summaries_with_load_days(
 
     The load days are empty when the reader does not store the local load.
     """
+    return _read_summaries(source, load_days=True)
+
+
+def _read_summaries(
+    source: CanonicalPerformanceSource, *, load_days: bool
+) -> tuple[tuple[ActivitySummary, ...], str | None, Mapping[str, float]]:
     reader = source.activity_summary_reader()
     if reader is None:
         raise RuntimeError("activity reads need the canonical activity summary reader")
     with source.database_manager().reader() as db:
         coverage = None if source.coverage is None else source.coverage()
         loads = (
-            reader.local_load_days(db) if isinstance(reader, LocalLoadDayReader) else {}
+            reader.local_load_days(db)
+            if load_days and isinstance(reader, LocalLoadDayReader)
+            else {}
         )
         return reader.activity_summaries(db), activities_synced_at(coverage, db), loads
 
@@ -506,6 +510,7 @@ def read_performance_inputs(
     activity_reader: ActivitySummaryReader | None = None,
     as_of: date,
     include_power_curve: bool = False,
+    include_local_load: bool = False,
     preferences: SourcePreferences = NO_PREFERENCES,
 ) -> CanonicalPerformanceInputs | None:
     """Read canonical activity summaries and wellness days in one selected unit.
@@ -516,7 +521,8 @@ def read_performance_inputs(
     No snapshot section is read. None means no activity reader, no observed
     wellness day and no stored power curve. ``as_of`` is the athlete-local day.
     ``include_power_curve`` also reads the stored power curve; otherwise it
-    stays empty.
+    stays empty. ``include_local_load`` also reads the whole-history local load
+    per day (``local_load_days``); otherwise it stays None.
     """
     reader = resolve_reader(reader, db)
     if not isinstance(reader, ReadOnceObservationReader):
@@ -560,7 +566,7 @@ def read_performance_inputs(
         ),
         power_curve=power_curve,
         local_load_days=activity_reader.local_load_days(db)
-        if isinstance(activity_reader, LocalLoadDayReader)
+        if include_local_load and isinstance(activity_reader, LocalLoadDayReader)
         else None,
     )
     if latest_day is None:

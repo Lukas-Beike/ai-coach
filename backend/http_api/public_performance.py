@@ -79,6 +79,7 @@ class PublicPerformanceStateService:
                     activity_reader=source.activity_summary_reader(),
                     as_of=today,
                     include_power_curve=True,
+                    include_local_load=True,
                     preferences=source.preferences_in(db),
                 ),
             )

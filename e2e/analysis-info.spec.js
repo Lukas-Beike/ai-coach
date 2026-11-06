@@ -618,7 +618,7 @@ test("@responsive load tab draws the local fitness, fatigue and form chart", asy
   }, "load");
   const chart = page.locator("#analysisLoadCharts .analysis-chart-card").filter({ has: page.getByRole("heading", { name: /^Fitness, Ermüdung, Form/ }) });
   await expect(chart).toBeVisible();
-  await expect(chart).toContainText("1 Einheiten ohne TSS");
+  await expect(chart).toContainText("1 Einheit ohne TSS");
   await expect(chart).toContainText("Lokal berechnet");
   await expect(chart).not.toContainText("Intervals");
 });

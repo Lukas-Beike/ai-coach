@@ -165,6 +165,9 @@ class LocalLoadStoreTests(unittest.TestCase):
                 "UPDATE activity_sessions SET state = 'deleted' "
                 "WHERE activity_id = 'act_g1'"
             )
+        # Before the next pass retires the row, the day sums already drop it.
+        with self.manager.reader() as db:
+            self.assertEqual(daily_local_loads(db), {})
         self.assertEqual(self._run()["counts"]["retired"], 2)
         with self.manager.reader() as db:
             self.assertEqual(stored_local_loads(db), {})

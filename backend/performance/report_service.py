@@ -596,8 +596,11 @@ class TrainingReportReadService:
             or sport is None
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
-        summaries, observed_at, load_days = activity_summaries_with_load_days(
-            self._canonical
+        # Only all-sport reports carry the local fitness, which needs the load days.
+        summaries, observed_at, load_days = (
+            activity_summaries_with_load_days(self._canonical)
+            if sport == "all"
+            else (*activity_summaries_with_sync_time(self._canonical), {})
         )
         # The smoothed load of an all-sport report needs the weeks before it.
         history = history_start(start, today) if sport == "all" else start
