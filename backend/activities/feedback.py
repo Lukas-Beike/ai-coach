@@ -212,12 +212,12 @@ def _effective_view(group: builtins.list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _session_rpes(value: dict[str, Any] | None) -> builtins.list[Any]:
-    """The stored session RPEs of an audit value's rows, in a stable order."""
+    """The rated rows' session RPEs of an audit value, in a stable order."""
     rows = (value or {}).get("rows") or []
     return sorted(
-        (str(row.get("activity_id")), row.get("session_rpe"))
+        (str(row.get("activity_id")), row["session_rpe"])
         for row in rows
-        if isinstance(row, dict)
+        if isinstance(row, dict) and row.get("session_rpe") is not None
     )
 
 
@@ -399,9 +399,11 @@ class ActivityFeedbackService:
     ) -> dict[str, Any] | None:
         """Replace the group's stored rows with the recorded ones, ids and times kept.
 
-        A restored session RPE requests a local load pass; the undo commits after
-        this returns and the pass waits for the writer.
+        A restored or removed session RPE requests a local load pass; the undo
+        commits after this returns and the pass waits for the writer.
         """
+        if _session_rpes(current) != _session_rpes(target):
+            self._on_change()
         for row in (current or {}).get("rows") or []:
             self._feedback_repository.delete(db, str(row["activity_id"]))
         rows = (target or {}).get("rows")
@@ -416,8 +418,6 @@ class ActivityFeedbackService:
                     409, "Die Rückmeldung kann nicht wiederhergestellt werden."
                 )
             self._feedback_repository.restore(db, row)
-        if _session_rpes(current) != _session_rpes(target):
-            self._on_change()
         return _audit_value(self._groups(db).get(self._current_key(db, entity_id)))
 
     @staticmethod

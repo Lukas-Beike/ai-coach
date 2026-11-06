@@ -223,6 +223,10 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         with self.manager.unit_of_work() as db:
             service.restore_in_transaction(db, entity_id, None, rated)
         self.assertEqual(calls, [True, True, True])
+        # Undoing the creation of a rating removes it and requests a pass too.
+        with self.manager.unit_of_work() as db:
+            service.restore_in_transaction(db, entity_id, rated, None)
+        self.assertEqual(calls, [True, True, True, True])
 
     def test_empty_notes_delete_and_exact_response(self) -> None:
         self.service.save("activity-1", {"notes": "remove me"})
