@@ -4,7 +4,7 @@ Load sums count only TSS-scale provider loads (Intervals.icu `icu_training_load`
 
 ## What Changes
 
-- New method M6 `local-tss-load` v1 (card `docs/performance-methods/m6-local-tss-load.md`, released 2026-11-06): power (NP/FTP), then run pace (grade-adjusted speed vs threshold pace), then heart rate (Banister TRIMP normalised to one threshold hour); none for strength, yoga and alpine ski.
+- New method M6 `local-tss-load` v1 (card `docs/performance-methods/m6-local-tss-load.md`, released 2026-11-06): power (NP/FTP), then run pace (grade-adjusted speed vs threshold pace), then heart rate (Banister TRIMP normalised to one threshold hour); none for strength, yoga, alpine ski and walking.
 - Thresholds are resolved per session day under the current-threshold source policy; a session before any threshold takes the earliest later one, flagged `threshold_after_session`.
 - Each value is a derived `session_load` observation (and `intensity_factor` for power) owned by the canonical session, with method, version and input fingerprint. A backfill follow-up stage recomputes changed sessions after every completed sync job, local zone change and worker start, and retires values of sessions that are gone.
 - Summaries serve `training_load` and `intensity` only from the local method; provider values move to `provider_training_load`, `provider_load_model` and `provider_intensity`. The Coach reads `load_branch` instead of `load_model`.

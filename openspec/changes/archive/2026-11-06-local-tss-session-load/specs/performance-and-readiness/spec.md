@@ -15,7 +15,7 @@ The system SHALL compute each canonical session's load with M6 `local-tss-load` 
 - **WHEN** a session's inputs, its dated thresholds or the method version change, or the session is gone
 - **THEN** the next stage pass rewrites only the values whose fingerprint changed and retires the values of gone sessions.
 
-Detailed contract: thresholds follow `resolve_current_thresholds` per day with the policy's age limits; resting HR comes from the session day or up to 7 days earlier, Garmin first. Strength, yoga and alpine ski get no value; an IF above 2.0 is rejected. The pass runs as the last canonical backfill follow-up, triggered by worker start, completed sync jobs and committed local zone changes, and keeps content-free counts that diagnostics report as `local_load`.
+Detailed contract: thresholds follow `resolve_current_thresholds` per day with the policy's age limits; resting HR comes from the session day or up to 7 days earlier, Garmin first, else the earliest later value, flagged. Strength, yoga, alpine ski and walking get no value; an IF above 2.0 is rejected. The pass runs as the last canonical backfill follow-up, triggered by worker start, completed sync jobs and committed local zone changes, and keeps content-free counts that diagnostics report as `local_load`.
 
 Evidence: `backend/performance/local_tss.py`, `backend/sync/local_load.py`, `backend/sync/canonical_backfill_assembly.py`, `backend/sync/executor.py:SyncJobExecutor.run`, `backend/athlete/zones.py:ZoneConfigurationService`; `tests/test_local_tss.py`, `tests/test_local_load_store.py`, `tests/test_sync_executor.py`, `tests/test_zone_configuration_canonical.py`, `docs/performance-methods/m6-local-tss-load.md`.
 

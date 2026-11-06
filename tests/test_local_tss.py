@@ -185,6 +185,17 @@ class SessionLoadWorkedExampleTests(unittest.TestCase):
         )
         self.assertEqual(result, "no_inputs")
 
+    def test_walking_has_no_load(self) -> None:
+        result = session_local_load(
+            _summary(sport="walk", moving_duration_s=3600.0, avg_hr=110.0),
+            SessionThresholds(
+                resting_hr=_threshold(50.0),
+                threshold_hr=_threshold(170.0),
+                max_hr=_threshold(190.0),
+            ),
+        )
+        self.assertEqual(result, "sport_without_load")
+
     def test_strength_has_no_load(self) -> None:
         result = session_local_load(
             _summary(sport="strength", moving_duration_s=3600.0, avg_hr=120.0),
@@ -343,7 +354,14 @@ class DatedThresholdTests(unittest.TestCase):
         )
         found = _found(thresholds.resting_hr(date(2026, 6, 1)))
         self.assertEqual((found.value, found.source), (50.0, "garmin"))
-        self.assertIsNone(thresholds.resting_hr(date(2026, 5, 19)))
+        self.assertFalse(found.after_session)
+        # Before any stored value: the earliest later one, flagged.
+        early = _found(thresholds.resting_hr(date(2026, 5, 1)))
+        self.assertEqual(
+            (early.value, early.observed_on, early.after_session),
+            (48.0, date(2026, 5, 20), True),
+        )
+        self.assertIsNone(thresholds.resting_hr(date(2026, 6, 10)))
 
     def test_session_loads_use_the_session_day(self) -> None:
         thresholds = DatedThresholds(

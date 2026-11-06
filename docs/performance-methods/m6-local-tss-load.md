@@ -54,7 +54,7 @@ branch that was (`load_branch`).
      value is marked `pace_basis: average_speed`.
    - `v_threshold`: the resolver's run threshold pace on the day, stored as
      m/s.
-3. **Heart rate** (every sport except strength, yoga and alpine ski, without
+3. **Heart rate** (every sport except strength, yoga, alpine ski and walking, without
    power or pace):
    - `TSS = TRIMP_session / TRIMP_threshold_hour × 100`.
    - `TRIMP = minutes × HRr × 0.64 × e^(1.92 × HRr)`.
@@ -66,6 +66,8 @@ branch that was (`load_branch`).
      values.
    - `HR_rest` is the resting HR of the session day, or of the nearest
      earlier day within 7 days, from the recovery family (Garmin first).
+     Without one, the earliest later resting HR stands in, flagged
+     `threshold_after_session` (athlete decision 2026-11-06).
 
 General rules:
 
@@ -140,7 +142,7 @@ hour, or a mix of branches on one scale.
   2. otherwise each provider's latest value observed on or before that day,
      within the policy's age limits counted from that day.
 - Resting HR comes from the recovery family on the session day or up to 7
-  days earlier.
+  days earlier, else the earliest later value, flagged.
 - Each value covers one session; no history window is needed.
 - The backfill covers every stored session.
 
@@ -177,8 +179,8 @@ hour, or a mix of branches on one scale.
   published method.
 - Pace uses Garmin's grade-adjusted average speed, not normalized graded pace
   from streams, and the flat average speed when that is missing.
-- Strength, yoga and alpine ski get no TSS. Their sRPE AU stays beside the
-  sum.
+- Strength, yoga, alpine ski and walking get no TSS. Their sRPE AU stays
+  beside the sum.
 
 ## Minimum data and stop rules
 
@@ -207,11 +209,11 @@ hour, or a mix of branches on one scale.
 | TRIMP prefactor and coefficient | 0.64 and 1.92 | product assumption | Banister male constants as cited for R19, not verified from the chapter; coefficient chosen by the athlete 2026-11-06. |
 | HR normalisation | 60 min at threshold HR = 100 | product assumption | Vendor convention (V2); no peer-reviewed source. |
 | HR guards | HR_rest < threshold HR < HR_max, 0 < HRr ≤ 1 | product assumption | Keeps HRr defined and the normalisation positive; not a published rule. |
-| Resting HR look-back | 7 days | product assumption | Keeps HRr on a recent resting HR; not a published value. |
+| Resting HR look-back | 7 days, else the earliest later value, flagged | product assumption | Keeps HRr on a recent resting HR; the later stand-in follows the athlete decision of 2026-11-06 after the count on the 2026-10-24 copy (2,334 sessions had none within 7 days); not a published value. |
 | Resting HR source | recovery family, Garmin first | product assumption | Same family rule as `backend/performance/source_policy.py`. |
 | Implausible IF | above 2.0 | product assumption | Guard against a wrong FTP or unit; not a physiological rule. |
 | Stored intensity | intensity_pct = IF × 100, power branch only | product assumption | Issue #1725 scope (NP/FTP); pace IF is not comparable. |
-| Sports without TSS | strength, yoga, alpine ski | product assumption | HR load agrees poorly with sRPE in strength work (Dai et al. 2025, README); yoga and alpine ski are treated alike because their HR does not reflect endurance load. |
+| Sports without TSS | strength, yoga, alpine ski, walking | product assumption | HR load agrees poorly with sRPE in strength work (Dai et al. 2025, README); yoga and alpine ski are treated alike because their HR does not reflect endurance load; walking is everyday activity, not training load (athlete decision 2026-11-06). Hiking keeps the HR branch. |
 | HR thresholds of other sports | run values | product assumption | The resolver keeps HR thresholds for ride and run only. |
 | Threshold after the session | earliest later threshold, flagged | product assumption | Athlete decision 2026-11-06; fills history before the first stored threshold. |
 | Duration | moving, else elapsed | product assumption | `summary_duration_s` in `backend/canonical/activity_summary.py:117`. |

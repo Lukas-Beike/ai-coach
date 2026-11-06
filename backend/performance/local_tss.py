@@ -6,7 +6,7 @@ the thresholds in effect on its local day, with the first complete branch of:
 * power (ride, run): ``IF = NP / FTP``, ``TSS = hours × IF² × 100``;
 * pace (run without power): ``IF = v / v_threshold`` with the grade-adjusted
   speed, else the average speed, ``TSS = hours × IF² × 100``;
-* heart rate (other sports too, except strength, yoga and alpine ski): Banister
+* heart rate (other sports too, except strength, yoga, alpine ski and walking): Banister
   TRIMP of the average HR, normalised so 60 minutes at the threshold HR is 100.
 
 Only the power branch gives an intensity factor (percent of FTP). A provider
@@ -48,7 +48,10 @@ TRIMP_PREFACTOR: Final = 0.64
 TRIMP_COEFFICIENT: Final = 1.92
 MAX_INTENSITY_FACTOR: Final = 2.0
 RESTING_HR_LOOKBACK_DAYS: Final = 7
-NO_TSS_SPORTS: Final = frozenset({Sport.STRENGTH, Sport.YOGA, Sport.ALPINE_SKI})
+# Walking is everyday activity, not training load (athlete decision 2026-11-06).
+NO_TSS_SPORTS: Final = frozenset(
+    {Sport.STRENGTH, Sport.YOGA, Sport.ALPINE_SKI, Sport.WALK}
+)
 _POWER_SPORTS: Final = frozenset({Sport.RIDE, Sport.RUN})
 _RESTING_HR_ORDER: Final = (ProviderId.GARMIN, ProviderId.INTERVALS, ProviderId.WAHOO)
 THRESHOLD_KINDS: Final = (
@@ -289,6 +292,18 @@ def _source(observation: Observation | None) -> str:
     return LOCAL_SOURCE if provider is None else provider.value
 
 
+def _first_by_provider(
+    window: Sequence[Observation], *, latest: bool
+) -> Threshold | None:
+    """The window's value of the first provider in resting-HR order that has one."""
+    for provider in _RESTING_HR_ORDER:
+        matches = [item for item in window if item.provenance.provider is provider]
+        if matches:
+            item = matches[-1] if latest else matches[0]
+            return Threshold(float(item.value.value), provider.value, item.observed_on)
+    return None
+
+
 class DatedThresholds:
     """Thresholds in effect on a given day under the current-threshold policy.
 
@@ -372,20 +387,28 @@ class DatedThresholds:
         """The resting HR of ``day`` or of the nearest earlier day within the window.
 
         Garmin's value wins over another provider's value of the same window.
+        Without one, the earliest later value stands in, flagged ``after_session``
+        (athlete decision 2026-11-06), Garmin first on that day.
         """
         start = bisect.bisect_left(
             self._rest_days, day - timedelta(days=RESTING_HR_LOOKBACK_DAYS)
         )
         end = bisect.bisect_right(self._rest_days, day)
-        window = self._rest[start:end]
-        for provider in _RESTING_HR_ORDER:
-            matches = [item for item in window if item.provenance.provider is provider]
-            if matches:
-                item = matches[-1]
-                return Threshold(
-                    float(item.value.value), provider.value, item.observed_on
-                )
-        return None
+        found = _first_by_provider(self._rest[start:end], latest=True)
+        if found is not None:
+            return found
+        later = self._rest[end:]
+        if not later:
+            return None
+        first_day = later[0].observed_on
+        stand_in = _first_by_provider(
+            [item for item in later if item.observed_on == first_day], latest=False
+        )
+        if stand_in is None:
+            return None
+        return Threshold(
+            stand_in.value, stand_in.source, stand_in.observed_on, after_session=True
+        )
 
     def for_session(self, sport: Sport, day: date) -> SessionThresholds:
         """The thresholds a session of ``sport`` on ``day`` reads."""
