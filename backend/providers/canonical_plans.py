@@ -29,6 +29,7 @@ from backend.canonical.domain_records import (
     ZoneConfiguration,
 )
 from backend.canonical.garmin_payload import ITEM_SECTIONS as GARMIN_ITEM_SECTIONS
+from backend.canonical.garmin_payload import dedicated_activity_rows
 from backend.canonical.local_time import (
     local_date,
     parse_provider_datetime,
@@ -138,12 +139,6 @@ GARMIN_FETCHED_AT_KEY: Final = "fetched_at"
 GARMIN_ACTIVITIES_SECTION: Final = "activities"
 # Dedicated training-load rows merged into the activities before they are stored.
 GARMIN_TRAINING_LOAD_SECTION: Final = "training_load_activities"
-# The athlete's ratings of single activities, merged in the same way (#1724).
-GARMIN_ACTIVITY_RATINGS_SECTION: Final = "activity_ratings"
-GARMIN_DEDICATED_SECTIONS: Final = (
-    GARMIN_ACTIVITY_RATINGS_SECTION,
-    GARMIN_TRAINING_LOAD_SECTION,
-)
 GARMIN_WEIGHT_SECTION: Final = "weight"
 GARMIN_BODY_BATTERY_SECTION: Final = "body_battery"
 GARMIN_MORNING_BATTERY_KEY: Final = "morning_body_battery"
@@ -562,16 +557,6 @@ def _garmin_activity_mapper(
     return mapper
 
 
-def _dedicated_rows(payload: Mapping[str, Any]) -> list[Any]:
-    """The payload's dedicated rows of every section merged into its activities."""
-    rows: list[Any] = []
-    for section in GARMIN_DEDICATED_SECTIONS:
-        value = payload.get(section)
-        if isinstance(value, list):
-            rows.extend(value)
-    return rows
-
-
 def garmin_ingest_plan(
     payload: object,
     *,
@@ -601,7 +586,7 @@ def garmin_ingest_plan(
                 zone=zone,
                 retrieved_at=activities_at,
                 training_loads=training_loads,
-                payload_loads=_dedicated_rows(payload),
+                payload_loads=dedicated_activity_rows(payload),
             ),
             mapper_version=GARMIN_ACTIVITY_VERSION,
             zone=zone,

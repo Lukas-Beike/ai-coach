@@ -58,56 +58,67 @@ def _row(activity_id: int, day: date, **extra: Any) -> dict[str, Any]:
 
 
 def _collect(
-    rows: list[dict[str, Any]], known: frozenset[str] | None, client: FakeClient
+    rows: list[dict[str, Any]], rated: frozenset[str], client: FakeClient
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"activities": rows, "errors": []}
-    _collect_activity_ratings(client, payload, TODAY, known, _call, str, None)
+    _collect_activity_ratings(client, payload, TODAY, rated, _call, str, None)
     return payload
 
 
 class CollectionTests(unittest.TestCase):
-    def test_new_and_recent_activities_are_read_older_known_ones_are_not(self) -> None:
+    def test_unrated_and_recent_activities_are_read_history_is_not(self) -> None:
         client = FakeClient()
         rows = [
-            _row(1, TODAY - timedelta(days=10)),  # known, old
-            _row(2, TODAY - timedelta(days=10)),  # new, old
-            _row(3, TODAY - timedelta(days=3)),  # known, recent
+            _row(1, TODAY - timedelta(days=10)),  # rated, older than 3 days
+            _row(2, TODAY - timedelta(days=10)),  # unrated, within 14 days
+            _row(3, TODAY - timedelta(days=3)),  # rated, recent: re-read
             _row(4, TODAY, manualActivity=True),  # manual entry
+            _row(5, TODAY - timedelta(days=15)),  # unrated history
         ]
 
-        payload = _collect(rows, frozenset({"1", "3", "4"}), client)
+        payload = _collect(rows, frozenset({"1", "3"}), client)
 
         self.assertEqual(["3", "2"], client.read)
+        day = (TODAY - timedelta(days=3)).isoformat()
         self.assertEqual(
-            [
-                {"activityId": "3", "directWorkoutRpe": 70, "directWorkoutFeel": 50},
-                {"activityId": "2", "directWorkoutRpe": 70, "directWorkoutFeel": 50},
-            ],
-            payload["activity_ratings"],
+            {
+                "activityId": "3",
+                "startTimeLocal": f"{day} 07:00:00",
+                "directWorkoutRpe": 70,
+                "directWorkoutFeel": 50,
+                "minHR": None,
+            },
+            payload["activity_ratings"][0],
         )
 
     def test_reads_are_capped_newest_first(self) -> None:
         client = FakeClient()
         rows = [_row(index, TODAY) for index in range(MAX_ACTIVITY_RATING_READS + 5)]
 
-        _collect(rows, None, client)
+        _collect(rows, frozenset(), client)
 
         self.assertEqual(MAX_ACTIVITY_RATING_READS, len(client.read))
 
-    def test_a_failed_read_keeps_the_others_and_is_recorded_once(self) -> None:
-        client = FakeClient(failing=frozenset({"1"}))
+    def test_a_failed_read_stops_the_reads_without_a_sync_error(self) -> None:
+        client = FakeClient(failing=frozenset({"2"}))
 
-        payload = _collect([_row(1, TODAY), _row(2, TODAY)], None, client)
-
-        self.assertEqual(
-            ["2"], [row["activityId"] for row in payload["activity_ratings"]]
+        payload = _collect(
+            [_row(1, TODAY), _row(2, TODAY), _row(3, TODAY)], frozenset(), client
         )
-        self.assertEqual(["activity_ratings"], [e["source"] for e in payload["errors"]])
+
+        # Newest first by start, then id: 3, 2 (fails, stops), 1 not read.
+        self.assertEqual(["3", "2"], client.read)
+        self.assertEqual(
+            ["3"], [row["activityId"] for row in payload["activity_ratings"]]
+        )
+        self.assertEqual([], payload["errors"])
 
     def test_a_client_without_the_read_collects_nothing(self) -> None:
         payload: dict[str, Any] = {"activities": [_row(1, TODAY)], "errors": []}
 
-        _collect_activity_ratings(object(), payload, TODAY, None, _call, str, None)
+        _collect_activity_ratings(
+            object(), payload, TODAY, frozenset(), _call, str, None
+        )
 
         self.assertNotIn("activity_ratings", payload)
 
@@ -141,6 +152,28 @@ class MappingTests(unittest.TestCase):
         ]
 
         self.assertEqual((6.0, 1.0, 97.0), (record.rpe, record.feel, record.min_hr))
+
+    def test_a_rating_cleared_on_the_watch_clears_the_stored_one(self) -> None:
+        rows = merge_training_load_rows(
+            [_activity()],
+            [
+                {"activityId": "910009", "directWorkoutRpe": 60},  # stored
+                {"activityId": "910009", "directWorkoutRpe": None},  # this sync
+            ],
+        )
+
+        record = map_garmin_activities(rows, zone=BERLIN, retrieved_at=STARTED).records[
+            0
+        ]
+
+        self.assertIsNone(record.rpe)
+
+    def test_rpe_below_garmin_range_is_not_a_rating(self) -> None:
+        result = map_garmin_activities(
+            [_activity(directWorkoutRpe=0)], zone=BERLIN, retrieved_at=STARTED
+        )
+
+        self.assertIsNone(result.records[0].rpe)
 
     def test_feel_follows_the_intervals_import(self) -> None:
         self.assertEqual(
@@ -241,6 +274,20 @@ class PrecedenceTests(unittest.TestCase):
         )
 
         self.assertTrue(summary["rpe_conflict"])
+
+    def test_disagreeing_intervals_copies_do_not_block_the_garmin_rating(self) -> None:
+        summary = activity_summary(
+            "act_1",
+            [
+                _record(ProviderId.GARMIN, "g1", rpe=6.0),
+                _record(ProviderId.INTERVALS, "i1", rpe=5.0),
+                _record(ProviderId.INTERVALS, "i2", rpe=7.0),
+            ],
+            BERLIN,
+        )
+
+        self.assertEqual(6.0, summary["rpe"])
+        self.assertNotIn("rpe_conflict", summary)
 
     def test_m1_labels_the_garmin_rating_and_local_feedback_still_wins(self) -> None:
         summary = activity_summary(

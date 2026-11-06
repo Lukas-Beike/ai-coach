@@ -23,6 +23,7 @@ from backend.activities.session_linking import (
     link_activity_sessions,
     split_unmatched_sessions,
 )
+from backend.canonical.garmin_payload import DEDICATED_ACTIVITY_SECTIONS
 from backend.canonical.local_time import local_date
 from backend.db import canonical_domain_store, canonical_store, garmin_store
 from backend.db.canonical_domain_store import ReplaceResult
@@ -30,7 +31,6 @@ from backend.db.canonical_store import ObservationScope, WriteOutcome
 from backend.observability import sanitized_provider_payload
 from backend.providers.canonical_plans import (
     ACTIVITY_RECORD_KIND,
-    GARMIN_DEDICATED_SECTIONS,
     INTERVALS_POWER_CURVE_KEY,
     IngestPlan,
     garmin_ingest_plan,
@@ -230,7 +230,7 @@ def stored_training_loads(db: Any) -> Callable[[str], Any]:
 
     def lookup(activity_id: str) -> Any:
         combined: dict[str, Any] = {}
-        for section in GARMIN_DEDICATED_SECTIONS:
+        for section in DEDICATED_ACTIVITY_SECTIONS:
             row = garmin_store.read_item(db, section, activity_id)
             if isinstance(row, dict):
                 combined.update(row)

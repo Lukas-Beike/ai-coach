@@ -11,6 +11,7 @@ from typing import Any
 from backend.activities.duplicates import deduplicate_api_records
 from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.garmin_payload import (
+    ACTIVITY_RATINGS_SECTION,
     MERGE_SECTIONS,
     REPLACE_SECTIONS,
     SECTIONS,
@@ -316,6 +317,19 @@ class GarminPayloadService:
         return frozenset(
             str(row["activityId"])
             for row in rows
+            if isinstance(row, dict) and row.get("activityId") is not None
+        )
+
+    def rated_activity_ids(self, days: int) -> frozenset[str]:
+        """Return the Garmin activity IDs of the last ``days`` days with a stored rating."""
+        start = (self._local_today() - timedelta(days=max(1, days))).isoformat()
+        with self._database_manager.reader() as db:
+            rows = garmin_store.read_sections(
+                db, (ACTIVITY_RATINGS_SECTION,), start=start
+            ).get(ACTIVITY_RATINGS_SECTION)
+        return frozenset(
+            str(row["activityId"])
+            for row in rows or []
             if isinstance(row, dict) and row.get("activityId") is not None
         )
 

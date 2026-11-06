@@ -137,7 +137,7 @@ def activity_summary(
         ),
         None,
     )
-    if _rpe_conflict(records):
+    if _rpe_conflict(rating_order(records)):
         summary["rpe_conflict"] = True
     if load is not None:
         summary["provider_training_load"] = load.load
@@ -197,13 +197,13 @@ def _values(
     return sources
 
 
-def _rpe_conflict(records: Sequence[ActivityRecord]) -> bool:
-    """Whether copies of one provider report different RPE values."""
-    seen: dict[ProviderId | None, set[float]] = {}
-    for record in records:
-        if record.rpe is not None:
-            seen.setdefault(record.provenance.provider, set()).add(record.rpe)
-    return any(len(values) > 1 for values in seen.values())
+def _rpe_conflict(rated: Sequence[ActivityRecord]) -> bool:
+    """Whether copies of the provider whose RPE the summary uses disagree."""
+    with_rpe = [record for record in rated if record.rpe is not None]
+    if not with_rpe:
+        return False
+    provider = with_rpe[0].provenance.provider
+    return len({r.rpe for r in with_rpe if r.provenance.provider is provider}) > 1
 
 
 def _record_ids(measured: Sequence[ActivityRecord]) -> dict[str, str]:

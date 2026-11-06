@@ -376,6 +376,7 @@ class PersonalOnlyCollectionTests(unittest.TestCase):
             [
                 {
                     "activityId": "900001",
+                    "startTimeLocal": f"{DAY} 11:47:18",
                     "directWorkoutRpe": 60,
                     "directWorkoutFeel": 75,
                     "minHR": 97,

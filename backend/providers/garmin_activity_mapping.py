@@ -191,7 +191,8 @@ _TRAINING_LOAD_FIELDS: Final = (
     _MIN_HR_KEYS,
 )
 # Garmin rates RPE 10..100 and feel 0 (very weak) .. 100 (very strong).
-_RATING_BOUNDS: Final = (0.0, 100.0)
+_RPE_BOUNDS: Final = (10.0, 100.0)
+_FEEL_BOUNDS: Final = (0.0, 100.0)
 _TRAINING_EFFECT_BOUNDS: Final = (0.0, MAX_TRAINING_EFFECT)
 _ALTITUDE_BOUNDS: Final = (MIN_ACTIVITY_ALTITUDE_M, MAX_ACTIVITY_ALTITUDE_M)
 _BIKE_CADENCE_KEYS: Final = ("averageBikingCadenceInRevPerMinute",)
@@ -342,8 +343,8 @@ def _map_row(
     avg_hr = _optional_number(row, ("averageHR",), HEART_RATE_BOUNDS, ref, issues)
     max_hr = _optional_number(row, _MAX_HR_KEYS, HEART_RATE_BOUNDS, ref, issues)
     min_hr = _optional_number(row, _MIN_HR_KEYS, HEART_RATE_BOUNDS, ref, issues)
-    raw_rpe = _optional_number(row, (_RPE_KEY,), _RATING_BOUNDS, ref, issues)
-    raw_feel = _optional_number(row, (_FEEL_KEY,), _RATING_BOUNDS, ref, issues)
+    raw_rpe = _optional_number(row, (_RPE_KEY,), _RPE_BOUNDS, ref, issues)
+    raw_feel = _optional_number(row, (_FEEL_KEY,), _FEEL_BOUNDS, ref, issues)
     max_speed = _optional_number(
         row, _MAX_SPEED_KEYS, (0.0, MAX_ACTIVITY_SPEED_MPS), ref, issues
     )
@@ -464,9 +465,8 @@ def merge_training_load_rows(activities: object, training_loads: object) -> obje
         if isinstance(row, dict) and not _is_absent(
             identity := row.get("activityId") or row.get("id")
         ):
-            by_id.setdefault(str(identity), {}).update(
-                {key: value for key, value in row.items() if value is not None}
-            )
+            # An explicit null clears an earlier value: a rating removed on the watch.
+            by_id.setdefault(str(identity), {}).update(row)
     if not by_id:
         return activities
     merged: list[object] = []

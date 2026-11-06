@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from typing import Any
 
+from backend.canonical.garmin_payload import ACTIVITY_RATINGS_SECTION
 from backend.providers.descriptors import GARMIN_ID
 from backend.providers.garmin_fields import (
     GARMIN_DATE_ALIASES,
@@ -53,6 +54,8 @@ class GarminCollectionOptions:
     # unless the run reads an activity outside ``known_activity_ids``.
     include_daily_metrics: bool = True
     known_activity_ids: frozenset[str] | None = None
+    # Activities whose watch rating is already stored (``activity_ratings``).
+    rated_activity_ids: frozenset[str] = frozenset()
 
 
 # Metrics that change at most daily or after an activity: they are read once per
@@ -1446,11 +1449,12 @@ def _validate_current_metrics(
 
 
 # The athlete's own ratings live only in the single-activity read (summaryDTO).
-ACTIVITY_RATINGS_SECTION = "activity_ratings"
 ACTIVITY_RATING_KEYS = ("directWorkoutRpe", "directWorkoutFeel", "minHR")
-# Activities that started this many days ago or later are read again, so a
-# rating corrected after the save is picked up; older ones only when new.
+# Activities of the last three days are read again, so a rating corrected after
+# the save is picked up. Older ones of the last two weeks are read once, when no
+# rating row is stored yet; history is not read (its Intervals.icu copy stays).
 ACTIVITY_RATING_RECHECK_DAYS = 3
+ACTIVITY_RATING_NEW_DAYS = 14
 MAX_ACTIVITY_RATING_READS = 30
 
 
@@ -1458,15 +1462,17 @@ def _collect_activity_ratings(
     client: Any,
     payload: dict[str, Any],
     today: date,
-    known_activity_ids: frozenset[str] | None,
+    rated_activity_ids: frozenset[str],
     external_call: ExternalCall,
     redact: Redact,
     warn: WarningLogger | None,
 ) -> None:
-    """Read the ratings of new and recent activities into ``activity_ratings``.
+    """Read the ratings of unrated and recent activities into ``activity_ratings``.
 
-    At most ``MAX_ACTIVITY_RATING_READS`` reads, newest first. A failed read
-    keeps the stored rating and is recorded once in ``errors``.
+    At most ``MAX_ACTIVITY_RATING_READS`` reads, newest first; the rest follow on
+    later syncs. The first failed read (a rate limit, an outage) stops the reads
+    of this run and is only logged: the ratings supplement the activities, so the
+    sync stays complete and the stored ratings stay.
     """
     fetch = getattr(client, "get_activity", None)
     if not callable(fetch):
@@ -1482,15 +1488,15 @@ def _collect_activity_ratings(
         ),
         reverse=True,
     )
+    new_from = (today - timedelta(days=ACTIVITY_RATING_NEW_DAYS)).isoformat()
     wanted = [
-        activity_id
+        (started, activity_id)
         for started, activity_id in candidates
         if started[:10] >= recheck_from
-        or (known_activity_ids is not None and activity_id not in known_activity_ids)
+        or (started[:10] >= new_from and activity_id not in rated_activity_ids)
     ][:MAX_ACTIVITY_RATING_READS]
     ratings: list[dict[str, Any]] = []
-    failure: BaseException | None = None
-    for activity_id in wanted:
+    for started, activity_id in wanted:
         try:
             value = external_call(
                 GARMIN_ID,
@@ -1498,26 +1504,23 @@ def _collect_activity_ratings(
                 partial(fetch, activity_id),
                 {"activity_id": activity_id},
             )
-        except Exception as exc:  # noqa: BLE001 - keep the other activities.
-            failure = exc
-            continue
+        except Exception as exc:  # noqa: BLE001 - the activities stay complete.
+            if warn:
+                warn(ACTIVITY_RATINGS_SECTION, redact(str(exc))[:500], exc)
+            break
         summary = value.get("summaryDTO") if isinstance(value, dict) else None
         if not isinstance(summary, dict):
             continue
+        # Every key is present, so a rating cleared on the watch clears the stored one.
         ratings.append(
             {
                 "activityId": activity_id,
-                **{
-                    key: summary[key]
-                    for key in ACTIVITY_RATING_KEYS
-                    if summary.get(key) is not None
-                },
+                "startTimeLocal": started,
+                **{key: summary.get(key) for key in ACTIVITY_RATING_KEYS},
             }
         )
     if ratings:
         payload[ACTIVITY_RATINGS_SECTION] = ratings
-    if failure is not None:
-        _add_error(payload, ACTIVITY_RATINGS_SECTION, failure, redact, warn)
 
 
 def collect_garmin_data(
@@ -1583,7 +1586,7 @@ def collect_garmin_data(
         client,
         payload,
         today,
-        collection_options.known_activity_ids,
+        collection_options.rated_activity_ids,
         external_call,
         redact,
         warn,

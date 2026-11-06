@@ -14,6 +14,7 @@ longer returns are removed.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Final
 
 GARMIN_PROVIDER: Final = "garmin"
@@ -58,6 +59,28 @@ REPLACE_SECTIONS: Final = (
     "performance_history",
 )
 SECTIONS: Final = frozenset((*MERGE_SECTIONS, *REPLACE_SECTIONS))
+# The athlete's ratings of single activities (summaryDTO), read per activity.
+ACTIVITY_RATINGS_SECTION: Final = "activity_ratings"
+# Per-activity rows merged into the activity rows before mapping, in merge
+# order: a later section's value wins.
+DEDICATED_ACTIVITY_SECTIONS: Final = (
+    ACTIVITY_RATINGS_SECTION,
+    "training_load_activities",
+)
+
+
+def dedicated_activity_rows(payload: object) -> list[object]:
+    """The payload's per-activity rows of every dedicated section, in merge order."""
+    if not isinstance(payload, Mapping):
+        return []
+    rows: list[object] = []
+    for section in DEDICATED_ACTIVITY_SECTIONS:
+        value = payload.get(section)
+        if isinstance(value, list):
+            rows.extend(value)
+    return rows
+
+
 # Sections that are not raw health records: activities have their own record kind.
 ITEM_SECTIONS: Final = SECTIONS - {ACTIVITIES_SECTION}
 

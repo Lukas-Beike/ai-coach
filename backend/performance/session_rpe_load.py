@@ -27,6 +27,7 @@ from backend.canonical.rating_scales import (
     INTERVALS_RPE_SCALE,
     LOCAL_SESSION_RPE_SCALE,
 )
+from backend.providers.garmin_activity_mapping import GARMIN_LABEL
 
 METRIC_ID: Final = "session_rpe_load"
 METHOD_ID: Final = "session-rpe-load"
@@ -71,13 +72,12 @@ _RPE_SCALES: Final = {
     SOURCE_ATHLETE: LOCAL_SESSION_RPE_SCALE.scale_id,
     SOURCE_PROVIDER: INTERVALS_RPE_SCALE.scale_id,
 }
-_GARMIN_LABEL: Final = "Garmin Connect"
 
 
 def _rpe_scale(source: str | None, label: str | None) -> str | None:
     if source is None:
         return None
-    if source == SOURCE_PROVIDER and label == _GARMIN_LABEL:
+    if source == SOURCE_PROVIDER and label == GARMIN_LABEL:
         return GARMIN_RPE_SCALE.scale_id
     return _RPE_SCALES[source]
 
