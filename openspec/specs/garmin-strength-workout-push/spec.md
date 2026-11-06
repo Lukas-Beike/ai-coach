@@ -42,6 +42,10 @@ A saved workout whose exercise steps differ from the sent ones SHALL be deleted 
 - **WHEN** the read-back workout lacks a sent exercise name
 - **THEN** the new workout is deleted, nothing is scheduled and the unit fails with a verification error.
 
+#### Scenario: Schedule id missing
+- **WHEN** Garmin confirms the schedule without an id and the calendar lookup for that workout and day finds none
+- **THEN** the unit fails as unconfirmed, its link keeps no payload hash, and it is not reported as synced.
+
 #### Scenario: Explicit removal
 - **WHEN** a job entry carries `remove: true` for a linked unit
 - **THEN** only its schedule and workout are deleted and the link is dropped; unrelated Garmin calendar items stay.
