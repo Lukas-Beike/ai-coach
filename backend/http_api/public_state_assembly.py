@@ -57,7 +57,7 @@ class PublicStateCoreInputs:
     app_version: str
     key_values: Callable[[], Any]
     key_value_service: Callable[[], Any]
-    # When set, the performance endpoint reads CTL and ATL from canonical observations.
+    # When set, the performance endpoint reads its inputs from canonical observations.
     observation_reader: Callable[[], ObservationReader] | None = None
     # When set, body history reads weight and body fat from canonical tables while
     # the tables serve reads.

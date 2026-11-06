@@ -334,7 +334,7 @@ class CurrentPerformanceProvenanceTests(unittest.TestCase):
                 "metrics",
                 "thresholds",
                 "current_load",
-                "actual_load",
+                "intervals_load_history",
                 "recovery",
                 "rolling_training",
                 "comparisons",

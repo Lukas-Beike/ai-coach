@@ -2531,7 +2531,7 @@ class ServerSyncTests(ServerTestCase):
         }
         performance = _current_performance_context(snapshot)
         self.assertEqual(performance["thresholds"]["ftp_w"], 300)
-        self.assertEqual(performance["current_load"]["tsb"], -6)
+        self.assertEqual(performance["intervals_load_history"]["tsb"], -6)
         self.assertEqual(performance["recovery"]["sleep_hours"], 7.5)
         # The local load (card M6), not Intervals.icu's 110: NP 270 W at the
         # Intervals.icu FTP 300 W for 2 h is IF 0.9, 2 × 0.81 × 100 = 162 TSS.
@@ -2549,7 +2549,7 @@ class ServerSyncTests(ServerTestCase):
             "recent_activities": [],
         }
         performance = _current_performance_context(snapshot)
-        self.assertEqual(performance["current_load"]["tsb"], -12)
+        self.assertEqual(performance["intervals_load_history"]["tsb"], -12)
 
     def test_current_eftp_prefers_current_intervals_model_over_latest_activity_estimate(
         self,

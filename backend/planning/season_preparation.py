@@ -265,15 +265,12 @@ def load_scenarios(
 ) -> dict[str, Any]:
     """Model the load curves of the current plan and one explicit alternative.
 
-    ``inputs`` carries yesterday's CTL/ATL and today's completed activities, read
-    by ``read_season_load_inputs``; ``synced_at`` is the canonical Intervals.icu
-    sync time.
+    ``inputs`` carries yesterday's local fitness and fatigue (M7) and today's
+    completed activities, read by ``read_season_load_inputs``; ``synced_at`` is
+    the canonical sync time.
     """
     end, scale, taper = _scenario_values(values, today)
-    ctl, atl = (
-        number(observation.value.value) if observation is not None else None
-        for observation in (inputs.ctl, inputs.atl)
-    )
+    ctl, atl = number(inputs.ctl), number(inputs.atl)
     basis = {
         "as_of": inputs.basis_day.isoformat(),
         "ctl": ctl,
@@ -285,7 +282,7 @@ def load_scenarios(
         "method": "explicit-local-exponential-model-v1",
         "basis": basis,
         "parameters": {"ctl_days": 42, "atl_days": 7},
-        "assumptions": "Local standard time constants, not verified provider configuration. Unplanned days are modeled as zero planned load. Planned units without a recorded load use a labelled duration-and-intensity estimate; units with neither block both scenarios. CTL/TSB do not predict performance, health or race time.",
+        "assumptions": "Starts from yesterday's local fitness and fatigue (card M7), never from Intervals.icu CTL/ATL. Unplanned days are modeled as zero planned load. Planned units without a recorded load use a labelled duration-and-intensity estimate; units with neither block both scenarios. CTL/TSB do not predict performance, health or race time.",
         "input_sha256": hashlib.sha256(
             json.dumps(
                 {
@@ -304,7 +301,7 @@ def load_scenarios(
         return {
             **base,
             "status": "insufficient_data",
-            "reason": "Datierter CTL-/ATL-Ausgangszustand von gestern fehlt.",
+            "reason": "Lokale Fitness und Ermüdung von gestern fehlen (keine lokale Last oder Einlaufphase).",
         }
     calendar = [
         row

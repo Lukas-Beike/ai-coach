@@ -1,6 +1,6 @@
 """Planning daily recovery is read from canonical observations.
 
-Sleep, HRV, resting HR, readiness, CTL, ATL, form (TSB) and the daily totals come
+Sleep, HRV, resting HR, readiness and the daily totals come
 from the injected observation reader over a window that ends on the athlete's local
 date. Body battery is not mapped to observations and stays a read of the morning
 battery. The populated temporary database tests pin the table-served view of the
@@ -64,15 +64,12 @@ def _day(values: dict[str, Any], garmin: tuple[str, ...] = ()) -> dict[str, Any]
 # 2026-10-10 and HRV and resting HR on 2026-10-10, and the fixture's Intervals.icu
 # values do not relay them, so Intervals.icu fills no gap of that family (#1668).
 EXPECTED_WINDOW = {
-    "2026-10-08": _day({"readiness": 74, "ctl": 52.1, "atl": 60.4, "tsb": -8.3}),
+    "2026-10-08": _day({"readiness": 74}),
     "2026-10-09": _day(
         {
             "sleep_hours": 7.0,
             "sleep_score": 78,
             "readiness": 70,
-            "ctl": 52.8,
-            "atl": 58.9,
-            "tsb": -6.1,
         },
         ("sleep_hours", "sleep_score"),
     ),
@@ -83,9 +80,6 @@ EXPECTED_WINDOW = {
             "hrv": 61,
             "readiness": 79,
             "resting_hr": 49,
-            "ctl": 53.4,
-            "atl": 57.0,
-            "tsb": -3.6,
         },
         ("sleep_hours", "sleep_score", "hrv", "resting_hr"),
     ),
@@ -208,16 +202,15 @@ class CanonicalPlanningRecoveryTests(unittest.TestCase):
                 ],
             }
         )
+        # The stored Intervals.icu CTL never reaches the planning view (#1726).
         self.assertEqual(
             view[DAY],
             {
                 "sleep_score": 84,
                 "readiness": 74,
-                "ctl": 55.5,
                 "sources": {
                     "sleep_score": GARMIN_SOURCE,
                     "readiness": INTERVALS_WELLNESS_SOURCE,
-                    "ctl": INTERVALS_WELLNESS_SOURCE,
                 },
             },
         )
@@ -272,17 +265,15 @@ class CanonicalPlanningRecoveryTests(unittest.TestCase):
         )
         self.assertEqual(view[DAY]["sleep_hours"], 7.5)
 
-    def test_load_is_taken_from_intervals_only(self) -> None:
+    def test_intervals_load_is_never_read(self) -> None:
         view = self._view(
             {
                 MetricKind.ATL: [
-                    _observation(MetricKind.ATL, 50, provider=ProviderId.GARMIN),
                     _observation(MetricKind.ATL, 57, provider=ProviderId.INTERVALS),
                 ]
             }
         )
-        self.assertEqual(view[DAY]["atl"], 57)
-        self.assertEqual(view[DAY]["sources"]["atl"], INTERVALS_WELLNESS_SOURCE)
+        self.assertEqual(view, {})
 
     def test_no_observations_yield_no_days(self) -> None:
         self.assertEqual(self._view({}), {})
@@ -307,16 +298,15 @@ class CanonicalPlanningRecoveryTests(unittest.TestCase):
                     MetricKind.HRV_RMSSD,
                     MetricKind.READINESS,
                     MetricKind.RESTING_HR,
-                    MetricKind.CTL,
-                    MetricKind.ATL,
-                    MetricKind.FORM,
                 )
             ],
         )
 
 
 class PlanningRecoveryViewTests(unittest.TestCase):
-    def test_form_and_body_battery_are_added_to_the_canonical_view(self) -> None:
+    def test_local_form_and_body_battery_are_added_to_the_canonical_view(
+        self,
+    ) -> None:
         reader = RecordingReader(
             {
                 MetricKind.SLEEP_SCORE: [_observation(MetricKind.SLEEP_SCORE, 84)],
@@ -332,20 +322,30 @@ class PlanningRecoveryViewTests(unittest.TestCase):
             end=WINDOW[1],
             morning_battery_history={DAY: 61},
             morning_body_battery=None,
+            local_fitness_days=[
+                {"date": DAY, "fitness": 50.0, "fatigue": 55.0, "form": -5.0},
+                {"date": OTHER_DAY, "fitness": None, "fatigue": None, "form": None},
+            ],
         )
+        local = "Lokal berechnet (M7)"
         self.assertEqual(
             view[DAY],
             {
                 "sleep_score": 84,
-                "tsb": -4.5,
+                "ctl": 50.0,
+                "atl": 55.0,
+                "tsb": -5.0,
                 "body_battery": 61,
                 "sources": {
                     "sleep_score": GARMIN_SOURCE,
-                    "tsb": INTERVALS_WELLNESS_SOURCE,
+                    "ctl": local,
+                    "atl": local,
+                    "tsb": local,
                     "body_battery": GARMIN_SOURCE,
                 },
             },
         )
+        self.assertNotIn("ctl", view.get(OTHER_DAY, {}))
 
 
 class DailyPlanningCanonicalWiringTests(unittest.TestCase):
@@ -369,8 +369,8 @@ class DailyPlanningCanonicalWiringTests(unittest.TestCase):
         self.assertEqual(
             {call[1:] for call in reader.calls}, {WINDOW, (family_start, WINDOW[1])}
         )
-        # Five recovery kinds, CTL, ATL and form, then the five daily totals.
-        self.assertEqual(len(reader.calls), 13)
+        # Five recovery kinds, then the five daily totals; no Intervals load.
+        self.assertEqual(len(reader.calls), 10)
         by_date = {day["date"]: day for day in result}
         self.assertEqual(by_date[DAY]["recovery"]["resting_hr"], 49)
         self.assertEqual(by_date[OTHER_DAY]["recovery"]["sleep_score"], 80)
@@ -458,9 +458,6 @@ class CanonicalPlanningEndToEndTests(CanonicalReadFixture):
                 "hrv_rmssd",
                 "readiness",
                 "resting_hr",
-                "ctl",
-                "atl",
-                "form",
                 "steps",
                 "floors",
                 "daily_energy_total",

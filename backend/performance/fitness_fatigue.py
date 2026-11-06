@@ -38,6 +38,8 @@ METHOD_ID: Final = "local-fitness-fatigue"
 METHOD_VERSION: Final = 1
 UNIT: Final = "TSS/d"
 EVIDENCE_CARD: Final = "docs/performance-methods/m7-local-fitness-fatigue.md"
+# The source label every consumer of the curve shows.
+SOURCE_LABEL: Final = "Lokal berechnet (M7)"
 FITNESS_TAU_DAYS: Final = 42
 FATIGUE_TAU_DAYS: Final = 7
 WARMUP_TAUS: Final = 2

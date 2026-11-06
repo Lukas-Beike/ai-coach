@@ -71,6 +71,11 @@ of M5, and the common CTL/ATL convention, not individually fitted.
   end. Sessions of the period mark the incomplete days.
 - The load tab shows the last 84 days; the Coach training report the report
   period of all-sport reports. Both read the same stored loads.
+- The Coach load block (`current_load`, last 7 days with averages), the
+  fitness, fatigue and form comparisons, the progress report and block review
+  (`ctl` first and last of the window), the daily planning context and the
+  load scenarios (yesterday's values as the start state) read the same curve
+  (#1726). The stored Intervals.icu values stay a labelled history.
 
 ## Measurement error and uncertainty
 
@@ -143,6 +148,3 @@ curve differs from it by design and is never compared with it as a check.
   phase has run.
 - No new literature search ran for this card; it relies on the register
   entries checked for M5 and M6.
-- The consumers that still read Intervals.icu CTL, ATL or form (load card,
-  comparisons, progress report, block review, planning scenarios) switch to
-  this curve in the follow-up change of #1726.

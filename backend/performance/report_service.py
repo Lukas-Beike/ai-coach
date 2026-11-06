@@ -17,10 +17,9 @@ from backend.activities.activity_summary import (
 )
 from backend.activities.detail_analysis_reads import analysis_summaries
 from backend.canonical.stored_sports import resolve_workout_sport
-from backend.canonical.vocabulary import MetricKind, ProviderId
+from backend.canonical.vocabulary import ProviderId
 from backend.db import activity_detail_store
 from backend.errors import AppError
-from backend.performance import wellness_days
 from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
     activity_summaries_and_fingerprints,
@@ -504,7 +503,10 @@ class TrainingReportReadService:
             or sport is None
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
-        summaries, observed_at = activity_summaries_with_sync_time(self._canonical)
+        # One read: the fitness load days belong to the same revision as the summaries.
+        summaries, observed_at, load_days = activity_summaries_with_load_days(
+            self._canonical
+        )
         period = [
             row
             for row in summaries
@@ -514,7 +516,6 @@ class TrainingReportReadService:
         ]
         with self._canonical.database_manager().read_snapshot() as db:
             inputs = inputs_for_snapshot(self._canonical, db, as_of=today)
-        history = () if inputs is None else inputs.history_wellness_days or ()
         return weekly_progress(
             start=start,
             weeks=days // 7,
@@ -524,7 +525,7 @@ class TrainingReportReadService:
             activity_summaries=summaries,
             session_feedback=feedback_by_session(period, self._session_feedback),
             plan=self._read_plan(),
-            ctl_by_day=wellness_days.series(history, MetricKind.CTL),
+            local_load_days=load_days,
             eftp_by_day=None if inputs is None else inputs.eftp_by_day,
             # Session curves cover the longest profile window only; read them
             # only when the window needs the mean-max comparison.

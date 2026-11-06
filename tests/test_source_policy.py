@@ -1346,21 +1346,19 @@ class ParityWithLegacyReadersTests(unittest.TestCase):
         self.assertEqual(self.pick(MetricKind.MAX_HR, Sport.RIDE), 185)
 
     def test_load_is_the_latest_intervals_row(self) -> None:
-        from performance_day_support import current_days
-
         from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 
-        days = current_days(WELLNESS_ROWS)
-        load = performance_load_context(
+        # Since #1726 the stored Intervals.icu row is the labelled history.
+        history = performance_load_context(
             [],
-            days,
             TODAY,
             canonical=CanonicalPerformanceInputs(
                 wellness_day=LATEST_DAY, ctl=60.0, atl=55.0
             ),
-        )["load"]
-        self.assertEqual(load["ctl"], 60.0)
-        self.assertEqual(load["atl"], 55.0)
+            timezone="UTC",
+        )["intervals_history"]
+        self.assertEqual(history["ctl"], 60.0)
+        self.assertEqual(history["atl"], 55.0)
         self.assertEqual(self.pick(MetricKind.CTL), 60.0)
         self.assertEqual(self.pick(MetricKind.ATL), 55.0)
 

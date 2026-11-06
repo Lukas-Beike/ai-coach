@@ -1,7 +1,9 @@
 """Season-preparation inputs read through the canonical selector ports.
 
-Activity summaries come from an ``ActivitySummaryReader`` and the CTL/ATL basis from an
-``ObservationReader``. Both are read inside one caller-owned unit of work, so a
+Activity summaries come from an ``ActivitySummaryReader``. The CTL/ATL basis is
+the local fitness and fatigue (card M7) of yesterday, computed from the stored
+local load the same reader serves (``LocalLoadDayReader``); Intervals.icu CTL
+and ATL never seed it. Both are read inside one caller-owned unit of work, so a
 concurrent sync cannot mix revisions. Nothing here reads the canonicalised sections
 of the stored snapshot, which a later change stops writing.
 
@@ -18,18 +20,12 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.activities.activity_summary import ActivitySummary, summary_local_date
-from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance.canonical_inputs import resolve_reader
-from backend.performance.planning_recovery import first_intervals_by_day
-from backend.providers.source_labels import (
-    SourceView,
-    observation_source_label,
-    provider_label,
-)
+from backend.performance.fitness_fatigue import SOURCE_LABEL
+from backend.performance.load_context import read_local_fitness
 from backend.runtime.ports import ActivitySummaryReader, ObservationReader
 
 ROW_WINDOW_PAD = timedelta(days=1)
+LOCAL_BASIS_SOURCE = SOURCE_LABEL
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,19 +39,16 @@ class SeasonSource:
 
 @dataclass(frozen=True, slots=True)
 class SeasonLoadInputs:
-    """The load basis of yesterday and the activities completed today."""
+    """The local load basis of yesterday and the activities completed today."""
 
     basis_day: date
-    ctl: Observation | None
-    atl: Observation | None
+    ctl: float | None
+    atl: float | None
     completed_today: tuple[ActivitySummary, ...]
 
     def source_label(self) -> str:
-        """Label of the basis values, from the observation that supplied them."""
-        observation = self.atl or self.ctl
-        if observation is None:
-            return provider_label(ProviderId.INTERVALS, SourceView.SEASON_PREPARATION)
-        return observation_source_label(observation, SourceView.SEASON_PREPARATION)
+        """Label of the basis values: always the local curve."""
+        return LOCAL_BASIS_SOURCE
 
 
 def read_activity_summaries(
@@ -72,15 +65,19 @@ def read_activity_summaries(
 def read_season_load_inputs(
     source: SeasonSource, db: Any, *, today: date, timezone: str
 ) -> SeasonLoadInputs:
-    """Read yesterday's CTL and ATL and the activities completed on ``today``."""
+    """Read yesterday's local fitness and fatigue and today's completed activities.
+
+    Yesterday is open, so unknown, while the activities were last synced before it.
+    """
     basis_day = today - timedelta(days=1)
-    reader = resolve_reader(source.observation_reader(), db)
-    loads = {
-        kind: first_intervals_by_day(
-            reader.observations(db, kind, start=basis_day, end=basis_day)
-        ).get(basis_day)
-        for kind in (MetricKind.CTL, MetricKind.ATL)
-    }
+    latest = read_local_fitness(
+        source.activity_summaries(),
+        db,
+        start=basis_day,
+        end=basis_day,
+        today=today,
+        timezone=timezone,
+    )["days"][-1]
     completed = tuple(
         summary
         for summary in read_activity_summaries(source, db, today, today)
@@ -88,7 +85,7 @@ def read_season_load_inputs(
     )
     return SeasonLoadInputs(
         basis_day=basis_day,
-        ctl=loads[MetricKind.CTL],
-        atl=loads[MetricKind.ATL],
+        ctl=latest["fitness"],
+        atl=latest["fatigue"],
         completed_today=completed,
     )

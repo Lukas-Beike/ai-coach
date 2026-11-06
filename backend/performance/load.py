@@ -1,4 +1,4 @@
-"""Training-load rollups and reconstructed actual ATL series.
+"""Training-load rollups.
 
 Loads are summed on the TSS scale only (Intervals.icu training load or TSS). A
 session without such a load, such as a Garmin-only session whose Garmin load is
@@ -19,7 +19,6 @@ from backend.canonical.activity_summary import (
     stored_activity_key,
     summary_is_electric,
 )
-from backend.canonical.decimal_text import provider_number as _as_number
 from backend.performance.session_rpe_load import session_load
 
 type SessionFeedback = Mapping[str, Mapping[str, Any]]
@@ -118,58 +117,3 @@ def _rollup_seconds(activity: dict[str, Any]) -> float:
     return _activity_rollup_number(
         activity, "moving_duration_s"
     ) or _activity_rollup_number(activity, "elapsed_duration_s")
-
-
-def _activity_load_by_date(activities: list[Any], anchor: date) -> dict[date, float]:
-    load_by_date: dict[date, float] = {}
-    for activity in activities:
-        if not isinstance(activity, dict):
-            continue
-        activity_date = _activity_rollup_date(activity)
-        if activity_date is None or activity_date > anchor:
-            continue
-        load = _as_number(activity.get("training_load"))
-        if load is not None:
-            load_by_date[activity_date] = load_by_date.get(activity_date, 0.0) + float(
-                load
-            )
-    return load_by_date
-
-
-def _atl_series_from_rows(
-    dated_wellness: list[tuple[date, float]],
-    load_by_date: dict[date, float],
-) -> dict[date, float]:
-    first_date, first_atl = dated_wellness[0]
-    retention = math.exp(-1.0 / 7.0)
-    decay = 1.0 - retention
-    previous = (first_atl - load_by_date.get(first_date, 0.0) * decay) / retention
-    series = {
-        first_date: round(
-            previous * retention + load_by_date.get(first_date, 0.0) * decay, 2
-        )
-    }
-    previous = series[first_date]
-    cursor = first_date
-    for row_date, _row in dated_wellness[1:]:
-        while cursor + timedelta(days=1) < row_date:
-            cursor += timedelta(days=1)
-            previous = previous * retention + load_by_date.get(cursor, 0.0) * decay
-        previous = previous * retention + load_by_date.get(row_date, 0.0) * decay
-        series[row_date] = round(previous, 2)
-        cursor = row_date
-    return series
-
-
-def actual_atl_series(
-    atl_by_day: dict[date, float],
-    activities: list[Any],
-    end_date: date,
-) -> dict[date, float]:
-    """Reconstruct ATL from completed activity load only (default 7-day ATL decay)."""
-    dated_wellness = sorted(atl_by_day.items())
-    if not dated_wellness:
-        return {}
-    return _atl_series_from_rows(
-        dated_wellness, _activity_load_by_date(activities, end_date)
-    )

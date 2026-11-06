@@ -51,6 +51,8 @@ class DailyPlanningSources:
     observation_reader: Callable[[], ObservationReader]
     # The athlete's preferred sources, read in the caller's unit of work.
     source_preferences: Callable[[Any], SourcePreferences] | None = None
+    # The athlete's IANA time zone; it dates the last sync for open days (M7).
+    timezone: Callable[[], str] | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,7 @@ class PlanningWorkflowAssembly:
         self._weather_service = daily.weather_service
         self._morning_body_battery_service = daily.morning_body_battery_service
         self._local_date = daily.local_date
+        self._timezone = daily.timezone
         self._calendar_window_days = daily.calendar_window_days
         self._checkin_text_limit = daily.checkin_text_limit
         self._observation_reader = daily.observation_reader
@@ -156,6 +159,7 @@ class PlanningWorkflowAssembly:
             self._calendar_window_days,
             self._observation_reader,
             self._source_preferences,
+            timezone=self._timezone,
         )
 
     def structured_training_state_service(self) -> StructuredTrainingStateService:

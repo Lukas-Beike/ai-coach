@@ -30,7 +30,6 @@ from canonical_read_support import (
     populate,
     store_garmin,
 )
-from performance_day_support import current_days
 
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
@@ -226,11 +225,35 @@ def _normalized_load(load: dict[str, Any]) -> dict[str, Any]:
 # path without canonical inputs has none of them. ``_assert_load_metric_split`` and
 # the load tests check the canonical values; the legacy-versus-canonical
 # comparisons leave them out.
-_LOAD_ONLY_KEYS = ("tsb", "ramp_rate", "ramp_rate_source")
+_LOAD_ONLY_KEYS = ("tsb",)
 
 
 def _without(load: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
     return {key: value for key, value in load.items() if key not in keys}
+
+
+def _history_load(canonical: CanonicalPerformanceInputs | None) -> dict[str, Any]:
+    """The stored Intervals.icu load values, which are only a labelled history.
+
+    Since #1726 the load block is the local curve (M7); the canonical Intervals.icu
+    CTL, ATL and form selection these tests pin is served as
+    ``intervals_history``.
+    """
+    history = (
+        performance_load_context(
+            [],
+            PARITY_TODAY,
+            canonical=canonical or EMPTY_PERFORMANCE_INPUTS,
+            timezone="UTC",
+        )["intervals_history"]
+        or {}
+    )
+    return {
+        "id": history.get("as_of"),
+        "ctl": history.get("ctl"),
+        "atl": history.get("atl"),
+        "tsb": history.get("tsb"),
+    }
 
 
 def _load_pair(
@@ -243,13 +266,8 @@ def _load_pair(
         None,
         as_of=PARITY_TODAY,
     )
-    days = current_days(rows)
-    legacy = performance_load_context(
-        [], days, PARITY_TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
-    )["load"]
-    canonical_load = performance_load_context(
-        [], days, PARITY_TODAY, canonical=_present(canonical)
-    )["load"]
+    legacy = _history_load(EMPTY_PERFORMANCE_INPUTS)
+    canonical_load = _history_load(_present(canonical))
     return legacy, canonical_load, canonical
 
 
@@ -293,11 +311,12 @@ def _assert_load_metric_split(
     absent_load = absent.get("current_load", {})
     case.assertEqual(served["metrics"]["cycling_eftp_watts"]["value"], 258)
     case.assertIsNone(absent["metrics"].get("cycling_eftp_watts", {}).get("value"))
-    case.assertEqual(served["current_load"]["tsb"], -3.6)
+    # The stored Intervals.icu form is only the labelled history (#1726).
+    case.assertEqual(served["intervals_load_history"]["tsb"], -3.6)
+    case.assertIsNone(served["current_load"]["tsb"])
     case.assertIsNone(absent_load.get("tsb"))
     for load in (served["current_load"], absent_load):
-        case.assertIsNone(load.get("ramp_rate"))
-        case.assertIsNone(load.get("ramp_rate_source"))
+        case.assertNotIn("ramp_rate", load)
 
 
 def _assert_recovery_split(
@@ -340,18 +359,11 @@ class CanonicalLoadParityTests(unittest.TestCase):
                 # CTL minus ATL (ctLoad/atlLoad aliases included); the carrier
                 # rampRate is ignored and no earlier CTL day exists.
                 self.assertEqual(canonical_load["tsb"], expected_form[name])
-                self.assertIsNone(canonical_load["ramp_rate"])
+                self.assertNotIn("ramp_rate", canonical_load)
                 self.assertIsNone(legacy["tsb"])
 
     def test_comma_decimal_is_mapped_to_a_number(self) -> None:
-        legacy_rows = [{"id": PARITY_DAY, "ctl": "58,2", "atl": 60}]
-        legacy = performance_load_context(
-            [],
-            current_days(legacy_rows),
-            PARITY_TODAY,
-            canonical=EMPTY_PERFORMANCE_INPUTS,
-            session_feedback=None,
-        )["load"]
+        legacy = _history_load(EMPTY_PERFORMANCE_INPUTS)
         # The canonical value is the number the comma-decimal mapper fix yields.
         canonical_rows = [{"id": PARITY_DAY, "ctl": 58.2, "atl": 60}]
         canonical = read_performance_inputs(
@@ -491,21 +503,15 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
         self.assertEqual(reader.db_seen, ["db", "db"])
 
     def test_empty_performance_inputs_stand_for_no_canonical_values(self) -> None:
-        rows = [{"id": PARITY_DAY, "ctl": "55", "atl": 65, "tsb": 3, "rampRate": "1.5"}]
-        load = performance_load_context(
-            [], current_days(rows), PARITY_TODAY, canonical=EMPTY_PERFORMANCE_INPUTS
-        )["load"]
+        load = _history_load(EMPTY_PERFORMANCE_INPUTS)
         self.assertEqual(
-            (load["ctl"], load["atl"], load["tsb"], load["ramp_rate"]),
-            (None, None, None, None),
+            (load["ctl"], load["atl"], load["tsb"]),
+            (None, None, None),
         )
 
     def test_canonical_inputs_replace_only_ctl_and_atl_in_the_load_block(self) -> None:
-        rows = [{"id": PARITY_DAY, "ctl": "55", "atl": 65, "tsb": 3, "rampRate": "1.5"}]
         inputs = CanonicalPerformanceInputs(wellness_day=PARITY_TODAY, ctl=1.0, atl=2.0)
-        load = performance_load_context(
-            [], current_days(rows), PARITY_TODAY, canonical=inputs
-        )["load"]
+        load = _history_load(inputs)
         # Form and ramp rate are not row values: the carrier tsb and rampRate are
         # ignored (#1412), and the inputs hold no form or ramp rate.
         self.assertEqual(
@@ -515,21 +521,16 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 "ctl": 1.0,
                 "atl": 2.0,
                 "tsb": None,
-                "ramp_rate": None,
-                "ramp_rate_source": None,
             },
         )
 
     def test_missing_canonical_value_does_not_read_the_latest_snapshot_row(
         self,
     ) -> None:
-        rows = [{"id": PARITY_DAY, "ctl": "55", "atl": 65, "tsb": 3, "rampRate": "1.5"}]
         inputs = CanonicalPerformanceInputs(
             wellness_day=PARITY_TODAY, ctl=1.0, atl=None
         )
-        load = performance_load_context(
-            [], current_days(rows), PARITY_TODAY, canonical=inputs
-        )["load"]
+        load = _history_load(inputs)
         self.assertEqual(
             load,
             {
@@ -537,16 +538,12 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 "ctl": 1.0,
                 "atl": None,
                 "tsb": None,
-                "ramp_rate": None,
-                "ramp_rate_source": None,
             },
         )
         inputs = CanonicalPerformanceInputs(
             wellness_day=PARITY_TODAY, ctl=None, atl=2.0
         )
-        load = performance_load_context(
-            [], current_days(rows), PARITY_TODAY, canonical=inputs
-        )["load"]
+        load = _history_load(inputs)
         self.assertEqual((load["ctl"], load["atl"]), (None, 2.0))
 
     def test_missing_canonical_value_never_falls_back_to_unusable_or_absent(
@@ -562,11 +559,9 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
                 {"id": PARITY_DAY},
             ],
         }
-        for name, rows in cases.items():
+        for name in cases:
             with self.subTest(name):
-                load = performance_load_context(
-                    [], current_days(rows), PARITY_TODAY, canonical=inputs
-                )["load"]
+                load = _history_load(inputs)
                 self.assertEqual((load["ctl"], load["atl"]), (None, None))
 
     def test_partial_observations_leave_the_other_value_unknown(
@@ -582,9 +577,7 @@ class CanonicalLoadEdgeTests(unittest.TestCase):
             )
         )
         canonical = read_performance_inputs(reader, "db", as_of=PARITY_TODAY)
-        load = performance_load_context(
-            [], current_days(rows), PARITY_TODAY, canonical=_present(canonical)
-        )["load"]
+        load = _history_load(_present(canonical))
         self.assertIsNone(_present(canonical).ctl)
         self.assertEqual((load["ctl"], load["atl"]), (None, 60.0))
 
@@ -904,8 +897,8 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
         legacy = _service(None, self.garmin).performance_state()
         canonical = _service(source, self.garmin).performance_state()
         self.assertEqual(counting.calls, _UNIT_READS)
-        self.assertEqual(canonical["performance"]["current_load"]["ctl"], 53.4)
-        self.assertEqual(canonical["performance"]["current_load"]["atl"], 57.0)
+        history = canonical["performance"]["intervals_load_history"]
+        self.assertEqual((history["ctl"], history["atl"]), (53.4, 57.0))
         # Without a canonical source there are no canonical values: unavailable.
         self.assertFalse(legacy["performance"]["available"])
         self.assertNotIn("current_load", legacy["performance"])
@@ -925,7 +918,9 @@ class CanonicalLoadEndToEndTests(CanonicalReadFixture):
             canonical = _service(source, self.garmin).performance_state()
         read_state.assert_called_once()
         legacy = _service(None, self.garmin).performance_state()
-        self.assertEqual(canonical["performance"]["current_load"]["ctl"], 53.4)
+        self.assertEqual(
+            canonical["performance"]["intervals_load_history"]["ctl"], 53.4
+        )
         self.assertFalse(legacy["performance"]["available"])
         _assert_load_metric_split(self, canonical, legacy)
 

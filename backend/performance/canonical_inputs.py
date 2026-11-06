@@ -82,8 +82,6 @@ class CanonicalPerformanceInputs:
 
     ``form_by_day``, ``eftp_by_day`` and ``run_eftp_by_day`` are the
     Intervals.icu wellness-day form and sport-scoped eFTP series.
-    ``ramp_rate`` is the latest wellness day's CTL minus the CTL of exactly seven
-    days earlier, rounded to two decimals, or None when either day is missing.
     ``local_load_days`` is the stored local session load (card M6) per local ISO
     day of the whole history, None when the reader does not store it.
     ``power_curve`` holds the stored power curve fetches and best power per
@@ -116,7 +114,6 @@ class CanonicalPerformanceInputs:
     form_by_day: Mapping[date, float] | None = None
     eftp_by_day: Mapping[date, float] | None = None
     run_eftp_by_day: Mapping[date, float] | None = None
-    ramp_rate: float | None = None
     local_load_days: Mapping[str, float] | None = None
     body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
     power_curve: PowerCurve = EMPTY_POWER_CURVE
@@ -174,8 +171,6 @@ class CanonicalPerformanceSource:
 ACTIVITY_HISTORY_DAYS: Final = 365
 # Daily totals of the days before ``as_of`` that the 7-day averages read.
 DAILY_HEALTH_DAYS: Final = 7
-# The ramp rate compares the CTL of the latest wellness day with this many days before.
-RAMP_RATE_DAYS: Final = 7
 
 
 def with_read_status(
@@ -306,7 +301,8 @@ def inputs_for_snapshot(
     """Read canonical load inputs inside the caller's snapshot transaction.
 
     ``include_power_curve`` also reads the stored power curve, which only the
-    analysis view shows.
+    analysis view shows. The whole-history local load per day is always read:
+    every snapshot consumer shows the local fitness (card M7).
     """
     if source is None:
         return None
@@ -319,6 +315,7 @@ def inputs_for_snapshot(
             activity_reader=source.activity_summary_reader(),
             as_of=as_of,
             include_power_curve=include_power_curve,
+            include_local_load=True,
             preferences=source.preferences_in(db),
         ),
     )
@@ -478,7 +475,6 @@ class _CarriedRows:
         ctl: float | None,
         atl: float | None,
         current: CanonicalCurrentInputs,
-        ramp_rate: float | None = None,
         preferences: SourcePreferences = NO_PREFERENCES,
     ) -> CanonicalPerformanceInputs:
         return CanonicalPerformanceInputs(
@@ -496,7 +492,6 @@ class _CarriedRows:
             form_by_day=self.form_by_day,
             eftp_by_day=self.eftp_by_day,
             run_eftp_by_day=self.run_eftp_by_day,
-            ramp_rate=ramp_rate,
             local_load_days=self.local_load_days,
             power_curve=self.power_curve,
             preferences=preferences,
@@ -594,18 +589,8 @@ def read_performance_inputs(
             as_of=as_of,
             preferences=preferences,
         ),
-        ramp_rate=_ramp_rate(wellness_days.series(days, MetricKind.CTL), latest_day),
         preferences=preferences,
     )
-
-
-def _ramp_rate(ctl_by_day: Mapping[date, float], day: date) -> float | None:
-    """Return the CTL change over ``RAMP_RATE_DAYS`` days; exact days only."""
-    current = ctl_by_day.get(day)
-    earlier = ctl_by_day.get(day - timedelta(days=RAMP_RATE_DAYS))
-    if current is None or earlier is None:
-        return None
-    return round(current - earlier, 2)
 
 
 def _activity_start(days: tuple[WellnessDay, ...], as_of: date) -> date:

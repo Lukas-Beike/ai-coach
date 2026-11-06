@@ -94,6 +94,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                     db,
                     activity_reader=reader,
                     as_of=as_of,
+                    include_local_load=True,
                     preferences=source.preferences_in(db),
                 ),
             )

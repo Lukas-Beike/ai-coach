@@ -30,7 +30,7 @@ class CoachContextPerformanceSources:
     today: Callable[[], Any]
     local_date: Callable[[], Any]
     utc_now: Callable[[], datetime]
-    # When set, Coach performance reads CTL and ATL from canonical observations.
+    # When set, Coach performance reads its inputs, the local load included.
     canonical: CanonicalPerformanceSource | None = None
     # When set, recent activities come from the canonical activity summary port.
     activity_rows: ActivitySummarySource | None = None

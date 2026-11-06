@@ -1,9 +1,8 @@
-import math
 import unittest
 from datetime import date
 from inspect import signature
 
-from backend.performance.load import activity_rollup, actual_atl_series
+from backend.performance.load import activity_rollup
 
 
 class PerformanceLoadTests(unittest.TestCase):
@@ -117,75 +116,6 @@ class PerformanceLoadTests(unittest.TestCase):
         self.assertNotIn(
             "load_missing_sessions",
             activity_rollup(activities[:1], 7, anchor, session_feedback=feedback),
-        )
-
-    def test_empty_and_invalid_wellness_data_are_empty(self):
-        end_date = date(2026, 9, 12)
-        self.assertIs(
-            signature(actual_atl_series).parameters["end_date"].default,
-            signature(actual_atl_series).empty,
-        )
-        self.assertEqual(
-            actual_atl_series(
-                {},
-                [{"started_at_local": end_date.isoformat(), "training_load": 20}],
-                end_date,
-            ),
-            {},
-        )
-        self.assertEqual(actual_atl_series({}, [], end_date), {})
-
-    def test_actual_atl_uses_completed_load_only_and_sums_same_day(self):
-        end_date = date(2026, 9, 12)
-        wellness = {date(2026, 9, 10): 10.0, date(2026, 9, 12): 20.0}
-        activities = [
-            {"started_at_local": "2026-09-12T08:00:00", "training_load": 50},
-            {"started_at_local": "2026-09-12T18:00:00", "training_load": 20},
-            {"started_at_local": "2026-09-13", "training_load": 999},
-            {"started_at_local": "not-a-date", "training_load": 999},
-        ]
-        retention = math.exp(-1 / 7)
-        decay = 1 - retention
-        expected = (10 * retention * retention) + 70 * decay
-        self.assertEqual(
-            actual_atl_series(wellness, activities, end_date),
-            {
-                date(2026, 9, 10): 10.0,
-                date(2026, 9, 12): round(expected, 2),
-            },
-        )
-
-    def test_actual_atl_applies_load_from_days_without_wellness_rows(self):
-        end_date = date(2026, 9, 12)
-        wellness = {date(2026, 9, 1): 10.0, date(2026, 9, 4): 10.0}
-        activities = [{"started_at_local": "2026-09-02", "training_load": 100}]
-        retention = math.exp(-1 / 7)
-        decay = 1 - retention
-        expected = (10 * retention + 100 * decay) * retention**2
-        series = actual_atl_series(wellness, activities, end_date)
-        self.assertEqual(series[date(2026, 9, 4)], round(expected, 2))
-        self.assertNotEqual(
-            series[date(2026, 9, 4)],
-            actual_atl_series(wellness, [], end_date)[date(2026, 9, 4)],
-        )
-
-    def test_actual_atl_decays_across_missing_days_and_is_sorted(self):
-        end_date = date(2026, 9, 12)
-        wellness = {
-            date(2026, 9, 12): 40.0,
-            date(2026, 9, 1): 10.0,
-            date(2026, 9, 8): 20.0,
-        }
-        series = actual_atl_series(wellness, [], end_date)
-        self.assertEqual(
-            list(series), [date(2026, 9, 1), date(2026, 9, 8), date(2026, 9, 12)]
-        )
-        retention = math.exp(-1 / 7)
-        self.assertEqual(series[date(2026, 9, 8)], round(10 * retention**7, 2))
-        self.assertEqual(series[date(2026, 9, 12)], round(10 * retention**11, 2))
-        self.assertEqual(
-            wellness,
-            {date(2026, 9, 12): 40.0, date(2026, 9, 1): 10.0, date(2026, 9, 8): 20.0},
         )
 
 

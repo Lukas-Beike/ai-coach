@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
+from unittest.mock import patch
 
 from canonical_read_support import CanonicalReadFixture, make_selector, populate
 
@@ -93,10 +94,21 @@ class SeasonCanonicalReadTests(CanonicalReadFixture):
         pending = self._scenarios(pending_selector, self.intervals, TODAY)["basis"]
         self.assertEqual((None, None), (pending["ctl"], pending["atl"]))
         selector = self._tables()
+        # The stored Intervals.icu CTL 52.1 / ATL 60.4 never seed the basis (#1726).
         basis = self._scenarios(selector, self.intervals, TODAY)["basis"]
         self.assertEqual(
-            ("2026-10-08", 52.1, 60.4), (basis["as_of"], basis["ctl"], basis["atl"])
+            ("2026-10-08", None, None), (basis["as_of"], basis["ctl"], basis["atl"])
         )
+        # Yesterday's local fitness and fatigue (M7) from the stored local load.
+        loads = {
+            (date(2026, 10, 8) - timedelta(days=i)).isoformat(): 60.0
+            for i in range(200)
+        }
+        with patch.object(selector, "local_load_days", return_value=loads):
+            basis = self._scenarios(selector, self.intervals, TODAY)["basis"]
+        self.assertEqual(basis["source"], "Lokal berechnet (M7)")
+        self.assertGreater(basis["ctl"], 50.0)
+        self.assertNotEqual(basis["ctl"], 52.1)
 
     def test_scenarios_do_not_need_the_snapshot_wellness_or_activities(self) -> None:
         selector = self._tables()
