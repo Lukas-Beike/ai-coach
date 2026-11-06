@@ -176,13 +176,13 @@ The client SHALL expose body history under nutrition with selectable 14-day and 
 
 #### Scenario: Twelve-week aggregation
 - **WHEN** the athlete selects twelve weeks
-- **THEN** each rolling week's chart point uses the median of available measurements, retains its observation count and latest measurement date, and leaves empty weeks as gaps; W/kg remains in the current cycling-performance table rather than a Body chart.
+- **THEN** each rolling week's chart point uses the week's latest measurement, retains its observation count and latest measurement date, draws a single measured week as a point, and leaves empty weeks as gaps; W/kg remains in the current cycling-performance table rather than a Body chart.
 
 #### Scenario: Preferred measurements unavailable
 - **WHEN** the response has no measured series from the server-preferred body source
 - **THEN** the latest-values table shows missing values and empty metric charts are omitted rather than silently substituting another source or profile value.
 
-Evidence: `backend/performance/body.py::body_history`, `public/analysis.js::renderBodyAnalysis`, `public/analysis.js::bodyWeeklyPoints`, `public/navigation.js::NAV_ROUTES`; `e2e/body-analysis.spec.js::@responsive Body keeps old measurements dated and long gaps empty`, `e2e/body-analysis.spec.js::@responsive Body plots measurements and W/kg appears only in the cycling table`, `tests/test_nutrition_garmin_refresh.py::GarminNutritionRefreshTests.test_remote_body_refresh_keeps_body_fat_only_measurements_and_normalizes_date`. Exact body-chart runtime conformance remains unexecuted in this worker; detailed body-series calculation belongs to the performance domain specification.
+Evidence: `backend/performance/body.py::body_history`, `public/analysis.js::renderBodyAnalysis`, `public/analysis.js::bodyWeeklyPoints`, `public/analysis.js::analysisPlottable`, `public/navigation.js::NAV_ROUTES`; `e2e/body-analysis.spec.js::@responsive Body keeps old measurements dated and long gaps empty`, `tests/analysis-presentation.test.cjs::12-week body charts show the latest reading of each week and draw a single week as a point`, `e2e/body-analysis.spec.js::@responsive Body plots measurements and W/kg appears only in the cycling table`, `tests/test_nutrition_garmin_refresh.py::GarminNutritionRefreshTests.test_remote_body_refresh_keeps_body_fat_only_measurements_and_normalizes_date`. Exact body-chart runtime conformance remains unexecuted in this worker; detailed body-series calculation belongs to the performance domain specification.
 
 ### Requirement: Daily macro comparison
 The diary SHALL subtly color complete macro totals outside athlete-specific daily reference ranges using the latest available weight and training data.

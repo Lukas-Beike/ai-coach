@@ -277,7 +277,7 @@ class BodyHistoryTests(unittest.TestCase):
             {
                 "week_start": "2026-09-30",
                 "week_end": "2026-10-06",
-                "value": 4.14,
+                "value": 4.29,
                 "count": 2,
                 "dates": ["2026-10-05", "2026-10-06"],
             },

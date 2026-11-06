@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
-from statistics import median
 from typing import Any
 
 from backend.athlete.local_date import LocalDate
@@ -136,7 +135,8 @@ def _weekly(
     points: list[dict[str, Any]], start: date, end: date
 ) -> list[dict[str, Any]]:
     weeks: list[dict[str, Any]] = []
-    # Fixed rolling 7-day buckets keep an 84-day selection to exactly 12 weeks.
+    # Fixed rolling 7-day buckets keep an 84-day selection to exactly 12 weeks;
+    # each week shows its latest measurement.
     for offset in range(0, (end - start).days + 1, 7):
         bucket_start = start + timedelta(days=offset)
         bucket_end = min(bucket_start + timedelta(days=6), end)
@@ -150,11 +150,7 @@ def _weekly(
             {
                 "week_start": bucket_start.isoformat(),
                 "week_end": bucket_end.isoformat(),
-                "value": round(
-                    float(median([float(item["value"]) for item in items])), 2
-                )
-                if items
-                else None,
+                "value": round(float(items[-1]["value"]), 2) if items else None,
                 "count": len(items),
                 "dates": [item["date"] for item in items],
             }
