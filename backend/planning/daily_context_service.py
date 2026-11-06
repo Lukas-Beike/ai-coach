@@ -12,7 +12,7 @@ from backend.performance.daily_health import read_daily_health_by_date
 from backend.performance.planning_recovery import planning_recovery_view
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.context import build_daily_planning_context
-from backend.runtime.ports import ObservationReader
+from backend.runtime.ports import LocalLoadDayReader, ObservationReader
 from backend.weather.history import decode_history
 
 # The Garmin state is still read for the morning body battery, which has no
@@ -58,11 +58,12 @@ class DailyPlanningContextService:
     ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
         """Recovery and daily-health views of the window ending on the local date.
 
-        Sleep, HRV, resting HR, readiness, CTL, ATL, form, steps, floors and
-        energy come from canonical observations. The reader is resolved once,
+        Sleep, HRV, resting HR, readiness, steps, floors and energy come from
+        canonical observations; CTL, ATL and form from the local curve (M7). The reader is resolved once,
         inside the caller's transaction.
         """
-        reader = resolve_reader(self._observation_reader(), db)
+        selector = self._observation_reader()
+        reader = resolve_reader(selector, db)
         start = today - timedelta(days=RECOVERY_WINDOW_DAYS)
         recovery = planning_recovery_view(
             reader,
@@ -76,6 +77,9 @@ class DailyPlanningContextService:
                 if self._source_preferences is None
                 else self._source_preferences(db)
             ),
+            local_load_days=selector.local_load_days(db)
+            if isinstance(selector, LocalLoadDayReader)
+            else None,
         )
         return recovery, read_daily_health_by_date(reader, db, start=start, end=today)
 

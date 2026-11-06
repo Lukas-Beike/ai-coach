@@ -133,12 +133,12 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual(result["as_of"], "2026-09-20T08:00:00+00:00")
         self.assertFalse(result["activities_need_refresh"])
         self.assertEqual(result["thresholds"]["ftp_w"], 300)
-        # Form and ramp rate come from canonical observations only (#1412): the
-        # mapped row's form is shown; without a CTL seven days earlier there is no
-        # ramp rate.
-        self.assertEqual(result["current_load"]["tsb"], -6)
-        self.assertIsNone(result["current_load"]["ramp_rate"])
-        self.assertIsNone(result["current_load"]["ramp_rate_source"])
+        # The mapped Intervals.icu form is only the labelled history (#1726);
+        # the current load is the local curve, which has no stored load here,
+        # and no ramp rate is derived.
+        self.assertEqual(result["intervals_load_history"]["tsb"], -6)
+        self.assertIsNone(result["current_load"]["tsb"])
+        self.assertNotIn("ramp_rate", result["current_load"])
         # Provider loads are never summed (card M6): without a stored local load
         # every session of the window counts as missing.
         last_7 = result["rolling_training"]["last_7_days"]
@@ -192,7 +192,7 @@ class PerformanceContextTests(unittest.TestCase):
             result["recovery"]["source_freshness"]["sleep_hours"]["freshness"], "fresh"
         )
 
-    def test_actual_atl_rolling_training_and_input_nonmutation(self):
+    def test_rolling_training_and_input_nonmutation(self):
         today = date(2026, 9, 20)
         snapshot = {
             "synced_at": "now",
@@ -226,10 +226,8 @@ class PerformanceContextTests(unittest.TestCase):
             canonical=canonical_from_snapshot(snapshot, today),
         )
 
-        self.assertEqual(result["actual_load"]["as_of"], today.isoformat())
-        self.assertEqual(
-            result["actual_load"]["source"], "Abgeschlossene Aktivitäten (berechnet)"
-        )
+        # The Intervals-anchored "actual ATL" is gone (#1726): it mixed sources.
+        self.assertNotIn("actual_load", result)
         self.assertIn("last_28_days", result["rolling_training"])
         self.assertEqual((snapshot, garmin, profile), before)
 
@@ -472,7 +470,8 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertNotIn("hrv", result["comparisons"])
         self.assertEqual(result["thresholds"]["ftp_w"], 300)
         self.assertEqual(result["thresholds"]["w_prime_j"], 20)
-        self.assertEqual(result["current_load"]["ctl"], 50)
+        self.assertEqual(result["intervals_load_history"]["ctl"], 50)
+        self.assertEqual(result["current_load"]["source"], "Lokal berechnet (M7)")
 
 
 if __name__ == "__main__":

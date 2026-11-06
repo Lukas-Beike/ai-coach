@@ -3452,7 +3452,9 @@ class ServerPlanningTests(ServerTestCase):
         self.assertEqual(comparisons["sleep_hours"]["days"], 7)
         self.assertEqual(comparisons["sleep_hours"]["color"], "good")
         self.assertEqual(comparisons["resting_hr_bpm"]["color"], "good")
-        self.assertEqual(comparisons["fitness_ctl"]["color"], "neutral")
+        # Fitness compares the local curve only (#1726); the rows' Intervals.icu
+        # CTL never feeds it, and no local load is stored here.
+        self.assertIsNone(comparisons["fitness_ctl"])
 
     def test_adaptive_planning_is_only_actionable_through_the_coach(self):
         markup = (server.PUBLIC_DIR / "index.html").read_text(encoding="utf-8")

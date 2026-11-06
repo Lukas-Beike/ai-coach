@@ -3,13 +3,21 @@ import inspect
 import json
 import unittest
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from canonical_recovery_support import RecordingReader, recovery_observation
 
 from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.planning.daily_context_service import DailyPlanningContextService
+
+
+class LocalLoadReader(RecordingReader):
+    """A reader that also serves a stored local load of 60 per day (M6)."""
+
+    def local_load_days(self, _db):
+        end = date(2026, 9, 20)
+        return {(end - timedelta(days=i)).isoformat(): 60.0 for i in range(200)}
 
 
 class FakeConnection:
@@ -248,7 +256,7 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
                 "morning_body_battery_history": json.dumps({"2026-09-19": 64}),
             }
         )
-        self.observations = RecordingReader(
+        self.observations = LocalLoadReader(
             {
                 MetricKind.SLEEP_DURATION: [
                     recovery_observation(
@@ -292,8 +300,12 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
 
         today = next(day for day in result if day["date"] == "2026-09-20")
         self.assertEqual(today["recovery"]["sleep_hours"], 8.0)
-        self.assertEqual(today["recovery"]["ctl"], 80)
-        self.assertEqual(today["recovery"]["tsb"], 20)
+        # CTL, ATL and form are the local curve (#1726); the stored Intervals.icu
+        # CTL 80 and form 20 never reach the planning context.
+        recovery = today["recovery"]
+        self.assertNotIn(recovery["ctl"], (None, 80))
+        self.assertEqual(recovery["tsb"], round(recovery["ctl"] - recovery["atl"], 1))
+        self.assertEqual(recovery["sources"]["ctl"], "Lokal berechnet (M7)")
         self.assertEqual(today["recovery"]["body_battery"], 76)
         self.assertEqual(today["health"], {"steps": 9000, "source": "Garmin Connect"})
         self.assertEqual(today["weather"]["temperature_max"], 17)

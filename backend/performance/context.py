@@ -91,10 +91,9 @@ def _subjective_ratings(day: WellnessDay | None) -> dict[str, float | None]:
 def _canonical_day_series(
     canonical: CanonicalPerformanceInputs,
 ) -> dict[str, Mapping[date, float] | None]:
-    """The canonical eFTP and form day series."""
+    """The canonical eFTP day series."""
     return {
         "eftp_by_day": canonical.eftp_by_day,
-        "form_by_day": canonical.form_by_day,
         "run_eftp_by_day": canonical.run_eftp_by_day,
     }
 
@@ -241,15 +240,17 @@ def current_performance_context(
         session_feedback,
     )
     load_context = performance_load_context.performance_load_context(
-        activities, days, today, canonical=canonical, session_feedback=feedback
+        activities,
+        today,
+        canonical=canonical,
+        timezone=str(profile.get("timezone") or "UTC"),
+        session_feedback=feedback,
     )
     load = load_context["load"]
     last_7 = load_context["last_7"]
     previous_7 = load_context["previous_7"]
     last_30 = load_context["last_30"]
     previous_30 = load_context["previous_30"]
-    actual_atl_date = load_context["actual_atl_date"]
-    actual_atl_current = load_context["actual_atl_current"]
 
     metrics.update(
         performance_daily_health.garmin_daily_health_metrics(
@@ -300,16 +301,12 @@ def current_performance_context(
             "weight": metrics["weight_kg"]["value"],
         },
         "current_load": load,
-        "actual_load": {
-            "atl": actual_atl_current,
-            "as_of": actual_atl_date.isoformat() if actual_atl_date else None,
-            "source": "Abgeschlossene Aktivitäten (berechnet)",
-            **(
-                {"load_missing_sessions": missing}
-                if (missing := load_context.get("actual_atl_load_missing_sessions"))
-                else {}
-            ),
-        },
+        # Stored Intervals.icu values, labelled; never part of current_load.
+        **(
+            {"intervals_load_history": history}
+            if (history := load_context["intervals_history"])
+            else {}
+        ),
         "recovery": {
             "id": recovery["sleep_date"]
             or recovery["resting_hr_date"]

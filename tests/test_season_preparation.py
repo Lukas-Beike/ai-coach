@@ -2,9 +2,6 @@ import unittest
 from copy import deepcopy
 from datetime import date
 
-from canonical_recovery_support import recovery_observation
-
-from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.errors import AppError
 from backend.performance.season_inputs import SeasonLoadInputs
 from backend.planning.season_preparation import (
@@ -19,18 +16,11 @@ SNAPSHOT = {"synced_at": "2026-10-02T06:00:00Z"}
 
 
 def _inputs(ctl=50, atl=60, completed=()):
-    """Season load inputs as the canonical readers return them."""
-    day = BASIS_DAY.isoformat()
-
-    def observed(kind, value):
-        if value is None:
-            return None
-        return recovery_observation(kind, value, day, ProviderId.INTERVALS)
-
+    """Season load inputs as the reader returns them: yesterday's local M7 values."""
     return SeasonLoadInputs(
         basis_day=BASIS_DAY,
-        ctl=observed(MetricKind.CTL, ctl),
-        atl=observed(MetricKind.ATL, atl),
+        ctl=ctl,
+        atl=atl,
         completed_today=tuple(completed),
     )
 
@@ -163,7 +153,7 @@ class SeasonPreparationTests(unittest.TestCase):
                 "as_of": "2026-10-01",
                 "ctl": 50.0,
                 "atl": 60.0,
-                "source": "Intervals.icu recorded wellness",
+                "source": "Lokal berechnet (M7)",
             },
             result["basis"],
         )

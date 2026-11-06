@@ -1,4 +1,8 @@
-"""Form, ramp rate and cycling eFTP are read from canonical observations only.
+"""Intervals.icu form and cycling eFTP are read from canonical observations only.
+
+Since #1726 the Intervals.icu CTL, ATL and form are only a labelled history
+(``intervals_load_history``); the current load is the local curve (M7) and no
+ramp rate is derived.
 
 The observations come from the real Intervals.icu mappers, applied to synthetic
 snapshots; the snapshot handed to the performance context is stripped of its
@@ -108,7 +112,7 @@ class FormTests(unittest.TestCase):
             ("derived", _row(_day(), ctl=52.1, atl=60.43), -8.33),
         ):
             with self.subTest(name):
-                load = _context(_snapshot([row]))["current_load"]
+                load = _context(_snapshot([row]))["intervals_load_history"]
                 self.assertEqual(load["tsb"], expected)
 
     def test_a_derived_form_keeps_its_value_and_kind_with_its_method_metadata(
@@ -124,88 +128,37 @@ class FormTests(unittest.TestCase):
         self.assertEqual(form.method, FORM_METHOD)
         self.assertEqual(form.method_version, FORM_METHOD_VERSION)
         self.assertIsNotNone(form.input_fingerprint)
-        self.assertEqual(_context(snapshot)["current_load"]["tsb"], form.value.value)
+        self.assertEqual(
+            _context(snapshot)["intervals_load_history"]["tsb"], form.value.value
+        )
 
     def test_the_carrier_form_is_never_read(self) -> None:
         mapped = _snapshot([_row(_day(), ctl=50, atl=60)])
         carrier = _snapshot([_row(_day(), ctl=50, atl=60, tsb=99, form=98)])
-        self.assertEqual(_context(mapped, carrier)["current_load"]["tsb"], -10.0)
+        self.assertEqual(
+            _context(mapped, carrier)["intervals_load_history"]["tsb"], -10.0
+        )
 
     def test_an_invalid_reported_form_is_unknown_not_derived(self) -> None:
         # Known deviation: the mapper rejects the invalid value and stores no form
         # for the day, where the snapshot reader derived CTL minus ATL.
         load = _context(_snapshot([_row(_day(), ctl=50, atl=60, tsb="fresh")]))
-        self.assertIsNone(load["current_load"]["tsb"])
+        self.assertIsNone(load["intervals_load_history"]["tsb"])
 
     def test_snapshot_only_latest_day_does_not_displace_observed_form(self) -> None:
         snapshot = _snapshot([_row(_day(1), ctl=50, atl=60), _row(_day())])
-        load = _context(snapshot, copy.deepcopy(snapshot))["current_load"]
+        load = _context(snapshot, copy.deepcopy(snapshot))["intervals_load_history"]
         self.assertEqual(load["tsb"], -10.0)
 
-    def test_the_seven_day_comparison_averages_the_canonical_form_days(self) -> None:
-        rows = [
-            _row(_day(8), ctl=60, atl=40),  # outside the window
-            _row(_day(6), tsb=-10),
-            _row(_day(3), tsb=2),
-            _row(_day(0), ctl=60, atl=62),
-        ]
-        comparison = _context(_snapshot(rows))["comparisons"]["form_tsb"]
-        self.assertEqual(comparison["current"], -2.0)
-        self.assertEqual(comparison["average"], -3.33)
-
-
-class RampRateTests(unittest.TestCase):
-    def test_ramp_rate_is_the_ctl_change_over_exactly_seven_days(self) -> None:
+    def test_intervals_form_never_feeds_the_current_load_or_comparison(
+        self,
+    ) -> None:
         rows = [_row(_day(7), ctl=54.1, atl=50), _row(_day(), ctl=58.4, atl=60)]
-        snapshot = _snapshot(rows)
-        self.assertEqual(_inputs(snapshot).ramp_rate, 4.3)
-        load = _context(snapshot)["current_load"]
-        self.assertEqual(load["ramp_rate"], 4.3)
-        self.assertEqual(load["ramp_rate_source"], RAMP_LABEL)
-
-    def test_ramp_rate_may_be_negative_and_is_rounded_to_two_decimals(self) -> None:
-        rows = [_row(_day(7), ctl=60.333), _row(_day(), ctl=58.1)]
-        self.assertEqual(_inputs(_snapshot(rows)).ramp_rate, -2.23)
-
-    def test_a_missing_day_gives_no_ramp_rate_and_no_neighbour_is_used(self) -> None:
-        rows = [
-            _row(_day(8), ctl=50),
-            _row(_day(6), ctl=52),
-            _row(_day(), ctl=58),
-        ]
-        load = _context(_snapshot(rows))["current_load"]
-        self.assertIsNone(load["ramp_rate"])
-        self.assertIsNone(load["ramp_rate_source"])
-
-    def test_eight_days_apart_is_not_a_ramp_rate(self) -> None:
-        rows = [_row(_day(8), ctl=50), _row(_day(), ctl=58)]
-        self.assertIsNone(_inputs(_snapshot(rows)).ramp_rate)
-
-    def test_a_latest_day_without_ctl_gives_no_ramp_rate(self) -> None:
-        snapshot = _snapshot(
-            [_row(_day(7), ctl=50), _row(_day(1), ctl=55), _row(_day())]
-        )
-        self.assertIsNone(_inputs(snapshot, copy.deepcopy(snapshot)).ramp_rate)
-
-    def test_no_wellness_day_gives_no_ramp_rate(self) -> None:
-        # The only wellness row has an unusable id, so there is no wellness day.
-        self.assertIsNone(
-            read_performance_inputs(
-                FilteringReader(()),
-                None,
-                as_of=DAY,
-            )
-        )
-
-    def test_the_carrier_ramp_rate_is_never_read(self) -> None:
-        rows = [_row(_day(7), ctl=54.1), _row(_day(), ctl=58.4, rampRate=9.9)]
-        mapped = _snapshot(rows)
-        load = _context(mapped, copy.deepcopy(mapped))["current_load"]
-        self.assertEqual(load["ramp_rate"], 4.3)
-        lone = _snapshot([_row(_day(), ctl=58.4, rampRate=9.9)])
-        self.assertIsNone(
-            _context(lone, copy.deepcopy(lone))["current_load"]["ramp_rate"]
-        )
+        context = _context(_snapshot(rows))
+        self.assertIsNone(context["current_load"]["tsb"])
+        self.assertIsNone(context["comparisons"]["form_tsb"])
+        self.assertNotIn("ramp_rate", context["current_load"])
+        self.assertEqual(context["intervals_load_history"]["ctl"], 58.4)
 
 
 def _ride(eftp: float | None = None, **fields: Any) -> dict[str, Any]:

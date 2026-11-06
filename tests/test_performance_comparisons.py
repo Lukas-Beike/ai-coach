@@ -163,12 +163,16 @@ class PerformanceComparisonsTests(unittest.TestCase):
             "hrv_average": 50,
         }
         load_context = {
-            "load": {"ctl": 70, "tsb": -5, "atl": 80},
+            # The local fitness (M7) and its own 7-day averages.
+            "load": {
+                "ctl": 70,
+                "tsb": -5,
+                "atl": 80,
+                "averages_7d": {"ctl": 68, "tsb": -8, "atl": 76},
+            },
             "last_7": {"training_load": 100, "duration_hours": 10},
             "previous_7": {"training_load": 90, "duration_hours": 8},
             "previous_30": {"training_load": 400, "duration_hours": 30},
-            "actual_atl_current": 78,
-            "actual_atl_average": 70,
         }
         activities = [
             {"started_at_local": "2026-09-07T08:00:00", "sport": "ride", "eftp_w": 290}
@@ -206,35 +210,32 @@ class PerformanceComparisonsTests(unittest.TestCase):
         self.assertEqual(result["readiness_30d"]["days"], 30)
         self.assertEqual(values, before)
 
-    def test_eftp_and_form_comparisons_read_the_canonical_days_only(self):
+    def test_eftp_comparison_reads_the_canonical_days_only(self):
         values = self._inputs()
         history = self._history()
-        # The rows carry sportInfo eFTP 290 and tsb -7/-8; they are not read.
+        # The rows carry sportInfo eFTP 290; it is not read.
         eftp_by_day = {date(2026, 9, 1): 250.0, date(2026, 8, 1): 999.0}
-        form_by_day = {
-            date(2026, 9, 1): -7.0,
-            date(2026, 9, 6): -8.0,
-            date(2026, 9, 7): -9.0,
-            date(2026, 8, 31): 40.0,
-        }
         result = performance_comparisons(
             *values,
             TODAY,
             garmin_history=history,
             eftp_by_day=eftp_by_day,
-            form_by_day=form_by_day,
         )
         # Wellness day 250 and the 2026-09-07 ride 290; the older day is outside.
         self.assertEqual(result["cycling_eftp_30d"]["average"], 270.0)
-        self.assertEqual(result["form_tsb"]["average"], -8)
-        self.assertEqual(result["form_tsb"]["current"], -5)
 
-    def test_without_canonical_days_only_activity_eftp_and_no_form_remain(self):
+    def test_fitness_form_and_fatigue_compare_the_local_values(self):
+        # The rows carry Intervals.icu tsb -7/-8; only the local averages count.
         result = performance_comparisons(
             *self._inputs(), TODAY, garmin_history=self._history()
         )
         self.assertEqual(result["cycling_eftp_30d"]["average"], 290.0)
-        self.assertIsNone(result["form_tsb"])
+        self.assertEqual(
+            (result["form_tsb"]["current"], result["form_tsb"]["average"]), (-5, -8)
+        )
+        self.assertEqual(result["fitness_ctl"]["average"], 68)
+        self.assertEqual(result["fatigue_atl"]["average"], 76)
+        self.assertNotIn("fatigue_atl_actual", result)
 
     def test_missing_values_return_none_without_mutation(self):
         values = self._inputs()

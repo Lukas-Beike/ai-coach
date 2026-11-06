@@ -14,7 +14,6 @@ from duplicate_support import mark_tables_serving
 from garmin_support import read_garmin, save_garmin
 from performance_day_support import (
     canonical_from_snapshot,
-    current_days,
     garmin_metrics_from_payload,
     snapshot_metrics,
 )
@@ -26,7 +25,6 @@ from server_test_support import (
 )
 from support import complete_canonical_backfill
 
-from backend.canonical.vocabulary import MetricKind
 from backend.performance import activity_validation
 from backend.performance import context as performance_context
 from backend.performance import load as performance_load
@@ -35,7 +33,6 @@ from backend.performance import morning_battery as performance_morning_battery
 from backend.performance import planning_recovery as performance_planning_recovery
 from backend.performance.freshness import GarminSyncStatus
 from backend.performance.morning_battery_service import MORNING_BATTERY_HISTORY_KEY
-from backend.performance.wellness_days import series as wellness_series
 from backend.providers import garmin as garmin_provider
 from backend.providers import intervals_client as intervals_client_module
 from backend.runtime import clock as runtime_clock
@@ -904,7 +901,7 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertNotIn("rpe", evidence)
         self.assertNotIn("intensity", evidence)
 
-    def test_actual_atl_uses_completed_activities_and_is_exposed_separately(self):
+    def test_no_actual_atl_is_reconstructed_from_intervals_atl(self):
         today = _local_datetime.now().astimezone().date()
         wellness = [
             {
@@ -926,31 +923,9 @@ class ServerPerformanceTests(ServerTestCase):
             ],
         }
         performance = _current_performance_context(snapshot)
-        self.assertIn("atl", performance["actual_load"])
-        self.assertEqual(
-            performance["actual_load"]["source"],
-            "Abgeschlossene Aktivitäten (berechnet)",
-        )
-        self.assertIn("fatigue_atl_actual", performance["comparisons"])
-
-    def test_actual_atl_recurrence_does_not_double_decay_daily_rows(self):
-        today = _local_datetime.now().astimezone().date()
-        retention = __import__("math").exp(-1 / 7)
-        expected = 10 * retention + 70 * (1 - retention)
-        wellness = [
-            {"id": (today - timedelta(days=1)).isoformat(), "atl": 10},
-            {"id": today.isoformat(), "atl": expected},
-        ]
-        activities = [
-            {
-                "started_at_local": today.isoformat() + "T08:00:00",
-                "training_load": 70,
-            }
-        ]
-        series = performance_load.actual_atl_series(
-            wellness_series(current_days(wellness), MetricKind.ATL), activities, today
-        )
-        self.assertAlmostEqual(series[today], expected, places=2)
+        # #1726: the Intervals-anchored actual ATL mixed sources and is gone.
+        self.assertNotIn("actual_load", performance)
+        self.assertNotIn("fatigue_atl_actual", performance["comparisons"])
 
     def test_performance_reads_sport_settings_and_wellness_aliases(self):
         today = _local_datetime.now().astimezone().date().isoformat()
@@ -986,8 +961,8 @@ class ServerPerformanceTests(ServerTestCase):
         self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 286)
         self.assertEqual(metrics["run_threshold_hr_bpm"]["value"], 174)
         self.assertEqual(metrics["cycling_vo2max_ml_kg_min"]["value"], 62)
-        self.assertEqual(performance["current_load"]["ctl"], 68)
-        self.assertEqual(performance["current_load"]["tsb"], -6)
+        history = performance["intervals_load_history"]
+        self.assertEqual((history["ctl"], history["tsb"]), (68, -6))
 
     def test_current_eftp_history_omits_implausible_samples(self):
         today = _local_datetime.now().astimezone().date()

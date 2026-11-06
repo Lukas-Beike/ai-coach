@@ -5,11 +5,9 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from canonical_recovery_support import recovery_observation
-
 from backend.activities.detail_summary_metrics import intervals_summary_metrics
 from backend.activities.duplicates import duplicate_delete_action
-from backend.canonical.vocabulary import MetricKind, ProviderId, RecordingOrigin
+from backend.canonical.vocabulary import RecordingOrigin
 from backend.performance import (
     body,
     current_metrics,
@@ -70,19 +68,13 @@ class EmittedSourceOutputTests(unittest.TestCase):
         )
         self.assertEqual("Intervals.icu", metrics["avg_speed_mps"]["source"]["label"])
 
-    def test_season_preparation_wellness_basis_names_recorded_wellness(self):
-        basis_day = date(2026, 10, 1)
+    def test_season_preparation_basis_names_the_local_curve(self):
+        # Since #1726 the basis is yesterday's local fitness (M7), never
+        # Intervals.icu recorded wellness.
         inputs = SeasonLoadInputs(
-            basis_day=basis_day,
-            ctl=recovery_observation(
-                MetricKind.CTL, 50, basis_day.isoformat(), ProviderId.INTERVALS
-            ),
-            atl=recovery_observation(
-                MetricKind.ATL, 60, basis_day.isoformat(), ProviderId.INTERVALS
-            ),
-            completed_today=(),
+            basis_day=date(2026, 10, 1), ctl=50.0, atl=60.0, completed_today=()
         )
         result = season_preparation.load_scenarios(
             None, {}, date(2026, 10, 2), SEASON_VALUES, inputs=inputs
         )
-        self.assertEqual("Intervals.icu recorded wellness", result["basis"]["source"])
+        self.assertEqual("Lokal berechnet (M7)", result["basis"]["source"])

@@ -23,8 +23,10 @@ from backend.athlete.measurements import number
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import eftp
 from backend.performance.comparable_sessions import equal_effort_trend
+from backend.performance.fitness_fatigue import local_fitness_fatigue
 from backend.performance.pace_at_hr import pace_at_heart_rate_trend
 from backend.performance.session_rpe_load import period_load, session_load
+from backend.performance.smoothed_load import complete_before
 from backend.performance.training_report import metric_sum, valid_zones
 from backend.providers.source_labels import SourceView, provider_label
 
@@ -41,8 +43,8 @@ ZONE_MAPPING = (
     "zones unused."
 )
 PROFILE_DURATIONS = (60, 300, 1200)
-# CTL and eFTP come from Intervals.icu wellness days and ride summaries.
-INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
+# Fitness (the ``ctl`` key) is the local curve (card M7), never Intervals.icu CTL.
+LOCAL_FITNESS_SOURCE = "Lokal berechnet (M7)"
 # Wellness-day eFTP, else the day's latest Intervals.icu ride summary.
 EFTP_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.CURRENT_METRIC)
 
@@ -390,12 +392,16 @@ def weekly_progress(
     activity_summaries: Sequence[ActivitySummary],
     session_feedback: Mapping[str, Mapping[str, Any]] | None = None,
     plan: Mapping[str, Any] | None = None,
-    ctl_by_day: Mapping[date, float] | None = None,
+    local_load_days: Mapping[str, float] | None = None,
     eftp_by_day: Mapping[date, float] | None = None,
     curve_records: Sequence[Mapping[str, Any]] | None = (),
     observed_at: str | None = None,
 ) -> dict[str, Any]:
-    """``start`` is a Monday; ``sport`` is ``"all"`` or a canonical sport."""
+    """``start`` is a Monday; ``sport`` is ``"all"`` or a canonical sport.
+
+    ``local_load_days`` is the stored local load per day of the whole history,
+    from which the fitness first and last values of the window are computed.
+    """
     end = start + timedelta(days=7 * weeks - 1)
     effective_end = min(end, today)
     eligible = [
@@ -424,11 +430,21 @@ def weekly_progress(
     # a non-empty later half.
     started_weeks = min(weeks, (effective_end - start).days // 7 + 1)
     middle = start + timedelta(weeks=started_weeks // 2)
+    fitness = local_fitness_fatigue(
+        local_load_days or {},
+        in_window,
+        session_feedback or {},
+        start=start,
+        end=effective_end,
+        today=today,
+        complete_before=complete_before(today, observed_at, timezone),
+        timezone=timezone,
+    )
     ctl = _first_last(
         {
-            day: value
-            for day, value in (ctl_by_day or {}).items()
-            if start <= day <= effective_end
+            day["date"]: day["fitness"]
+            for day in fitness["days"]
+            if day["fitness"] is not None
         }
     )
     eftp_values = eftp.eftp_daily_values(eftp_by_day, in_window, start, effective_end)
@@ -443,7 +459,12 @@ def weekly_progress(
         "observed_at": observed_at,
         "zone_mapping": ZONE_MAPPING,
         "week_list": week_rows,
-        "ctl": {**ctl, "source": INTERVALS_SOURCE},
+        "ctl": {
+            **ctl,
+            "source": LOCAL_FITNESS_SOURCE,
+            "method_id": fitness["method_id"],
+            "method_version": fitness["method_version"],
+        },
         **(
             {
                 "eftp": {

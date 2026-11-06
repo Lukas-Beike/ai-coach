@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
-from backend.canonical.vocabulary import MetricKind
 from backend.performance import eftp, garmin_metrics, trends, wellness
 from backend.performance.wellness_days import WellnessDay
 
@@ -114,7 +113,6 @@ def performance_comparisons(
     *,
     garmin_history: Mapping[str, Mapping[date, float]],
     eftp_by_day: Mapping[date, float] | None = None,
-    form_by_day: Mapping[date, float] | None = None,
     run_eftp_by_day: Mapping[date, float] | None = None,
 ) -> dict[str, Any]:
     load = load_context["load"]
@@ -173,25 +171,16 @@ def performance_comparisons(
             "W",
             30,
         ),
+        # Local fitness, form and fatigue (M7) against their own 7-day averages.
         "fitness_ctl": wellness.comparison_value(
-            load["ctl"],
-            wellness.wellness_average(wellness_days, MetricKind.CTL, 7, today),
-            "",
-            7,
+            load["ctl"], load["averages_7d"]["ctl"], "", 7
         ),
         "form_tsb": wellness.comparison_value(
-            load["tsb"], wellness.wellness_form_average(form_by_day, 7, today), "", 7
+            load["tsb"], load["averages_7d"]["tsb"], "", 7
         ),
         "fatigue_atl": wellness.comparison_value(
             load["atl"],
-            wellness.wellness_average(wellness_days, MetricKind.ATL, 7, today),
-            "",
-            7,
-            higher_is_better=False,
-        ),
-        "fatigue_atl_actual": wellness.comparison_value(
-            load_context["actual_atl_current"],
-            load_context["actual_atl_average"],
+            load["averages_7d"]["atl"],
             "",
             7,
             higher_is_better=False,
