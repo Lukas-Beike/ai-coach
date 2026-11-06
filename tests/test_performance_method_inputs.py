@@ -141,8 +141,9 @@ class M1SessionRpeInputs(linking.LinkingCase):
                 garmin["moving_duration_s"],
                 canonical_store.activity_elapsed_duration(garmin["details"]),
             ),
-            (3600.0, 3300.0, 3600.0),
-            msg="#1445: Garmin stores its elapsed duration in the one elapsed field",
+            (3300.0, 3300.0, 3600.0),
+            msg="#1445: Garmin stores its elapsed duration in the one elapsed field; "
+            "#1672: its duration is moving time first, like Intervals.icu",
         )
         self.assertEqual(
             (intervals["recorded_by"], garmin["recorded_by"]),
