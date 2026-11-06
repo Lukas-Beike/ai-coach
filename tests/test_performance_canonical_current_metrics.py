@@ -64,9 +64,7 @@ ATHLETE_RECORD_KINDS = (
     MetricKind.HEIGHT,
     MetricKind.W_PRIME,
 )
-INSTANT_KINDS = tuple(
-    dict.fromkeys((*SYNC_KINDS, MetricKind.EFTP, *ATHLETE_RECORD_KINDS))
-)
+INSTANT_KINDS = tuple(dict.fromkeys((*SYNC_KINDS, *ATHLETE_RECORD_KINDS)))
 
 
 class ObservationStub(ObservationReader):
@@ -343,7 +341,8 @@ class CanonicalCurrentInputTests(unittest.TestCase):
             [(kind, None, None, None) for kind in instant_kinds],
         )
         # The Wahoo fallbacks follow, unwindowed: stored FTP, then weight. The
-        # wellness-day weight and eFTP are read last, for the latest wellness day.
+        # wellness-day weight is read last, for the latest wellness day; eFTP is
+        # never read (#1727).
         latest = _latest_wellness_day(_latest_wellness(case.intervals))
         self.assertEqual(
             reader.calls[len(instant_kinds) :],
@@ -351,7 +350,6 @@ class CanonicalCurrentInputTests(unittest.TestCase):
                 (MetricKind.THRESHOLD_HR, *window, None),
                 (MetricKind.VO2MAX, *window, None),
                 (MetricKind.WEIGHT, *window, None),
-                (MetricKind.EFTP, *window, None),
                 *((kind, *window, None) for kind in ATHLETE_RECORD_KINDS),
                 (MetricKind.INDOOR_FTP, *window, None),
                 (MetricKind.FTP, None, None, None),
@@ -368,7 +366,6 @@ class CanonicalCurrentInputTests(unittest.TestCase):
                     )
                 ),
                 (MetricKind.WEIGHT, latest, latest, None),
-                (MetricKind.EFTP, latest, latest, Sport.RIDE),
             ],
         )
 
@@ -445,114 +442,34 @@ def _eftp_case(*, athlete: float | None, wellness: float | None) -> Case:
 
 
 class CanonicalEftpInputTests(unittest.TestCase):
-    def _inputs(
-        self, case: Case, observations: tuple[Observation, ...] | None = None
-    ) -> CanonicalCurrentInputs | None:
-        reader = ObservationStub(
-            _observations(case) if observations is None else observations
-        )
-        return _read(reader, case.intervals)
+    """Stored Intervals.icu eFTP is no current input (#1727)."""
 
-    def test_athlete_and_wellness_ride_eftp_are_read_and_run_is_ignored(self) -> None:
-        inputs = self._inputs(_eftp_case(athlete=262, wellness=265))
-        assert inputs is not None
-        assert inputs.athlete_eftp is not None and inputs.wellness_eftp is not None
-        self.assertEqual(inputs.athlete_eftp.value.value, 262)
-        self.assertEqual(inputs.wellness_eftp.value.value, 265)
-        self.assertIs(inputs.athlete_eftp.sport, Sport.RIDE)
-        self.assertIs(inputs.wellness_eftp.sport, Sport.RIDE)
-
-    def test_the_athlete_eftp_comes_from_the_athlete_record_only(self) -> None:
-        inputs = self._inputs(_eftp_case(athlete=None, wellness=265))
-        assert inputs is not None
-        self.assertIsNone(inputs.athlete_eftp)
-        self.assertEqual(inputs.wellness_eftp and inputs.wellness_eftp.value.value, 265)
-
-    def test_the_wellness_eftp_is_the_latest_wellness_day_only(self) -> None:
-        case = _eftp_case(athlete=None, wellness=265)
-        intervals = copy.deepcopy(case.intervals)
-        intervals["recent_wellness"][0]["sportInfo"] = [
-            {"types": ["Ride"], "eftp": 250}
-        ]
-        del intervals["recent_wellness"][-1]["sportInfo"]
-        inputs = self._inputs(replace(case, intervals=intervals))
-        assert inputs is not None
-        self.assertIsNone(inputs.wellness_eftp)
-
-    def test_an_older_sync_athlete_eftp_never_changes_the_current_value(self) -> None:
-        case = _eftp_case(athlete=262, wellness=None)
-        current = _observations(case)
-        earlier = RETRIEVED_AT - timedelta(days=1)
-        stale = tuple(
-            replace(
-                row,
-                value=replace(row.value, value=row.value.value + 5),
-                provenance=replace(row.provenance, retrieved_at=earlier),
-            )
-            for row in current
-            if row.kind is MetricKind.EFTP
-        )
-        inputs = self._inputs(case, (*current, *stale))
-        assert inputs is not None and inputs.athlete_eftp is not None
-        self.assertEqual(inputs.athlete_eftp.value.value, 262)
-        others = tuple(row for row in current if row.kind is not MetricKind.EFTP)
-        inputs = self._inputs(case, (*others, *stale))
-        assert inputs is not None
-        self.assertIsNone(inputs.athlete_eftp)
-
-    def test_an_athlete_record_with_only_an_eftp_still_defines_the_sync(self) -> None:
-        # No threshold, VO2max or weight: the athlete eFTP observation alone sets
-        # the sync instant (the snapshot reader read the setting without them).
-        case = _eftp_case(athlete=262, wellness=None)
-        only_athlete_eftp = tuple(
-            row
-            for row in _observations(case)
-            if row.kind is MetricKind.EFTP
-            and row.sport is Sport.RIDE
-            and row.provenance.source_record_id != row.observed_on.isoformat()
-        )
-        inputs = self._inputs(case, only_athlete_eftp)
-        assert inputs is not None and inputs.athlete_eftp is not None
-        self.assertEqual(inputs.athlete_eftp.value.value, 262)
-
-    def test_a_wellness_only_eftp_keeps_the_inputs_without_an_intervals_sync(
-        self,
-    ) -> None:
-        case = _eftp_case(athlete=None, wellness=265)
-        only_eftp = tuple(
-            row
-            for row in _observations(case)
-            if row.kind is MetricKind.EFTP and row.sport is Sport.RIDE
-        )
-        inputs = self._inputs(case, only_eftp)
-        assert inputs is not None
-        self.assertIsNone(inputs.athlete_eftp)
-        self.assertEqual(inputs.wellness_eftp and inputs.wellness_eftp.value.value, 265)
-        self.assertIsNone(inputs.athlete_threshold_hr)
-
-    def test_no_eftp_observation_keeps_the_legacy_shaped_inputs(self) -> None:
-        case = _case("intervals_only")
-        inputs = self._inputs(case)
-        assert inputs is not None
-        self.assertIsNone(inputs.athlete_eftp)
-        self.assertIsNone(inputs.wellness_eftp)
-
-    def test_the_eftp_current_value_is_labelled_like_the_legacy_metric(self) -> None:
+    def test_stored_eftp_is_never_read(self) -> None:
         case = _eftp_case(athlete=262, wellness=265)
-        garmin = garmin_payload_metrics.garmin_payload_performance_metrics({}, TODAY)
-        metrics = snapshot_metrics(
-            case.intervals, {}, garmin, canonical=self._inputs(case)
+        observations = _observations(case)
+        self.assertTrue(any(row.kind is MetricKind.EFTP for row in observations))
+        reader = ObservationStub(observations)
+        inputs = _read(reader, case.intervals)
+        assert inputs is not None
+        self.assertNotIn(MetricKind.EFTP, {call[0] for call in reader.calls})
+        for name in ("athlete_eftp", "wellness_eftp"):
+            self.assertFalse(hasattr(inputs, name), name)
+
+    def test_an_athlete_record_with_only_an_eftp_defines_no_sync(self) -> None:
+        case = _eftp_case(athlete=262, wellness=265)
+        only_eftp = tuple(
+            row for row in _observations(case) if row.kind is MetricKind.EFTP
         )
         self.assertEqual(
-            metrics["cycling_eftp_watts"],
-            {
-                "value": 262,
-                "unit": "W",
-                "source": "Intervals.icu",
-                "source_provider": "intervals",
-                "note": "",
-            },
+            read_current_inputs(ObservationStub(only_eftp), None, as_of=TODAY),
+            NO_CURRENT_INPUTS,
         )
+
+    def test_stored_eftp_yields_no_current_metric(self) -> None:
+        case = _eftp_case(athlete=262, wellness=265)
+        garmin = garmin_payload_metrics.garmin_payload_performance_metrics({}, TODAY)
+        metrics = snapshot_metrics(case.intervals, {}, garmin, canonical=_inputs(case))
+        self.assertNotIn("cycling_eftp_watts", metrics)
 
 
 class CanonicalWeightTests(unittest.TestCase):
@@ -624,9 +541,7 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
         canonical = current_performance_context(
             GarminSyncStatus.from_state(self.garmin), {}, TODAY, canonical=inputs
         )
-        # Intended difference (#1412): eFTP is read from canonical observations only,
-        # so it is absent without canonical inputs. The canonical value is the
-        # fixture athlete's Ride eFTP, labelled as before.
+        # The fixture athlete's stored Ride eFTP is no current metric (#1727).
         ride = next(
             setting
             for setting in self.intervals["raw_provider_data"]["athlete"][
@@ -634,19 +549,11 @@ class CanonicalCurrentFromTablesTests(CanonicalReadFixture):
             ]
             if setting["types"] == ["Ride"]
         )
+        self.assertIn("eftp", ride)
         # Without canonical inputs the context is unavailable (#1416).
         self.assertFalse(legacy["available"])
         self.assertEqual(legacy["metrics"], {})
-        self.assertEqual(
-            canonical["metrics"]["cycling_eftp_watts"],
-            {
-                "value": ride["eftp"],
-                "unit": "W",
-                "source": "Intervals.icu",
-                "source_provider": "intervals",
-                "note": "",
-            },
-        )
+        self.assertNotIn("cycling_eftp_watts", canonical["metrics"])
         # Garmin values and the Intervals.icu athlete settings are read from the
         # canonical inputs (#1415). Their parity with the stored payload is pinned
         # in tests/test_garmin_canonical_reads.py.

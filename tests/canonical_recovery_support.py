@@ -257,7 +257,6 @@ def recovery_only_inputs(
         inputs,
         wellness_day=full.wellness_day,
         form_by_day=full.form_by_day,
-        eftp_by_day=full.eftp_by_day,
         current=full.current,
         activities=full.activities,
         # The stored wellness days mark the provider data as present (#1416).

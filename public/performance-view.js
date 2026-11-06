@@ -300,7 +300,6 @@ function renderCurrentPerformance(metrics, history, status = []) {
     ["Radfahren", [
       ["cycling_ftp_watts", "FTP"],
       ["cycling_w_per_kg", "Leistung pro Gewicht"],
-      ["cycling_eftp_watts", "eFTP \u00b7 Sch\u00e4tzung"],
       ["bike_threshold_hr_bpm", "Schwellen-Herzfrequenz"],
       ["cycling_vo2max_ml_kg_min", "VO\u2082max \u00b7 Sch\u00e4tzung"],
     ]],

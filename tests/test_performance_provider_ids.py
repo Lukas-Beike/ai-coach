@@ -66,15 +66,11 @@ class ProviderIdPayloadTests(unittest.TestCase):
             canonical=EMPTY_PERFORMANCE_INPUTS,
         )
 
-        eftp = result["metrics"]["cycling_eftp_watts"][0]
+        self.assertNotIn("cycling_eftp_watts", result["metrics"])
         ftp = result["metrics"]["cycling_ftp_watts"][0]
-        self.assertEqual(eftp["source"], "Intervals.icu")
-        self.assertEqual(eftp["source_provider"], "intervals")
         self.assertEqual(ftp["source"], "Garmin Connect")
         self.assertEqual(ftp["source_provider"], "garmin")
-        self.assertEqual(
-            result["preferred_providers"]["cycling_eftp_watts"], "intervals"
-        )
+        self.assertNotIn("cycling_eftp_watts", result["preferred_providers"])
         self.assertEqual(result["preferred_providers"]["cycling_ftp_watts"], "garmin")
 
     def test_body_history_series_and_policy_carry_provider_ids(self):
@@ -88,12 +84,10 @@ class ProviderIdPayloadTests(unittest.TestCase):
             ]
         }
         result = body_history(
-            (snapshot or {}).get("synced_at"),
             GarminSyncStatus.from_state(garmin),
             TODAY,
             wellness_days=days_from_rows(snapshot["recent_wellness"]),
             canonical=garmin_body_from_payload(garmin, TODAY),
-            activities=(),
             garmin_ftp=garmin_metrics_from_payload(garmin).performance_history[
                 "cycling_ftp_watts"
             ],
@@ -112,7 +106,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
         }
         self.assertEqual(ftp_series["garmin"]["source"], "Garmin Connect")
         self.assertEqual(ftp_series["garmin"]["power_method"], "FTP")
-        self.assertEqual(ftp_series["intervals"]["source"], "Intervals.icu")
+        self.assertNotIn("intervals", ftp_series)
         point = next(
             item
             for item in ftp_series["garmin"]["points"]
@@ -143,7 +137,7 @@ class ProviderIdPayloadTests(unittest.TestCase):
         self.assertEqual(
             result["cycling_ftp_watts"]["alternatives"][0]["source_provider"], "garmin"
         )
-        self.assertEqual(result["cycling_eftp_watts"]["source_provider"], None)
+        self.assertNotIn("cycling_eftp_watts", result)
         self.assertIsNone(result["run_threshold_watts"]["value"])
         self.assertIsNone(result["run_threshold_watts"]["source_provider"])
         self.assertEqual(result["weight_kg"]["source"], "Intervals.icu")

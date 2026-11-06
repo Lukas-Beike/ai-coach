@@ -417,7 +417,7 @@ class ServerPerformanceTests(ServerTestCase):
             },
             "recent_activities": [],
             # A wellness day (without values) lets the canonical inputs read the
-            # athlete record's eFTP.
+            # athlete record.
             "recent_wellness": [
                 {"id": _local_datetime.now().astimezone().date().isoformat()}
             ],
@@ -426,15 +426,14 @@ class ServerPerformanceTests(ServerTestCase):
             snapshot,
             server.ATHLETE_DATA.profile().get(),
             _garmin_metrics(read_garmin()),
-            # The setting's eFTP is a canonical observation (#1412).
             canonical=recovery_only_inputs(snapshot=snapshot).current,
         )
         # The Intervals ride setting precedes Garmin's FTP (#1668).
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 250)
         self.assertEqual(metrics["cycling_ftp_watts"]["source"], "Intervals.icu")
         self.assertEqual(metrics["cycling_ftp_watts"]["alternatives"][0]["value"], 302)
-        self.assertEqual(metrics["cycling_eftp_watts"]["value"], 260)
-        self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
+        # Intervals.icu eFTP is no longer read (#1727).
+        self.assertNotIn("cycling_eftp_watts", metrics)
         self.assertEqual(metrics["run_threshold_watts"]["value"], 328)
         self.assertEqual(metrics["run_threshold_pace_seconds_per_km"]["value"], 263)
         self.assertEqual(metrics["bike_threshold_hr_bpm"]["value"], 169)
@@ -789,7 +788,6 @@ class ServerPerformanceTests(ServerTestCase):
             [
                 "cycling_vo2max_ml_kg_min",
                 "cycling_ftp_watts",
-                "cycling_eftp_watts",
             ],
         )
         self.assertEqual(
@@ -964,33 +962,7 @@ class ServerPerformanceTests(ServerTestCase):
         history = performance["intervals_load_history"]
         self.assertEqual((history["ctl"], history["tsb"]), (68, -6))
 
-    def test_current_eftp_history_omits_implausible_samples(self):
-        today = _local_datetime.now().astimezone().date()
-        snapshot = intervals_compaction.compact_snapshot(
-            {"sportSettings": [{"types": ["Ride"], "eFTP": 300}]},
-            [],
-            [
-                {
-                    "id": today.isoformat(),
-                    "sportInfo": [{"types": ["Ride"], "eFTP": 9999}],
-                },
-                {
-                    "id": (today - timedelta(days=1)).isoformat(),
-                    "sportInfo": [{"types": ["Ride"], "eFTP": 280}],
-                },
-            ],
-            [],
-            all_sync_days=server.ALL_SYNC_DAYS,
-            synced_at=runtime_clock.utc_now(),
-        )
-
-        comparison = _current_performance_context(snapshot)["comparisons"][
-            "cycling_eftp_30d"
-        ]
-
-        self.assertEqual(comparison["average"], 280)
-
-    def test_current_eftp_reads_mmp_model_without_using_ftp_as_eftp(self):
+    def test_mmp_model_is_neither_ftp_nor_a_current_eftp(self):
         today = _local_datetime.now().astimezone().date().isoformat()
         snapshot = intervals_compaction.compact_snapshot(
             {
@@ -1012,7 +984,8 @@ class ServerPerformanceTests(ServerTestCase):
 
         metrics = _current_performance_context(snapshot)["metrics"]
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
-        self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
+        # Intervals.icu eFTP is no longer read (#1727).
+        self.assertNotIn("cycling_eftp_watts", metrics)
 
     def test_manual_body_profile_values_are_used_when_api_values_are_absent(self):
         server.ATHLETE_DATA.profile().save(

@@ -76,10 +76,10 @@ _NO_RECOVERY = CanonicalRecoveryInputs(
 # subjective ratings), then the Garmin performance kinds (with the twelve training
 # load and load balance kinds and the four history-chart kinds), the daily totals
 # (with resting energy) and the recovery kinds not read before (the weekly HRV
-# average), the form and eFTP kinds (#1412), and the athlete-record kinds without
-# an earlier read (zone-2 pace, height and W′, #1415), and the plan-zone indoor FTP
-# (#1416).
-_UNIT_READS = 52
+# average), the form kind (#1412), and the athlete-record kinds without an earlier
+# read (zone-2 pace, height and W′, #1415), and the plan-zone indoor FTP (#1416).
+# eFTP is not read (#1727).
+_UNIT_READS = 51
 
 
 class StubObservationReader(ObservationReader):
@@ -193,8 +193,6 @@ def _assert_load_inputs(
             wellness_days=None,
             history_wellness_days=None,
             form_by_day=None,
-            eftp_by_day=None,
-            run_eftp_by_day=None,
         ),
         CanonicalPerformanceInputs(
             wellness_day=PARITY_TODAY,
@@ -221,7 +219,7 @@ def _normalized_load(load: dict[str, Any]) -> dict[str, Any]:
     return {**load, "ctl": _as_float(load["ctl"]), "atl": _as_float(load["atl"])}
 
 
-# Form, ramp rate and eFTP come from canonical observations only (#1412), so the
+# Form and ramp rate come from canonical observations only (#1412), so the
 # path without canonical inputs has none of them. ``_assert_load_metric_split`` and
 # the load tests check the canonical values; the legacy-versus-canonical
 # comparisons leave them out.
@@ -299,18 +297,18 @@ def _service(
 def _assert_load_metric_split(
     case: unittest.TestCase, canonical: dict[str, Any], legacy: dict[str, Any]
 ) -> None:
-    """Canonical state shows eFTP, form and the derived ramp rate; the other none.
+    """Canonical state shows form and the derived ramp rate; the other none.
 
-    The fixture's athlete Ride setting reports eFTP 258 and its latest wellness
-    day (2026-10-10) a reported form of -3.6. No CTL exists seven days earlier,
+    The fixture's athlete Ride setting reports eFTP 258, which is not read
+    (#1727), and its latest wellness day (2026-10-10) a reported form of -3.6. No CTL exists seven days earlier,
     so the ramp rate stays unknown instead of using the carrier ``rampRate``.
     A no-source state without canonical values is unavailable and shows none.
     """
     served = canonical["performance"]
     absent = legacy["performance"]
     absent_load = absent.get("current_load", {})
-    case.assertEqual(served["metrics"]["cycling_eftp_watts"]["value"], 258)
-    case.assertIsNone(absent["metrics"].get("cycling_eftp_watts", {}).get("value"))
+    case.assertNotIn("cycling_eftp_watts", served["metrics"])
+    case.assertNotIn("cycling_eftp_watts", absent["metrics"])
     # The stored Intervals.icu form is only the labelled history (#1726).
     case.assertEqual(served["intervals_load_history"]["tsb"], -3.6)
     case.assertIsNone(served["current_load"]["tsb"])

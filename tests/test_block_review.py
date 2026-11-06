@@ -134,7 +134,7 @@ class BlockReviewTests(unittest.TestCase):
         self.assertFalse(review["plan_available"])
         self.assertEqual(0, review["compliance"]["planned"])
         self.assertIsNone(review["intensity"]["shares"])
-        self.assertEqual("insufficient_data", review["performance"]["eftp"]["status"])
+        self.assertNotIn("eftp", review["performance"])
         self.assertEqual([], review["lessons"])
         self.assertEqual(0, review["subjective"]["checkin_scores"]["checkins"])
 

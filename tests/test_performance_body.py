@@ -33,9 +33,7 @@ def body_history(snapshot, garmin, today, **kwargs):
             "cycling_ftp_watts", {}
         ),
     )
-    kwargs.setdefault("activities", ())
     return _body_history(
-        (snapshot or {}).get("synced_at"),
         GarminSyncStatus.from_state(garmin),
         today,
         wellness_days=days_from_rows(rows),
@@ -85,8 +83,7 @@ class BodyHistoryTests(unittest.TestCase):
         )
 
     def test_ftp_sources_and_weight_age_limit(self):
-        # The eFTP of a wellness day is a canonical observation; the snapshot's
-        # sportInfo is not read (#1412).
+        # #1727: the Intervals.icu eFTP is not read; W/kg divides Garmin FTP only.
         snapshot = {
             "synced_at": "intervals-sync",
             "recent_wellness": [
@@ -97,7 +94,6 @@ class BodyHistoryTests(unittest.TestCase):
             ],
             "recent_activities": [],
         }
-        eftp_by_day = {date(2026, 10, 1): 250.0}
         garmin = {
             "weight": [{"date": "2026-09-29", "weightKg": 70}],
             "performance_history": [
@@ -109,20 +105,18 @@ class BodyHistoryTests(unittest.TestCase):
                 "cycling_ftp": {"fetched_at": "ftp-fetch"},
             },
         }
-        result = body_history(snapshot, garmin, TODAY, eftp_by_day=eftp_by_day)
+        result = body_history(snapshot, garmin, TODAY)
         garmin_series = _series(result, "12w", "cycling_w_per_kg", "Garmin Connect")[
             "points"
         ]
         self.assertAlmostEqual(garmin_series[-1]["value"], 300 / 70, places=3)
         self.assertEqual(garmin_series[-1]["weight_age_days"], 7)
-        intervals_series = _series(result, "12w", "cycling_w_per_kg", "Intervals.icu")[
-            "points"
-        ]
-        self.assertAlmostEqual(intervals_series[-6]["value"], 250 / 70, places=3)
-        self.assertEqual(intervals_series[-6]["ftp_synced_at"], "intervals-sync")
         self.assertEqual(
-            _series(result, "12w", "cycling_w_per_kg", "Intervals.icu")["power_method"],
-            "eFTP",
+            [
+                item["source"]
+                for item in result["windows"]["12w"]["metrics"]["cycling_w_per_kg"]
+            ],
+            ["Garmin Connect"],
         )
         self.assertEqual(
             _series(result, "12w", "cycling_w_per_kg", "Garmin Connect")[
@@ -259,18 +253,24 @@ class BodyHistoryTests(unittest.TestCase):
                 {"id": "2026-10-06", "weight": 70},
             ]
         }
+        garmin = {
+            "performance_history": [
+                {"date": "2026-10-05", "metrics": {"cycling_ftp_watts": 280}},
+                {"date": "2026-10-06", "metrics": {"cycling_ftp_watts": 300}},
+            ]
+        }
         canonical = CanonicalPerformanceInputs(
             wellness_day=None,
             ctl=None,
             atl=None,
-            eftp_by_day={date(2026, 10, 5): 280.0, date(2026, 10, 6): 300.0},
+            garmin=garmin_metrics_from_payload(garmin),
             history_wellness_days=days_from_rows(snapshot["recent_wellness"]),
         )
         result = analysis_history(
             GarminSyncStatus.from_state({}), TODAY, canonical=canonical
         )
         self.assertIn("body", result)
-        series = _series(result["body"], "12w", "cycling_w_per_kg", "Intervals.icu")
+        series = _series(result["body"], "12w", "cycling_w_per_kg", "Garmin Connect")
         self.assertEqual(len(series["weekly"]), 12)
         self.assertEqual(
             series["weekly"][-1],

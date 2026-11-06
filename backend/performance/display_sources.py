@@ -27,14 +27,12 @@ _DISPLAY_KINDS: Final[Mapping[str, MetricKind]] = {
     "sleep": MetricKind.SLEEP_DURATION,
     "hrv": MetricKind.HRV_RMSSD,
     "resting_hr": MetricKind.RESTING_HR,
-    "cycling_eftp_watts": MetricKind.EFTP,
     "run_threshold_pace_seconds_per_km": MetricKind.THRESHOLD_PACE,
     "cycling_vo2max_ml_kg_min": MetricKind.VO2MAX,
     "running_vo2max_ml_kg_min": MetricKind.VO2MAX,
 }
 # Display keys that are not the selection order. The FTP history and the FTP-based
-# W/kg series exist only for Garmin (Intervals' W/kg series divides eFTP), so the
-# charts keep Garmin.
+# W/kg series exist only for Garmin, so the charts keep Garmin.
 _DISPLAY_ONLY: Final[Mapping[str, ProviderId]] = {
     "cycling_ftp_watts": ProviderId.GARMIN,
     "cycling_w_per_kg": ProviderId.GARMIN,

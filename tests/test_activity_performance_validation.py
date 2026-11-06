@@ -102,7 +102,7 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
         )
         self.assertEqual(
             [reference["metric"] for reference in result["provider_references"]],
-            ["cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts"],
+            ["cycling_vo2max_ml_kg_min", "cycling_ftp_watts"],
         )
 
     def test_unknown_sport_and_no_activity_are_explicit(self):
@@ -146,7 +146,7 @@ class ActivityPerformanceValidationTests(unittest.TestCase):
         self.assertIsNone(activity_pace_seconds_per_km({"pace_mps": [300]}))
         self.assertEqual(
             activity_direct_estimates(
-                {"ftp_w": 300, "eftp_w": [300], "vo2max": {"value": 60}}
+                {"ftp_w": 300, "eftp_w": 300, "vo2max": {"value": 60}}
             ),
             {"activity_configured_ftp_watts": 300},
         )

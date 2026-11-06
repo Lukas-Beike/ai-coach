@@ -177,7 +177,7 @@ The system SHALL compute observed power-duration and running speed/distance effo
 Evidence: `backend/performance/power_profile.py:power_profile`, `backend/performance/power_profile.py:running_profile`, `backend/performance/activity_validation.py:activity_performance_validation`; `tests/test_power_profile.py:test_sprint_is_not_lost_to_display_downsampling`, `tests/test_power_profile.py:test_missing_or_stopped_recording_never_yields_peak`, `tests/test_activity_performance_validation.py:test_unknown_sport_and_no_activity_are_explicit`.
 
 ### Requirement: Canonical mean-maximal curve
-The analysis power and running best-effort curve (`mean-max-curve` version 1, windows including 180, 420 and 720 s) SHALL be computed at read time only from full-resolution canonical stream sets, count each canonical session once, give overlapping bests of one session the same effort group, and carry the method, version and an input fingerprint. The Intervals.icu power curve stays a separately labelled provider value.
+The analysis power and running best-effort curve (`mean-max-curve` version 1, windows including 180, 420 and 720 s) SHALL be computed at read time only from full-resolution canonical stream sets, count each canonical session once, give overlapping bests of one session the same effort group, and carry the method, version and an input fingerprint. The stored Intervals.icu power curve is not read by any view.
 
 #### Scenario: Protocol windows
 - **WHEN** a full-resolution stream holds 3, 7 and 12 minute efforts between gaps and pauses

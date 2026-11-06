@@ -609,10 +609,10 @@ class ThresholdParityTests(unittest.TestCase):
         )
 
     def test_eftp_is_a_ride_observation_and_not_read_from_the_snapshot(self) -> None:
-        # The snapshot reader of cycling_eftp_watts was removed (#1412): the value
-        # is read from this observation.
+        # The mapper still stores the ride eFTP, but since #1727 no current metric
+        # reads it.
         result = map_thresholds(self.athlete)
-        self.assertEqual(self.legacy["cycling_eftp_watts"]["value"], 258)
+        self.assertNotIn("cycling_eftp_watts", self.legacy)
         self.assertEqual(first_value(result, MetricKind.EFTP, sport=Sport.RIDE), 258)
 
     def test_any_type_entry_classifies_a_sport_setting(self) -> None:

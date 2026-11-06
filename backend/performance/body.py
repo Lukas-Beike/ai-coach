@@ -7,12 +7,8 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
-from backend.athlete.local_date import LocalDate
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance import (
-    eftp,
-)
 from backend.performance.canonical_body import (
     BODY_FAT_BOUNDS,
     WEIGHT_BOUNDS,
@@ -31,14 +27,11 @@ from backend.providers.source_labels import SourceView, provider_label
 INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
 GARMIN_SOURCE = provider_label(ProviderId.GARMIN, SourceView.BODY_HISTORY)
 WAHOO_SOURCE = provider_label(ProviderId.WAHOO, SourceView.BODY_HISTORY)
-# Body history keys its eFTP-derived FTP series by this label, not the wellness label.
-INTERVALS_FTP_SOURCE = "Intervals.icu"
 _MEASUREMENT_SOURCES = {
     ProviderId.INTERVALS: INTERVALS_SOURCE,
     ProviderId.GARMIN: GARMIN_SOURCE,
 }
 _FTP_SOURCES = {
-    ProviderId.INTERVALS: INTERVALS_FTP_SOURCE,
     ProviderId.GARMIN: GARMIN_SOURCE,
     ProviderId.WAHOO: WAHOO_SOURCE,
 }
@@ -50,13 +43,6 @@ def _number(value: Any) -> float | None:
     except TypeError, ValueError:
         return None
     return result if math.isfinite(result) else None
-
-
-def _day(value: Any) -> date | None:
-    try:
-        return LocalDate.parse(value).to_date()
-    except TypeError, ValueError:
-        return None
 
 
 def _bounded_weight(value: Any) -> float | None:
@@ -189,7 +175,7 @@ def _quotient_series(
     end: date,
     preferred: ProviderId | None = None,
 ) -> dict[str, Any]:
-    """FTP or eFTP per kg with a weight from the seven preceding days.
+    """FTP per kg with a weight from the seven preceding days.
 
     The newest weight wins (Garmin on a tie); with the athlete's preferred body
     source (``preferred``), its newest weight in the window wins when it has one.
@@ -260,15 +246,12 @@ def _stamped(
 
 
 def body_history(
-    intervals_synced_at: str | None,
     garmin: GarminSyncStatus,
     today: date,
     *,
     canonical: CanonicalBodyInputs,
     wellness_days: Sequence[WellnessDay],
-    activities: Sequence[Mapping[str, Any]],
     garmin_ftp: Mapping[date, float],
-    eftp_by_day: Mapping[date, float] | None = None,
     preferences: SourcePreferences = NO_PREFERENCES,
 ) -> dict[str, Any]:
     """Return API-ready 14d/12w charts under performance.history.body.
@@ -278,9 +261,8 @@ def body_history(
     weight age. Missing dates stay null; profile values are never observations.
 
     Wellness measurements come solely from canonical days, Garmin weight, body fat
-    and FTP solely from canonical observations, and activity eFTP from the canonical
-    activity summaries. ``intervals_synced_at`` (the canonical Intervals.icu
-    sync time) and the Garmin sync status supply only sync times.
+    and FTP solely from canonical observations. The W/kg series divides Garmin's
+    dated FTP only. The Garmin sync status supplies only sync times.
     """
     intervals = _intervals_measurements(today, wellness_days)
     garmin_synced_at = _sync_timestamp(garmin, "weight")
@@ -292,23 +274,8 @@ def body_history(
         ProviderId.INTERVALS: intervals["weight_kg"],
         ProviderId.GARMIN: garmin_values["weight_kg"],
     }
-    intervals_ftp: dict[date, tuple[float, str, Any]] = {}
-    for observed_at, value in eftp.eftp_daily_values(
-        eftp_by_day,
-        list(activities),
-        today - timedelta(days=83),
-        today,
-    ).items():
-        observed = _day(observed_at)
-        if observed is not None:
-            intervals_ftp[observed] = (
-                value,
-                observed.isoformat(),
-                intervals_synced_at,
-            )
     ftp: dict[ProviderId, dict[date, tuple[float, str, Any]]] = {
         ProviderId.GARMIN: _garmin_ftp(garmin, today, garmin_ftp),
-        ProviderId.INTERVALS: intervals_ftp,
     }
     windows: dict[str, Any] = {}
     for key, days in (("14d", 14), ("12w", 84)):
@@ -341,7 +308,7 @@ def body_history(
                 "cycling_w_per_kg": [
                     _quotient_series(
                         provider,
-                        "FTP" if provider is ProviderId.GARMIN else "eFTP",
+                        "FTP",
                         values,
                         weights,
                         start,

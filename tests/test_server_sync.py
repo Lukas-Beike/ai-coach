@@ -2551,7 +2551,7 @@ class ServerSyncTests(ServerTestCase):
         performance = _current_performance_context(snapshot)
         self.assertEqual(performance["intervals_load_history"]["tsb"], -12)
 
-    def test_current_eftp_prefers_current_intervals_model_over_latest_activity_estimate(
+    def test_intervals_eftp_is_not_read_from_settings_wellness_or_activities(
         self,
     ):
         today = _local_datetime.now().astimezone().date().isoformat()
@@ -2577,22 +2577,17 @@ class ServerSyncTests(ServerTestCase):
         performance = _current_performance_context(snapshot)
         metrics = performance["metrics"]
         self.assertEqual(metrics["cycling_ftp_watts"]["value"], 300)
-        self.assertEqual(metrics["cycling_eftp_watts"]["value"], 309)
-        self.assertEqual(metrics["cycling_eftp_watts"]["source"], "Intervals.icu")
-        # One value per day: the same-day wellness eFTP wins over the activity.
-        self.assertEqual(performance["comparisons"]["cycling_eftp_30d"]["average"], 274)
-        eftp_reference = next(
-            item
-            for item in performance["activity_validation"]["provider_references"]
-            if item["metric"] == "cycling_eftp_watts"
+        # Intervals.icu eFTP is no longer read by any view (#1727).
+        self.assertNotIn("cycling_eftp_watts", metrics)
+        self.assertNotIn("cycling_eftp_30d", performance.get("comparisons") or {})
+        validation = performance["activity_validation"]
+        self.assertNotIn(
+            "cycling_eftp_watts",
+            [item["metric"] for item in validation["provider_references"]],
         )
-        self.assertEqual(eftp_reference["historical_comparison"]["average"], 274)
-        self.assertEqual(
-            performance["activity_validation"]["direct_activity_estimates"][
-                "activity_configured_ftp_watts"
-            ],
-            300,
-        )
+        estimates = validation["direct_activity_estimates"]
+        self.assertNotIn("activity_eftp_watts", estimates)
+        self.assertEqual(estimates["activity_configured_ftp_watts"], 300)
 
     def test_garmin_near_duplicate_is_skipped_in_favour_of_intervals_activity(self):
         garmin = {

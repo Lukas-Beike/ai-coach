@@ -161,7 +161,7 @@ class PlaybookInjectionTests(unittest.TestCase):
         self.assertNotIn("week-by-week rationale", playbook_for("plan_week"))
 
     def test_review_kinds_share_the_answer_format_and_plain_language(self) -> None:
-        self.assertIn("explain a term like CTL, TSB or eFTP", COACH_PROMPT)
+        self.assertIn("explain a term like CTL or TSB", COACH_PROMPT)
         for kind in ("session_analysis", "progress_review", "block_review"):
             with self.subTest(kind=kind):
                 self.assertIn(playbooks._ANSWER, playbook_for(kind))
