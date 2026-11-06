@@ -48,6 +48,7 @@ class GarminJobDependencies:
     fixture_loader: Callable[[], Any]
     activity_detail_service: Callable[[], Any] | None = None
     strength_push_service: Callable[[], Any] | None = None
+    wellness_history_service: Callable[[], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,9 @@ def build_garmin_owner(
         all_sync_days=all_sync_days,
         activity_detail_service=garmin.activity_detail_service()
         if garmin.activity_detail_service
+        else None,
+        wellness_history_service=garmin.wellness_history_service()
+        if garmin.wellness_history_service
         else None,
     )
 

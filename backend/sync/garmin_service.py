@@ -33,6 +33,7 @@ from backend.providers.garmin_personal import (
     GarminPersonalClient,
     GarminTransportClient,
 )
+from backend.providers.garmin_wellness_history import collect_wellness_history
 from backend.sync.garmin import GARMIN_RECONCILIATION_DAYS
 from backend.sync.garmin_snapshot_writer import (
     ANALYSIS_SOURCES,
@@ -351,6 +352,25 @@ class GarminRemoteReader:
                     "Garmin-Daten für den Zeitraum sind nicht verfügbar.",
                     reason="not_supported",
                 ) from exc
+        finally:
+            _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
+
+    def fetch_wellness_history(self, start: date, end: date) -> dict[str, Any]:
+        """Read one wellness history window for the one-off backfill (#1730)."""
+        if not self.configured():
+            raise AppError(
+                503, "Garmin ist nicht konfiguriert.", reason="not_configured"
+            )
+        call_external = self._external_call(None)
+        client, login_argument = self._authenticated_client(call_external)
+        try:
+            return collect_wellness_history(
+                client,
+                start,
+                end,
+                external_call=call_external,
+                redact=self._redactor,
+            )
         finally:
             _persist_garmin_tokens(self._garmin_tokens, client, login_argument)
 

@@ -158,10 +158,16 @@ class RecordingQueue:
         self.calls.append((args, kwargs))
 
     def backfill_continued(
-        self, provider: str, end_date: str, created_since: str
+        self,
+        provider: str,
+        end_date: str,
+        created_since: str,
+        job_type: str = "historical_backfill",
     ) -> bool:
         return any(
-            args[0] == provider and args[2]["end_date"] == end_date
+            args[0] == provider
+            and args[1] == job_type
+            and args[2]["end_date"] == end_date
             for args, _kwargs in self.calls
         )
 

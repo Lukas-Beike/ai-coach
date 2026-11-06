@@ -415,7 +415,13 @@ INTERVALS_JOB_TYPES = frozenset(
 PREVIOUS_JOB_SUPPORT: dict[str, frozenset[str]] = {
     "intervals": INTERVALS_JOB_TYPES,
     "garmin": frozenset(
-        {"refresh", "historical_backfill", "activity_details", "plan_push"}
+        {
+            "refresh",
+            "historical_backfill",
+            "wellness_backfill",
+            "activity_details",
+            "plan_push",
+        }
     ),
     "calendar": frozenset({"refresh"}),
     "weather": frozenset({"refresh"}),
