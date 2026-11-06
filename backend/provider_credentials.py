@@ -342,6 +342,16 @@ class ProviderCredentialService:
         )
         return str(value or "").strip()
 
+    def _reset_replaced_personal_key(
+        self, db: Any, current: dict[str, str], changes: Mapping[str, str | None]
+    ) -> None:
+        """A new or removed key keeps neither the old expiry nor its rejection."""
+        if PERSONAL_KEY_FIELD not in changes:
+            return
+        if PERSONAL_KEY_EXPIRES_FIELD not in changes:
+            current.pop(PERSONAL_KEY_EXPIRES_FIELD, None)
+        self._key_values.delete(db, GARMIN_PERSONAL_KEY_REJECTED_KEY)
+
     def update(self, values: object) -> dict[str, Any]:
         """Apply a validated submission; null or empty clears a field."""
         changes = validated_changes(values)
@@ -351,14 +361,7 @@ class ProviderCredentialService:
                     self._key_values.get(db, PROVIDER_CREDENTIALS_KEY)
                 )
                 previous_athlete = self._athlete_id(current)
-                if (
-                    PERSONAL_KEY_FIELD in changes
-                    and PERSONAL_KEY_EXPIRES_FIELD not in changes
-                ):
-                    # A new or removed key never inherits the old key's expiry.
-                    current.pop(PERSONAL_KEY_EXPIRES_FIELD, None)
-                if PERSONAL_KEY_FIELD in changes:
-                    self._key_values.delete(db, GARMIN_PERSONAL_KEY_REJECTED_KEY)
+                self._reset_replaced_personal_key(db, current, changes)
                 for field, value in changes.items():
                     if value is None:
                         current.pop(field, None)

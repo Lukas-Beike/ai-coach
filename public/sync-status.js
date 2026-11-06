@@ -341,6 +341,11 @@ function providerRequiresManualAttention(entry) {
 
 const GARMIN_KEY_RENEWAL = "in Garmin Connect Web erneuern und unter Zugangsdaten speichern";
 
+function garminKeyDaysLeft(days) {
+  if (days === 0) return "heute";
+  return `in ${days} ${days === 1 ? "Tag" : "Tagen"}`;
+}
+
 // Pure: the Personal API key and SDK login hint for the Garmin card. A rejected
 // or expired key is urgent and also raises the attention banner.
 function garminKeyHint(garmin) {
@@ -351,9 +356,7 @@ function garminKeyHint(garmin) {
   if (key.state === "rejected") parts.push(`Personal-API-Schlüssel abgelehnt – ${GARMIN_KEY_RENEWAL}`);
   else if (key.state === "expired") parts.push(`Personal-API-Schlüssel abgelaufen – ${GARMIN_KEY_RENEWAL}`);
   else if (key.state === "expiring") {
-    const days = Number(key.days_left);
-    const when = days === 0 ? "heute" : `in ${days} ${days === 1 ? "Tag" : "Tagen"}`;
-    parts.push(`Personal-API-Schlüssel läuft ${when} ab – ${GARMIN_KEY_RENEWAL}`);
+    parts.push(`Personal-API-Schlüssel läuft ${garminKeyDaysLeft(Number(key.days_left))} ab – ${GARMIN_KEY_RENEWAL}`);
   } else if (key.state === "expiry_missing") parts.push("Ablaufdatum des Personal-API-Schlüssels fehlt");
   if (garmin.sdk_skipped) parts.push("Garmin-Login für Zusatzwerte erneuern");
   return { text: parts.join(" · "), urgent };

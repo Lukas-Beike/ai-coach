@@ -7,11 +7,13 @@ const { test } = require("node:test");
 function loadGarminKeyHint() {
   const source = fs.readFileSync(path.join(__dirname, "../public/sync-status.js"), "utf8").replace(/\r\n/g, "\n");
   const constant = source.slice(source.indexOf("const GARMIN_KEY_RENEWAL"), source.indexOf("\n", source.indexOf("const GARMIN_KEY_RENEWAL")) + 1);
+  const helperStart = source.indexOf("function garminKeyDaysLeft(");
+  const helper = source.slice(helperStart, source.indexOf("\n}\n", helperStart) + 3);
   const start = source.indexOf("function garminKeyHint(");
   assert.notEqual(start, -1, "garminKeyHint must exist");
   const end = source.indexOf("\n}\n", start);
   const context = vm.createContext({});
-  vm.runInContext(`${constant}${source.slice(start, end + 3)}\nthis.garminKeyHint = garminKeyHint;`, context);
+  vm.runInContext(`${constant}${helper}${source.slice(start, end + 3)}\nthis.garminKeyHint = garminKeyHint;`, context);
   return context.garminKeyHint;
 }
 
