@@ -13,6 +13,19 @@ async function performanceFixture(page, changes, route = "performance") {
   await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise);
 }
 
+async function localFitnessFixture(page) {
+  await performanceFixture(page, (performance) => {
+    const end = performance.history.end;
+    const days = Array.from({ length: 28 }, (_, index) => {
+      const date = new Date(`${end}T12:00:00Z`);
+      date.setUTCDate(date.getUTCDate() - 27 + index);
+      return { date: date.toISOString().slice(0, 10), state: "loaded", load: 60, fitness: 50 + index / 10, fatigue: 55, form: index / 10 - 5 };
+    });
+    return { history: { ...performance.history, local_fitness_fatigue: { status: "estimate", days } } };
+  }, "load");
+  return page.locator("#analysisLoadCharts .analysis-chart-card").filter({ has: page.getByRole("heading", { name: /^Fitness, Ermüdung, Form/ }) });
+}
+
 test("@responsive running tolerance renders Garmin toleranceScore instead of missing data", async ({ page }) => {
   await page.goto("/#analysis/performance");
   await page.waitForFunction(() => state.loadedAreas.has("performance") && !state.loadPromise && !!state.data?.performance?.history?.end);
@@ -297,20 +310,23 @@ test("@responsive sparse performance shows measurements and the current value li
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test("sparse FTP uses a current value line alongside a dense eFTP series", async ({ page }) => {
+test("sparse FTP draws one connected series with its legend and no eFTP", async ({ page }) => {
   await performanceFixture(page, { history: {
     start: "2026-09-01", end: "2026-09-15", load: { points: [] }, metrics: {
       cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }],
-      cycling_eftp_watts: [{ source: "Intervals.icu", points: [{ date: "2026-09-01", value: 205 }, { date: "2026-09-08", value: 208 }, { date: "2026-09-15", value: 212 }] }],
     },
   } });
-  const chart = page.locator("#analysisHistoryCharts svg");
+  const root = page.locator("#analysisHistoryCharts");
+  const chart = root.locator("svg");
   await expect(chart).toHaveCount(1);
+  await expect(root.getByRole("heading", { name: "Leistungsschwelle · FTP", exact: true })).toHaveCount(1);
   await expect(chart.locator('circle[data-series="0"]')).toHaveCount(2);
   await expect(chart.locator('path[data-series="0"]')).toHaveCount(1);
   await expect(chart.locator('.analysis-current-line[data-series="0"]')).toHaveCount(0);
-  await expect(chart.locator('path[data-series="1"]')).toHaveCount(1);
-  await expect(page.locator("#analysisHistoryCharts")).toContainText("Seit 01.09.2026: +10 W");
+  await expect(chart.locator('[data-series="1"]')).toHaveCount(0);
+  await expect(root.locator(".analysis-chart-legend .analysis-legend-info")).toHaveCount(1);
+  await expect(root).toContainText("Seit 01.09.2026: +10 W");
+  await expect(root).not.toContainText("eFTP");
 });
 
 test("@responsive pace ticks stay distinct and faster pace is higher", async ({ page }) => {
@@ -353,25 +369,28 @@ test("@responsive performance keeps dated FTP values and weekly medians independ
   ];
   await performanceFixture(page, { history: { start: "2026-08-01", end: "2026-09-30", load: { points: [] }, metrics: {
     cycling_ftp_watts: [{ source: "Garmin Connect", points }],
-    cycling_eftp_watts: [{ source: "Intervals.icu", points }],
+    cycling_vo2max_ml_kg_min: [{ source: "Garmin Connect", points: points.map((point) => ({ ...point, value: point.value - 160 })) }],
     run_threshold_pace_seconds_per_km: [{ source: "Garmin Connect", points: points.slice(1).map((point) => ({ ...point, value: 500 - point.value })) }],
   } } });
   const root = page.locator("#analysisHistoryCharts");
   await expect(root.locator(".analysis-period-controls")).toHaveCount(0);
-  const ftp = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Leistungsschwelle · FTP / eFTP", exact: true }) });
+  const ftp = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Leistungsschwelle · FTP", exact: true }) });
   await ftp.getByText("Werte ansehen", { exact: true }).click();
-  await expect(ftp.locator("tbody tr")).toHaveCount(7);
+  await expect(ftp.locator("tbody tr")).toHaveCount(5);
   await expect(ftp.locator("tbody")).toContainText("03.09.2026");
   await expect(ftp.locator("tbody")).toContainText("09.09.2026");
-  await expect(ftp.locator("tbody td:nth-child(2)")).toHaveText([/200 W/, /220 W/, /210 W/, "–", /220 W/, /210 W/, "–"]);
-  await expect(ftp.locator("tbody td:nth-child(3)")).toHaveText(["–", "–", "–", /210 W.*3 Messungen/, "–", "–", /215 W.*2 Messungen/]);
+  await expect(ftp.locator("tbody td:nth-child(2)")).toHaveText([/200 W/, /220 W/, /210 W/, /220 W/, /210 W/]);
+  const vo2max = root.locator("[data-analysis-section='development-Rad'] .analysis-subchart").filter({ has: page.getByRole("heading", { name: "VO₂max · Schätzung", exact: true }) });
+  await vo2max.getByText("Werte ansehen", { exact: true }).click();
+  await expect(vo2max.locator("tbody td:nth-child(2)")).toHaveText([/50 ml\/kg\/min.*3 Messungen/, /55 ml\/kg\/min.*2 Messungen/]);
   const pace = root.locator(".analysis-subchart").filter({ has: page.getByRole("heading", { name: "Schwellenpace", exact: true }) });
   await pace.getByText("Werte ansehen", { exact: true }).click();
   await expect(pace.locator("tbody td:nth-child(2)")).toHaveText([/4:50 min\/km/, /4:50 min\/km/]);
   await page.evaluate(async () => { await AppRouter.navigate("analysis/load", { historyMode: "replace" }); });
   await page.locator("#analysisLoadPeriod").getByRole("button", { name: "Letzte 14 Tage", exact: true }).click();
   await page.evaluate(async () => { await AppRouter.navigate("analysis/performance", { historyMode: "replace" }); });
-  await expect(ftp.locator("tbody tr")).toHaveCount(7);
+  await expect(ftp.locator("tbody tr")).toHaveCount(5);
+  await expect(vo2max.locator("tbody tr")).toHaveCount(2);
 });
 
 test("@responsive latest measurement stays visible without inventing measurements in empty weeks", async ({ page }) => {
@@ -415,7 +434,6 @@ test("@responsive dense performance retains every measured week without overlapp
   await performanceFixture(page, { history: { start: "2026-07-13", end: "2026-09-30", load: { points: [] }, metrics: {
     running_vo2max_ml_kg_min: [{ source: "Garmin Connect", points }],
     cycling_ftp_watts: [{ source: "Garmin Connect", points: points.map((point, index) => ({ ...point, value: 266 + index })) }],
-    cycling_eftp_watts: [{ source: "Intervals.icu", points: points.map((point, index) => ({ ...point, value: 268 + index })) }],
   } } });
   const charts = page.locator("#analysisHistoryCharts svg");
   const geometry = await charts.evaluateAll((charts) => charts.map((chart) => {
@@ -426,7 +444,7 @@ test("@responsive dense performance retains every measured week without overlapp
     return { count: chart.querySelectorAll("circle[data-series]").length, labels,
       overlap: labels.some((a, index) => labels.slice(index + 1).some((b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top)) };
   }));
-  expect(geometry.map((chart) => chart.count)).toEqual([12, 24]);
+  expect(geometry.map((chart) => chart.count)).toEqual([12, 12]);
   for (const chart of geometry) expect(chart.overlap).toBe(false);
   const vo2max = page.locator("#analysisHistoryCharts .analysis-subchart").filter({ has: page.getByRole("heading", { name: "VO₂max · Schätzung", exact: true }) }).filter({ has: page.locator("circle[data-series='0']") }).first();
   await vo2max.locator("details summary").click();
@@ -553,17 +571,11 @@ test("@responsive legend info buttons have a 44px layout box, a German name and 
 });
 
 test("@responsive legend info buttons are at least 44x44 and never overlap each other", async ({ page }) => {
-  await performanceFixture(page, { history: {
-    start: "2026-09-01", end: "2026-09-08", load: { points: [] },
-    metrics: {
-      cycling_ftp_watts: [{ source: "Garmin Connect", points: [{ date: "2026-09-01", value: 200 }, { date: "2026-09-08", value: 210 }] }],
-      // The FTP chart shows its legend; FTP and eFTP give two neighbouring info buttons.
-      cycling_eftp_watts: [{ source: "Intervals.icu", points: [{ date: "2026-09-01", value: 205 }, { date: "2026-09-08", value: 212 }] }],
-    },
-  } });
-  const buttons = page.locator("#analysisHistoryCharts .analysis-chart-legend .analysis-legend-info");
+  // Fitness, fatigue and form give three neighbouring legend info buttons.
+  const chart = await localFitnessFixture(page);
+  const buttons = chart.locator(".analysis-chart-legend .analysis-legend-info");
+  await expect(buttons).toHaveCount(3);
   const count = await buttons.count();
-  expect(count).toBeGreaterThanOrEqual(2);
   const boxes = [];
   for (let index = 0; index < count; index += 1) {
     const box = await buttons.nth(index).boundingBox();

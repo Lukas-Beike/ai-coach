@@ -78,8 +78,8 @@ _NO_RECOVERY = CanonicalRecoveryInputs(
 # (with resting energy) and the recovery kinds not read before (the weekly HRV
 # average), the form kind (#1412), and the athlete-record kinds without an earlier
 # read (zone-2 pace, height and W′, #1415), and the plan-zone indoor FTP (#1416).
-# eFTP is not read (#1727).
-_UNIT_READS = 51
+# eFTP is read only for the Intervals.icu sync instant (#1727).
+_UNIT_READS = 52
 
 
 class StubObservationReader(ObservationReader):

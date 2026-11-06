@@ -64,7 +64,9 @@ ATHLETE_RECORD_KINDS = (
     MetricKind.HEIGHT,
     MetricKind.W_PRIME,
 )
-INSTANT_KINDS = tuple(dict.fromkeys((*SYNC_KINDS, *ATHLETE_RECORD_KINDS)))
+INSTANT_KINDS = tuple(
+    dict.fromkeys((*SYNC_KINDS, MetricKind.EFTP, *ATHLETE_RECORD_KINDS))
+)
 
 
 class ObservationStub(ObservationReader):
@@ -342,7 +344,7 @@ class CanonicalCurrentInputTests(unittest.TestCase):
         )
         # The Wahoo fallbacks follow, unwindowed: stored FTP, then weight. The
         # wellness-day weight is read last, for the latest wellness day; eFTP is
-        # never read (#1727).
+        # read only for the sync instant (#1727).
         latest = _latest_wellness_day(_latest_wellness(case.intervals))
         self.assertEqual(
             reader.calls[len(instant_kinds) :],
@@ -444,26 +446,28 @@ def _eftp_case(*, athlete: float | None, wellness: float | None) -> Case:
 class CanonicalEftpInputTests(unittest.TestCase):
     """Stored Intervals.icu eFTP is no current input (#1727)."""
 
-    def test_stored_eftp_is_never_read(self) -> None:
+    def test_stored_eftp_is_read_only_for_the_sync_instant(self) -> None:
         case = _eftp_case(athlete=262, wellness=265)
         observations = _observations(case)
         self.assertTrue(any(row.kind is MetricKind.EFTP for row in observations))
         reader = ObservationStub(observations)
         inputs = _read(reader, case.intervals)
         assert inputs is not None
-        self.assertNotIn(MetricKind.EFTP, {call[0] for call in reader.calls})
+        self.assertEqual(
+            [call for call in reader.calls if call[0] is MetricKind.EFTP],
+            [(MetricKind.EFTP, None, None, None)],
+        )
         for name in ("athlete_eftp", "wellness_eftp"):
             self.assertFalse(hasattr(inputs, name), name)
 
-    def test_an_athlete_record_with_only_an_eftp_defines_no_sync(self) -> None:
+    def test_an_athlete_record_with_only_an_eftp_defines_the_sync(self) -> None:
         case = _eftp_case(athlete=262, wellness=265)
         only_eftp = tuple(
             row for row in _observations(case) if row.kind is MetricKind.EFTP
         )
-        self.assertEqual(
-            read_current_inputs(ObservationStub(only_eftp), None, as_of=TODAY),
-            NO_CURRENT_INPUTS,
-        )
+        inputs = read_current_inputs(ObservationStub(only_eftp), None, as_of=TODAY)
+        self.assertIsNotNone(inputs.synced_at)
+        self.assertEqual(inputs.athlete_record, ())
 
     def test_stored_eftp_yields_no_current_metric(self) -> None:
         case = _eftp_case(athlete=262, wellness=265)

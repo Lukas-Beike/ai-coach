@@ -33,8 +33,8 @@ Wellness rows
     ``sport`` and ``sport_type``, classifies to (OTHER only when no text names a
     known sport).
     The value is ``mmp_model``'s ``ftp``, ``eftp`` or ``eFTP``, else the entry's
-    ``eftp`` or ``eFTP``, as ``performance.eftp`` reads it. Only the first entry
-    of each sport is mapped.
+    ``eftp`` or ``eFTP``. The observations are stored history; no performance
+    view reads them. Only the first entry of each sport is mapped.
 
 Athlete thresholds
     ``sportSettings`` (with the snake_case alias ``sport_settings`` as the

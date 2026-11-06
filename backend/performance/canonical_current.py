@@ -66,9 +66,11 @@ _ATHLETE_RECORD_KINDS: Final = (
     MetricKind.HEIGHT,
     MetricKind.W_PRIME,
 )
-# Kinds whose athlete-record rows define the sync instant, each read once.
+# Kinds whose athlete-record rows define the sync instant, each read once. eFTP
+# rows still define it, so a record holding only an eFTP keeps the instant
+# current; their values feed no metric.
 _INSTANT_KINDS: Final = tuple(
-    dict.fromkeys((*_SYNC_KINDS, *_ATHLETE_RECORD_KINDS))
+    dict.fromkeys((*_SYNC_KINDS, MetricKind.EFTP, *_ATHLETE_RECORD_KINDS))
 )
 _EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
 # Sport-scoped athlete settings that give the plan zones their thresholds.

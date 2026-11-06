@@ -990,7 +990,7 @@ def _observation_series(observation: Observation) -> str:
     is anything else comes from the athlete record. The consumers tell the two
     apart by the same rule. Both values are kept: the current-metrics reader shows
     the wellness weight and body fat first and the athlete values as their
-    fallbacks, and the athlete eFTP before the wellness eFTP.
+    fallbacks; eFTP is stored history that no view reads.
     """
     provenance = observation.provenance
     shared = observation.kind in _ATHLETE_SERIES_KINDS or (

@@ -26,14 +26,9 @@ from backend.providers.source_labels import SourceView, provider_label
 
 INTERVALS_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.BODY_HISTORY)
 GARMIN_SOURCE = provider_label(ProviderId.GARMIN, SourceView.BODY_HISTORY)
-WAHOO_SOURCE = provider_label(ProviderId.WAHOO, SourceView.BODY_HISTORY)
 _MEASUREMENT_SOURCES = {
     ProviderId.INTERVALS: INTERVALS_SOURCE,
     ProviderId.GARMIN: GARMIN_SOURCE,
-}
-_FTP_SOURCES = {
-    ProviderId.GARMIN: GARMIN_SOURCE,
-    ProviderId.WAHOO: WAHOO_SOURCE,
 }
 
 
@@ -167,15 +162,13 @@ def _series(
 
 
 def _quotient_series(
-    provider: ProviderId,
-    method: str,
     ftp: dict[date, tuple[float, str, Any]],
     weights: dict[ProviderId, dict[date, tuple[float, str, Any]]],
     start: date,
     end: date,
     preferred: ProviderId | None = None,
 ) -> dict[str, Any]:
-    """FTP per kg with a weight from the seven preceding days.
+    """Garmin FTP per kg with a weight from the seven preceding days.
 
     The newest weight wins (Garmin on a tie); with the athlete's preferred body
     source (``preferred``), its newest weight in the window wins when it has one.
@@ -229,9 +222,9 @@ def _quotient_series(
                 )
         points.append(point)
     return {
-        "source": _FTP_SOURCES[provider],
-        "source_provider": provider.value,
-        "power_method": method,
+        "source": GARMIN_SOURCE,
+        "source_provider": ProviderId.GARMIN.value,
+        "power_method": "FTP",
         "unit": "W/kg",
         "points": points,
         "weekly": _weekly(points, start, end),
@@ -274,9 +267,7 @@ def body_history(
         ProviderId.INTERVALS: intervals["weight_kg"],
         ProviderId.GARMIN: garmin_values["weight_kg"],
     }
-    ftp: dict[ProviderId, dict[date, tuple[float, str, Any]]] = {
-        ProviderId.GARMIN: _garmin_ftp(garmin, today, garmin_ftp),
-    }
+    ftp = _garmin_ftp(garmin, today, garmin_ftp)
     windows: dict[str, Any] = {}
     for key, days in (("14d", 14), ("12w", 84)):
         start = today - timedelta(days=days - 1)
@@ -307,15 +298,12 @@ def body_history(
                 ],
                 "cycling_w_per_kg": [
                     _quotient_series(
-                        provider,
-                        "FTP",
-                        values,
+                        ftp,
                         weights,
                         start,
                         today,
                         preferred_source(MetricKind.WEIGHT, preferences),
                     )
-                    for provider, values in ftp.items()
                 ],
             },
         }
