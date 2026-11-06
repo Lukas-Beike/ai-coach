@@ -139,7 +139,7 @@ class LocalLoadStoreTests(unittest.TestCase):
     def test_pass_logs_counts_only(self) -> None:
         with self.manager.unit_of_work() as db:
             _ftp(db, 250.0, date(2026, 9, 1))
-        with self.assertLogs("backend.sync.local_load", level="INFO") as logs:
+        with self.assertLogs("intervals_coach", level="INFO") as logs:
             self._run()
         (record,) = logs.records
         self.assertEqual(record.event, "local_load_reconciled")  # type: ignore[attr-defined]

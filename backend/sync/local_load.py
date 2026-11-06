@@ -47,7 +47,8 @@ from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_table_reader import CanonicalTableReader
 
-_LOGGER = logging.getLogger(__name__)
+# The application logger: only it has handlers (see observability.configure_logging).
+_LOGGER = logging.getLogger("intervals_coach")
 STAGE: Final = "local_load"
 STATE_KEY: Final = "local_load_state"
 DERIVED_LABEL: Final = "derived"
