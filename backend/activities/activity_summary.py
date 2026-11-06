@@ -82,7 +82,6 @@ _DERIVED: Final = (
     ("provider_intensity", "intensity"),
     ("grade_adjusted_speed_mps", "grade_adjusted_speed_mps"),
     ("ftp_w", "ftp_w"),
-    ("eftp_w", "eftp_w"),
     ("vo2max", "vo2max"),
     ("power_zone_times", "power_zone_times_s"),
     ("heart_rate_zone_times", "hr_zone_times_s"),

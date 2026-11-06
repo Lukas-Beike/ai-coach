@@ -74,7 +74,6 @@ class ActivitySummary(TypedDict, total=False):
     provider_intensity: float
     grade_adjusted_speed_mps: float
     ftp_w: float
-    eftp_w: float
     vo2max: float
     training_load: float
     load_method: str

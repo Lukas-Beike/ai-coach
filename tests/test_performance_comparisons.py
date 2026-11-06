@@ -108,7 +108,6 @@ class PerformanceComparisonsTests(unittest.TestCase):
 
     def _inputs(self):
         metrics = {
-            "cycling_eftp_watts": {"value": 309, "source": "Intervals.icu"},
             "weight_kg": {"value": 72, "source": GARMIN_SOURCE},
             "readiness": {"value": 80, "source": GARMIN_SOURCE},
             "cycling_ftp_watts": {"value": 300, "source": GARMIN_SOURCE},
@@ -174,15 +173,11 @@ class PerformanceComparisonsTests(unittest.TestCase):
             "previous_7": {"training_load": 90, "duration_hours": 8},
             "previous_30": {"training_load": 400, "duration_hours": 30},
         }
-        activities = [
-            {"started_at_local": "2026-09-07T08:00:00", "sport": "ride", "eftp_w": 290}
-        ]
         return (
             metrics,
             recovery,
             load_context,
             current_days(wellness_rows),
-            activities,
         )
 
     def test_comparisons_preserve_keys_units_labels_and_direction_flags(self):
@@ -206,30 +201,32 @@ class PerformanceComparisonsTests(unittest.TestCase):
         )
         self.assertEqual(result["run_5k_seconds_30d"]["direction"], "down")
         self.assertEqual(result["run_5k_seconds_30d"]["color"], "good")
-        self.assertEqual(result["cycling_eftp_30d"]["average"], 290.0)
         self.assertEqual(result["readiness_30d"]["days"], 30)
         self.assertEqual(values, before)
 
-    def test_eftp_comparison_reads_the_canonical_days_only(self):
-        values = self._inputs()
-        history = self._history()
-        # The rows carry sportInfo eFTP 290; it is not read.
-        eftp_by_day = {date(2026, 9, 1): 250.0, date(2026, 8, 1): 999.0}
+    def test_eftp_and_form_comparisons_read_the_canonical_days_only(self):
+        metrics, recovery, load_context, days = self._inputs()
+        # A stored eFTP metric and the rows' sportInfo eFTP 290 are not read and
+        # yield no eFTP comparison since #1727.
+        metrics = {
+            **metrics,
+            "cycling_eftp_watts": {"value": 309, "source": "Intervals.icu"},
+        }
         result = performance_comparisons(
-            *values,
-            TODAY,
-            garmin_history=history,
-            eftp_by_day=eftp_by_day,
+            metrics, recovery, load_context, days, TODAY, garmin_history=self._history()
         )
-        # Wellness day 250 and the 2026-09-07 ride 290; the older day is outside.
-        self.assertEqual(result["cycling_eftp_30d"]["average"], 270.0)
+        self.assertNotIn("cycling_eftp_30d", result)
+        self.assertFalse(any("eftp" in key for key in result))
+        # The rows carry Intervals.icu tsb -7/-8; the form compares the local values.
+        self.assertEqual(
+            (result["form_tsb"]["current"], result["form_tsb"]["average"]), (-5, -8)
+        )
 
     def test_fitness_form_and_fatigue_compare_the_local_values(self):
         # The rows carry Intervals.icu tsb -7/-8; only the local averages count.
         result = performance_comparisons(
             *self._inputs(), TODAY, garmin_history=self._history()
         )
-        self.assertEqual(result["cycling_eftp_30d"]["average"], 290.0)
         self.assertEqual(
             (result["form_tsb"]["current"], result["form_tsb"]["average"]), (-5, -8)
         )
@@ -258,7 +255,7 @@ class PerformanceComparisonsTests(unittest.TestCase):
 
         self.assertIsNone(result["sleep_hours"])
         self.assertIsNone(result["readiness"])
-        self.assertIsNone(result["cycling_eftp_30d"])
+        self.assertNotIn("cycling_eftp_30d", result)
         self.assertEqual(values, before)
 
 

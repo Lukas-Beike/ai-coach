@@ -127,7 +127,9 @@ class WellnessDayTests(unittest.TestCase):
         self.assertEqual(plain, contradiction)
         self.assertEqual(contradiction.wellness_day, TODAY)
 
-    def test_run_eftp_is_a_separate_sparse_series(self):
+    def test_eftp_observations_feed_no_series(self):
+        # Since #1727 eFTP rows only define the Intervals.icu sync instant; they
+        # feed no wellness-day series.
         yesterday = TODAY - timedelta(days=1)
         reader = Reader(
             observation(MetricKind.FORM, TODAY, -3),
@@ -137,8 +139,9 @@ class WellnessDayTests(unittest.TestCase):
         )
         inputs = read_performance_inputs(reader, object(), as_of=TODAY)
         assert inputs is not None and inputs.wellness_days is not None
-        self.assertEqual(inputs.run_eftp_by_day, {yesterday: 310})
-        self.assertEqual(inputs.eftp_by_day, {TODAY: 250})
+        self.assertEqual(reader.calls.count(MetricKind.EFTP), 1)
+        self.assertFalse(hasattr(inputs, "eftp_by_day"))
+        self.assertFalse(hasattr(inputs, "run_eftp_by_day"))
         self.assertEqual([day.day for day in inputs.wellness_days], [TODAY])
         self.assertEqual(len(reader.calls), len(set(reader.calls)))
 

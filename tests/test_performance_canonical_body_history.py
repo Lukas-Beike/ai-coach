@@ -170,12 +170,10 @@ def _body(
     canonical: CanonicalBodyInputs,
 ) -> dict[str, Any]:
     return body_history(
-        (snapshot or {}).get("synced_at"),
         GarminSyncStatus.from_state(garmin),
         TODAY,
         canonical=canonical,
         wellness_days=_days(snapshot),
-        activities=(),
         garmin_ftp=garmin_metrics_from_payload(garmin or {}).performance_history.get(
             "cycling_ftp_watts", {}
         ),
@@ -580,21 +578,17 @@ class CanonicalBodyPopulatedDatabaseTests(CanonicalReadFixture):
             inputs = read_body_inputs(selector, db, today)
         self.assertEqual(
             body_history(
-                (self.intervals or {}).get("synced_at"),
                 GarminSyncStatus.from_state(self.garmin),
                 today,
                 canonical=garmin_body_from_payload(self.garmin, today),
                 wellness_days=_days(self.intervals),
-                activities=(),
                 garmin_ftp={},
             ),
             body_history(
-                (self.intervals or {}).get("synced_at"),
                 GarminSyncStatus.from_state(self.garmin),
                 today,
                 canonical=inputs,
                 wellness_days=_days(self.intervals),
-                activities=(),
                 garmin_ftp={},
             ),
         )

@@ -24,7 +24,7 @@ class DisplaySourcesTests(unittest.TestCase):
 
         for key, kind in _DISPLAY_KINDS.items():
             self.assertEqual(payload[key], CURRENT_RULES[kind].order[0].value, key)
-        self.assertEqual(payload["cycling_eftp_watts"], ProviderId.INTERVALS.value)
+        self.assertNotIn("cycling_eftp_watts", payload)
         self.assertEqual(
             payload["run_threshold_pace_seconds_per_km"], ProviderId.GARMIN.value
         )

@@ -20,11 +20,6 @@ from backend.canonical.vocabulary import (
     RecordingOrigin,
     SourceKind,
 )
-from backend.performance.canonical_current import CanonicalCurrentInputs
-from backend.providers.intervals_wellness_mapping import (
-    map_intervals_athlete_thresholds,
-    map_intervals_wellness,
-)
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 TODAY = date(2026, 5, 4)
@@ -70,46 +65,6 @@ def _current(
         latest_wellness=latest_day(
             (snapshot or _snapshot()).get("recent_wellness", [])
         ),
-    )
-
-
-def _eftp_inputs(
-    *, athlete: float | None = None, wellness: float | None = None
-) -> CanonicalCurrentInputs:
-    """Canonical current inputs with ride eFTP observations from the real mappers."""
-    retrieved = datetime(2026, 5, 4, 8, 0, tzinfo=UTC)
-    athlete_eftp = wellness_eftp = None
-    if athlete is not None:
-        records = map_intervals_athlete_thresholds(
-            {
-                "id": "athlete-1",
-                "sportSettings": [{"types": ["Ride"], "eftp": athlete}],
-            },
-            observed_on=TODAY,
-            retrieved_at=retrieved,
-        ).records
-        athlete_eftp = next(r for r in records if r.kind is MetricKind.EFTP)
-    if wellness is not None:
-        records = map_intervals_wellness(
-            [
-                {
-                    "id": "2026-05-03",
-                    "sportInfo": [{"types": ["Ride"], "eftp": wellness}],
-                }
-            ],
-            retrieved_at=retrieved,
-        ).records
-        wellness_eftp = next(r for r in records if r.kind is MetricKind.EFTP)
-    return CanonicalCurrentInputs(
-        bike_threshold_hr=(),
-        run_threshold_hr=(),
-        athlete_threshold_hr=None,
-        cycling_vo2max=(),
-        running_vo2max=(),
-        wellness_weight=None,
-        athlete_weight=None,
-        athlete_eftp=athlete_eftp,
-        wellness_eftp=wellness_eftp,
     )
 
 
@@ -742,102 +697,24 @@ class CurrentMaxHrTests(unittest.TestCase):
 
 
 class CurrentEftpTests(unittest.TestCase):
-    def test_eftp_athlete_then_wellness_then_latest_ride_activity(self) -> None:
-        # The athlete setting and the wellness sportInfo eFTP are canonical
-        # observations (#1412); the snapshot's setting has none, so each case
-        # supplies them.
-        activity = {
-            "id": "ride-1",
-            "type": "Ride",
-            "start_date_local": "2026-05-03T07:00:00",
-            "icu_eftp": 270,
-        }
-        wellness = [
-            _wellness("2026-05-03", sport_info=[{"types": ["Ride"], "eFTP": 265}])
-        ]
+    def test_stored_eftp_is_no_current_metric(self) -> None:
+        # Since #1727 no Intervals.icu eFTP is read: not the athlete setting, the
+        # wellness sportInfo or the latest ride activity.
         snapshot = _snapshot(
-            athlete={"sport_settings": [_setting("Ride")]},
-            wellness=wellness,
-            activities=[activity],
+            athlete={"sport_settings": [_setting("Ride", eftp=262)]},
+            wellness=[
+                _wellness("2026-05-03", sportInfo=[{"types": ["Ride"], "eftp": 265}])
+            ],
+            activities=[
+                {
+                    "id": "ride-1",
+                    "type": "Ride",
+                    "start_date_local": "2026-05-03T07:00:00",
+                    "icu_eftp": 270,
+                }
+            ],
         )
-        for name, canonical, expected in (
-            ("athlete first", _eftp_inputs(athlete=262, wellness=265), 262),
-            ("then wellness", _eftp_inputs(wellness=265), 265),
-            ("then latest ride", _eftp_inputs(), 270),
-            ("no eFTP observation", None, 270),
-        ):
-            with self.subTest(name):
-                result = snapshot_metrics(snapshot, {}, _garmin(), canonical=canonical)
-                self.assertEqual(
-                    _pair(result["cycling_eftp_watts"]), (expected, INTERVALS)
-                )
-
-    def test_latest_ride_is_chosen_by_start_date_not_list_order(self) -> None:
-        activities = [
-            {
-                "id": "ride-2",
-                "type": "Ride",
-                "start_date_local": "2026-05-03T07:00:00",
-                "icu_eftp": 275,
-            },
-            {
-                "id": "ride-1",
-                "type": "Ride",
-                "start_date_local": "2026-05-01T07:00:00",
-                "icu_eftp": 270,
-            },
-        ]
-        result = _current(_snapshot(activities=list(reversed(activities))))
-        self.assertEqual(_pair(result["cycling_eftp_watts"]), (275, INTERVALS))
-
-    def test_latest_ride_without_eftp_hides_older_ride_quirk(self) -> None:
-        # Quirk: the newest ride is selected first; if it has no eFTP, an older
-        # ride's eFTP is not used.
-        activities: list[dict[str, Any]] = [
-            {"id": "ride-2", "type": "Ride", "start_date_local": "2026-05-03T07:00:00"},
-            {
-                "id": "ride-1",
-                "type": "Ride",
-                "start_date_local": "2026-05-01T07:00:00",
-                "icu_eftp": 270,
-            },
-        ]
-        result = _current(_snapshot(activities=activities))
-        self.assertEqual(_pair(result["cycling_eftp_watts"]), (None, None))
-
-    def test_the_summary_sport_decides_ride(self) -> None:
-        # Canonical: the mapper classifies the Intervals.icu type into the summary
-        # sport, so a Run typed activity named "Morning Ride" is a run and its eFTP
-        # is not the ride eFTP (the former raw type-key quirk no longer applies).
-        activities = [
-            {
-                "id": "run-1",
-                "type": "Run",
-                "name": "Morning Ride",
-                "start_date_local": "2026-05-03T07:00:00",
-                "icu_eftp": 300,
-            },
-            {
-                "id": "ride-1",
-                "type": "Ride",
-                "start_date_local": "2026-05-01T07:00:00",
-                "icu_eftp": 270,
-            },
-        ]
-        result = _current(_snapshot(activities=activities))
-        self.assertEqual(_pair(result["cycling_eftp_watts"]), (270, INTERVALS))
-
-    def test_activity_icu_eftp_key_precedes_eftp(self) -> None:
-        # Canonical: the mapper reads icu_eftp first; the summary carries it as eftp_w.
-        activity = {
-            "id": "ride-1",
-            "type": "Ride",
-            "start_date_local": "2026-05-03T07:00:00",
-            "icu_eftp": 275,
-            "eftp": 999,
-        }
-        result = _current(_snapshot(activities=[activity]))
-        self.assertEqual(_pair(result["cycling_eftp_watts"]), (275, INTERVALS))
+        self.assertNotIn("cycling_eftp_watts", _current(snapshot))
 
 
 class CurrentVo2AndRacePredictionTests(unittest.TestCase):
@@ -942,7 +819,6 @@ class CurrentResultShapeTests(unittest.TestCase):
                 "run_zone2_pace_seconds_per_km": "s/km",
                 "bike_threshold_hr_bpm": "bpm",
                 "run_threshold_hr_bpm": "bpm",
-                "cycling_eftp_watts": "W",
                 "cycling_max_hr_bpm": "bpm",
                 "running_max_hr_bpm": "bpm",
                 "max_hr_bpm": "bpm",

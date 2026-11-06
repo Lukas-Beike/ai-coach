@@ -7,7 +7,7 @@ Describe deterministic local performance, training-load, readiness, recovery, bo
 ## Requirements
 
 ### Requirement: Current performance metrics with explicit fallback
-The system SHALL compose current body, cycling/running thresholds, VO2max, maximum HR, Zone-2 pace, eFTP, and running predictions from supported local provider/profile inputs with source and unit metadata. It SHALL use metric-specific Garmin/Intervals/Wahoo/manual precedence, preserve sport scope, and reject implausible values. Canonical and compatibility inputs SHALL preserve the same supported public metric shape without mutating callers.
+The system SHALL compose current body, cycling/running thresholds, VO2max, maximum HR, Zone-2 pace and running predictions from supported local provider/profile inputs with source and unit metadata. It SHALL use metric-specific Garmin/Intervals/Wahoo/manual precedence, preserve sport scope, and reject implausible values. Canonical and compatibility inputs SHALL preserve the same supported public metric shape without mutating callers.
 
 #### Scenario: Garmin thresholds available
 - **WHEN** plausible Garmin cycling FTP or running threshold values coexist with Intervals settings
@@ -17,17 +17,9 @@ The system SHALL compose current body, cycling/running thresholds, VO2max, maxim
 - **WHEN** a preferred source is missing
 - **THEN** the implemented sport, wellness, athlete, manual, or Wahoo fallback may supply that metric; if no eligible source exists its value remains unknown.
 
-#### Scenario: Current cycling eFTP comes from canonical observations
-- **WHEN** the current performance metrics are composed
-- **THEN** `cycling_eftp_watts` is the ride eFTP observation of the latest Intervals sync's athlete record, else the ride eFTP observation of the latest wellness day, else the latest ride activity's eFTP, with the unchanged Intervals source label; the snapshot's athlete `sport_settings` and wellness `sportInfo` are not read for it.
-
-#### Scenario: No canonical eFTP input
-- **WHEN** no canonical current inputs exist, or no athlete-record or wellness-day ride eFTP observation is stored
-- **THEN** the athlete-record and wellness steps contribute nothing and only the latest ride activity's eFTP can supply the value; otherwise it remains unknown.
-
-#### Scenario: Athlete eFTP without a wellness day
-- **WHEN** the latest Intervals sync's athlete record stores a ride eFTP but there is no usable wellness day
-- **THEN** `cycling_eftp_watts` is that athlete-record eFTP and the athlete settings of that sync still apply; only the wellness-day eFTP and wellness weight steps contribute nothing.
+#### Scenario: Intervals.icu eFTP is not a current metric
+- **WHEN** the current performance metrics are composed while ride or run eFTP observations or activity eFTP values are stored
+- **THEN** no `cycling_eftp_watts` metric is composed and no stored Intervals.icu eFTP feeds a current value, W/kg, comparison or report; the stored observations stay unchanged as history.
 
 #### Scenario: Intervals athlete settings come from canonical observations
 - **WHEN** current FTP, run threshold power, threshold or Zone-2 pace, threshold or maximum HR, VO2max, athlete weight, body fat, height, W′ or the threshold context's max HR and LTHR come from Intervals.icu
@@ -37,11 +29,7 @@ The system SHALL compose current body, cycling/running thresholds, VO2max, maxim
 - **WHEN** a newer Intervals write stores wellness rows but no athlete record
 - **THEN** the athlete settings of the latest athlete record still apply, and the wellness weight is the newest stored value of the latest wellness day.
 
-#### Scenario: Run and other sports do not feed cycling eFTP
-- **WHEN** Run and Ride eFTP observations coexist
-- **THEN** only ride-scoped observations feed `cycling_eftp_watts`.
-
-Evidence: `backend/performance/current_metrics.py:current_performance_metrics`, `backend/performance/canonical_current.py:read_current_inputs`; `tests/test_performance_current_metrics.py:test_garmin_priority_and_metric_shape`, `tests/test_performance_current_metrics.py:test_intervals_wellness_athlete_profile_fallbacks_and_eftp`, `tests/test_performance_current_metrics.py:test_invalid_values_and_inputs_are_not_mutated`. The canonical eFTP scenarios are verified by `tests/test_performance_canonical_current_metrics.py:CanonicalEftpInputTests`, `tests/test_performance_current_metrics.py:test_eftp_follows_the_canonical_chain_then_the_latest_ride_activity`, `tests/test_characterization_current_metrics.py:test_eftp_athlete_then_wellness_then_latest_ride_activity` and `tests/test_performance_canonical_load_metrics.py:EftpTests` (including `test_the_athlete_record_eftp_needs_no_wellness_day`). The athlete-settings scenario is verified by `tests/test_characterization_current_metrics.py` (each synthetic snapshot through the mappers and `read_current_inputs`), `tests/test_intervals_mapping_parity.py:ThresholdParityTests` and `tests/test_intervals_wellness_mapping.py:AthleteSettingsV9Tests`; the wellness-only write by `tests/test_performance_canonical_current_metrics.py:CanonicalCurrentInputTests.test_a_later_wellness_only_write_keeps_the_athlete_settings`.
+Evidence: `backend/performance/current_metrics.py:current_performance_metrics`, `backend/performance/canonical_current.py:read_current_inputs`; `tests/test_performance_current_metrics.py:test_garmin_priority_and_metric_shape`, `tests/test_performance_current_metrics.py:test_intervals_wellness_athlete_profile_fallbacks`, `tests/test_performance_current_metrics.py:test_invalid_values_and_inputs_are_not_mutated`. The eFTP scenario is verified by `tests/test_performance_current_metrics.py:test_stored_eftp_is_not_a_current_metric` and `tests/test_performance_canonical_load_metrics.py:EftpTests`. The athlete-settings scenario is verified by `tests/test_characterization_current_metrics.py` (each synthetic snapshot through the mappers and `read_current_inputs`), `tests/test_intervals_mapping_parity.py:ThresholdParityTests` and `tests/test_intervals_wellness_mapping.py:AthleteSettingsV9Tests`; the wellness-only write by `tests/test_performance_canonical_current_metrics.py:CanonicalCurrentInputTests.test_a_later_wellness_only_write_keeps_the_athlete_settings`.
 
 ### Requirement: Load rollups and the local current load
 The system SHALL calculate current/previous 7- and 30-day completed-activity rollups from known completed loads. The current load block (`current_load` `ctl`, `atl`, `tsb`) SHALL be the latest valued day of the local fitness, fatigue and form (M7); the stored Intervals.icu values SHALL only appear as the labelled `intervals_load_history`. Activity-derived load SHALL not be presented as Garmin's device-reported acute load.
@@ -129,9 +117,9 @@ The system SHALL provide bounded dated performance and provider-metric histories
 - **WHEN** valid original-stream profiles exist inside 28- or 90-day windows
 - **THEN** records retain sport/provenance and incomplete-record coverage; future activities are excluded and running speed/distance selection uses their implemented different extrema.
 
-#### Scenario: eFTP history reads canonical wellness days
-- **WHEN** the eFTP chart, body history or 30-day eFTP comparison is composed
-- **THEN** each day contributes at most one value: the ride eFTP observation of that wellness day, else the day's latest ride activity eFTP, both bounded to 20-2000 W; snapshot `sportInfo` is not read, and days without a value remain gaps.
+#### Scenario: No eFTP history
+- **WHEN** the analysis performance charts, the body W/kg history or the 30-day comparisons are composed while Intervals.icu eFTP observations are stored
+- **THEN** no eFTP series or `cycling_eftp_30d` comparison is composed, and the W/kg series divides only Garmin's dated FTP.
 
 #### Scenario: Form comparison reads canonical form days
 - **WHEN** the 7-day form comparison is composed
@@ -145,13 +133,13 @@ The system SHALL provide bounded dated performance and provider-metric histories
 - **WHEN** the analysis history is composed
 - **THEN** `daily_activity` lists the 90 days with the canonical Garmin steps and floors climbed of each day, labelled with the Garmin source and provider; a real zero stays zero and a day without an observation is a gap.
 
-#### Scenario: Power profile reads the canonical power curve
-- **WHEN** the analysis cycling power profile is composed
-- **THEN** its best power per duration, the day and activity of each best effort, the fetch window, fetch status and fetch time come from the canonical power curve rows (fetch-level facts once per source record), with the same points and source label the stored snapshot curve showed; a fetch that reports no usable curve keeps the stored points and still shows its status, and before the first completed backfill it shows no points.
+#### Scenario: Power profile reads only the local curve
+- **WHEN** the analysis cycling power profile is shown while Intervals.icu power curve rows are stored
+- **THEN** its best power per duration comes only from the local mean-maximal curve of the last 90 days; the analysis history has no `cycling_power_profile` and the stored Intervals.icu power curve feeds no view.
 
-Detailed contract: Intervals eFTP averages SHALL use actual Intervals estimates rather than configured FTP; race predictions, endurance scores, running tolerance, readiness history, and weekly training status SHALL retain their supported observation dates and aggregation metadata.
+Detailed contract: race predictions, endurance scores, running tolerance, readiness history, and weekly training status SHALL retain their supported observation dates and aggregation metadata.
 
-Evidence: `backend/performance/chart_history.py:analysis_history`, `backend/performance/comparisons.py:performance_comparisons`, `backend/performance/eftp.py:eftp_30_day_average`, `backend/performance/report_service.py:TrainingProfileSelectionService`; `tests/test_performance_chart_history.py:test_sources_remain_separate_with_no_backdating_of_current_settings`, `tests/test_performance_chart_history.py:test_race_prediction_history_does_not_backfill_current_estimates`, `tests/test_performance_chart_history.py:test_steps_and_floors_come_from_canonical_garmin_days`, `tests/test_training_report.py:test_running_speed_selects_fastest_effort_and_distance_selects_shortest`. The canonical-inputs scenario is verified by `tests/test_chart_history_canonical_parity.py`, `tests/test_garmin_training_load_canonical_parity.py`, `tests/test_performance_comparisons.py` and `tests/test_performance_canonical_parity.py:test_empty_performance_inputs_stand_for_no_canonical_values`. The power profile scenario is verified by `tests/test_power_curve_canonical.py` and `tests/test_db_power_curve_migration.py::CompletedBackfillUpgradeTests`. The canonical eFTP and form scenarios are verified by `tests/test_performance_eftp.py`, `tests/test_performance_comparisons.py:test_eftp_and_form_comparisons_read_the_canonical_days_only`, `tests/test_performance_wellness.py:WellnessFormTests`, `tests/test_characterization_body_history.py` and `tests/test_performance_canonical_load_metrics.py:test_chart_and_body_history_read_the_canonical_series`.
+Evidence: `backend/performance/chart_history.py:analysis_history`, `backend/performance/comparisons.py:performance_comparisons`, `backend/performance/report_service.py:TrainingProfileSelectionService`; `tests/test_performance_chart_history.py:test_sources_remain_separate_with_no_backdating_of_current_settings`, `tests/test_performance_chart_history.py:test_race_prediction_history_does_not_backfill_current_estimates`, `tests/test_performance_chart_history.py:test_steps_and_floors_come_from_canonical_garmin_days`, `tests/test_training_report.py:test_running_speed_selects_fastest_effort_and_distance_selects_shortest`. The canonical-inputs scenario is verified by `tests/test_chart_history_canonical_parity.py`, `tests/test_garmin_training_load_canonical_parity.py`, `tests/test_performance_comparisons.py` and `tests/test_performance_canonical_parity.py:test_empty_performance_inputs_stand_for_no_canonical_values`. The power profile scenario is verified by `tests/test_performance_chart_history.py:test_history_has_no_intervals_power_curve` and `tests/analysis-presentation.test.cjs`. The eFTP and form scenarios are verified by `tests/test_performance_comparisons.py:test_eftp_and_form_comparisons_read_the_canonical_days_only`, `tests/test_performance_wellness.py:WellnessFormTests`, `tests/test_characterization_body_history.py` and `tests/test_performance_canonical_load_metrics.py:test_chart_and_body_history_have_no_eftp_series`.
 
 ### Requirement: Current and planning recovery sources
 The system SHALL compose sleep, resting HR, HRV, readiness, averages and planning day recovery with explicit source/date. Sleep, HRV and resting HR SHALL keep one method family, Garmin's night values by default; readiness prefers eligible Intervals values. Per-day planning values SHALL use their date-specific source priority and the current rules' bounds, preserve absent days, and include morning Body Battery. Source freshness SHALL distinguish measurement date from fetch time.
@@ -276,7 +264,7 @@ The system SHALL retain dated weight/body-fat histories and daily energy/count m
 
 #### Scenario: Body history reads canonical inputs only
 - **WHEN** the body history is composed for the performance view or the state bootstrap
-- **THEN** Intervals weight and body fat come from the canonical wellness days, Garmin weight, body fat and FTP from the canonical Garmin observations read with the performance inputs, and eFTP from the canonical activity rows; Garmin values present only in the stored view are not shown.
+- **THEN** Intervals weight and body fat come from the canonical wellness days, Garmin weight, body fat and FTP from the canonical Garmin observations read with the performance inputs; Garmin values present only in the stored view are not shown.
 
 #### Scenario: Daily totals come from canonical observations only
 - **WHEN** the 7-day steps, floors and energy averages are composed
@@ -443,27 +431,23 @@ The system SHALL NOT derive or show a ramp rate: card M7 forbids ramp, ratio and
 
 Evidence: `backend/performance/load_context.py:performance_load_context`; `tests/test_performance_canonical_load_metrics.py:FormTests.test_intervals_form_never_feeds_the_current_load_or_comparison`, `tests/test_performance_canonical_parity.py`.
 
-### Requirement: Cycling eFTP and form are read from canonical observations only
-The system SHALL read cycling eFTP and form only from canonical Intervals.icu observations: the ride-scoped eFTP of the athlete record and of wellness days, and wellness-day form. Activity rows supply only the activity eFTP step. Without canonical inputs these values SHALL be absent rather than read from snapshot wellness rows or sport settings. Values and source labels stay unchanged. Output keys follow the provider-neutral output key requirement.
+### Requirement: Form is read from canonical observations only
+The system SHALL read Intervals.icu form only from canonical wellness-day observations. Without canonical inputs it SHALL be absent rather than read from snapshot wellness rows. Stored Intervals.icu eFTP observations SHALL NOT be read by any performance view. Values and source labels stay unchanged. Output keys follow the provider-neutral output key requirement.
 
 #### Scenario: No snapshot rows
 - **WHEN** the snapshot has no wellness rows and no athlete sport settings but canonical observations exist
-- **THEN** `metrics.cycling_eftp_watts`, `comparisons.cycling_eftp_30d`, `current_load.tsb` and `comparisons.form_tsb` equal the values computed from equivalent snapshot rows, apart from the known limits below.
+- **THEN** `current_load.tsb` and `comparisons.form_tsb` equal the values computed from equivalent snapshot rows, apart from the known limits below.
 
 #### Scenario: Carrier fields are ignored
 - **WHEN** snapshot wellness rows still carry `tsb`, `rampRate` and `sportInfo`
 - **THEN** none of them influences these values.
 
-#### Scenario: Stale and multi-sport data
-- **WHEN** the newest wellness day has no eFTP observation, or Run settings coexist with Ride settings
-- **THEN** the current eFTP falls to the next step of its chain and the history keeps the older dated values; Run values never feed cycling eFTP.
-
-Detailed contract: since wellness mapper version 8 the eFTP classification follows the legacy readers. The first of two ride sport settings wins, and each `types` text, or `type`, `sport` and `sport_type` of a `sportInfo` entry without a `types` list, classifies a sport, so one setting can serve several sports. Known limits, not requirements: the canonical sport terms also match `velo`, `bicycle` and `jog`, which the legacy readers did not; a reported form value that is not a number yields no form for that day.
+Detailed contract: known limit, not a requirement: a reported form value that is not a number yields no form for that day.
 
 Evidence: `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`, `backend/providers/intervals_wellness_mapping.py:map_intervals_athlete_thresholds`; `tests/test_intervals_wellness_mapping.py` (EFTP and FORM mapping), `tests/test_performance_canonical_parity.py`. The strict-read scenarios are verified by `tests/test_performance_canonical_load_metrics.py` (carrier rows are stripped or contradicting), `tests/test_performance_canonical_parity.py:_assert_load_metric_split` and `tests/test_server_performance.py`.
 
 ### Requirement: Report-family reads use canonical activity rows only
-The system SHALL read the activities of period reports, the training-record observation list, tag impact, training focus, load rollups, eFTP and season preparation from the canonical activity summary port only, and SHALL NOT fall back to the stored snapshot's `raw_provider_data.activities` or `recent_activities`.
+The system SHALL read the activities of period reports, the training-record observation list, tag impact, training focus, load rollups and season preparation from the canonical activity summary port only, and SHALL NOT fall back to the stored snapshot's `raw_provider_data.activities` or `recent_activities`.
 
 #### Scenario: Canonical rows with an empty snapshot
 - **WHEN** any of these reads runs with canonical activity summaries and a snapshot without activity sections
@@ -552,26 +536,26 @@ The system SHALL read every daily wellness value of the performance projection f
 
 #### Scenario: Sport-scoped and athlete-record observations
 - **WHEN** athlete-record observations (thresholds, athlete weight) or sport-scoped wellness observations exist
-- **THEN** they do not become daily wellness values; only the run-scoped wellness-day eFTP feeds the 30-day running threshold-power average.
+- **THEN** they do not become daily wellness values.
 
-Detailed contract: the daily wellness values are CTL, ATL, form, weight, body fat, readiness, the subjective fatigue, soreness, stress and mood ratings, and the run eFTP of the trend averages. The snapshot rows not read are `recent_wellness` and `raw_provider_data.wellness`. The current-day window is the 90 days ending on the latest wellness day. The history view covers every stored wellness day.
+Detailed contract: the daily wellness values are CTL, ATL, form, weight, body fat, readiness, the subjective fatigue, soreness, stress and mood ratings. The snapshot rows not read are `recent_wellness` and `raw_provider_data.wellness`. The current-day window is the 90 days ending on the latest wellness day. The history view covers every stored wellness day.
 
 Evidence: `backend/performance/wellness_days.py:read_wellness_days`, `backend/performance/canonical_inputs.py:read_performance_inputs`; `tests/test_performance_wellness_days.py:WellnessDayTests`, `tests/test_performance_canonical_sections.py:SectionHelperTests` and `SectionReadTests`, `tests/test_performance_canonical_parity.py:CanonicalLoadEdgeTests`, `tests/test_performance_context.py:PerformanceContextTests`, `tests/test_performance_canonical_parity.py:CanonicalReadStatusEndToEndTests`, and `tests/test_performance_canonical_body_history.py:CanonicalBodyLedgerCaseTests`.
 
 ### Requirement: Wellness `sportInfo` threshold fallbacks are not read
-The system SHALL NOT read cycling or running FTP, LTHR, maximum heart rate, VO2max, threshold pace or Zone-2 pace from Intervals.icu wellness `sportInfo` entries. These values SHALL come only from their remaining sources: Garmin, athlete sport settings, the athlete record, Wahoo and the manual profile. The 30-day `run_threshold_watts` average SHALL read the run-scoped wellness-day eFTP observations, bounded as before.
+The system SHALL NOT read cycling or running FTP, LTHR, maximum heart rate, VO2max, threshold pace or Zone-2 pace from Intervals.icu wellness `sportInfo` entries. These values SHALL come only from their remaining sources: Garmin, athlete sport settings, the athlete record, Wahoo and the manual profile. The 30-day `run_threshold_watts` average SHALL read only Garmin's run threshold power history and SHALL be unknown when the current value has another source.
 
 #### Scenario: `sportInfo` carries threshold keys
 - **WHEN** a stored wellness row's `sportInfo` entry carries `ftp`, `lthr`, a maximum heart rate, `vo2max`, `threshold_pace` or a Zone-2 pace
 - **THEN** none of them supplies a current metric or a 30-day average.
 
-#### Scenario: Run eFTP average
-- **WHEN** run eFTP wellness-day observations exist in the 30 days ending on the current day and the current `run_threshold_watts` has an Intervals.icu source
-- **THEN** `comparisons.run_threshold_watts_30d` averages those observations as the snapshot `sportInfo` run eFTP average did; days without an observation are not filled.
+#### Scenario: Run eFTP is not a threshold power average
+- **WHEN** run eFTP wellness-day observations exist in the 30 days ending on the current day and the current `run_threshold_watts` has a source other than Garmin
+- **THEN** `comparisons.run_threshold_watts_30d` has no average; the run eFTP observations are not read.
 
 Detailed contract: the Intervals.icu wellness `sportInfo` entry provides the sport type, CTL, ATL, eFTP, W′ and Pmax (`tests/fixtures/providers/intervals/wellness.json`); the removed keys are not part of it. No live payload was inspected (evidence gap).
 
-Evidence: `backend/performance/current_metrics.py:current_performance_metrics`, `backend/performance/trends.py:intervals_performance_average`; `tests/test_characterization_current_metrics.py:CurrentThresholdTests.test_wellness_sport_info_ftp_does_not_supply_cycling_ftp`, `tests/test_characterization_current_metrics.py:CurrentMaxHrTests.test_out_of_range_setting_does_not_read_wellness_sport_info`, `tests/test_performance_trends.py:IntervalsPerformanceAverageTests.test_wellness_values_and_run_eftp_are_bounded_and_sport_info_thresholds_absent`, `tests/test_performance_wellness_days.py:WellnessDayTests.test_run_eftp_is_a_separate_sparse_series`.
+Evidence: `backend/performance/current_metrics.py:current_performance_metrics`, `backend/performance/trends.py:intervals_performance_average`; `tests/test_characterization_current_metrics.py:CurrentThresholdTests.test_wellness_sport_info_ftp_does_not_supply_cycling_ftp`, `tests/test_characterization_current_metrics.py:CurrentMaxHrTests.test_out_of_range_setting_does_not_read_wellness_sport_info`, `tests/test_performance_trends.py:IntervalsPerformanceAverageTests.test_wellness_values_are_bounded_and_run_eftp_and_sport_info_thresholds_absent`, `tests/test_performance_wellness_days.py:WellnessDayTests.test_eftp_observations_feed_no_series`.
 
 ### Requirement: Performance context output keys are provider-neutral
 The current performance context returned to the Coach and through HTTP SHALL name its recovery, comparison, load and threshold values with provider-neutral keys and SHALL NOT emit the former provider-shaped keys. Values, units and source labels SHALL stay unchanged.

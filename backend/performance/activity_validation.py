@@ -121,7 +121,6 @@ def activity_direct_estimates(latest: dict[str, Any]) -> dict[str, float | int]:
     estimates: dict[str, float | int] = {}
     for key, summary_key, minimum, maximum in (
         ("activity_vo2max", "vo2max", 10, 100),
-        ("activity_eftp_watts", "eftp_w", 20, 2000),
         ("activity_configured_ftp_watts", "ftp_w", 20, 2000),
     ):
         value = bounded_activity_metric(_present(latest, summary_key), minimum, maximum)
@@ -134,7 +133,6 @@ def bounded_performance_metric(key: str, value: Any) -> float | int | None:
     """Normalize provider performance values before using them for validation."""
     bounds = {
         "cycling_ftp_watts": (20, 2000),
-        "cycling_eftp_watts": (20, 2000),
         "run_threshold_watts": (20, 2000),
         "running_vo2max_ml_kg_min": (10, 100),
         "cycling_vo2max_ml_kg_min": (10, 100),
@@ -173,7 +171,7 @@ def cycling_activity_validation_details(
         if 0 <= power_percent <= 500:
             activity_evidence["power_as_percent_of_current_ftp"] = power_percent
     return (
-        ("cycling_vo2max_ml_kg_min", "cycling_ftp_watts", "cycling_eftp_watts"),
+        ("cycling_vo2max_ml_kg_min", "cycling_ftp_watts"),
         (
             "Leistung, Herzfrequenz, Dauer und Intensität dieser Einheit sind direkte Belastungsevidenz. "
             "Sie bestätigen oder widerlegen FTP und VO2max aber nur bei einem ausreichend langen "
@@ -257,9 +255,7 @@ def activity_performance_validation(
                 "unit": provider_value.get("unit"),
                 "source": provider_value.get("source"),
                 "observed_at": provider_value.get("observed_at"),
-                "historical_comparison": comparisons_map.get(
-                    {"cycling_eftp_watts": "cycling_eftp_30d"}.get(key, f"{key}_30d")
-                ),
+                "historical_comparison": comparisons_map.get(f"{key}_30d"),
             }
         )
     return {

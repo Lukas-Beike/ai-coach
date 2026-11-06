@@ -27,7 +27,7 @@ from server_test_support import server
 
 from backend.calendar.ical_mapping import calendar_event_constraints
 from backend.canonical.section_items import split_section
-from backend.canonical.vocabulary import MetricKind, Sport, StreamChannel
+from backend.canonical.vocabulary import StreamChannel
 from backend.coach.response_transport import raise_if_chat_cancelled
 from backend.db import garmin_store
 from backend.db.activity_detail_store import analysis_row_for_record, detail_sets_for
@@ -38,9 +38,7 @@ from backend.performance.body import body_history
 from backend.performance.canonical_inputs import EMPTY_PERFORMANCE_INPUTS
 from backend.performance.chart_history import METRIC_KEYS, analysis_history
 from backend.performance.freshness import GarminSyncStatus
-from backend.performance.wellness_days import wellness_day_values
 from backend.providers.calendar import parse_ical_calendar
-from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 from backend.sync.garmin_payload_metrics import garmin_payload_performance_metrics
 
 # Importing the fixture rewrites os.environ and sys.path and replaces shared server
@@ -162,8 +160,6 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                 self.assertEqual(metric["freshness"], "current")
                 self.assertEqual(metric["observed_at"], self.today.isoformat())
         for key in METRIC_KEYS:
-            if key == "cycling_eftp_watts":
-                continue  # Intervals eFTP is covered with both providers below.
             with self.subTest(history=key):
                 points = history["metrics"][key][0]["points"]
                 self.assertGreater(sum(p["value"] is not None for p in points), 10)
@@ -259,33 +255,16 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
         self.assertEqual(links, slots)
         self.assertEqual(unattributed, 0)
 
-    def test_standard_dataset_covers_sparse_body_history_and_both_ftp_sources(self):
+    def test_standard_dataset_covers_sparse_body_history_and_garmin_ftp(self):
         wellness = fixture_runtime._fixture_demo_wellness(self.today)
         garmin = fixture_runtime._fixture_demo_garmin(
             self.today, fixture_runtime.demo_performance_history(self.today)
         )
-        snapshot = {
-            "synced_at": "synthetic",
-            "recent_wellness": wellness,
-            "raw_provider_data": {"wellness": wellness},
-        }
-
-        # The Intervals.icu eFTP of a wellness day is a canonical observation
-        # (#1412); map the fixture rows as a sync would.
-        mapped = map_intervals_wellness(
-            wellness, retrieved_at=datetime.now(ZoneInfo("UTC"))
-        )
-        eftp_by_day = wellness_day_values(
-            (r for r in mapped.records if r.kind is MetricKind.EFTP), sport=Sport.RIDE
-        )
         result = body_history(
-            (snapshot or {}).get("synced_at"),
             GarminSyncStatus.from_state(garmin),
             self.today,
-            eftp_by_day=eftp_by_day,
             wellness_days=days_from_rows(wellness),
             canonical=garmin_body_from_payload(garmin, self.today),
-            activities=(),
             garmin_ftp=garmin_metrics_from_payload(garmin).performance_history[
                 "cycling_ftp_watts"
             ],
@@ -313,12 +292,9 @@ class StandardFixtureDataTests(StandardFixtureTestCase):
                 for series in ftp_series
             )
         )
-        self.assertTrue(
-            any(
-                series["source"] == "Intervals.icu"
-                and any(point.get("ftp_watts") for point in series["points"])
-                for series in ftp_series
-            )
+        # #1727: the Intervals.icu eFTP is not read, so W/kg is Garmin's only.
+        self.assertEqual(
+            [series["source"] for series in ftp_series], ["Garmin Connect"]
         )
 
     def test_daily_calories_have_measured_zero_values_and_today_provisional(self):

@@ -86,7 +86,6 @@ CURRENT_KINDS = frozenset(
         MetricKind.VO2MAX,
         MetricKind.CTL,
         MetricKind.ATL,
-        MetricKind.EFTP,
     }
 )
 DAILY_KINDS = frozenset(

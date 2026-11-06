@@ -20,15 +20,12 @@ from backend.activities.activity_summary import (
 )
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
-from backend.canonical.vocabulary import ProviderId
-from backend.performance import eftp
 from backend.performance.comparable_sessions import equal_effort_trend
 from backend.performance.fitness_fatigue import SOURCE_LABEL, local_fitness_fatigue
 from backend.performance.pace_at_hr import pace_at_heart_rate_trend
 from backend.performance.session_rpe_load import period_load, session_load
 from backend.performance.smoothed_load import complete_before
 from backend.performance.training_report import metric_sum, valid_zones
-from backend.providers.source_labels import SourceView, provider_label
 
 METHOD = "weekly-progress-v1"
 SPORT_BUCKETS = ("run", "ride", "strength")
@@ -45,8 +42,6 @@ ZONE_MAPPING = (
 PROFILE_DURATIONS = (60, 300, 1200)
 # Fitness (the ``ctl`` key) is the local curve (card M7), never Intervals.icu CTL.
 LOCAL_FITNESS_SOURCE = SOURCE_LABEL
-# Wellness-day eFTP, else the day's latest Intervals.icu ride summary.
-EFTP_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.CURRENT_METRIC)
 
 
 def _sport(summary: Mapping[str, Any]) -> str:
@@ -393,7 +388,6 @@ def weekly_progress(
     session_feedback: Mapping[str, Mapping[str, Any]] | None = None,
     plan: Mapping[str, Any] | None = None,
     local_load_days: Mapping[str, float] | None = None,
-    eftp_by_day: Mapping[date, float] | None = None,
     curve_records: Sequence[Mapping[str, Any]] | None = (),
     observed_at: str | None = None,
 ) -> dict[str, Any]:
@@ -447,7 +441,6 @@ def weekly_progress(
             if day["fitness"] is not None
         }
     )
-    eftp_values = eftp.eftp_daily_values(eftp_by_day, in_window, start, effective_end)
     return {
         "method": METHOD,
         "start": start.isoformat(),
@@ -465,17 +458,6 @@ def weekly_progress(
             "method_id": fitness["method_id"],
             "method_version": fitness["method_version"],
         },
-        **(
-            {
-                "eftp": {
-                    "sport": "ride",
-                    "source": EFTP_SOURCE,
-                    **_first_last(eftp_values),
-                }
-            }
-            if sport in {"all", "ride"}
-            else {}
-        ),
         **(
             {
                 "mean_max_power": _mean_max_window(

@@ -26,7 +26,6 @@ from backend.performance.canonical_inputs import (
     activity_summaries_for,
     activity_summaries_with_load_days,
     activity_summaries_with_sync_time,
-    inputs_for_snapshot,
 )
 from backend.performance.comparisons import recurring_training_comparisons
 from backend.performance.critical_power import WINDOW_DAYS as CP_WINDOW_DAYS
@@ -319,6 +318,12 @@ class TrainingProfileSelectionService:
             if (row.get("power_profile") or {}).get("status") == "ok"
             or (row.get("running_profile") or {}).get("status") == "ok"
         ]
+        rides = [row for row in eligible if row.get("sport") == "ride"]
+        ride_usable = [
+            row
+            for row in rides
+            if (row.get("power_profile") or {}).get("status") == "ok"
+        ]
         result: dict[str, Any] = {
             "date_start": start.isoformat(),
             "date_end": today.isoformat(),
@@ -328,6 +333,9 @@ class TrainingProfileSelectionService:
                 "cached_records": len(eligible),
                 "usable_records": len(usable),
                 "unknown_records": len(eligible) - len(usable),
+                # Rides only: the power bests cannot come from runs.
+                "power_records": len(rides),
+                "power_unknown_records": len(rides) - len(ride_usable),
                 "eligible_activities": [row["activity_id"] for row in eligible],
             },
             "input_fingerprint": _records_fingerprint(eligible),
@@ -514,8 +522,6 @@ class TrainingReportReadService:
             <= summary_local_date(row, timezone)
             <= today.isoformat()
         ]
-        with self._canonical.database_manager().read_snapshot() as db:
-            inputs = inputs_for_snapshot(self._canonical, db, as_of=today)
         return weekly_progress(
             start=start,
             weeks=days // 7,
@@ -526,7 +532,6 @@ class TrainingReportReadService:
             session_feedback=feedback_by_session(period, self._session_feedback),
             plan=self._read_plan(),
             local_load_days=load_days,
-            eftp_by_day=None if inputs is None else inputs.eftp_by_day,
             # Session curves cover the longest profile window only; read them
             # only when the window needs the mean-max comparison.
             curve_records=self._curve_records()

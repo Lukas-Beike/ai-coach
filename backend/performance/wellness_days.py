@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from typing import Any, Final
 
 from backend.canonical.records import Observation
-from backend.canonical.vocabulary import MetricKind, ProviderId, Sport
+from backend.canonical.vocabulary import MetricKind, ProviderId
 from backend.runtime.ports import ObservationReader
 
 WELLNESS_WINDOW_DAYS: Final = 90
@@ -87,14 +87,3 @@ def latest(days: Sequence[WellnessDay]) -> WellnessDay | None:
 def series(days: Iterable[WellnessDay], kind: MetricKind) -> dict[date, float]:
     """Return observed values of one kind by day, preserving sparse dates."""
     return {day.day: value for day in days if (value := day.value(kind)) is not None}
-
-
-def wellness_day_values(
-    observations: Iterable[Observation], *, sport: Sport | None = None
-) -> dict[date, float]:
-    """Read one sport scope of Intervals wellness-day observations by date."""
-    return {
-        observation.observed_on: observation.value.value
-        for observation in observations
-        if observation.sport is sport and _is_wellness_record(observation)
-    }

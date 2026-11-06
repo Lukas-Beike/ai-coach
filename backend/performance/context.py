@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any, Final
 
@@ -85,16 +84,6 @@ def _subjective_ratings(day: WellnessDay | None) -> dict[str, float | None]:
     return {
         key: None if day is None else day.value(kind)
         for key, kind in SUBJECTIVE_RATINGS
-    }
-
-
-def _canonical_day_series(
-    canonical: CanonicalPerformanceInputs,
-) -> dict[str, Mapping[date, float] | None]:
-    """The canonical eFTP day series."""
-    return {
-        "eftp_by_day": canonical.eftp_by_day,
-        "run_eftp_by_day": canonical.run_eftp_by_day,
     }
 
 
@@ -266,14 +255,12 @@ def current_performance_context(
         recovery,
         load_context,
         days,
-        activities,
         today,
         # The weight trend uses the body history's per-day Garmin weights.
         garmin_history={
             **_garmin_canonical(canonical).performance_history,
             "weight_kg": canonical.body.garmin_weight_kg,
         },
-        **_canonical_day_series(canonical),
     )
     activity_performance = activity_validation.activity_performance_validation(
         activities, metrics, comparisons

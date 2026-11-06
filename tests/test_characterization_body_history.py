@@ -18,13 +18,10 @@ from performance_day_support import (
     snapshot_coverage_time,
 )
 
-from backend.canonical.vocabulary import MetricKind, Sport
 from backend.performance import body as _body
 from backend.performance import chart_history as _chart_history
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
 from backend.performance.freshness import GarminSyncStatus
-from backend.performance.wellness_days import wellness_day_values
-from backend.providers.intervals_wellness_mapping import map_intervals_wellness
 
 TODAY = date(2026, 5, 4)
 SYNC_DAY_BEFORE = datetime(2026, 5, 3, 8, tzinfo=UTC)
@@ -33,7 +30,6 @@ INTERVALS = "Intervals.icu"
 INTERVALS_WELLNESS = "Intervals.icu Wellness"
 ANALYSIS_METRIC_KEYS = (
     "cycling_ftp_watts",
-    "cycling_eftp_watts",
     "run_threshold_pace_seconds_per_km",
     "cycling_vo2max_ml_kg_min",
     "running_vo2max_ml_kg_min",
@@ -56,26 +52,6 @@ def _wellness(
     if eftp is not None:
         row["sportInfo"] = [{"types": ["Ride"], "mmp_model": {"ftp": eftp}}]
     return row
-
-
-def _eftp_by_day(snapshot: Any) -> dict[date, float]:
-    """The ride eFTP of each wellness day, as the canonical reader provides it.
-
-    The snapshot's wellness rows (raw, then compact) go through the real mapper;
-    since #1412 the history reads the resulting observations, not the rows.
-    """
-    rows: list[Any] = []
-    if isinstance(snapshot, dict):
-        raw = snapshot.get("raw_provider_data")
-        rows += raw.get("wellness", []) if isinstance(raw, dict) else []
-        rows += snapshot.get("recent_wellness", [])
-    mapped = map_intervals_wellness(
-        rows, retrieved_at=datetime(2026, 5, 4, 8, 0, tzinfo=UTC)
-    )
-    return wellness_day_values(
-        (record for record in mapped.records if record.kind is MetricKind.EFTP),
-        sport=Sport.RIDE,
-    )
 
 
 def _payload(garmin: Any) -> dict[str, Any]:
@@ -108,15 +84,12 @@ def body_history(
         rows += raw.get("wellness", []) if isinstance(raw, dict) else []
         rows += snapshot.get("recent_wellness", [])
     return _body.body_history(
-        (snapshot or {}).get("synced_at"),
         GarminSyncStatus.from_state(garmin),
         today,
-        eftp_by_day=_eftp_by_day(snapshot),
         wellness_days=days_from_rows(rows),
         canonical=garmin_body_from_payload(
             _payload(garmin), today, retrieved_at=retrieved_at
         ),
-        activities=_activity_summaries(snapshot),
         garmin_ftp=garmin_metrics_from_payload(
             _payload(garmin), retrieved_at=retrieved_at
         ).performance_history.get("cycling_ftp_watts", {}),
@@ -135,7 +108,6 @@ def analysis_history(snapshot: Any, garmin: Any, today: date) -> dict[str, Any]:
         atl=None,
         # The Intervals.icu coverage time the snapshot's sync stored.
         intervals_synced_at=snapshot_coverage_time(snapshot),
-        eftp_by_day=_eftp_by_day(snapshot),
         history_wellness_days=days_from_rows(rows),
         activities=_activity_summaries(snapshot),
         garmin=garmin_metrics_from_payload(_payload(garmin)),
@@ -183,7 +155,7 @@ def _point_value(points: list[dict[str, Any]], day: str) -> Any:
 
 
 class BodyHistoryCharacterizationTests(unittest.TestCase):
-    def test_same_day_weight_tie_prefers_garmin_for_both_ftp_sources(self) -> None:
+    def test_same_day_weight_tie_prefers_garmin_weight(self) -> None:
         snapshot = {
             "synced_at": "intervals-sync",
             "recent_wellness": [_wellness("2026-05-04", weight=70, eftp=280)],
@@ -193,16 +165,13 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
             "performance_history": [_performance_ftp("2026-05-04", 300)],
         }
         result = body_history(snapshot, garmin, TODAY)
-        for source, watts in ((GARMIN, 300), (INTERVALS, 280)):
-            with self.subTest(source=source):
-                point = _point(
-                    _body_series(result, "14d", "cycling_w_per_kg", source),
-                    "2026-05-04",
-                )
-                self.assertEqual(point["weight_source"], GARMIN)
-                self.assertEqual(point["weight_kg"], 72)
-                self.assertEqual(point["weight_age_days"], 0)
-                self.assertEqual(point["value"], round(watts / 72, 3))
+        point = _point(
+            _body_series(result, "14d", "cycling_w_per_kg", GARMIN), "2026-05-04"
+        )
+        self.assertEqual(point["weight_source"], GARMIN)
+        self.assertEqual(point["weight_kg"], 72)
+        self.assertEqual(point["weight_age_days"], 0)
+        self.assertEqual(point["value"], round(300 / 72, 3))
 
     def test_newer_intervals_weight_beats_older_garmin_weight_for_w_per_kg(
         self,
@@ -225,13 +194,6 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
         self.assertEqual(garmin_point["weight_kg"], 70)
         self.assertEqual(garmin_point["weight_age_days"], 1)
         self.assertEqual(garmin_point["value"], round(300 / 70, 3))
-        # Quirk: the weight_source label is the weight provider name
-        # ("Intervals.icu Wellness"), while the W/kg series source is "Intervals.icu".
-        intervals_point = _point(
-            _body_series(result, "14d", "cycling_w_per_kg", INTERVALS), "2026-05-04"
-        )
-        self.assertEqual(intervals_point["weight_source"], INTERVALS_WELLNESS)
-        self.assertEqual(intervals_point["value"], round(280 / 70, 3))
 
     def test_w_per_kg_weight_window_is_seven_days_inclusive_and_never_looks_forward(
         self,
@@ -288,12 +250,11 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
             for metric in ("weight_kg", "body_fat_pct"):
                 for series in result["windows"][window]["metrics"][metric]:
                     self.assertTrue(all(p["value"] is None for p in series["points"]))
-        for source in (GARMIN, INTERVALS):
-            with self.subTest(source=source):
-                series = _body_series(result, "14d", "cycling_w_per_kg", source)
-                point = _point(series, "2026-05-04")
-                self.assertIsNone(point["value"])
-                self.assertNotIn("weight_kg", point)
+        point = _point(
+            _body_series(result, "14d", "cycling_w_per_kg", GARMIN), "2026-05-04"
+        )
+        self.assertIsNone(point["value"])
+        self.assertNotIn("weight_kg", point)
         self.assertEqual(
             _point(
                 _body_series(result, "14d", "cycling_w_per_kg", GARMIN), "2026-05-04"
@@ -455,23 +416,20 @@ class BodyHistoryCharacterizationTests(unittest.TestCase):
         # The weight recorded on the following day does not explain 2026-05-03.
         self.assertIsNone(point["value"])
 
-    def test_intervals_eftp_window_is_eighty_four_days_inclusive(self) -> None:
+    def test_intervals_eftp_reaches_no_w_per_kg_series(self) -> None:
+        # #1727: the Intervals.icu eFTP is no longer read; W/kg divides Garmin FTP.
         snapshot = {
             "synced_at": "sync",
-            "recent_wellness": [
-                _wellness("2026-02-09", eftp=250),
-                _wellness("2026-02-10", weight=70, eftp=260),
-            ],
+            "recent_wellness": [_wellness("2026-05-04", weight=70, eftp=260)],
         }
         result = body_history(snapshot, {}, TODAY)
-        series = _body_series(result, "12w", "cycling_w_per_kg", INTERVALS)
-        points = series["points"]
-        self.assertEqual(len(points), 84)
-        self.assertEqual(points[0]["date"], "2026-02-10")
-        self.assertEqual(series["weekly"][0]["week_start"], "2026-02-10")
-        self.assertEqual(points[0]["ftp_watts"], 260)
-        self.assertEqual(points[0]["value"], round(260 / 70, 3))
-        self.assertFalse(any(point.get("ftp_watts") == 250 for point in points))
+        for window in ("14d", "12w"):
+            with self.subTest(window=window):
+                series = result["windows"][window]["metrics"]["cycling_w_per_kg"]
+                self.assertEqual([item["source"] for item in series], [GARMIN])
+                self.assertFalse(
+                    any("ftp_watts" in point for point in series[0]["points"])
+                )
 
 
 class AnalysisHistoryCharacterizationTests(unittest.TestCase):
@@ -502,8 +460,7 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             with self.subTest(metric=key):
                 sources = result["metrics"][key]
                 self.assertEqual(len(sources), 1)
-                expected = INTERVALS if key == "cycling_eftp_watts" else GARMIN
-                self.assertEqual(sources[0]["source"], expected)
+                self.assertEqual(sources[0]["source"], GARMIN)
                 self.assertEqual(len(sources[0]["points"]), 90)
         body_sources = {
             metric: sorted(
@@ -516,7 +473,7 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
             body_sources,
             {
                 "weight_kg": sorted([INTERVALS_WELLNESS, GARMIN]),
-                "cycling_w_per_kg": sorted([INTERVALS, GARMIN]),
+                "cycling_w_per_kg": [GARMIN],
             },
         )
 
@@ -649,94 +606,27 @@ class AnalysisHistoryCharacterizationTests(unittest.TestCase):
         self.assertEqual(_point_value(points, "2026-05-03"), 57)
         self.assertEqual(sum(point["value"] is not None for point in points), 2)
 
-    def test_eftp_same_day_wellness_beats_activity_and_latest_activity_wins(
-        self,
-    ) -> None:
-        # The latest 2026-05-03 activity is listed last so that a first-occurrence
-        # rule would be distinguishable from the observed latest-start rule.
-        activities = [
-            {
-                "id": "e0",
-                "start_date_local": "2026-05-02T08:00:00",
-                "type": "Ride",
-                "icu_eftp": 240,
-            },
-            {
-                "id": "e1",
-                "start_date_local": "2026-05-03T08:00:00",
-                "type": "Ride",
-                "icu_eftp": 250,
-            },
-            {
-                "id": "e2",
-                "start_date_local": "2026-05-03T16:00:00",
-                "type": "Ride",
-                "icu_eftp": 260,
-            },
-        ]
-        activities_only = _analysis_points(
-            analysis_history({"recent_activities": activities}, {}, TODAY),
-            "cycling_eftp_watts",
-        )
-        self.assertEqual(_point_value(activities_only, "2026-05-03"), 260)
-        self.assertEqual(_point_value(activities_only, "2026-05-02"), 240)
-
-        with_wellness = _analysis_points(
-            analysis_history(
+    def test_intervals_eftp_reaches_no_chart_or_body_series(self) -> None:
+        # #1727: neither wellness-day nor activity eFTP is read by the history.
+        snapshot = {
+            "recent_activities": [
                 {
-                    "recent_activities": activities,
-                    "recent_wellness": [_wellness("2026-05-03", eftp=270)],
-                },
-                {},
-                TODAY,
-            ),
-            "cycling_eftp_watts",
-        )
-        self.assertEqual(_point_value(with_wellness, "2026-05-03"), 270)
-
-    def test_eftp_chart_window_is_ninety_days_while_body_eftp_is_eighty_four(
-        self,
-    ) -> None:
-        # Quirk: the chart eFTP series uses the 90-day analysis window while body
-        # eFTP uses an 84-day window. The divergence is intentional for now and
-        # is pinned here so a refactor cannot silently merge the two windows.
-        snapshot = {
-            "recent_wellness": [
-                _wellness("2026-02-03", eftp=240),
-                _wellness("2026-02-04", eftp=250),
-            ]
+                    "id": "e1",
+                    "start_date_local": "2026-05-03T08:00:00",
+                    "type": "Ride",
+                    "icu_eftp": 250,
+                }
+            ],
+            "recent_wellness": [_wellness("2026-05-03", weight=70, eftp=270)],
         }
         result = analysis_history(snapshot, {}, TODAY)
-        points = _analysis_points(result, "cycling_eftp_watts")
-        self.assertEqual(points[0], {"date": "2026-02-04", "value": 250})
-        self.assertFalse(any(point["value"] == 240 for point in points))
-        body_points = _body_series(
-            result["body"], "12w", "cycling_w_per_kg", INTERVALS
-        )["points"]
+        self.assertNotIn("cycling_eftp_watts", result["metrics"])
+        self.assertNotIn("cycling_power_profile", result)
+        body_series = result["body"]["windows"]["12w"]["metrics"]["cycling_w_per_kg"]
+        self.assertEqual([item["source"] for item in body_series], [GARMIN])
         self.assertFalse(
-            any(point.get("ftp_watts") in (240, 250) for point in body_points)
+            any("ftp_watts" in point for point in body_series[0]["points"])
         )
-
-    def test_wellness_day_eftp_does_not_depend_on_the_carrier_rows(self) -> None:
-        # Intended difference (#1412): the eFTP of a wellness day is a canonical
-        # observation. A compact row for the same day no longer replaces the raw
-        # row's eFTP in the chart, so chart and body report the same 270.
-        snapshot = {
-            "raw_provider_data": {
-                "wellness": [_wellness("2026-05-03", eftp=270)],
-            },
-            "recent_wellness": [{"id": "2026-05-03", "ctl": 40}],
-        }
-        result = analysis_history(snapshot, {}, TODAY)
-        self.assertEqual(
-            _point_value(_analysis_points(result, "cycling_eftp_watts"), "2026-05-03"),
-            270,
-        )
-        body_point = _point(
-            _body_series(result["body"], "12w", "cycling_w_per_kg", INTERVALS),
-            "2026-05-03",
-        )
-        self.assertEqual(body_point["ftp_watts"], 270)
 
     def test_provider_metrics_keep_cached_status_or_fall_back_to_unavailable(
         self,

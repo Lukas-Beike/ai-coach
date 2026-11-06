@@ -143,13 +143,26 @@ class TrainingReportTests(unittest.TestCase):
                 "device": "Garmin",
                 "power_profile": {"status": "insufficient_data", "duration_curve": []},
             },
+            {
+                "activity_id": "run-without-streams",
+                "date": "2026-10-01",
+                "sport": "run",
+                "environment": "outdoor",
+                "activity_type": "run",
+                "source": "Garmin Connect",
+                "device": "Garmin",
+                "running_profile": {"status": "insufficient_data"},
+            },
         ]
         result = TrainingProfileSelectionService._profile_window(
             records, date(2026, 10, 2), 28
         )
-        self.assertEqual(3, result["cache_coverage"]["records"])
+        self.assertEqual(4, result["cache_coverage"]["records"])
         self.assertEqual(2, result["cache_coverage"]["usable_records"])
-        self.assertEqual(1, result["cache_coverage"]["unknown_records"])
+        self.assertEqual(2, result["cache_coverage"]["unknown_records"])
+        # The power coverage counts rides only; the run cannot hold a power best.
+        self.assertEqual(3, result["cache_coverage"]["power_records"])
+        self.assertEqual(1, result["cache_coverage"]["power_unknown_records"])
         power = [point for point in result["power"] if point["duration_seconds"] == 60]
         self.assertEqual(
             {"outdoor": 240, "indoor": 300},
