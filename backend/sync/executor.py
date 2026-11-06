@@ -473,11 +473,23 @@ class IntervalsJobAdapter:
         }
 
 
-class GarminJobAdapter:
-    """Refuse plan pushes, then run the Garmin sync owner."""
+class GarminStrengthPushOwner(Protocol):
+    """Pushes the selected strength planned units to Garmin."""
 
-    def __init__(self, *, jobs: GarminSyncJobOwner) -> None:
+    def sync(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class GarminJobAdapter:
+    """Run the explicit strength-workout push or the Garmin sync owner."""
+
+    def __init__(
+        self,
+        *,
+        jobs: GarminSyncJobOwner,
+        plan_push: GarminStrengthPushOwner | None = None,
+    ) -> None:
         self._jobs = jobs
+        self._plan_push = plan_push
 
     def execute(
         self,
@@ -487,6 +499,11 @@ class GarminJobAdapter:
         *,
         job_type: str,
     ) -> dict[str, Any]:
+        if job_type == "plan_push" and self._plan_push is not None:
+            selected_payload = {"entries": payload.get("entries")}
+            if payload.get("repair"):
+                selected_payload["repair"] = True
+            return self._plan_push.sync(selected_payload)
         _reject_plan_push(job_type)
         return self._jobs.execute(job, payload, reason)
 

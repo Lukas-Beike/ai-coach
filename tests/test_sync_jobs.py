@@ -46,7 +46,7 @@ PROVIDER_REJECTIONS = {
     "nutrition_sync": "Ungültiger Ernährungssynchronisierungsauftrag.",
     "performance_refresh": "Dieser Job ist nur für Intervals.icu zulässig.",
     "competition_push": "Dieser Job ist nur für Intervals.icu zulässig.",
-    "plan_push": "Plan-Push-Jobs sind nur für Intervals.icu und Wahoo zulässig.",
+    "plan_push": "Plan-Push-Jobs sind nur für Intervals.icu, Wahoo und Garmin zulässig.",
 }
 # Payloads valid for the Intervals.icu-only types, so only the provider check can fail.
 PROBE_PAYLOADS = {
@@ -507,7 +507,7 @@ class SyncJobRequestNormalizationTests(unittest.TestCase):
         self.assertNotIn("repair", without_repair["payload"])
 
     def test_plan_push_rejects_provider_fields_count_uuid_hash_and_booleans(self):
-        self.assert_invalid("garmin", "plan_push", {}, "nur für Intervals.icu")
+        self.assert_invalid("weather", "plan_push", {}, "nur für Intervals.icu")
         self.assert_invalid(
             "intervals", "plan_push", {"entries": [], "unknown": True}, "Felder"
         )

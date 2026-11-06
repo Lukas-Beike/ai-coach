@@ -65,6 +65,11 @@ _EXERCISE_PROPERTIES: dict[str, Any] = {
     "rpe": {"type": ["number", "null"], "minimum": 1, "maximum": 10},
     "rir": {"type": ["integer", "null"], "minimum": 0, "maximum": 10},
     "rest_s": {"type": ["integer", "null"], "minimum": 0, "maximum": 600},
+    "garmin_exercise": {
+        "type": ["string", "null"],
+        "maxLength": 80,
+        "description": "Exact English Garmin Connect exercise name for the watch, e.g. 'Barbell Back Squat' or 'Romanian Deadlift'; null when unsure. An unknown name is rejected with suggestions.",
+    },
 }
 STRENGTH_STRUCTURE_SCHEMA: dict[str, Any] = {
     "type": ["array", "null"],

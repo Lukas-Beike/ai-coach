@@ -254,6 +254,10 @@ def carry_focus(target: dict[str, Any], source: Mapping[str, Any]) -> None:
     a description edited remotely wins as free text.
     """
     carried = {key: source[key] for key in FOCUS_KEYS if source.get(key) is not None}
+    if STRENGTH_STRUCTURE in carried:
+        carried[STRENGTH_STRUCTURE] = strength_structure.without_unknown_garmin(
+            carried[STRENGTH_STRUCTURE]
+        )
     if STRENGTH_STRUCTURE in carried and not _matches_description(target, carried):
         del carried[STRENGTH_STRUCTURE]
     candidate = {**target, **carried}

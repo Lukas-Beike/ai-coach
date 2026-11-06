@@ -19,6 +19,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from backend.athlete.local_date import iso_date_prefix
+from backend.canonical.vocabulary import ProviderId
 from backend.runtime.clock import utc_now as system_utc_now
 from backend.sync.provider_registry import DEFAULT_PROVIDER_REGISTRY, ProviderRegistry
 
@@ -456,12 +457,18 @@ def _normalize_competition_push_job(
     return normalized
 
 
-def _normalize_plan_push_entry(entry: Any) -> dict[str, str]:
+def _normalize_plan_push_entry(entry: Any, *, removable: bool) -> dict[str, Any]:
     workout_id = (
         str(entry.get("library_workout_id") or "") if isinstance(entry, dict) else ""
     )
     if not isinstance(entry, dict) or not re.fullmatch(r"[0-9a-f-]{36}", workout_id):
         raise JobValidationError("Jede Plan-Push-Einheit benötigt eine lokale UUID.")
+    if "remove" in entry:
+        # Only Garmin removes a pushed workout; elsewhere the flag would be
+        # dropped and the entry silently pushed instead.
+        if not removable or entry["remove"] is not True:
+            raise JobValidationError("remove ist nur für Garmin mit true zulässig.")
+        return {"library_workout_id": workout_id, "remove": True}
     payload_hash = str(entry.get("expected_payload_hash") or "").strip().lower()
     if not SHA256_PATTERN.fullmatch(payload_hash):
         raise JobValidationError(
@@ -475,7 +482,7 @@ def _normalize_plan_push_job(
 ) -> dict[str, Any]:
     if not registry.supports_job(provider, "plan_push"):
         raise JobValidationError(
-            "Plan-Push-Jobs sind nur für Intervals.icu und Wahoo zulässig."
+            "Plan-Push-Jobs sind nur für Intervals.icu, Wahoo und Garmin zulässig."
         )
     if set(values) - {"entries", "reason", "repair"}:
         raise JobValidationError("Ein Plan-Push-Job enthält nicht unterstützte Felder.")
@@ -484,7 +491,10 @@ def _normalize_plan_push_job(
         raise JobValidationError(
             "Ein Plan-Push-Job benötigt 1 bis 28 ausgewählte Einheiten."
         )
-    normalized_entries = [_normalize_plan_push_entry(entry) for entry in entries]
+    removable = provider == ProviderId.GARMIN.value
+    normalized_entries = [
+        _normalize_plan_push_entry(entry, removable=removable) for entry in entries
+    ]
     if "repair" in values and type(values["repair"]) is not bool:
         raise JobValidationError("repair muss ein Boolean sein.")
     normalized: dict[str, Any] = {
