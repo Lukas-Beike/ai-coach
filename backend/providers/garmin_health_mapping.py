@@ -850,6 +850,19 @@ def _measure(
     return field, raw, unit
 
 
+def _field_value(field: _Field, number: float | None) -> float | None:
+    """Return a grouped field's value as stored, or None when it is unset.
+
+    Garmin's scaled threshold speed below 1 is multiplied by ten, whole fields
+    are rounded, and a 0 night value means "not measured".
+    """
+    if number is None or (number == 0 and field.kind in _UNSET_WHEN_ZERO):
+        return None
+    if field.kind is MetricKind.THRESHOLD_PACE and 0 < number < 1:
+        number *= 10
+    return float(round(number)) if field.whole else number
+
+
 def _within_bounds(kind: MetricKind, number: float) -> bool:
     lower, upper = METRIC_BOUNDS[kind]
     if kind in _ZERO_ALLOWED:
@@ -1461,17 +1474,9 @@ class _HealthMapping:
             return
         entry = _entry(name, ref, day, group.key, index=index)
         for field in group.fields:
-            number = self._group_number(name, group, record, source, field, ref)
-            if (
-                number is not None
-                and field.kind is MetricKind.THRESHOLD_PACE
-                and 0 < number < 1
-            ):
-                number *= 10
-            if number is not None and field.whole:
-                number = float(round(number))
-            if number == 0 and field.kind in _UNSET_WHEN_ZERO:
-                continue
+            number = _field_value(
+                field, self._group_number(name, group, record, source, field, ref)
+            )
             if number is not None:
                 self.emit(
                     entry,
