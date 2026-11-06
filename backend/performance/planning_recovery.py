@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
@@ -10,7 +10,7 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import provider_number as _as_number
 from backend.canonical.records import Observation
 from backend.canonical.vocabulary import MetricKind, ProviderId
-from backend.performance.fitness_fatigue import local_fitness_fatigue
+from backend.performance.fitness_fatigue import SOURCE_LABEL
 from backend.performance.source_policy import (
     FAMILY_LOOKBACK_DAYS,
     METHOD_FAMILY_KINDS,
@@ -44,7 +44,7 @@ _LOAD_FIELDS: tuple[tuple[str, str], ...] = (
     ("atl", "fatigue"),
     ("tsb", "form"),
 )
-LOCAL_LOAD_SOURCE: Final = "Lokal berechnet (M7)"
+LOCAL_LOAD_SOURCE: Final = SOURCE_LABEL
 
 
 def _planning_context_date(value: Any) -> str:
@@ -157,20 +157,10 @@ def canonical_planning_recovery(
 
 def _add_local_load(
     recovery_by_date: dict[str, dict[str, Any]],
-    local_load_days: Mapping[str, float],
-    *,
-    start: date,
-    end: date,
+    local_fitness_days: Sequence[Mapping[str, Any]],
 ) -> None:
-    """Add the local fitness, fatigue and form (M7) of each day of the window.
-
-    The stored load days are already athlete-local; no session marks are read,
-    so the zone only labels the period.
-    """
-    curve = local_fitness_fatigue(
-        local_load_days, (), {}, start=start, end=end, today=end, timezone="local"
-    )
-    for day in curve["days"]:
+    """Add the valued local fitness, fatigue and form (M7) of each day."""
+    for day in local_fitness_days:
         for field, key in _LOAD_FIELDS:
             if day[key] is not None:
                 _add_planning_recovery_value(
@@ -215,22 +205,18 @@ def planning_recovery_view(
     morning_battery_history: Any,
     morning_body_battery: Any,
     preferences: SourcePreferences = NO_PREFERENCES,
-    local_load_days: Mapping[str, float] | None = None,
+    local_fitness_days: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, dict[str, Any]]:
     """Combine canonical recovery with the body battery and the local fitness.
 
     Body battery comes from the morning history and the current morning reading;
-    CTL, ATL and form from the local curve over ``local_load_days`` (card M7).
+    CTL, ATL and form from the days of the local curve (card M7,
+    ``read_local_fitness``); open and warm-up days have none.
     """
     recovery_by_date = canonical_planning_recovery(
         reader, db, start=start, end=end, preferences=preferences
     )
-    _add_local_load(
-        recovery_by_date,
-        local_load_days or {},
-        start=start,
-        end=end,
-    )
+    _add_local_load(recovery_by_date, local_fitness_days)
     _add_morning_battery_recovery(
         recovery_by_date, morning_battery_history, morning_body_battery
     )

@@ -9,10 +9,11 @@ from typing import Any
 from backend.db import garmin_store
 from backend.performance.canonical_inputs import resolve_reader
 from backend.performance.daily_health import read_daily_health_by_date
+from backend.performance.load_context import read_local_fitness
 from backend.performance.planning_recovery import planning_recovery_view
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.planning.context import build_daily_planning_context
-from backend.runtime.ports import LocalLoadDayReader, ObservationReader
+from backend.runtime.ports import ObservationReader
 from backend.weather.history import decode_history
 
 # The Garmin state is still read for the morning body battery, which has no
@@ -77,9 +78,10 @@ class DailyPlanningContextService:
                 if self._source_preferences is None
                 else self._source_preferences(db)
             ),
-            local_load_days=selector.local_load_days(db)
-            if isinstance(selector, LocalLoadDayReader)
-            else None,
+            # The athlete zone is not known here; the sync day is taken in UTC.
+            local_fitness_days=read_local_fitness(
+                selector, db, start=start, end=today, today=today, timezone="UTC"
+            )["days"],
         )
         return recovery, read_daily_health_by_date(reader, db, start=start, end=today)
 

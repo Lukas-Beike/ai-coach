@@ -10,19 +10,53 @@ from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any, Final
 
+from backend.activities.sync_time import activities_synced_at
 from backend.performance import load as performance_load
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
-from backend.performance.fitness_fatigue import local_fitness_fatigue
+from backend.performance.fitness_fatigue import SOURCE_LABEL, local_fitness_fatigue
 from backend.performance.load import SessionFeedback
 from backend.performance.smoothed_load import complete_before
+from backend.runtime.ports import LocalLoadDayReader
 
-LOCAL_LOAD_SOURCE: Final = "Lokal berechnet (M7)"
+LOCAL_LOAD_SOURCE: Final = SOURCE_LABEL
 INTERVALS_HISTORY_SOURCE: Final = "Intervals.icu (gespeichert, nicht lokal)"
 # The days the current local values and their averages are read from.
 CURRENT_DAYS: Final = 7
 
 
-def local_load_days(
+def read_local_fitness(
+    reader: Any,
+    db: Any,
+    *,
+    start: date,
+    end: date,
+    today: date,
+    timezone: str,
+) -> dict[str, Any]:
+    """The local curve (M7) of ``start``..``end`` read through ``reader``.
+
+    ``reader`` serves the stored load days (``LocalLoadDayReader``) and, when it
+    can, the provider coverage whose activities sync time marks the open days,
+    as the load tab does; without a sync time the days before ``today`` count.
+    No session marks are read.
+    """
+    days = reader.local_load_days(db) if isinstance(reader, LocalLoadDayReader) else {}
+    coverage = reader if callable(getattr(reader, "coverage", None)) else None
+    return local_fitness_fatigue(
+        days,
+        (),
+        {},
+        start=start,
+        end=end,
+        today=today,
+        complete_before=complete_before(
+            today, activities_synced_at(coverage, db), timezone
+        ),
+        timezone=timezone,
+    )
+
+
+def local_fitness_curve(
     canonical: CanonicalPerformanceInputs,
     activities: list[Any],
     today: date,
@@ -115,7 +149,7 @@ def performance_load_context(
     previous_30 = performance_load.activity_rollup(
         activities, 30, today - timedelta(days=30), session_feedback=feedback
     )
-    curve = local_load_days(
+    curve = local_fitness_curve(
         canonical,
         activities,
         today,

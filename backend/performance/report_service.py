@@ -503,7 +503,10 @@ class TrainingReportReadService:
             or sport is None
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
-        summaries, observed_at = activity_summaries_with_sync_time(self._canonical)
+        # One read: the fitness load days belong to the same revision as the summaries.
+        summaries, observed_at, load_days = activity_summaries_with_load_days(
+            self._canonical
+        )
         period = [
             row
             for row in summaries
@@ -522,7 +525,7 @@ class TrainingReportReadService:
             activity_summaries=summaries,
             session_feedback=feedback_by_session(period, self._session_feedback),
             plan=self._read_plan(),
-            local_load_days=None if inputs is None else inputs.local_load_days,
+            local_load_days=load_days,
             eftp_by_day=None if inputs is None else inputs.eftp_by_day,
             # Session curves cover the longest profile window only; read them
             # only when the window needs the mean-max comparison.

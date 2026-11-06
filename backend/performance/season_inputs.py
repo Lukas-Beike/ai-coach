@@ -20,15 +20,12 @@ from datetime import date, timedelta
 from typing import Any
 
 from backend.activities.activity_summary import ActivitySummary, summary_local_date
-from backend.performance.fitness_fatigue import local_fitness_fatigue
-from backend.runtime.ports import (
-    ActivitySummaryReader,
-    LocalLoadDayReader,
-    ObservationReader,
-)
+from backend.performance.fitness_fatigue import SOURCE_LABEL
+from backend.performance.load_context import read_local_fitness
+from backend.runtime.ports import ActivitySummaryReader, ObservationReader
 
 ROW_WINDOW_PAD = timedelta(days=1)
-LOCAL_BASIS_SOURCE = "Lokal berechnet (M7)"
+LOCAL_BASIS_SOURCE = SOURCE_LABEL
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,19 +67,12 @@ def read_season_load_inputs(
 ) -> SeasonLoadInputs:
     """Read yesterday's local fitness and fatigue and today's completed activities.
 
-    Yesterday is complete: a day before ``today`` without a session is rest.
+    Yesterday is open, so unknown, while the activities were last synced before it.
     """
     basis_day = today - timedelta(days=1)
-    summaries = source.activity_summaries()
-    days = (
-        summaries.local_load_days(db)
-        if isinstance(summaries, LocalLoadDayReader)
-        else {}
-    )
-    latest = local_fitness_fatigue(
-        days,
-        (),
-        {},
+    latest = read_local_fitness(
+        source.activity_summaries(),
+        db,
         start=basis_day,
         end=basis_day,
         today=today,

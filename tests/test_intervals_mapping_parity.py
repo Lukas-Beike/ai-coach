@@ -22,7 +22,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from canonical_recovery_support import mapped_recovery_inputs
-from performance_day_support import current_days, latest_day, snapshot_metrics
+from performance_day_support import latest_day, snapshot_metrics
 
 from backend.activities.activity_summary import activity_summaries
 from backend.activities.identity import activity_kind
@@ -430,14 +430,15 @@ class WellnessParityTests(unittest.TestCase):
                 day = date.fromisoformat(row["id"])
                 ctl = expect_value(result, MetricKind.CTL, day=row["id"])
                 atl = expect_value(result, MetricKind.ATL, day=row["id"])
+                # The stored values are the labelled history since #1726.
                 load = performance_load_context(
                     self.snapshot["recent_activities"],
-                    current_days([row]),
                     TODAY,
                     canonical=CanonicalPerformanceInputs(
                         wellness_day=day, ctl=ctl, atl=atl
                     ),
-                )["load"]
+                    timezone="UTC",
+                )["intervals_history"] or {"ctl": None, "atl": None}
                 self.assertEqual(
                     expect_value(result, MetricKind.CTL, day=row["id"]), load["ctl"]
                 )

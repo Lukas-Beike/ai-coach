@@ -23,7 +23,7 @@ from backend.athlete.measurements import number
 from backend.canonical.vocabulary import ProviderId
 from backend.performance import eftp
 from backend.performance.comparable_sessions import equal_effort_trend
-from backend.performance.fitness_fatigue import local_fitness_fatigue
+from backend.performance.fitness_fatigue import SOURCE_LABEL, local_fitness_fatigue
 from backend.performance.pace_at_hr import pace_at_heart_rate_trend
 from backend.performance.session_rpe_load import period_load, session_load
 from backend.performance.smoothed_load import complete_before
@@ -44,7 +44,7 @@ ZONE_MAPPING = (
 )
 PROFILE_DURATIONS = (60, 300, 1200)
 # Fitness (the ``ctl`` key) is the local curve (card M7), never Intervals.icu CTL.
-LOCAL_FITNESS_SOURCE = "Lokal berechnet (M7)"
+LOCAL_FITNESS_SOURCE = SOURCE_LABEL
 # Wellness-day eFTP, else the day's latest Intervals.icu ride summary.
 EFTP_SOURCE = provider_label(ProviderId.INTERVALS, SourceView.CURRENT_METRIC)
 
