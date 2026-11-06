@@ -68,7 +68,8 @@ class AthleteDataAssemblyTests(unittest.TestCase):
         self.assertIs(checkin._today, today)
         self.assertIs(profile._manager, manager)
         # The profile hook keeps the location invalidation and requests a local
-        # load pass (card M6) only when a preferred threshold source changes.
+        # load pass (card M6) only when a preferred threshold source or the time zone
+        # changes.
         with patch(
             "backend.http_api.athlete_assembly.invalidate_for_location_change"
         ) as invalidate:
@@ -78,6 +79,11 @@ class AthleteDataAssemblyTests(unittest.TestCase):
             field = next(iter(PREFERENCE_PROFILE_FIELDS.values()))
             profile._on_location_changed({}, {field: "garmin"}, db=None)
             self.assertEqual(load_input_changes, [True])
+            # A new time zone re-dates the stored loads (#1726).
+            profile._on_location_changed(
+                {"timezone": "Europe/Berlin"}, {"timezone": "UTC"}, db=None
+            )
+            self.assertEqual(load_input_changes, [True, True])
         self.assertIs(duplicate._database_manager, manager)
         self.assertIs(duplicate._event_buffer, event_buffer)
         self.assertFalse(hasattr(assembly, "activity_read"))

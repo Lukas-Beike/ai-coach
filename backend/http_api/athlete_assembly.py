@@ -176,11 +176,14 @@ class AthleteDataAssembly:
     def _profile_changed(
         self, previous: dict[str, Any], current: dict[str, Any], **kwargs: Any
     ) -> None:
-        """Invalidate location caches; a new preferred source changes local loads."""
+        """Invalidate location caches; a new preferred source changes local loads.
+
+        A new time zone moves the local day the stored loads are dated by (M6, M7).
+        """
         invalidate_for_location_change(previous, current, **kwargs)
         if any(
             previous.get(field) != current.get(field)
-            for field in PREFERENCE_PROFILE_FIELDS.values()
+            for field in (*PREFERENCE_PROFILE_FIELDS.values(), "timezone")
         ):
             self._load_inputs_changed()
 
