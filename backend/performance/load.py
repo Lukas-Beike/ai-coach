@@ -34,6 +34,15 @@ def _activity_rollup_number(activity: dict[str, Any], key: str) -> float:
         return 0.0
 
 
+def _tss_load(activity: Mapping[str, Any]) -> float | None:
+    """The session's TSS-scale load as the rollup sums it, or None without one."""
+    try:
+        number = float(activity.get("training_load"))  # type: ignore[arg-type]
+    except TypeError, ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _activities_in(activities: list[Any], cutoff: date, anchor: date) -> list[dict]:
     return [
         activity
@@ -48,7 +57,7 @@ def _missing_load(
     window: list[dict], session_feedback: SessionFeedback
 ) -> tuple[int, float | None]:
     """Sessions without a TSS-scale load, and their known session-RPE load in AU."""
-    missing = [row for row in window if _as_number(row.get("training_load")) is None]
+    missing = [row for row in window if _tss_load(row) is None]
     rated = [
         value
         for row in missing
@@ -80,9 +89,7 @@ def activity_rollup(
         or _activity_rollup_number(activity, "elapsed_duration_s")
         for activity in window
     )
-    training_load = sum(
-        _activity_rollup_number(activity, "training_load") for activity in window
-    )
+    training_load = sum(_tss_load(activity) or 0.0 for activity in window)
     rollup: dict[str, Any] = {
         "days": days,
         "sessions": len(window),

@@ -198,6 +198,8 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         self.assertEqual(result["sessions"], 1)
         self.assertEqual(result["duration_hours"], 0.5)
         self.assertEqual(result["training_load"], 0.0)
+        # #1672: the unsummed load is reported as missing, not dropped silently.
+        self.assertEqual(result["load_missing_sessions"], 1)
 
     def test_rollup_sums_negative_loads_without_bounds(self) -> None:
         # Quirk: the rollup has no lower bound, so negative loads reduce totals.
