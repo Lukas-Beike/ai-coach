@@ -32,7 +32,12 @@ from backend.canonical.activity_detail import (
 from backend.canonical.local_time import wall_time
 from backend.canonical.rating_scales import ACTIVITY_RATING_SCALES, rating_fields
 from backend.canonical.records import ActivityRecord, Provenance
-from backend.canonical.vocabulary import ProviderId, StreamChannel, ZoneMetric
+from backend.canonical.vocabulary import (
+    ProviderId,
+    SourceKind,
+    StreamChannel,
+    ZoneMetric,
+)
 from backend.db.activity_detail_store import StoredDetailSet
 from backend.providers.intervals_activity_detail_projection import (
     COACH_ACTIVITY_DETAIL_MAX_SERIES_POINTS,
@@ -386,7 +391,12 @@ def _zones(zones: Mapping[ZoneMetric, SetChoice]) -> dict[str, Any]:
         zone = _zone_set(choice.chosen)
         result[metric.value] = {
             "boundary_source": zone.boundary_source.value,
-            "source": _candidate_source(choice.chosen),
+            "source": _source(
+                zone.provenance,
+                "derived"
+                if zone.provenance.source_kind is SourceKind.DERIVED
+                else "measured",
+            ),
             "buckets": [
                 {
                     "index": bucket.index,
