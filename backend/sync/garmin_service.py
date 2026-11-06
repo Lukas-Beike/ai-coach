@@ -439,8 +439,9 @@ class GarminRemoteReader:
                     self._config, self._garmin_tokens
                 ),
             )
-        except Exception:
-            if personal is None:
+        except Exception as error:
+            # A cancelled run stops; only a failed login falls back to Personal.
+            if personal is None or getattr(error, "reason", None) == "chat_cancelled":
                 raise
             self._log_sdk_skipped("login_failed")
             return GarminTransportClient(personal, None), login_argument

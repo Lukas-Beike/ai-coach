@@ -413,3 +413,88 @@ class TransportParityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemoteReaderTransportTests(unittest.TestCase):
+    """The reader keeps the Personal API families when the SDK login fails."""
+
+    def _reader(self, factory: Any, **changes: Any) -> Any:
+        from unittest.mock import Mock
+
+        from support import make_config
+
+        from backend.sync.garmin_service import GarminRemoteReader
+
+        settings: dict[str, Any] = {
+            "openai_base_url": "",
+            "openai_model": "",
+            "intervals_athlete_id": "",
+            "data_retention_days": 30,
+            "garmin_email": "athlete@example.invalid",
+            "garmin_password": "synthetic",
+            "garmin_tokenstore": "missing-tokenstore",
+            "garmin_personal_api_key": SYNTHETIC_KEY,
+        }
+        config = make_config(**{**settings, **changes})
+        return GarminRemoteReader(
+            config,
+            factory,
+            Mock(),
+            Mock(),
+            lambda value: value,
+            Mock(),
+            lambda: "2026-11-06T08:00:00+00:00",
+            lambda: date(2026, 11, 6),
+            date(2000, 1, 1),
+            90,
+            -1,
+        )
+
+    def _factory(self, login: Any) -> Any:
+        from unittest.mock import Mock
+
+        sdk = Mock()
+        sdk.login.side_effect = login
+        factory = Mock()
+        factory.available.return_value = True
+        factory.create.return_value = sdk
+        return factory
+
+    def test_failed_sdk_login_keeps_the_personal_families(self) -> None:
+        def fail(_argument: Any) -> Any:
+            raise RuntimeError("synthetic SDK login failure")
+
+        reader = self._reader(self._factory(fail))
+
+        client, _argument = reader._authenticated_client(_external_call)
+
+        self.assertIsNone(client.sdk)
+        self.assertIsNotNone(client.personal)
+
+    def test_pending_mfa_keeps_the_personal_families(self) -> None:
+        reader = self._reader(self._factory(lambda _argument: ("needs_mfa", {})))
+
+        client, _argument = reader._authenticated_client(_external_call)
+
+        self.assertIsNone(client.sdk)
+
+    def test_cancellation_during_sdk_login_still_stops(self) -> None:
+        from backend.errors import AppError
+
+        def cancel(_argument: Any) -> Any:
+            raise AppError(499, "cancelled", reason="chat_cancelled")
+
+        reader = self._reader(self._factory(cancel))
+
+        with self.assertRaises(AppError):
+            reader._authenticated_client(_external_call)
+
+    def test_key_only_needs_no_sdk_login(self) -> None:
+        factory = self._factory(lambda _argument: (None, None))
+        reader = self._reader(factory, garmin_email="", garmin_password="")
+
+        client, _argument = reader._authenticated_client(_external_call)
+
+        self.assertTrue(reader.configured())
+        self.assertIsNone(client.sdk)
+        factory.create.assert_not_called()
