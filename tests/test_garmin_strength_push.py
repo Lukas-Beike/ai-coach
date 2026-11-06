@@ -9,6 +9,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 from backend.canonical.vocabulary import RemoteEntityKind
@@ -163,7 +164,7 @@ class StructureTests(unittest.TestCase):
             "garmin_pair": {"category": "SQUAT", "exercise": "RETIRED"},
         }
         rendered = strength_structure.render([SQUAT])
-        target = {"sport": "WeightTraining", "description": rendered}
+        target: dict[str, Any] = {"sport": "WeightTraining", "description": rendered}
         session_focus.carry_focus(target, {"strength_structure": [stored]})
         kept = target["strength_structure"]
         self.assertEqual("Kniebeuge", kept[0]["name"])
