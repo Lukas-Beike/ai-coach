@@ -115,8 +115,7 @@ from backend.canonical.vocabulary import (
 # moving time before the timer ``duration``.
 # Version 13: maps terrain, motor assistance and the native type key, and knows
 # the cyclocross, BMX, track cycling, e-MTB, skate and backcountry skiing,
-# indoor and treadmill walking, Pilates, HIIT and indoor cardio keys; road,
-# gravel and mountain biking are outdoor like the same Wahoo types (#1670).
+# indoor and treadmill walking, Pilates, HIIT and indoor cardio keys (#1670).
 MAPPER_VERSION: Final = 13
 GARMIN_LABEL: Final = "Garmin Connect"
 MAX_NAME_LENGTH: Final = 200
@@ -140,7 +139,7 @@ _TRAINING_LOAD_KEY: Final = "activityTrainingLoad"
 _TRAINING_LOAD_FIELDS: Final = (_TRAINING_LOAD_KEY, _TRAINING_EFFECT_LABEL_KEY)
 
 # Exact Garmin activityType.typeKey values. The environment is set only where the
-# key names it (road, gravel and mountain biking name an outdoor surface);
+# key names it;
 # otherwise UNKNOWN, which the activity name may still refine.
 # Lap swimming is not named as indoor and open water is named as outdoor.
 # The legacy text classifier does not recognise road_biking, mountain_biking or
@@ -150,10 +149,10 @@ GARMIN_ACTIVITY_TYPES: Final[Mapping[str, tuple[Sport, Environment]]] = {
     "bmx": (Sport.RIDE, Environment.UNKNOWN),
     "cyclocross": (Sport.RIDE, Environment.OUTDOOR),
     "e_bike_fitness": (Sport.RIDE, Environment.UNKNOWN),
-    "e_bike_mountain": (Sport.RIDE, Environment.OUTDOOR),
-    "gravel_cycling": (Sport.RIDE, Environment.OUTDOOR),
-    "mountain_biking": (Sport.RIDE, Environment.OUTDOOR),
-    "road_biking": (Sport.RIDE, Environment.OUTDOOR),
+    "e_bike_mountain": (Sport.RIDE, Environment.UNKNOWN),
+    "gravel_cycling": (Sport.RIDE, Environment.UNKNOWN),
+    "mountain_biking": (Sport.RIDE, Environment.UNKNOWN),
+    "road_biking": (Sport.RIDE, Environment.UNKNOWN),
     "track_cycling": (Sport.RIDE, Environment.UNKNOWN),
     "indoor_cycling": (Sport.RIDE, Environment.INDOOR),
     "virtual_ride": (Sport.RIDE, Environment.VIRTUAL),

@@ -49,6 +49,20 @@ SNAPSHOT: Final[Mapping[str, frozenset[str]]] = {
         }
     ),
     "Environment": frozenset({"outdoor", "indoor", "virtual", "unknown"}),
+    "Terrain": frozenset(
+        {
+            "road",
+            "trail",
+            "track",
+            "gravel",
+            "mountain",
+            "treadmill",
+            "pool",
+            "open_water",
+            "unknown",
+        }
+    ),
+    "Assist": frozenset({"none", "electric", "unknown"}),
     "LoadModel": frozenset(
         {
             "intervals_training_load",

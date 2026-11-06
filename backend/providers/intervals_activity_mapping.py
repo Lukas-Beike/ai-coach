@@ -127,8 +127,7 @@ from backend.canonical.vocabulary import (
 # Version 8: the activity's own time zone dates it where it was recorded.
 # Version 9: the duration follows the canonical rule (``activity_duration_s``),
 # so a strength session counts its elapsed time.
-# Version 10: maps terrain, motor assistance and the native ``type``; gravel and
-# mountain bike rides are outdoor like the same Garmin and Wahoo types (#1670).
+# Version 10: maps terrain, motor assistance and the native ``type`` (#1670).
 MAPPER_VERSION: Final = 10
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
@@ -201,8 +200,8 @@ _OUTDOOR: Final = Environment.OUTDOOR
 
 # Exact Intervals.icu type names whose sport is definite. "Workout" and "Other"
 # are generic, so they are left out and classified from their text instead.
-# OUTDOOR is used only where the name denotes an outdoor setting (trail, gravel,
-# mountain bike, open water, hiking, backcountry). Indoor is never named by a type, so it comes
+# OUTDOOR is used only where the name denotes an outdoor setting (trail, open
+# water, hiking, backcountry). Indoor is never named by a type, so it comes
 # from text only.
 INTERVALS_ACTIVITY_TYPES: Final[Mapping[str, tuple[Sport, Environment]]] = {
     **_entries(
@@ -211,12 +210,12 @@ INTERVALS_ACTIVITY_TYPES: Final[Mapping[str, tuple[Sport, Environment]]] = {
         (
             "Ride",
             "EBikeRide",
+            "EMountainBikeRide",
+            "GravelRide",
             "Handcycle",
+            "MountainBikeRide",
             "Velomobile",
         ),
-    ),
-    **_entries(
-        Sport.RIDE, _OUTDOOR, ("EMountainBikeRide", "GravelRide", "MountainBikeRide")
     ),
     **_entries(Sport.RIDE, _VIRTUAL, ("VirtualRide",)),
     **_entries(Sport.RUN, _UNKNOWN, ("Run",)),
@@ -451,7 +450,7 @@ def _classify(type_name: str | None, identity: str) -> tuple[Sport, Environment]
 def _qualifiers(
     type_name: str | None, row: Mapping[str, object]
 ) -> tuple[Terrain, Assist]:
-    if type_name not in INTERVALS_ACTIVITY_TYPES:
+    if type_name is None or type_name not in INTERVALS_ACTIVITY_TYPES:
         return Terrain.UNKNOWN, Assist.UNKNOWN
     if type_name == "Swim":
         pool = coerce_number(row.get(_POOL_LENGTH_KEY))

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import unittest
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -108,7 +109,11 @@ EQUIVALENT_TYPES: dict[str, tuple[tuple[str, Any], ...]] = {
     "pilates": (("intervals", "Pilates"), ("garmin", "pilates")),
     "hiit": (("intervals", "HighIntensityIntervalTraining"), ("garmin", "hiit")),
 }
-MAPPERS = {"intervals": intervals, "garmin": garmin, "wahoo": wahoo}
+MAPPERS: dict[str, Callable[[Any], ActivityRecord]] = {
+    "intervals": intervals,
+    "garmin": garmin,
+    "wahoo": wahoo,
+}
 
 
 class CrossProviderTableTests(unittest.TestCase):

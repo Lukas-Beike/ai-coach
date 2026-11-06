@@ -26,8 +26,8 @@ Field rules:
 * sport, environment, terrain and motor assistance come from
   ``workout_type_id``, which is kept as ``native_type``. An id this table does
   not know maps to ``Sport.OTHER`` with unknown environment, terrain and assist.
-  Running and cycling track (3, 16) and lap swimming (25) name no environment,
-  like the same Garmin types.
+  Running and cycling track (3, 16), mountain and road biking (13, 15) and lap
+  swimming (25) name no environment, like the same Garmin and Intervals.icu types.
 * load: ``power_bike_tss_last`` is a Training Stress Score, modelled as
   ``LoadModel.TSS`` so it is never mixed with another provider's load. Without a
   positive value the load stays unknown.
@@ -75,8 +75,9 @@ from backend.canonical.vocabulary import (
 # Version 4: the workout's own IANA ``time_zone`` dates it where it was recorded.
 # Version 5: the duration follows the canonical rule (``activity_duration_s``),
 # so a strength workout counts its elapsed time.
-# Version 6: maps terrain, motor assistance and the native type id; track and lap
-# swimming name no environment, like the same Garmin types (#1670).
+# Version 6: maps terrain, motor assistance and the native type id; track,
+# mountain and road biking and lap swimming name no environment, like the same
+# Garmin types (#1670).
 MAPPER_VERSION: Final = 6
 WAHOO_LABEL: Final = "Wahoo"
 MAX_NAME_LENGTH: Final = 200
@@ -113,10 +114,10 @@ def _entries(
 # types (workout, fitness equipment, cardio class, unknown) are OTHER because
 # they name no sport. Motorised and sail/board types are OTHER as well.
 WAHOO_WORKOUT_TYPES: Final[Mapping[int, tuple[Sport, Environment]]] = {
-    **_entries(Sport.RIDE, _OUTDOOR, (0, 11, 13, 15)),
+    **_entries(Sport.RIDE, _OUTDOOR, (0, 11)),
     **_entries(Sport.RIDE, _INDOOR, (12, 21, 49, 61)),
     **_entries(Sport.RIDE, _VIRTUAL, (68,)),
-    **_entries(Sport.RIDE, _UNKNOWN, (14, 16, 64, 70)),
+    **_entries(Sport.RIDE, _UNKNOWN, (13, 14, 15, 16, 64, 70)),
     **_entries(Sport.RUN, _OUTDOOR, (1, 4, 67)),
     **_entries(Sport.RUN, _UNKNOWN, (3,)),
     **_entries(Sport.RUN, _INDOOR, (5,)),
