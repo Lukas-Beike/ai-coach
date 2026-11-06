@@ -1582,15 +1582,20 @@ def collect_garmin_data(
             source="training_status",
             method="get_training_status",
         )
-    _collect_activity_ratings(
-        client,
-        payload,
-        today,
-        collection_options.rated_activity_ids,
-        external_call,
-        redact,
-        warn,
-    )
+    if (
+        collection_options.include_recovery
+        or collection_options.include_current_metrics
+    ):
+        # Historical chunks read no ratings: history keeps its Intervals.icu copy.
+        _collect_activity_ratings(
+            client,
+            payload,
+            today,
+            collection_options.rated_activity_ids,
+            external_call,
+            redact,
+            warn,
+        )
     read_daily = collection_options.include_daily_metrics or _reads_new_activity(
         payload, collection_options.known_activity_ids
     )
