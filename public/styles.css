@@ -1121,6 +1121,8 @@ h3 > .analysis-legend-info::before, h4 > .analysis-legend-info::before { content
 .connection-resync-status { display: block; line-height: 1.4; }
 .provider-setup-hint { margin: 0; color: var(--subtle); font-size: .64rem; line-height: 1.4; }
 .provider-setup-hint[hidden] { display: none; }
+.provider-key-hint[hidden] { display: none; }
+.provider-key-hint.error { color: var(--form-error-ink); }
 .provider-setup-hint a { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent-bright); font-weight: 700; }
 .provider-setup-hint code { font: .95em ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 .provider-credentials { display: grid; gap: 10px; margin-top: 12px; }

@@ -6,7 +6,7 @@
 const CREDENTIAL_FORMS = Object.freeze({
   openai: Object.freeze(["openai_api_key", "openai_base_url"]),
   intervals: Object.freeze(["intervals_api_key", "intervals_athlete_id"]),
-  garmin_personal: Object.freeze(["garmin_personal_api_key"]),
+  garmin_personal: Object.freeze(["garmin_personal_api_key", "garmin_personal_api_key_expires"]),
   wahoo: Object.freeze(["wahoo_client_id", "wahoo_client_secret"]),
   yazio: Object.freeze(["yazio_email", "yazio_password"]),
 });
@@ -17,6 +17,7 @@ const CREDENTIAL_FIELD_LABELS = Object.freeze({
   intervals_api_key: "Intervals.icu-API-Schlüssel",
   intervals_athlete_id: "Intervals.icu-Athlete-ID",
   garmin_personal_api_key: "Garmin-Personal-API-Schlüssel",
+  garmin_personal_api_key_expires: "Ablaufdatum des Garmin-Personal-API-Schlüssels",
   wahoo_client_id: "Wahoo-Client-ID",
   wahoo_client_secret: "Wahoo-Client-Secret",
   yazio_email: "Yazio-E-Mail",
@@ -24,7 +25,7 @@ const CREDENTIAL_FIELD_LABELS = Object.freeze({
 });
 
 // Non-secret values the server echoes back; they are shown as the current value.
-const CREDENTIAL_VISIBLE_FIELDS = new Set(["openai_base_url", "intervals_athlete_id", "wahoo_client_id"]);
+const CREDENTIAL_VISIBLE_FIELDS = new Set(["openai_base_url", "intervals_athlete_id", "wahoo_client_id", "garmin_personal_api_key_expires"]);
 
 const CREDENTIAL_SOURCE_LABELS = Object.freeze({
   db: "In der App gespeichert",
