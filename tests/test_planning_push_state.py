@@ -17,6 +17,7 @@ from backend.planning.push_state import (
     garmin_baselines,
     garmin_fingerprint,
 )
+from backend.providers.garmin_strength_workout import catalogue_available
 
 STRENGTH = {
     "sport": "WeightTraining",
@@ -132,6 +133,21 @@ class PushStateTests(unittest.TestCase):
         self.assertEqual(
             {"intervals": False, "garmin": False}, conflicted[0]["push_pending"]
         )
+
+    @unittest.skipUnless(catalogue_available(), "garminconnect is not installed")
+    def test_an_unmapped_exercise_offers_no_garmin_push(self) -> None:
+        unmapped = json.dumps(
+            {
+                **STRENGTH,
+                "strength_structure": [
+                    {"name": "Copenhagen Plank", "sets": 2, "reps": 8}
+                ],
+            }
+        )
+        projected = self.project(
+            [{"local_id": "s5", "payload": unmapped, "sync_state": "synced"}]
+        )
+        self.assertEqual({"intervals": False}, projected[0]["push_pending"])
 
     def test_an_invalid_structure_offers_no_garmin_push(self) -> None:
         invalid = json.dumps({**STRENGTH, "strength_structure": [{"name": ""}]})

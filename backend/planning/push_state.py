@@ -21,6 +21,10 @@ from backend.errors import AppError
 from backend.planning import strength_structure
 from backend.planning.library import library_payload_hash
 from backend.planning.sport import planned_sport_environment
+from backend.providers.garmin_strength_workout import (
+    GarminStrengthMappingError,
+    resolved_exercises,
+)
 
 # States from which an explicit Intervals.icu push helps; a conflict needs a
 # decision first, and "syncing" is already on its way.
@@ -65,6 +69,25 @@ def garmin_fingerprint(payload: dict[str, Any]) -> str | None:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def _pushable_fingerprint(payload: dict[str, Any]) -> str | None:
+    """The Garmin fingerprint, only when every exercise maps to Garmin.
+
+    An unmapped exercise would make every push fail, so no button is offered;
+    the Coach or the job still names the exercise with catalogue suggestions.
+    """
+    fingerprint = garmin_fingerprint(payload)
+    if fingerprint is None:
+        return None
+    try:
+        resolved_exercises(
+            strength_structure.normalize_structure(payload.get(STRENGTH_STRUCTURE))
+            or []
+        )
+    except AppError, GarminStrengthMappingError:
+        return None
+    return fingerprint
+
+
 def attach_push_state(
     pairs: Iterable[tuple[Any, dict[str, Any]]], baselines: dict[str, str | None]
 ) -> None:
@@ -78,7 +101,7 @@ def attach_push_state(
         # A unit in a sync conflict needs the athlete's decision first; no
         # provider is offered, so the conflicted version never reaches the watch.
         conflicted = str(row["sync_state"] or "") == "conflict"
-        fingerprint = garmin_fingerprint(payload)
+        fingerprint = _pushable_fingerprint(payload)
         if fingerprint is not None:
             pending[ProviderId.GARMIN.value] = (
                 not conflicted and baselines.get(str(row["local_id"])) != fingerprint
