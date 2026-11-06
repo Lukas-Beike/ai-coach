@@ -318,6 +318,12 @@ class TrainingProfileSelectionService:
             if (row.get("power_profile") or {}).get("status") == "ok"
             or (row.get("running_profile") or {}).get("status") == "ok"
         ]
+        rides = [row for row in eligible if row.get("sport") == "ride"]
+        ride_usable = [
+            row
+            for row in rides
+            if (row.get("power_profile") or {}).get("status") == "ok"
+        ]
         result: dict[str, Any] = {
             "date_start": start.isoformat(),
             "date_end": today.isoformat(),
@@ -327,6 +333,9 @@ class TrainingProfileSelectionService:
                 "cached_records": len(eligible),
                 "usable_records": len(usable),
                 "unknown_records": len(eligible) - len(usable),
+                # Rides only: the power bests cannot come from runs.
+                "power_records": len(rides),
+                "power_unknown_records": len(rides) - len(ride_usable),
                 "eligible_activities": [row["activity_id"] for row in eligible],
             },
             "input_fingerprint": _records_fingerprint(eligible),
