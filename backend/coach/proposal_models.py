@@ -18,6 +18,7 @@ COACH_ACTION_TYPES = {
 REMOTE_COACH_WRITE_TOOLS = frozenset(
     {
         "start_intervals_plan_sync",
+        "push_strength_to_garmin",
         "sync_competitions",
         "delete_duplicate_intervals_activity",
         "sync_nutrition",

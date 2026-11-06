@@ -20,6 +20,7 @@ from backend.sync.queue import SyncJobQueueService
 COACH_SYNC_TOOL_NAMES = frozenset(
     {
         "start_intervals_plan_sync",
+        "push_strength_to_garmin",
         "get_sync_job",
         "sync_competitions",
         "sync_nutrition",
@@ -69,6 +70,8 @@ class CoachSyncToolService:
     ) -> dict[str, Any] | None:
         if name == "start_intervals_plan_sync":
             return self._start_plan_sync(arguments, intent, sync_job_ids)
+        if name == "push_strength_to_garmin":
+            return self._push_strength_to_garmin(arguments, intent, sync_job_ids)
         if name == "get_sync_job":
             job_id = str(arguments.get("job_id") or "").strip()
             if job_id not in sync_job_ids:
@@ -212,6 +215,36 @@ class CoachSyncToolService:
             prepared,
             sync_job_ids,
             reason=str(arguments.get("reason") or "Coach-Anfrage"),
+        )
+
+    def _push_strength_to_garmin(
+        self, arguments: dict[str, Any], intent: dict[str, Any], sync_job_ids: list[str]
+    ) -> dict[str, Any]:
+        """Queue the approved Garmin strength push; entries come from the card."""
+        if (
+            "push_strength_to_garmin" not in authorized_operations(intent)
+            or intent.get("target_system") != ProviderId.GARMIN
+        ):
+            raise AppError(
+                403, STRUCTURED_AUTHORIZATION_ERROR, reason="intent_scope_denied"
+            )
+        require_coach_scope(intent, "garmin_sync")
+        entries = arguments.get("entries")
+        valid = isinstance(entries, list) and all(
+            isinstance(entry, dict)
+            and (
+                entry.get("remove") is True
+                or len(str(entry.get("expected_payload_hash") or "")) == 64
+            )
+            for entry in entries
+        )
+        if not valid or not entries:
+            raise AppError(409, "Die freigegebene Garmin-Auswahl fehlt.")
+        return self._plan_push.enqueue(
+            entries,
+            sync_job_ids,
+            reason=str(arguments.get("reason") or "Coach-Anfrage"),
+            provider=ProviderId.GARMIN.value,
         )
 
     def _sync_competitions(

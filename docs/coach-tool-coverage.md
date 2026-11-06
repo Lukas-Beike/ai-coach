@@ -70,6 +70,7 @@ All test names below refer to `tests/test_coach_tool_coverage.py`.
 | `stage_training_plan` | `success` | `test_requested_draft_commit_and_metadata_lifecycle` |
 | `start_intervals_plan_sync` | `all_pending`, `created`, `selected` | `test_new_plan_sync_and_later_selected_sync_use_real_ids` |
 | `start_provider_refresh` | `calendar`, `garmin`, `intervals`, `weather` | `test_provider_reads_and_job_status_use_correct_provider` |
+| `push_strength_to_garmin` | `push`, `remove` | `test_garmin_strength_push_is_bound_to_the_stored_units` |
 | `sync_nutrition` | `date`, `pending` | `test_nutrition_correction_preserves_fields_and_sync_is_explicitly_queued` |
 | `delete_nutrition_entry` | `success` | `test_nutrition_entries_can_be_saved_read_and_deleted` |
 | `sync_competitions` | `success` | `test_competition_lifecycle_syncs_only_after_explicit_followup` |

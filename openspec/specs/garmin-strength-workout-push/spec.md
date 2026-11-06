@@ -29,6 +29,10 @@ A strength planned unit SHALL reach Garmin only through an explicit `plan_push` 
 - **WHEN** a linked unit is pushed again after a change or move
 - **THEN** the same Garmin workout is updated, its own schedule is replaced by one on the current date, and a workout missing at Garmin is uploaded again.
 
+#### Scenario: Coach request
+- **WHEN** the Coach proposes the push after the athlete named Garmin or the watch
+- **THEN** the same job is queued only after the athlete approves the card, with the payload hashes stored when the card was created (see coach-tool-authority CA5).
+
 #### Scenario: Rejected locally
 - **WHEN** a unit is stale, deleted, archived, in the past, not strength or has no structure
 - **THEN** it is reported as conflict or error and no Garmin login or write happens for it.

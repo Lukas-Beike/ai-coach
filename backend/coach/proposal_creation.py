@@ -17,7 +17,6 @@ from backend.activities.activity_reference import (
 from backend.activities.duplicate_inspection import DuplicateInspector
 from backend.activities.duplicates import validate_duplicate_delete
 from backend.athlete.local_date import LocalDate
-from backend.canonical.vocabulary import ProviderId
 from backend.coach.proposal_models import (
     COACH_ACTION_TTL_SECONDS,
     _preview_nutrient,
@@ -29,11 +28,13 @@ from backend.coach.proposal_models import (
 from backend.coach.proposal_validation import (
     _validate_local_coach_write,
     remote_coach_write_diff,
+    remote_write_target,
     validated_coach_action_preview_input,
 )
 from backend.db.manager import DatabaseManager
 from backend.db.repositories import PlanAdjustmentRepository
 from backend.errors import AppError
+from backend.planning import library as planning_library
 from backend.providers.intervals_workouts import intervals_record_type
 from backend.sync.authority import competition_push_manifest
 
@@ -165,7 +166,7 @@ class CoachProposalCreationService:
         return self.create(
             {
                 "action_type": "remote_coach_write",
-                "target_system": ProviderId.INTERVALS.value,
+                "target_system": remote_write_target(tool),
                 "object_ids": {"operation": tool, "targets": targets},
                 "diff": remote_coach_write_diff(
                     tool, arguments, intent, approval_manifest, approval_details
@@ -321,6 +322,8 @@ def _approved_remote_arguments(
 ) -> dict[str, Any]:
     if tool == "start_intervals_plan_sync":
         return _approved_plan_sync_arguments(arguments, intent, database_manager)
+    if tool == "push_strength_to_garmin":
+        return _approved_garmin_arguments(arguments, database_manager)
     if tool == "sync_competitions":
         with database_manager.reader() as db:
             return {**arguments, "_approval_manifest": competition_push_manifest(db)}
@@ -439,7 +442,86 @@ def _remote_write_approval_details(
         return _plan_sync_approval_details(arguments, intent, database_manager)
     if tool == "sync_competitions":
         return _competition_approval_details(arguments, database_manager)
+    if tool == "push_strength_to_garmin":
+        return _garmin_approval_details(arguments, database_manager)
     return []
+
+
+def _approved_garmin_arguments(
+    arguments: dict[str, Any], database_manager: DatabaseManager
+) -> dict[str, Any]:
+    """Bind each selected unit to its stored payload when the card is created.
+
+    The model names only unit ids and the remove flag; the hash comes from the
+    stored unit with the job's own formula, so an edit after the card was shown
+    makes the push a conflict.
+    """
+    raw = arguments.get("entries")
+    if not isinstance(raw, list) or not 1 <= len(raw) <= 28:
+        raise AppError(
+            400, "Wähle 1 bis 28 Krafteinheiten.", reason="invalid_job_request"
+        )
+    selected = [
+        (
+            planning_library.workout_library_entry_id(item.get("local_id")),
+            item.get("remove") is True,
+        )
+        for item in raw
+        if isinstance(item, dict)
+    ]
+    if len(selected) != len(raw) or len({i for i, _ in selected}) != len(selected):
+        raise AppError(400, "Eine Einheit darf nur einmal ausgewählt werden.")
+    rows = _planned_rows([local_id for local_id, _ in selected], database_manager)
+    payloads = {str(row["local_id"]): row["payload"] for row in rows}
+    if len(payloads) != len(selected):
+        raise AppError(
+            409,
+            "Die ausgewählte Einheit ist nicht mehr verfügbar.",
+            reason="request_object_missing",
+        )
+    entries: list[dict[str, Any]] = [
+        {"library_workout_id": local_id, "remove": True}
+        if remove
+        else {
+            "library_workout_id": local_id,
+            "expected_payload_hash": planning_library.library_payload_hash(
+                payloads[local_id]
+            ),
+        }
+        for local_id, remove in selected
+    ]
+    return {"entries": entries, "reason": str(arguments.get("reason") or "")[:200]}
+
+
+def _planned_rows(
+    identifiers: list[str], database_manager: DatabaseManager
+) -> list[Any]:
+    placeholders = ",".join("?" for _ in identifiers)
+    with database_manager.reader() as db:
+        return db.execute(
+            "SELECT local_id, payload FROM planned_units WHERE local_id IN ("
+            + placeholders
+            + ") ORDER BY local_id",
+            tuple(identifiers),
+        ).fetchall()
+
+
+def _garmin_approval_details(
+    arguments: dict[str, Any], database_manager: DatabaseManager
+) -> list[dict[str, str]]:
+    entries = arguments.get("entries") or []
+    removals = {
+        entry["library_workout_id"] for entry in entries if entry.get("remove") is True
+    }
+    rows = _planned_rows(
+        [entry["library_workout_id"] for entry in entries], database_manager
+    )
+    details = _plan_workout_details(rows)
+    for detail in details:
+        detail["sport"] = (
+            "Von Garmin entfernen" if detail["id"] in removals else "Kraft an Garmin"
+        )
+    return details
 
 
 def _plan_sync_approval_details(

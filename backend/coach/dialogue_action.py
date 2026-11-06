@@ -40,6 +40,7 @@ LOCAL_BROAD_SCOPES = frozenset(
         "activity_feedback",
         "adaptive_replan",
         "intervals_sync",
+        "garmin_sync",
         "local_nutrition",
         "local_nutrition_product",
         "local_equipment",
@@ -125,7 +126,7 @@ class CoachDialogueActionService:
         if name in {"delete_nutrition_template", "log_nutrition_template"}:
             scope.add("nutrition_template:" + str(arguments.get("id") or ""))
         remote_write, refresh = self._retry_metadata(name, arguments, target)
-        self._validate_target(request, target, scope, remote_write, refresh)
+        self._validate_target(request, target, scope, remote_write, refresh, name)
         self._validate_objects(name, arguments, scope)
         action = {
             "intent": "remote_sync" if remote_write or refresh else "local_action",
@@ -166,6 +167,7 @@ class CoachDialogueActionService:
             name
             in {
                 "start_intervals_plan_sync",
+                "push_strength_to_garmin",
                 "sync_competitions",
                 "sync_nutrition",
                 "delete_duplicate_intervals_activity",
@@ -189,11 +191,16 @@ class CoachDialogueActionService:
         scope: set[str],
         remote_write: bool,
         refresh: bool,
+        name: str = "",
     ) -> None:
+        # Each remote write names its own provider and that provider's sync scope.
+        provider, sync_scope = (
+            (ProviderId.GARMIN, "garmin_sync")
+            if name == "push_strength_to_garmin"
+            else (ProviderId.INTERVALS, "intervals_sync")
+        )
         if remote_write and (
-            not request["remote_write"]
-            or target != ProviderId.INTERVALS
-            or "intervals_sync" not in scope
+            not request["remote_write"] or target != provider or sync_scope not in scope
         ):
             raise AppError(
                 403,
@@ -362,6 +369,8 @@ class CoachDialogueActionService:
                 action["request"]["sync_scope"] == "all_pending"
             )
             self._validate_repair_scope(arguments, action["request"], action)
+        if name == "push_strength_to_garmin":
+            _apply_garmin_scope(arguments, action)
         if name == "sync_nutrition":
             require_coach_scope(action, "local_nutrition", "intervals_sync")
         elif name == "delete_duplicate_intervals_activity":
@@ -430,3 +439,21 @@ class CoachDialogueActionService:
         payload = arguments.get("payload")
         template_id = str(payload.get("id") or "") if isinstance(payload, dict) else ""
         return template_id or None
+
+
+def _apply_garmin_scope(arguments: dict[str, Any], action: dict[str, Any]) -> None:
+    """Require a selected sync and every unit in the validated request scope.
+
+    As for an Intervals.icu selection, the model's entries grant nothing alone.
+    """
+    if action["request"]["sync_scope"] != "selected":
+        raise AppError(
+            400, "Der Umfang der Synchronisierung fehlt.", reason="request_sync"
+        )
+    for entry in arguments.get("entries") or []:
+        local_id = str(entry.get("local_id") or "") if isinstance(entry, dict) else ""
+        if not local_id:
+            raise AppError(
+                400, "Jede Einheit benötigt ihre local_id.", reason="request_scope"
+            )
+        require_coach_scope(action, f"planned_unit:{local_id}")
