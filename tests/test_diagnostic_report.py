@@ -36,6 +36,8 @@ class _Database:
                 "planned_units",
                 "activity_records",
                 "activity_sessions",
+                "observations",
+                "provider",
             )
         ):
             return SimpleNamespace(fetchall=list, fetchone=lambda: {"count": 0})
@@ -188,6 +190,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "canonical_backfill",
                 "canonical_read",
                 "canonical_session_conflicts",
+                "canonical_provider_composition",
                 "logs",
                 "debug_capture",
                 "note",
@@ -267,10 +270,14 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     "planned_units",
                     "activity_records",
                     "activity_sessions",
+                    "observations",
+                    "provider",
                 )
             )
         ]
-        self.assertEqual(len(self.db.queries), 15)
+        # The provider composition adds five reads (sessions, observations and
+        # three domain tables) to the same snapshot.
+        self.assertEqual(len(self.db.queries), 20)
         self.assertEqual(
             [query.rsplit("FROM ", 1)[1] for query in count_queries],
             [
