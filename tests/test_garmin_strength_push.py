@@ -291,6 +291,14 @@ class FakeGarmin:
         self.schedules[schedule_id] = (workout_id, day)
         return {"workoutScheduleId": int(schedule_id), "calendarDate": day}
 
+    def get_scheduled_workouts_by_period(self, start, end):
+        self.calls.append(("period", start))
+        return [
+            {"workoutScheduleId": int(sid), "workout": {"workoutId": int(wid)}}
+            for sid, (wid, day) in self.schedules.items()
+            if start <= day <= end
+        ]
+
     def unschedule_workout(self, schedule_id):
         self.calls.append(("unschedule", schedule_id))
         if self.schedules.pop(schedule_id, None) is None:
@@ -439,6 +447,24 @@ class PushTests(unittest.TestCase):
         self.assertEqual("ok", self.push((U1, digest))["status"])
         self.assertEqual(["501"], list(self.garmin.workouts))
         self.assertEqual(digest, self.link(U1).baseline_hash)
+
+    def test_a_schedule_without_id_is_looked_up_or_left_incomplete(self) -> None:
+        digest = self.insert(U1, UNIT)
+        original = self.garmin.schedule_workout
+
+        def no_id(workout_id, day):
+            original(workout_id, day)
+            return {}
+
+        self.garmin.schedule_workout = no_id  # type: ignore[method-assign]
+        self.assertEqual("ok", self.push((U1, digest))["status"])
+        self.assertEqual("502", self.link(U1).remote_external_id)
+
+        self.garmin.get_scheduled_workouts_by_period = lambda start, end: []  # type: ignore[method-assign]
+        result = self.push((U1, digest))
+        self.assertEqual("error", result["status"])
+        self.assertIn("Termin-ID", result["results"][0]["error"])
+        self.assertIsNone(self.link(U1).baseline_hash)
 
     def test_blanked_exercise_names_are_deleted_and_never_scheduled(self) -> None:
         self.garmin.blank_names = True

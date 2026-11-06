@@ -273,7 +273,16 @@ class GarminStrengthPushService:
             self._save_link(unit, workout_id, None, None)
         schedule_id = _schedule_id(
             _call(client.schedule_workout, workout_id, unit.plan_date)
-        )
+        ) or _scheduled_on(client, workout_id, unit.plan_date)
+        if schedule_id is None:
+            # Without the id a later push could not move this entry; the push
+            # stays incomplete instead of reporting success.
+            raise AppError(
+                502,
+                "Garmin hat den Termin ohne Termin-ID bestätigt; bitte den "
+                "Garmin-Kalender prüfen, bevor erneut gesendet wird.",
+                reason="garmin_schedule_unconfirmed",
+            )
         self._save_link(unit, workout_id, schedule_id, unit.payload_hash)
         return {
             "library_workout_id": unit.local_id,
@@ -413,6 +422,20 @@ def _schedule_id(saved: Any) -> str | None:
             and str(value).strip()
         ):
             return str(value)
+    return None
+
+
+def _scheduled_on(client: Any, workout_id: str, day: str) -> str | None:
+    """Find this workout's schedule id on ``day`` in Garmin's calendar."""
+    items = _call(client.get_scheduled_workouts_by_period, day, day)
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        workout = item.get("workout")
+        workout = workout if isinstance(workout, dict) else {}
+        owner = item.get("workoutId") or workout.get("workoutId")
+        if str(owner or "") == workout_id:
+            return _schedule_id(item)
     return None
 
 
