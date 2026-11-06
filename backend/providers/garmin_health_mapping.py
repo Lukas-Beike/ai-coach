@@ -134,6 +134,7 @@ import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, tzinfo
+from operator import itemgetter
 from typing import Final
 
 from backend.canonical.local_time import local_date
@@ -211,8 +212,8 @@ from backend.providers.garmin_weight_walk import (
 # Version 15: observations record their owning raw element, so re-projection
 # retires the values a stored element no longer carries (schema version 21).
 # Version 16: sleep periods are dated by the record's ``calendarDate``.
-# Version 17: running threshold power is FTP for running, manual weigh-ins are
-# provider-reported, and readiness keeps the day's morning reading.
+# Version 17: running threshold power is FTP for running, manual weigh-ins and the
+# history weight are provider-reported, and readiness keeps the morning reading.
 MAPPER_VERSION: Final = 17
 GARMIN_LABEL: Final = "Garmin Connect"
 
@@ -273,8 +274,10 @@ _HISTORY_METRICS: Final = "metrics"
 _HISTORY_PACE: Final = "run_threshold_pace_seconds_per_km"
 _METRES_PER_KM: Final = 1000.0
 # Legacy performance-history keys and the kind, sport and source kind each holds.
+# The history weight copies the latest weigh-in without its source type, so it
+# may be a manual entry and is never claimed as a scale measurement.
 _HISTORY_KINDS: Final[Mapping[str, tuple[MetricKind, Sport | None, SourceKind]]] = {
-    "weight_kg": (MetricKind.WEIGHT, None, SourceKind.DEVICE_MEASURED),
+    "weight_kg": (MetricKind.WEIGHT, None, SourceKind.PROVIDER_REPORTED),
     "cycling_ftp_watts": (MetricKind.FTP, Sport.RIDE, SourceKind.PROVIDER_REPORTED),
     "cycling_vo2max_ml_kg_min": (
         MetricKind.VO2MAX,
@@ -1149,12 +1152,6 @@ def _manual_weigh_in(record: Mapping[str, object]) -> bool:
     return isinstance(source, str) and source.upper() == _MANUAL_WEIGH_IN
 
 
-def _row_record(
-    row: tuple[str, Mapping[str, object], int | None],
-) -> Mapping[str, object]:
-    return row[1]
-
-
 class _HealthMapping:
     """Collects the observations and issues of one ``map_garmin_health`` call."""
 
@@ -1209,7 +1206,7 @@ class _HealthMapping:
         section_date_keys = _SECTION_DATE_KEYS.get(name, (_DATE_FIELD,))
         rows = self._records(name, payload)
         if name == _READINESS:
-            rows = morning_readiness(rows, _row_record)
+            rows = morning_readiness(rows, itemgetter(1))
         for ref, record, index in rows:
             date_keys, record_groups = section_date_keys, groups
             if name == _DAILY_STATS:

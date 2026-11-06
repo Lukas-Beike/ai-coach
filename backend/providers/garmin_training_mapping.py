@@ -32,6 +32,7 @@ from typing import Any, Final
 from backend.canonical.mapping import coerce_number
 from backend.canonical.vocabulary import MetricKind, Sport
 from backend.providers.garmin_device_records import primary_device_record
+from backend.providers.garmin_fields import GARMIN_READINESS_ALIASES
 from backend.providers.garmin_performance_fields import (
     METRIC_DATE_KEYS,
     PLANNING_READINESS_ALIASES,
@@ -114,7 +115,12 @@ _DAY_TEXT_LENGTH: Final = 10
 # The reading taken at wake-up is the day's morning value.
 _READINESS_CONTEXT: Final = "inputContext"
 _WAKE_CONTEXT: Final = "AFTER_WAKEUP_RESET"
-_READINESS_TIME_KEYS: Final = ("timestampLocal", "timestamp")
+_LOCAL_TIME: Final = "timestampLocal"
+_UTC_TIME: Final = "timestamp"
+_CALENDAR_DATE: Final = "calendarDate"
+_READINESS_SCORE_KEYS: Final = tuple(
+    dict.fromkeys((*PLANNING_READINESS_ALIASES, *GARMIN_READINESS_ALIASES))
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,17 +155,35 @@ def _row_day(record: Mapping[str, Any]) -> date | None:
     return next(iter(days)) if len(days) == 1 else None
 
 
-def _morning_rank(record: Mapping[str, Any]) -> tuple[bool, str]:
-    """Wake-up readings first, then the earliest reading time; untimed ones last."""
-    stamp = next(
-        (
-            value
-            for key in _READINESS_TIME_KEYS
-            if isinstance(value := record.get(key), str) and value
-        ),
-        "￿",
+type _MorningRank = tuple[bool, bool, bool, str, bool, str]
+
+
+def _text(record: Mapping[str, Any], key: str) -> str | None:
+    value = record.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _morning_rank(record: Mapping[str, Any]) -> _MorningRank:
+    """Scored readings first, then wake-up ones, then the earliest reading.
+
+    Local reading times are compared with local ones and UTC times with UTC ones;
+    a reading with a local time ranks before one with only a UTC time.
+    """
+    scored = any(record.get(key) is not None for key in _READINESS_SCORE_KEYS)
+    local, utc = _text(record, _LOCAL_TIME), _text(record, _UTC_TIME)
+    return (
+        not scored,
+        record.get(_READINESS_CONTEXT) != _WAKE_CONTEXT,
+        local is None,
+        local or "",
+        utc is None,
+        utc or "",
     )
-    return record.get(_READINESS_CONTEXT) != _WAKE_CONTEXT, stamp
+
+
+def _readiness_day(record: Mapping[str, Any]) -> date | None:
+    """The day the mappers date a readiness reading by: ``calendarDate`` first."""
+    return _iso_day(record.get(_CALENDAR_DATE)) or _row_day(record)
 
 
 def morning_readiness[T](
@@ -167,25 +191,31 @@ def morning_readiness[T](
 ) -> list[T]:
     """Keep one readiness reading per day: the morning one, in the given order.
 
-    Garmin lists several readings per day. The reading flagged as taken after
-    waking wins; without one, the earliest timed reading; without times, the
-    first listed. Undated items are kept, so their issues are still reported.
+    Garmin lists several readings per day. Among the readings with a score, the
+    one flagged as taken after waking wins; without one, the earliest timed
+    reading; without times, the first listed. Undated items are kept, so their
+    issues are still reported.
     """
-    chosen: dict[date, tuple[tuple[bool, str], int]] = {}
+    chosen: dict[date, tuple[_MorningRank, int]] = {}
+    undated: set[int] = set()
     for position, item in enumerate(items):
         record = record_of(item)
-        day = _row_day(record)
+        day = _readiness_day(record)
         if day is None:
+            undated.add(position)
             continue
         rank = _morning_rank(record)
         if day not in chosen or rank < chosen[day][0]:
             chosen[day] = (rank, position)
-    kept = {position for _, position in chosen.values()}
-    return [
-        item
-        for position, item in enumerate(items)
-        if position in kept or _row_day(record_of(item)) is None
-    ]
+    kept = undated | {position for _, position in chosen.values()}
+    return [item for position, item in enumerate(items) if position in kept]
+
+
+def morning_readiness_records(
+    records: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """``morning_readiness`` of plain reading records."""
+    return morning_readiness(records, lambda record: record)
 
 
 def history_rows(value: object) -> list[Mapping[str, Any]]:
@@ -268,10 +298,6 @@ def unresolved_device_record(section: str, payload: object) -> bool:
     )
 
 
-def _same(record: Mapping[str, Any]) -> Mapping[str, Any]:
-    return record
-
-
 def training_values(section: str, payload: object) -> list[TrainingValue]:
     """Return the values one training section reports; unreadable rows yield none."""
     if section == DAILY_TRAINING_STATUS:
@@ -298,7 +324,7 @@ def training_values(section: str, payload: object) -> list[TrainingValue]:
         )
     rows = history_rows(payload)
     if section == TRAINING_READINESS_HISTORY:
-        rows = morning_readiness(rows, _same)
+        rows = morning_readiness_records(rows)
     values: list[TrainingValue] = []
     for row in rows:
         day = _row_day(row)

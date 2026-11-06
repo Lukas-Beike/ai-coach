@@ -28,6 +28,7 @@ from backend.providers.garmin_health_mapping import (
     map_garmin_health,
 )
 from backend.providers.garmin_status_mapping import map_garmin_status_codes
+from backend.sync.garmin_performance_history import readiness_score_value
 
 type Triple = tuple[str | None, str, IssueReason]
 
@@ -1671,6 +1672,20 @@ class MorningReadinessTests(unittest.TestCase):
         early = {"calendarDate": DAY, "score": 66, "timestamp": "2026-10-10T05:30:00.0"}
         result = _map({"readiness": [late, early]})
         self.assertEqual(_find(result, MetricKind.READINESS).value.value, 66.0)
+
+    def test_an_unscored_wake_up_reading_does_not_hide_a_scored_one(self) -> None:
+        unscored = {key: _MORNING[key] for key in ("calendarDate", "inputContext")}
+        result = _map({"readiness": [unscored, _AFTERNOON]})
+        self.assertEqual(_find(result, MetricKind.READINESS).value.value, 41.0)
+
+    def test_local_times_are_not_compared_with_utc_times(self) -> None:
+        local = {"calendarDate": DAY, "score": 70, "timestampLocal": "2026-10-10T06:45"}
+        utc_only = {"calendarDate": DAY, "score": 50, "timestamp": "2026-10-10T05:30"}
+        result = _map({"readiness": [utc_only, local]})
+        self.assertEqual(_find(result, MetricKind.READINESS).value.value, 70.0)
+
+    def test_legacy_readiness_reads_the_morning_reading(self) -> None:
+        self.assertEqual(readiness_score_value([_MORNING, _AFTERNOON]), 78)
 
     def test_readiness_level_follows_the_morning_reading(self) -> None:
         for section in ("readiness", "training_readiness_history"):

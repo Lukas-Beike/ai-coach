@@ -33,7 +33,7 @@ from backend.providers.garmin_training_mapping import (
     DAILY_TRAINING_STATUS,
     TRAINING_READINESS_HISTORY,
     history_rows,
-    morning_readiness,
+    morning_readiness_records,
 )
 
 GARMIN_LABEL: Final = "Garmin Connect"
@@ -70,10 +70,6 @@ def _rows(value: object) -> list[Mapping[str, Any]]:
     return []
 
 
-def _same(record: Mapping[str, Any]) -> Mapping[str, Any]:
-    return record
-
-
 def map_garmin_status_codes(
     section: str,
     element: object,
@@ -87,10 +83,10 @@ def map_garmin_status_codes(
         rows = _rows(element)
     elif section == READINESS_SECTION:
         domain, field = CategoricalDomain.READINESS_LEVEL, "level"
-        rows = morning_readiness(_rows(element), _same)
+        rows = morning_readiness_records(_rows(element))
     elif section == TRAINING_READINESS_HISTORY:
         domain, field = CategoricalDomain.READINESS_LEVEL, "level"
-        rows = morning_readiness(history_rows(element), _same)
+        rows = morning_readiness_records(history_rows(element))
     elif section == DAILY_TRAINING_STATUS:
         domain, field = CategoricalDomain.TRAINING_STATUS, "trainingStatus"
         record = primary_device_record(

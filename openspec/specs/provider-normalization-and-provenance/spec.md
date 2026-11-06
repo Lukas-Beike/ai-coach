@@ -88,11 +88,11 @@ The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly
 
 #### Scenario: Several Garmin readiness readings per day
 - **WHEN** Garmin lists several training-readiness readings for one day
-- **THEN** READINESS and its level come from the reading flagged as taken after waking, else the earliest timed reading, else the first listed, regardless of list order or sync time.
+- **THEN** READINESS and its level, in the canonical and legacy reads, come from the scored reading flagged as taken after waking, else the earliest timed scored reading, else the first listed, regardless of list order or sync time.
 
 #### Scenario: Manually entered Garmin weigh-in
 - **WHEN** a Garmin weigh-in declares `sourceType` `MANUAL`
-- **THEN** its weight is provider-reported and recorded by manual entry, so scale measurements rank ahead of it.
+- **THEN** its weight is provider-reported and recorded by manual entry rather than a device measurement; the performance-history weight copy, which carries no source type, is provider-reported too.
 
 #### Scenario: Different HRV windows
 - **WHEN** a payload has only a weekly HRV average and no last-night value
