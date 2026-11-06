@@ -311,6 +311,7 @@ MAX_TRAINING_EFFECT_LABEL_LENGTH: Final = 50
 MAX_NATIVE_TYPE_LENGTH: Final = 64
 MAX_ZONE_ID_LENGTH: Final = 20
 MAX_LAP_COUNT: Final = 10_000.0
+TEMPERATURE_C_BOUNDS: Final = (-60.0, 70.0)
 # Garmin's training effect runs 0.0 (none) to 5.0 (overreaching).
 MAX_TRAINING_EFFECT: Final = 5.0
 MAX_WATER_ESTIMATE_ML: Final = 50_000.0
@@ -324,9 +325,9 @@ _SUMMARY_VALUE_BOUNDS: Final = (
     ("ftp_w", 0.0, MAX_ACTIVITY_POWER_W),
     ("eftp_w", 0.0, MAX_ACTIVITY_POWER_W),
     ("vo2max", 0.0, 100.0),
-    ("avg_temp_c", -60.0, 70.0),
-    ("min_temp_c", -60.0, 70.0),
-    ("max_temp_c", -60.0, 70.0),
+    ("avg_temp_c", *TEMPERATURE_C_BOUNDS),
+    ("min_temp_c", *TEMPERATURE_C_BOUNDS),
+    ("max_temp_c", *TEMPERATURE_C_BOUNDS),
     ("elevation_loss_m", 0.0, MAX_ACTIVITY_ELEVATION_M),
     ("lap_count", 0.0, MAX_LAP_COUNT),
     ("aerobic_training_effect", 0.0, MAX_TRAINING_EFFECT),

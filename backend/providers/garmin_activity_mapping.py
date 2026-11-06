@@ -94,6 +94,7 @@ from backend.canonical.records import (
     MAX_TRAINING_EFFECT_LABEL_LENGTH,
     MAX_WATER_ESTIMATE_ML,
     MAX_ZONE_COUNT,
+    TEMPERATURE_C_BOUNDS,
     ActivityRecord,
     Provenance,
     activity_duration_s,
@@ -162,16 +163,16 @@ _TRAINING_EFFECT_LABEL_KEY: Final = "trainingEffectLabel"
 _TRAINING_LOAD_KEY: Final = "activityTrainingLoad"
 _AEROBIC_EFFECT_KEYS: Final = ("aerobicTrainingEffect", "trainingEffect")
 _ANAEROBIC_EFFECT_KEYS: Final = ("anaerobicTrainingEffect",)
-# The dedicated training-load rows override these activity fields.
+# The dedicated training-load rows override these activity fields, each named
+# by its aliases.
 _TRAINING_LOAD_FIELDS: Final = (
-    _TRAINING_LOAD_KEY,
-    _TRAINING_EFFECT_LABEL_KEY,
-    *_AEROBIC_EFFECT_KEYS,
-    *_ANAEROBIC_EFFECT_KEYS,
+    (_TRAINING_LOAD_KEY,),
+    (_TRAINING_EFFECT_LABEL_KEY,),
+    _AEROBIC_EFFECT_KEYS,
+    _ANAEROBIC_EFFECT_KEYS,
 )
 _TRAINING_EFFECT_BOUNDS: Final = (0.0, MAX_TRAINING_EFFECT)
 _ALTITUDE_BOUNDS: Final = (MIN_ACTIVITY_ALTITUDE_M, MAX_ACTIVITY_ALTITUDE_M)
-_TEMPERATURE_BOUNDS: Final = (-60.0, 70.0)
 _BIKE_CADENCE_KEYS: Final = ("averageBikingCadenceInRevPerMinute",)
 _RUN_CADENCE_KEYS: Final = ("averageRunningCadenceInStepsPerMinute",)
 # Garmin reports zone times as numbered keys, zone 1 first.
@@ -349,7 +350,7 @@ def _map_row(
         row, ("minElevation", "maxElevation"), _ALTITUDE_BOUNDS, ref, issues
     )
     min_temp, max_temp = _ordered_pair(
-        row, ("minTemperature", "maxTemperature"), _TEMPERATURE_BOUNDS, ref, issues
+        row, ("minTemperature", "maxTemperature"), TEMPERATURE_C_BOUNDS, ref, issues
     )
     elevation_loss = _optional_number(
         row, ("elevationLoss",), (0.0, MAX_ACTIVITY_ELEVATION_M), ref, issues
@@ -435,17 +436,24 @@ def merge_training_load_rows(activities: object, training_loads: object) -> obje
         if not isinstance(activity, dict) or load_row is None:
             merged.append(activity)
             continue
-        merged.append(
-            {
-                **activity,
-                **{
-                    key: load_row[key]
-                    for key in _TRAINING_LOAD_FIELDS
-                    if load_row.get(key) is not None
-                },
-            }
-        )
+        merged.append(_with_load_fields(activity, load_row))
     return merged
+
+
+def _with_load_fields(
+    activity: dict[str, object], load_row: dict[str, object]
+) -> dict[str, object]:
+    """Replace each field the load row carries, dropping the activity's aliases."""
+    result = dict(activity)
+    for aliases in _TRAINING_LOAD_FIELDS:
+        carried = {
+            key: load_row[key] for key in aliases if load_row.get(key) is not None
+        }
+        if carried:
+            for key in aliases:
+                result.pop(key, None)
+            result.update(carried)
+    return result
 
 
 def _training_effect_label(
@@ -636,12 +644,12 @@ def _cadence(
     bike = _optional_number(
         row, _BIKE_CADENCE_KEYS, (0.0, MAX_ACTIVITY_CADENCE_RPM), ref, issues
     )
-    if bike is not None:
+    if bike:
         return bike
     steps = _optional_number(
         row, _RUN_CADENCE_KEYS, (0.0, 2 * MAX_ACTIVITY_CADENCE_RPM), ref, issues
     )
-    return None if steps is None else steps / 2
+    return bike if steps is None else steps / 2
 
 
 def _zone_times(
@@ -650,17 +658,13 @@ def _zone_times(
     """Return ``<prefix><n>`` seconds as ``Z<n>`` zones; one bad zone drops all."""
     zones: list[tuple[str, float]] = []
     for number in range(1, MAX_ZONE_COUNT + 1):
-        value = row.get(f"{prefix}{number}")
-        if _is_absent(value):
+        key = f"{prefix}{number}"
+        if _is_absent(row.get(key)):
             continue
-        seconds = coerce_number(value)
-        if seconds is None or not 0.0 <= seconds <= MAX_ACTIVITY_DURATION_S:
-            reason = (
-                IssueReason.INVALID_NUMBER
-                if seconds is None
-                else IssueReason.OUT_OF_RANGE
-            )
-            issues.append(MappingIssue(ref, f"{prefix}{number}", reason))
+        seconds = _optional_number(
+            row, (key,), (0.0, MAX_ACTIVITY_DURATION_S), ref, issues
+        )
+        if seconds is None:
             return None
         zones.append((f"Z{number}", seconds))
     return tuple(zones) or None

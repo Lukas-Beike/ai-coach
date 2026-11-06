@@ -1044,6 +1044,15 @@ class ZoneEffectAndExtremeTests(unittest.TestCase):
         self.assertEqual((("Z1", 60.0), ("Z2", 120.5)), record.power_zone_times_s)
         self.assertEqual(88.0, record.avg_cadence)
 
+    def test_zero_bike_cadence_does_not_hide_the_run_cadence(self) -> None:
+        record, _ = _one(
+            averageBikingCadenceInRevPerMinute=0,
+            averageRunningCadenceInStepsPerMinute=170,
+        )
+
+        assert record is not None
+        self.assertEqual(85.0, record.avg_cadence)
+
     def test_one_invalid_zone_drops_the_distribution_with_one_issue(self) -> None:
         record, issues = _one(hrTimeInZone_1=60, hrTimeInZone_2="x")
 
@@ -1128,6 +1137,15 @@ class ZoneEffectAndExtremeTests(unittest.TestCase):
             "avg_cadence",
         ):
             self.assertIsNone(getattr(record, field), field)
+
+    def test_a_load_row_alias_replaces_the_activity_value(self) -> None:
+        rows = merge_training_load_rows(
+            [_row(aerobicTrainingEffect=2.1)],
+            [{"activityId": 910009, "trainingEffect": 3.4}],
+        )
+
+        record = _map(*untyped(rows)).records[0]
+        self.assertEqual(3.4, record.aerobic_training_effect)
 
     def test_training_load_rows_bring_the_effect_values(self) -> None:
         rows = merge_training_load_rows(

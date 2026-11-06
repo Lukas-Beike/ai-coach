@@ -957,6 +957,41 @@ class SummaryMetricTests(unittest.TestCase):
         self.assertEqual(8.5, doc["metrics"]["avg_speed_mps"]["value"])
         json.dumps(doc, allow_nan=False)
 
+    def test_covered_intervals_extremes_stay_as_alternatives(self) -> None:
+        extra = intervals_summary_metrics(
+            {"min_temp": 8.0, "total_elevation_loss": 400.0},
+            recorded_by=RecordingOrigin.GARMIN,
+        )
+
+        doc = build(
+            [
+                record(
+                    GARMIN,
+                    "g-run-1",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    label="Garmin Connect",
+                    min_temp_c=9.0,
+                    elevation_loss_m=390.0,
+                )
+            ],
+            summary_metrics=extra,
+        )
+
+        for key, own, other in (
+            ("min_temp_c", 9.0, 8.0),
+            ("elevation_loss_m", 390.0, 400.0),
+        ):
+            metric = doc["metrics"][key]
+            self.assertEqual(own, metric["value"], key)
+            self.assertEqual(
+                [(other, "intervals")],
+                [
+                    (alt["value"], alt["source"]["provider"])
+                    for alt in metric["alternatives"]
+                ],
+                key,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

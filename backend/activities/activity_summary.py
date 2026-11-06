@@ -131,11 +131,14 @@ def activity_summary(
         summary["load_model"] = load.load_model.value
         sources["training_load"] = _label(load)
     effect = next(
+        (record for record in derived if record.training_effect_label is not None),
+        None,
+    ) or next(
         (
             record
             for record in derived
-            if record.training_effect_label is not None
-            or record.aerobic_training_effect is not None
+            if record.aerobic_training_effect is not None
+            or record.anaerobic_training_effect is not None
         ),
         None,
     )

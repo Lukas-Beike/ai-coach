@@ -236,6 +236,31 @@ class ActivitySummaryTests(unittest.TestCase):
         )
         self.assertEqual("Garmin Connect", summary["sources"]["heart_rate_zone_times"])
 
+    def test_the_labelled_record_supplies_the_effect_values(self) -> None:
+        summary = activity_summary(
+            "act_1",
+            [
+                record(
+                    ProviderId.GARMIN,
+                    "g1",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    aerobic_training_effect=3.0,
+                ),
+                record(
+                    ProviderId.GARMIN,
+                    "g2",
+                    recorded_by=RecordingOrigin.GARMIN,
+                    training_effect_label="TEMPO",
+                    anaerobic_training_effect=1.2,
+                ),
+            ],
+            BERLIN,
+        )
+
+        self.assertEqual("TEMPO", summary["training_effect_label"])
+        self.assertEqual(1.2, summary["anaerobic_training_effect"])
+        self.assertNotIn("aerobic_training_effect", summary)
+
     def test_session_without_an_effect_label_has_no_effect_values(self) -> None:
         summary = activity_summary(
             "act_1",
