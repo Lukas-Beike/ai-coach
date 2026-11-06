@@ -12,7 +12,8 @@ locally. The fields are the ones today's readers show:
   with two different values is ambiguous and yields none. These and the daily
   status describe one quantity, so a day reported by two sections is one row.
 * ``running_tolerance``: RUNNING_TOLERANCE for running from ``toleranceScore``.
-* ``training_readiness_history``: READINESS from the readiness score aliases.
+* ``training_readiness_history``: READINESS from the readiness score aliases, of
+  the day's morning reading (see ``morning_readiness``).
 * ``endurance_score``: ENDURANCE_SCORE_GROUP_AVERAGE and _MAX of each dated
   ``groupMap`` entry.
 
@@ -23,7 +24,7 @@ reports it as UNKNOWN_VALUE, so coverage shows the gap. History rows are dated b
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Final
@@ -109,6 +110,11 @@ _VISIT_LIMIT: Final = 2000
 _LIST_LIMIT: Final = 500
 _ROW_LIMIT: Final = 1000
 _DAY_TEXT_LENGTH: Final = 10
+# Garmin re-scores readiness during the day (after waking, after workouts, ...).
+# The reading taken at wake-up is the day's morning value.
+_READINESS_CONTEXT: Final = "inputContext"
+_WAKE_CONTEXT: Final = "AFTER_WAKEUP_RESET"
+_READINESS_TIME_KEYS: Final = ("timestampLocal", "timestamp")
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +147,45 @@ def _row_day(record: Mapping[str, Any]) -> date | None:
     days = {_iso_day(record.get(key)) for key in METRIC_DATE_KEYS}
     days.discard(None)
     return next(iter(days)) if len(days) == 1 else None
+
+
+def _morning_rank(record: Mapping[str, Any]) -> tuple[bool, str]:
+    """Wake-up readings first, then the earliest reading time; untimed ones last."""
+    stamp = next(
+        (
+            value
+            for key in _READINESS_TIME_KEYS
+            if isinstance(value := record.get(key), str) and value
+        ),
+        "￿",
+    )
+    return record.get(_READINESS_CONTEXT) != _WAKE_CONTEXT, stamp
+
+
+def morning_readiness[T](
+    items: Sequence[T], record_of: Callable[[T], Mapping[str, Any]]
+) -> list[T]:
+    """Keep one readiness reading per day: the morning one, in the given order.
+
+    Garmin lists several readings per day. The reading flagged as taken after
+    waking wins; without one, the earliest timed reading; without times, the
+    first listed. Undated items are kept, so their issues are still reported.
+    """
+    chosen: dict[date, tuple[tuple[bool, str], int]] = {}
+    for position, item in enumerate(items):
+        record = record_of(item)
+        day = _row_day(record)
+        if day is None:
+            continue
+        rank = _morning_rank(record)
+        if day not in chosen or rank < chosen[day][0]:
+            chosen[day] = (rank, position)
+    kept = {position for _, position in chosen.values()}
+    return [
+        item
+        for position, item in enumerate(items)
+        if position in kept or _row_day(record_of(item)) is None
+    ]
 
 
 def history_rows(value: object) -> list[Mapping[str, Any]]:
@@ -223,6 +268,10 @@ def unresolved_device_record(section: str, payload: object) -> bool:
     )
 
 
+def _same(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    return record
+
+
 def training_values(section: str, payload: object) -> list[TrainingValue]:
     """Return the values one training section reports; unreadable rows yield none."""
     if section == DAILY_TRAINING_STATUS:
@@ -247,8 +296,11 @@ def training_values(section: str, payload: object) -> list[TrainingValue]:
                 None,
             )
         )
+    rows = history_rows(payload)
+    if section == TRAINING_READINESS_HISTORY:
+        rows = morning_readiness(rows, _same)
     values: list[TrainingValue] = []
-    for row in history_rows(payload):
+    for row in rows:
         day = _row_day(row)
         if day is None:
             continue

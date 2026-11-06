@@ -102,6 +102,8 @@ class MetricKind(StrEnum):
     TRAINING_LOAD = "training_load"
     FORM = "form"
     EFTP = "eftp"
+    # Legacy: running threshold power is FTP with sport RUN for every provider.
+    # Only rows stored before Garmin health mapper 17 still carry this kind.
     RUN_THRESHOLD_POWER = "run_threshold_power"
     DAILY_ENERGY_TOTAL = "daily_energy_total"
     DAILY_ENERGY_ACTIVE = "daily_energy_active"

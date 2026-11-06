@@ -3,7 +3,8 @@
 Codes are kept as Garmin reports them and never turned into numbers:
 
 * ``hrv``: HRV_STATUS from ``hrvStatus``, such as ``BALANCED``.
-* ``readiness`` and ``training_readiness_history``: READINESS_LEVEL from ``level``.
+* ``readiness`` and ``training_readiness_history``: READINESS_LEVEL from ``level``
+  of the day's morning reading, the one READINESS is taken from.
 * ``daily_training_status``: TRAINING_STATUS from ``trainingStatus`` of the primary
   (or unambiguous latest) device record, when Garmin sends a text code. A numeric
   status has no verified meaning and is not mapped.
@@ -32,6 +33,7 @@ from backend.providers.garmin_training_mapping import (
     DAILY_TRAINING_STATUS,
     TRAINING_READINESS_HISTORY,
     history_rows,
+    morning_readiness,
 )
 
 GARMIN_LABEL: Final = "Garmin Connect"
@@ -68,6 +70,10 @@ def _rows(value: object) -> list[Mapping[str, Any]]:
     return []
 
 
+def _same(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    return record
+
+
 def map_garmin_status_codes(
     section: str,
     element: object,
@@ -81,10 +87,10 @@ def map_garmin_status_codes(
         rows = _rows(element)
     elif section == READINESS_SECTION:
         domain, field = CategoricalDomain.READINESS_LEVEL, "level"
-        rows = _rows(element)
+        rows = morning_readiness(_rows(element), _same)
     elif section == TRAINING_READINESS_HISTORY:
         domain, field = CategoricalDomain.READINESS_LEVEL, "level"
-        rows = history_rows(element)
+        rows = morning_readiness(history_rows(element), _same)
     elif section == DAILY_TRAINING_STATUS:
         domain, field = CategoricalDomain.TRAINING_STATUS, "trainingStatus"
         record = primary_device_record(
