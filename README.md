@@ -135,6 +135,7 @@ Schema version 9 stores sports in the canonical vocabulary (`sport` such as `rid
 
 ### Garmin Connect Integration & Health Metrics
 - **Direct Read-Only Health Sync**: Independent synchronization of Garmin Connect wellness metrics, activity recordings, and physiological measurements.
+- **Official Personal API transport**: With a Garmin Personal API key, activities, activity details, sleep, HRV, daily summaries, resting heart rate, Body Battery and weight are read through Garmin's official read-only Personal API. The unofficial login stays an optional supplement for training readiness, training status, load balance, VO2 max, FTP, lactate threshold, race predictions, endurance score, activity splits and zone times. Either transport works alone; both together write each activity and day once. Without the login, the Personal API families still sync when the login fails or needs MFA.
 - **Dedicated Sleep Gating**: Intelligent morning check-in gate that delays morning coaching until the current day's sleep analysis is processed and finalized by Garmin.
 - **Overnight Body Battery Tracking**: Targeted extraction of resting stress metrics capturing the final level before sleep and the initial waking level within one hour of rising.
 - **Bounded Sleep Retry Engine**: Three-tier exponential retry schedule (15-minute intervals, max 3 attempts) handling delayed Garmin cloud sleep processing.
@@ -304,6 +305,7 @@ Coach settings offer GPT-6 Luna (default), GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astr
 | `INTERVALS_ATHLETE_ID` | `0` | No | Athlete ID for Intervals.icu (`0` targets the athlete account associated with the API key). |
 | `GARMIN_EMAIL` | *None* | No | Garmin Connect account email. Read-only fallback used when no Garmin login is stored in the app. The UI login does not need it. |
 | `GARMIN_PASSWORD` | *None* | No | Garmin Connect account password. Read-only fallback for login; the UI never stores the password. Remove it once tokens are stored. |
+| `GARMIN_PERSONAL_API_KEY` | *None* | No | Garmin Personal API key (Garmin Connect Web > Settings > Personal API Key). Can also be set in **Mehr > Anbindungen > Zugangsdaten**. Exchanged server-side for a 24-hour access token on demand; never logged or returned. |
 | `GARMINTOKENS` | `/data/garmin_tokens` | No | Path of the legacy Garmin token file. It is imported once when the database has no Garmin tokens and is left in place. |
 | `GARMIN_FIXTURE_PATH` | *None* | No | Local mock JSON fixture path for development and testing without live Garmin credentials. |
 | `WAHOO_CLIENT_ID` | *None* | No | Wahoo Cloud API application client ID. Wahoo counts as configured only when all three `WAHOO_*` values are set. |

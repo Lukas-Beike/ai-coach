@@ -88,7 +88,7 @@ let serviceWorkerReplaced = false;
 let serviceWorkerReloaded = false;
 
 // Settings fields that start empty, so any value in them is still being entered.
-const UPDATE_RELOAD_INPUT_FIELDS = "#cred-form-openai input, #cred-form-intervals input, #cred-form-wahoo input, #garmin-login-form input, #garmin-mfa-form input, #nutritionProductQuery";
+const UPDATE_RELOAD_INPUT_FIELDS = "#cred-form-openai input, #cred-form-intervals input, #cred-form-wahoo input, #cred-form-garmin_personal input, #garmin-login-form input, #garmin-mfa-form input, #nutritionProductQuery";
 
 function pageInputPending() {
   const active = document.activeElement;

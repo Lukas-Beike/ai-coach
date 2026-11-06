@@ -6,6 +6,7 @@
 const CREDENTIAL_FORMS = Object.freeze({
   openai: Object.freeze(["openai_api_key", "openai_base_url"]),
   intervals: Object.freeze(["intervals_api_key", "intervals_athlete_id"]),
+  garmin_personal: Object.freeze(["garmin_personal_api_key"]),
   wahoo: Object.freeze(["wahoo_client_id", "wahoo_client_secret"]),
   yazio: Object.freeze(["yazio_email", "yazio_password"]),
 });
@@ -15,6 +16,7 @@ const CREDENTIAL_FIELD_LABELS = Object.freeze({
   openai_base_url: "OpenAI-Basis-URL",
   intervals_api_key: "Intervals.icu-API-Schlüssel",
   intervals_athlete_id: "Intervals.icu-Athlete-ID",
+  garmin_personal_api_key: "Garmin-Personal-API-Schlüssel",
   wahoo_client_id: "Wahoo-Client-ID",
   wahoo_client_secret: "Wahoo-Client-Secret",
   yazio_email: "Yazio-E-Mail",

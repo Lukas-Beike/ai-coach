@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.athlete.profile import timezone_name
+from backend.providers.garmin_personal import GarminTransportClient
 from backend.sync.garmin_service import _persist_garmin_tokens, shared_garmin_sync_lock
 
 
@@ -30,11 +31,15 @@ class GarminProfileBodyExport:
         if self._fixture_loader.path() is not None or not self._reader.configured():
             return None
         try:
-            return self._reader._authenticated_client(
+            client, login_argument = self._reader._authenticated_client(
                 lambda _service, _operation, call, _details: call()
             )
         except Exception:  # noqa: BLE001 - provider authentication is an external boundary
             return None
+        # The upload is an SDK write; the read-only Personal API cannot do it.
+        if isinstance(client, GarminTransportClient):
+            client = client.sdk
+        return None if client is None else (client, login_argument)
 
     def _upload_and_persist(
         self,

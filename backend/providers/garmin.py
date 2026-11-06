@@ -999,25 +999,27 @@ def _collect_current_metrics(
     metrics = (
         (
             "daily_training_status",
-            lambda: client.get_daily_training_status(today.isoformat()),
+            "get_daily_training_status",
+            lambda fetch: fetch(today.isoformat()),
             {"date": today.isoformat()},
         ),
         (
             "training_load_balance",
-            lambda: client.get_training_four_week_load_balance(today.isoformat()),
+            "get_training_four_week_load_balance",
+            lambda fetch: fetch(today.isoformat()),
             {"date": today.isoformat()},
         ),
         (
             "readiness",
-            lambda: client.get_training_readiness(today.isoformat()),
+            "get_training_readiness",
+            lambda fetch: fetch(today.isoformat()),
             {"date": today.isoformat()},
         ),
-        ("race_predictions", client.get_race_predictions, None),
+        ("race_predictions", "get_race_predictions", lambda fetch: fetch(), None),
         (
             "max_metrics",
-            lambda: client.get_max_metrics_range(
-                max_metrics_start.isoformat(), today.isoformat()
-            ),
+            "get_max_metrics_range",
+            lambda fetch: fetch(max_metrics_start.isoformat(), today.isoformat()),
             {
                 "window_start": max_metrics_start.isoformat(),
                 "window_end": today.isoformat(),
@@ -1025,19 +1027,15 @@ def _collect_current_metrics(
             },
         ),
     )
-    for key, metric_fetch, details in metrics:
+    for key, method_name, invoke, details in metrics:
         if not include_daily and key in GARMIN_DAILY_METRIC_SOURCES:
             continue
-        if key == "daily_training_status" and not callable(
-            getattr(client, "get_daily_training_status", None)
-        ):
-            continue
-        if key == "training_load_balance" and not callable(
-            getattr(client, "get_training_four_week_load_balance", None)
-        ):
+        # A method the transport does not serve (SDK not connected) is skipped.
+        fetch = getattr(client, method_name, None)
+        if not callable(fetch):
             continue
         _collect_optional_metric(
-            payload, key, metric_fetch, details, external_call, redact, warn
+            payload, key, partial(invoke, fetch), details, external_call, redact, warn
         )
     if include_daily:
         _collect_threshold_metrics(client, payload, external_call, redact, warn)
@@ -1347,27 +1345,41 @@ def collect_garmin_activity_detail(
     skipped: list[str] = []
     # (capability key, payload key, fetch). The capability key also names the
     # external call, matching ``_fetch_range``.
-    parts: tuple[tuple[str, str, Callable[[], Any]], ...] = (
+    parts: tuple[tuple[str, str, str, Callable[[Any], Any]], ...] = (
         (
             "activity_details",
             "details",
-            lambda: client.get_activity_details(
+            "get_activity_details",
+            lambda method: method(
                 activity_id, maxchart=ACTIVITY_DETAIL_MAX_CHART_POINTS
             ),
         ),
-        ("activity_splits", "splits", lambda: client.get_activity_splits(activity_id)),
+        (
+            "activity_splits",
+            "splits",
+            "get_activity_splits",
+            lambda method: method(activity_id),
+        ),
         (
             "activity_hr_zones",
             "hr_zones",
-            lambda: client.get_activity_hr_in_timezones(activity_id),
+            "get_activity_hr_in_timezones",
+            lambda method: method(activity_id),
         ),
         (
             "activity_power_zones",
             "power_zones",
-            lambda: client.get_activity_power_in_timezones(activity_id),
+            "get_activity_power_in_timezones",
+            lambda method: method(activity_id),
         ),
     )
-    for capability, key, fetch in parts:
+    for capability, key, method_name, invoke in parts:
+        method = getattr(client, method_name, None)
+        if not callable(method):
+            # The Personal API serves no splits or zone times; without the SDK
+            # these parts do not exist and the detail is complete without them.
+            continue
+        fetch = partial(invoke, method)
         if capability_allowed is not None and not capability_allowed(capability):
             skipped.append(capability)
             continue

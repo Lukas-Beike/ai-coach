@@ -147,6 +147,7 @@ class GarminProjectionService:
             "configured": bool(
                 self._config.garmin_fixture_path
                 or self._config.garmin_email
+                or self._config.garmin_personal_api_key
                 or tokens_connected
             ),
             "source": status.source

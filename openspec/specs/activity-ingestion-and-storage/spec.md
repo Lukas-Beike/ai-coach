@@ -19,6 +19,23 @@ The system SHALL fetch Intervals activities/wellness/events through bounded date
 
 Evidence: `backend/sync/intervals.py:IntervalsSnapshotReader.fetch_snapshot`, `backend/providers/garmin.py:collect_garmin_data`, `backend/providers/wahoo_client.py:WahooClient`, `backend/sync/wahoo_sync.py:WahooSyncService._sync_locked`; `tests/test_wahoo_sync.py:test_truncated_fetch_reports_partial`, `tests/test_wahoo_runtime_acceptance.py:test_the_owner_never_writes_to_wahoo`, `tests/test_sync_intervals_reader.py:test_incremental_merge_and_full_sync_behavior`, `tests/test_sync_intervals_reader.py:test_historical_date_windows_and_calendar_window`.
 
+### Requirement: Garmin transports per data family
+The system SHALL read Garmin through the official read-only Personal API when its key is configured, and through the unofficial SDK login when that is connected. Activity lists, activity details, sleep, HRV, daily summaries, resting heart rate, Body Battery and weight SHALL use the Personal API when its key is configured; readiness, training status, load balance, VO2 max, FTP, lactate threshold, race predictions, endurance score, activity splits and zone times SHALL stay on the SDK. A family the configured transports do not serve SHALL be skipped as unsupported rather than reported as a failure. The Personal API key SHALL be stored server-side like the other provider credentials and exchanged for a bearer token on demand; neither SHALL be logged, exported or returned. Both transports SHALL write the same records: activities keyed by Garmin `activityId`, sleep nights keyed by their calendar date.
+
+#### Scenario: Personal API key only
+- **WHEN** only the Personal API key is configured
+- **THEN** activities, sleep, HRV, daily summaries, resting heart rate, Body Battery and weight sync, and SDK-only families are absent without errors.
+
+#### Scenario: Both transports
+- **WHEN** the same Garmin activity or night was stored through one transport and is read through the other
+- **THEN** it exists once.
+
+#### Scenario: SDK login unavailable with a Personal API key
+- **WHEN** the SDK login fails or requires MFA while a Personal API key is configured
+- **THEN** the Personal API families still sync and only the SDK-only families are skipped.
+
+Evidence: `backend/providers/garmin_personal.py:GarminTransportClient`, `backend/providers/garmin_personal.py:wrap_daily_sleep`, `backend/sync/garmin_service.py:GarminRemoteReader._authenticated_client`; `tests/test_garmin_personal_transport.py`.
+
 ### Requirement: Atomic canonical import and correction
 The system SHALL atomically store sanitized provider records and canonical projections within the owning ingest transaction. Repeated natural identities SHALL update or retain records without duplicate activities. Wahoo SHALL commit coverage and success markers with its ingest; Garmin SHALL commit canonical payload/state together, with later metadata, equipment, and cursor operations retaining their separate persistence boundaries.
 

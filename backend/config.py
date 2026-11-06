@@ -167,6 +167,7 @@ class Config:
     wahoo_client_id: str = ""
     wahoo_client_secret: str = ""
     wahoo_redirect_uri: str = ""
+    garmin_personal_api_key: str = ""
     yazio_email: str = ""
     yazio_password: str = ""
     yazio_user_agent: str = ""
@@ -258,6 +259,7 @@ def load_config(
         wahoo_client_id=value("WAHOO_CLIENT_ID", "").strip(),
         wahoo_client_secret=value("WAHOO_CLIENT_SECRET", "").strip(),
         wahoo_redirect_uri=value("WAHOO_REDIRECT_URI", "").strip(),
+        garmin_personal_api_key=value("GARMIN_PERSONAL_API_KEY", "").strip(),
         yazio_email=value("YAZIO_EMAIL", "").strip(),
         yazio_password=value("YAZIO_PASSWORD", "").strip(),
         yazio_user_agent=value("YAZIO_USER_AGENT", "").strip(),
