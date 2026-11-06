@@ -1076,6 +1076,18 @@ def upsert_observation(
     return WriteOutcome.UPDATED
 
 
+def derived_daily_sums(db: Any, method: str, metric: str) -> dict[str, float]:
+    """Sum the active local derived ``metric`` values of ``method`` per observed day."""
+    rows = _fetch_all(
+        db,
+        "SELECT observed_on, SUM(value) AS total FROM observations "
+        "WHERE provider IS NULL AND method = ? AND metric = ? "
+        "AND source_kind = ? AND state = ? GROUP BY observed_on",
+        (method, metric, SourceKind.DERIVED.value, ProjectionState.ACTIVE.value),
+    )
+    return {str(row["observed_on"]): float(row["total"]) for row in rows}
+
+
 def derived_observation_rows(
     db: Any, method: str, *, owners: Sequence[str] | None = None
 ) -> list[dict[str, Any]]:

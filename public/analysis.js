@@ -750,6 +750,7 @@ function renderAnalysisHistory(history) { // NOSONAR
   }
   appendSessionRpeLoadChart(history.session_rpe_load, loadRoot, loadMissing, start, end);
   appendSmoothedLoadChart(history.smoothed_session_load, history.session_rpe_load, loadRoot, loadMissing, start, end);
+  appendLocalFitnessChart(history.local_fitness_fatigue, loadRoot, loadMissing, start, end);
   appendDailyActivityGroup(history.daily_activity, loadRoot, loadMissing, start, end);
   const loadMissingNote = analysisMissingDataNote(loadMissing);
   if (loadMissingNote) loadRoot.append(loadMissingNote);
@@ -845,6 +846,22 @@ function appendSmoothedLoadChart(report, rpeReport, loadRoot, loadMissing, start
       points: weekly ? analysisWeeklyLastPoints(points, start, end) : points, currentPoint: points.findLast(analysisValidPoint) };
   });
   const chart = collectAnalysisChart(loadMissing, "Kurz-/Langzeitbelastung", series, "AU", start, end, "", { calendarWeeks: weekly });
+  if (chart) loadRoot.append(chart);
+}
+
+// Local fitness, fatigue and form (card M7): TSS-scale, never mixed with Intervals.icu CTL/ATL.
+function appendLocalFitnessChart(report, loadRoot, loadMissing, start, end) {
+  const title = "Fitness, Ermüdung, Form";
+  const days = (report?.days || []).filter((day) => day.date >= start && day.date <= end);
+  if (!days.some((day) => day.fitness != null || day.fatigue != null)) { loadMissing.push(title); return; }
+  const weekly = analysisHistoryPeriod === "twelveWeeks";
+  const series = [["fitness", "Fitness", 0], ["fatigue", "Ermüdung", 1], ["form", "Form", 3]].map(([key, label, color]) => {
+    const points = days.map((day) => ({ date: day.date, value: day[key] }));
+    return { label, legendLabel: label, source: "Lokal berechnet", unit: "", color, connected: true, cadenceDays: weekly ? 7 : 1,
+      points: weekly ? analysisWeeklyLastPoints(points, start, end) : points, currentPoint: points.findLast(analysisValidPoint) };
+  });
+  const unloaded = days.reduce((sum, day) => sum + (day.sessions_without_load || 0), 0);
+  const chart = collectAnalysisChart(loadMissing, title, series, "", start, end, unloaded ? `${unloaded} Einheiten ohne TSS` : "", { calendarWeeks: weekly });
   if (chart) loadRoot.append(chart);
 }
 

@@ -28,6 +28,7 @@ from backend.providers.garmin_health_mapping import MAPPER_VERSION
 from backend.sync.canonical_table_reader import CanonicalTableReader
 from backend.sync.local_load import (
     LocalLoadStage,
+    daily_local_loads,
     refresh_after_job,
     stored_local_loads,
     with_local_loads,
@@ -209,6 +210,11 @@ class LocalLoadReviewRegressionTests(unittest.TestCase):
             stored = stored_local_loads(db)
         self.assertAlmostEqual(stored["act_g1"]["session_load"]["value"], 98.75, 2)
         self.assertAlmostEqual(stored["act_g2"]["session_load"]["value"], 100.0, 6)
+        # The day sum counts each session's load once, never its intensity factor.
+        with self.manager.reader() as db:
+            days = daily_local_loads(db)
+        self.assertEqual(list(days), [stored["act_g1"]["session_load"]["observed_on"]])
+        self.assertAlmostEqual(next(iter(days.values())), 198.75, 2)
 
     def test_one_value_outside_the_bounds_does_not_stop_the_pass(self) -> None:
         # 150,000 s at IF 1.6 is 41.7 h × 2.56 × 100 = 10,667 TSS > 10,000.

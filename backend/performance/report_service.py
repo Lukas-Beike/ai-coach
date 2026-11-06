@@ -25,6 +25,7 @@ from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
     activity_summaries_and_fingerprints,
     activity_summaries_for,
+    activity_summaries_with_load_days,
     activity_summaries_with_sync_time,
     inputs_for_snapshot,
 )
@@ -595,7 +596,9 @@ class TrainingReportReadService:
             or sport is None
         ):
             raise AppError(400, "Ungültiger Berichtszeitraum oder Sportfilter.")
-        summaries, observed_at = activity_summaries_with_sync_time(self._canonical)
+        summaries, observed_at, load_days = activity_summaries_with_load_days(
+            self._canonical
+        )
         # The smoothed load of an all-sport report needs the weeks before it.
         history = history_start(start, today) if sport == "all" else start
         period = [
@@ -620,6 +623,7 @@ class TrainingReportReadService:
             computed_at=None
             if self._now is None
             else self._now().isoformat(timespec="seconds"),
+            local_load_days=load_days,
         )
 
 

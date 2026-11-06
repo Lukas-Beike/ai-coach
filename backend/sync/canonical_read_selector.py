@@ -72,7 +72,11 @@ from backend.sync.canonical_coverage_store import (
     LIVE_COVERAGE_PROVIDERS,
     CanonicalCoverageStore,
 )
-from backend.sync.local_load import stored_local_loads, with_local_loads
+from backend.sync.local_load import (
+    daily_local_loads,
+    stored_local_loads,
+    with_local_loads,
+)
 
 REASON_COMPLETE: Final = "backfill_complete"
 REASON_PENDING: Final = "backfill_pending"
@@ -258,6 +262,15 @@ class CanonicalReadSelector(
                 stored_local_loads(db, (summary["id"] for summary in summaries)),
             ),
         )
+
+    def local_load_days(self, db: Any) -> dict[str, float]:
+        """Return the stored local session load (card M6) summed per local day.
+
+        Empty before the first completed backfill, as every other read.
+        """
+        if self._read_state(db) is ReadState.PENDING:
+            return {}
+        return daily_local_loads(db)
 
     def observations(
         self,

@@ -17,6 +17,7 @@ CARD_NAMES = (
     "m4-critical-power-speed.md",
     "m5-smoothed-session-load.md",
     "m6-local-tss-load.md",
+    "m7-local-fitness-fatigue.md",
 )
 FRONT_FIELDS = (
     "Card",

@@ -54,6 +54,7 @@ from backend.runtime.ports import (
     ActivityRowAndSummaryReader,
     ActivitySummaryReader,
     CanonicalReadStatus,
+    LocalLoadDayReader,
     ObservationReader,
     ObservationSourceSelector,
     PowerCurveReader,
@@ -83,6 +84,8 @@ class CanonicalPerformanceInputs:
     Intervals.icu wellness-day form and sport-scoped eFTP series.
     ``ramp_rate`` is the latest wellness day's CTL minus the CTL of exactly seven
     days earlier, rounded to two decimals, or None when either day is missing.
+    ``local_load_days`` is the stored local session load (card M6) per local ISO
+    day of the whole history, None when the reader does not store it.
     ``power_curve`` holds the stored power curve fetches and best power per
     duration; it is empty when none is stored or it was not read (only the
     analysis view asks for it).
@@ -114,6 +117,7 @@ class CanonicalPerformanceInputs:
     eftp_by_day: Mapping[date, float] | None = None
     run_eftp_by_day: Mapping[date, float] | None = None
     ramp_rate: float | None = None
+    local_load_days: Mapping[str, float] | None = None
     body: CanonicalBodyInputs = EMPTY_BODY_INPUTS
     power_curve: PowerCurve = EMPTY_POWER_CURVE
     pending: bool = False
@@ -240,6 +244,24 @@ def activity_summaries_with_sync_time(
     with source.database_manager().reader() as db:
         coverage = None if source.coverage is None else source.coverage()
         return reader.activity_summaries(db), activities_synced_at(coverage, db)
+
+
+def activity_summaries_with_load_days(
+    source: CanonicalPerformanceSource,
+) -> tuple[tuple[ActivitySummary, ...], str | None, Mapping[str, float]]:
+    """Read the summaries, their sync time and the local load per day in one read.
+
+    The load days are empty when the reader does not store the local load.
+    """
+    reader = source.activity_summary_reader()
+    if reader is None:
+        raise RuntimeError("activity reads need the canonical activity summary reader")
+    with source.database_manager().reader() as db:
+        coverage = None if source.coverage is None else source.coverage()
+        loads = (
+            reader.local_load_days(db) if isinstance(reader, LocalLoadDayReader) else {}
+        )
+        return reader.activity_summaries(db), activities_synced_at(coverage, db), loads
 
 
 def activity_summaries_and_fingerprints(
@@ -443,6 +465,7 @@ class _CarriedRows:
     eftp_by_day: Mapping[date, float]
     run_eftp_by_day: Mapping[date, float]
     power_curve: PowerCurve
+    local_load_days: Mapping[str, float] | None
 
     def inputs(
         self,
@@ -470,6 +493,7 @@ class _CarriedRows:
             eftp_by_day=self.eftp_by_day,
             run_eftp_by_day=self.run_eftp_by_day,
             ramp_rate=ramp_rate,
+            local_load_days=self.local_load_days,
             power_curve=self.power_curve,
             preferences=preferences,
         )
@@ -535,6 +559,9 @@ def read_performance_inputs(
             sport=Sport.RUN,
         ),
         power_curve=power_curve,
+        local_load_days=activity_reader.local_load_days(db)
+        if isinstance(activity_reader, LocalLoadDayReader)
+        else None,
     )
     if latest_day is None:
         return carried.inputs(

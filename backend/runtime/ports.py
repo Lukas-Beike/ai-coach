@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
 from datetime import date
 from typing import Any, Protocol, runtime_checkable
@@ -218,6 +218,17 @@ class CategoricalObservationReader(Protocol):
         start: date | None = None,
         end: date | None = None,
     ) -> tuple[CategoricalObservation, ...]: ...
+
+
+@runtime_checkable
+class LocalLoadDayReader(Protocol):
+    """Reads the stored local session load (card M6) summed per local day.
+
+    Keys are athlete-local ISO days over the whole stored history. Only a source
+    that stores the local load implements it.
+    """
+
+    def local_load_days(self, db: Any) -> Mapping[str, float]: ...
 
 
 @runtime_checkable

@@ -290,6 +290,13 @@ def stored_local_loads(
     return result
 
 
+def daily_local_loads(db: Any) -> dict[str, float]:
+    """Sum the stored local session loads per athlete-local ISO day, every day."""
+    return canonical_store.derived_daily_sums(
+        db, METHOD_ID, MetricKind.SESSION_LOAD.value
+    )
+
+
 def with_local_loads(
     summaries: Iterable[Mapping[str, Any]],
     stored: Mapping[str, Mapping[str, Any]],

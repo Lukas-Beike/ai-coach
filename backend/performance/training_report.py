@@ -15,6 +15,7 @@ from backend.activities.activity_summary import (
 from backend.athlete.local_date import iso_date_prefix
 from backend.athlete.measurements import number
 from backend.canonical.planning_fields import PLANNED_LOAD as PLANNED_LOAD_KEY
+from backend.performance.fitness_fatigue import local_fitness_fatigue
 from backend.performance.session_rpe_load import session_rpe_load
 from backend.performance.smoothed_load import complete_before, smoothed_session_load
 
@@ -135,12 +136,14 @@ def training_report(
     observed_at: str | None = None,
     session_feedback: Mapping[str, Mapping[str, Any]] | None = None,
     computed_at: str | None = None,
+    local_load_days: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Build the report from the activity summaries, one per canonical session.
 
     ``sport`` is ``"all"`` or a canonical sport. ``observed_at`` is the sync time
     of the summaries (canonical coverage). ``session_feedback`` maps a summary's
     stored key to its session's effective feedback for the session-RPE load.
+    ``local_load_days`` is the stored local load per day of the whole history.
     """
     end = start + timedelta(days=days - 1)
     effective_end = min(today, end)
@@ -214,6 +217,19 @@ def training_report(
         if sport != "all"
         else smoothed_session_load(
             activity_summaries,
+            session_feedback or {},
+            start=start,
+            end=effective_end,
+            today=today,
+            complete_before=complete_before(today, observed_at, timezone),
+            timezone=timezone,
+            computed_at=computed_at,
+        ),
+        "local_fitness_fatigue": None
+        if sport != "all"
+        else local_fitness_fatigue(
+            local_load_days or {},
+            current,
             session_feedback or {},
             start=start,
             end=effective_end,
