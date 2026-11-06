@@ -49,7 +49,7 @@ RIDE_SUMMARY = {
     "pace_mps": 7.7,
     "intensity": 71.0,
     "training_load": 82.0,
-    "load_model": "intervals_training_load",
+    "load_branch": "power",
     "rpe": 6.0,
     "feel": 3,
     "planned_event_id": "evt-1",
@@ -64,7 +64,7 @@ RUN_SUMMARY = {
     "moving_duration_s": 1800,
     "distance_m": 5000.0,
     "training_load": 30.0,
-    "load_model": "intervals_training_load",
+    "load_branch": "heart_rate",
 }
 
 
@@ -100,7 +100,7 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
                 "min_temp_c": 12.0,
                 "max_temp_c": 21.0,
                 "training_load": 82.0,
-                "load_model": "intervals_training_load",
+                "load_branch": "power",
                 "aerobic_training_effect": 3.2,
                 "anaerobic_training_effect": 0.8,
                 "intensity": 71.0,
@@ -214,9 +214,6 @@ class CoachRawRowParityTests(unittest.TestCase):
                 "moving_duration_s": 3600.0,
                 "distance_m": 36000.0,
                 "elevation_gain_m": 120.0,
-                "training_load": 75.0,
-                "load_model": "intervals_training_load",
-                "intensity": 82.5,
                 "avg_hr": 150.0,
                 "max_hr": 172.0,
                 "avg_power": 215.0,

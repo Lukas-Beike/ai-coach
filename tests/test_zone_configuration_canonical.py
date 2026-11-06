@@ -318,6 +318,22 @@ class LocalZoneEditTests(unittest.TestCase):
             )
         )
 
+    def test_committed_save_and_removal_notify_the_change_hook(self) -> None:
+        calls: list[bool] = []
+        service = ZoneConfigurationService(
+            self.manager,
+            CanonicalTableReader(),
+            lambda: NOW,
+            on_change=lambda: calls.append(True),
+        )
+        key = service.save(LOCAL_POWER)["configuration"]["key"]
+        self.assertEqual(calls, [True])
+        with self.assertRaises(AppError):
+            service.remove({"key": key})
+        self.assertEqual(calls, [True])
+        service.remove({"key": key, "confirmed": True})
+        self.assertEqual(calls, [True, True])
+
     def test_removal_needs_confirmation_and_can_be_undone(self) -> None:
         key = self.service.save(LOCAL_POWER)["configuration"]["key"]
         with self.assertRaises(AppError):

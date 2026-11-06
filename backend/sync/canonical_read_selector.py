@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from datetime import date, tzinfo
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from backend.activities.activity_summary import ActivitySummary, activity_summaries
 from backend.canonical.coverage import MetricWindow, ProviderCoverage
@@ -72,6 +72,7 @@ from backend.sync.canonical_coverage_store import (
     LIVE_COVERAGE_PROVIDERS,
     CanonicalCoverageStore,
 )
+from backend.sync.local_load import stored_local_loads, with_local_loads
 
 REASON_COMPLETE: Final = "backfill_complete"
 REASON_PENDING: Final = "backfill_pending"
@@ -209,7 +210,9 @@ class CanonicalReadSelector(
         limit: int | None = None,
     ) -> tuple[dict[str, Any], ...]:
         """Return raw activity rows from the same source as ``activities``."""
-        return self._source(db).intervals_activity_payloads(db, start=start, end=end, limit=limit)
+        return self._source(db).intervals_activity_payloads(
+            db, start=start, end=end, limit=limit
+        )
 
     def summary_fingerprints(
         self, db: Any, keys: Iterable[ProviderActivityKey]
@@ -239,11 +242,18 @@ class CanonicalReadSelector(
         end: date | None = None,
         limit: int | None = None,
     ) -> tuple[ActivitySummary, ...]:
-        """Return one neutral summary per session, newest first."""
-        return activity_summaries(
+        """Return one neutral summary per session, newest first.
+
+        ``training_load`` and ``intensity`` are the stored local load (card M6).
+        """
+        summaries = activity_summaries(
             self._source(db).activity_sessions(db, start=start, end=end, newest=limit),
             self._zone(db),
             limit=limit,
+        )
+        return cast(
+            tuple[ActivitySummary, ...],
+            with_local_loads(summaries, stored_local_loads(db)),
         )
 
     def observations(

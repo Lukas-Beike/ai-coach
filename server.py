@@ -706,6 +706,7 @@ ATHLETE_DATA = AthleteDataAssembly(
             normalize_competition=planning_competitions.normalize_competition,
             uuid_factory=uuid.uuid4,
             read_planned_units=lambda: PLANNING_DATA.planned_unit().list(500),
+            zones_changed=lambda: start_canonical_backfill(),
         ),
     )
 )
@@ -1631,6 +1632,7 @@ SYNC_JOB_DEPENDENCIES = SyncJobExecutionAssembly.Inputs(
 SYNC_JOB_EXECUTION = SyncJobExecutionAssembly(
     dependencies=SYNC_JOB_DEPENDENCIES,
     provider_runtime=provider_runtime,
+    after_job=lambda: start_canonical_backfill(),
 )
 
 
@@ -2097,6 +2099,9 @@ CANONICAL_BACKFILL = build_canonical_backfill(
     zone_provider=lambda: ATHLETE_CLOCK.now().tzinfo,
     maintenance_gate=runtime_maintenance.MAINTENANCE_GATE,
     clock=runtime_clock.utc_now,
+    source_preferences=lambda db: preferences_from_profile(
+        ATHLETE_DATA.profile().get_from_db(db)
+    ),
 )
 
 DIAGNOSTICS_ASSEMBLY = DiagnosticsAssembly(

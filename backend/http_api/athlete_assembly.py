@@ -45,6 +45,8 @@ class AthleteRuntime:
     normalize_competition: Callable[[Any], Any]
     uuid_factory: Callable[[], Any]
     read_planned_units: Callable[[], list[dict[str, Any]]] = list
+    # Called after a committed local zone change, so derived loads follow it.
+    zones_changed: Callable[[], None] = lambda: None
 
 
 class AthleteDataAssembly:
@@ -80,6 +82,7 @@ class AthleteDataAssembly:
         self._normalize_competition = runtime.normalize_competition
         self._uuid_factory = runtime.uuid_factory
         self._read_planned_units = runtime.read_planned_units
+        self._zones_changed = runtime.zones_changed
 
     def activity_summaries(self) -> tuple[ActivitySummary, ...]:
         with self._database_manager().unit_of_work() as db:
@@ -106,7 +109,10 @@ class AthleteDataAssembly:
 
     def zones(self) -> ZoneConfigurationService:
         return ZoneConfigurationService(
-            self._database_manager(), CanonicalTableReader(), self._utc_now
+            self._database_manager(),
+            CanonicalTableReader(),
+            self._utc_now,
+            on_change=self._zones_changed,
         )
 
     def activity_feedback(self) -> ActivityFeedbackService:

@@ -137,6 +137,7 @@ class SyncJobExecutionAssembly:
         *,
         dependencies: SyncJobExecutionAssembly.Inputs,
         provider_runtime: Callable[[], ProviderRuntimeRegistry] | None = None,
+        after_job: Callable[[], None] = lambda: None,
     ) -> None:
         self._historical = dependencies.historical
         self._state = dependencies.state
@@ -144,6 +145,7 @@ class SyncJobExecutionAssembly:
         self._garmin = dependencies.garmin
         self._calendar_weather = dependencies.calendar_weather
         self._provider_runtime = provider_runtime
+        self._after_job = after_job
 
     def executor(self) -> sync_executor.SyncJobExecutor:
         """Create one dispatcher with shared historical sync policy."""
@@ -167,6 +169,7 @@ class SyncJobExecutionAssembly:
             historical_sync=historical_sync,
             outcome_service=self._state.outcome_service(),
             all_sync_days=self._historical.all_sync_days,
+            after_job=self._after_job,
         )
 
     def _runtime_executor(
@@ -178,4 +181,5 @@ class SyncJobExecutionAssembly:
             outcome_service=self._state.outcome_service(),
             all_sync_days=self._historical.all_sync_days,
             registry=runtime.static,
+            after_job=self._after_job,
         )

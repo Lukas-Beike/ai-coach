@@ -281,10 +281,11 @@ class ActivityParityTests(unittest.TestCase):
             rollup["duration_hours"],
             round(sum(record.duration_s or 0.0 for record in records) / 3600, 1),
         )
-        self.assertEqual(
-            rollup["training_load"],
-            round(sum(record.load or 0.0 for record in records), 1),
-        )
+        # The Intervals.icu load stays on the records but is never summed: the
+        # rollup sums only the stored local load (card M6), absent here.
+        self.assertTrue(any(record.load for record in records))
+        self.assertEqual(rollup["training_load"], 0.0)
+        self.assertEqual(rollup["load_missing_sessions"], len(records))
 
     def test_sport_family_matches_legacy_activity_kind(self) -> None:
         for rows in (self.raw, self.compact):

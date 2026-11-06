@@ -133,6 +133,8 @@ class CanonicalVocabularyTests(unittest.TestCase):
                 "height": "cm",
                 "zone2_pace": "m/s",
                 "indoor_ftp": "W",
+                "session_load": "load",
+                "intensity_factor": "%",
             },
             {kind.value: kind.unit for kind in MetricKind},
         )

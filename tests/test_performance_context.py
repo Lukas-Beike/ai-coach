@@ -139,9 +139,11 @@ class PerformanceContextTests(unittest.TestCase):
         self.assertEqual(result["current_load"]["tsb"], -6)
         self.assertIsNone(result["current_load"]["ramp_rate"])
         self.assertIsNone(result["current_load"]["ramp_rate_source"])
-        self.assertEqual(
-            result["rolling_training"]["last_7_days"]["training_load"], 110.0
-        )
+        # Provider loads are never summed (card M6): without a stored local load
+        # every session of the window counts as missing.
+        last_7 = result["rolling_training"]["last_7_days"]
+        self.assertEqual(last_7["training_load"], 0.0)
+        self.assertEqual(last_7["load_missing_sessions"], last_7["sessions"])
         self.assertEqual(result["metrics"]["steps_7d"]["value"], 1000)
         self.assertEqual(result["metrics"]["floors_7d"]["value"], 5)
         self.assertEqual(result["metrics"]["calories_7d"]["value"], 2000)

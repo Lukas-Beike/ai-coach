@@ -7,8 +7,12 @@ and takes it from the best-ranked record that has it: measured values in
 ``derived_order`` (provider rank). ``sources`` names the source label of every
 value, so consumers never read provider rows or provider field names.
 
-``training_load`` is filled only from TSS-like load models, so loads of different
-scales are never added up; ``load_model`` names the model it came from.
+A provider's own load and intensity are never the session's load: the first
+TSS-like provider load is kept as ``provider_training_load`` (its model in
+``provider_load_model``) and the provider intensity as ``provider_intensity``,
+for cross-checking only. ``training_load`` and ``intensity`` are the local
+TSS-scale load and intensity factor (card M6) that the reader sets from the
+stored derived observations (``backend.sync.local_load.with_local_loads``).
 ``training_effect_label`` is the provider's training-effect category,
 ``training_effect_load`` the training load on that provider's own scale, and
 ``aerobic_training_effect``/``anaerobic_training_effect`` its effect values, all
@@ -69,7 +73,8 @@ _DERIVED: Final = (
     ("normalized_power", "normalized_power"),
     ("weighted_avg_speed_mps", "weighted_avg_speed_mps"),
     ("pace_mps", "pace_mps"),
-    ("intensity", "intensity"),
+    ("provider_intensity", "intensity"),
+    ("grade_adjusted_speed_mps", "grade_adjusted_speed_mps"),
     ("ftp_w", "ftp_w"),
     ("eftp_w", "eftp_w"),
     ("vo2max", "vo2max"),
@@ -127,9 +132,9 @@ def activity_summary(
     if len({record.rpe for record in records if record.rpe is not None}) > 1:
         summary["rpe_conflict"] = True
     if load is not None:
-        summary["training_load"] = load.load
-        summary["load_model"] = load.load_model.value
-        sources["training_load"] = _label(load)
+        summary["provider_training_load"] = load.load
+        summary["provider_load_model"] = load.load_model.value
+        sources["provider_training_load"] = _label(load)
     effect = next(
         (record for record in derived if record.training_effect_label is not None),
         None,

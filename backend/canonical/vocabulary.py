@@ -180,6 +180,9 @@ class MetricKind(StrEnum):
     # setting's ``ftp``; a setting without ``ftp`` (absent or null) also stores its
     # ``indoor_ftp`` as FTP, as the current metrics read it.
     INDOOR_FTP = "indoor_ftp"
+    # Local TSS-scale load and intensity factor of one session (card M6).
+    SESSION_LOAD = "session_load"
+    INTENSITY_FACTOR = "intensity_factor"
 
     @property
     def unit(self) -> str:
@@ -244,6 +247,8 @@ _METRIC_UNITS: Final[Mapping[MetricKind, str]] = {
     MetricKind.HEIGHT: "cm",
     MetricKind.ZONE2_PACE: "m/s",
     MetricKind.INDOOR_FTP: "W",
+    MetricKind.SESSION_LOAD: "load",
+    MetricKind.INTENSITY_FACTOR: "%",
 }
 
 
@@ -261,6 +266,14 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
     MetricKind.RUN_THRESHOLD_POWER: (
         "no longer produced: running threshold power is FTP with sport RUN since "
         "Garmin health mapper 17; retained so rows stored earlier stay readable"
+    ),
+    MetricKind.SESSION_LOAD: (
+        "derived locally per session by backend.sync.local_load (card M6), never "
+        "by a provider mapper"
+    ),
+    MetricKind.INTENSITY_FACTOR: (
+        "derived locally per session by backend.sync.local_load (card M6), never "
+        "by a provider mapper"
     ),
 }
 # Kinds stored for export, backup and history that no reader uses yet. A kind

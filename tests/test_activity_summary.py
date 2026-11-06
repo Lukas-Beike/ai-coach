@@ -89,17 +89,20 @@ class ActivitySummaryTests(unittest.TestCase):
         self.assertEqual("ride", summary["sport"])
         self.assertEqual("outdoor", summary["environment"])
         self.assertEqual(3500.0, summary["moving_duration_s"])
-        self.assertEqual(60.0, summary["training_load"])
-        self.assertEqual("intervals_training_load", summary["load_model"])
-        self.assertEqual(78.0, summary["intensity"])
+        self.assertEqual(60.0, summary["provider_training_load"])
+        self.assertEqual("intervals_training_load", summary["provider_load_model"])
+        self.assertEqual(78.0, summary["provider_intensity"])
         self.assertEqual(
             [{"id": "Z1", "secs": 600.0}, {"id": "Z2", "secs": 1200.0}],
             summary["heart_rate_zone_times"],
         )
         self.assertEqual("77", summary["planned_event_id"])
         self.assertEqual("Intervals.icu", summary["source"])
-        self.assertEqual("Intervals.icu", summary["sources"]["training_load"])
+        self.assertEqual("Intervals.icu", summary["sources"]["provider_training_load"])
         self.assertNotIn("avg_power", summary)
+        # A provider load or intensity is never the session load (card M6).
+        self.assertNotIn("training_load", summary)
+        self.assertNotIn("intensity", summary)
 
     def test_measured_values_prefer_the_recording_platform_copy(self) -> None:
         intervals = record(
@@ -124,9 +127,9 @@ class ActivitySummaryTests(unittest.TestCase):
 
         self.assertEqual(141.0, summary["avg_hr"])
         self.assertEqual("Garmin Connect", summary["sources"]["avg_hr"])
-        self.assertEqual(55.0, summary["training_load"])
-        self.assertEqual("Intervals.icu", summary["sources"]["training_load"])
-        self.assertEqual(70.0, summary["intensity"])
+        self.assertEqual(55.0, summary["provider_training_load"])
+        self.assertEqual("Intervals.icu", summary["sources"]["provider_training_load"])
+        self.assertEqual(70.0, summary["provider_intensity"])
 
     def test_disagreeing_provider_ratings_mark_the_session(self) -> None:
         agreeing = activity_summary(
@@ -164,8 +167,8 @@ class ActivitySummaryTests(unittest.TestCase):
             BERLIN,
         )
 
-        self.assertNotIn("training_load", summary)
-        self.assertNotIn("load_model", summary)
+        self.assertNotIn("provider_training_load", summary)
+        self.assertNotIn("provider_load_model", summary)
         self.assertEqual(10000.0, summary["distance_m"])
         self.assertEqual("Garmin Connect", summary["source"])
 
@@ -195,7 +198,7 @@ class ActivitySummaryTests(unittest.TestCase):
         self.assertEqual("TEMPO", summary["training_effect_label"])
         self.assertEqual(120.0, summary["training_effect_load"])
         self.assertEqual("Garmin Connect", summary["sources"]["training_effect_label"])
-        self.assertEqual(60.0, summary["training_load"])
+        self.assertEqual(60.0, summary["provider_training_load"])
 
     def test_effect_values_and_garmin_extremes_reach_the_summary(self) -> None:
         # #1724: Garmin-only sessions carry effect values, temperatures and descent.
@@ -279,15 +282,15 @@ class ActivitySummaryTests(unittest.TestCase):
         self.assertNotIn("training_effect_label", summary)
         self.assertNotIn("training_effect_load", summary)
 
-    def test_wahoo_tss_counts_as_training_load(self) -> None:
+    def test_wahoo_tss_is_kept_as_the_provider_load(self) -> None:
         summary = activity_summary(
             "act_1",
             [record(ProviderId.WAHOO, "w1", load=80.0, load_model=LoadModel.TSS)],
             BERLIN,
         )
 
-        self.assertEqual(80.0, summary["training_load"])
-        self.assertEqual("tss", summary["load_model"])
+        self.assertEqual(80.0, summary["provider_training_load"])
+        self.assertEqual("tss", summary["provider_load_model"])
 
     def test_summaries_are_newest_first_and_limited(self) -> None:
         sessions = [

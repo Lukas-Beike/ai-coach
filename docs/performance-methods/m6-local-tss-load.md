@@ -3,10 +3,10 @@
 - **Card:** M6
 - **Card version:** 1
 - **Method ID:** local-tss-load v1 (#1725)
-- **Status:** planned (not implemented)
+- **Status:** implemented (`backend/performance/local_tss.py`, `backend/sync/local_load.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-06
-- **Review:** blocked
+- **Review:** released 2026-11-06 (athlete)
 
 ## Target construct
 
@@ -192,8 +192,10 @@ hour, or a mix of branches on one scale.
   with `HR_rest < threshold HR < HR_max` and `0 < HRr ≤ 1`.
 - An IF above 2.0 is rejected as implausible (`implausible_intensity`).
 - Duplicate imports count once (canonical session).
-- Sessions without a valid dated threshold: rule pending the athlete's
-  decision (see Open points).
+- A session without a valid threshold on its day uses the earliest later
+  threshold under the same source policy and is flagged
+  `threshold_after_session` with that threshold's date (athlete decision
+  2026-11-06). Without any later threshold it has no value.
 
 ## Numeric rules
 
@@ -211,6 +213,7 @@ hour, or a mix of branches on one scale.
 | Stored intensity | intensity_pct = IF × 100, power branch only | product assumption | Issue #1725 scope (NP/FTP); pace IF is not comparable. |
 | Sports without TSS | strength, yoga, alpine ski | product assumption | HR load agrees poorly with sRPE in strength work (Dai et al. 2025, README); yoga and alpine ski are treated alike because their HR does not reflect endurance load. |
 | HR thresholds of other sports | run values | product assumption | The resolver keeps HR thresholds for ride and run only. |
+| Threshold after the session | earliest later threshold, flagged | product assumption | Athlete decision 2026-11-06; fills history before the first stored threshold. |
 | Duration | moving, else elapsed | product assumption | `summary_duration_s` in `backend/canonical/activity_summary.py:117`. |
 
 ## Allowed statements
@@ -231,8 +234,6 @@ hour, or a mix of branches on one scale.
 
 ## Open points
 
-- **Pending athlete decision:** handling of sessions without a valid dated
-  FTP or threshold.
 - **Unverified primary sources:**
   - R18 itself was not read: the NP definition and the TSS formula are
     confirmed only in vendor text (V1).

@@ -201,8 +201,9 @@ class SyncJobExecutorTests(unittest.TestCase):
         self.details.prefetch_new.return_value = {"fetched": 2, "failed": 0}
         self.executor = self.make_executor()
 
-    def make_executor(self) -> SyncJobExecutor:
+    def make_executor(self, after_job: Any = None) -> SyncJobExecutor:
         historical_sync = build_historical_sync(self.state, self.queue)
+        self.after_job_calls: list[bool] = []
         return SyncJobExecutor(
             job_owners=build_job_owners(
                 nutrition_sync_service=self.nutrition,
@@ -231,6 +232,7 @@ class SyncJobExecutorTests(unittest.TestCase):
             historical_sync=historical_sync,
             outcome_service=self.outcomes,
             all_sync_days=-1,
+            after_job=after_job or (lambda: self.after_job_calls.append(True)),
         )
 
     def test_executor_has_concrete_owner_dependencies_not_parameter_bag(self) -> None:
@@ -244,6 +246,7 @@ class SyncJobExecutorTests(unittest.TestCase):
                 "outcome_service",
                 "all_sync_days",
                 "registry",
+                "after_job",
             },
         )
 
@@ -744,6 +747,26 @@ class SyncJobExecutorTests(unittest.TestCase):
 
         self.assertEqual(self.outcomes.update_calls, [("job-123", "failed")])
         self.assertNotIn("store failure", " ".join(logs.output))
+
+    def test_completed_job_runs_the_after_job_hook(self) -> None:
+        self.executor.run(self.job("intervals"))
+        self.assertEqual(self.after_job_calls, [True])
+
+    def test_failed_job_skips_the_after_job_hook(self) -> None:
+        self.intervals.error = RuntimeError("provider failure")
+        self.executor.run(self.job("intervals"))
+        self.assertEqual(self.after_job_calls, [])
+
+    def test_failing_after_job_hook_keeps_the_completed_outcome(self) -> None:
+        def broken() -> None:
+            raise RuntimeError("hook failure")
+
+        executor = self.make_executor(after_job=broken)
+        with self.assertLogs("backend.sync.executor", level="ERROR") as logs:
+            executor.run(self.job("intervals"))
+        self.assertEqual(len(self.outcomes.complete_calls), 1)
+        self.assertEqual(self.outcomes.failure_calls, [])
+        self.assertNotIn("hook failure", " ".join(logs.output))
 
     def test_run_records_execution_failure_without_reraising(self) -> None:
         failure = RuntimeError("isolated provider failure")

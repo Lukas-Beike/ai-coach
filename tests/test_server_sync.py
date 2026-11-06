@@ -2525,6 +2525,7 @@ class ServerSyncTests(ServerTestCase):
                     "start_date_local": today + "T07:00:00",
                     "moving_time": 7200,
                     "icu_training_load": 110,
+                    "icu_weighted_avg_watts": 270,
                 }
             ],
         }
@@ -2532,8 +2533,10 @@ class ServerSyncTests(ServerTestCase):
         self.assertEqual(performance["thresholds"]["ftp_w"], 300)
         self.assertEqual(performance["current_load"]["tsb"], -6)
         self.assertEqual(performance["recovery"]["sleep_hours"], 7.5)
+        # The local load (card M6), not Intervals.icu's 110: NP 270 W at the
+        # Intervals.icu FTP 300 W for 2 h is IF 0.9, 2 × 0.81 × 100 = 162 TSS.
         self.assertEqual(
-            performance["rolling_training"]["last_7_days"]["training_load"], 110.0
+            performance["rolling_training"]["last_7_days"]["training_load"], 162.0
         )
         self.assertNotIn("ai_estimates", performance)
 

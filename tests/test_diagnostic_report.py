@@ -194,6 +194,7 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                 "canonical_read",
                 "canonical_session_conflicts",
                 "canonical_provider_composition",
+                "local_load",
                 "logs",
                 "debug_capture",
                 "note",
@@ -298,7 +299,8 @@ class DiagnosticReportServiceTests(unittest.TestCase):
         )
         # Two extra reads: the Garmin configured signal checks the token blob and
         # the disconnect marker inside the same snapshot (see transactions above).
-        self.assertEqual(self.key_values.get.call_count, 10)
+        # One more reads the local load state (card M6).
+        self.assertEqual(self.key_values.get.call_count, 11)
 
     def test_snapshot_size_counts_utf8_bytes_without_fetching_the_payload(self):
         with closing(sqlite3.connect(":memory:")) as db:

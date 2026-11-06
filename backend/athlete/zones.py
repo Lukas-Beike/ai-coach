@@ -193,10 +193,14 @@ class ZoneConfigurationService:
         database_manager: Any,
         reader: ZoneConfigurationReader,
         now: Callable[[], str],
+        *,
+        on_change: Callable[[], None] = lambda: None,
     ) -> None:
         self._database_manager = database_manager
         self._reader = reader
         self._now = now
+        # Runs after a committed save or removal (the local load follows it).
+        self._on_change = on_change
 
     def configurations(self) -> tuple[ZoneConfiguration, ...]:
         """Every active local and provider configuration."""
@@ -230,6 +234,7 @@ class ZoneConfigurationService:
                 current,
                 _audit_value(configuration),
             )
+        self._on_change()
         return self._receipt(public_configuration(configuration), change)
 
     def remove(self, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -247,6 +252,7 @@ class ZoneConfigurationService:
             change = change_history.record_change(
                 db, ENTITY_TYPE, key, "delete", current, None
             )
+        self._on_change()
         return self._receipt(None, change)
 
     def current(
