@@ -103,6 +103,8 @@ COACH_ACTIVITY_FIELDS = (
     "name",
     "sport",
     "environment",
+    "terrain",
+    "assist",
     "moving_duration_s",
     "distance_m",
     "elevation_gain_m",

@@ -20,7 +20,6 @@ from backend.canonical.activity_detail import ActivityLapSet
 from backend.canonical.records import (
     ActivityRecord,
     Provenance,
-    session_assist,
     session_terrain,
 )
 from backend.canonical.vocabulary import (
@@ -76,7 +75,7 @@ def analysis_input(
 ) -> AnalysisInput:
     """Build the analysis input of one activity from its merged detail.
 
-    ``members`` are the session's other records, for its terrain and assist.
+    ``members`` are the session's records in measured order, for its terrain.
     """
     stream_fields, channel_labels = _streams(streams)
     lap_fields = _laps(laps, streams)
@@ -107,19 +106,17 @@ def analysis_input(
 def analysis_sport(
     record: ActivityRecord, members: Sequence[ActivityRecord] = ()
 ) -> dict[str, Any]:
-    """Return the canonical sport, environment, terrain, assist and trail flag.
+    """Return the canonical sport, environment and trail-run flag.
 
-    Sport and environment are ``record``'s; terrain and assist follow
-    ``session_terrain`` and ``session_assist`` over ``record`` and ``members``.
-    ``trail`` marks a trail run, whose pace the road-pace analyses leave out.
+    Sport and environment are ``record``'s. The terrain follows
+    ``session_terrain`` over ``members`` (the session's records in measured
+    order, as its summary reads them), else over ``record`` alone. ``trail``
+    marks a trail run, whose pace the road-pace analyses leave out.
     """
-    ordered = (record, *members)
-    terrain = session_terrain(ordered)
+    terrain = session_terrain(members or (record,))
     return {
         "sport": record.sport.value,
         "environment": record.environment.value,
-        "terrain": terrain.value,
-        "assist": session_assist(ordered).value,
         "trail": record.sport is Sport.RUN and terrain is Terrain.TRAIL,
     }
 

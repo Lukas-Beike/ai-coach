@@ -70,7 +70,10 @@ RUN_SUMMARY = {
 
 class CoachActivitySummaryParityTests(unittest.TestCase):
     def test_coach_activity_carries_the_summary_values_without_private_fields(self):
-        row = compact_coach_activity(RIDE_SUMMARY, select=planning_context.selected)
+        row = compact_coach_activity(
+            {**RIDE_SUMMARY, "terrain": "gravel", "assist": "electric"},
+            select=planning_context.selected,
+        )
         self.assertEqual(
             row,
             {
@@ -79,6 +82,8 @@ class CoachActivitySummaryParityTests(unittest.TestCase):
                 "name": "Endurance",
                 "sport": "ride",
                 "environment": "outdoor",
+                "terrain": "gravel",
+                "assist": "electric",
                 "moving_duration_s": 5400,
                 "distance_m": 42000.0,
                 "elevation_gain_m": 410.0,

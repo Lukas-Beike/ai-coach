@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final
 
-from backend.canonical.vocabulary import Terrain
+from backend.canonical.activity_summary import summary_is_trail_run
 from backend.performance.session_execution import rounded_metric
 
 METHOD: Final = "comparable-sessions-v1"
@@ -140,6 +140,8 @@ def _peers(
         and first.isoformat() <= str(row.get("date") or "") < day.isoformat()
         and row.get("sport") == own.get("sport")
         and row.get("environment") == own.get("environment")
+        # Trail runs compare only with trail runs, road runs only with road runs.
+        and summary_is_trail_run(row) == summary_is_trail_run(own)
         and _sound_peer(mine, row.get("execution_summary"))
     ]
 
@@ -279,7 +281,7 @@ def _same_kind(row: Mapping[str, Any], sport: str, environment: str) -> bool:
     return (
         row.get("sport") == sport
         and row.get("environment") == environment
-        and not (sport == "run" and row.get("terrain") == Terrain.TRAIL.value)
+        and not summary_is_trail_run(row)
     )
 
 

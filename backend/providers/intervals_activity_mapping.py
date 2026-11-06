@@ -459,19 +459,17 @@ def _qualifiers(
 
 
 def intervals_analysis_sport(row: Mapping[str, object]) -> dict[str, object]:
-    """Return the canonical sport, environment, terrain, assist and trail flag of a row.
+    """Return the canonical sport, environment and trail-run flag of a raw row.
 
     The same classification the mapper applies; ``trail`` marks a trail terrain.
     """
     raw_type = row.get("type")
     type_name = raw_type.strip() if isinstance(raw_type, str) else None
     sport, environment = _classify(type_name, _identity_text(row))
-    terrain, assist = _qualifiers(type_name, row)
+    terrain, _assist = _qualifiers(type_name, row)
     return {
         "sport": sport.value,
         "environment": environment.value,
-        "terrain": terrain.value,
-        "assist": assist.value,
         "trail": terrain is Terrain.TRAIL,
     }
 

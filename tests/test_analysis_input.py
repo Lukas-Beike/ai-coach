@@ -22,7 +22,6 @@ from backend.canonical.activity_detail import (
 from backend.canonical.records import ActivityRecord, Provenance
 from backend.canonical.vocabulary import (
     ActivityDetailOrigin,
-    Assist,
     Environment,
     LapKind,
     LapSource,
@@ -333,7 +332,6 @@ class AnalysisInputMappingTests(unittest.TestCase):
                 )
                 adapted = analysis_input(trail, None, None)
                 self.assertTrue(adapted.activity["trail"])
-                self.assertEqual("trail", adapted.activity["terrain"])
 
     def test_an_outdoor_run_without_a_trail_terrain_is_not_a_trail_run(self) -> None:
         # The provider no longer decides: an outdoor Intervals.icu or Garmin run
@@ -345,22 +343,19 @@ class AnalysisInputMappingTests(unittest.TestCase):
                 )
                 self.assertFalse(adapted.activity["trail"])
 
-    def test_session_terrain_and_assist_come_from_another_record_when_unknown(
+    def test_the_session_terrain_comes_from_its_records_in_measured_order(
         self,
     ) -> None:
-        primary = record(Sport.RIDE)
-        other = dataclasses.replace(
-            as_provider(primary, ProviderId.GARMIN),
-            terrain=Terrain.MOUNTAIN,
-            assist=Assist.ELECTRIC,
+        primary = record(Sport.RUN)
+        trail = dataclasses.replace(
+            as_provider(primary, ProviderId.GARMIN), terrain=Terrain.TRAIL
         )
-        adapted = analysis_input(primary, None, None, members=(other,))
-        self.assertEqual("mountain", adapted.activity["terrain"])
-        self.assertEqual("electric", adapted.activity["assist"])
-        known = dataclasses.replace(primary, terrain=Terrain.ROAD, assist=Assist.NONE)
-        adapted = analysis_input(known, None, None, members=(other,))
-        self.assertEqual("road", adapted.activity["terrain"])
-        self.assertEqual("none", adapted.activity["assist"])
+        adapted = analysis_input(primary, None, None, members=(primary, trail))
+        self.assertTrue(adapted.activity["trail"])
+        road = dataclasses.replace(trail, terrain=Terrain.ROAD)
+        adapted = analysis_input(primary, None, None, members=(road, trail))
+        self.assertFalse(adapted.activity["trail"])
+        self.assertNotIn("terrain", adapted.activity)
 
     def test_moving_flags_map_to_booleans_and_gaps(self) -> None:
         source = candidate(

@@ -187,12 +187,8 @@ class MapperQualifierTests(unittest.TestCase):
         self.assertIs(Terrain.UNKNOWN, intervals("Swim", pool_length=0).terrain)
 
     def test_the_raw_intervals_detail_classification_matches_the_mapper(self) -> None:
-        analysed = intervals_analysis_sport({"type": "TrailRun"})
-        self.assertEqual("trail", analysed["terrain"])
-        self.assertTrue(analysed["trail"])
-        self.assertEqual(
-            "electric", intervals_analysis_sport({"type": "EBikeRide"})["assist"]
-        )
+        self.assertTrue(intervals_analysis_sport({"type": "TrailRun"})["trail"])
+        self.assertFalse(intervals_analysis_sport({"type": "Run"})["trail"])
 
 
 class StorageTests(unittest.TestCase):
@@ -220,7 +216,9 @@ class StorageTests(unittest.TestCase):
             "duration_s": 3600.0,
             "distance_m": 10000.0,
             "name": "Synthetic",
-            "details": '{"terrain":"trail","native_type":"trail_running"}',
+            "terrain": "trail",
+            "assist": None,
+            "native_type": "trail_running",
         }
         entry = _entry(row)
         self.assertEqual("trail_running", entry["native_type"])
@@ -237,6 +235,14 @@ class SessionAndAnalysisTests(unittest.TestCase):
         plain = activity_summary("act_2", [intervals("Workout")], UTC)
         self.assertNotIn("terrain", plain)
         self.assertNotIn("assist", plain)
+
+    def test_an_electric_record_wins_over_a_generic_ride(self) -> None:
+        generic = garmin("cycling")
+        ebike = intervals("EBikeRide")
+        self.assertIs(Assist.NONE, generic.assist)
+        summary = activity_summary("act_1", [generic, ebike], UTC)
+        self.assertEqual("electric", summary["assist"])
+        self.assertNotIn("assist", activity_summary("act_2", [generic], UTC))
 
     def test_e_bike_hours_are_volume_with_their_own_label(self) -> None:
         rows = [

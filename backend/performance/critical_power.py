@@ -16,7 +16,7 @@ from datetime import date
 from statistics import linear_regression
 from typing import Any, Final
 
-from backend.canonical.vocabulary import Terrain
+from backend.canonical.activity_summary import summary_is_trail_run
 
 METHOD_ID: Final = "critical-power-speed"
 METHOD_VERSION: Final = 1
@@ -178,7 +178,7 @@ def _fits(row: dict[str, Any], sport: str, environment: str) -> bool:
     return (
         row.get("sport") == sport
         and row.get("environment") == environment
-        and not (sport == "run" and row.get("terrain") == Terrain.TRAIL.value)
+        and not summary_is_trail_run(row)
     )
 
 

@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+from backend.activities.detail_contract import measured_order
 from backend.activities.detail_merge import merge_details
 from backend.canonical.records import ActivityRecord
 from backend.canonical.vocabulary import ProviderId
@@ -171,7 +172,9 @@ def _session_curve(
     ]
     merged = merge_details(detail_candidates(records, stored))
     primary = primary_analysis_record(records)
-    adapted = analysis_input(primary, merged.streams, merged.laps, members=records)
+    adapted = analysis_input(
+        primary, merged.streams, merged.laps, members=measured_order(records)
+    )
     return SessionCurve(
         power=power_profile(
             adapted.activity, source_label=adapted.label_for("watts", "moving")
@@ -211,7 +214,7 @@ def _fingerprint(
             PACE_METHOD,
             EXECUTION_METHOD,
             sorted([key.content_sha256, key.fetched_at] for key in laps),
-            analysis_sport(primary_analysis_record(records), records),
+            analysis_sport(primary_analysis_record(records), measured_order(records)),
             sorted(
                 _canonical(
                     [

@@ -105,7 +105,7 @@ def activity_summary(
     terrain, assist = session_terrain(measured), session_assist(measured)
     if terrain is not Terrain.UNKNOWN:
         summary["terrain"] = terrain.value
-    if assist is not Assist.UNKNOWN:
+    if assist is Assist.ELECTRIC:
         summary["assist"] = assist.value
     if offset is not None:
         summary["local_offset_minutes"] = offset

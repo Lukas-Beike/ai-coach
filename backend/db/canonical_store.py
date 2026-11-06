@@ -70,6 +70,11 @@ _LOCAL_OFFSET_KEY: Final = "local_offset_minutes"
 _TERRAIN_KEY: Final = "terrain"
 _ASSIST_KEY: Final = "assist"
 _NATIVE_TYPE_KEY: Final = "native_type"
+# The stored terrain, assist and native type of ``r``, as columns named by key.
+_QUALIFIER_COLUMNS: Final = ", ".join(
+    f"json_extract(r.details, '$.{key}') AS {key}"
+    for key in (_TERRAIN_KEY, _ASSIST_KEY, _NATIVE_TYPE_KEY)
+)
 # ActivityRecord summary fields stored in the details under their own names.
 ACTIVITY_SUMMARY_DETAIL_FIELDS: Final = (
     "intensity",
@@ -1586,6 +1591,11 @@ def activity_qualifiers(details: object) -> dict[str, Any]:
     return _activity_qualifiers(_activity_details_object(details))
 
 
+def row_qualifiers(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the terrain, assist and native type columns of a member row, if valid."""
+    return _activity_qualifiers(row)
+
+
 def _stored_zones(value: object) -> tuple[tuple[str, float], ...] | None:
     if not isinstance(value, list) or not value or len(value) > MAX_ZONE_COUNT:
         return None
@@ -2266,7 +2276,9 @@ def session_member_rows(db: Any, activity_id: str) -> list[dict[str, Any]]:
     return _fetch_all(
         db,
         "SELECT r.activity_id AS session_id, r.provider, r.recorded_by, r.sport, "
-        "r.started_at, r.duration_s, r.distance_m, r.name, r.details FROM activity_records AS r "
+        "r.started_at, r.duration_s, r.distance_m, r.name, "
+        + _QUALIFIER_COLUMNS
+        + " FROM activity_records AS r "
         "JOIN activity_sessions AS s ON s.activity_id = r.activity_id "
         "WHERE r.state = ? AND ((s.activity_id = ? AND s.state = ?) "
         "OR (s.state = ? AND s.merged_into = ?)) "
@@ -2295,7 +2307,9 @@ def merge_candidate_rows(
     return _fetch_all(
         db,
         "SELECT s.activity_id AS session_id, r.provider, r.recorded_by, r.sport, "
-        "r.started_at, r.duration_s, r.distance_m, r.name, r.details FROM activity_sessions AS s "
+        "r.started_at, r.duration_s, r.distance_m, r.name, "
+        + _QUALIFIER_COLUMNS
+        + " FROM activity_sessions AS s "
         "JOIN activity_sessions AS m ON m.activity_id = s.activity_id "
         "OR (m.state = ? AND m.merged_into = s.activity_id) "
         "JOIN activity_records AS r ON r.activity_id = m.activity_id "

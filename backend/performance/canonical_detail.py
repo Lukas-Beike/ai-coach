@@ -214,7 +214,7 @@ class CanonicalDetailReader:
             merged.streams,
             merged.laps,
             decoupling=_decoupling(payload),
-            members=records,
+            members=measured_order(records),
         )
         targets = payload.get("target_snapshot")
         # Each analysis credits only the providers of the channels it reads.

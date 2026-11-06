@@ -84,7 +84,7 @@ PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     ),
     "intervals_activity_mapping": (
         (10,),
-        "b5f143b7245246f90b30073c177d5fc992064ffefd45c8cda30025f32842fc14",
+        "814125637b58cd0ec59d6484a2db42c46b8f05fa0c279b00e84fa7877b2b005f",
     ),
     "intervals_power_curve_mapping": (
         (1,),

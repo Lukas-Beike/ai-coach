@@ -637,7 +637,14 @@ def session_terrain(records: Sequence[ActivityRecord]) -> Terrain:
 
 
 def session_assist(records: Sequence[ActivityRecord]) -> Assist:
-    """Return a session's motor assistance by the same rule as ``session_terrain``."""
+    """Return a session's motor assistance, primary record first.
+
+    ELECTRIC wins whenever any record names it: a generic type such as a plain
+    "Ride" maps to NONE, so it cannot rule motor assistance out. Otherwise the
+    first known value, as in ``session_terrain``.
+    """
+    if any(record.assist is Assist.ELECTRIC for record in records):
+        return Assist.ELECTRIC
     return next(
         (record.assist for record in records if record.assist is not Assist.UNKNOWN),
         Assist.UNKNOWN,
