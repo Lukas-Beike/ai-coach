@@ -28,7 +28,10 @@ PROVIDERS = ROOT / "backend" / "providers"
 
 # Mapping module -> the modules whose MAPPER_VERSION replays its output.
 REPLAYED_BY: Final[dict[str, tuple[str, ...]]] = {
-    "fit_activity_detail_mapping": ("fit_activity_detail_mapping",),
+    "fit_activity_detail_mapping": (
+        "fit_activity_detail_mapping",
+        "garmin_activity_detail_mapping",
+    ),
     "garmin_activity_detail_mapping": ("garmin_activity_detail_mapping",),
     "garmin_activity_mapping": ("garmin_activity_mapping",),
     "garmin_gear_mapping": ("garmin_health_mapping",),
@@ -51,12 +54,12 @@ NOT_REPLAYED: Final[dict[str, str]] = {
 # Module -> (replaying versions, code fingerprint).
 PINNED: Final[dict[str, tuple[tuple[int, ...], str]]] = {
     "fit_activity_detail_mapping": (
-        (2,),
+        (2, 3),
         "43952bd67a189645af8944a284a5902c66e498d9cb4f8dfbc85285b59910235a",
     ),
     "garmin_activity_detail_mapping": (
-        (2,),
-        "581b457314c458d0c4fd5378e5785a6494372d83d53eb01be5d7b5d549815e9c",
+        (3,),
+        "46f1435e688f51d79280657735473411f710cf0827f44c161639a26096261121",
     ),
     "garmin_activity_mapping": (
         (13,),

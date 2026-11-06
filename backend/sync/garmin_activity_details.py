@@ -55,6 +55,7 @@ BACKFILL_WINDOW: Final = timedelta(days=90)
 BACKFILL_RATE_LIMIT_PAUSE: Final = timedelta(seconds=GARMIN_CAPABILITY_PAUSE_SECONDS)
 BACKFILL_STATE_KEY: Final = "garmin_activity_detail_backfill"
 BACKFILL_RETRY_ATTEMPTS: Final = 3
+# The optional ``activity_fit`` part pauses only itself, never the other parts.
 DETAIL_CAPABILITIES: Final = (
     "activity_details",
     "activity_splits",

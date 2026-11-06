@@ -553,3 +553,63 @@ class GarminActivityDetailMappingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _synthetic_fit():
+    """Three records and two device laps, built with the FIT test builder."""
+    from tests.test_fit_activity_detail_mapping import _fit, _lap, _record
+
+    return _fit(
+        records=[
+            _record(1000, distance=0, speed=2500, hr=120, power=200),
+            _record(1001, distance=250, speed=2500, hr=125, power=210),
+            _record(1002, distance=500, speed=2600, hr=130, power=220),
+        ],
+        laps=[
+            _lap(start=1000, elapsed=1000, timer=1000, distance=250),
+            _lap(start=1001, elapsed=1000, timer=1000, distance=250),
+        ],
+    )
+
+
+class GarminFitPartTests(unittest.TestCase):
+    """A decodable FIT file wins over charts and splits; they stay the fallback."""
+
+    def test_fit_streams_and_laps_replace_charts_and_splits(self):
+        result = _map(_collected(fit=_synthetic_fit()))
+
+        streams = _only(result, ActivityStreamSet)
+        laps = _only(result, ActivityLapSet)
+        self.assertEqual(streams.resolution, StreamResolution.FULL)
+        self.assertEqual(streams.provenance.provider, ProviderId.GARMIN)
+        self.assertEqual(len(laps.laps), 2)
+        self.assertEqual(laps.lap_source, LapSource.DEVICE_LAPS)
+        self.assertEqual(len(_records_of(result, ZoneDistribution)), 2)
+
+    def test_without_fit_charts_and_splits_are_mapped_as_before(self):
+        result = _map(_collected())
+
+        self.assertEqual(
+            _only(result, ActivityStreamSet).resolution, StreamResolution.DOWNSAMPLED
+        )
+        self.assertEqual(
+            len(_only(result, ActivityLapSet).laps),
+            len(_fixture("splits")["lapDTOs"]),
+        )
+
+    def test_fit_alone_yields_streams_and_laps(self):
+        result = _map({"activity_id": ID, "fit": _synthetic_fit()})
+
+        self.assertEqual(
+            _only(result, ActivityStreamSet).resolution, StreamResolution.FULL
+        )
+        self.assertEqual(len(_only(result, ActivityLapSet).laps), 2)
+        self.assertEqual(result.issues, ())
+
+    def test_undecodable_fit_falls_back_and_reports_one_issue(self):
+        result = _map(_collected(fit=b"not a fit file"))
+
+        self.assertEqual(
+            _only(result, ActivityStreamSet).resolution, StreamResolution.DOWNSAMPLED
+        )
+        self.assertIn(_issue("fit", IssueReason.INVALID_TYPE), result.issues)
