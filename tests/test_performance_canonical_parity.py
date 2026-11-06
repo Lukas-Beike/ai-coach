@@ -350,6 +350,7 @@ class CanonicalLoadParityTests(unittest.TestCase):
             current_days(legacy_rows),
             PARITY_TODAY,
             canonical=EMPTY_PERFORMANCE_INPUTS,
+            session_feedback=None,
         )["load"]
         # The canonical value is the number the comma-decimal mapper fix yields.
         canonical_rows = [{"id": PARITY_DAY, "ctl": 58.2, "atl": 60}]
@@ -640,6 +641,7 @@ class CanonicalWiringTests(unittest.TestCase):
             PARITY_PROFILE,
             PARITY_TODAY,
             canonical=EMPTY_PERFORMANCE_INPUTS,
+            session_feedback=None,
         )
         self.assertEqual(manager.events, ["enter", "exit"])
         # Only the unbounded wellness reads happen; no windowed read follows.
@@ -658,6 +660,7 @@ class CanonicalWiringTests(unittest.TestCase):
             PARITY_PROFILE,
             PARITY_TODAY,
             canonical=EMPTY_PERFORMANCE_INPUTS,
+            session_feedback=None,
         )
 
     def test_activity_performance_inputs_share_the_snapshot_unit(self) -> None:
@@ -811,6 +814,7 @@ class CanonicalWiringTests(unittest.TestCase):
             PARITY_PROFILE,
             PARITY_TODAY,
             canonical=EMPTY_PERFORMANCE_INPUTS,
+            session_feedback=None,
         )
 
     def test_coach_performance_without_a_source_keeps_the_legacy_call(self) -> None:
@@ -834,6 +838,7 @@ class CanonicalWiringTests(unittest.TestCase):
             PARITY_PROFILE,
             PARITY_TODAY,
             canonical=EMPTY_PERFORMANCE_INPUTS,
+            session_feedback=None,
         )
 
 

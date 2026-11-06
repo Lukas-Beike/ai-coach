@@ -171,7 +171,14 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         )
         self.assertEqual(
             result,
-            {"days": 1, "sessions": 2, "duration_hours": 1.5, "training_load": 12.5},
+            {
+                "days": 1,
+                "sessions": 2,
+                "duration_hours": 1.5,
+                "training_load": 12.5,
+                # #1672: a structured load is no TSS-scale number.
+                "load_missing_sessions": 1,
+            },
         )
 
     def test_rollup_decimal_comma_load_is_zero_while_atl_accepts_it(self) -> None:
@@ -191,6 +198,8 @@ class CharacterizationLoadRollupTests(unittest.TestCase):
         self.assertEqual(result["sessions"], 1)
         self.assertEqual(result["duration_hours"], 0.5)
         self.assertEqual(result["training_load"], 0.0)
+        # #1672: the unsummed load is reported as missing, not dropped silently.
+        self.assertEqual(result["load_missing_sessions"], 1)
 
     def test_rollup_sums_negative_loads_without_bounds(self) -> None:
         # Quirk: the rollup has no lower bound, so negative loads reduce totals.

@@ -690,7 +690,13 @@ class ServerPerformanceTests(ServerTestCase):
         )
         self.assertEqual(
             rollup,
-            {"days": 2, "sessions": 2, "duration_hours": 1.0, "training_load": 42.5},
+            {
+                "days": 2,
+                "sessions": 2,
+                "duration_hours": 1.0,
+                "training_load": 42.5,
+                "load_missing_sessions": 1,
+            },
         )
 
     def test_activity_validation_exposes_running_evidence_against_provider_values(self):
