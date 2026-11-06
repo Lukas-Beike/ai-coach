@@ -225,3 +225,21 @@ test("weekly daily-activity mean averages known days and keeps empty weeks as ga
   assert.equal(analysisValidPoint(weeks[0]) && weeks[0].value, 500, "unknown days are not zero, a real zero counts");
   assert.equal(weeks[1].value, null);
 });
+
+test("12-week body charts show the latest reading of each week and draw a single week as a point", () => {
+  const { bodyWeeklyPoints, analysisPlottable } = loadFunctions("analysis.js", ["analysisValidPoint", "analysisPlottable", "bodyWeeklyPoints"], {
+    addDateKey: (key, days) => new Date(Date.parse(key) + days * 86400000).toISOString().slice(0, 10),
+  });
+  const points = [
+    { date: "2026-10-31", value: null },
+    { date: "2026-11-02", value: 15.6 },
+    { date: "2026-11-04", value: 15.2 },
+    { date: "2026-11-06", value: 14.9 },
+  ];
+  const weeks = bodyWeeklyPoints(points, "2026-10-24", "2026-11-06");
+  assert.equal(weeks.length, 2);
+  assert.deepEqual([weeks[0].value, weeks[0].count], [null, 0], "a week without readings stays a gap");
+  assert.deepEqual([weeks[1].date, weeks[1].value, weeks[1].count], ["2026-11-06", 14.9, 3], "the week shows its last reading, not the median 15.2");
+  assert.equal(analysisPlottable({ points: weeks, minPoints: 1 }), true, "body charts draw one weekly value");
+  assert.equal(analysisPlottable({ points: weeks }), false, "other charts still need two values");
+});

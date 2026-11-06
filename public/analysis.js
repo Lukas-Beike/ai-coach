@@ -141,7 +141,7 @@ function analysisChart(title, series, unit, start, end, note, {
   });
   if (showLegend) section.append(legend);
 
-  if (!series.some((item) => item.bars || item.points.filter(valid).length >= 2)) {
+  if (!series.some(analysisPlottable)) {
     section.append(reportNode("p", "Ein einzelner Messwert zeigt noch keinen Verlauf; mindestens zwei datierte Werte sind erforderlich.", "empty"));
     appendAnalysisTable(section, title, series, unit);
     return section;
@@ -193,6 +193,11 @@ function analysisValidPoint(point) {
   return point?.value != null && Number.isFinite(Number(point.value));
 }
 
+// Body charts set minPoints: 1 so a single weekly value is still drawn as a point.
+function analysisPlottable(item) {
+  return item.bars || item.points.filter(analysisValidPoint).length >= (item.minPoints ?? 2);
+}
+
 function analysisHasData(series) {
   return series.some((item) => item.points.some(analysisValidPoint));
 }
@@ -237,7 +242,7 @@ function appendAnalysisTable(section, title, series, unit) {
 
 function analysisPlotScales(series, start, end, { unit = "", zeroCentered = false } = {}) {
   const values = series.flatMap((item) => [
-    ...(item.bars || item.points.filter(analysisValidPoint).length >= 2 ? item.points.filter(analysisValidPoint) : []).flatMap((point) => [Number(point.value), point.lower, point.upper].filter((v) => v != null && Number.isFinite(Number(v))).map(Number)),
+    ...(analysisPlottable(item) ? item.points.filter(analysisValidPoint) : []).flatMap((point) => [Number(point.value), point.lower, point.upper].filter((v) => v != null && Number.isFinite(Number(v))).map(Number)),
     ...(item.range ? [item.range.lower, item.range.upper] : []),
     ...(item.target != null ? [item.target] : []),
   ]);
@@ -351,7 +356,7 @@ function appendAnalysisSeriesPoints(svg, item, { index, unit, scales, zeroCenter
   const latest = item.points.findLast(analysisValidPoint);
   const latestLabel = latest ? analysisValue(latest.value, item.unit || unit).split(" ")[0] : null;
   const latestIndex = item.points.findLastIndex(analysisValidPoint);
-  if (!item.bars && item.points.filter(analysisValidPoint).length < 2) return path;
+  if (!analysisPlottable(item)) return path;
   item.points.forEach((point, pointIndex) => {
     if (!analysisValidPoint(point)) {
       flushAnalysisArea(svg, segment, zeroCentered, color, x, y);
@@ -903,13 +908,9 @@ function bodyWeeklyPoints(points, start, end) {
     const offset = Math.min(6, Math.round((Date.parse(end) - Date.parse(weekStart)) / 86400000));
     const boundedEnd = addDateKey(weekStart, offset);
     const readings = points.filter((point) => point.date >= weekStart && point.date <= boundedEnd && analysisValidPoint(point));
-    const values = readings.map((point) => Number(point.value)).sort((a, b) => a - b);
-    const middle = Math.floor(values.length / 2);
-    let value = null;
-    if (values.length) value = values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
     const latest = readings.at(-1);
     weeks.push(latest
-      ? { ...latest, date: boundedEnd, value, count: readings.length, observedDate: latest.observed_at || latest.date }
+      ? { ...latest, date: boundedEnd, count: readings.length, observedDate: latest.observed_at || latest.date }
       : { date: boundedEnd, value: null, count: 0 });
   }
   return weeks;
@@ -932,6 +933,7 @@ function bodyMetricChart(metric, title, unit, window, period, preferred = {}) {
     color: index,
     noCurrentLine: true,
     sparse: true,
+    minPoints: 1,
     cadenceDays: period === "twelveWeeks" ? 7 : 1,
     explanation: metric === "cycling_w_per_kg"
       ? "Tageswert aus FTP oder eFTP geteilt durch das letzte Körpergewicht der vorherigen sieben Tage."
@@ -946,7 +948,7 @@ function bodyMetricChart(metric, title, unit, window, period, preferred = {}) {
   if (!chart) return null;
   chart.dataset.bodyMetric = metric;
   if (period === "twelveWeeks") chart.querySelectorAll(".analysis-info-tooltip").forEach((info) => {
-    info.append(reportNode("p", "12 rollierende Wochen: Median der Messungen je Woche. Datum nennt den letzten Messwert der Woche.", "analysis-reference-note"));
+    info.append(reportNode("p", "12 rollierende Wochen: letzter Messwert je Woche.", "analysis-reference-note"));
   });
   if (metric === "cycling_w_per_kg") chart.querySelectorAll(".analysis-info-tooltip").forEach((info, index) => {
     const item = entries[index];
