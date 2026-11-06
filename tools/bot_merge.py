@@ -80,11 +80,11 @@ def release_test_passed(pr, repository, token):
     return False
 
 
-def only_generated_skills(pr, repository, token):
+def only_generated_skills(number, repository, token):
     page = 1
     while True:
         files = request(
-            f"repos/{repository}/pulls/{pr['number']}/files?per_page=100&page={page}",
+            f"repos/{repository}/pulls/{int(number)}/files?per_page=100&page={page}",
             token,
         )
         if not files:
@@ -120,7 +120,7 @@ def merge_if_eligible(number, repository, token):
     ):
         return
     if pr["head"]["ref"] == OPENSPEC_BRANCH and not only_generated_skills(
-        pr, repository, token
+        number, repository, token
     ):
         return
     result = request(
