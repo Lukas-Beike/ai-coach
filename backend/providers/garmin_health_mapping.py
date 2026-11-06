@@ -858,7 +858,7 @@ def _field_value(field: _Field, number: float | None) -> float | None:
     """
     if number is None or (number == 0 and field.kind in _UNSET_WHEN_ZERO):
         return None
-    if field.kind is MetricKind.THRESHOLD_PACE and 0 < number < 1:
+    if field.kind == MetricKind.THRESHOLD_PACE and 0 < number < 1:
         number *= 10
     return float(round(number)) if field.whole else number
 
