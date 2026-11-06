@@ -79,7 +79,7 @@ def _not_found(error: BaseException) -> bool:
     return type(error).__name__ == "GarminConnectNotFoundError" or _status(error) == 404
 
 
-def _remote_failure(error: BaseException) -> Exception:
+def _remote_failure(error: BaseException) -> AppError | _StopRun:
     """Map an SDK failure to a fixed message; never forward Garmin's text."""
     status = _status(error)
     if status is not None and 400 <= status < 500 and status not in (401, 408, 429):
@@ -137,9 +137,9 @@ class GarminStrengthPushService:
             for item in results
             if item["status"] in {"error", "conflict"}
         ]
-        status = (
-            "ok" if not failed else "partial" if len(failed) < len(results) else "error"
-        )
+        status = "ok"
+        if failed:
+            status = "partial" if len(failed) < len(results) else "error"
         return {
             "ok": not failed,
             "status": status,
