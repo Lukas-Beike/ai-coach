@@ -211,6 +211,16 @@ def _effective_view(group: builtins.list[dict[str, Any]]) -> dict[str, Any]:
     return view
 
 
+def _session_rpes(value: dict[str, Any] | None) -> builtins.list[Any]:
+    """The stored session RPEs of an audit value's rows, in a stable order."""
+    rows = (value or {}).get("rows") or []
+    return sorted(
+        (str(row.get("activity_id")), row.get("session_rpe"))
+        for row in rows
+        if isinstance(row, dict)
+    )
+
+
 class ActivityFeedbackService:
     """Coordinate local activity-feedback use cases and their transactions."""
 
@@ -301,15 +311,6 @@ class ActivityFeedbackService:
         return self._save(self._references.resolve_reference(activity_id), value)
 
     def _save(self, reference: ActivityReference, value: Any) -> dict[str, Any]:
-        """Save, then request a local load pass when the session RPE changed."""
-        result, rpe_changed = self._save_feedback(reference, value)
-        if rpe_changed:
-            self._on_change()
-        return result
-
-    def _save_feedback(
-        self, reference: ActivityReference, value: Any
-    ) -> tuple[dict[str, Any], bool]:
         """Edit the effective feedback of the reference's session.
 
         Omitted fields keep their effective value. Clearing every field removes the
@@ -334,13 +335,15 @@ class ActivityFeedbackService:
                 feedback["activity_id"] = existing["activity_id"]
             own_row = feedback["activity_id"] == key
             _keep_omitted_fields(feedback, value, existing)
-            rpe_changed = existing.get("session_rpe") != feedback.get("session_rpe")
+            if existing.get("session_rpe") != feedback.get("session_rpe"):
+                # A session RPE feeds strength loads (M6); the requested pass
+                # waits for this writer, so it reads the committed rating.
+                self._on_change()
             if _is_cleared(feedback):
                 for row in group or [{"activity_id": key}]:
                     self._feedback_repository.delete(db, row["activity_id"])
                 change = self._record(db, group_key, group, None)
-                cleared = {"status": "ok", "activity_feedback": None, "change": change}
-                return cleared, rpe_changed
+                return {"status": "ok", "activity_feedback": None, "change": change}
             self._feedback_repository.upsert(
                 db,
                 feedback,
@@ -356,8 +359,7 @@ class ActivityFeedbackService:
         with self._database_manager.reader() as db:
             saved_group = self._groups(db).get(saved_key)
         saved = _effective_view(saved_group) if saved_group else feedback
-        result = {"status": "ok", "activity_feedback": saved, "change": change}
-        return result, rpe_changed
+        return {"status": "ok", "activity_feedback": saved, "change": change}
 
     @staticmethod
     def _record(
@@ -397,10 +399,9 @@ class ActivityFeedbackService:
     ) -> dict[str, Any] | None:
         """Replace the group's stored rows with the recorded ones, ids and times kept.
 
-        The undo commits after this returns; the requested local load pass waits
-        for the writer, so it reads the restored session RPE.
+        A restored session RPE requests a local load pass; the undo commits after
+        this returns and the pass waits for the writer.
         """
-        self._on_change()
         for row in (current or {}).get("rows") or []:
             self._feedback_repository.delete(db, str(row["activity_id"]))
         rows = (target or {}).get("rows")
@@ -415,6 +416,8 @@ class ActivityFeedbackService:
                     409, "Die Rückmeldung kann nicht wiederhergestellt werden."
                 )
             self._feedback_repository.restore(db, row)
+        if _session_rpes(current) != _session_rpes(target):
+            self._on_change()
         return _audit_value(self._groups(db).get(self._current_key(db, entity_id)))
 
     @staticmethod

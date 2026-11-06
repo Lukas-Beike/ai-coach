@@ -42,6 +42,7 @@ from backend.canonical.activity_summary import (
 from backend.canonical.domain_records import ZoneConfiguration
 from backend.canonical.rating_scales import GARMIN_RPE_SCALE, LOCAL_SESSION_RPE_SCALE
 from backend.canonical.records import Observation, fingerprint_inputs
+from backend.canonical.validation import MAX_ACTIVITY_LOAD
 from backend.canonical.vocabulary import (
     Environment,
     MetricKind,
@@ -172,8 +173,14 @@ class RpeCalibrations:
         ordered = sorted(pairs)
         self._days = [day for day, _ratio in ordered]
         self._ratios = [ratio for _day, ratio in ordered]
+        self._by_day: dict[date, RpeCalibration | None] = {}
 
     def on(self, day: date) -> RpeCalibration | None:
+        if day not in self._by_day:
+            self._by_day[day] = self._calibrate(day)
+        return self._by_day[day]
+
+    def _calibrate(self, day: date) -> RpeCalibration | None:
         start = day - timedelta(days=CALIBRATION_WINDOW_DAYS - 1)
         low = bisect.bisect_left(self._days, start)
         high = bisect.bisect_right(self._days, day)
@@ -339,11 +346,13 @@ def _heart_rate(
 
 def _session_rpe(
     sport: Sport,
-    rating: SessionRating | None,
+    rating: SessionRating | str | None,
     calibration: RpeCalibration | None,
 ) -> LocalLoad | str:
     if rating is None:
         return "no_rating"
+    if isinstance(rating, str):
+        return rating
     if calibration is None:
         return "not_calibrated"
     return _result(
@@ -365,7 +374,7 @@ def session_local_load(
     summary: Mapping[str, Any],
     thresholds: SessionThresholds,
     *,
-    rating: SessionRating | None = None,
+    rating: SessionRating | str | None = None,
     calibration: RpeCalibration | None = None,
 ) -> LocalLoad | str:
     """Return the session's local load, or the reason it has none.
@@ -583,10 +592,15 @@ class DatedThresholds:
 
 def _rating(
     summary: Mapping[str, Any], feedback: Mapping[str, Any] | None
-) -> SessionRating | None:
+) -> SessionRating | str:
+    """The session-RPE load (card M1), or its no-value reason (``no_rating`` etc.).
+
+    RPE 0 is a valid rating and gives 0 AU.
+    """
     entry, au = session_load(summary, feedback)
-    if au is None or au <= 0 or entry["rpe"] is None:
-        return None
+    if au is None or entry["rpe"] is None:
+        reason = str(entry.get("reason") or "no_rating")
+        return "no_rating" if reason == "no_rating" else reason
     return SessionRating(au=au, rpe=float(entry["rpe"]), rpe_scale=entry["rpe_scale"])
 
 
@@ -595,6 +609,16 @@ def _session_day(summary: Mapping[str, Any]) -> date | None:
         return date.fromisoformat(summary_local_date(summary))
     except ValueError:
         return None
+
+
+def rated_sessions(
+    summaries: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """The sessions whose feedback the strength branch reads; none without strength."""
+    if not any(_sport(summary) in SESSION_RPE_SPORTS for summary in summaries):
+        return []
+    sports = SESSION_RPE_SPORTS | CALIBRATION_SPORTS
+    return [summary for summary in summaries if _sport(summary) in sports]
 
 
 def calibration_pairs(
@@ -613,10 +637,16 @@ def calibration_pairs(
         day = _session_day(summary)
         if not isinstance(load, LocalLoad) or day is None:
             continue
-        if _sport(summary) not in CALIBRATION_SPORTS:
+        # A load the store rejects as outside the canonical bounds never
+        # calibrates (``invalid_value`` in the stage).
+        if _sport(summary) not in CALIBRATION_SPORTS or load.load > MAX_ACTIVITY_LOAD:
             continue
         rating = _rating(summary, feedback.get(stored_activity_key(summary)))
-        if rating is None or rating.rpe_scale not in CALIBRATION_RPE_SCALES:
+        if (
+            isinstance(rating, str)
+            or rating.au <= 0
+            or rating.rpe_scale not in CALIBRATION_RPE_SCALES
+        ):
             continue
         pairs.append((day, load.load / rating.au))
     return pairs

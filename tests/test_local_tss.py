@@ -38,6 +38,7 @@ from backend.performance.local_tss import (
     SessionRating,
     SessionThresholds,
     Threshold,
+    rated_sessions,
     session_loads,
     session_local_load,
 )
@@ -525,6 +526,27 @@ class SessionRpeCalibrationTests(unittest.TestCase):
         found = RpeCalibrations(pairs).on(DAY)
         assert found is not None
         self.assertEqual(found.factor, 0.3)
+
+    def test_rpe_zero_gives_zero_and_unbounded_rides_do_not_calibrate(self) -> None:
+        rides = [_ride(i, DAY - timedelta(days=i)) for i in range(20)]
+        load = self._loads(rides, _strength(DAY, rpe=0.0))["act_gym"]
+        assert isinstance(load, LocalLoad), load
+        self.assertEqual(load.load, 0.0)
+        # A 200 h unstopped recording is rejected by the store, so it never counts.
+        rides[0]["moving_duration_s"] = 720_000.0
+        self.assertEqual(
+            self._loads(rides, _strength(DAY))["act_gym"], "not_calibrated"
+        )
+
+    def test_rated_sessions_only_with_strength(self) -> None:
+        rides = [_ride(i, DAY) for i in range(3)]
+        walk = {**_ride(9, DAY), "id": "act_walk", "sport": "walk"}
+        self.assertEqual(rated_sessions([*rides, walk]), [])
+        gym = _strength(DAY)
+        self.assertEqual(
+            [item["id"] for item in rated_sessions([*rides, walk, gym])],
+            ["act_r0", "act_r1", "act_r2", "act_gym"],
+        )
 
     def test_unrated_strength_has_no_load(self) -> None:
         rides = [_ride(i, DAY - timedelta(days=i)) for i in range(20)]

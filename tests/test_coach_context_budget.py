@@ -275,30 +275,41 @@ PLAN = COMMON | {
 RATING_RULE = 500
 # Rule 8i on the local fitness, fatigue and form (M7, #1726).
 FITNESS_RULE = 300
+# Rule 8f's strength exception (session-RPE TSS, M6 v2, #1726).
+STRENGTH_LOAD_RULE = 200
 # Exact present sections and a character ceiling (whole prompt context) per case.
 EXPECTED: dict[str, tuple[set[str], int]] = {
-    "session_analysis": (COMMON | {"recovery"}, 26_000 + RATING_RULE + FITNESS_RULE),
+    "session_analysis": (
+        COMMON | {"recovery"},
+        26_000 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE,
+    ),
     # Progress and block review are one review with the same sections.
     "progress_review": (
         COMMON | {"planning", "recovery", "training_plans"},
-        31_000 + RATING_RULE + FITNESS_RULE,
+        31_000 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE,
     ),
     "block_review": (
         COMMON | {"planning", "recovery", "training_plans"},
-        31_000 + RATING_RULE + FITNESS_RULE,
+        31_000 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE,
     ),
-    "plan_week": (PLAN, 49_500 + RATING_RULE + FITNESS_RULE),
-    "plan_block": (PLAN, 63_500 + RATING_RULE + FITNESS_RULE),
-    "adjust_week": (PLAN, 45_500 + RATING_RULE + FITNESS_RULE),
+    "plan_week": (PLAN, 49_500 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE),
+    "plan_block": (PLAN, 63_500 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE),
+    "adjust_week": (PLAN, 45_500 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE),
     "morning_checkin": (
         COMMON | {"daily_planning_context", "recovery"},
-        26_000 + RATING_RULE + FITNESS_RULE,
+        26_000 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE,
     ),
-    "free_text_planning": (PLAN, 49_500 + RATING_RULE + FITNESS_RULE),
-    "general_question": (COMMON | {"recovery"}, 25_000 + RATING_RULE + FITNESS_RULE),
+    "free_text_planning": (
+        PLAN,
+        49_500 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE,
+    ),
+    "general_question": (
+        COMMON | {"recovery"},
+        25_000 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE,
+    ),
     "nutrition_message": (
         COMMON | {"nutrition_products"},
-        25_000 + RATING_RULE + FITNESS_RULE,
+        25_000 + RATING_RULE + FITNESS_RULE + STRENGTH_LOAD_RULE,
     ),
 }
 

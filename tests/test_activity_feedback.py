@@ -208,12 +208,20 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         service.save("activity-1", {"notes": "Good"})
         self.assertEqual(calls, [])
         service.save("activity-1", {"session_rpe": 6})
+        with self.manager.reader() as db:
+            entity = service.current(db, "activity:activity-1")[0]
+            self.assertIsNotNone(entity)
+        rated, entity_id = entity, "activity:activity-1"
         service.save("activity-1", {"notes": "Better"})
         self.assertEqual(calls, [True])
         service.save("activity-1", {"notes": "", "session_rpe": None})
         self.assertEqual(calls, [True, True])
+        # An undo requests a pass only when it restores a different session RPE.
         with self.manager.unit_of_work() as db:
-            service.restore_in_transaction(db, "activity:activity-1", None, None)
+            service.restore_in_transaction(db, entity_id, None, None)
+        self.assertEqual(calls, [True, True])
+        with self.manager.unit_of_work() as db:
+            service.restore_in_transaction(db, entity_id, None, rated)
         self.assertEqual(calls, [True, True, True])
 
     def test_empty_notes_delete_and_exact_response(self) -> None:

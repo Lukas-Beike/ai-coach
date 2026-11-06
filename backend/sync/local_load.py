@@ -42,6 +42,7 @@ from backend.performance.local_tss import (
     THRESHOLD_KINDS,
     DatedThresholds,
     LocalLoad,
+    rated_sessions,
     session_loads,
 )
 from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
@@ -220,7 +221,9 @@ class LocalLoadStage:
             summaries,
             thresholds,
             now=now,
-            feedback=feedback_by_session(summaries, self._session_feedback),
+            feedback=feedback_by_session(
+                rated_sessions(summaries), self._session_feedback
+            ),
         )
         self._save(
             db,
@@ -330,6 +333,14 @@ def with_local_loads(
             if derivation.get("threshold_after_session"):
                 item["load_threshold_after_session"] = True
             sources["training_load"] = DERIVED_LABEL
+            if calibration := derivation.get("calibration"):
+                item["load_calibration"] = {
+                    "tss_per_au": calibration.get("tss_per_au"),
+                    "pairs": calibration.get("pairs"),
+                    "session_rpe_au": (derivation.get("inputs") or {}).get(
+                        "session_rpe_au"
+                    ),
+                }
         intensity = rows.get(MetricKind.INTENSITY_FACTOR.value)
         if intensity is not None:
             item["intensity"] = intensity["value"]

@@ -156,7 +156,28 @@ class LocalLoadStoreTests(unittest.TestCase):
         rollup = activity_rollup([summary], 7, date(2026, 9, 10))
         self.assertEqual(rollup["load_missing_sessions"], 1)
 
-    def test_pass_reads_the_session_feedback_of_every_session(self) -> None:
+    def test_served_strength_load_names_its_calibration(self) -> None:
+        stored = {
+            "act_gym": {
+                "session_load": {
+                    "value": 90.0,
+                    "method_version": 2,
+                    "derivation": {
+                        "branch": "session_rpe",
+                        "inputs": {"session_rpe_au": 270.0},
+                        "calibration": {"tss_per_au": 1 / 3, "pairs": 20},
+                    },
+                }
+            }
+        }
+        (served,) = with_local_loads([{"id": "act_gym", "sport": "strength"}], stored)
+        self.assertEqual(served["load_branch"], "session_rpe")
+        self.assertEqual(
+            served["load_calibration"],
+            {"tss_per_au": 1 / 3, "pairs": 20, "session_rpe_au": 270.0},
+        )
+
+    def test_pass_reads_no_feedback_without_strength(self) -> None:
         requested: list[list[str]] = []
 
         def lookup(keys: list[str]) -> list[dict[str, Any]]:
@@ -171,8 +192,8 @@ class LocalLoadStoreTests(unittest.TestCase):
         )
         with self.manager.unit_of_work() as db:
             stage.run_batch(db)
-        self.assertEqual(len(requested), 1)
-        self.assertTrue(requested[0])
+        # The only session is a ride: no strength, so no feedback is resolved.
+        self.assertEqual(requested, [])
 
     def test_deleted_session_retires_its_load(self) -> None:
         with self.manager.unit_of_work() as db:

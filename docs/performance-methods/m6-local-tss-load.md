@@ -108,7 +108,7 @@ General rules:
   - `observed_on`: the session's local day.
   - `sport`: the session's sport.
   - `source_kind`: `derived`.
-  - `method`: `local-tss-load`, `method_version`: 1.
+  - `method`: `local-tss-load`, `method_version`: 2.
   - The owner is the canonical session.
   - `details` hold the branch, the pace basis, and the thresholds used with
     their sources and dates; a session-RPE value also holds `k`, its pair
