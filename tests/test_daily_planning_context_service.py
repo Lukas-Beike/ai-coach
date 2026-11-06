@@ -5,6 +5,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from canonical_recovery_support import RecordingReader, recovery_observation
 
@@ -313,6 +314,26 @@ class DailyPlanningContextServiceTests(unittest.TestCase):
         self.assertEqual(today["checkin"]["motivation"], 9)
         yesterday = next(day for day in result if day["date"] == "2026-09-19")
         self.assertEqual(yesterday["recovery"]["body_battery"], 64)
+
+    def test_open_days_are_dated_in_the_athlete_zone(self):
+        service = DailyPlanningContextService(
+            self.database_manager,
+            self.key_values,
+            self.checkins,
+            self.calendar,
+            self.morning_battery,
+            self.feedback,
+            self._today,
+            35,
+            lambda: self.observations,
+            timezone=lambda: "Australia/Sydney",
+        )
+        with patch(
+            "backend.planning.daily_context_service.read_local_fitness",
+            return_value={"days": []},
+        ) as read:
+            service.build(planned=[], weather={}, checkins=[], calendar_events=[])
+        self.assertEqual(read.call_args.kwargs["timezone"], "Australia/Sydney")
 
     def test_today_is_sampled_once_and_calendar_window_is_forwarded(self):
         service = DailyPlanningContextService(

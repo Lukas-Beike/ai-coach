@@ -38,6 +38,8 @@ class DailyPlanningContextService:
         calendar_window_days: int,
         observation_reader: Callable[[], ObservationReader],
         source_preferences: Callable[[Any], SourcePreferences] | None = None,
+        *,
+        timezone: Callable[[], str] | None = None,
     ) -> None:
         self._database_manager = database_manager
         self._key_value_repository = key_value_repository
@@ -49,6 +51,7 @@ class DailyPlanningContextService:
         self._calendar_window_days = calendar_window_days
         self._observation_reader = observation_reader
         self._source_preferences = source_preferences
+        self._timezone = timezone
 
     def _recovery_by_date(
         self,
@@ -78,9 +81,14 @@ class DailyPlanningContextService:
                 if self._source_preferences is None
                 else self._source_preferences(db)
             ),
-            # The athlete zone is not known here; the sync day is taken in UTC.
+            # The sync day is taken in the athlete's zone, as on the load tab.
             local_fitness_days=read_local_fitness(
-                selector, db, start=start, end=today, today=today, timezone="UTC"
+                selector,
+                db,
+                start=start,
+                end=today,
+                today=today,
+                timezone="UTC" if self._timezone is None else self._timezone(),
             )["days"],
         )
         return recovery, read_daily_health_by_date(reader, db, start=start, end=today)

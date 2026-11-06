@@ -792,6 +792,7 @@ PLANNING_WORKFLOWS = PlanningWorkflowAssembly(
             source_preferences=lambda db: preferences_from_profile(
                 ATHLETE_DATA.profile().get_from_db(db)
             ),
+            timezone=lambda: str(ATHLETE_DATA.profile().get().get("timezone") or "UTC"),
         ),
         runtime=PlanningRuntime(
             sync_job_queue_service=lambda: SYNC_JOB_QUEUE.service(),
