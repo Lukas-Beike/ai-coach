@@ -10,9 +10,12 @@ from backend.activities.activity_summary import ActivitySummary
 from backend.activities.detail_contract import measured_order
 from backend.activities.detail_store import ActivityDetailStore
 from backend.activities.read_service import ActivityReadService, ActivitySummarySource
+from backend.activities.zone_settings import ZoneSettings
 from backend.athlete.profile import timezone_name
+from backend.canonical.local_time import local_date
 from backend.canonical.records import ActivityRecord
 from backend.errors import AppError
+from backend.performance.canonical_current import read_zone_thresholds
 from backend.performance.canonical_detail import (
     CanonicalDetailReader,
     RefreshableProviders,
@@ -23,9 +26,11 @@ from backend.performance.canonical_inputs import (
     CanonicalPerformanceInputs,
     CanonicalPerformanceSource,
     read_performance_inputs,
+    resolve_reader,
     with_read_status,
 )
 from backend.performance.context import current_performance_context
+from backend.performance.current_thresholds import ZoneConfigurationSource
 from backend.performance.detail_envelope import (
     DetailEnvelopeReader,
     feedback_session_load,
@@ -59,6 +64,13 @@ class ActivityAnalysisReadService(ActivityReadService):
         self._canonical = canonical
         self._session_records = session_records
         self._refreshable = refreshable
+
+    def _zone_settings_reader(
+        self, profile: Mapping[str, Any]
+    ) -> Callable[[Any, ActivityRecord], ZoneSettings]:
+        return _session_zone_settings(
+            self._canonical, ZoneInfo(timezone_name(profile.get("timezone")))
+        )
 
     def _performance_inputs(
         self, as_of: date, activity_id: str | None = None
@@ -181,6 +193,7 @@ class ActivityAnalysisReadService(ActivityReadService):
                 summary=requested_summary,
             ),
             zone=ZoneInfo(timezone_name(profile.get("timezone"))),
+            zone_settings=self._zone_settings_reader(profile),
         )
         with self._database_manager.read_snapshot() as db:
             document = reader.read(db, normalized_id)
@@ -192,6 +205,40 @@ class ActivityAnalysisReadService(ActivityReadService):
                 )
             records = self._session_records(db, document["session"]["activity_id"])
         return {"ok": True, **document, "data_scope": _data_scope(document, records)}
+
+
+def _session_zone_settings(
+    source: CanonicalPerformanceSource, zone: ZoneInfo
+) -> Callable[[Any, ActivityRecord], ZoneSettings]:
+    """The zones in effect for a session's sport, environment and local day.
+
+    Local configurations first, then provider configurations, then the plan-zone
+    thresholds of that day with the default limits, as planned units use them.
+    """
+
+    def read(db: Any, record: ActivityRecord) -> ZoneSettings:
+        day = local_date(record.started_at, zone)
+        reader = resolve_reader(source.observation_reader(), db)
+        thresholds = read_zone_thresholds(
+            reader, db, as_of=day, preferences=source.preferences_in(db)
+        )
+        configurations = (
+            reader.zone_configurations(db)
+            if isinstance(reader, ZoneConfigurationSource)
+            else ()
+        )
+        # The zones of planning's resolve_thresholds, without importing planning.
+        return ZoneSettings.from_configurations(
+            configurations,
+            record.sport,
+            record.environment,
+            day,
+            fallback=ZoneSettings.from_thresholds(
+                thresholds, record.sport, record.environment
+            ),
+        )
+
+    return read
 
 
 def _find_summary(

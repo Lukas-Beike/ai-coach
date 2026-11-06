@@ -29,6 +29,8 @@ from backend.activities.detail_merge import (
 )
 from backend.activities.detail_store import summary_fingerprint
 from backend.activities.detail_summary_metrics import intervals_summary_metrics
+from backend.activities.stream_zones import with_stream_zones
+from backend.activities.zone_settings import ZoneSettings
 from backend.canonical.activity_detail import (
     ActivityDetailSet,
     ActivityStreamSet,
@@ -117,6 +119,10 @@ def read_reference(db: Any, any_id: str) -> str | None:
     return None
 
 
+# The zone settings in effect for one session's primary record, or None.
+type ZoneSettingsReader = Callable[[Any, ActivityRecord], ZoneSettings | None]
+
+
 class CanonicalDetailReader:
     """Serve the ``activity_detail.v1`` document of a canonical session."""
 
@@ -130,6 +136,7 @@ class CanonicalDetailReader:
         failures: FailureReader | None = None,
         envelope: EnvelopeReader | None = None,
         zone: tzinfo = UTC,
+        zone_settings: ZoneSettingsReader | None = None,
     ) -> None:
         self._session_records = session_records
         self._zone = zone
@@ -139,6 +146,8 @@ class CanonicalDetailReader:
         self._fingerprints = fingerprints
         self._failures = failures
         self._envelope = envelope
+        # Without it no zone distribution is derived from the streams.
+        self._zone_settings = zone_settings
 
     def read(self, db: Any, any_id: str) -> dict[str, Any] | None:
         """Return the document, or None when the session has no readable records.
@@ -170,6 +179,11 @@ class CanonicalDetailReader:
                 candidates, activity_id, analysis_record, summary
             )
         merged = merge_details(candidates)
+        zone_settings = self._zone_settings
+        if zone_settings is not None:
+            merged = with_stream_zones(
+                merged, lambda: zone_settings(db, analysis_record)
+            )
         status = self._status(db, sets, intervals_id, summary)
         stale = any(state.stale for state in status.values())
         analysis = (
