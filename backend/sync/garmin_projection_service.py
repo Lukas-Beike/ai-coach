@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.canonical.activity_summary import ActivitySummary
@@ -110,6 +110,25 @@ class GarminProjectionService:
             summaries = sources.activity_summaries().activity_summaries(db, start=start)
         return state, summaries
 
+    def _personal_api_state(
+        self, today: date, tokens_connected: bool
+    ) -> dict[str, Any]:
+        """Personal API key and SDK-skip state; absent without a key (bounded bootstrap)."""
+        if not self._config.garmin_personal_api_key:
+            return {}
+        state: dict[str, Any] = {
+            "personal_api": personal_key_state(
+                self._config,
+                today,
+                rejected=self._garmin_sync_state_service.personal_key_rejected(),
+            )
+        }
+        if tokens_connected or self._config.garmin_email:
+            skipped = self._garmin_sync_state_service.sdk_skipped()
+            if skipped:
+                state["sdk_skipped"] = skipped
+        return state
+
     def public_state(
         self,
         status: GarminSyncStatus | None = None,
@@ -162,18 +181,7 @@ class GarminProjectionService:
             "metric_export_enabled": bool(metric_export_fields),
             "metric_export_fields": fields_view(metric_export_fields),
             "last_error": parsed_error,
-            "personal_api": personal_key_state(
-                self._config,
-                today,
-                rejected=bool(self._config.garmin_personal_api_key)
-                and self._garmin_sync_state_service.personal_key_rejected(),
-            ),
-            "sdk_skipped": (
-                self._garmin_sync_state_service.sdk_skipped()
-                if self._config.garmin_personal_api_key
-                and (tokens_connected or self._config.garmin_email)
-                else None
-            ),
+            **self._personal_api_state(today, tokens_connected),
             "pagination": dict(status.pagination),
             "source_freshness": performance_freshness.garmin_source_freshness(
                 status, today

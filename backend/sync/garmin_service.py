@@ -424,8 +424,7 @@ class GarminRemoteReader:
             raise AppError(
                 401, GARMIN_MFA_REQUIRED_MESSAGE, reason="reconnect_required"
             )
-        if personal is not None:
-            self._state_service.clear_sdk_skipped()
+        self._state_service.clear_sdk_skipped()
 
     def _check_personal_key(self, personal: GarminPersonalClient) -> None:
         """Exchange the Personal API key once; a rejection names the key."""
@@ -502,8 +501,7 @@ class GarminRemoteReader:
                 raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
             self._log_sdk_skipped("mfa_required")
             return GarminTransportClient(personal, None), login_argument
-        if personal is not None:
-            self._state_service.clear_sdk_skipped()
+        self._state_service.clear_sdk_skipped()
         return GarminTransportClient(personal, sdk), login_argument
 
     def _record_key_result(self, accepted: bool) -> None:
