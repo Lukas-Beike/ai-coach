@@ -48,6 +48,7 @@ SECRET_FIELDS = frozenset(
     {
         "openai_api_key",
         "intervals_api_key",
+        "garmin_personal_api_key",
         "wahoo_client_secret",
         "yazio_password",
     }

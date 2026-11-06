@@ -59,6 +59,7 @@ def _garmin_configured(inputs: FreshnessInputs) -> bool:
     return bool(
         config.garmin_fixture_path
         or config.garmin_email
+        or config.garmin_personal_api_key
         or inputs.signals.get(GARMIN_TOKENSTORE_SIGNAL, False)
     )
 

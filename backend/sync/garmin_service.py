@@ -28,6 +28,10 @@ from backend.providers.garmin import (
     collect_garmin_data,
 )
 from backend.providers.garmin_fields import GARMIN_EXTENDED_DATE_ALIASES
+from backend.providers.garmin_personal import (
+    GarminPersonalClient,
+    GarminTransportClient,
+)
 from backend.sync.garmin import GARMIN_RECONCILIATION_DAYS
 from backend.sync.garmin_snapshot_writer import (
     ANALYSIS_SOURCES,
@@ -105,6 +109,12 @@ def _garmin_sync_configured(config: Config, garmin_tokens: Any | None) -> bool:
     return bool(config.garmin_email)
 
 
+def _personal_client(config: Config) -> GarminPersonalClient | None:
+    """The official Personal API client when its key is configured."""
+    key = str(getattr(config, "garmin_personal_api_key", "") or "").strip()
+    return GarminPersonalClient(key) if key else None
+
+
 def _garmin_tokenstore_present(config: Config, garmin_tokens: Any | None) -> bool:
     if garmin_tokens is not None:
         return garmin_tokens.connected()
@@ -115,7 +125,9 @@ def _persist_garmin_tokens(
     garmin_tokens: Any | None, client: Any, login_argument: str
 ) -> None:
     """Store refreshed or first-imported tokens, even when collection failed."""
-    if garmin_tokens is not None:
+    if isinstance(client, GarminTransportClient):
+        client = client.sdk
+    if garmin_tokens is not None and client is not None:
         garmin_tokens.write_back(client, login_argument)
 
 
@@ -151,10 +163,16 @@ class GarminRemoteReader:
         self._garmin_tokens = garmin_tokens
 
     def available(self) -> bool:
-        return self._client_factory.available()
+        return self._client_factory.available() or self._personal_configured()
 
     def configured(self) -> bool:
-        return self.available() and _garmin_sync_configured(
+        return self._personal_configured() or self._sdk_configured()
+
+    def _personal_configured(self) -> bool:
+        return bool(str(self._config.garmin_personal_api_key or "").strip())
+
+    def _sdk_configured(self) -> bool:
+        return self._client_factory.available() and _garmin_sync_configured(
             self._config, self._garmin_tokens
         )
 
@@ -397,19 +415,35 @@ class GarminRemoteReader:
 
         return call_external
 
-    def _authenticated_client(self, call_external: ExternalCall) -> tuple[Any, str]:
-        """Create the SDK client and log in; MFA stops before any collection."""
+    def _authenticated_client(
+        self, call_external: ExternalCall
+    ) -> tuple[GarminTransportClient, str]:
+        """Route Garmin reads through the Personal API and, if connected, the SDK.
+
+        Without a Personal API key the SDK login is required and MFA stops before
+        any collection. With a key, a failed SDK login or pending MFA only drops
+        the SDK-only families; the Personal API families still sync.
+        """
+        personal = _personal_client(self._config)
         login_argument = _garmin_login_argument(self._config, self._garmin_tokens)
-        client, mfa_status = garmin_adapter.authenticate_client(
-            self._client_factory,
-            self._config.garmin_email or None,
-            self._config.garmin_password or None,
-            login_argument,
-            external_call=call_external,
-            tokenstore_exists=_garmin_tokenstore_present(
-                self._config, self._garmin_tokens
-            ),
-        )
+        if personal is not None and not self._sdk_configured():
+            return GarminTransportClient(personal, None), login_argument
+        try:
+            sdk, mfa_status = garmin_adapter.authenticate_client(
+                self._client_factory,
+                self._config.garmin_email or None,
+                self._config.garmin_password or None,
+                login_argument,
+                external_call=call_external,
+                tokenstore_exists=_garmin_tokenstore_present(
+                    self._config, self._garmin_tokens
+                ),
+            )
+        except Exception:
+            if personal is None:
+                raise
+            self._log_sdk_skipped("login_failed")
+            return GarminTransportClient(personal, None), login_argument
         if mfa_status:
             self._logger.warning(
                 "Garmin login requires MFA",
@@ -418,8 +452,20 @@ class GarminRemoteReader:
                     "context": {"service": GARMIN_ID, "operation": "login"},
                 },
             )
-            raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
-        return client, login_argument
+            if personal is None:
+                raise AppError(401, GARMIN_MFA_REQUIRED_MESSAGE)
+            self._log_sdk_skipped("mfa_required")
+            return GarminTransportClient(personal, None), login_argument
+        return GarminTransportClient(personal, sdk), login_argument
+
+    def _log_sdk_skipped(self, reason: str) -> None:
+        self._logger.warning(
+            "Garmin SDK unavailable; reading Personal API families only",
+            extra={
+                "event": "garmin_sdk_skipped",
+                "context": {"service": GARMIN_ID, "reason": reason},
+            },
+        )
 
     def _warn(self, source: str, _message: str, error: BaseException) -> None:
         self._logger.warning(
@@ -801,15 +847,23 @@ class GarminMorningRemoteReader:
         self._garmin_tokens = garmin_tokens
 
     def configured(self) -> bool:
-        return self._client_factory.available() and _garmin_sync_configured(
-            self._config, self._garmin_tokens
+        return _personal_client(self._config) is not None or (
+            self._client_factory.available()
+            and _garmin_sync_configured(self._config, self._garmin_tokens)
         )
 
     def fetch(self, checkin_date: date) -> tuple[Any, Any]:
-        client = self._client_factory.create(
-            self._config.garmin_email or None,
-            self._config.garmin_password or None,
-            return_on_mfa=True,
+        # Sleep and Body Battery are Personal API families; the SDK (and its
+        # login) is used only without a Personal API key.
+        personal = _personal_client(self._config)
+        client: Any = (
+            GarminTransportClient(personal, None)
+            if personal is not None
+            else self._client_factory.create(
+                self._config.garmin_email or None,
+                self._config.garmin_password or None,
+                return_on_mfa=True,
+            )
         )
         profile_timezone = timezone_name(self._profile_service.get().get("timezone"))
         fallback_zone = self._athlete_clock.now().tzinfo or UTC

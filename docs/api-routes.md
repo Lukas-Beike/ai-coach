@@ -111,8 +111,8 @@ return a secret: the response is the credential status only.
 
 - `PUT /api/settings/credentials` takes a JSON object whose keys are credential
   fields (`openai_api_key`, `openai_base_url`, `intervals_api_key`,
-  `intervals_athlete_id`, `wahoo_client_id`, `wahoo_client_secret`,
-  `garmin_email`). `garmin_email` has no UI field; it pairs with the
+  `intervals_athlete_id`, `garmin_personal_api_key`, `wahoo_client_id`,
+  `wahoo_client_secret`, `garmin_email`). `garmin_email` has no UI field; it pairs with the
   environment `GARMIN_PASSWORD` fallback and is reported as configured only,
   never echoed back. A string
   stores the value; `null` or a blank string clears the value stored in the app,

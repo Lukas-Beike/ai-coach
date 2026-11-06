@@ -1,0 +1,415 @@
+"""Garmin Personal API transport and per-family routing with a mocked HTTP opener.
+
+The payloads are small synthetic shapes derived from the sanitized Personal API
+probe (2026-11-06): flat ``dailySleep`` rows, ``hrvSummaries``, ``data`` daily
+summaries, ``dailyWeightSummaries`` and activity list entries. No real account,
+key or token is used.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import unittest
+from datetime import UTC, date, datetime
+from email.message import Message
+from typing import Any
+from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
+
+from backend.canonical.section_items import merge_records, record_identity
+from backend.providers import http as provider_http
+from backend.providers.garmin import (
+    GarminCollectionOptions,
+    collect_garmin_activity_detail,
+    collect_garmin_data,
+)
+from backend.providers.garmin_activity_mapping import map_garmin_activities
+from backend.providers.garmin_health_mapping import map_garmin_health
+from backend.providers.garmin_personal import (
+    PERSONAL_BASE_URL,
+    TOKEN_PATH,
+    GarminPersonalClient,
+    GarminTransportClient,
+    wrap_daily_sleep,
+)
+
+SYNTHETIC_KEY = "synthetic-personal-key"
+DAY = "2026-11-03"
+
+
+def _token(label: str) -> str:
+    return f"header.{label}.signature"
+
+
+def _activity(activity_id: int = 900001) -> dict[str, Any]:
+    return {
+        "activityId": activity_id,
+        "activityName": "Synthetic run",
+        "startTimeLocal": f"{DAY} 11:47:18",
+        "startTimeGMT": f"{DAY} 10:47:18",
+        "activityType": {"typeId": 1, "typeKey": "running", "parentTypeId": 17},
+        "distance": 9780.0,
+        "duration": 2975.0,
+        "elapsedDuration": 2975.0,
+        "movingDuration": 2966.0,
+        "averageHR": 142.0,
+        "maxHR": 169.0,
+    }
+
+
+def _flat_sleep(day: str = DAY, sleep_id: int = 1) -> dict[str, Any]:
+    return {
+        "id": sleep_id,
+        "calendarDate": day,
+        "sleepTimeSeconds": 25440,
+        "sleepStartTimestampGMT": 1793656244000,
+        "sleepEndTimestampGMT": 1793681744000,
+        "averageSpO2Value": 96.0,
+        "averageRespirationValue": 15.0,
+        "avgHeartRate": 49.0,
+        "sleepScores": {"overall": {"value": 84}},
+    }
+
+
+class _Response(io.BytesIO):
+    status = 200
+
+
+class FakePersonalApi:
+    """Answer Personal API paths from synthetic payloads and record the requests."""
+
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, str, dict[str, list[str]], dict[str, str]]] = []
+        self.tokens = iter(_token(f"t{index}") for index in range(1, 100))
+        self.reject_bearer: set[str] = set()
+        self.activities = [_activity()]
+
+    def __call__(self, request: Any, timeout: float) -> _Response:
+        parsed = urlparse(request.full_url)
+        headers = {key.lower(): value for key, value in request.header_items()}
+        query = parse_qs(parsed.query)
+        self.requests.append((request.get_method(), parsed.path, query, headers))
+        if parsed.path == TOKEN_PATH:
+            if headers.get("authorization") != f"ApiKey {SYNTHETIC_KEY}":
+                raise HTTPError(
+                    request.full_url, 401, "Unauthorized", Message(), io.BytesIO()
+                )
+            return _Response(f'"{next(self.tokens)}"'.encode())
+        bearer = headers.get("authorization", "").removeprefix("Bearer ")
+        if bearer in self.reject_bearer:
+            raise HTTPError(
+                request.full_url, 401, "Unauthorized", Message(), io.BytesIO()
+            )
+        return _Response(json.dumps(self.payload(parsed.path, query)).encode())
+
+    def payload(self, path: str, query: dict[str, list[str]]) -> Any:
+        if path == "/activitylist-service/activities/search/activities":
+            start = int(query["start"][0])
+            return self.activities if start == 0 else []
+        if path.startswith("/activity-service/activity/") and path.endswith("/details"):
+            return {
+                "activityId": 900001,
+                "metricDescriptors": [],
+                "activityDetailMetrics": [],
+            }
+        if path == "/sleep-service/sleep/dailySleepSummariesByDate":
+            return [_flat_sleep(query["startDate"][0])]
+        if path == "/sleep-service/sleep/dailySleep":
+            return _flat_sleep(query["date"][0])
+        if path.startswith("/hrv-service/hrv/daily/"):
+            return {
+                "hrvSummaries": [
+                    {"calendarDate": DAY, "lastNightAvg": 57, "weeklyAvg": 55}
+                ]
+            }
+        if path == "/usersummary-service/v2/dailysummaries":
+            return {
+                "data": [
+                    {
+                        "calendarDate": query["startDate"][0],
+                        "heartRate": {"restingHeartRate": 45},
+                    }
+                ]
+            }
+        if path == "/usersummary-service/usersummary/daily":
+            return {"calendarDate": query["calendarDate"][0], "bmrKilocalories": 1700}
+        if path == "/wellness-service/wellness/dailyHeartRate":
+            return {"calendarDate": query["date"][0], "restingHeartRate": 45}
+        if path == "/wellness-service/wellness/bodyBattery/reports/daily":
+            return [{"date": query["startDate"][0], "charged": 71}]
+        if path.startswith("/weight-service/weight/range/"):
+            return {
+                "dailyWeightSummaries": [
+                    {
+                        "summaryDate": DAY,
+                        "latestWeight": {"weight": 75000.0, "calendarDate": DAY},
+                    }
+                ]
+            }
+        raise HTTPError(path, 404, "Not Found", Message(), io.BytesIO())
+
+    def data_paths(self) -> list[str]:
+        return [
+            path
+            for _method, path, _query, _headers in self.requests
+            if path != TOKEN_PATH
+        ]
+
+
+def _client(
+    api: FakePersonalApi, clock: list[float] | None = None
+) -> GarminPersonalClient:
+    now = clock or [1_000.0]
+    return GarminPersonalClient(SYNTHETIC_KEY, opener=api, clock=lambda: now[0])
+
+
+class FakeSdk:
+    """The unofficial SDK surface: records which methods were called."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def login(self, tokenstore: str | None = None) -> tuple[Any, Any]:
+        self.calls.append("login")
+        return None, None
+
+    def get_training_readiness(self, day: str) -> list[dict[str, Any]]:
+        self.calls.append("get_training_readiness")
+        return [{"calendarDate": day, "score": 70}]
+
+    def get_activities_by_date(self, *_args: Any) -> list[dict[str, Any]]:
+        self.calls.append("get_activities_by_date")
+        return [_activity()]
+
+
+class PersonalClientTests(unittest.TestCase):
+    def test_key_is_exchanged_once_and_sent_only_to_the_token_path(self) -> None:
+        api = FakePersonalApi()
+        client = _client(api)
+
+        client.get_user_summary(DAY)
+        client.get_heart_rates(DAY)
+
+        token_requests = [r for r in api.requests if r[1] == TOKEN_PATH]
+        self.assertEqual(len(token_requests), 1)
+        self.assertEqual(token_requests[0][0], "POST")
+        for _method, path, _query, headers in api.requests:
+            if path == TOKEN_PATH:
+                continue
+            self.assertEqual(headers["authorization"], f"Bearer {_token('t1')}")
+            self.assertNotIn(SYNTHETIC_KEY, json.dumps(headers))
+        self.assertTrue(all(r[1].startswith("/") for r in api.requests))
+        self.assertNotIn(SYNTHETIC_KEY, repr(client))
+
+    def test_expired_or_rejected_token_is_exchanged_again(self) -> None:
+        api = FakePersonalApi()
+        clock = [1_000.0]
+        client = _client(api, clock)
+        client.get_user_summary(DAY)
+        clock[0] += 24 * 3600
+        client.get_user_summary(DAY)
+        api.reject_bearer.add(_token("t2"))
+        client.get_user_summary(DAY)
+
+        self.assertEqual(sum(r[1] == TOKEN_PATH for r in api.requests), 3)
+
+    def test_rejected_key_raises_a_safe_authentication_error(self) -> None:
+        api = FakePersonalApi()
+        client = GarminPersonalClient("wrong-synthetic-key", opener=api)
+
+        with self.assertRaises(provider_http.ProviderHTTPError) as raised:
+            client.get_user_summary(DAY)
+
+        self.assertEqual(raised.exception.status, 401)
+        self.assertEqual(raised.exception.category, "authentication")
+        self.assertNotIn("wrong-synthetic-key", str(raised.exception))
+
+    def test_families_use_the_personal_paths(self) -> None:
+        api = FakePersonalApi()
+        client = _client(api)
+
+        self.assertEqual(client.get_activities_by_date(DAY, DAY), [_activity()])
+        client.get_activity_details("900001", maxchart=2000)
+        client.get_hrv_data_range(DAY, DAY)
+        client.get_body_battery(DAY, DAY)
+        client.get_weigh_ins(DAY, DAY)
+
+        self.assertEqual(
+            api.data_paths(),
+            [
+                "/activitylist-service/activities/search/activities",
+                "/activitylist-service/activities/search/activities",
+                "/activity-service/activity/900001/details",
+                f"/hrv-service/hrv/daily/{DAY}/{DAY}",
+                "/wellness-service/wellness/bodyBattery/reports/daily",
+                f"/weight-service/weight/range/{DAY}/{DAY}",
+            ],
+        )
+        self.assertEqual(PERSONAL_BASE_URL, "https://personal.connectapi.garmin.com")
+
+    def test_ranges_are_split_into_the_personal_api_day_limits(self) -> None:
+        api = FakePersonalApi()
+        client = _client(api)
+
+        summaries = client.get_daily_summaries("2026-01-01", "2026-03-01")
+        sleep = client.get_sleep_daily("2026-01-01", "2026-03-01")
+
+        summary_windows = [
+            (q["startDate"][0], q["endDate"][0])
+            for _m, path, q, _h in api.requests
+            if path == "/usersummary-service/v2/dailysummaries"
+        ]
+        self.assertEqual(
+            summary_windows,
+            [
+                ("2026-01-01", "2026-01-31"),
+                ("2026-02-01", "2026-03-01"),
+            ],
+        )
+        self.assertEqual(len(summaries["data"]), 2)
+        self.assertEqual(
+            [night["calendarDate"] for night in sleep], ["2026-01-01", "2026-02-01"]
+        )
+
+    def test_flat_daily_sleep_is_wrapped_like_the_sdk(self) -> None:
+        api = FakePersonalApi()
+        client = _client(api)
+
+        self.assertEqual(client.get_sleep_data(DAY), {"dailySleepDTO": _flat_sleep()})
+        self.assertEqual(
+            client.get_sleep_daily(DAY, DAY),
+            [{"calendarDate": DAY, "dailySleepDTO": _flat_sleep()}],
+        )
+        self.assertIsNone(wrap_daily_sleep({"id": 3}))
+
+
+class TransportRoutingTests(unittest.TestCase):
+    def test_personal_families_use_the_personal_api_and_others_the_sdk(self) -> None:
+        api = FakePersonalApi()
+        sdk = FakeSdk()
+        client = GarminTransportClient(_client(api), sdk)
+
+        client.get_activities_by_date(DAY, DAY)
+        client.get_training_readiness(DAY)
+
+        self.assertEqual(sdk.calls, ["get_training_readiness"])
+        self.assertIn(
+            "/activitylist-service/activities/search/activities", api.data_paths()
+        )
+        self.assertEqual(client.login("synthetic"), (None, None))
+        self.assertEqual(sdk.calls[-1], "login")
+
+    def test_without_the_sdk_its_families_are_absent(self) -> None:
+        client = GarminTransportClient(_client(FakePersonalApi()), None)
+
+        self.assertIsNone(getattr(client, "get_training_readiness", None))
+        self.assertIsNone(getattr(client, "get_activity_splits", None))
+        self.assertEqual(client.login("synthetic"), (None, None))
+
+    def test_without_a_key_every_family_uses_the_sdk(self) -> None:
+        sdk = FakeSdk()
+        client = GarminTransportClient(None, sdk)
+
+        client.get_activities_by_date(DAY, DAY)
+
+        self.assertEqual(sdk.calls, ["get_activities_by_date"])
+
+
+def _external_call(_service: str, _operation: str, call: Any, _details: Any) -> Any:
+    return call()
+
+
+class PersonalOnlyCollectionTests(unittest.TestCase):
+    def test_personal_key_alone_syncs_every_personal_family_without_errors(
+        self,
+    ) -> None:
+        api = FakePersonalApi()
+        client = GarminTransportClient(_client(api), None)
+        day = date.fromisoformat(DAY)
+
+        payload = collect_garmin_data(
+            client,
+            [(day, day)],
+            start=day,
+            today=day,
+            synced_at="2026-11-06T08:00:00Z",
+            external_call=_external_call,
+            redact=str,
+            options=GarminCollectionOptions(),
+        )
+
+        self.assertEqual(payload["errors"], [])
+        self.assertEqual([row["activityId"] for row in payload["activities"]], [900001])
+        self.assertEqual(
+            payload["sleep"], [{"calendarDate": DAY, "dailySleepDTO": _flat_sleep()}]
+        )
+        self.assertEqual(payload["hrv"][0]["lastNightAvg"], 57)
+        self.assertEqual(payload["daily_stats"][0]["calendarDate"], DAY)
+        self.assertEqual(payload["resting_hr"][0]["restingHeartRate"], 45)
+        self.assertIn("dailyWeightSummaries", payload["weight"])
+        for absent in (
+            "readiness",
+            "race_predictions",
+            "max_metrics",
+            "training_status",
+        ):
+            self.assertNotIn(absent, payload)
+
+    def test_activity_detail_without_the_sdk_is_complete_with_its_details(self) -> None:
+        client = GarminTransportClient(_client(FakePersonalApi()), None)
+
+        detail = collect_garmin_activity_detail(
+            client, "900001", external_call=_external_call, redact=str
+        )
+
+        self.assertEqual(set(detail), {"activity_id", "details"})
+
+
+class TransportParityTests(unittest.TestCase):
+    def test_one_activity_from_both_transports_maps_to_one_identity(self) -> None:
+        sdk_row = {**_activity(), "vO2MaxValue": 55.0, "timeZoneId": 124}
+        personal_row = _activity()
+        retrieved = datetime(2026, 11, 6, tzinfo=UTC)
+        zone = ZoneInfo("Europe/Berlin")
+
+        sdk = map_garmin_activities([sdk_row], zone=zone, retrieved_at=retrieved)
+        personal = map_garmin_activities(
+            [personal_row], zone=zone, retrieved_at=retrieved
+        )
+
+        self.assertEqual(
+            {record.activity_id for record in sdk.records},
+            {record.activity_id for record in personal.records},
+        )
+        self.assertEqual(record_identity(sdk_row), record_identity(personal_row))
+        self.assertEqual(len(merge_records([personal_row], [sdk_row])), 1)
+
+    def test_one_night_from_both_transports_is_stored_once(self) -> None:
+        # The SDK morning read stores the night keyed by its date; the sleep id
+        # differs on purpose and must not split the night.
+        sdk_night = {"calendarDate": DAY, "dailySleepDTO": _flat_sleep(sleep_id=111)}
+        personal_night = wrap_daily_sleep(_flat_sleep(sleep_id=222))
+
+        self.assertEqual(record_identity(sdk_night), record_identity(personal_night))
+        merged = merge_records([personal_night], [sdk_night])
+        self.assertEqual(merged, [personal_night])
+
+    def test_wrapped_personal_night_maps_sleep_duration_and_score(self) -> None:
+        result = map_garmin_health(
+            {"sleep": [wrap_daily_sleep(_flat_sleep())]},
+            zone=ZoneInfo("Europe/Berlin"),
+            retrieved_at=datetime(2026, 11, 6, tzinfo=UTC),
+        )
+
+        kinds = {
+            observation.kind.value: observation.value.value
+            for observation in result.records
+        }
+        self.assertEqual(kinds.get("sleep_duration"), 25440)
+        self.assertEqual(kinds.get("sleep_score"), 84)
+
+
+if __name__ == "__main__":
+    unittest.main()

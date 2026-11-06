@@ -400,6 +400,16 @@
               <p id="cred-error-yazio" class="credential-error" role="alert" hidden></p>
               <button id="cred-submit-yazio" class="secondary-button" type="submit">Speichern</button>
             </form>
+            <form id="cred-form-garmin_personal" class="credential-form" autocomplete="off" aria-labelledby="credGarminPersonalTitle">
+              <h4 id="credGarminPersonalTitle">Garmin Personal API</h4>
+              <div class="credential-row">
+                <div class="credential-row-head"><label for="cred-garmin_personal_api_key">API-Schlüssel</label><span id="cred-source-garmin_personal_api_key" class="credential-source">Status wird geprüft…</span></div>
+                <input id="cred-garmin_personal_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Neuen Schlüssel eingeben">
+                <button id="cred-clear-garmin_personal_api_key" class="secondary-button danger-button credential-clear" type="button" hidden>Entfernen</button>
+              </div>
+              <p id="cred-error-garmin_personal" class="credential-error" role="alert" hidden></p>
+              <button id="cred-submit-garmin_personal" class="secondary-button" type="submit">Speichern</button>
+            </form>
             <section class="credential-form garmin-credential-form" aria-labelledby="credGarminTitle">
               <div class="credential-row-head"><h4 id="credGarminTitle">Garmin</h4><span id="garmin-source" class="credential-source">Status wird geprüft…</span></div>
               <p id="garmin-connection-status" class="credential-current">Status wird geprüft…</p>
@@ -615,7 +625,7 @@
   <script src="/auth.js?v=13" defer></script>
   <script src="/sync-status.js?v=14" defer></script>
   <script src="/view-refresh.js?v=3" defer></script>
-  <script src="/notifications.js?v=5" defer></script>
+  <script src="/notifications.js?v=6" defer></script>
   <script src="/nutrition.js?v=49" defer></script>
   <script src="/analysis.js?v=148" defer></script>
   <script src="/activity-details.js?v=28" defer></script>
@@ -625,7 +635,7 @@
   <script src="/state-loader.js?v=24" defer></script>
   <script src="/sync-actions.js?v=5" defer></script>
   <script src="/wahoo-connection.js?v=5" defer></script>
-  <script src="/provider-connections.js?v=9" defer></script>
+  <script src="/provider-connections.js?v=10" defer></script>
   <script src="/provider-checks.js?v=4" defer></script>
   <script src="/weekly-plan.js?v=4" defer></script>
   <script src="/settings.js?v=17" defer></script>
