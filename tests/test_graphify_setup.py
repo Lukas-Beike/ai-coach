@@ -475,6 +475,7 @@ class WorktreePreparationTests(unittest.TestCase):
             with (
                 self.subTest(results=results),
                 patch.object(prepare.shutil, "which", return_value="npm.cmd"),
+                patch.object(prepare, "report_newer_versions") as report,
                 patch.object(
                     prepare.subprocess,
                     "run",
@@ -484,6 +485,7 @@ class WorktreePreparationTests(unittest.TestCase):
                 ) as run,
             ):
                 self.assertEqual(prepare.main(), int(any(results)))
+                report.assert_called_once()
                 calls = [call.args[0] for call in run.call_args_list]
                 self.assertEqual(calls[0], ["npm.cmd", "ci", "--ignore-scripts"])
                 self.assertEqual(
@@ -515,6 +517,7 @@ class WorktreePreparationTests(unittest.TestCase):
     def test_missing_npm_and_launch_errors_still_attempt_remaining_steps(self):
         with (
             patch.object(prepare.shutil, "which", return_value=None),
+            patch.object(prepare, "report_newer_versions"),
             patch.object(
                 prepare.subprocess,
                 "run",
@@ -527,6 +530,61 @@ class WorktreePreparationTests(unittest.TestCase):
         ):
             self.assertEqual(prepare.main(), 1)
             self.assertEqual(run.call_count, 3)
+
+    def test_version_check_reports_newer_pins_without_installing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "requirements.in").write_text("tzdata==2026.6\n")
+            (root / "requirements-dev.in").write_text(
+                "-r requirements.in\nruff==0.17.3\n"
+            )
+            (root / "requirements-graphify.in").write_text(
+                'graphifyy[mcp]==0.9.100\npywin32>=311; sys_platform == "win32"\n'
+            )
+            latest = {"tzdata": "2026.6", "ruff": "0.17.10", "graphifyy": "0.9.99"}
+            outdated = {
+                "@playwright/test": {"current": "1.64.1", "latest": "1.65.0"},
+                "@fission-ai/openspec": {"current": "1.16.0", "latest": "1.16.0"},
+            }
+            with (
+                patch.object(prepare, "pypi_latest", side_effect=latest.__getitem__),
+                patch.object(
+                    prepare.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        [], 1, stdout=json.dumps(outdated)
+                    ),
+                ) as run,
+            ):
+                notes = prepare.newer_versions(root, "npm.cmd")
+            self.assertEqual(
+                notes, ["ruff 0.17.3 -> 0.17.10", "@playwright/test 1.64.1 -> 1.65.0"]
+            )
+            self.assertEqual(run.call_args.args[0], ["npm.cmd", "outdated", "--json"])
+
+    def test_version_check_failures_are_advisory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name in prepare.PIP_INPUTS:
+                (root / name).write_text("ruff==0.17.3\n")
+            with (
+                patch.object(prepare, "pypi_latest", side_effect=OSError("offline")),
+                patch.object(prepare.subprocess, "run", side_effect=OSError("no npm")),
+            ):
+                self.assertEqual(
+                    prepare.newer_versions(root, "npm.cmd"),
+                    [
+                        "ruff: check unavailable (OSError)",
+                        "npm: check unavailable (OSError)",
+                    ],
+                )
+            output = io.StringIO()
+            with (
+                patch.object(prepare, "newer_versions", side_effect=RuntimeError),
+                contextlib.redirect_stdout(output),
+            ):
+                prepare.report_newer_versions(root, None)
+            self.assertIn("Version check skipped", output.getvalue())
 
 
 if __name__ == "__main__":
