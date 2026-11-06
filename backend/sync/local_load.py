@@ -44,6 +44,7 @@ from backend.performance.local_tss import (
     LocalLoad,
     session_loads,
 )
+from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.source_policy import NO_PREFERENCES, SourcePreferences
 from backend.sync.canonical_backfill import BatchReport
 from backend.sync.canonical_table_reader import CanonicalTableReader
@@ -112,9 +113,14 @@ def reconcile_local_loads(
     thresholds: DatedThresholds,
     *,
     now: str,
+    feedback: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Write every session's local load and retire stale rows; return counts."""
-    loads = session_loads(summaries, thresholds)
+    """Write every session's local load and retire stale rows; return counts.
+
+    ``feedback`` is each session's effective local feedback by stored key, which
+    the session-RPE branch of strength sessions and its calibration read.
+    """
+    loads = session_loads(summaries, thresholds, feedback)
     by_id = {str(summary.get("id")): summary for summary in summaries}
     keep: set[str] = set()
     written = 0
@@ -181,7 +187,9 @@ class LocalLoadStage:
         clock: Callable[[], str],
         preferences: Preferences = lambda _db: NO_PREFERENCES,
         reader: CanonicalTableReader | None = None,
+        session_feedback: FeedbackLookup | None = None,
     ) -> None:
+        self._session_feedback = session_feedback
         self._key_values = key_values
         self._zone_provider = zone_provider
         self._clock = clock
@@ -206,8 +214,13 @@ class LocalLoadStage:
             preferences=self._preferences(db),
         )
         now = self._clock()
+        summaries = _summaries(reader, db, self._zone_provider())
         counts = reconcile_local_loads(
-            db, _summaries(reader, db, self._zone_provider()), thresholds, now=now
+            db,
+            summaries,
+            thresholds,
+            now=now,
+            feedback=feedback_by_session(summaries, self._session_feedback),
         )
         self._save(
             db,

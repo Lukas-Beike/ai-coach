@@ -8,6 +8,7 @@ from datetime import tzinfo
 from typing import Any
 
 from backend.db.repositories import KeyValueRepository
+from backend.performance.session_rpe_load import FeedbackLookup
 from backend.performance.source_policy import NO_PREFERENCES
 from backend.runtime.maintenance import MaintenanceGate
 from backend.sync.activity_detail_backfill import ActivityDetailBackfill
@@ -36,6 +37,7 @@ def build_canonical_backfill(
     clock: Callable[[], str],
     source_preferences: Preferences = lambda _db: NO_PREFERENCES,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    session_feedback: FeedbackLookup | None = None,
 ) -> CanonicalBackfillAssembly:
     backfill = CanonicalBackfill(
         key_values=key_values,
@@ -58,6 +60,7 @@ def build_canonical_backfill(
         zone_provider=zone_provider,
         clock=clock,
         preferences=source_preferences,
+        session_feedback=session_feedback,
     )
     worker = CanonicalBackfillWorker(
         backfill=backfill,

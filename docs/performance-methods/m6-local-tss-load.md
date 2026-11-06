@@ -1,8 +1,8 @@
 # M6 — Local TSS-scale session load and intensity
 
 - **Card:** M6
-- **Card version:** 1
-- **Method ID:** local-tss-load v1 (#1725)
+- **Card version:** 2
+- **Method ID:** local-tss-load v2 (#1725, v2 #1726)
 - **Status:** implemented (`backend/performance/local_tss.py`, `backend/sync/local_load.py`)
 - **Classification:** model estimate
 - **Literature checked:** 2026-11-06
@@ -32,11 +32,24 @@ Athlete decisions (2026-11-06, comments on #1725):
   session.
 - Fitness, fatigue and form (#1726) stay computed on read.
 
+Athlete decisions for v2 (2026-11-06, #1726):
+
+- Strength gets a load from its session-RPE load (card M1) times the
+  athlete's own TSS per AU, because heart rate misses the load of strength
+  work, leg training in particular.
+- The factor is the median `TSS / AU` of the rated ride and run sessions with
+  a local load of the 365 days up to the session day, from at least 20 pairs.
+  Only local feedback and Garmin device ratings calibrate; ratings relayed by
+  Intervals.icu do not.
+- Walking takes the heart-rate branch like hiking. Yoga and alpine ski keep no
+  value.
+
 ## Formula and units
 
-One versioned method with three branches, tried in a fixed order. The first
-branch whose inputs are complete gives the value. The value records which
-branch that was (`load_branch`).
+One versioned method with four branches. Endurance sessions try the first
+three in a fixed order and take the first whose inputs are complete; strength
+uses only the fourth. The value records which branch gave it
+(`load_branch`).
 
 1. **Power** (ride and run):
    `IF = NP / FTP`,
@@ -56,8 +69,8 @@ branch that was (`load_branch`).
      value is marked `pace_basis: average_speed`.
    - `v_threshold`: the resolver's run threshold pace on the day, stored as
      m/s.
-3. **Heart rate** (every sport except strength, yoga, alpine ski and walking, without
-   power or pace):
+3. **Heart rate** (every sport except strength, yoga and alpine ski, without
+   power or pace; walking included since v2):
    - `TSS = TRIMP_session / TRIMP_threshold_hour × 100`.
    - `TRIMP = minutes × HRr × 0.64 × e^(1.92 × HRr)`.
    - `HRr = (HR − HR_rest) / (HR_max − HR_rest)`.
@@ -70,6 +83,13 @@ branch that was (`load_branch`).
      earlier day within 7 days, from the recovery family (Garmin first).
      Without one, the earliest later resting HR stands in, flagged
      `threshold_after_session` (athlete decision 2026-11-06).
+4. **Session RPE** (strength only, v2):
+   `TSS = AU × k`.
+   - `AU`: the session-RPE load of card M1, elapsed minutes × RPE, from the
+     local feedback RPE, else the Garmin, else the Intervals.icu rating.
+   - `k`: the median of `TSS / AU` over the ride and run sessions with a
+     local load (any branch) and a local or Garmin rating, observed in the 365
+     days up to the session day. At least 20 such pairs are needed.
 
 General rules:
 
@@ -91,9 +111,11 @@ General rules:
   - `method`: `local-tss-load`, `method_version`: 1.
   - The owner is the canonical session.
   - `details` hold the branch, the pace basis, and the thresholds used with
-    their sources and dates.
+    their sources and dates; a session-RPE value also holds `k`, its pair
+    count and window.
 - **Fingerprint.** `input_fingerprint` is the SHA-256 over the method
-  version, branch, session inputs and thresholds.
+  version, branch, session inputs, thresholds and, for strength, the
+  calibration.
 - **Recompute.** A method version bump or a changed input gives a new
   fingerprint. A local, idempotent backfill then recomputes the affected
   sessions, so a corrected or backfilled threshold changes past values.
@@ -101,6 +123,8 @@ General rules:
   their dated threshold is unchanged.
 - **Session changes.** A session that disappears or merges retires its
   observations.
+- **Rating changes.** A saved, changed or undone session RPE requests a pass,
+  so strength values and the calibration follow it.
 
 ## Sources
 
@@ -116,6 +140,9 @@ General rules:
   case only). R25 is evidence against it.
 - **Agreement and comparison limits:** R21-R24 and R31. R26 reports the
   reliability of HR-based scores.
+- **Session-RPE branch:** R1 (session RPE as a load measure, card M1). The
+  conversion of AU into TSS by a personal factor has no source; it is a
+  product assumption (v2).
 
 ## Population and reference measurement
 
@@ -170,6 +197,9 @@ hour, or a mix of branches on one scale.
   (R23, R24).
 - HR-based scores in water or in strength work may misrepresent load. This is
   a product assumption, not a cited finding.
+- The strength factor assumes that one AU of strength costs as much TSS as one
+  AU of the athlete's rides and runs. Nothing validates this; it is a personal
+  scaling, not a measurement.
 - The male coefficient is fixed for this athlete and does not transfer.
 
 ## Deviations from the studied procedure
@@ -181,8 +211,9 @@ hour, or a mix of branches on one scale.
   published method.
 - Pace uses Garmin's grade-adjusted average speed, not normalized graded pace
   from streams, and the flat average speed when that is missing.
-- Strength, yoga, alpine ski and walking get no TSS. Their sRPE AU stays
-  beside the sum.
+- Yoga and alpine ski get no TSS. Their sRPE AU stays beside the sum.
+- Strength TSS is the session-RPE load scaled by a personal factor, not a
+  published TSS method.
 
 ## Minimum data and stop rules
 
@@ -194,6 +225,9 @@ hour, or a mix of branches on one scale.
 - Pace: `v > 0` and `v_threshold > 0`.
 - Heart rate: average HR, HR_rest, HR_max and the threshold HR all known,
   with `HR_rest < threshold HR < HR_max` and `0 < HRr ≤ 1`.
+- Session RPE (strength): a rated session with a positive elapsed duration
+  (`no_rating` otherwise) and at least 20 calibration pairs in the window
+  (`not_calibrated` otherwise).
 - An IF above 2.0 is rejected as implausible (`implausible_intensity`).
 - Duplicate imports count once (canonical session).
 - A session without a valid threshold on its day uses the earliest later
@@ -215,7 +249,13 @@ hour, or a mix of branches on one scale.
 | Resting HR source | recovery family, Garmin first | product assumption | Same family rule as `backend/performance/source_policy.py`. |
 | Implausible IF | above 2.0 | product assumption | Guard against a wrong FTP or unit; not a physiological rule. |
 | Stored intensity | intensity_pct = IF × 100, power branch only | product assumption | Issue #1725 scope (NP/FTP); pace IF is not comparable. |
-| Sports without TSS | strength, yoga, alpine ski, walking | product assumption | HR load agrees poorly with sRPE in strength work (Dai et al. 2025, README); yoga and alpine ski are treated alike because their HR does not reflect endurance load; walking is everyday activity, not training load (athlete decision 2026-11-06). Hiking keeps the HR branch. |
+| Sports without TSS | yoga, alpine ski | product assumption | Their HR does not reflect endurance load; athlete decision 2026-11-06 (v2). |
+| Walking | heart-rate branch | product assumption | Like hiking; athlete decision 2026-11-06 (v2) reverses the earlier exclusion. |
+| Strength branch | session-RPE AU × personal TSS per AU | product assumption | HR load agrees poorly with sRPE in strength work (Dai et al. 2025, README) and misses leg load; athlete decision 2026-11-06 (v2). R1 covers the AU, not the conversion. |
+| Calibration statistic | median of TSS / AU per session | product assumption | Robust to single outliers; athlete decision 2026-11-06. |
+| Calibration window | 365 days up to the session day | product assumption | Follows slow changes and dates each value; athlete decision 2026-11-06. |
+| Calibration minimum | 20 pairs | product assumption | Enough for a stable median; athlete decision 2026-11-06. |
+| Calibration ratings | local feedback and Garmin device only | product assumption | Ratings relayed by Intervals.icu are left out; athlete decision 2026-11-06. |
 | HR thresholds of other sports | run values | product assumption | The resolver keeps HR thresholds for ride and run only. |
 | Indoor ride FTP | local indoor power zone of the day, else the ride FTP | product assumption | Athlete decision 2026-11-06 after review; plans also apply local indoor zones. |
 | Threshold after the session | earliest later threshold, flagged | product assumption | Athlete decision 2026-11-06; fills history before the first stored threshold. |
@@ -227,10 +267,14 @@ hour, or a mix of branches on one scale.
 - "This week: 410 TSS from 5 sessions (4 power, 1 heart rate); 1 strength
   session has no TSS."
 - "This value uses the FTP of 2026-03-01 from your local zones."
+- "Krafteinheit 90 TSS: 270 AU × 0,33 TSS/AU aus 42 bewerteten Rad- und
+  Laufeinheiten (Schätzung)."
 
 ## Forbidden statements
 
-- Equating power, pace and heart-rate TSS, or AU with TSS (R21, R22).
+- Equating power, pace and heart-rate TSS, or AU with TSS outside the
+  calibrated strength branch (R21, R22).
+- Presenting a strength TSS as measured, or without naming its factor basis.
 - Metabolic-stress, fatigue, readiness or injury statements from one session's
   TSS (R23-R25).
 - Presenting IF = 1 as the lactate threshold or MLSS (R29).
@@ -248,6 +292,9 @@ hour, or a mix of branches on one scale.
     The pace branch may be dropped at review.
 - **Method scope:** the heart-rate branch mixes an internal-load model into a
   power scale (R22). The athlete decides at review whether to keep it.
+- **Strength conversion (v2):** no study supports converting session-RPE AU
+  into TSS with a factor from endurance sessions; the factor carries the
+  RPE-to-TSS relation of rides and runs into strength work.
 - **Evidence gaps:**
   - The funding and interest statements of the IJSPP papers are known only
     from abstracts.

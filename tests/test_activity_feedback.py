@@ -200,6 +200,22 @@ class ActivityFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(updated["activity_feedback"]["notes"], "Better")
         self.assertEqual(self.service.list(), [updated["activity_feedback"]])
 
+    def test_only_session_rpe_changes_request_a_local_load_pass(self) -> None:
+        calls: list[bool] = []
+        service = ActivityFeedbackService(
+            self.manager, self.feedback_repository, on_change=lambda: calls.append(True)
+        )
+        service.save("activity-1", {"notes": "Good"})
+        self.assertEqual(calls, [])
+        service.save("activity-1", {"session_rpe": 6})
+        service.save("activity-1", {"notes": "Better"})
+        self.assertEqual(calls, [True])
+        service.save("activity-1", {"notes": "", "session_rpe": None})
+        self.assertEqual(calls, [True, True])
+        with self.manager.unit_of_work() as db:
+            service.restore_in_transaction(db, "activity:activity-1", None, None)
+        self.assertEqual(calls, [True, True, True])
+
     def test_empty_notes_delete_and_exact_response(self) -> None:
         self.service.save("activity-1", {"notes": "remove me"})
 

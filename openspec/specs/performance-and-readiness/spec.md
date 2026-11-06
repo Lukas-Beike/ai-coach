@@ -689,7 +689,7 @@ Detailed contract:
 | Power and running best-effort curve | `mean-max-curve` v1 | `ok`, `insufficient_data`; per running point also `unknown` | observed bests only, no FTP, CP or pace estimate | M4 card |
 | Critical Power and Critical Speed | `critical-power-speed` v1 | method `experimental`; per fit `ok`, `insufficient_data`, `withheld` | model estimate from the best 3/7/12-min efforts of 28 days; never FTP, threshold or zones | M4, released |
 | Short- and long-term session-RPE load (AU) | `smoothed-session-load` v1 | `estimate`, `insufficient_data` | smoothed subjective load; no fitness, form, ratio, risk or provider comparison | M5, released |
-| Session load and intensity factor (TSS scale) | `local-tss-load` v1 | stored per session with `load_branch` `power`, `pace` or `heart_rate`; none without inputs | branches are not equivalent; no fatigue, readiness or injury statement; IF = 1 is not a physiological threshold | M6, released |
+| Session load and intensity factor (TSS scale) | `local-tss-load` v2 | stored per session with `load_branch` `power`, `pace`, `heart_rate` or `session_rpe` (strength); none without inputs | branches are not equivalent; strength TSS is a personal sRPE scaling; no fatigue, readiness or injury statement; IF = 1 is not a physiological threshold | M6, released |
 | Local fitness, fatigue and form (TSS/d) | `local-fitness-fatigue` v1 | `estimate`, `insufficient_data` | model estimate from the local load; never mixed with Intervals.icu CTL/ATL/form; no performance, risk or readiness prediction | M7, released |
 
 Passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1, W′ balance and HRV-based recommendations stay deferred. No observation phase has run.
@@ -697,11 +697,15 @@ Passive CP/CS, other TRIMP uses, further threshold or VO2max estimates, DFA-α1,
 Evidence: `docs/performance-methods/README.md`, `backend/coach/context.py:coach_performance_projection`, `backend/coach/context.py:coach_sleep_timing_projection`, `backend/coach/activity_read_tools.py:CoachActivityReadToolService.execute`; `tests/test_performance_coach_ui_parity.py`.
 
 ### Requirement: Local TSS-scale session load is a labelled model estimate
-The system SHALL compute each canonical session's load with M6 `local-tss-load` v1 from its summary and the thresholds valid on its local day: power (NP/FTP, ride and run), then run pace, then heart rate (Banister TRIMP, 60 min at threshold HR = 100). It SHALL store the load, and the power IF, as derived observations owned by the session and SHALL NOT use a provider load or intensity.
+The system SHALL compute each canonical session's load with M6 `local-tss-load` v2 from its summary and the thresholds valid on its local day: power (NP/FTP, ride and run), then run pace, then heart rate (Banister TRIMP, 60 min at threshold HR = 100). A strength session SHALL instead take its session-RPE AU times a personal TSS-per-AU factor. It SHALL store the load, and the power IF, as derived observations owned by the session and SHALL NOT use a provider load or intensity.
 
 #### Scenario: Garmin-only session with power
 - **WHEN** a Garmin-only ride reports NP 230 W for 70 minutes and the FTP valid that day is 250 W
 - **THEN** its summary serves `training_load` 98.75, `intensity` 92 and `load_branch` `power` with the source label `derived`, and the rollup sums it.
+
+#### Scenario: Strength from the session RPE
+- **WHEN** a 45-minute strength session is rated RPE 6 on the Garmin device and 20 Garmin-rated rides of the last 365 days each give 100 TSS for 300 AU
+- **THEN** it gets 90 TSS with `load_branch` `session_rpe`, its factor and pair count; with 19 pairs or only Intervals.icu-relayed ratings it gets none (`not_calibrated`), and unrated it gets none (`no_rating`).
 
 #### Scenario: Threshold valid only after the session
 - **WHEN** no threshold is valid on the session day but a later one exists
@@ -711,9 +715,9 @@ The system SHALL compute each canonical session's load with M6 `local-tss-load` 
 - **WHEN** a session's inputs, its dated thresholds or the method version change, or the session is gone
 - **THEN** the next stage pass rewrites only the values whose fingerprint changed and retires the values of gone sessions.
 
-Detailed contract: thresholds follow `resolve_current_thresholds` per day with the policy's age limits, and an indoor or virtual ride uses a local indoor power zone of the day first; resting HR comes from the session day or up to 7 days earlier, Garmin first, else the earliest later value, flagged. Strength, yoga, alpine ski and walking get no value; an IF above 2.0 is rejected. The pass runs as the first canonical backfill follow-up, triggered by worker start, completed Intervals.icu, Garmin and Wahoo jobs, local zone changes, session corrections and their undo, and a changed preferred threshold source; one invalid session value never stops the pass. It keeps content-free counts that diagnostics and the log (`local_load_reconciled`) report.
+Detailed contract: thresholds follow `resolve_current_thresholds` per day with the policy's age limits, and an indoor or virtual ride uses a local indoor power zone of the day first; resting HR comes from the session day or up to 7 days earlier, Garmin first, else the earliest later value, flagged. The strength factor is the median TSS per AU of the locally or Garmin-rated ride and run sessions with a local load in the 365 days up to the session day, from at least 20 pairs. Yoga and alpine ski get no value, walking takes the heart-rate branch; an IF above 2.0 is rejected. The pass runs as the first canonical backfill follow-up, triggered by worker start, completed Intervals.icu, Garmin and Wahoo jobs, local zone changes, session corrections and their undo, a changed session RPE and its undo, and a changed preferred threshold source; one invalid session value never stops the pass. It keeps content-free counts that diagnostics and the log (`local_load_reconciled`) report.
 
-Evidence: `backend/performance/local_tss.py`, `backend/sync/local_load.py`, `backend/sync/canonical_backfill_assembly.py`, `backend/sync/executor.py:SyncJobExecutor.run`, `backend/athlete/zones.py:ZoneConfigurationService`; `tests/test_local_tss.py`, `tests/test_local_load_store.py`, `tests/test_sync_executor.py`, `tests/test_zone_configuration_canonical.py`, `docs/performance-methods/m6-local-tss-load.md`.
+Evidence: `backend/performance/local_tss.py`, `backend/sync/local_load.py`, `backend/sync/canonical_backfill_assembly.py`, `backend/sync/executor.py:SyncJobExecutor.run`, `backend/athlete/zones.py:ZoneConfigurationService`, `backend/activities/feedback.py:ActivityFeedbackService`; `tests/test_local_tss.py`, `tests/test_activity_feedback.py`, `tests/test_local_load_store.py`, `tests/test_sync_executor.py`, `tests/test_zone_configuration_canonical.py`, `docs/performance-methods/m6-local-tss-load.md`.
 
 ### Requirement: Local fitness, fatigue and form are a labelled model estimate
 The system SHALL compute M7 `local-fitness-fatigue` v1 on read as the exponentially smoothed stored M6 load per local day with τ 42 days (fitness) and 7 days (fatigue), and form as fitness minus fatigue of the same day. The curves SHALL start at 0 before the first day with a stored local load of the whole history and SHALL NOT be stored, seeded, corrected or mixed with Intervals.icu CTL, ATL or form.
@@ -723,7 +727,7 @@ The system SHALL compute M7 `local-fitness-fatigue` v1 on read as the exponentia
 - **THEN** the last day shows the recursion values of both curves and their difference, rounded to 0.1.
 
 #### Scenario: Session without a local load
-- **WHEN** a day holds a strength session, or another session without a stored local load
+- **WHEN** a day holds an unrated or uncalibrated strength session, a yoga session, or another session without a stored local load
 - **THEN** the session adds nothing, the day is `incomplete` with the number of such sessions and their rated session-RPE AU, and the curve values equal those without the session.
 
 #### Scenario: Warm-up and open days

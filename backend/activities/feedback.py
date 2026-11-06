@@ -12,7 +12,7 @@ feedback.
 from __future__ import annotations
 
 import builtins
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any, Final
 
 from backend import change_history
@@ -220,9 +220,12 @@ class ActivityFeedbackService:
         feedback_repository: Any,
         *,
         references: ActivityReferenceResolver | None = None,
+        on_change: Callable[[], None] = lambda: None,
     ):
         self._database_manager = database_manager
         self._feedback_repository = feedback_repository
+        # Requests a local load pass: a session RPE feeds strength loads (M6).
+        self._on_change = on_change
         self._references = NoActivityReferences() if references is None else references
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -298,6 +301,15 @@ class ActivityFeedbackService:
         return self._save(self._references.resolve_reference(activity_id), value)
 
     def _save(self, reference: ActivityReference, value: Any) -> dict[str, Any]:
+        """Save, then request a local load pass when the session RPE changed."""
+        result, rpe_changed = self._save_feedback(reference, value)
+        if rpe_changed:
+            self._on_change()
+        return result
+
+    def _save_feedback(
+        self, reference: ActivityReference, value: Any
+    ) -> tuple[dict[str, Any], bool]:
         """Edit the effective feedback of the reference's session.
 
         Omitted fields keep their effective value. Clearing every field removes the
@@ -322,11 +334,13 @@ class ActivityFeedbackService:
                 feedback["activity_id"] = existing["activity_id"]
             own_row = feedback["activity_id"] == key
             _keep_omitted_fields(feedback, value, existing)
+            rpe_changed = existing.get("session_rpe") != feedback.get("session_rpe")
             if _is_cleared(feedback):
                 for row in group or [{"activity_id": key}]:
                     self._feedback_repository.delete(db, row["activity_id"])
                 change = self._record(db, group_key, group, None)
-                return {"status": "ok", "activity_feedback": None, "change": change}
+                cleared = {"status": "ok", "activity_feedback": None, "change": change}
+                return cleared, rpe_changed
             self._feedback_repository.upsert(
                 db,
                 feedback,
@@ -342,7 +356,8 @@ class ActivityFeedbackService:
         with self._database_manager.reader() as db:
             saved_group = self._groups(db).get(saved_key)
         saved = _effective_view(saved_group) if saved_group else feedback
-        return {"status": "ok", "activity_feedback": saved, "change": change}
+        result = {"status": "ok", "activity_feedback": saved, "change": change}
+        return result, rpe_changed
 
     @staticmethod
     def _record(
@@ -380,7 +395,12 @@ class ActivityFeedbackService:
         current: dict[str, Any] | None,
         target: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
-        """Replace the group's stored rows with the recorded ones, ids and times kept."""
+        """Replace the group's stored rows with the recorded ones, ids and times kept.
+
+        The undo commits after this returns; the requested local load pass waits
+        for the writer, so it reads the restored session RPE.
+        """
+        self._on_change()
         for row in (current or {}).get("rows") or []:
             self._feedback_repository.delete(db, str(row["activity_id"]))
         rows = (target or {}).get("rows")

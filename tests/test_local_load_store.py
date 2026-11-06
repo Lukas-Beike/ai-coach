@@ -156,6 +156,24 @@ class LocalLoadStoreTests(unittest.TestCase):
         rollup = activity_rollup([summary], 7, date(2026, 9, 10))
         self.assertEqual(rollup["load_missing_sessions"], 1)
 
+    def test_pass_reads_the_session_feedback_of_every_session(self) -> None:
+        requested: list[list[str]] = []
+
+        def lookup(keys: list[str]) -> list[dict[str, Any]]:
+            requested.append(list(keys))
+            return []
+
+        stage = LocalLoadStage(
+            key_values=self.key_values,
+            zone_provider=lambda: ZONE,
+            clock=lambda: NOW,
+            session_feedback=lookup,
+        )
+        with self.manager.unit_of_work() as db:
+            stage.run_batch(db)
+        self.assertEqual(len(requested), 1)
+        self.assertTrue(requested[0])
+
     def test_deleted_session_retires_its_load(self) -> None:
         with self.manager.unit_of_work() as db:
             _ftp(db, 250.0, date(2026, 9, 1))
