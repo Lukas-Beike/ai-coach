@@ -1070,7 +1070,8 @@ MOVED_SYMBOLS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "_activity_rollup_date",
             "_activity_rollup_number",
-            "_activity_rollup_totals",
+            "_activities_in",
+            "_missing_load",
             "activity_rollup",
             "_activity_load_by_date",
             "_atl_series_from_rows",

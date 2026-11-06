@@ -27,7 +27,7 @@ FIXTURE_ACTIVITIES = [
 # The stored observations per metric after the fixture backfill.
 FIXTURE_OBSERVATION_COUNTS = {
     "weight": 5,
-    "ftp": 4,
+    "ftp": 5,
     "threshold_hr": 4,
     "max_hr": 2,
     "resting_hr": 4,
@@ -42,7 +42,6 @@ FIXTURE_OBSERVATION_COUNTS = {
     "atl": 3,
     "form": 3,
     "eftp": 4,
-    "run_threshold_power": 1,
     "acute_load": 1,
     "chronic_load": 1,
     "acute_chronic_ratio": 1,

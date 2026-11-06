@@ -50,6 +50,10 @@ The system SHALL calculate explicit current/previous 7- and 30-day completed-act
 - **WHEN** a day contains several completed loads and later days have no activity
 - **THEN** rollups sum known contributions and actual ATL evolves through the implemented decay rather than copying a future planned load.
 
+#### Scenario: Sessions without a TSS-scale load
+- **WHEN** a rollup window holds sessions without an Intervals.icu training load or TSS, such as a Garmin-only session with only its EPOC-based Garmin load
+- **THEN** the rollup and the actual ATL report how many sessions were left out of the load sum, and the rollup reports their known session-RPE load in AU beside the sum, with the labels of its RPE sources, never added to it.
+
 #### Scenario: Missing or conflicting Garmin acute load
 - **WHEN** no dated valid measured acute-load value exists or device values conflict
 - **THEN** Garmin acute-load history leaves the date unknown instead of reconstructing it from daily/chronic activity totals.
@@ -62,7 +66,7 @@ The system SHALL calculate explicit current/previous 7- and 30-day completed-act
 - **WHEN** the latest wellness day has no form observation, including a reported form value that the mapper rejected as invalid, or no canonical inputs exist
 - **THEN** `tsb` is unknown instead of a snapshot value or a consumer-side derivation.
 
-Evidence: `backend/performance/load.py:activity_rollup`, `backend/performance/load.py:actual_atl_series`, `backend/performance/load_context.py:performance_load_context`, `backend/performance/garmin_load.py:acute_load_value`; `tests/test_performance_load.py:test_actual_atl_decays_across_missing_days_and_is_sorted`, `tests/test_performance_chart_history.py:test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load`, `tests/test_performance_chart_history.py:test_acute_load_rejects_invalid_and_conflicting_device_values`. The form scenarios are verified by `tests/test_performance_canonical_load_metrics.py:FormTests`, `tests/test_performance_load_context.py:test_form_and_ramp_rate_come_from_the_canonical_inputs` and `tests/test_characterization_load_focus.py:test_carrier_form_fields_are_not_read_without_canonical_inputs`.
+Evidence: `backend/performance/load.py:activity_rollup`, `tests/test_performance_load.py:test_sessions_without_a_tss_scale_load_are_counted_with_their_rpe_load`, `backend/performance/load.py:actual_atl_series`, `backend/performance/load_context.py:performance_load_context`, `backend/performance/garmin_load.py:acute_load_value`; `tests/test_performance_load.py:test_actual_atl_decays_across_missing_days_and_is_sorted`, `tests/test_performance_chart_history.py:test_garmin_acute_load_is_dated_and_never_derived_from_daily_or_chronic_load`, `tests/test_performance_chart_history.py:test_acute_load_rejects_invalid_and_conflicting_device_values`. The form scenarios are verified by `tests/test_performance_canonical_load_metrics.py:FormTests`, `tests/test_performance_load_context.py:test_form_and_ramp_rate_come_from_the_canonical_inputs` and `tests/test_characterization_load_focus.py:test_carrier_form_fields_are_not_read_without_canonical_inputs`.
 
 ### Requirement: Training reports retain coverage and actual execution
 The system SHALL build local period reports from the neutral activity summaries, one per canonical session, using athlete-local dates, exclude future completed data, and expose measured-session coverage for duration, distance, and load. Reports SHALL include supported period comparisons, daily/cumulative load, eight calendar weeks of load, sports, key sessions, feedback, and plan-execution context with a common period. Unknown values SHALL stay unknown while valid zero load remains measured.

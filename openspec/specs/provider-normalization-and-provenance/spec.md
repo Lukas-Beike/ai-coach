@@ -32,10 +32,6 @@ The system SHALL preserve explicit instants, date each activity on the day it wa
 - **WHEN** a Wahoo workout has an unrecognized type identifier
 - **THEN** it maps to other sport and unknown environment rather than claiming a known activity type.
 
-#### Scenario: Trail runs since Garmin mapper version 10
-- **WHEN** a Garmin activity has type `trail_running` or `obstacle_run`, or an Intervals.icu activity has type `TrailRun`
-- **THEN** it maps to an outdoor run, the only outdoor run of those two providers, so the session analyses (decoupling, pace at heart rate) leave it out as a trail run; Wahoo outdoor runs stay ordinary runs, and treadmill and virtual runs count as flat for pace at heart rate (method `pace-at-heart-rate-v2`), never grade-adjusted by a course altitude.
-
 #### Scenario: Activity recorded abroad
 - **WHEN** an athlete with profile zone Europe/Berlin records a run at 06:30 in Tokyo, reported by Garmin (`startTimeLocal` nine hours after `startTimeGMT`), by Intervals.icu (`timezone` Asia/Tokyo with an exact `start_date`) or by Wahoo (`time_zone` Asia/Tokyo)
 - **THEN** the activity, its session, `started_at_local` and every week or plan read are dated on the Tokyo day at 06:30, not on the previous Berlin day.
@@ -50,7 +46,26 @@ The system SHALL preserve explicit instants, date each activity on the day it wa
 
 Detailed contract: Wahoo's naive `starts` SHALL be interpreted as UTC. The offset is stored as `local_offset_minutes` in the activity record's details; a session uses its primary record's offset, else that of the first record reporting one. A summary carrying an offset keeps its own `started_at_local` date even when a reader converts to the athlete zone.
 
-Evidence: `backend/canonical/local_time.py:localize_wall_time`, `backend/canonical/local_time.py:wall_time`, `backend/canonical/local_time.py:wall_clock_offset_minutes`, `backend/canonical/local_time.py:zone_offset_minutes`, `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`, `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_TYPES`, `backend/activities/detail_contract.py:session_local_start`, `backend/canonical/activity_summary.py:summary_local_date`, `backend/performance/analysis_input.py:analysis_sport`, `backend/performance/pace_at_hr.py:pace_at_heart_rate`; `tests/test_activity_local_offset.py`, `tests/test_garmin_activity_mapping.py:test_only_off_road_runs_are_outdoor_runs`, `tests/test_pace_at_hr.py:test_indoor_and_virtual_runs_ignore_course_altitude`, `tests/test_analysis_input.py:test_garmin_outdoor_runs_are_trail_runs`, `tests/test_pace_at_hr.py:test_outdoor_run_without_terrain_is_unknown_but_indoor_is_flat`, `tests/test_intervals_activity_mapping.py:test_aware_start_date_wins_over_local_wall_time`, `tests/test_intervals_activity_mapping.py:test_naive_start_date_alone_drops_the_record`, `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`, `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`, `tests/test_wahoo_activity_mapping.py:test_the_workouts_own_time_zone_dates_it_where_it_was_recorded`.
+Evidence: `backend/canonical/local_time.py:localize_wall_time`, `backend/canonical/local_time.py:wall_time`, `backend/canonical/local_time.py:wall_clock_offset_minutes`, `backend/canonical/local_time.py:zone_offset_minutes`, `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_TYPES`, `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_TYPES`, `backend/activities/detail_contract.py:session_local_start`, `backend/canonical/activity_summary.py:summary_local_date`, `backend/performance/analysis_input.py:analysis_sport`, `backend/performance/pace_at_hr.py:pace_at_heart_rate`; `tests/test_activity_local_offset.py`, `tests/test_garmin_activity_mapping.py:test_only_off_road_runs_are_outdoor_runs`, `tests/test_pace_at_hr.py:test_indoor_and_virtual_runs_ignore_course_altitude`, `tests/test_analysis_input.py:test_a_trail_terrain_marks_a_trail_run_for_every_provider`, `tests/test_pace_at_hr.py:test_outdoor_run_without_terrain_is_unknown_but_indoor_is_flat`, `tests/test_intervals_activity_mapping.py:test_aware_start_date_wins_over_local_wall_time`, `tests/test_intervals_activity_mapping.py:test_naive_start_date_alone_drops_the_record`, `tests/test_wahoo_activity_mapping.py:test_start_without_an_offset_is_read_as_utc`, `tests/test_wahoo_activity_mapping.py:test_local_date_follows_the_athlete_zone`, `tests/test_wahoo_activity_mapping.py:test_the_workouts_own_time_zone_dates_it_where_it_was_recorded`.
+
+### Requirement: Activity terrain, motor assistance and native type
+The system SHALL map the terrain and motor assistance a provider activity type names into provider-neutral qualifiers, keep the provider's native type, and filter analyses by these qualifiers, never by provider identity.
+
+#### Scenario: Trail runs carry an explicit terrain
+- **WHEN** an Intervals.icu `TrailRun`, a Garmin `trail_running` or `obstacle_run`, or a Wahoo workout type 4 is mapped
+- **THEN** it is an outdoor run with terrain `trail`, and the session analyses (decoupling, pace at heart rate), the critical-speed fit and the equal-effort run trend leave it out by that terrain, never by provider; treadmill and virtual runs count as flat for pace at heart rate (method `pace-at-heart-rate-v2`), never grade-adjusted by a course altitude.
+
+#### Scenario: E-bike rides carry motor assistance
+- **WHEN** an Intervals.icu `EBikeRide` or `EMountainBikeRide`, a Garmin `e_bike_fitness` or `e_bike_mountain`, or a Wahoo workout type 64 is mapped
+- **THEN** it is a ride with assist `electric`; its session stays out of the power and speed best values, CP/CS fits and mean-max and equal-effort trends, and counts in time-based volume, reported again as `electric_assist_hours`.
+
+#### Scenario: Equivalent types across providers
+- **WHEN** the same activity type exists in two provider tables (for example cyclocross, mountain bike, lap or open-water swim, treadmill run)
+- **THEN** each provider maps it to the same sport, environment and terrain.
+
+Detailed contract: Terrain (road, trail, track, gravel, mountain, treadmill, pool, open water, unknown), assist (none, electric, unknown) and `native_type` (the provider type name or id, at most 64 characters) are stored in the record's details; a type a provider table knows without naming assistance is assist `none`, an unknown type is `unknown`. A session takes its primary record's terrain unless that is unknown and another record knows it; it is electric whenever any record is, since a generic type such as a plain ride maps to assist `none`. The session summary, the session analysis and the Coach activity list carry the terrain when known and `assist` only as `electric`; comparable sessions compare trail runs only with trail runs. An Intervals.icu `Swim` is a pool swim only with a positive `pool_length`.
+
+Evidence: `backend/canonical/vocabulary.py:Terrain`, `backend/canonical/vocabulary.py:Assist`, `backend/canonical/records.py:session_terrain`, `backend/providers/intervals_activity_mapping.py:INTERVALS_ACTIVITY_QUALIFIERS`, `backend/providers/garmin_activity_mapping.py:GARMIN_ACTIVITY_QUALIFIERS`, `backend/providers/wahoo_activity_mapping.py:WAHOO_WORKOUT_QUALIFIERS`, `backend/performance/critical_power.py:critical_power_speed`, `backend/performance/load.py:activity_rollup`; `tests/test_activity_qualifiers.py`, `tests/test_mean_max_curve.py:test_e_bike_sessions_stay_out_of_the_bests_and_fits`.
 
 ### Requirement: Activity field and load semantics
 The system SHALL retain distinct moving and elapsed durations from every provider, distance in metres, power in watts, heart rate in bpm, ascent in metres, speed in metres per second, cadence in rpm, energy in kJ where mapped, and provider-specific load models. Intervals SHALL prefer moving time and average-watts aliases; Wahoo SHALL use summary active duration before total duration and never use planned workout minutes as completed duration.
@@ -69,7 +84,7 @@ The system SHALL retain distinct moving and elapsed durations from every provide
 
 #### Scenario: Garmin strength session duration
 - **WHEN** a Garmin strength activity has an active timer `duration` and a longer `elapsedDuration`
-- **THEN** `elapsedDuration` is stored as the elapsed duration, and as the activity duration, so rest between sets counts.
+- **THEN** `elapsedDuration` is stored as the elapsed duration, and as the activity duration, so rest between sets counts; Intervals.icu and Wahoo strength sessions follow the same rule.
 
 #### Scenario: Provider loads differ
 - **WHEN** Intervals training load and Wahoo TSS describe copies of a session
@@ -79,12 +94,33 @@ Detailed contract: Wahoo work in joules SHALL convert to kJ; zero ascent remains
 
 Evidence: `backend/providers/intervals_activity_mapping.py:map_intervals_activities`, `backend/providers/garmin_activity_mapping.py:map_garmin_activities`, `backend/providers/wahoo_activity_mapping.py:map_wahoo_activities`; `tests/test_intervals_activity_mapping.py:test_moving_time_precedes_elapsed_time`, `tests/test_intervals_activity_mapping.py:test_zero_load_is_kept_with_the_intervals_model`, `tests/test_wahoo_activity_mapping.py:test_summary_metrics_map_from_decimal_text`, `tests/test_wahoo_activity_mapping.py:test_planned_minutes_are_never_the_duration`, `tests/test_garmin_activity_mapping.py:test_strength_duration_is_the_whole_session_not_the_active_timer`, `backend/providers/canonical_plans.py:wahoo_ingest_plan`, `backend/sync/canonical_ingest.py:ingest_plan`, `tests/test_wahoo_activity_mapping.py:test_workouts_without_a_measured_value_are_withdrawn`, `tests/test_session_linking.py:test_a_stored_placeholder_is_withdrawn_and_revived_with_its_summary`, `tests/test_session_linking.py:test_a_stored_recording_listed_without_its_summary_is_kept`, `tests/test_wahoo_activity_mapping.py:test_a_workout_with_a_recording_file_is_never_withdrawn`.
 
+### Requirement: One activity duration and cadence meaning
+The system SHALL fill the activity duration by one rule for every provider: moving time, else timer time, else elapsed time, and the elapsed time when it is longer for strength. Cadence SHALL be rpm, counting one leg per minute for runs, never steps per minute.
+
+#### Scenario: Garmin moving time beside its timer time
+- **WHEN** a Garmin activity has `movingDuration` and a longer timer `duration`
+- **THEN** since Garmin activity mapper 12 the activity duration is the moving time, as for Intervals.icu and Wahoo, and session bundling compares the Garmin elapsed time with the Intervals.icu elapsed time in its elapsed pass.
+
+#### Scenario: Strength session from any provider
+- **WHEN** an Intervals.icu, Wahoo or Garmin strength session has a moving or timer time shorter than its elapsed time
+- **THEN** the activity duration is the elapsed time, so rest between sets counts.
+
+Evidence: `backend/canonical/records.py:activity_duration_s`, `backend/activities/canonical_sessions.py:_garmin_measurement_gaps`; `tests/test_canonical_records.py:ActivityDurationRuleTests`, `tests/test_intervals_activity_mapping.py:test_strength_duration_is_the_whole_session`, `tests/test_garmin_activity_mapping.py:test_moving_duration_comes_from_moving_duration_only`, `tests/test_canonical_sessions.py:test_a_wahoo_record_is_not_matched_by_the_intervals_elapsed_time`.
+
 ### Requirement: Health and body unit normalization
 The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly HRV average, resting HR, readiness, body measurements, daily counts/energy, VO2max, thresholds, predictions, and endurance score using supported aliases and plausible bounds. Weekly HRV SHALL not stand in for a last-night reading. Declared grams/pounds/kilograms SHALL convert to kg, body-fat fractions to percent, with bounded fallback magnitude interpretation only for undeclared units.
 
 #### Scenario: Declared weight unit
 - **WHEN** a valid Garmin weigh-in explicitly declares pounds or grams
 - **THEN** canonical weight is converted once to kilograms and its dated provenance is retained.
+
+#### Scenario: Several Garmin readiness readings per day
+- **WHEN** Garmin lists several training-readiness readings for one day
+- **THEN** a reading flagged as a re-score after exercise or a real-time update never becomes READINESS, even when stored and re-projected alone; of the rest, READINESS and its level, in the canonical and legacy reads, come from the scored reading flagged as taken after waking, else the earliest timed scored reading, else the first listed.
+
+#### Scenario: Manually entered Garmin weigh-in
+- **WHEN** a Garmin weigh-in declares `sourceType` `MANUAL`
+- **THEN** its weight is provider-reported and recorded by manual entry rather than a device measurement; the performance-history weight copy, which carries no source type, is provider-reported too.
 
 #### Scenario: Different HRV windows
 - **WHEN** a payload has only a weekly HRV average and no last-night value
@@ -96,7 +132,7 @@ The system SHALL normalize Garmin sleep duration/score, last-night RMSSD, weekly
 
 Detailed contract: Zero SHALL remain valid for sleep score, steps, floors, and active energy where implemented, while absent or invalid measurements remain unknown.
 
-Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
+Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/intervals_wellness_mapping.py:map_intervals_wellness`; `tests/test_garmin_health_mapping.py:test_weight_converts_declared_units_to_kilograms`, `tests/test_garmin_health_mapping.py:test_wake_up_reading_wins_regardless_of_list_order`, `tests/test_garmin_health_mapping.py:test_manual_weigh_in_is_provider_reported_and_recorded_by_manual`, `tests/test_garmin_health_mapping.py:test_hrv_prefers_last_night_and_ignores_weekly_average`, `tests/test_garmin_health_mapping.py:test_zero_sleep_score_is_kept`, `tests/test_garmin_health_mapping.py:test_daily_stats_map_counts_and_energy_with_units`.
 
 ### Requirement: Current thresholds and dated special metrics
 The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed conversion to canonical m/s, display conversion to seconds/km, date-bearing historical FTP, running race-prediction seconds, and endurance-score wrapper normalization. An undated current Garmin FTP, running threshold, zone maximum, or prediction may use the fetch's local day only in its implemented current-value path. Undated current FTP SHALL never invent historical FTP.
@@ -109,13 +145,17 @@ The system SHALL keep FTP and threshold sport scope, Garmin scaled running speed
 - **WHEN** stored Garmin FTP history holds biometric range records with `from` and `value`
 - **THEN** since Garmin health mapper version 14 each becomes a ride FTP observation on its `from` day, reprojected without a provider refetch; a bare `value` without `from` is not FTP.
 
+#### Scenario: Running threshold power under one kind
+- **WHEN** Garmin, Intervals.icu or Wahoo report a running threshold power
+- **THEN** since Garmin health mapper version 17 each is FTP with sport run; Garmin rows stored earlier under the legacy run threshold power kind stay readable as the run FTP until replay re-projects them.
+
 #### Scenario: Multiple Wahoo zone revisions
 - **WHEN** Wahoo returns multiple power-zone sets for one supported family
 - **THEN** the newest update time wins, later input wins an equal-time tie, and only that selected source row supplies the FTP observation.
 
 Detailed contract: Wahoo SHALL map the newest power-zone set per cycling/running family to FTP and current profile weight to the local fetch day; it SHALL not infer zone boundaries or other profile metrics from them.
 
-Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_ftp_history_reads_biometric_range_records`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
+Evidence: `backend/providers/garmin_health_mapping.py:map_garmin_health`, `backend/performance/garmin_canonical.py:garmin_thresholds`, `tests/test_current_thresholds.py:test_garmin_run_power_is_one_ftp_kind_with_the_legacy_kind_readable`, `backend/providers/wahoo_threshold_mapping.py:select_power_zone_sets`, `backend/providers/wahoo_threshold_mapping.py:map_wahoo_power_zones`; `tests/test_garmin_health_mapping.py:test_latest_ftp_without_a_date_uses_the_sync_day_only_for_current`, `tests/test_garmin_health_mapping.py:test_ftp_history_reads_biometric_range_records`, `tests/test_garmin_health_mapping.py:test_scaled_running_speed_is_stored_as_metres_per_second`, `tests/test_garmin_health_mapping.py:test_wrapped_endurance_score_is_mapped`, `tests/test_wahoo_threshold_mapping.py:test_the_newest_zone_set_of_each_family_is_kept_in_input_order`, `tests/test_wahoo_threshold_mapping.py:test_the_profile_is_dated_on_the_local_day_of_the_fetch`.
 
 ### Requirement: Metric-specific source priority and local authority
 The system SHALL apply per-metric source rules rather than a universal provider order. A locally confirmed zone configuration precedes every provider for thresholds. Current ride FTP prefers the athlete-maintained Intervals.icu setting before Garmin, with Wahoo last; threshold and maximum heart rate, threshold pace and run power prefer Garmin before Intervals.icu. VO2max prefers Garmin. Weight and body fat take the most recent measurement.
@@ -192,6 +232,10 @@ The system SHALL map dated Intervals wellness body, HRV, sleep, readiness, VO2ma
 #### Scenario: HRV methods and alias precedence
 - **WHEN** RMSSD and SDNN are both present or an earlier alias is invalid while a later alias is numeric
 - **THEN** HRV methods remain separate observations, and the rejected first-present value is reported rather than replaced by the later alias. Supported wellness kinds include weight/body fat, resting HR, RMSSD/SDNN, sleep duration/score, readiness, VO2max, CTL/ATL/form, and sport-scoped eFTP.
+
+#### Scenario: Subjective wellness ratings
+- **WHEN** a wellness row carries fatigue, soreness, stress or mood
+- **THEN** each is stored as entered, provider-reported with `recorded_by` manual so the Intervals.icu provenance stays, on the Intervals.icu 1–4 scale where 1 is good and 4 bad (mood 1 super … 4 mies); the scale is resolved at read time, not stored.
 
 #### Scenario: Rejected reported form stays absent
 - **WHEN** a wellness row reports a form value that is not a valid number while CTL and ATL are valid

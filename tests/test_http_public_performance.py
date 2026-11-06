@@ -83,7 +83,11 @@ class PublicPerformanceStateTests(unittest.TestCase):
         # Canonical reads (#1416): the context takes the Garmin sync status and
         # no snapshot.
         project_performance.assert_called_once_with(
-            garmin, profile, today, canonical=EMPTY_PERFORMANCE_INPUTS
+            garmin,
+            profile,
+            today,
+            canonical=EMPTY_PERFORMANCE_INPUTS,
+            session_feedback=None,
         )
         garmin_payload_service.sync_status.assert_called_once_with()
         garmin_payload_service.view.assert_not_called()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Final
@@ -36,6 +36,7 @@ from backend.canonical.validation import (
     validate_metric_value,
 )
 from backend.canonical.vocabulary import (
+    Assist,
     DeviceType,
     Environment,
     LoadModel,
@@ -45,6 +46,7 @@ from backend.canonical.vocabulary import (
     RecordingOrigin,
     SourceKind,
     Sport,
+    Terrain,
 )
 
 
@@ -306,6 +308,7 @@ type ZoneSeconds = tuple[tuple[str, float], ...]
 
 MAX_ZONE_COUNT: Final = 20
 MAX_TRAINING_EFFECT_LABEL_LENGTH: Final = 50
+MAX_NATIVE_TYPE_LENGTH: Final = 64
 MAX_ZONE_ID_LENGTH: Final = 20
 _SUMMARY_VALUE_BOUNDS: Final = (
     ("intensity", 0.0, 1_000.0),
@@ -356,8 +359,37 @@ class ExternalRef:
         require_text(self.upstream_id, "upstream_id", max_length=200)
 
 
+def activity_duration_s(
+    sport: Sport,
+    *,
+    moving: float | None,
+    timer: float | None,
+    elapsed: float | None,
+) -> float | None:
+    """The canonical ``ActivityRecord.duration_s``, the same rule for every provider.
+
+    Moving time, else timer time, else elapsed time. A zero moving time (nothing
+    moved, as in a gym session) falls through; a zero timer or elapsed time is a
+    measured zero. A strength session counts as a whole: rest between sets is
+    part of it, so its duration is the elapsed time when that is longer.
+    """
+    active = moving or (timer if timer is not None else elapsed)
+    if sport is Sport.STRENGTH and elapsed:
+        return max(active or 0.0, elapsed)
+    return active
+
+
 @dataclass(frozen=True, slots=True)
 class ActivityRecord:
+    """One provider's record of a completed activity.
+
+    ``duration_s`` follows ``activity_duration_s`` for every provider;
+    ``moving_duration_s`` and ``elapsed_duration_s`` keep the provider's own
+    moving and elapsed times. ``avg_cadence`` is in rpm and, for runs, counts one
+    leg (strides per minute, half the steps per minute), like FIT and
+    ``StreamChannel.CADENCE_RPM``.
+    """
+
     activity_id: str
     provenance: Provenance
     sport: Sport
@@ -413,12 +445,22 @@ class ActivityRecord:
     # The UTC offset in minutes where and when the activity was recorded, when
     # the provider reports it; it dates the activity on the day it was lived.
     local_offset_minutes: int | None = None
+    # Surface and motor assistance the provider type names (see ``Terrain``,
+    # ``Assist``), and the provider's own type name or id, for later remapping.
+    terrain: Terrain = Terrain.UNKNOWN
+    assist: Assist = Assist.UNKNOWN
+    native_type: str | None = None
 
     def __post_init__(self) -> None:
         require_text(self.activity_id, "activity_id")
         require_instance(self.provenance, Provenance, "provenance")
         require_instance(self.sport, Sport, "sport")
         require_instance(self.environment, Environment, "environment")
+        require_instance(self.terrain, Terrain, "terrain")
+        require_instance(self.assist, Assist, "assist")
+        optional_text(
+            self.native_type, "native_type", max_length=MAX_NATIVE_TYPE_LENGTH
+        )
         require_aware_datetime(self.started_at, "started_at")
         object.__setattr__(
             self,
@@ -581,3 +623,29 @@ class ActivityRecord:
             raise ValueError(
                 "local_offset_minutes must be a quarter-hour offset within 14 hours"
             )
+
+
+def session_terrain(records: Sequence[ActivityRecord]) -> Terrain:
+    """Return a session's terrain from its records, primary record first.
+
+    The primary record's terrain, unless it is UNKNOWN and another record knows it.
+    """
+    return next(
+        (record.terrain for record in records if record.terrain is not Terrain.UNKNOWN),
+        Terrain.UNKNOWN,
+    )
+
+
+def session_assist(records: Sequence[ActivityRecord]) -> Assist:
+    """Return a session's motor assistance, primary record first.
+
+    ELECTRIC wins whenever any record names it: a generic type such as a plain
+    "Ride" maps to NONE, so it cannot rule motor assistance out. Otherwise the
+    first known value, as in ``session_terrain``.
+    """
+    if any(record.assist is Assist.ELECTRIC for record in records):
+        return Assist.ELECTRIC
+    return next(
+        (record.assist for record in records if record.assist is not Assist.UNKNOWN),
+        Assist.UNKNOWN,
+    )

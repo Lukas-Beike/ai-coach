@@ -92,7 +92,11 @@ def latest_wahoo_garmin_duplicate(
         "duplicate_id": copy.activity_id,
         "duplicate_name": (copy.name or "Garmin-Radeinheit")[:_NAME_LIMIT],
         "start_date_local": wall.isoformat(timespec="seconds"),
-        "moving_time": keep.duration_s,
+        "moving_time": (
+            keep.duration_s
+            if keep.moving_duration_s is None
+            else keep.moving_duration_s
+        ),
         "distance": keep.distance_m,
         "snapshot_synced_at": max(fetched).isoformat() if fetched else None,
     }

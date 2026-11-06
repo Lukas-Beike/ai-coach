@@ -72,9 +72,52 @@ class PerformanceLoadTests(unittest.TestCase):
                 "sessions": 3,
                 "duration_hours": 1.0,
                 "training_load": 25.0,
+                "load_missing_sessions": 1,
             },
         )
         self.assertEqual(activities, original)
+
+    def test_sessions_without_a_tss_scale_load_are_counted_with_their_rpe_load(
+        self,
+    ):
+        # #1672: a Garmin-only session (EPOC load) is left out of the sum, counted,
+        # and its session-RPE load is reported beside it in AU, never added.
+        anchor = date(2026, 9, 12)
+        activities = [
+            {
+                "id": "act_1",
+                "started_at_local": "2026-09-12T07:00:00",
+                "elapsed_duration_s": 3600,
+                "training_load": 60,
+            },
+            {
+                "id": "act_2",
+                "started_at_local": "2026-09-12T18:00:00",
+                "elapsed_duration_s": 1800,
+                "load_model": "garmin_training_load",
+            },
+            {"id": "act_3", "started_at_local": "2026-09-11T18:00:00"},
+        ]
+        feedback = {"act_2": {"session_rpe": 6}}
+
+        rollup = activity_rollup(activities, 7, anchor, session_feedback=feedback)
+
+        self.assertEqual(rollup["training_load"], 60.0)
+        self.assertEqual(rollup["load_missing_sessions"], 2)
+        self.assertEqual(rollup["load_missing_session_rpe_au"], 180.0)
+        self.assertEqual(rollup["load_missing_session_rpe_source"], "Athletenfeedback")
+        provider_rated = {
+            **activities[1],
+            "rpe": 5,
+            "sources": {"rpe": "Intervals.icu"},
+        }
+        fallback = activity_rollup([provider_rated], 7, anchor)
+        self.assertEqual(fallback["load_missing_session_rpe_au"], 150.0)
+        self.assertEqual(fallback["load_missing_session_rpe_source"], "Intervals.icu")
+        self.assertNotIn(
+            "load_missing_sessions",
+            activity_rollup(activities[:1], 7, anchor, session_feedback=feedback),
+        )
 
     def test_empty_and_invalid_wellness_data_are_empty(self):
         end_date = date(2026, 9, 12)

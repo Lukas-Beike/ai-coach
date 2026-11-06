@@ -724,6 +724,7 @@ class SessionStructureTests(unittest.TestCase):
             provider=ProviderId.GARMIN,
             recorded_by=RecordingOrigin.GARMIN,
             duration_s=4500.0,
+            elapsed_duration_s=4500.0,
         )
 
         self.assertFalse(_duplicate_ids(_bundle([copy, wahoo]), ProviderId.WAHOO))

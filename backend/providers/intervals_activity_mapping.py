@@ -18,12 +18,16 @@ produces an issue, and the next alias is tried:
 * local offset: with an exact ``start_date``, the UTC offset of the activity's
   IANA ``timezone`` at that instant, else the difference to ``start_date_local``
   -> ``local_offset_minutes``. Without an exact start it stays unknown.
-* duration: ``moving_time`` before ``elapsed_time``, as activity_validation does.
+* duration: ``activity_duration_s`` of ``moving_time`` and ``elapsed_time``:
+  moving time first, as activity_validation does; strength counts elapsed time.
   A zero duration is out of range (the legacy minimum is one second), so
   ``elapsed_time`` is then consulted. ``elapsed_time`` is also kept on its own as
   ``elapsed_duration_s``, so session bundling can compare it with a Garmin
   elapsed time when Garmin sends no moving time. A malformed ``elapsed_time`` is
   reported once.
+* terrain and motor assistance: ``INTERVALS_ACTIVITY_QUALIFIERS`` by ``type``; a
+  "Swim" with a positive ``pool_length`` is a pool swim. ``type`` is kept as
+  ``native_type``.
 * average heart rate: ``average_heartrate`` before ``averageHR``.
 * maximum heart rate: ``max_heartrate`` before ``maxHR``, as activity_validation
   reads it.
@@ -81,11 +85,13 @@ from backend.canonical.mapping import (
     coerce_number,
 )
 from backend.canonical.records import (
+    MAX_NATIVE_TYPE_LENGTH,
     MAX_ZONE_COUNT,
     MAX_ZONE_ID_LENGTH,
     ActivityRecord,
     ExternalRef,
     Provenance,
+    activity_duration_s,
 )
 from backend.canonical.sports import classify_environment_text, classify_sport_text
 from backend.canonical.validation import (
@@ -99,6 +105,7 @@ from backend.canonical.validation import (
     MAX_ACTIVITY_SPEED_MPS,
 )
 from backend.canonical.vocabulary import (
+    Assist,
     DeviceType,
     Environment,
     LoadModel,
@@ -106,6 +113,7 @@ from backend.canonical.vocabulary import (
     RecordingOrigin,
     SourceKind,
     Sport,
+    Terrain,
 )
 
 # Version 7: maps the upstream Garmin or Wahoo activity of a synchronized copy
@@ -117,7 +125,10 @@ from backend.canonical.vocabulary import (
 # Version 4: a source of exactly "manual" is recorded as MANUAL origin.
 # Version 3: maps the activity's maximum heart rate.
 # Version 8: the activity's own time zone dates it where it was recorded.
-MAPPER_VERSION: Final = 8
+# Version 9: the duration follows the canonical rule (``activity_duration_s``),
+# so a strength session counts its elapsed time.
+# Version 10: maps terrain, motor assistance and the native ``type`` (#1670).
+MAPPER_VERSION: Final = 10
 INTERVALS_LABEL: Final = "Intervals.icu"
 MAX_ACTIVITY_ID_LENGTH: Final = 200
 MAX_NAME_LENGTH: Final = 200
@@ -259,6 +270,19 @@ INTERVALS_ACTIVITY_TYPES: Final[Mapping[str, tuple[Sport, Environment]]] = {
         ),
     ),
 }
+
+# Terrain and motor assistance of the type names that name them. Every other
+# name of INTERVALS_ACTIVITY_TYPES is (UNKNOWN, NONE); any other name is
+# (UNKNOWN, UNKNOWN).
+INTERVALS_ACTIVITY_QUALIFIERS: Final[Mapping[str, tuple[Terrain, Assist]]] = {
+    "TrailRun": (Terrain.TRAIL, Assist.NONE),
+    "GravelRide": (Terrain.GRAVEL, Assist.NONE),
+    "MountainBikeRide": (Terrain.MOUNTAIN, Assist.NONE),
+    "EBikeRide": (Terrain.UNKNOWN, Assist.ELECTRIC),
+    "EMountainBikeRide": (Terrain.MOUNTAIN, Assist.ELECTRIC),
+    "OpenWaterSwim": (Terrain.OPEN_WATER, Assist.NONE),
+}
+_POOL_LENGTH_KEY: Final = "pool_length"
 
 _RECORDING_ORIGIN_TERMS: Final[tuple[tuple[tuple[str, ...], RecordingOrigin], ...]] = (
     (("wahoo", "elemnt"), RecordingOrigin.WAHOO),
@@ -423,19 +447,30 @@ def _classify(type_name: str | None, identity: str) -> tuple[Sport, Environment]
     return sport, environment
 
 
+def _qualifiers(
+    type_name: str | None, row: Mapping[str, object]
+) -> tuple[Terrain, Assist]:
+    if type_name is None or type_name not in INTERVALS_ACTIVITY_TYPES:
+        return Terrain.UNKNOWN, Assist.UNKNOWN
+    if type_name == "Swim":
+        pool = coerce_number(row.get(_POOL_LENGTH_KEY))
+        return (Terrain.POOL if pool and pool > 0 else Terrain.UNKNOWN), Assist.NONE
+    return INTERVALS_ACTIVITY_QUALIFIERS.get(type_name, (Terrain.UNKNOWN, Assist.NONE))
+
+
 def intervals_analysis_sport(row: Mapping[str, object]) -> dict[str, object]:
     """Return the canonical sport, environment and trail-run flag of a raw row.
 
-    The same classification the mapper applies; ``trail`` marks a "TrailRun".
+    The same classification the mapper applies; ``trail`` marks a trail terrain.
     """
-    type_name = row.get("type")
-    sport, environment = _classify(
-        type_name if isinstance(type_name, str) else None, _identity_text(row)
-    )
+    raw_type = row.get("type")
+    type_name = raw_type.strip() if isinstance(raw_type, str) else None
+    sport, environment = _classify(type_name, _identity_text(row))
+    terrain, _assist = _qualifiers(type_name, row)
     return {
         "sport": sport.value,
         "environment": environment.value,
-        "trail": type_name == "TrailRun",
+        "trail": terrain is Terrain.TRAIL,
     }
 
 
@@ -526,7 +561,9 @@ def _map_row(
     started_at = reader.started_at(zone)
     if activity_id is None or started_at is None:
         return None
-    sport, environment = _classify(reader.text("type"), _identity_text(row))
+    type_name = reader.text("type")
+    sport, environment = _classify(type_name, _identity_text(row))
+    terrain, assist = _qualifiers(type_name, row)
     provenance = {key: reader.text(key) for key in _PROVENANCE_KEYS}
     provenance_text = " ".join(
         value for value in provenance.values() if value is not None
@@ -551,7 +588,9 @@ def _map_row(
         sport=sport,
         environment=environment,
         started_at=started_at,
-        duration_s=moving_time if moving_time is not None else elapsed_time,
+        duration_s=activity_duration_s(
+            sport, moving=moving_time, timer=None, elapsed=elapsed_time
+        ),
         distance_m=reader.number(_DISTANCE_KEYS, 0.0, MAX_ACTIVITY_DISTANCE_M),
         load=load,
         load_model=(
@@ -596,6 +635,9 @@ def _map_row(
             else provenance["device_name"][:MAX_NAME_LENGTH] or None
         ),
         local_offset_minutes=_local_offset(row, started_at),
+        terrain=terrain,
+        assist=assist,
+        native_type=type_name[:MAX_NATIVE_TYPE_LENGTH] if type_name else None,
     )
 
 

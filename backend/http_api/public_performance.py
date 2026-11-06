@@ -116,7 +116,11 @@ class PublicPerformanceStateService:
             # source or pagination. Only the Garmin connection status stays.
             garmin = NO_GARMIN_SYNC_STATUS
         performance = performance_context.current_performance_context(
-            garmin, profile, today, canonical=inputs
+            garmin,
+            profile,
+            today,
+            canonical=inputs,
+            session_feedback=self._session_feedback,
         )
         timezone = str(profile.get("timezone") or "UTC")
         performance = {

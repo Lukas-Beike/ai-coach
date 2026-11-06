@@ -68,7 +68,7 @@ class SportTests(unittest.TestCase):
             5: (Sport.RUN, Environment.INDOOR),
             6: (Sport.WALK, Environment.OUTDOOR),
             9: (Sport.HIKE, Environment.OUTDOOR),
-            25: (Sport.SWIM, Environment.INDOOR),
+            25: (Sport.SWIM, Environment.UNKNOWN),
             26: (Sport.SWIM, Environment.OUTDOOR),
             22: (Sport.ROW, Environment.INDOOR),
             30: (Sport.NORDIC_SKI, Environment.OUTDOOR),
@@ -541,11 +541,11 @@ class StoredRawRecordTests(unittest.TestCase):
 
 
 class ReprojectionTests(unittest.TestCase):
-    def test_mapper_version_is_four_and_newer_than_the_stored_version_one(
+    def test_mapper_version_is_six_and_newer_than_the_stored_version_one(
         self,
     ) -> None:
-        self.assertEqual(4, MAPPER_VERSION)
-        self.assertEqual(4, reprojection_mapper_version("wahoo", "activity"))
+        self.assertEqual(6, MAPPER_VERSION)
+        self.assertEqual(6, reprojection_mapper_version("wahoo", "activity"))
 
     def test_a_stored_version_one_row_reprojects_the_new_metrics(self) -> None:
         stored = {

@@ -76,11 +76,12 @@ def load_fixture_rows() -> list[dict[str, Any]]:
 
 
 class ModuleContractTests(unittest.TestCase):
-    def test_mapper_version_is_eight(self) -> None:
+    def test_mapper_version_is_ten(self) -> None:
         # Version 2 keeps elapsed_time as elapsed_duration_s; version 3 max_hr;
         # version 4 manual source origin; version 5 extremes and device type;
-        # version 7 the upstream external reference; version 8 the local offset.
-        self.assertEqual(8, MAPPER_VERSION)
+        # version 7 the upstream external reference; version 8 the local offset;
+        # version 10 terrain, assist and the native type.
+        self.assertEqual(10, MAPPER_VERSION)
 
     def test_retrieved_at_must_be_timezone_aware(self) -> None:
         with self.assertRaises(ValueError):
@@ -355,6 +356,13 @@ class AliasTests(unittest.TestCase):
         self.assertEqual(
             3000.0, map_one(moving_time=3000, elapsed_time=3600).duration_s
         )
+
+    def test_strength_duration_is_the_whole_session(self) -> None:
+        # #1672: the canonical rule, as the Garmin and Wahoo mappers apply it.
+        record = map_one(type="WeightTraining", moving_time=1800, elapsed_time=3600)
+        self.assertIs(Sport.STRENGTH, record.sport)
+        self.assertEqual(3600.0, record.duration_s)
+        self.assertEqual(1800.0, record.moving_duration_s)
 
     def test_elapsed_time_is_used_when_moving_time_is_absent(self) -> None:
         self.assertEqual(3600.0, map_one(elapsed_time=3600).duration_s)

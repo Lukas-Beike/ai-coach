@@ -27,6 +27,9 @@ from backend.providers.garmin_health_mapping import (
     MAPPER_VERSION,
     map_garmin_health,
 )
+from backend.providers.garmin_status_mapping import map_garmin_status_codes
+from backend.sync.garmin_metric_history import projected_metric
+from backend.sync.garmin_performance_history import readiness_score_value
 
 type Triple = tuple[str | None, str, IssueReason]
 
@@ -69,7 +72,7 @@ EXPECTED_FIXTURE_ROWS: list[tuple[str, float, str, str]] = [
     ("threshold_pace", 3.6, "2026-10-11", "run"),
     ("threshold_hr", 168.0, "2026-10-11", "run"),
     ("threshold_hr", 160.0, "2026-10-11", "ride"),
-    ("run_threshold_power", 290.0, "2026-10-11", "run"),
+    ("ftp", 290.0, "2026-10-11", "run"),
     ("ftp", 260.0, "2026-10-10", "ride"),
     ("ftp", 258.0, "2026-10-05", "ride"),
     ("ftp", 260.0, "2026-10-10", "ride"),
@@ -810,6 +813,36 @@ class AliasAndUnitTests(unittest.TestCase):
         self.assertIsNone(second.observed_at)
         self.assertEqual(first.provenance.source_record_id, f"weight:{DAY}:0")
         self.assertEqual(second.provenance.source_record_id, f"weight:{DAY}:1")
+
+    def test_manual_weigh_in_is_provider_reported_and_recorded_by_manual(
+        self,
+    ) -> None:
+        # #1672: a weigh-in typed into Garmin Connect is not a scale measurement.
+        result = _map(
+            {
+                "weight": [
+                    {
+                        "calendarDate": DAY,
+                        "weight": 72.1,
+                        "unitKey": "kg",
+                        "sourceType": "MANUAL",
+                    },
+                    {
+                        "calendarDate": DAY,
+                        "weight": 71.9,
+                        "unitKey": "kg",
+                        "sourceType": "INDEX_SCALE",
+                    },
+                ]
+            }
+        )
+
+        manual, scale = result.records
+        self.assertIs(manual.provenance.source_kind, SourceKind.PROVIDER_REPORTED)
+        self.assertIs(manual.provenance.recorded_by, RecordingOrigin.MANUAL)
+        self.assertIs(manual.provenance.provider, ProviderId.GARMIN)
+        self.assertIs(scale.provenance.source_kind, SourceKind.DEVICE_MEASURED)
+        self.assertIs(scale.provenance.recorded_by, RecordingOrigin.GARMIN)
 
     def test_weight_unit_alias_precedence(self) -> None:
         cases: list[dict[str, object]] = [
@@ -1606,9 +1639,96 @@ class PerformanceHistoryTests(unittest.TestCase):
         )
 
 
+_AFTERNOON = {
+    "calendarDate": DAY,
+    "score": 41,
+    "level": "LOW",
+    "inputContext": "AFTER_POST_EXERCISE_RESET",
+    "timestampLocal": "2026-10-10T15:20:00.0",
+}
+_MORNING = {
+    "calendarDate": DAY,
+    "score": 78,
+    "level": "HIGH",
+    "inputContext": "AFTER_WAKEUP_RESET",
+    "timestampLocal": "2026-10-10T06:45:00.0",
+}
+
+
+class MorningReadinessTests(unittest.TestCase):
+    """#1672: Garmin re-scores readiness during the day; the morning value counts."""
+
+    def test_wake_up_reading_wins_regardless_of_list_order(self) -> None:
+        for readings in ([_AFTERNOON, _MORNING], [_MORNING, _AFTERNOON]):
+            with self.subTest(first=readings[0]["inputContext"]):
+                for section in ("readiness", "training_readiness_history"):
+                    result = _map({section: readings})
+                    self.assertEqual(
+                        _find(result, MetricKind.READINESS).value.value, 78.0
+                    )
+
+    def test_a_stored_re_score_alone_projects_no_readiness(self) -> None:
+        # The raw layer stores and re-projects each listed reading by itself.
+        for section in ("readiness", "training_readiness_history"):
+            with self.subTest(section=section):
+                result = _map({section: [_AFTERNOON]})
+                self.assertEqual(
+                    [o for o in result.records if o.kind is MetricKind.READINESS], []
+                )
+        self.assertEqual(
+            _find(_map({"readiness": [_MORNING]}), MetricKind.READINESS).value.value,
+            78.0,
+        )
+
+    def test_without_a_wake_up_flag_the_earliest_reading_wins(self) -> None:
+        late = {key: _AFTERNOON[key] for key in ("calendarDate", "score")}
+        late["timestamp"] = "2026-10-10T13:00:00.0"
+        early = {"calendarDate": DAY, "score": 66, "timestamp": "2026-10-10T05:30:00.0"}
+        result = _map({"readiness": [late, early]})
+        self.assertEqual(_find(result, MetricKind.READINESS).value.value, 66.0)
+
+    def test_an_unscored_wake_up_reading_does_not_hide_a_scored_one(self) -> None:
+        unscored = {key: _MORNING[key] for key in ("calendarDate", "inputContext")}
+        later = {"calendarDate": DAY, "score": 52, "timestampLocal": "2026-10-10T09:00"}
+        result = _map({"readiness": [unscored, later]})
+        self.assertEqual(_find(result, MetricKind.READINESS).value.value, 52.0)
+
+    def test_local_times_are_not_compared_with_utc_times(self) -> None:
+        local = {"calendarDate": DAY, "score": 70, "timestampLocal": "2026-10-10T06:45"}
+        utc_only = {"calendarDate": DAY, "score": 50, "timestamp": "2026-10-10T05:30"}
+        result = _map({"readiness": [utc_only, local]})
+        self.assertEqual(_find(result, MetricKind.READINESS).value.value, 70.0)
+
+    def test_legacy_readiness_reads_the_morning_reading(self) -> None:
+        self.assertEqual(readiness_score_value([_MORNING, _AFTERNOON]), 78)
+
+    def test_legacy_readiness_history_keeps_the_morning_reading(self) -> None:
+        projected = projected_metric(
+            [_MORNING, _AFTERNOON],
+            start=date(2026, 10, 1),
+            end=date(2026, 10, 31),
+            aggregation="daily",
+            metric="training_readiness_history",
+            synced_at=None,
+        )
+        (point,) = projected["points"]
+        self.assertEqual(point["value"], 78)
+
+    def test_readiness_level_follows_the_morning_reading(self) -> None:
+        for section in ("readiness", "training_readiness_history"):
+            with self.subTest(section=section):
+                codes = map_garmin_status_codes(
+                    section,
+                    [_AFTERNOON, _MORNING],
+                    source_record_id=section,
+                    retrieved_at=RETRIEVED_AT,
+                )
+                self.assertEqual([code.code for code in codes], ["HIGH"])
+
+
 class ContractTests(unittest.TestCase):
     def test_mapper_version_is_pinned(self) -> None:
-        self.assertEqual(MAPPER_VERSION, 16)
+        self.assertEqual(MAPPER_VERSION, 17)
 
     def test_non_mapping_sections_yield_one_issue(self) -> None:
         for sections in (["sleep"], "sleep", None, 5):
@@ -1678,7 +1798,7 @@ class ContractTests(unittest.TestCase):
             }
         )
 
-        observation = _find(result, MetricKind.RUN_THRESHOLD_POWER, Sport.RUN)
+        observation = _find(result, MetricKind.FTP, Sport.RUN)
         self.assertEqual(observation.value.unit, "W")
         self.assertEqual(
             observation.provenance.source_record_id, f"running_threshold:{DAY}:power"

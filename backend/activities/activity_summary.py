@@ -30,11 +30,18 @@ from backend.canonical.activity_summary import (
     ActivitySummary,
     stored_activity_key,
     summary_duration_s,
+    summary_is_electric,
     summary_is_indoor,
     summary_local_date,
 )
-from backend.canonical.records import ActivityRecord
-from backend.canonical.vocabulary import LoadModel, ProviderId, RecordingOrigin
+from backend.canonical.records import ActivityRecord, session_assist, session_terrain
+from backend.canonical.vocabulary import (
+    Assist,
+    LoadModel,
+    ProviderId,
+    RecordingOrigin,
+    Terrain,
+)
 
 # Summary key -> ActivityRecord field, in measured order.
 _MEASURED: Final = (
@@ -95,6 +102,11 @@ def activity_summary(
         summary["name"] = name[1]
     if primary.device_type is not None:
         summary["device_type"] = primary.device_type.value
+    terrain, assist = session_terrain(measured), session_assist(measured)
+    if terrain is not Terrain.UNKNOWN:
+        summary["terrain"] = terrain.value
+    if assist is Assist.ELECTRIC:
+        summary["assist"] = assist.value
     if offset is not None:
         summary["local_offset_minutes"] = offset
     sources = _values(summary, measured, _MEASURED) | _values(
@@ -236,6 +248,7 @@ __all__ = [
     "activity_summary",
     "stored_activity_key",
     "summary_duration_s",
+    "summary_is_electric",
     "summary_is_indoor",
     "summary_local_date",
 ]

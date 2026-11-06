@@ -169,6 +169,7 @@
 
   function recordingText(entry) {
     const parts = [entry.label];
+    if (entry.native_type) parts.push(entry.native_type);
     if (entry.started_at) parts.push(formatTime(entry.started_at));
     if (Number.isFinite(entry.duration_s)) parts.push(`${Math.round(entry.duration_s / 60)} min`);
     return parts.join(" · ");

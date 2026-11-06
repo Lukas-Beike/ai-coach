@@ -37,6 +37,8 @@ from backend.performance.canonical_inputs import (
     CanonicalPerformanceSource,
     inputs_for_snapshot,
 )
+from backend.performance.load import SessionFeedback
+from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.planning import adaptive as planning_adaptive
 from backend.planning import context as planning_context
 from backend.planning import library as planning_library
@@ -101,6 +103,8 @@ COACH_ACTIVITY_FIELDS = (
     "name",
     "sport",
     "environment",
+    "terrain",
+    "assist",
     "moving_duration_s",
     "distance_m",
     "elevation_gain_m",
@@ -287,6 +291,7 @@ class CoachIntervalsContextService:
         activities: Sequence[Mapping[str, Any]] | None = None,
         *,
         synced_at: str | None = None,
+        session_feedback: SessionFeedback | None = None,
     ) -> dict[str, Any]:
         summaries: list[dict[str, Any]] = [
             dict(item) for item in activities or [] if isinstance(item, Mapping)
@@ -314,8 +319,12 @@ class CoachIntervalsContextService:
         }
         rollups_by_sport = {
             sport: {
-                "last_7_days": performance_load.activity_rollup(rows, 7, today),
-                "last_30_days": performance_load.activity_rollup(rows, 30, today),
+                "last_7_days": performance_load.activity_rollup(
+                    rows, 7, today, session_feedback=session_feedback
+                ),
+                "last_30_days": performance_load.activity_rollup(
+                    rows, 30, today, session_feedback=session_feedback
+                ),
             }
             for sport, rows in sorted(grouped.items())
         }
@@ -548,6 +557,7 @@ class CoachPerformanceContextReader:
         today: Callable[[], date],
         canonical: CanonicalPerformanceSource | None = None,
         activity_rows: ActivitySummarySource | None = None,
+        session_feedback: FeedbackLookup | None = None,
     ) -> None:
         self._profile_service = profile_service
         self._garmin_payload_service = garmin_payload_service
@@ -555,6 +565,7 @@ class CoachPerformanceContextReader:
         self._today = today
         self._canonical = canonical
         self._activity_rows = activity_rows
+        self._session_feedback = session_feedback
 
     def profile(self) -> Any:
         return self._profile_service.get()
@@ -567,7 +578,11 @@ class CoachPerformanceContextReader:
             recent = self._activity_rows.read() if self._activity_rows else ([], None)
         rows, synced_at = recent
         return CoachIntervalsContextService().project(
-            planned, self._today(), rows, synced_at=synced_at
+            planned,
+            self._today(),
+            rows,
+            synced_at=synced_at,
+            session_feedback=feedback_by_session(rows, self._session_feedback),
         )
 
     def read_inputs(self) -> CanonicalPerformanceInputs | None:
@@ -601,6 +616,7 @@ class CoachPerformanceContextReader:
                 self._profile_service.get(),
                 self._today(),
                 canonical=canonical or EMPTY_PERFORMANCE_INPUTS,
+                session_feedback=self._session_feedback,
             )
         )
 

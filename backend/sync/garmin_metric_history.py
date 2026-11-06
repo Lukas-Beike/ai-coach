@@ -10,6 +10,10 @@ from backend.athlete.local_date import iso_date_prefix
 from backend.canonical.decimal_text import comma_decimal_float
 from backend.performance.garmin_load import acute_load_value
 from backend.providers import garmin_performance_fields as garmin_perf_fields
+from backend.providers.garmin_training_mapping import (
+    history_rows,
+    morning_readiness_records,
+)
 
 GARMIN_SOURCE = "Garmin Connect"
 
@@ -136,6 +140,9 @@ def projected_metric(
     metric: str,
     synced_at: Any,
 ) -> dict[str, Any]:
+    if metric == "training_readiness_history":
+        # One reading per day, the morning one, as the canonical mapper keeps.
+        value = morning_readiness_records(history_rows(value))
     points = metric_points(value, start=start, end=end)
     if metric == "training_readiness_history":
         _readiness_values(points)

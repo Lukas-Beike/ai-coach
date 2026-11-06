@@ -6,6 +6,7 @@ from typing import Any
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import load as performance_load
 from backend.performance.canonical_inputs import CanonicalPerformanceInputs
+from backend.performance.load import SessionFeedback
 from backend.performance.wellness_days import WellnessDay, latest, series
 
 RAMP_RATE_SOURCE = "Intervals.icu CTL (berechnet)"
@@ -17,14 +18,21 @@ def performance_load_context(
     today: date,
     *,
     canonical: CanonicalPerformanceInputs,
+    session_feedback: SessionFeedback | None = None,
 ) -> dict[str, Any]:
-    last_7 = performance_load.activity_rollup(activities, 7, today)
-    previous_7 = performance_load.activity_rollup(
-        activities, 7, today - timedelta(days=7)
+    """Load rollups and the actual ATL; ``session_feedback`` as ``activity_rollup``."""
+    feedback = session_feedback or {}
+    last_7 = performance_load.activity_rollup(
+        activities, 7, today, session_feedback=feedback
     )
-    last_30 = performance_load.activity_rollup(activities, 30, today)
+    previous_7 = performance_load.activity_rollup(
+        activities, 7, today - timedelta(days=7), session_feedback=feedback
+    )
+    last_30 = performance_load.activity_rollup(
+        activities, 30, today, session_feedback=feedback
+    )
     previous_30 = performance_load.activity_rollup(
-        activities, 30, today - timedelta(days=30)
+        activities, 30, today - timedelta(days=30), session_feedback=feedback
     )
     actual_atl = performance_load.actual_atl_series(
         series(days, MetricKind.ATL), activities, today
@@ -67,4 +75,10 @@ def performance_load_context(
         "actual_atl_current": actual_atl_current,
         "actual_atl_date": actual_atl_date,
         "actual_atl_average": actual_atl_average,
+        # The actual ATL sums the same TSS-scale loads as ``last_7``.
+        **(
+            {"actual_atl_load_missing_sessions": last_7["load_missing_sessions"]}
+            if "load_missing_sessions" in last_7
+            else {}
+        ),
     }

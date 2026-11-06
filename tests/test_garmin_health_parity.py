@@ -377,7 +377,7 @@ class RecoveryAndPerformanceParityTests(unittest.TestCase):
         self.assertEqual(ride_hr, self.metrics["bike_threshold_hr_bpm"]["value"])
 
     def test_running_threshold_power_matches_legacy_running_watts(self) -> None:
-        _, watts = _latest_value(self.result, MetricKind.RUN_THRESHOLD_POWER, Sport.RUN)
+        _, watts = _latest_value(self.result, MetricKind.FTP, Sport.RUN)
 
         self.assertEqual(watts, self.metrics["run_threshold_watts"]["value"])
 

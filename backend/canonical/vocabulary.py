@@ -64,6 +64,33 @@ class Environment(StrEnum):
     UNKNOWN = "unknown"
 
 
+class Terrain(StrEnum):
+    """The surface an activity was done on, where the provider type names it.
+
+    Orthogonal to ``Sport`` and ``Environment``: a trail run is a RUN, OUTDOOR,
+    TRAIL. UNKNOWN when the type names no surface.
+    """
+
+    ROAD = "road"
+    TRAIL = "trail"
+    TRACK = "track"
+    GRAVEL = "gravel"
+    MOUNTAIN = "mountain"
+    TREADMILL = "treadmill"
+    POOL = "pool"
+    OPEN_WATER = "open_water"
+    UNKNOWN = "unknown"
+
+
+class Assist(StrEnum):
+    """Motor assistance: ELECTRIC for e-bikes, NONE when the provider type names a
+    sport without assistance, UNKNOWN when the type is not known."""
+
+    NONE = "none"
+    ELECTRIC = "electric"
+    UNKNOWN = "unknown"
+
+
 class LoadModel(StrEnum):
     """Provider model that produced an activity's reported training load.
 
@@ -102,6 +129,8 @@ class MetricKind(StrEnum):
     TRAINING_LOAD = "training_load"
     FORM = "form"
     EFTP = "eftp"
+    # Legacy: running threshold power is FTP with sport RUN for every provider.
+    # Only rows stored before Garmin health mapper 17 still carry this kind.
     RUN_THRESHOLD_POWER = "run_threshold_power"
     DAILY_ENERGY_TOTAL = "daily_energy_total"
     DAILY_ENERGY_ACTIVE = "daily_energy_active"
@@ -228,6 +257,10 @@ UNPRODUCED_METRIC_KINDS: Final[Mapping[MetricKind, str]] = {
     MetricKind.TRAINING_LOAD: (
         "never produced: activity loads carry LoadModel and Garmin's daily load is "
         "ACUTE_LOAD; retained so a stored value stays readable"
+    ),
+    MetricKind.RUN_THRESHOLD_POWER: (
+        "no longer produced: running threshold power is FTP with sport RUN since "
+        "Garmin health mapper 17; retained so rows stored earlier stay readable"
     ),
 }
 # Kinds stored for export, backup and history that no reader uses yet. A kind
@@ -387,6 +420,8 @@ class StreamChannel(StrEnum):
     SPEED_MPS = "speed_mps"
     POWER_W = "power_w"
     HEART_RATE_BPM = "heart_rate_bpm"
+    # Revolutions per minute; for runs one leg (strides per minute, half the
+    # steps per minute), as FIT and every provider mapper report it.
     CADENCE_RPM = "cadence_rpm"
     TEMPERATURE_C = "temperature_c"
     # 1 while moving, 0 while paused.

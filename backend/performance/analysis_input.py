@@ -7,7 +7,7 @@ provider. It never mutates its inputs and performs no I/O.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,12 +17,15 @@ from backend.activities.detail_merge import (
     clock_offset,
 )
 from backend.canonical.activity_detail import ActivityLapSet
-from backend.canonical.records import ActivityRecord, Provenance
+from backend.canonical.records import (
+    ActivityRecord,
+    Provenance,
+    session_terrain,
+)
 from backend.canonical.vocabulary import (
-    Environment,
-    ProviderId,
     Sport,
     StreamChannel,
+    Terrain,
 )
 
 # Canonical channels and the legacy stream keys the analysis reads them from.
@@ -68,8 +71,12 @@ def analysis_input(
     laps: SetChoice | None,
     *,
     decoupling: float | None = None,
+    members: Sequence[ActivityRecord] = (),
 ) -> AnalysisInput:
-    """Build the analysis input of one activity from its merged detail."""
+    """Build the analysis input of one activity from its merged detail.
+
+    ``members`` are the session's records in measured order, for its terrain.
+    """
     stream_fields, channel_labels = _streams(streams)
     lap_fields = _laps(laps, streams)
     if laps is not None and lap_fields:
@@ -80,7 +87,7 @@ def analysis_input(
         label for key, label in channel_labels.items() if key != "laps"
     )
     activity: dict[str, Any] = {
-        **analysis_sport(record),
+        **analysis_sport(record, members),
         "decoupling": decoupling,
         "streams": stream_fields,
         "laps": lap_fields,
@@ -96,22 +103,21 @@ def analysis_input(
     )
 
 
-_TRAIL_PROVIDERS = frozenset({ProviderId.INTERVALS, ProviderId.GARMIN})
+def analysis_sport(
+    record: ActivityRecord, members: Sequence[ActivityRecord] = ()
+) -> dict[str, Any]:
+    """Return the canonical sport, environment and trail-run flag.
 
-
-def analysis_sport(record: ActivityRecord) -> dict[str, Any]:
-    """Return the canonical sport, environment and trail-run flag of a record.
-
-    Intervals.icu ("TrailRun") and Garmin ("trail_running") map only trail
-    runs to an outdoor run, so those are ``trail``; Wahoo maps every outdoor
-    run as outdoor, so its runs are not.
+    Sport and environment are ``record``'s. The terrain follows
+    ``session_terrain`` over ``members`` (the session's records in measured
+    order, as its summary reads them), else over ``record`` alone. ``trail``
+    marks a trail run, whose pace the road-pace analyses leave out.
     """
+    terrain = session_terrain(members or (record,))
     return {
         "sport": record.sport.value,
         "environment": record.environment.value,
-        "trail": record.sport is Sport.RUN
-        and record.environment is Environment.OUTDOOR
-        and record.provenance.provider in _TRAIL_PROVIDERS,
+        "trail": record.sport is Sport.RUN and terrain is Terrain.TRAIL,
     }
 
 

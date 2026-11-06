@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any, Final
 
+from backend.canonical.activity_summary import summary_local_date
 from backend.canonical.vocabulary import MetricKind
 from backend.performance import activity_validation, garmin_projection
 from backend.performance import comparisons as performance_comparisons
@@ -24,10 +25,13 @@ from backend.performance.canonical_inputs import (
 from backend.performance.freshness import NO_GARMIN_SYNC_STATUS, GarminSyncStatus
 from backend.performance.garmin_canonical import GarminCanonicalMetrics
 from backend.performance.personal_recovery import personal_recovery
+from backend.performance.session_rpe_load import FeedbackLookup, feedback_by_session
 from backend.performance.training_focus import training_focus
 from backend.performance.wellness_days import WellnessDay, latest
 
-_SUBJECTIVE_RATINGS = (
+# Recovery keys of the Intervals.icu wellness ratings; their scales live in
+# backend.canonical.rating_scales.
+SUBJECTIVE_RATINGS = (
     ("fatigue", MetricKind.SUBJECTIVE_FATIGUE),
     ("soreness", MetricKind.SUBJECTIVE_SORENESS),
     ("stress", MetricKind.SUBJECTIVE_STRESS),
@@ -54,6 +58,20 @@ _GARMIN_RECOVERY_SOURCES = frozenset(
 )
 
 
+# The oldest rollup window ends 30 days ago and spans 30 days.
+_ROLLUP_LOOKBACK_DAYS: Final = 60
+
+
+def _recent(activities: list[Any], cutoff: date) -> list[Any]:
+    """Summaries on or after ``cutoff``, whose feedback the load rollups read."""
+    return [
+        activity
+        for activity in activities
+        if isinstance(activity, dict)
+        and summary_local_date(activity) >= cutoff.isoformat()
+    ]
+
+
 def _activities(canonical: CanonicalPerformanceInputs) -> list[Any]:
     """Return the canonical activity summaries; none when none were read."""
     return list(canonical.activities or ())
@@ -66,7 +84,7 @@ def _day_id(day: WellnessDay | None) -> str | None:
 def _subjective_ratings(day: WellnessDay | None) -> dict[str, float | None]:
     return {
         key: None if day is None else day.value(kind)
-        for key, kind in _SUBJECTIVE_RATINGS
+        for key, kind in SUBJECTIVE_RATINGS
     }
 
 
@@ -167,8 +185,12 @@ def current_performance_context(
     today: date,
     *,
     canonical: CanonicalPerformanceInputs,
+    session_feedback: FeedbackLookup | None = None,
 ) -> dict[str, Any]:
     """Compose the current performance projection from canonical inputs only.
+
+    ``session_feedback`` reads the local session feedback, so load rollups can
+    report the session-RPE load of sessions without a TSS-scale load.
 
     The canonical inputs supply activities, wellness, load, body, Garmin and
     athlete-setting values and the Intervals.icu sync time;
@@ -214,8 +236,12 @@ def current_performance_context(
         garmin_body=_garmin_canonical(canonical).body,
         as_of=today,
     )
+    feedback = feedback_by_session(
+        _recent(activities, today - timedelta(days=_ROLLUP_LOOKBACK_DAYS)),
+        session_feedback,
+    )
     load_context = performance_load_context.performance_load_context(
-        activities, days, today, canonical=canonical
+        activities, days, today, canonical=canonical, session_feedback=feedback
     )
     load = load_context["load"]
     last_7 = load_context["last_7"]
@@ -278,6 +304,11 @@ def current_performance_context(
             "atl": actual_atl_current,
             "as_of": actual_atl_date.isoformat() if actual_atl_date else None,
             "source": "Abgeschlossene Aktivitäten (berechnet)",
+            **(
+                {"load_missing_sessions": missing}
+                if (missing := load_context.get("actual_atl_load_missing_sessions"))
+                else {}
+            ),
         },
         "recovery": {
             "id": recovery["sleep_date"]
@@ -314,7 +345,9 @@ def current_performance_context(
             "previous_7_days": previous_7,
             "last_30_days": last_30,
             "previous_30_days": previous_30,
-            "last_28_days": performance_load.activity_rollup(activities, 28, today),
+            "last_28_days": performance_load.activity_rollup(
+                activities, 28, today, session_feedback=feedback
+            ),
         },
         "comparisons": comparisons,
         "activity_validation": activity_performance,
