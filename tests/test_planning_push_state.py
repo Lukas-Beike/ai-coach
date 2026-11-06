@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 import tempfile
@@ -13,7 +12,11 @@ from backend.canonical.vocabulary import RemoteEntityKind, RemoteLinkState
 from backend.db import DatabaseManager, row_factory
 from backend.db.remote_links import RemoteLink, RemoteLinkRepository
 from backend.db.schema import initialize_schema
-from backend.planning.push_state import attach_push_state, garmin_baselines
+from backend.planning.push_state import (
+    attach_push_state,
+    garmin_baselines,
+    garmin_fingerprint,
+)
 
 STRENGTH = {
     "sport": "WeightTraining",
@@ -23,8 +26,10 @@ STRENGTH = {
 RIDE = {"sport": "Ride", "date": "2026-11-09", "description": "- 30m 60%"}
 
 
-def _digest(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+# sha256 of json.dumps(STRENGTH), the raw stored payload string.
+STRENGTH_PAYLOAD_HASH = (
+    "ceca587e328bdd0d119e9bc7a7ea56d3e82f5a7b7d01f900c18dadeb3f0d8dae"
+)
 
 
 class PushStateTests(unittest.TestCase):
@@ -68,29 +73,58 @@ class PushStateTests(unittest.TestCase):
                 {"local_id": "r1", "payload": ride, "sync_state": "synced"},
             ]
         )
-        self.assertEqual(_digest(strength), projected[0]["payload_hash"])
+        self.assertEqual(STRENGTH_PAYLOAD_HASH, projected[0]["payload_hash"])
         self.assertEqual(
             {"intervals": True, "garmin": True}, projected[0]["push_pending"]
         )
         # Endurance units never offer Garmin; a synced unit needs no Intervals push.
         self.assertEqual({"intervals": False}, projected[1]["push_pending"])
 
-    def test_garmin_is_pending_until_the_current_payload_was_pushed(self) -> None:
+    def test_garmin_is_pending_until_its_content_was_pushed(self) -> None:
         raw = json.dumps(STRENGTH)
-        self.link("s1", _digest(raw))
+        self.link("s1", garmin_fingerprint(STRENGTH) or "")
         current = self.project(
             [{"local_id": "s1", "payload": raw, "sync_state": "synced"}]
         )
         self.assertEqual(
             {"intervals": False, "garmin": False}, current[0]["push_pending"]
         )
-        edited = json.dumps({**STRENGTH, "name": "Neu"})
-        changed = self.project(
-            [{"local_id": "s1", "payload": edited, "sync_state": "local"}]
+        # An Intervals.icu sync rewrites the payload but not what Garmin holds.
+        synced = json.dumps(
+            {**STRENGTH, "sync_status": "synced", "remote_event_id": "e1"}
+        )
+        after_intervals = self.project(
+            [{"local_id": "s1", "payload": synced, "sync_state": "synced"}]
         )
         self.assertEqual(
-            {"intervals": True, "garmin": True}, changed[0]["push_pending"]
+            {"intervals": False, "garmin": False}, after_intervals[0]["push_pending"]
         )
+        for changed in (
+            {**STRENGTH, "name": "Neu"},
+            {**STRENGTH, "date": "2026-11-10"},
+            {
+                **STRENGTH,
+                "strength_structure": [{"name": "Kniebeuge", "sets": 4, "reps": 5}],
+            },
+        ):
+            with self.subTest(changed=changed):
+                projected = self.project(
+                    [
+                        {
+                            "local_id": "s1",
+                            "payload": json.dumps(changed),
+                            "sync_state": "synced",
+                        }
+                    ]
+                )
+                self.assertTrue(projected[0]["push_pending"]["garmin"])
+
+    def test_an_invalid_structure_offers_no_garmin_push(self) -> None:
+        invalid = json.dumps({**STRENGTH, "strength_structure": [{"name": ""}]})
+        projected = self.project(
+            [{"local_id": "s3", "payload": invalid, "sync_state": "synced"}]
+        )
+        self.assertEqual({"intervals": False}, projected[0]["push_pending"])
 
     def test_conflicts_and_strength_without_structure_offer_nothing_extra(self) -> None:
         bare = json.dumps({**STRENGTH, "strength_structure": None})

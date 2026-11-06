@@ -11,13 +11,16 @@
 
 globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets });
 
-// Providers this planned unit still needs an explicit push to, in push order.
-// Past and completed entries get none; the server rejects past pushes anyway.
-function plannedPushTargets(entry, dateKey, todayKey) {
+// Providers this planned unit still needs an explicit push to, in push order:
+// Intervals.icu last, because its sync rewrites the unit and so its payload
+// hash, which every other job of the same click still carries. Past, done,
+// in-flight and unconfigured targets get none.
+function plannedPushTargets(entry, dateKey, todayKey, { configured = {}, completed = false, intervals } = {}) {
   const pending = entry?.push_pending;
-  if (!entry?.local_id || !entry.payload_hash || entry.is_completed_activity) return [];
+  if (!entry?.local_id || !entry.payload_hash || entry.is_completed_activity || completed) return [];
   if (!pending || typeof pending !== "object" || !dateKey || dateKey < todayKey) return [];
-  return Object.keys(pending).filter((provider) => pending[provider] === true).sort();
+  const targets = Object.keys(pending).filter((provider) => pending[provider] === true && configured[provider] === true);
+  return [...targets.filter((provider) => provider !== intervals).sort(), ...targets.filter((provider) => provider === intervals)];
 }
 
 const CALENDAR_MARKERS = [
@@ -763,18 +766,25 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
 
   // One explicit sync per pending provider; each job carries the unit's current
   // payload hash, so a unit edited meanwhile is refused instead of pushed.
-  function plannedSyncButton(entry, dateKey, todayKey) {
-    const targets = plannedPushTargets(entry, dateKey, todayKey);
+  function plannedSyncButton(entry, dateKey, todayKey, actual) {
+    const ids = providerIds();
+    const configured = { [ids.intervals]: Boolean(state.data?.configured?.[ids.intervals]), [ids.garmin]: Boolean(state.data?.garmin?.configured) };
+    const targets = plannedPushTargets(entry, dateKey, todayKey, { configured, completed: Boolean(actual), intervals: ids.intervals });
     if (!targets.length) return null;
+    // A re-render during a running push must not offer a second click.
+    state.plannedSyncInFlight ||= new Set();
     const button = document.createElement("button");
     button.type = "button";
     button.className = "secondary-button planned-sync-button";
     button.textContent = "Synchronisieren";
     button.setAttribute("aria-label", `${entry.name || "Einheit"} synchronisieren`);
+    button.disabled = state.plannedSyncInFlight.has(entry.local_id);
     button.addEventListener("click", async (event) => {
       // The button sits in the card summary; a click must not toggle the card.
       event.preventDefault();
       event.stopPropagation();
+      if (state.plannedSyncInFlight.has(entry.local_id)) return;
+      state.plannedSyncInFlight.add(entry.local_id);
       button.disabled = true;
       button.classList.add("busy");
       const failures = [];
@@ -787,6 +797,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
           failures.push(error.message);
         }
       }
+      state.plannedSyncInFlight.delete(entry.local_id);
       globalThis.toast?.(failures.length ? failures.join(" · ") : "Synchronisiert", failures.length > 0);
       button.disabled = false;
       button.classList.remove("busy");
@@ -826,7 +837,7 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
     if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
-    const syncButton = plannedSyncButton(entry, dateKey, todayKey);
+    const syncButton = plannedSyncButton(entry, dateKey, todayKey, actual);
     if (syncButton) cardSummary.append(syncButton);
     const details = document.createElement("div");
     details.className = "planned-entry-details";

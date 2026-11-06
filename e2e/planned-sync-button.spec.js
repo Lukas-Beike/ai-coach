@@ -10,6 +10,13 @@ test("@responsive a pending planned unit offers a sync button that queues its pu
     await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ id: `job-${posted.length}`, status: "queued" }) });
   });
   await page.route("**/api/sync/jobs/job-*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ id: "job", status: "completed", items: [] }) }));
+  // The fixture configures no provider; the button only targets configured ones.
+  await page.route("**/api/bootstrap*", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.configured = { ...(body.configured || {}), intervals: true };
+    await route.fulfill({ status: response.status(), contentType: "application/json", body: JSON.stringify(body) });
+  });
   await page.goto("/#plan/overview");
   await page.waitForFunction(() => state.initialStateLoaded);
   const button = page.locator(".planned-entry .planned-sync-button").first();
@@ -32,4 +39,6 @@ test("@responsive a pending planned unit offers a sync button that queues its pu
   const hit = await button.boundingBox();
   expect(hit.height).toBeGreaterThanOrEqual(32);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+  // Background polls may still be routed; stop them before the page closes.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
