@@ -10,7 +10,7 @@ Each strength exercise SHALL resolve to one Garmin catalogue exercise before exp
 
 #### Scenario: Explicit catalogue name
 - **WHEN** a strength unit is saved with `garmin_exercise` "barbell back squat"
-- **THEN** the stored exercise carries `garmin_exercise` "Barbell Back Squat" and the pair SQUAT/BARBELL_BACK_SQUAT, always derived from the catalogue on write and never taken from the request.
+- **THEN** the stored exercise carries `garmin_exercise` "Barbell Back Squat" and the pair SQUAT/BARBELL_BACK_SQUAT, always derived from the catalogue on write and never taken from the request; a remote reconcile drops only a stored mapping the catalogue no longer knows and keeps the structure.
 
 #### Scenario: Unmatched exercise
 - **WHEN** an exercise matches neither field, name nor alias at export

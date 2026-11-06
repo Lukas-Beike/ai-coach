@@ -17,7 +17,7 @@ from backend.db.remote_links import RemoteLinkRepository
 from backend.db.schema import initialize_schema
 from backend.errors import AppError
 from backend.planning import library as planning_library
-from backend.planning import strength_structure
+from backend.planning import session_focus, strength_structure
 from backend.providers import garmin_strength_workout as mapping
 from backend.sync.executor import GarminJobAdapter
 from backend.sync.garmin_strength_push import GarminStrengthPushService
@@ -155,6 +155,19 @@ class StructureTests(unittest.TestCase):
                 strength_structure.normalize_structure(
                     [{**SQUAT, "garmin_exercise": "Frnt Squat", "garmin_pair": pair}]
                 )
+
+    def test_a_reconcile_keeps_a_structure_with_a_retired_garmin_name(self) -> None:
+        stored = {
+            **SQUAT,
+            "garmin_exercise": "Retired Squat",
+            "garmin_pair": {"category": "SQUAT", "exercise": "RETIRED"},
+        }
+        rendered = strength_structure.render([SQUAT])
+        target = {"sport": "WeightTraining", "description": rendered}
+        session_focus.carry_focus(target, {"strength_structure": [stored]})
+        kept = target["strength_structure"]
+        self.assertEqual("Kniebeuge", kept[0]["name"])
+        self.assertNotIn("garmin_exercise", kept[0])
 
     def test_unknown_garmin_exercise_is_rejected_with_suggestions(self) -> None:
         with self.assertRaises(AppError) as raised:

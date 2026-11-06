@@ -104,6 +104,25 @@ def _garmin_exercise(item: Mapping[str, Any], result: dict[str, Any]) -> None:
     result["garmin_pair"] = {"category": found.category, "exercise": found.exercise}
 
 
+def without_unknown_garmin(value: Any) -> Any:
+    """Drop a stored Garmin mapping the current catalogue no longer knows.
+
+    For stored structures only (for example a remote reconcile), so a catalogue
+    update loses that one mapping instead of the whole structure; new input
+    still goes through the strict check of ``normalize_structure``.
+    """
+    if not isinstance(value, list) or not garmin_catalogue.catalogue_available():
+        return value
+    return [
+        {key: item[key] for key in item if key not in GARMIN_KEYS}
+        if isinstance(item, Mapping)
+        and item.get("garmin_exercise")
+        and garmin_catalogue.catalogue_exercise(item["garmin_exercise"]) is None
+        else item
+        for item in value
+    ]
+
+
 def normalize_structure(value: Any) -> list[dict[str, Any]] | None:
     """Validated exercises, or ``None`` when no structure is given."""
     if value in (None, "", []):
