@@ -100,6 +100,12 @@ class CoachContextAssembly:
         self._limits = dialogue.limits
         self._default_max_output_tokens = dialogue.default_max_output_tokens
 
+    def _session_feedback_lookup(self, keys: list[str]) -> list[dict[str, Any]]:
+        """The session-aware local feedback the load rollups' session-RPE load reads."""
+        return self._activity_feedback_service().for_activity_ids(
+            keys, sessions_only=True
+        )
+
     def structured_context_service(self) -> CoachStructuredContextService:
         return CoachStructuredContextService(
             self._checkin_service(),
@@ -121,6 +127,7 @@ class CoachContextAssembly:
                 self._local_date,
                 self._canonical,
                 self._activity_rows,
+                session_feedback=self._session_feedback_lookup,
             ),
             nutrition_meal_library=self._nutrition_meal_library,
             zone_configurations=self._zone_configurations,
