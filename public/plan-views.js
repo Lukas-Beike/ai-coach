@@ -9,7 +9,16 @@
     ].filter(Boolean);
   }
 
-globalThis.AppPlanViews = Object.freeze({ create });
+globalThis.AppPlanViews = Object.freeze({ create, plannedPushTargets });
+
+// Providers this planned unit still needs an explicit push to, in push order.
+// Past and completed entries get none; the server rejects past pushes anyway.
+function plannedPushTargets(entry, dateKey, todayKey) {
+  const pending = entry?.push_pending;
+  if (!entry?.local_id || !entry.payload_hash || entry.is_completed_activity) return [];
+  if (!pending || typeof pending !== "object" || !dateKey || dateKey < todayKey) return [];
+  return Object.keys(pending).filter((provider) => pending[provider] === true).sort();
+}
 
 const CALENDAR_MARKERS = [
   { key: "no_training", name: "NO_TRAINING", label: "Kein Training" },
@@ -752,6 +761,40 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     return form;
   }
 
+  // One explicit sync per pending provider; each job carries the unit's current
+  // payload hash, so a unit edited meanwhile is refused instead of pushed.
+  function plannedSyncButton(entry, dateKey, todayKey) {
+    const targets = plannedPushTargets(entry, dateKey, todayKey);
+    if (!targets.length) return null;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-button planned-sync-button";
+    button.textContent = "Synchronisieren";
+    button.setAttribute("aria-label", `${entry.name || "Einheit"} synchronisieren`);
+    button.addEventListener("click", async (event) => {
+      // The button sits in the card summary; a click must not toggle the card.
+      event.preventDefault();
+      event.stopPropagation();
+      button.disabled = true;
+      button.classList.add("busy");
+      const failures = [];
+      for (const provider of targets) {
+        try {
+          const job = await api("/api/sync/jobs", { method: "POST", body: JSON.stringify({ provider, type: "plan_push", payload: { entries: [{ library_workout_id: entry.local_id, expected_payload_hash: entry.payload_hash }] } }) });
+          const done = await globalThis.waitForSyncJob(job.id);
+          if (done.status !== "completed") failures.push(globalThis.providerJobErrorDetail?.(done) || "Synchronisierung fehlgeschlagen");
+        } catch (error) {
+          failures.push(error.message);
+        }
+      }
+      globalThis.toast?.(failures.length ? failures.join(" · ") : "Synchronisiert", failures.length > 0);
+      button.disabled = false;
+      button.classList.remove("busy");
+      await globalThis.load?.();
+    });
+    return button;
+  }
+
   function renderPlannedEntry(entry, dateKey, todayKey, dayContext = {}) {
     const actual = calendarActualActivity(entry);
     const baseStatus = calendarEntryStatus(entry, dateKey, todayKey);
@@ -783,6 +826,8 @@ function create({ $, state, dateLabel, formatTime, formatDuration, formatPace, f
     const conflictSpecs = plannedConflictBadgeSpecs(entry.conflicts);
     if (conflictSpecs.length) cardSummary.append(calendarBadgeRow(conflictSpecs));
     if (actual && !entry.is_completed_activity) appendPlannedTarget(cardSummary, entry);
+    const syncButton = plannedSyncButton(entry, dateKey, todayKey);
+    if (syncButton) cardSummary.append(syncButton);
     const details = document.createElement("div");
     details.className = "planned-entry-details";
     appendActualCalendarDetails(details, actual);

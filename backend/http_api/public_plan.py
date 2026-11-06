@@ -148,7 +148,7 @@ class PublicPlanStateService:
 
     def _read(self, weather: dict[str, Any] | None, db: Any) -> dict[str, Any]:
         sync_metadata = self._sync_state.sync_metadata(db)
-        local_planned = self._planned_units.list(500)
+        local_planned = self._planned_units.list(500, push_state=True)
         canonical_planned = calendar_canonical.canonical_planned_workouts(
             [], local_planned
         )

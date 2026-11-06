@@ -1,0 +1,35 @@
+const { test, expect } = require("@playwright/test");
+
+test("@responsive a pending planned unit offers a sync button that queues its push", async ({ page, request }) => {
+  test.setTimeout(180_000);
+  expect((await request.get("/api/fixture/demo")).ok()).toBeTruthy();
+  const posted = [];
+  // The fixture never contacts a provider: answer the job queue and its poll here.
+  await page.route("**/api/sync/jobs", async (route) => {
+    posted.push(JSON.parse(route.request().postData() || "{}"));
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ id: `job-${posted.length}`, status: "queued" }) });
+  });
+  await page.route("**/api/sync/jobs/job-*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ id: "job", status: "completed", items: [] }) }));
+  await page.goto("/#plan/overview");
+  await page.waitForFunction(() => state.initialStateLoaded);
+  const button = page.locator(".planned-entry .planned-sync-button").first();
+  await button.evaluate((element) => {
+    for (let node = element.parentElement; node; node = node.parentElement) if (node.tagName === "DETAILS" && !node.classList.contains("planned-entry")) node.open = true;
+  });
+  await button.scrollIntoViewIfNeeded();
+  await expect(button).toBeVisible();
+  await expect(button).toHaveText("Synchronisieren");
+  const card = button.locator("xpath=ancestor::details[contains(@class,'planned-entry')]");
+  await button.click();
+  await expect.poll(() => posted.length).toBeGreaterThan(0);
+  // The click queues the push and leaves the card closed.
+  expect(await card.evaluate((element) => element.open)).toBe(false);
+  for (const body of posted) {
+    expect(body.type).toBe("plan_push");
+    expect(body.payload.entries).toHaveLength(1);
+    expect(body.payload.entries[0].expected_payload_hash).toMatch(/^[0-9a-f]{64}$/);
+  }
+  const hit = await button.boundingBox();
+  expect(hit.height).toBeGreaterThanOrEqual(32);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+});

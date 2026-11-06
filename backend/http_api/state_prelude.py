@@ -74,7 +74,7 @@ class PublicStateLocalPrelude:
             activities = self._activity_feedback.attach_to_activities(
                 self._activity_rows.compact(db) if self._activity_rows else []
             )
-            local_planned = self._planned_units.list()
+            local_planned = self._planned_units.list(push_state=True)
             canonical_planned = calendar_canonical.canonical_planned_workouts(
                 [], local_planned
             )
