@@ -37,7 +37,10 @@ class _Database:
                 "activity_records",
                 "activity_sessions",
                 "observations",
-                "provider",
+                "provider_records",
+                "sleep_periods",
+                "zone_configurations",
+                "power_curve_points",
             )
         ):
             return SimpleNamespace(fetchall=list, fetchone=lambda: {"count": 0})
@@ -271,7 +274,10 @@ class DiagnosticReportServiceTests(unittest.TestCase):
                     "activity_records",
                     "activity_sessions",
                     "observations",
-                    "provider",
+                    "provider_records",
+                    "sleep_periods",
+                    "zone_configurations",
+                    "power_curve_points",
                 )
             )
         ]

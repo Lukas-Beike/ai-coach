@@ -5,8 +5,9 @@ record comes from Intervals.icu, by year and by the Intervals.icu ``source`` of
 those records, and the observation kinds no other source holds on a given day.
 
 Only provider identifiers, Intervals.icu source enum values, years, metric and
-sport identifiers, table names and counts leave this module. Any other stored
-text is reported as ``other``, so no ids, names, dates or values are carried.
+sport identifiers, table names and counts leave this module. Other stored
+provider or source text is reported as ``other``, and observation kinds outside
+the vocabulary only as a count, so no ids, names, dates or values are carried.
 """
 
 from __future__ import annotations
@@ -68,12 +69,20 @@ _OBSERVATION_DAYS: Final = """
 
 
 def summarize_provider_composition(db: Any) -> dict[str, Any]:
-    """Return session, observation and domain row counts by providing source."""
-    return {
-        "sessions": _sessions(db),
-        "observations": _observations(db),
-        "domain_rows": {table: _domain_rows(db, table) for table in _DOMAIN_TABLES},
-    }
+    """Return session, observation and domain row counts by providing source.
+
+    A failing query must not break the diagnostics report, so any failure yields
+    ``{"status": "unavailable"}`` and nothing about the failure is kept.
+    """
+    try:
+        return {
+            "status": "available",
+            "sessions": _sessions(db),
+            "observations": _observations(db),
+            "domain_rows": {table: _domain_rows(db, table) for table in _DOMAIN_TABLES},
+        }
+    except Exception:  # noqa: BLE001 - a failing count must not break diagnostics.
+        return {"status": "unavailable"}
 
 
 def _sessions(db: Any) -> dict[str, Any]:
@@ -118,8 +127,13 @@ def _observations(db: Any) -> dict[str, Any]:
     """Count Intervals.icu observation days, and those no other source holds."""
     totals: dict[str, Counter[str]] = {}
     only_by_year: dict[str, Counter[str]] = {}
+    unrecognized: set[tuple[Any, Any]] = set()
     for row in db.execute(_OBSERVATION_DAYS).fetchall():
         kind = _kind(row)
+        if kind is None:
+            # Unknown text is never reported; its days are not summed into a key.
+            unrecognized.add((row["metric"], row["sport"]))
+            continue
         counts = totals.setdefault(kind, Counter())
         counts["intervals_days"] += row["intervals_days"]
         counts["intervals_only_days"] += row["only_days"]
@@ -144,6 +158,7 @@ def _observations(db: Any) -> dict[str, Any]:
             }
             for kind, counts in sorted(intervals_kinds.items())
         },
+        "unrecognized_kinds": len(unrecognized),
     }
 
 
@@ -154,11 +169,12 @@ def _domain_rows(db: Any, table: str) -> dict[str, int]:
     return _sorted(counts)
 
 
-def _kind(row: Any) -> str:
-    """Return ``metric`` or ``metric/sport``; unknown text is ``other``."""
-    metric = _known(row["metric"], _METRICS)
-    sport = row["sport"]
-    return metric if not sport else f"{metric}/{_known(sport, _SPORTS)}"
+def _kind(row: Any) -> str | None:
+    """Return ``metric`` or ``metric/sport``; None for text outside the vocabulary."""
+    metric, sport = row["metric"], row["sport"]
+    if metric not in _METRICS or (sport and sport not in _SPORTS):
+        return None
+    return metric if not sport else f"{metric}/{sport}"
 
 
 def _known(value: Any, allowed: frozenset[str], *, local: bool = False) -> str:

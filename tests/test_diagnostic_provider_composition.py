@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from typing import Any
+from unittest import mock
 
 from canonical_detail_support import (
     NOW,
@@ -183,11 +184,15 @@ class ProviderCompositionDiagnosticsTests(unittest.TestCase):
         _add_observation(
             self.manager, "resting_hr", "intervals", "2026-01-01", state="retired"
         )
+        # Text outside the vocabulary is only counted, never summed into a key.
         _add_observation(self.manager, _PRIVATE, "intervals", "2026-01-01")
+        _add_observation(self.manager, "private_two", "intervals", "2026-01-01")
+        _add_observation(self.manager, "ctl", "intervals", "2026-01-01", sport=_PRIVATE)
 
         summary = self.summary()["observations"]
 
-        self.assertEqual(["ctl", "other"], summary["only_from_intervals"])
+        self.assertEqual(["ctl"], summary["only_from_intervals"])
+        self.assertEqual(3, summary["unrecognized_kinds"])
         self.assertEqual(
             {
                 "ctl": {
@@ -208,16 +213,20 @@ class ProviderCompositionDiagnosticsTests(unittest.TestCase):
                     "other_days": 2,
                     "intervals_only_days_by_year": {"2023": 1},
                 },
-                "other": {
-                    "intervals_days": 1,
-                    "intervals_only_days": 1,
-                    "other_days": 0,
-                    "intervals_only_days_by_year": {"2026": 1},
-                },
             },
             summary["by_kind"],
         )
-        self.assertNotIn(_PRIVATE, json.dumps(summary))
+        serialized = json.dumps(summary)
+        for private in (_PRIVATE, "private_two"):
+            self.assertNotIn(private, serialized)
+
+    def test_a_failing_query_reports_unavailable(self) -> None:
+        failing = mock.Mock()
+        failing.execute.side_effect = RuntimeError("private failure text")
+
+        self.assertEqual(
+            {"status": "unavailable"}, summarize_provider_composition(failing)
+        )
 
     def test_counts_active_domain_rows_per_provider(self) -> None:
         _add_zone(self.manager, "z1", "intervals")
