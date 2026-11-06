@@ -160,6 +160,10 @@ Eligible Dependabot and release pull requests SHALL be eligible for direct squas
 - **WHEN** the release app opens an expected version or promotion branch for its protected target and a successful GitHub Actions test exists on the current head or on a test-merge commit whose parents are the current base and head
 - **THEN** the automation can request a squash merge without Gitar
 
+#### Scenario: OpenSpec skill update
+- **WHEN** the daily OpenSpec update workflow regenerates skills with the locked CLI, the release app opens `chore/openspec-update` against develop, and a successful GitHub Actions test exists as for release pull requests
+- **THEN** the automation can request a squash merge without Gitar, and the same branch targeting main is ineligible
+
 #### Scenario: Untrusted metadata
 - **WHEN** a human pull request imitates a bot branch, title, label, or commit author
 - **THEN** it is ineligible for this automation
@@ -180,4 +184,4 @@ Eligible Dependabot and release pull requests SHALL be eligible for direct squas
 - **WHEN** the deployment gate is disabled
 - **THEN** the automation remains disabled
 
-Evidence: `.github/workflows/bot-merge.yml`; `tools/bot_merge.py`; `tests/test_bot_merge.py::test_release_rejects_stale_test_merge_commit`. On 2026-10-30 the release app was removed from the Default ruleset bypass list; the isolated Gitar exemption and normal checks were verified by reading the live rulesets. The app directly squash-merged Dependabot PR #1502 at its checked head in Actions run 41124099781 with non-Gitar checks passing and no unresolved threads. Rule suite 4824127971 recorded Default status checks, pull-request rules and code scanning passing and Gitar skipped. Earlier rule suites 4355093065 and 4355238064 rejected unresolved conversation and failing or pending check cases for the repository owner; equivalent negative attempts by the release app remain unverified.
+Evidence: `.github/workflows/bot-merge.yml`; `.github/workflows/openspec-update.yml`; `tools/bot_merge.py`; `tests/test_bot_merge.py::test_release_rejects_stale_test_merge_commit`; `tests/test_bot_merge.py::test_release_bot_openspec_update_targets_develop_only`; `tests/test_ci_contracts.py::test_openspec_update_runs_pinned_cli_before_any_write_token`. The OpenSpec update workflow has not run on GitHub yet. On 2026-10-30 the release app was removed from the Default ruleset bypass list; the isolated Gitar exemption and normal checks were verified by reading the live rulesets. The app directly squash-merged Dependabot PR #1502 at its checked head in Actions run 41124099781 with non-Gitar checks passing and no unresolved threads. Rule suite 4824127971 recorded Default status checks, pull-request rules and code scanning passing and Gitar skipped. Earlier rule suites 4355093065 and 4355238064 rejected unresolved conversation and failing or pending check cases for the repository owner; equivalent negative attempts by the release app remain unverified.
